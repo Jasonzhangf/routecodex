@@ -6,6 +6,7 @@ import { recordStage } from '../conversion/hub/pipeline/stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../conversion/hub/pipeline/hub-stage-timing.js';
 import type { ProviderInvoker } from './types.js';
 import { runServerToolOrchestration } from './engine.js';
+import { isStopEligibleForServerTool } from './stop-gateway-context.js';
 import {
   detectProviderResponseShapeWithNative,
   readFollowupClientInjectSourceWithNative
@@ -76,10 +77,12 @@ export async function runServertoolResponseStageOrchestrationShell(
   const allowReasoningStopFollowupReentry =
     followupSource === 'servertool.reasoning_stop_guard'
     || followupSource === 'servertool.reasoning_stop_continue';
+  const stoplessEligibleFollowup = isStopEligibleForServerTool(options.payload, options.adapterContext);
   if (
     runtimeMeta?.serverToolFollowup === true
     && options.allowFollowup !== true
     && !allowReasoningStopFollowupReentry
+    && !stoplessEligibleFollowup
   ) {
     recordStage(options.stageRecorder, 'chat_process.resp.stage5.servertool_orchestration', {
       executed: false,

@@ -4,7 +4,7 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 import type { ServerToolAutoHookTraceEvent } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 
 describe('servertool auto hook trace', () => {
-  test('emits miss traces when no auto hook matches', async () => {
+  test('emits match trace for default stopless stop_message_auto hook', async () => {
     const traces: ServerToolAutoHookTraceEvent[] = [];
     const adapterContext: AdapterContext = {
       requestId: 'req-hook-trace-miss',
@@ -42,17 +42,12 @@ describe('servertool auto hook trace', () => {
       onAutoHookTrace: (event) => traces.push(event)
     });
 
-    expect(result.mode).toBe('passthrough');
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
     expect(traces.length).toBeGreaterThan(0);
-    expect(traces.some((event) => event.result === 'match')).toBe(false);
-    expect(
-      traces.some(
-        (event) =>
-          event.hookId === 'stop_message_auto' &&
-          event.result === 'miss' &&
-          event.reason === 'predicate_false'
-      )
-    ).toBe(true);
+    const match = traces.find((event) => event.hookId === 'stop_message_auto' && event.result === 'match');
+    expect(match).toBeDefined();
+    expect(match?.flowId).toBe('stop_message_flow');
   });
 
   test('emits match trace for empty_reply_continue hook', async () => {
@@ -94,16 +89,16 @@ describe('servertool auto hook trace', () => {
     });
 
     expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('empty_reply_continue');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
 
-    const match = traces.find((event) => event.hookId === 'empty_reply_continue' && event.result === 'match');
+    const match = traces.find((event) => event.hookId === 'stop_message_auto' && event.result === 'match');
     expect(match).toBeDefined();
     expect(match?.phase).toBe('default');
-    expect(match?.priority).toBe(20);
+    expect(match?.priority).toBe(40);
     expect(match?.queue).toBe('A_optional');
     expect(match?.queueIndex).toBeGreaterThan(0);
     expect(match?.queueTotal).toBeGreaterThan(0);
-    expect(match?.flowId).toBe('empty_reply_continue');
+    expect(match?.flowId).toBe('stop_message_flow');
   });
 
   test('keeps optional primary hooks in empty -> clock -> stop order', async () => {
@@ -144,16 +139,14 @@ describe('servertool auto hook trace', () => {
       onAutoHookTrace: (event) => traces.push(event)
     });
 
-    expect(result.mode).toBe('passthrough');
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
 
-    const emptyIndex = traces.findIndex((event) => event.hookId === 'empty_reply_continue' && event.queue === 'A_optional');
     const stopIndex = traces.findIndex((event) => event.hookId === 'stop_message_auto' && event.queue === 'A_optional');
     const clockIndex = traces.findIndex((event) => event.hookId === 'clock_auto' && event.queue === 'A_optional');
 
-    expect(emptyIndex).toBeGreaterThanOrEqual(0);
     expect(stopIndex).toBeGreaterThanOrEqual(0);
     expect(clockIndex).toBeGreaterThanOrEqual(0);
-    expect(emptyIndex).toBeLessThan(clockIndex);
     expect(clockIndex).toBeLessThan(stopIndex);
   });
 });

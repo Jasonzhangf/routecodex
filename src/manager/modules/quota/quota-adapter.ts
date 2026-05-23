@@ -25,6 +25,7 @@ export interface QuotaViewEntry {
   reason?: string;
   priorityTier?: number;
   cooldownUntil?: number | null;
+  cooldownKeepsPool?: boolean;
   blacklistUntil?: number | null;
   authIssue?: unknown;
   authType?: string;
@@ -349,6 +350,7 @@ export function createQuotaManagerAdapter(options: {
           reason: typeof r.reason === 'string' ? r.reason : undefined,
           priorityTier: typeof r.priorityTier === 'number' ? r.priorityTier : undefined,
           cooldownUntil: typeof r.cooldownUntil === 'number' ? r.cooldownUntil : null,
+          cooldownKeepsPool: r.cooldownKeepsPool === true ? true : undefined,
           blacklistUntil: typeof r.blacklistUntil === 'number' ? r.blacklistUntil : null,
           authIssue: r.authIssue,
           authType: typeof r.authType === 'string' ? r.authType : undefined,

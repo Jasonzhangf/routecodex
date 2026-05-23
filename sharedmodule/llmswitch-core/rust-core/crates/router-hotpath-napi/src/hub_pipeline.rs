@@ -523,10 +523,7 @@ fn build_router_metadata_input(input: &Value) -> Result<Value, String> {
                 .map(Value::String)
                 .collect();
             if !normalized.is_empty() {
-                out.insert(
-                    "allowedProviders".to_string(),
-                    Value::Array(normalized),
-                );
+                out.insert("allowedProviders".to_string(), Value::Array(normalized));
             }
         }
 
@@ -873,8 +870,7 @@ fn coerce_standardized_request_from_payload(input: &Value) -> Result<Value, Stri
         .get("payload")
         .cloned()
         .ok_or_else(|| "payload must be object".to_string())?;
-    let payload = normalize_chat_envelope_tool_calls(&payload)
-        .map_err(|err| err.to_string())?;
+    let payload = normalize_chat_envelope_tool_calls(&payload).map_err(|err| err.to_string())?;
     let payload = payload
         .as_object()
         .ok_or_else(|| "payload must be object".to_string())?;
@@ -890,20 +886,24 @@ fn coerce_standardized_request_from_payload(input: &Value) -> Result<Value, Stri
         .filter(|v| !v.is_empty())
         .ok_or_else(|| "[HubPipeline] outbound stage requires payload.model".to_string())?;
     let tools = payload.get("tools").and_then(|v| v.as_array()).cloned();
-    let messages = if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
-        messages
-    } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
-        convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
-            input: input_items,
-            tools: tools.clone(),
-            tool_result_fallback_text: None,
-            normalize_function_name: Some("responses".to_string()),
-            allow_pending_terminal_tool_call: Some(true),
-        })?
-        .messages
-    } else {
-        return Err("[HubPipeline] outbound stage requires payload.messages[] or payload.input[]".to_string());
-    };
+    let messages =
+        if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
+            messages
+        } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
+            convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+                input: input_items,
+                tools: tools.clone(),
+                tool_result_fallback_text: None,
+                normalize_function_name: Some("responses".to_string()),
+                allow_pending_terminal_tool_call: Some(true),
+            })?
+            .messages
+        } else {
+            return Err(
+                "[HubPipeline] outbound stage requires payload.messages[] or payload.input[]"
+                    .to_string(),
+            );
+        };
     let parameters = payload
         .get("parameters")
         .and_then(|v| v.as_object())
@@ -1048,6 +1048,7 @@ fn prepare_runtime_metadata_for_servertools(input: &Value) -> Result<Value, Stri
     attach_if_object(rt_base, "webSearchConfig", "webSearch", row);
     attach_if_object(rt_base, "execCommandGuard", "execCommandGuard", row);
     attach_if_object(rt_base, "clockConfig", "clock", row);
+    attach_if_object(rt_base, "applyPatchConfig", "applyPatch", row);
 
     Ok(Value::Object(meta_base))
 }
@@ -1441,9 +1442,7 @@ fn normalize_resume_output_text(value: Option<&Value>) -> String {
     }
 }
 
-fn read_resume_tool_outputs_detailed(
-    resume_obj: &Map<String, Value>,
-) -> Vec<(String, String)> {
+fn read_resume_tool_outputs_detailed(resume_obj: &Map<String, Value>) -> Vec<(String, String)> {
     let detailed = resume_obj
         .get("toolOutputsDetailed")
         .and_then(|v| v.as_array())
@@ -1540,10 +1539,7 @@ fn synthesize_continuation_from_responses_resume(resume: Option<&Value>) -> Opti
                 .iter()
                 .map(|entry| Value::String(entry.1.clone()))
                 .collect::<Vec<_>>();
-            tool_continuation.insert(
-                "resumeOutputs".to_string(),
-                Value::Array(resume_outputs),
-            );
+            tool_continuation.insert("resumeOutputs".to_string(), Value::Array(resume_outputs));
         }
         continuation.insert(
             "toolContinuation".to_string(),
@@ -1801,7 +1797,9 @@ fn lift_responses_resume_into_semantics(request: &Value, metadata: &Value) -> Va
         if let Some(mut resume_value) = resume {
             if let Some(resume_obj) = resume_value.as_object_mut() {
                 if !resume_obj.contains_key("routeHint") {
-                    if let Some(route_hint) = read_trimmed_optional_string(next_metadata.get("routeHint")) {
+                    if let Some(route_hint) =
+                        read_trimmed_optional_string(next_metadata.get("routeHint"))
+                    {
                         resume_obj.insert("routeHint".to_string(), Value::String(route_hint));
                     }
                 }
@@ -1868,6 +1866,12 @@ fn sync_responses_context_from_canonical_messages(request: &Value) -> Result<Val
         .unwrap_or_else(|_| Value::Array(vec![]));
 
     context_obj.insert("input".to_string(), bridge_input);
+    if let Some(tool_history) = bridge.tool_history {
+        context_obj.insert(
+            "toolHistory".to_string(),
+            serde_json::to_value(tool_history).unwrap_or_else(|_| Value::Null),
+        );
+    }
     context_obj.insert(
         "originalSystemMessages".to_string(),
         original_system_messages,
@@ -3277,12 +3281,10 @@ mod tests {
         };
         let result = run_hub_pipeline(input).expect("hub pipeline");
         let metadata = result.metadata.expect("metadata value");
-        assert!(
-            metadata
-                .get("runtime")
-                .and_then(|v| v.get("applyPatchToolMode"))
-                .is_none()
-        );
+        assert!(metadata
+            .get("runtime")
+            .and_then(|v| v.get("applyPatchToolMode"))
+            .is_none());
     }
 
     #[test]
@@ -3317,12 +3319,10 @@ mod tests {
         };
         let result = run_hub_pipeline(input).expect("hub pipeline");
         let metadata = result.metadata.expect("metadata value");
-        assert!(
-            metadata
-                .get("runtime")
-                .and_then(|v| v.get("applyPatchToolMode"))
-                .is_none()
-        );
+        assert!(metadata
+            .get("runtime")
+            .and_then(|v| v.get("applyPatchToolMode"))
+            .is_none());
     }
 
     #[test]
@@ -3778,7 +3778,7 @@ mod tests {
                 "routecodexPortMode": "router",
                 "routecodexPortBinding": "dbittai-gpt.key1.gpt-5.3-codex",
                 "allowedProviders": [
-                    "dbittai-gpt",
+                    "dbittai-gpt.key1.gpt-5.3-codex",
                     "mini27",
                     "",
                     null
@@ -3793,18 +3793,15 @@ mod tests {
             Some("gateway_priority_5555")
         );
         assert_eq!(
-            row.get("routecodexLocalPort")
-                .and_then(|v| v.as_i64()),
+            row.get("routecodexLocalPort").and_then(|v| v.as_i64()),
             Some(5555)
         );
         assert_eq!(
-            row.get("routecodexPortMode")
-                .and_then(|v| v.as_str()),
+            row.get("routecodexPortMode").and_then(|v| v.as_str()),
             Some("router")
         );
         assert_eq!(
-            row.get("routecodexPortBinding")
-                .and_then(|v| v.as_str()),
+            row.get("routecodexPortBinding").and_then(|v| v.as_str()),
             Some("dbittai-gpt.key1.gpt-5.3-codex")
         );
         assert_eq!(
@@ -3814,7 +3811,7 @@ mod tests {
                     .iter()
                     .filter_map(|entry| entry.as_str())
                     .collect::<Vec<_>>()),
-            Some(vec!["dbittai-gpt", "mini27"])
+            Some(vec!["dbittai-gpt.key1.gpt-5.3-codex", "mini27"])
         );
     }
 
@@ -4083,9 +4080,7 @@ mod tests {
             Some(1)
         );
         assert_eq!(
-            row.get("input")
-                .and_then(|v| v.as_array())
-                .map(|v| v.len()),
+            row.get("input").and_then(|v| v.as_array()).map(|v| v.len()),
             Some(1)
         );
         assert_eq!(
@@ -4406,10 +4401,12 @@ mod tests {
             .as_str()
             .expect("patch args");
         let patch_args: Value = serde_json::from_str(patch_args_text).expect("patch args json");
-        assert_eq!(patch_args["patch"], patch_args["input"]);
+        // Hub coerce only owns envelope standardization. apply_patch call arguments
+        // are governed later by req/resp chat-process, not normalized here.
         let patch_input = patch_args["input"].as_str().expect("patch input");
         assert!(patch_input.starts_with("*** Begin Patch"));
         assert!(patch_input.contains("*** Add File: note.txt"));
+        assert!(patch_args.get("patch").is_none());
     }
 
     #[test]
@@ -4421,7 +4418,8 @@ mod tests {
             },
             "webSearchConfig": { "enabled": true },
             "execCommandGuard": { "mode": "strict" },
-            "clockConfig": { "tickMs": 60000 }
+            "clockConfig": { "tickMs": 60000 },
+            "applyPatchConfig": { "mode": "servertool" }
         });
         let output = prepare_runtime_metadata_for_servertools(&input)
             .expect("prepare runtime metadata for servertools");
@@ -4452,6 +4450,13 @@ mod tests {
                 .and_then(|v| v.get("tickMs"))
                 .and_then(|v| v.as_i64()),
             Some(60000)
+        );
+        assert_eq!(
+            rt.get("applyPatch")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("mode"))
+                .and_then(|v| v.as_str()),
+            Some("servertool")
         );
     }
 

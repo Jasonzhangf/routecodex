@@ -89,7 +89,10 @@ export function resolveRouteAwareResponsesContinuation(args: {
     return applyUnifiedResponsesResumeSemantics(args.request, resumed.meta, {
       deltaInput: Array.isArray((resumed.payload as Record<string, unknown>)?.input)
         ? cloneJson((resumed.payload as Record<string, unknown>).input)
-        : []
+        : [],
+      restoredTools: Array.isArray((resumed.payload as Record<string, unknown>)?.tools)
+        ? cloneJson((resumed.payload as Record<string, unknown>).tools)
+        : undefined
     });
   }
 

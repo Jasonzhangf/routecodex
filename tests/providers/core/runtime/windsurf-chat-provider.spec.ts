@@ -310,6 +310,16 @@ describe('WindsurfChatProvider', () => {
     }));
   });
 
+  test('RED: classifyWindsurfCascadeError must surface service unreachable as 503 instead of 502', async () => {
+    const provider = createProvider();
+    const classified = (provider as any).classifyWindsurfCascadeError(new Error('connect ECONNREFUSED 127.0.0.1:42145'));
+    expect(classified).toEqual(expect.objectContaining({
+      code: 'WINDSURF_SERVICE_UNREACHABLE',
+      status: 503,
+      retryable: true,
+    }));
+  });
+
   test('RED: parseGetChatMessageResponse must decode connect-framed delta_text + delta_thinking + delta_tool_calls into assistant candidate', async () => {
     const provider = createProvider();
     const raw = Buffer.concat([
@@ -2197,7 +2207,7 @@ describe('WindsurfChatProvider', () => {
     const fetchSpy = jest.spyOn(provider as any, 'fetchWithTimeout');
     jest.spyOn(provider as any, 'ensureManagedLocalGrpcRuntime').mockRejectedValue(
       Object.assign(new Error('[windsurf] no managed LS runtime in test'), {
-        code: 'WINDSURF_SERVICE_UNREACHABLE', status: 502, retryable: true,
+        code: 'WINDSURF_SERVICE_UNREACHABLE', status: 503, retryable: true,
       }),
     );
 
@@ -2208,7 +2218,7 @@ describe('WindsurfChatProvider', () => {
       },
     })).rejects.toMatchObject({
       code: 'WINDSURF_SERVICE_UNREACHABLE',
-      status: 502,
+      status: 503,
       retryable: true,
     });
 
@@ -2304,11 +2314,12 @@ describe('WindsurfChatProvider', () => {
     } as any, deps);
 
     const expectedDir = `${process.env.HOME}/.rcc/windsurf-ls/ws-pro-adopt`;
-    jest.spyOn(provider as any, 'findPreferredRoutecodexWindsurfRuntime').mockReturnValue({
-      lsPort: 42177,
-      csrfToken: 'windsurf-api-csrf-fixed-token',
-      command: `/Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/bin/language_server_macos_arm --server_port=42177 --csrf_token=windsurf-api-csrf-fixed-token --codeium_dir=${expectedDir}`,
-    });
+    jest.spyOn(provider as any, 'execFileUtf8').mockImplementation(((file: any) => {
+      if (file === 'ps') {
+        return `70001 /Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/bin/language_server_macos_arm --server_port=42177 --csrf_token=windsurf-api-csrf-fixed-token --codeium_dir=${expectedDir}\n` as any;
+      }
+      throw new Error(`unexpected execFileSync ${file}`);
+    }) as any);
     jest.spyOn(provider as any, 'isTcpPortListening').mockReturnValue(true);
     const spawnSpy = jest.spyOn(provider as any, 'waitManagedLsPortReady');
 
@@ -2317,6 +2328,49 @@ describe('WindsurfChatProvider', () => {
     expect(runtime.port).toBe(42177);
     expect(runtime.ready).toBe(true);
     expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
+  test('RED: managed runtime must terminate stale same-key LS ports before adopting one live runtime group', async () => {
+    const provider = new WindsurfChatProvider({
+      type: 'openai-standard',
+      config: {
+        providerType: 'openai',
+        baseUrl: 'http://localhost:3003',
+        model: 'gpt-5.3-codex',
+        auth: { type: 'apikey', apiKey: 'devin-session-token$stale-ls-cleanup', rawType: 'windsurf-devin-token', accountAlias: 'ws-pro-cleanup' },
+      },
+    } as any, deps);
+
+    const expectedDir = `${process.env.HOME}/.rcc/windsurf-ls/ws-pro-cleanup`;
+    jest.spyOn(provider as any, 'execFileUtf8').mockImplementation(((file: any) => {
+      if (file === 'ps') {
+        return [
+          `70001 /Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/bin/language_server_macos_arm --server_port=42111 --csrf_token=windsurf-api-csrf-fixed-token --codeium_dir=${expectedDir}`,
+          `70002 /Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/bin/language_server_macos_arm --server_port=42111 --csrf_token=windsurf-api-csrf-fixed-token --codeium_dir=${expectedDir} --run_child`,
+          `70003 /Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/bin/language_server_macos_arm --server_port=42112 --csrf_token=windsurf-api-csrf-fixed-token --codeium_dir=${expectedDir}`,
+          `70004 /Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/bin/language_server_macos_arm --server_port=42112 --csrf_token=windsurf-api-csrf-fixed-token --codeium_dir=${expectedDir} --run_child`,
+          '80001 /Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/bin/language_server_macos_arm --server_port=43111 --csrf_token=app-token --codeium_dir=/Users/fanzhang/.codeium/windsurf',
+        ].join('\n') + '\n' as any;
+      }
+      throw new Error(`unexpected execFileSync ${file}`);
+    }) as any);
+    jest.spyOn(provider as any, 'isTcpPortListening').mockReturnValue(true);
+    const killSpy = jest.spyOn(process, 'kill').mockImplementation((() => true) as any);
+    const spawnSpy = jest.spyOn(provider as any, 'waitManagedLsPortReady');
+
+    try {
+      const runtime = await (provider as any).ensureManagedLocalGrpcRuntime();
+
+      expect(runtime.port).toBe(42112);
+      expect(killSpy).toHaveBeenCalledWith(70001, 'SIGTERM');
+      expect(killSpy).toHaveBeenCalledWith(70002, 'SIGTERM');
+      expect(killSpy).not.toHaveBeenCalledWith(70003, expect.anything());
+      expect(killSpy).not.toHaveBeenCalledWith(70004, expect.anything());
+      expect(killSpy).not.toHaveBeenCalledWith(80001, expect.anything());
+      expect(spawnSpy).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 
   test('RED: checkHealth performs real cascade auth probe for direct devin token', async () => {
@@ -3030,13 +3084,13 @@ describe('WindsurfChatProvider', () => {
     ])).toThrow('[windsurf] orphan tool_result without matching assistant tool call');
   });
 
-  test('RED: parseCascadeSemanticRoundtripSync fails fast on repeated prior tool call after tool_result', async () => {
+  test('RED: parseCascadeSemanticRoundtripSync preserves repeated same tool args after tool_result when call_id is new', async () => {
     const provider = new WindsurfChatProvider({
       type: 'openai-standard',
       config: { providerType: 'openai', baseUrl: 'http://localhost:3003', model: 'gpt-5.4-medium', auth: { type: 'apikey', apiKey: 'test-key' } },
     } as any, deps);
 
-    expect(() => (provider as any).parseCascadeSemanticRoundtripSync([
+    const roundtrip = (provider as any).parseCascadeSemanticRoundtripSync([
       { role: 'user', content: 'read /tmp/a.txt' },
       {
         role: 'assistant',
@@ -3049,7 +3103,12 @@ describe('WindsurfChatProvider', () => {
         content: '',
         tool_calls: [{ id: 'call_read_1_b', type: 'function', function: { name: 'read', arguments: JSON.stringify({ filePath: '/tmp/a.txt' }) } }],
       },
-    ])).toThrow('[windsurf] upstream repeated prior tool call after tool_result');
+    ]);
+
+    expect(roundtrip[3]).toMatchObject({
+      type: 'assistant',
+      tool_calls: [{ call_id: 'call_read_1_b', name: 'read', arguments: { filePath: '/tmp/a.txt' } }],
+    });
   });
 
   test('RED: parseCascadeSemanticRoundtripSync fails fast on duplicate tool_result for the same call after completion', async () => {
@@ -3549,10 +3608,10 @@ describe('WindsurfChatProvider', () => {
     ])).toThrow('[windsurf] duplicate assistant tool call id in history');
   });
 
-  test('RED: parseCascadeSemanticRoundtripSync must treat reordered tool argument keys as the same signature like reference digest', async () => {
+  test('RED: parseCascadeSemanticRoundtripSync preserves reordered same-args tool calls when call_id differs', async () => {
     const provider = createProvider();
 
-    expect(() => (provider as any).parseCascadeSemanticRoundtripSync([
+    const roundtrip = (provider as any).parseCascadeSemanticRoundtripSync([
       { role: 'user', content: 'go' },
       {
         role: 'assistant',
@@ -3570,13 +3629,21 @@ describe('WindsurfChatProvider', () => {
           },
         ],
       },
-    ])).toThrow('[windsurf] duplicate assistant tool call signature in history');
+    ]);
+
+    expect(roundtrip[1]).toMatchObject({
+      type: 'assistant',
+      tool_calls: [
+        { call_id: 'call_reorder_1', name: 'read', arguments: { filePath: '/tmp/a.txt', offset: 1 } },
+        { call_id: 'call_reorder_2', name: 'read', arguments: { filePath: '/tmp/a.txt', offset: 1 } },
+      ],
+    });
   });
 
-  test('RED: parseCascadeAssistantTurnSync must treat reordered candidate tool argument keys as the same signature like reference digest', async () => {
+  test('RED: parseCascadeAssistantTurnSync preserves reordered same-args candidate calls when call_id differs', async () => {
     const provider = createProvider();
 
-    expect(() => (provider as any).parseCascadeAssistantTurnSync({
+    const parsed = (provider as any).parseCascadeAssistantTurnSync({
       role: 'assistant',
       tool_calls: [
         {
@@ -3590,16 +3657,20 @@ describe('WindsurfChatProvider', () => {
           function: { name: 'read', arguments: JSON.stringify({ offset: 1, filePath: '/tmp/a.txt' }) },
         },
       ],
-    })).toThrow('[windsurf] duplicate assistant tool call signature in assistant candidate');
+    });
+
+    expect(parsed.tool_calls).toHaveLength(2);
+    expect(parsed.tool_calls[0].id).toBe('call_candidate_reorder_1');
+    expect(parsed.tool_calls[1].id).toBe('call_candidate_reorder_2');
   });
 
-  test('RED: parseCascadeSemanticRoundtripSync fails fast when assistant chat tool_calls history repeats same signature with different call_id', async () => {
+  test('RED: parseCascadeSemanticRoundtripSync preserves assistant chat tool_calls that repeat args with different call_id', async () => {
     const provider = new WindsurfChatProvider({
       type: 'openai-standard',
       config: { providerType: 'openai', baseUrl: 'http://localhost:3003', model: 'gpt-5.4-medium', auth: { type: 'apikey', apiKey: 'test-key' } },
     } as any, deps);
 
-    expect(() => (provider as any).parseCascadeSemanticRoundtripSync([
+    const roundtrip = (provider as any).parseCascadeSemanticRoundtripSync([
       { role: 'user', content: 'do tools' },
       {
         role: 'assistant',
@@ -3617,7 +3688,15 @@ describe('WindsurfChatProvider', () => {
           },
         ],
       },
-    ])).toThrow('[windsurf] duplicate assistant tool call signature in history');
+    ]);
+
+    expect(roundtrip[1]).toMatchObject({
+      type: 'assistant',
+      tool_calls: [
+        { call_id: 'call_hist_sig_1', name: 'read', arguments: { filePath: '/tmp/a.txt' } },
+        { call_id: 'call_hist_sig_2', name: 'read', arguments: { filePath: '/tmp/a.txt' } },
+      ],
+    });
   });
 
 
@@ -3749,13 +3828,13 @@ describe('WindsurfChatProvider', () => {
     ]);
   });
 
-  test('RED: parseCascadeSemanticRoundtripSync fails fast when upstream repeats the same multi-tool signature set after tool results', async () => {
+  test('RED: parseCascadeSemanticRoundtripSync preserves repeated multi-tool args after tool results when call_id is new', async () => {
     const provider = new WindsurfChatProvider({
       type: 'openai-standard',
       config: { providerType: 'openai', baseUrl: 'http://localhost:3003', model: 'gpt-5.4-medium', auth: { type: 'apikey', apiKey: 'test-key' } },
     } as any, deps);
 
-    expect(() => (provider as any).parseCascadeSemanticRoundtripSync([
+    const roundtrip = (provider as any).parseCascadeSemanticRoundtripSync([
       { role: 'user', content: '先读文件再列目录' },
       {
         role: 'assistant',
@@ -3793,7 +3872,15 @@ describe('WindsurfChatProvider', () => {
           },
         ],
       },
-    ])).toThrow('[windsurf] upstream repeated prior tool call after tool_result');
+    ]);
+
+    expect(roundtrip[4]).toMatchObject({
+      type: 'assistant',
+      tool_calls: [
+        { call_id: 'call_read_repeat_2', name: 'read', arguments: { filePath: '/tmp/a.txt' } },
+        { call_id: 'call_ls_repeat_2', name: 'list_directory', arguments: { path: '/tmp' } },
+      ],
+    });
   });
 
   test('RED: parseCascadeSemanticRoundtripSync allows repeating same tool signature after a new user turn', async () => {
@@ -3853,13 +3940,13 @@ describe('WindsurfChatProvider', () => {
     ]);
   });
 
-  test('RED: parseCascadeSemanticRoundtripSync fails fast when same tool signature repeats after assistant text but before any new user turn', async () => {
+  test('RED: parseCascadeSemanticRoundtripSync preserves same tool args after assistant text when call_id is new', async () => {
     const provider = new WindsurfChatProvider({
       type: 'openai-standard',
       config: { providerType: 'openai', baseUrl: 'http://localhost:3003', model: 'gpt-5.4-medium', auth: { type: 'apikey', apiKey: 'test-key' } },
     } as any, deps);
 
-    expect(() => (provider as any).parseCascadeSemanticRoundtripSync([
+    const roundtrip = (provider as any).parseCascadeSemanticRoundtripSync([
       { role: 'user', content: '读一下 /tmp/a.txt' },
       {
         role: 'assistant',
@@ -3885,7 +3972,12 @@ describe('WindsurfChatProvider', () => {
           },
         ],
       },
-    ])).toThrow('[windsurf] upstream repeated prior tool call after tool_result');
+    ]);
+
+    expect(roundtrip[4]).toMatchObject({
+      type: 'assistant',
+      tool_calls: [{ call_id: 'call_read_repeat_text_2', name: 'read', arguments: { filePath: '/tmp/a.txt' } }],
+    });
   });
 
   // Chat completion candidate parsing / usage extraction
@@ -4040,8 +4132,8 @@ describe('WindsurfChatProvider', () => {
     });
   });
 
-  test('RED: parseCascadeSemanticRoundtripSync fails fast when same tool signature repeats after tool_result + assistant text without any new user turn', async () => {
-    expect(() => projectConversation([
+  test('RED: parseCascadeSemanticRoundtripSync preserves same tool args after tool_result and assistant text when call_id is new', async () => {
+    const conversation = projectConversation([
       { role: 'user', content: '读一下 /tmp/a.txt' },
       {
         role: 'assistant',
@@ -4055,7 +4147,12 @@ describe('WindsurfChatProvider', () => {
         content: '',
         tool_calls: [{ id: 'call_read_repeat_send_2', type: 'function', function: { name: 'read', arguments: JSON.stringify({ filePath: '/tmp/a.txt' }) } }],
       },
-    ])).toThrow('[windsurf] upstream repeated prior tool call after tool_result');
+    ]);
+
+    expect(conversation[4]).toMatchObject({
+      type: 'assistant',
+      tool_calls: [{ call_id: 'call_read_repeat_send_2', name: 'read', arguments: { filePath: '/tmp/a.txt' } }],
+    });
   });
 
   test('RED: buildCascadeCompletionFromOutput prefers direct candidate tool continuation in multi-round flow', async () => {
@@ -5188,6 +5285,7 @@ print(__import__('json').dumps(checks))
         tools: [
           { type: 'function', function: { name: 'shell_command', description: 'shell', parameters: { type: 'object', properties: { cmd: { type: 'string' } } } } },
           { type: 'function', function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object', properties: { patch: { type: 'string' } } } } },
+          { type: 'function', function: { name: 'update_plan', description: 'plan', parameters: { type: 'object', properties: { plan: { type: 'array' } } } } },
         ],
       },
     });
@@ -5198,10 +5296,18 @@ print(__import__('json').dumps(checks))
       'gpt-5-4-medium',
       mapped.body.windsurf_unsupported_text_tools,
     );
-    expect(prompt).toContain('Tool-call output contract (STRICT)');
+    expect(prompt).toContain('Text tool calling format (STRICT)');
+    expect(prompt).not.toContain('Tool-call output contract (STRICT)');
+    expect(prompt).not.toContain('unsupported tool');
+    expect(prompt).not.toContain('unsupported tools');
+    expect(prompt).toContain('parameters: plan:array');
     expect(prompt).toContain('<|RCC|tool_calls>');
     expect(prompt).toContain('<|RCC|invoke name="apply_patch">');
     expect(prompt).toContain('<|RCC|parameter name="patch">');
+    expect(prompt).toContain('filePath must be workspace-relative, not absolute');
+    expect(prompt).toContain('patch must be a strict line-edit patch');
+    expect(prompt).toContain('create/append lines start with `+ `');
+    expect(prompt).toContain('updates use exact current target lines as `- ` entries followed by replacement `+ ` entries');
     expect(prompt).not.toContain('shell_command');
     expect(prompt).not.toContain('run_command');
     expect(prompt).not.toContain('<tool_call>');
@@ -5227,6 +5333,63 @@ print(__import__('json').dumps(checks))
     expect(String(parsed.tool_calls[0].id)).toMatch(/^call_/);
   });
 
+  test('RED: RCC harvest preserves JSON-typed unsupported tool parameters instead of stringifying arrays', async () => {
+    const provider = createProvider();
+    const parsed = (provider as any).parseCascadeAssistantTurnSync({
+      role: 'assistant',
+      content: [
+        '<|RCC|tool_calls>',
+        '<|RCC|invoke name="update_plan">',
+        '<|RCC|parameter name="plan"><![CDATA[[{"step":"create tmp file","status":"in_progress"},{"step":"verify tmp file","status":"pending"}]]]></|RCC|parameter>',
+        '</|RCC|invoke>',
+        '</|RCC|tool_calls>',
+      ].join('\n'),
+    }, [{
+      type: 'function',
+      function: {
+        name: 'update_plan',
+        parameters: {
+          type: 'object',
+          properties: {
+            plan: { type: 'array', items: { type: 'object' } },
+          },
+          required: ['plan'],
+        },
+      },
+    }]);
+
+    expect(parsed.tool_calls).toHaveLength(1);
+    expect(parsed.tool_calls[0].function.name).toBe('update_plan');
+    expect(JSON.parse(parsed.tool_calls[0].function.arguments)).toEqual({
+      plan: [
+        { step: 'create tmp file', status: 'in_progress' },
+        { step: 'verify tmp file', status: 'pending' },
+      ],
+    });
+  });
+
+  test('RED: RCC guidance lists every required parameter for multi-parameter unsupported tools', () => {
+    const provider = createProvider();
+    const prompt = (provider as any).buildWindsurfRccToolGuidance([{
+      type: 'function',
+      function: {
+        name: 'apply_patch',
+        parameters: {
+          type: 'object',
+          properties: {
+            filePath: { type: 'string' },
+            patch: { type: 'string' },
+          },
+          required: ['filePath', 'patch'],
+        },
+      },
+    }]);
+
+    expect(prompt).toContain('<|RCC|invoke name="apply_patch">');
+    expect(prompt).toContain('<|RCC|parameter name="filePath">');
+    expect(prompt).toContain('<|RCC|parameter name="patch">');
+  });
+
   test('RED: malformed legacy tool_call text must not be returned as visible assistant content', async () => {
     const provider = createProvider();
     expect(() => (provider as any).parseCascadeAssistantTurnSync({
@@ -5234,7 +5397,7 @@ print(__import__('json').dumps(checks))
       content: '<tool_call>{"name":"echo","arguments":{"text":"ping"',
     })).toThrow(expect.objectContaining({
       code: 'WINDSURF_TOOL_PROTOCOL_CONFLICT',
-      status: 502,
+      status: 400,
       retryable: false,
     }));
   });
@@ -5287,7 +5450,7 @@ print(__import__('json').dumps(checks))
       tool_calls: [{ id: 'call_native', type: 'function', function: { name: 'shell_command', arguments: '{"cmd":"pwd"}' } }],
     }, [{ type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } }])).toThrow(expect.objectContaining({
       code: 'WINDSURF_TOOL_PROTOCOL_CONFLICT',
-      status: 502,
+      status: 400,
       retryable: false,
     }));
   });
@@ -5333,6 +5496,34 @@ print(__import__('json').dumps(checks))
     expect(prompt).not.toContain('<|RCC|invoke name="run_command">');
   });
 
+  test('RED: Windsurf preprocessing must preserve Responses flat function tools for RCC text protocol', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'create a /tmp file with apply_patch' },
+        ],
+        tools: [
+          { type: 'function', name: 'apply_patch', description: 'patch files', parameters: { type: 'object', properties: { filePath: { type: 'string' }, patch: { type: 'string' } }, required: ['filePath', 'patch'] } },
+        ],
+      },
+    });
+    expect(mapped.body.tools).toBeUndefined();
+    expect(mapped.body.windsurf_text_tool_protocol).toBe('rcc');
+    expect(mapped.body.windsurf_unsupported_text_tools.map((t: any) => t.function.name)).toEqual(['apply_patch']);
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    expect(prompt).toContain('<|RCC|invoke name="apply_patch">');
+    expect(prompt).toContain('<|RCC|parameter name="filePath">');
+    expect(prompt).toContain('<|RCC|parameter name="patch">');
+  });
+
   test('RED: hybrid continuation prompt must include pending RCC reminder in the latest human turn after native result', async () => {
     const provider = createProvider();
     const mapped = await (provider as any).preprocessRequest({
@@ -5358,9 +5549,11 @@ print(__import__('json').dumps(checks))
       'gpt-5-4-medium',
       mapped.body.windsurf_unsupported_text_tools,
     );
-    expect(prompt).toContain('You have not yet called these required unsupported tools: echo_tool');
+    expect(prompt).toContain('Available remaining text tool names: echo_tool');
+    expect(prompt).not.toContain('required unsupported tools');
     const latestHuman = prompt.slice(prompt.lastIndexOf('<human>'));
-    expect(latestHuman).toContain('You have not yet called these required unsupported tools: echo_tool');
+    expect(latestHuman).toContain('Available remaining text tool names: echo_tool');
+    expect(latestHuman).not.toContain('required unsupported tools');
     expect(latestHuman).toContain('<|RCC|tool_calls>');
     expect(latestHuman).toContain('<|RCC|invoke name="echo_tool">');
     expect(latestHuman).toContain('Tool result for run_command');
@@ -5393,8 +5586,9 @@ print(__import__('json').dumps(checks))
       mapped.body.windsurf_unsupported_text_tools,
     );
     expect(prompt).toContain('<|RCC|invoke name="apply_patch">');
-    expect(prompt).toContain('You have not yet called these required unsupported tools: apply_patch');
-    expect(prompt).toContain('output the RCC block now');
+    expect(prompt).toContain('Available remaining text tool names: apply_patch');
+    expect(prompt).not.toContain('required unsupported tools');
+    expect(prompt).toContain('output the tool-call block now');
   });
 
   test('RED: mixed final continuation prompt must preserve prior native tool result after RCC tool result', async () => {
@@ -5465,8 +5659,8 @@ print(__import__('json').dumps(checks))
       'gpt-5-4-medium',
       mapped.body.windsurf_unsupported_text_tools,
     );
-    expect(prompt).toContain('RCC tool results already returned');
-    expect(prompt).toContain('Do not repeat the same RCC invocation');
+    expect(prompt).toContain('Tool results are feedback for the next reasoning step');
+    expect(prompt).toContain('Tool results are feedback for the next reasoning step');
     expect(prompt).toContain('<|RCC|tool_result id="call_patch" name="apply_patch">');
     expect(prompt).toContain('patch applied');
     const latestHuman = prompt.slice(prompt.lastIndexOf('<human>'));
@@ -5510,11 +5704,129 @@ print(__import__('json').dumps(checks))
     expect(latestHuman).toContain('BEGIN_Rcc_Long_Output');
     expect(latestHuman).toContain('MIDDLE_Rcc_Long_Output');
     expect(latestHuman).toContain('END_Rcc_Long_Output');
-    expect(latestHuman).toContain('Do not repeat the same RCC invocation');
+    expect(latestHuman).toContain('Tool results are feedback for the next reasoning step');
     expect(latestHuman).toContain('Verified marker lines observed inside the RCC tool_result body: BEGIN_Rcc_Long_Output, MIDDLE_Rcc_Long_Output, END_Rcc_Long_Output.');
     expect(latestHuman).toContain('Required marker evidence to include verbatim in the final answer: BEGIN_Rcc_Long_Output, MIDDLE_Rcc_Long_Output, END_Rcc_Long_Output.');
     expect(latestHuman.lastIndexOf('Verified marker lines observed inside')).toBeGreaterThan(latestHuman.lastIndexOf('</|RCC|tool_result>'));
     expect(latestHuman.lastIndexOf('Required marker evidence to include verbatim')).toBeGreaterThan(latestHuman.lastIndexOf('</|RCC|tool_result>'));
+  });
+
+  test('RED: paired assistant/tool injection projects RCC tool_result into Windsurf latest human turn', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'run apply_patch smoke' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              { id: 'call_patch_pair', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: '/tmp/rcc.txt', patch: '+ ok' }) } },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call_patch_pair', content: '{"status":"APPLY_PATCH_APPLIED","ok":true}' },
+        ],
+        tools: [
+          { type: 'function', name: 'apply_patch', description: 'patch files', parameters: { type: 'object', properties: { filePath: { type: 'string' }, patch: { type: 'string' } }, required: ['filePath', 'patch'] } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    const latestHuman = prompt.includes('<human>') ? prompt.slice(prompt.lastIndexOf('<human>')) : prompt;
+    expect(latestHuman).toContain('<|RCC|tool_result id="call_patch_pair" name="apply_patch">');
+    expect(latestHuman).toContain('APPLY_PATCH_APPLIED');
+    expect(latestHuman).toContain('Tool results are feedback for the next reasoning step');
+  });
+
+  test('RED: failed RCC text tool result instructs corrected retry and is not duplicated as plain text', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'apply a complex patch' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              { id: 'call_patch_failed', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: '/tmp/rcc.txt', patch: 'bad patch' }) } },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call_patch_failed', content: 'APPLY_PATCH_ERROR: apply_patch did not apply. Retry with workspace-relative filePath and a line-edit patch only.' },
+        ],
+        tools: [
+          { type: 'function', name: 'apply_patch', description: 'patch files', parameters: { type: 'object', properties: { filePath: { type: 'string' }, patch: { type: 'string' } }, required: ['filePath', 'patch'] } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    const latestHuman = prompt.includes('<human>') ? prompt.slice(prompt.lastIndexOf('<human>')) : prompt;
+    expect(latestHuman).toContain('<|RCC|tool_result id="call_patch_failed" name="apply_patch">');
+    expect(latestHuman).toContain('APPLY_PATCH_ERROR');
+    expect(latestHuman).toContain('Tool results are feedback for the next reasoning step');
+    expect(latestHuman).toContain('not content to explain back to the user');
+    expect(latestHuman).toContain('Use each tool result to decide the next action');
+    expect(latestHuman).not.toContain('call the same text tool again');
+    expect(latestHuman).not.toContain('do not stop with a failure report');
+    expect(latestHuman).not.toContain('Tool result for apply_patch:');
+  });
+
+  test('RED: Rust bridge toolHistory schema projects RCC tool_result without plain text fallback', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'run apply_patch smoke' },
+          { role: 'user', content: 'continue from tool result' },
+        ],
+        semantics: {
+          responses: {
+            context: {
+              toolHistory: {
+                version: 1,
+                pairs: [{
+                  callId: 'call_patch_schema',
+                  name: 'apply_patch',
+                  arguments: { filePath: '/tmp/rcc.txt', patch: '+ ok' },
+                  output: 'BEGIN_SCHEMA_TOOL\nAPPLY_PATCH_APPLIED\nEND_SCHEMA_TOOL',
+                  status: 'completed',
+                }],
+              },
+            },
+          },
+        },
+        tools: [
+          { type: 'function', name: 'apply_patch', description: 'patch files', parameters: { type: 'object', properties: { filePath: { type: 'string' }, patch: { type: 'string' } }, required: ['filePath', 'patch'] } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    (provider as any).appendBridgeToolHistoryToSemanticConversation(semantic, (provider as any).readBridgeToolHistoryPairs(mapped.body));
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    const latestHuman = prompt.includes('<human>') ? prompt.slice(prompt.lastIndexOf('<human>')) : prompt;
+    expect(latestHuman).toContain('<|RCC|tool_result id="call_patch_schema" name="apply_patch">');
+    expect(latestHuman).toContain('BEGIN_SCHEMA_TOOL');
+    expect(latestHuman).toContain('END_SCHEMA_TOOL');
+    expect(latestHuman).not.toContain('Tool result for apply_patch:');
   });
 
   test('RED: Responses submit function_call_output without name still resolves prior unsupported tool name', async () => {
@@ -7595,7 +7907,7 @@ print('{"ok":true}')
       if (!pinned || pinned.lsPort !== runtimeA.lsPort || pinned.lsPort === runtimeB.lsPort) {
         throw Object.assign(new Error('trajectory not found'), {
           code: 'WINDSURF_SERVICE_UNREACHABLE',
-          status: 502,
+          status: 503,
           retryable: true,
         });
       }

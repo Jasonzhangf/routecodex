@@ -232,7 +232,10 @@ mod tests {
             }
         });
 
-        assert_eq!(resolve_sticky_key(&metadata), "req_request_scope".to_string());
+        assert_eq!(
+            resolve_sticky_key(&metadata),
+            "req_request_scope".to_string()
+        );
     }
 
     #[test]
@@ -257,7 +260,10 @@ mod tests {
             "sessionId": "session_1"
         });
 
-        assert_eq!(resolve_sticky_key(&metadata), "session:session_1".to_string());
+        assert_eq!(
+            resolve_sticky_key(&metadata),
+            "session:session_1".to_string()
+        );
     }
 
     #[test]

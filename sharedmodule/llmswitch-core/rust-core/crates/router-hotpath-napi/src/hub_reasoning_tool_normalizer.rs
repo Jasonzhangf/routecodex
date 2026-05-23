@@ -1,5 +1,5 @@
-use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use crate::hub_bridge_actions::utils::create_harvested_tool_call_id;
+use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use crate::hub_text_markup_normalizer::{
     extract_explicit_top_level_tool_calls_as_values, TextMarkupNormalizeOptions,
 };
@@ -1415,16 +1415,15 @@ fn repair_bash_lc_inline_eval_single_quotes(raw: &str) -> String {
             break;
         };
         let quote_idx = cursor + rel_quote_idx;
-        let prefix = inner[..quote_idx]
-            .trim_end_matches('\\')
-            .trim_end();
+        let prefix = inner[..quote_idx].trim_end_matches('\\').trim_end();
         if !looks_like_inline_interpreter_eval_prefix(prefix) {
             cursor = quote_idx + 1;
             continue;
         }
-        let end_quote_idx = inner.rfind('"').filter(|idx| *idx > quote_idx).or_else(|| {
-            find_matching_double_quote(inner, quote_idx + 1)
-        });
+        let end_quote_idx = inner
+            .rfind('"')
+            .filter(|idx| *idx > quote_idx)
+            .or_else(|| find_matching_double_quote(inner, quote_idx + 1));
         let Some(end_quote_idx) = end_quote_idx else {
             break;
         };
@@ -2387,10 +2386,9 @@ fn canonicalize_dsml_tool_markup_variants(raw: &str) -> String {
         r#"(?is)<\s*[|｜│]+\s*DSML\s*[|｜│]+\s*(tool_calls|invoke|parameter)\b([^>]*)>"#,
     )
     .expect("valid dsml open canonicalization pattern");
-    let close_pattern = Regex::new(
-        r#"(?is)</\s*[|｜│]+\s*DSML\s*[|｜│]+\s*(tool_calls|invoke|parameter)\s*>"#,
-    )
-    .expect("valid dsml close canonicalization pattern");
+    let close_pattern =
+        Regex::new(r#"(?is)</\s*[|｜│]+\s*DSML\s*[|｜│]+\s*(tool_calls|invoke|parameter)\s*>"#)
+            .expect("valid dsml close canonicalization pattern");
 
     let normalized_open = open_pattern
         .replace_all(masked_text.as_str(), |caps: &regex::Captures| {
@@ -3097,14 +3095,11 @@ pub fn normalize_assistant_text_to_tool_calls_json(
         }
         for (entry_idx, entry) in tool_calls.iter().enumerate() {
             if let Value::Object(obj) = entry {
-                let harvested_id = create_harvested_tool_call_id(
-                    Some("reasoning"),
-                    idx + entry_idx + 1,
-                );
-                let Some(normalized) = normalize_structured_tool_call_entry(
-                    obj,
-                    Some(harvested_id),
-                ) else {
+                let harvested_id =
+                    create_harvested_tool_call_id(Some("reasoning"), idx + entry_idx + 1);
+                let Some(normalized) =
+                    normalize_structured_tool_call_entry(obj, Some(harvested_id))
+                else {
                     continue;
                 };
                 mapped_calls.push(normalized);
@@ -3742,10 +3737,22 @@ exec_command
             .cloned()
             .unwrap_or_default();
         assert_eq!(tool_calls.len(), 2, "output={output_json}");
-        let id1 = tool_calls[0].get("id").and_then(Value::as_str).unwrap_or("");
-        let id2 = tool_calls[1].get("id").and_then(Value::as_str).unwrap_or("");
-        assert!(id1.starts_with("call_harvested_") || id1.starts_with("call_"), "id1={id1}");
-        assert!(id2.starts_with("call_harvested_") || id2.starts_with("call_"), "id2={id2}");
+        let id1 = tool_calls[0]
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let id2 = tool_calls[1]
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert!(
+            id1.starts_with("call_harvested_") || id1.starts_with("call_"),
+            "id1={id1}"
+        );
+        assert!(
+            id2.starts_with("call_harvested_") || id2.starts_with("call_"),
+            "id2={id2}"
+        );
         assert_ne!(id1, id2);
     }
 
@@ -4673,6 +4680,4 @@ exec_command
             Some("apply_patch")
         );
     }
-
-
 }

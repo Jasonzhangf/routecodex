@@ -10,6 +10,7 @@ export type QuotaViewEntry = {
   lastErrorAtMs?: number | null;
   consecutiveErrorCount?: number;
   cooldownUntil?: number | null;
+  cooldownKeepsPool?: boolean;
   blacklistUntil?: number | null;
 };
 
@@ -69,6 +70,7 @@ export function buildQuotaViewEntry(options: {
     lastErrorAtMs,
     consecutiveErrorCount: typeof state.consecutiveErrorCount === 'number' ? state.consecutiveErrorCount : undefined,
     cooldownUntil,
+    cooldownKeepsPool: keepPoolDuringCooldown || undefined,
     blacklistUntil
   };
 }

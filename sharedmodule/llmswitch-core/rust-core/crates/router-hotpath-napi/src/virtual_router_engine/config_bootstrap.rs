@@ -177,6 +177,12 @@ struct WebSearchConfigOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ApplyPatchConfigOutput {
+    mode: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ConfigBootstrapOutput {
     classifier: ClassifierConfigOutput,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -190,6 +196,8 @@ struct ConfigBootstrapOutput {
     exec_command_guard: Option<ExecCommandGuardConfigOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     clock: Option<ClockConfigOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    apply_patch: Option<ApplyPatchConfigOutput>,
 }
 
 pub(crate) fn bootstrap_virtual_router_config_meta_json(
@@ -218,9 +226,41 @@ pub(crate) fn bootstrap_virtual_router_config_meta_json(
         )?,
         exec_command_guard: normalize_exec_command_guard(section.get("execCommandGuard")),
         clock: normalize_clock(section.get("clock")),
+        apply_patch: normalize_apply_patch_config(resolve_apply_patch_config_node(section)).map_err(|error| napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error)))?,
     };
 
     serde_json::to_string(&output).map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+
+
+fn resolve_apply_patch_config_node<'a>(section: &'a Map<String, Value>) -> Option<&'a Value> {
+    section.get("applyPatch").or_else(|| section.get("apply_patch")).or_else(|| {
+        section
+            .get("servertool")
+            .and_then(|v| v.as_object())
+            .and_then(|row| row.get("applyPatch").or_else(|| row.get("apply_patch")))
+    })
+}
+
+fn normalize_apply_patch_config(value: Option<&Value>) -> Result<Option<ApplyPatchConfigOutput>, String> {
+    let Some(raw) = value else {
+        return Ok(Some(ApplyPatchConfigOutput { mode: "client".to_string() }));
+    };
+    let Some(record) = raw.as_object() else {
+        return Err("servertool.apply_patch/applyPatch must be object when configured".to_string());
+    };
+    let mode_raw = record
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "client".to_string());
+    match mode_raw.as_str() {
+        "client" => Ok(Some(ApplyPatchConfigOutput { mode: "client".to_string() })),
+        "servertool" => Ok(Some(ApplyPatchConfigOutput { mode: "servertool".to_string() })),
+        other => Err(format!("servertool.apply_patch.mode must be client or servertool, got {}", other)),
+    }
 }
 
 fn normalize_classifier(value: Option<&Value>) -> ClassifierConfigOutput {
@@ -323,7 +363,9 @@ fn normalize_context_weighted(value: Option<&Value>) -> Option<ContextWeightedCo
     let record = value.and_then(Value::as_object)?;
     let output = ContextWeightedConfigOutput {
         enabled: record.get("enabled").and_then(parse_bool_like),
-        client_cap_tokens: record.get("clientCapTokens").and_then(normalize_optional_f64),
+        client_cap_tokens: record
+            .get("clientCapTokens")
+            .and_then(normalize_optional_f64),
         gamma: record.get("gamma").and_then(normalize_optional_f64),
         max_multiplier: record.get("maxMultiplier").and_then(normalize_optional_f64),
     };

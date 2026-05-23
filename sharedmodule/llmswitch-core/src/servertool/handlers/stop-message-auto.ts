@@ -8,7 +8,7 @@ import { registerServerToolHandler } from '../registry.js';
 import { isCompactionRequest } from './compaction-detect.js';
 import { extractCapturedChatSeed } from '../followup-seed.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
-import { isStopEligibleForServerTool } from '../stop-gateway-context.js';
+import { isStopEligibleForServerTool, resolveStopGatewayContext } from '../stop-gateway-context.js';
 import { attachStopMessageCompareContext, type StopMessageCompareContext } from '../stop-message-compare-context.js';
 import {
   resolveStopMessageDebugEnabled,
@@ -80,36 +80,6 @@ function readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys: strin
     }
   }
   return { exhaustedDefault: false };
-}
-
-function persistSnapshotUsage(args: {
-  stickyKey?: string;
-  snapshot: {
-    text: string;
-    maxRepeats: number;
-    source?: string;
-    stageMode?: 'on' | 'off' | 'auto';
-    aiMode?: 'on' | 'off';
-  };
-  used: number;
-  resetLastUsedAt?: boolean;
-}): void {
-  if (!isPersistentStickyKey(args.stickyKey)) {
-    return;
-  }
-  const now = Date.now();
-  const persistedState = loadRoutingInstructionStateSync(args.stickyKey) ?? null;
-  const nextState = applyStopMessageSnapshotToState(persistedState, {
-    text: args.snapshot.text,
-    maxRepeats: args.snapshot.maxRepeats,
-    used: args.used,
-    source: args.snapshot.source,
-    stageMode: args.snapshot.stageMode,
-    aiMode: args.snapshot.aiMode ?? 'off',
-    updatedAt: now,
-    ...(args.resetLastUsedAt ? {} : { lastUsedAt: now })
-  });
-  persistStopMessageState(args.stickyKey, nextState);
 }
 
 function clearPersistedStopMessageSnapshot(args: {
@@ -447,8 +417,13 @@ const handler: ServerToolHandler = async (
 
     const followupFlowId = readServerToolFollowupFlowId(rt);
     if (followupFlowId) {
-      debugLog('followup_request_allowed', { followupFlowId } as JsonObject);
-      return markSkip('skip_servertool_followup_hop');
+      const followupStopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
+      if (followupStopGateway.eligible) {
+        debugLog('followup_request_stopless_allowed', { followupFlowId } as JsonObject);
+      } else {
+        debugLog('followup_request_allowed', { followupFlowId } as JsonObject);
+        return markSkip('skip_servertool_followup_hop');
+      }
     }
 
     if (hasResponsesSubmitToolOutputsResume(ctx.adapterContext)) {
@@ -559,24 +534,15 @@ const handler: ServerToolHandler = async (
       return markSkip('skip_stopmessage_invalid_repeats');
     }
 
-    if (used >= maxRepeats) {
-      clearPersistedStopMessageSnapshot({
-        stickyKey,
-        snapshot: {
-          text,
-          maxRepeats,
-          source: snapshot.source,
-          stageMode: mode,
-          aiMode: snapshot.aiMode ?? 'off'
-        }
-      });
-      return markSkip('skip_reached_max_repeats');
-    }
-
-    const stopEligible = isStopEligibleForServerTool(ctx.base, ctx.adapterContext);
+    const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
+    const stopEligible = stopGateway.eligible;
     updateCompare({ stopEligible });
     if (!stopEligible) {
       return markSkip('skip_not_stop_finish_reason');
+    }
+
+    if (used > maxRepeats) {
+      return markSkip('skip_reached_max_repeats');
     }
 
     if (hasManagedGoal && effectiveGoalState?.status === 'active') {
@@ -591,32 +557,7 @@ const handler: ServerToolHandler = async (
     });
 
     const followupText = enforceStopMessageExecutionFollowupText(STOP_MESSAGE_EXECUTION_APPEND);
-    const nextUsed = used + 1;
-    if (nextUsed >= maxRepeats) {
-      clearPersistedStopMessageSnapshot({
-        stickyKey,
-        snapshot: {
-          text,
-          maxRepeats,
-          source: snapshot.source,
-          stageMode: mode,
-          aiMode: snapshot.aiMode ?? 'off'
-        }
-      });
-    } else {
-      persistSnapshotUsage({
-        stickyKey,
-        snapshot: {
-          text,
-          maxRepeats,
-          source: snapshot.source,
-          stageMode: mode,
-          aiMode: snapshot.aiMode ?? 'off'
-        },
-        used: nextUsed
-      });
-    }
-    updateCompare({ used: nextUsed, decision: 'trigger', reason: 'triggered' });
+    updateCompare({ used, decision: 'trigger', reason: 'triggered' });
 
     const connectionState = resolveClientConnectionState(record.clientConnectionState);
     const pinnedTarget = readPinnedTargetFromAdapterContext(ctx.adapterContext);
@@ -662,9 +603,7 @@ const handler: ServerToolHandler = async (
                   modelId: pinnedTarget.modelId
                 }
               } : {}),
-              ...(pinnedTarget.routecodexPortMode ? { routecodexPortMode: pinnedTarget.routecodexPortMode } : {}),
-              clientInjectText: followupText,
-              clientInjectSource: 'servertool.stop_message'
+              ...(pinnedTarget.routecodexPortMode ? { routecodexPortMode: pinnedTarget.routecodexPortMode } : {})
             } as JsonObject
           }
         }

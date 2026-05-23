@@ -89,7 +89,9 @@ fn extract_tool_signatures_from_payload(payload: &Value) -> Vec<String> {
 
 /// Returns true if the after-payload has new governed tool calls not present in before.
 fn has_new_governed_server_tool_calls(before: &Value, after: &Value) -> bool {
-    let before_set: HashSet<String> = extract_tool_signatures_from_payload(before).into_iter().collect();
+    let before_set: HashSet<String> = extract_tool_signatures_from_payload(before)
+        .into_iter()
+        .collect();
     let after_sigs = extract_tool_signatures_from_payload(after);
     after_sigs.into_iter().any(|sig| !before_set.contains(&sig))
 }
@@ -156,13 +158,14 @@ pub fn has_new_governed_server_tool_calls_json(
 }
 
 #[napi]
-pub fn responses_payload_requires_submit_tool_outputs_json(payload_json: String) -> NapiResult<String> {
+pub fn responses_payload_requires_submit_tool_outputs_json(
+    payload_json: String,
+) -> NapiResult<String> {
     let payload: Value =
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     serde_json::to_string(&responses_payload_requires_submit_tool_outputs(&payload))
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
-
 
 #[cfg(test)]
 mod tests {

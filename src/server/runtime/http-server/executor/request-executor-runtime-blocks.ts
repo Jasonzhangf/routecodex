@@ -193,7 +193,7 @@ function isAlreadyClientFinalResponseBody(body: unknown): boolean {
 
 export function shouldBypassProviderResponseConversion(
   normalized: PipelineExecutionResult,
-  options?: { entryEndpoint?: string; providerProtocol?: string }
+  options?: { entryEndpoint?: string; providerProtocol?: string; serverToolsEnabled?: boolean; metadata?: Record<string, unknown> }
 ): boolean {
   if (typeof normalized.status === 'number' && normalized.status >= 400) {
     return true;
@@ -209,9 +209,58 @@ export function shouldBypassProviderResponseConversion(
       if (object === 'chat.completion' || object === 'chat.completion.chunk') {
         return false;
       }
+      if (options?.serverToolsEnabled !== false && object === 'response') {
+        return false;
+      }
     }
   }
+  if (options?.serverToolsEnabled !== false && hasServertoolApplyPatchToolCall(normalized.body, options?.metadata)) {
+    return false;
+  }
   return isAlreadyClientFinalResponseBody(normalized.body);
+}
+
+function hasServertoolApplyPatchToolCall(body: unknown, metadata?: Record<string, unknown>): boolean {
+  const rt = metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+    ? metadata.__rt as Record<string, unknown>
+    : undefined;
+  const applyPatch = rt?.applyPatch && typeof rt.applyPatch === 'object' && !Array.isArray(rt.applyPatch)
+    ? rt.applyPatch as Record<string, unknown>
+    : undefined;
+  const mode = typeof applyPatch?.mode === 'string' ? applyPatch.mode.trim().toLowerCase() : '';
+  if (mode !== 'servertool') {
+    return false;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return false;
+  }
+  const choices = (body as Record<string, unknown>).choices;
+  if (!Array.isArray(choices)) {
+    return false;
+  }
+  return choices.some((choice) => {
+    if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
+      return false;
+    }
+    const message = (choice as Record<string, unknown>).message;
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      return false;
+    }
+    const toolCalls = (message as Record<string, unknown>).tool_calls;
+    if (!Array.isArray(toolCalls)) {
+      return false;
+    }
+    return toolCalls.some((toolCall) => {
+      if (!toolCall || typeof toolCall !== 'object' || Array.isArray(toolCall)) {
+        return false;
+      }
+      const fn = (toolCall as Record<string, unknown>).function;
+      const name = fn && typeof fn === 'object' && !Array.isArray(fn)
+        ? (fn as Record<string, unknown>).name
+        : (toolCall as Record<string, unknown>).name;
+      return typeof name === 'string' && name.trim() === 'apply_patch';
+    });
+  });
 }
 
 export function normalizeStoplessLogMode(value: unknown): StoplessLogMode | undefined {

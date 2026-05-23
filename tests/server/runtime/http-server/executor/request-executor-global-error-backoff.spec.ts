@@ -1,3 +1,4 @@
+import { describe, expect, jest, test, beforeEach, afterEach } from '@jest/globals';
 import {
   peekGlobalErrorBackoffWaitMs,
   recordGlobalErrorBackoff,
@@ -33,6 +34,25 @@ describe('request-executor-global-error-backoff', () => {
     expect(peekGlobalErrorBackoffWaitMs()).toBe(0);
   });
 
+  test('does not accumulate delayed debt after the current backoff window elapses', () => {
+    expect(recordGlobalErrorBackoff(new Error('e1'))).toBe(1000);
+    expect(peekGlobalErrorBackoffWaitMs()).toBe(1000);
+
+    jest.advanceTimersByTime(1000);
+    expect(peekGlobalErrorBackoffWaitMs()).toBe(0);
+
+    expect(recordGlobalErrorBackoff(new Error('e2'))).toBe(2000);
+    expect(peekGlobalErrorBackoffWaitMs()).toBe(2000);
+  });
+
+  test('resets consecutive global errors after non-error request completion', () => {
+    expect(recordGlobalErrorBackoff(new Error('e1'))).toBe(1000);
+    resetGlobalErrorBackoff();
+
+    expect(recordGlobalErrorBackoff(new Error('e2'))).toBe(1000);
+    expect(peekGlobalErrorBackoffWaitMs()).toBe(1000);
+  });
+
   test('wait gate blocks until timer elapses', async () => {
     recordGlobalErrorBackoff(new Error('e1'));
     const waiting = waitGlobalErrorBackoffWithGate();
@@ -41,4 +61,3 @@ describe('request-executor-global-error-backoff', () => {
     expect(peekGlobalErrorBackoffWaitMs()).toBe(0);
   });
 });
-

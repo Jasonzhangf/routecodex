@@ -378,10 +378,16 @@ fn serialize_stopless_goal_state(state: &RoutingInstructionState, out: &mut Map<
     };
     let mut goal_out = Map::new();
     goal_out.insert("status".to_string(), Value::String(goal.status.clone()));
-    goal_out.insert("objective".to_string(), Value::String(goal.objective.clone()));
+    goal_out.insert(
+        "objective".to_string(),
+        Value::String(goal.objective.clone()),
+    );
     if let Some(value) = &goal.latest_note {
         if !value.trim().is_empty() {
-            goal_out.insert("latestNote".to_string(), Value::String(value.trim().to_string()));
+            goal_out.insert(
+                "latestNote".to_string(),
+                Value::String(value.trim().to_string()),
+            );
         }
     }
     if let Some(value) = &goal.completion_evidence {
@@ -394,7 +400,10 @@ fn serialize_stopless_goal_state(state: &RoutingInstructionState, out: &mut Map<
     }
     if let Some(value) = &goal.next_step {
         if !value.trim().is_empty() {
-            goal_out.insert("nextStep".to_string(), Value::String(value.trim().to_string()));
+            goal_out.insert(
+                "nextStep".to_string(),
+                Value::String(value.trim().to_string()),
+            );
         }
     }
     if let Some(value) = &goal.user_question {
@@ -426,7 +435,10 @@ fn serialize_stopless_goal_state(state: &RoutingInstructionState, out: &mut Map<
     }
     if let Some(value) = &goal.error_class {
         if !value.trim().is_empty() {
-            goal_out.insert("errorClass".to_string(), Value::String(value.trim().to_string()));
+            goal_out.insert(
+                "errorClass".to_string(),
+                Value::String(value.trim().to_string()),
+            );
         }
     }
     if let Some(value) = &goal.completion_summary {
@@ -463,8 +475,14 @@ fn serialize_stopless_goal_state(state: &RoutingInstructionState, out: &mut Map<
             Value::Number(value.max(0).into()),
         );
     }
-    goal_out.insert("updatedAt".to_string(), Value::Number(goal.updated_at.into()));
-    goal_out.insert("createdAt".to_string(), Value::Number(goal.created_at.into()));
+    goal_out.insert(
+        "updatedAt".to_string(),
+        Value::Number(goal.updated_at.into()),
+    );
+    goal_out.insert(
+        "createdAt".to_string(),
+        Value::Number(goal.created_at.into()),
+    );
     out.insert("stoplessGoalState".to_string(), Value::Object(goal_out));
 }
 

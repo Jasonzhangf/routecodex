@@ -34,6 +34,32 @@ function readScopeToken(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+function readToolCallId(item: AnyRecord): string | undefined {
+  for (const key of ['call_id', 'tool_call_id', 'id']) {
+    const value = item[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function collectPendingToolCallIds(input: AnyRecord[]): string[] {
+  const pending: string[] = [];
+  for (const item of input) {
+    const type = typeof item.type === 'string' ? item.type.trim().toLowerCase() : '';
+    const callId = readToolCallId(item);
+    if (!callId) continue;
+    if (type === 'function_call') {
+      if (!pending.includes(callId)) pending.push(callId);
+      continue;
+    }
+    if (type === 'function_call_output' || type === 'tool_result' || type === 'tool_message') {
+      const index = pending.indexOf(callId);
+      if (index >= 0) pending.splice(index, 1);
+    }
+  }
+  return pending;
+}
+
 function buildScopeKeys(scope: { sessionId?: unknown; conversationId?: unknown }): string[] {
   const keys: string[] = [];
   const sessionId = readScopeToken(scope.sessionId);
@@ -183,6 +209,15 @@ class ResponsesConversationStore {
       entry.routeHint = responseRouteHint;
       entry.basePayload.routeHint = responseRouteHint;
     }
+    const nextScopeKeys = buildScopeKeys({
+      sessionId: args.sessionId,
+      conversationId: args.conversationId
+    });
+    for (const scopeKey of nextScopeKeys) {
+      if (!entry.scopeKeys.includes(scopeKey)) {
+        entry.scopeKeys.push(scopeKey);
+      }
+    }
     if (entry.lastResponseId) {
       this.responseIndex.delete(entry.lastResponseId);
     }
@@ -273,6 +308,8 @@ class ResponsesConversationStore {
       ...(entry.routeHint ? { routeHint: entry.routeHint } : {}),
       ...(entry.lastResponseId ? { previous_response_id: entry.lastResponseId } : {})
     };
+    entry.releasedPendingToolCallIds = collectPendingToolCallIds(entry.input);
+    entry.input = [];
     entry.updatedAt = Date.now();
     this.attachEntryScopes(entry);
   }

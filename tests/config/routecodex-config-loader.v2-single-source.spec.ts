@@ -142,6 +142,41 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     await expect(loadRouteCodexConfig(configPath)).rejects.toThrow('v2 config disallows top-level field "providers"');
   });
 
+  it('allows router sameProtocolBehavior in top-level httpserver config', async () => {
+    const root = await mkTmp('routecodex-v2-same-protocol-');
+    process.env.RCC_HOME = root;
+    process.env.ROUTECODEX_USER_DIR = root;
+    process.env.ROUTECODEX_HOME = root;
+    await writeProviderConfig(root);
+
+    const configPath = path.join(root, 'config.json');
+    await fs.writeFile(
+      configPath,
+      `${JSON.stringify({
+        version: '2.0.0',
+        virtualrouterMode: 'v2',
+        httpserver: {
+          host: '127.0.0.1',
+          port: 5555,
+          sameProtocolBehavior: 'relay'
+        },
+        virtualrouter: {
+          routingPolicyGroups: {
+            default: {
+              routing: {
+                default: [{ id: 'default-primary', targets: ['ali-coding-plan.glm-5'] }]
+              }
+            }
+          }
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+
+    const loaded = await loadRouteCodexConfig(configPath);
+    expect((loaded.userConfig.httpserver as any).sameProtocolBehavior).toBe('relay');
+  });
+
   it('does not stick to a previous auto-resolved config path', async () => {
     const rootA = await mkTmp('routecodex-v2-path-a-');
     process.env.RCC_HOME = rootA;

@@ -106,6 +106,16 @@ function logResponsesHandlerNonBlockingError(stage: string, error: unknown, deta
   }
 }
 
+function readResponsesSessionId(metadata: Record<string, unknown> | undefined): string | undefined {
+  const value = typeof metadata?.session_id === 'string'
+    ? metadata.session_id
+    : typeof metadata?.sessionId === 'string'
+      ? metadata.sessionId
+      : undefined;
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed || undefined;
+}
+
 function queueInboundToolHistoryErrorsample(args: {
   requestId: string;
   entryEndpoint: string;
@@ -405,14 +415,33 @@ export async function handleResponses(
       return;
     }
     const effectiveRequestId = pipelineInput.requestId;
+    if (pipelineEntryEndpoint === '/v1/responses') {
+      result.metadata = {
+        ...(result.metadata || {}),
+        responsesRequestContext: {
+          payload: payload as Record<string, unknown>,
+          context: {
+            input: Array.isArray(payload.input) ? payload.input : [],
+            toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
+          },
+          sessionId: readResponsesSessionId(requestBodyMetadata),
+        },
+      };
+    }
     if (!hasSsePayload(result.body)) {
       logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body, {
         preserveTimingForUsage: true
       });
     }
-    sendPipelineResponse(res, result, effectiveRequestId, {
+    await sendPipelineResponse(res, result, effectiveRequestId, {
       forceSSE: wantsStream,
-      entryEndpoint,
+      entryEndpoint: pipelineEntryEndpoint,
+      responsesRequestContext: result.metadata?.responsesRequestContext as {
+        payload: Record<string, unknown>;
+        context: Record<string, unknown>;
+        sessionId?: string;
+        conversationId?: string;
+      } | undefined,
       ...(isVideoRequest ? { sseTotalTimeoutMs: requestTimeoutMs } : {})
     });
   } catch (error: unknown) {

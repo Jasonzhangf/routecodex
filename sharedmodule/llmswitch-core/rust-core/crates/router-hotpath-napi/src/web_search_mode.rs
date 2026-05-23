@@ -48,7 +48,9 @@ fn read_direct_activation(engine: &Map<String, Value>) -> String {
     }
 }
 
-pub(crate) fn resolve_web_search_execution_mode(engine: &Map<String, Value>) -> WebSearchExecutionMode {
+pub(crate) fn resolve_web_search_execution_mode(
+    engine: &Map<String, Value>,
+) -> WebSearchExecutionMode {
     if read_execution_mode(engine) != "direct" {
         return WebSearchExecutionMode::Servertool;
     }
@@ -58,7 +60,9 @@ pub(crate) fn resolve_web_search_execution_mode(engine: &Map<String, Value>) -> 
     WebSearchExecutionMode::DirectRoute
 }
 
-pub(crate) fn resolve_web_search_execution_mode_from_value(engine: &Value) -> WebSearchExecutionMode {
+pub(crate) fn resolve_web_search_execution_mode_from_value(
+    engine: &Value,
+) -> WebSearchExecutionMode {
     let Some(row) = engine.as_object() else {
         return WebSearchExecutionMode::Servertool;
     };

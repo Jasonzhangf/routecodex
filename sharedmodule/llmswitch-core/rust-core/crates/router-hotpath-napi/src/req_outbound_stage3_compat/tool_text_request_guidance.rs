@@ -87,12 +87,16 @@ fn is_tool_choice_required(root: &Map<String, Value>) -> bool {
 }
 
 fn parse_json_object(text: &str) -> Option<Map<String, Value>> {
-    serde_json::from_str::<Value>(text).ok()?.as_object().cloned()
+    serde_json::from_str::<Value>(text)
+        .ok()?
+        .as_object()
+        .cloned()
 }
 
 fn read_tool_call_name(entry: &Map<String, Value>) -> Option<String> {
     read_trimmed_string(entry.get("name")).or_else(|| {
-        entry.get("function")
+        entry
+            .get("function")
             .and_then(Value::as_object)
             .and_then(|row| read_trimmed_string(row.get("name")))
     })
@@ -100,7 +104,8 @@ fn read_tool_call_name(entry: &Map<String, Value>) -> Option<String> {
 
 fn read_tool_call_arguments_text(entry: &Map<String, Value>) -> Option<String> {
     read_trimmed_string(entry.get("arguments")).or_else(|| {
-        entry.get("function")
+        entry
+            .get("function")
             .and_then(Value::as_object)
             .and_then(|row| read_trimmed_string(row.get("arguments")))
     })
@@ -176,7 +181,9 @@ fn has_recent_apply_patch_failure_without_read(root: &Map<String, Value>) -> boo
                 {
                     events.push_back("apply_patch_failure".to_string());
                 }
-                if is_shell_like_tool_name(name.as_str()) && looks_like_file_read_command(text.as_str()) {
+                if is_shell_like_tool_name(name.as_str())
+                    && looks_like_file_read_command(text.as_str())
+                {
                     events.push_back("read".to_string());
                 }
             }
@@ -546,6 +553,9 @@ mod tests {
         apply_tool_text_request_guidance(&mut payload, None);
 
         let content = payload["messages"][0]["content"].as_str().unwrap_or("");
-        assert!(!content.contains("apply_patch"), "should not mention apply_patch when not declared");
+        assert!(
+            !content.contains("apply_patch"),
+            "should not mention apply_patch when not declared"
+        );
     }
 }

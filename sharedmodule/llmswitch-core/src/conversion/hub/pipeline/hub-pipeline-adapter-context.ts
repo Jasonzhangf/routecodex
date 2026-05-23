@@ -8,8 +8,6 @@ import {
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { cloneRuntimeMetadata } from "../../runtime-metadata.js";
 import { isJsonObject, jsonClone, type JsonObject, type JsonValue } from "../types/json.js";
-import { saveOriginSnapshot } from "../../../servertool/origin-request-store.js";
-import { resolveServertoolPersistentScopeKey } from "../../../servertool/state-scope.js";
 
 
 
@@ -35,12 +33,6 @@ function applyMetadataAdapterContextFields(args: {
   }
   if (adapterObjectCarriers.capturedChatRequest) {
     (adapterContext as Record<string, unknown>).capturedChatRequest = adapterObjectCarriers.capturedChatRequest;
-    const scope = resolveServertoolPersistentScopeKey(adapterContext);
-    if (scope && adapterObjectCarriers.capturedChatRequest) {
-      const captured = adapterObjectCarriers.capturedChatRequest as Record<string, unknown>;
-      const capturedMessages = Array.isArray(captured.messages) ? (captured.messages as unknown[]) : [];
-      saveOriginSnapshot(scope, { requestId: adapterContext.requestId ?? String(Date.now()), sessionScope: scope, capturedChatRequest: captured as any, model: captured?.model as string | undefined, messages: capturedMessages as any, tools: (((captured?.tools as unknown[]) ?? []) as any), parameters: ((captured?.parameters as Record<string, unknown>) ?? undefined) as any, entryEndpoint: adapterContext.entryEndpoint, providerProtocol: adapterContext.providerProtocol });
-    }
   }
   if (typeof adapterMetadataSignals.sessionId === "string") (adapterContext as Record<string, unknown>).sessionId = adapterMetadataSignals.sessionId;
   if (typeof adapterMetadataSignals.conversationId === "string") (adapterContext as Record<string, unknown>).conversationId = adapterMetadataSignals.conversationId;

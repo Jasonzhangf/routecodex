@@ -222,25 +222,39 @@ fn value_contains_reasoning(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::String(s) => {
             let lower = s.to_lowercase();
-            lower.contains("<think") || lower.contains("</think")
-                || lower.contains("<reflection") || lower.contains("</reflection")
-                || lower.contains("```think") || lower.contains("```reflection")
-                || lower.contains("[思考]") || lower.contains("[/思考]")
+            lower.contains("<think")
+                || lower.contains("</think")
+                || lower.contains("<reflection")
+                || lower.contains("</reflection")
+                || lower.contains("```think")
+                || lower.contains("```reflection")
+                || lower.contains("[思考]")
+                || lower.contains("[/思考]")
         }
         serde_json::Value::Array(arr) => arr.iter().any(value_contains_reasoning),
         serde_json::Value::Object(obj) => {
             if let Some(text) = obj.get("text").and_then(serde_json::Value::as_str) {
                 let lower = text.to_lowercase();
-                if lower.contains("<think") || lower.contains("</think")
-                    || lower.contains("<reflection") || lower.contains("</reflection")
-                    || lower.contains("```think") || lower.contains("```reflection")
-                    || lower.contains("[思考]") || lower.contains("[/思考]")
+                if lower.contains("<think")
+                    || lower.contains("</think")
+                    || lower.contains("<reflection")
+                    || lower.contains("</reflection")
+                    || lower.contains("```think")
+                    || lower.contains("```reflection")
+                    || lower.contains("[思考]")
+                    || lower.contains("[/思考]")
                 {
                     return true;
                 }
             }
             if let Some(content) = obj.get("content") {
-                if content.is_array() && content.as_array().unwrap().iter().any(value_contains_reasoning) {
+                if content.is_array()
+                    && content
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(value_contains_reasoning)
+                {
                     return true;
                 }
             }
@@ -251,30 +265,60 @@ fn value_contains_reasoning(value: &serde_json::Value) -> bool {
 }
 
 fn chat_payload_contains_reasoning(payload: &serde_json::Value) -> bool {
-    payload.get("messages").map(value_contains_reasoning).unwrap_or(false)
-        || payload.get("choices").map(value_contains_reasoning).unwrap_or(false)
+    payload
+        .get("messages")
+        .map(value_contains_reasoning)
+        .unwrap_or(false)
+        || payload
+            .get("choices")
+            .map(value_contains_reasoning)
+            .unwrap_or(false)
 }
 
 fn responses_payload_contains_reasoning(payload: &serde_json::Value) -> bool {
-    (payload.get("output").map(value_contains_reasoning).unwrap_or(false))
-        || (payload.get("input").map(value_contains_reasoning).unwrap_or(false))
-        || (payload.get("instructions").map(value_contains_reasoning).unwrap_or(false))
-        || (payload.get("required_action").map(value_contains_reasoning).unwrap_or(false))
+    (payload
+        .get("output")
+        .map(value_contains_reasoning)
+        .unwrap_or(false))
+        || (payload
+            .get("input")
+            .map(value_contains_reasoning)
+            .unwrap_or(false))
+        || (payload
+            .get("instructions")
+            .map(value_contains_reasoning)
+            .unwrap_or(false))
+        || (payload
+            .get("required_action")
+            .map(value_contains_reasoning)
+            .unwrap_or(false))
 }
 
 fn anthropic_payload_contains_reasoning(payload: &serde_json::Value) -> bool {
-    payload.get("messages").map(value_contains_reasoning).unwrap_or(false)
-        || payload.get("content").map(value_contains_reasoning).unwrap_or(false)
+    payload
+        .get("messages")
+        .map(value_contains_reasoning)
+        .unwrap_or(false)
+        || payload
+            .get("content")
+            .map(value_contains_reasoning)
+            .unwrap_or(false)
 }
 
 fn gemini_payload_contains_reasoning(payload: &serde_json::Value) -> bool {
-    payload.get("contents").map(value_contains_reasoning).unwrap_or(false)
-        || payload.get("candidates").map(value_contains_reasoning).unwrap_or(false)
+    payload
+        .get("contents")
+        .map(value_contains_reasoning)
+        .unwrap_or(false)
+        || payload
+            .get("candidates")
+            .map(value_contains_reasoning)
+            .unwrap_or(false)
 }
 
 pub fn should_normalize_reasoning_payload_json(input_json: String) -> NapiResult<String> {
-    let value: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let value: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let payload = value.get("payload").unwrap_or(&serde_json::Value::Null);
     let protocol = value
         .get("protocol")
@@ -290,7 +334,6 @@ pub fn should_normalize_reasoning_payload_json(input_json: String) -> NapiResult
     };
     serde_json::to_string(&should).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
-
 
 pub fn normalize_resp_inbound_reasoning_payload_json(input_json: String) -> NapiResult<String> {
     let mut value: Value =
@@ -536,9 +579,6 @@ pub fn run_bridge_action_pipeline_json(input_json: String) -> NapiResult<String>
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
 
-
-
-
 pub fn strip_function_namespace_json(input_json: String) -> NapiResult<String> {
     let trimmed = input_json.trim();
     if trimmed.is_empty() {
@@ -575,7 +615,13 @@ pub fn to_canonical_tool_name_json(input_json: String) -> NapiResult<String> {
     let result = stripped
         .to_lowercase()
         .chars()
-        .map(|c| if c == ' ' || c == '_' || c == '-' { '.' } else { c })
+        .map(|c| {
+            if c == ' ' || c == '_' || c == '-' {
+                '.'
+            } else {
+                c
+            }
+        })
         .collect::<String>();
     // Collapse multiple dots
     let mut collapsed = String::new();
@@ -640,7 +686,10 @@ pub fn resolve_tool_family_json(input_json: String) -> NapiResult<String> {
     }
 
     let shell_candidate = canonical.replace('.', "_");
-    if is_shell_tool_name(&canonical) || is_shell_tool_name(&shell_candidate) || canonical == "terminal" {
+    if is_shell_tool_name(&canonical)
+        || is_shell_tool_name(&shell_candidate)
+        || canonical == "terminal"
+    {
         return Ok("shell_like".to_string());
     }
 
@@ -657,14 +706,22 @@ pub fn resolve_tool_family_json(input_json: String) -> NapiResult<String> {
 
 fn namespace_joiner(namespace: &str) -> &'static str {
     let trimmed = namespace.trim();
-    if trimmed.ends_with("__") || trimmed.ends_with('_') || trimmed.ends_with('.') || trimmed.ends_with('/') || trimmed.ends_with('-') {
+    if trimmed.ends_with("__")
+        || trimmed.ends_with('_')
+        || trimmed.ends_with('.')
+        || trimmed.ends_with('/')
+        || trimmed.ends_with('-')
+    {
         ""
     } else {
         "__"
     }
 }
 
-pub fn build_namespace_alias_json(namespace_json: String, raw_name_json: String) -> NapiResult<String> {
+pub fn build_namespace_alias_json(
+    namespace_json: String,
+    raw_name_json: String,
+) -> NapiResult<String> {
     let ns = namespace_json.trim();
     let name = raw_name_json.trim();
     if ns.is_empty() || name.is_empty() {
@@ -674,7 +731,10 @@ pub fn build_namespace_alias_json(namespace_json: String, raw_name_json: String)
     Ok(result)
 }
 
-pub fn build_namespace_lookup_key_json(namespace_json: String, raw_name_json: String) -> NapiResult<String> {
+pub fn build_namespace_lookup_key_json(
+    namespace_json: String,
+    raw_name_json: String,
+) -> NapiResult<String> {
     let ns = namespace_json.trim().to_lowercase();
     let name = raw_name_json.trim().to_lowercase();
     if ns.is_empty() || name.is_empty() {
@@ -703,7 +763,9 @@ pub fn read_schema_json(input_json: String) -> NapiResult<String> {
 
     let result = extract_function_parameters(&input);
     match result {
-        Some(val) => serde_json::to_string(&val).map_err(|e| napi::Error::from_reason(e.to_string())),
+        Some(val) => {
+            serde_json::to_string(&val).map_err(|e| napi::Error::from_reason(e.to_string()))
+        }
         None => Ok("null".to_string()),
     }
 }
@@ -781,7 +843,8 @@ pub fn assert_no_unknown_tool_names_json(input_json: String) -> NapiResult<Strin
     }
 
     // Extract declared tool names
-    let declared_names: Vec<String> = input.client_tools_raw
+    let declared_names: Vec<String> = input
+        .client_tools_raw
         .unwrap_or_default()
         .iter()
         .filter_map(|tool| {
@@ -888,7 +951,12 @@ pub fn extract_client_tool_index_json(input_json: String) -> NapiResult<String> 
             .unwrap_or_else(|| "function".to_string());
 
         if tool_type == "namespace" {
-            let namespace = match row.get("name").and_then(|v| v.as_str()).map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
+            let namespace = match row
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+            {
                 Some(ns) => ns,
                 None => continue,
             };
@@ -910,7 +978,8 @@ pub fn extract_client_tool_index_json(input_json: String) -> NapiResult<String> 
                     .map(|v| v.trim().to_string())
                     .filter(|v| !v.is_empty())
                     .or_else(|| {
-                        child.as_object()
+                        child
+                            .as_object()
                             .and_then(|r| r.get("function"))
                             .and_then(|f| f.as_object())
                             .and_then(|fo| fo.get("name"))
@@ -930,7 +999,11 @@ pub fn extract_client_tool_index_json(input_json: String) -> NapiResult<String> 
                 });
 
                 // Register with namespace key
-                let ns_key = format!("{}::{}", namespace.to_lowercase(), child_name.to_lowercase());
+                let ns_key = format!(
+                    "{}::{}",
+                    namespace.to_lowercase(),
+                    child_name.to_lowercase()
+                );
                 if !by_namespace_name.contains_key(&ns_key) {
                     by_namespace_name.insert(ns_key, entry.clone());
                 }
@@ -1049,7 +1122,13 @@ fn to_canonical_tool_name_impl(input: &str) -> String {
     let result: String = stripped
         .to_lowercase()
         .chars()
-        .map(|c| if c == ' ' || c == '_' || c == '-' { '.' } else { c })
+        .map(|c| {
+            if c == ' ' || c == '_' || c == '-' {
+                '.'
+            } else {
+                c
+            }
+        })
         .collect();
     let mut collapsed = String::new();
     let mut prev_dot = false;
@@ -1074,13 +1153,33 @@ fn resolve_tool_family_impl(canonical: &str) -> String {
 
     let shell_candidate = canonical.replace('.', "_");
     let shell_aliases = [
-        "bash", "shell", "cmd", "cmd_exe", "shell_cmd", "bash_cmd", "exec", "run",
-        "command", "system", "run_command", "execute", "exec_command", "bash_command",
-        "shell_command", "run_shell", "bash_shell", "system_command", "shell_exec",
-        "run_cmd", "bash_exec",
+        "bash",
+        "shell",
+        "cmd",
+        "cmd_exe",
+        "shell_cmd",
+        "bash_cmd",
+        "exec",
+        "run",
+        "command",
+        "system",
+        "run_command",
+        "execute",
+        "exec_command",
+        "bash_command",
+        "shell_command",
+        "run_shell",
+        "bash_shell",
+        "system_command",
+        "shell_exec",
+        "run_cmd",
+        "bash_exec",
     ];
 
-    if shell_aliases.contains(&canonical) || shell_aliases.contains(&shell_candidate.as_str()) || canonical == "terminal" {
+    if shell_aliases.contains(&canonical)
+        || shell_aliases.contains(&shell_candidate.as_str())
+        || canonical == "terminal"
+    {
         return "shell_like".to_string();
     }
 
@@ -1125,7 +1224,8 @@ pub fn resolve_client_tool_from_index_json(input_json: String) -> NapiResult<Str
     if let Some(ns) = &input.namespace {
         let ns_key = format!("{}::{}", ns.to_lowercase(), trimmed.to_lowercase());
         if let Some(result) = input.index.by_namespace_name.get(&ns_key) {
-            return serde_json::to_string(result).map_err(|e| napi::Error::from_reason(e.to_string()));
+            return serde_json::to_string(result)
+                .map_err(|e| napi::Error::from_reason(e.to_string()));
         }
     }
 
@@ -1152,22 +1252,26 @@ pub fn resolve_client_tool_from_index_json(input_json: String) -> NapiResult<Str
 
     if !canonical.is_empty() {
         if let Some(result) = input.index.by_canonical_lower.get(&canonical) {
-            return serde_json::to_string(result).map_err(|e| napi::Error::from_reason(e.to_string()));
+            return serde_json::to_string(result)
+                .map_err(|e| napi::Error::from_reason(e.to_string()));
         }
         if let Some(result) = input.index.by_stripped_lower.get(&canonical) {
-            return serde_json::to_string(result).map_err(|e| napi::Error::from_reason(e.to_string()));
+            return serde_json::to_string(result)
+                .map_err(|e| napi::Error::from_reason(e.to_string()));
         }
     }
 
     if !compact.is_empty() {
         if let Some(result) = input.index.by_compact_lower.get(&compact) {
-            return serde_json::to_string(result).map_err(|e| napi::Error::from_reason(e.to_string()));
+            return serde_json::to_string(result)
+                .map_err(|e| napi::Error::from_reason(e.to_string()));
         }
     }
 
     if !family.is_empty() {
         if let Some(result) = input.index.by_family.get(&family) {
-            return serde_json::to_string(result).map_err(|e| napi::Error::from_reason(e.to_string()));
+            return serde_json::to_string(result)
+                .map_err(|e| napi::Error::from_reason(e.to_string()));
         }
     }
 
@@ -1193,7 +1297,8 @@ pub fn remap_chat_tool_calls_json(input_json: String) -> NapiResult<String> {
     // Build index using existing function
     let tools_raw_json = serde_json::to_string(&serde_json::json!({
         "client_tools_raw": input.client_tools_raw
-    })).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    }))
+    .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     let index_json = extract_client_tool_index_json(tools_raw_json)?;
     #[derive(serde::Deserialize)]
@@ -1269,10 +1374,14 @@ pub fn remap_chat_tool_calls_json(input_json: String) -> NapiResult<String> {
     if let Some(choices) = payload.get_mut("choices").and_then(|c| c.as_array_mut()) {
         for choice in choices {
             if let Some(message) = choice.get_mut("message").and_then(|m| m.as_object_mut()) {
-                if let Some(tool_calls) = message.get_mut("tool_calls").and_then(|tc| tc.as_array_mut()) {
+                if let Some(tool_calls) = message
+                    .get_mut("tool_calls")
+                    .and_then(|tc| tc.as_array_mut())
+                {
                     for tool_call in tool_calls {
                         if let Some(tc_obj) = tool_call.as_object_mut() {
-                            let function = tc_obj.get_mut("function").and_then(|f| f.as_object_mut());
+                            let function =
+                                tc_obj.get_mut("function").and_then(|f| f.as_object_mut());
                             let current_name = function
                                 .and_then(|f| f.get("name"))
                                 .and_then(|n| n.as_str())
@@ -1287,9 +1396,16 @@ pub fn remap_chat_tool_calls_json(input_json: String) -> NapiResult<String> {
 
                             if let Some(matched) = lookup(&current_name, namespace) {
                                 // Update function.name
-                                if let Some(function) = tc_obj.get_mut("function").and_then(|f| f.as_object_mut()) {
-                                    if let Some(declared) = matched.get("declaredName").and_then(|d| d.as_str()) {
-                                        function.insert("name".to_string(), serde_json::Value::String(declared.to_string()));
+                                if let Some(function) =
+                                    tc_obj.get_mut("function").and_then(|f| f.as_object_mut())
+                                {
+                                    if let Some(declared) =
+                                        matched.get("declaredName").and_then(|d| d.as_str())
+                                    {
+                                        function.insert(
+                                            "name".to_string(),
+                                            serde_json::Value::String(declared.to_string()),
+                                        );
                                     }
                                 }
                             } else {
@@ -1333,7 +1449,8 @@ pub fn remap_responses_tool_calls_json(input_json: String) -> NapiResult<String>
     // Build index
     let tools_raw_json = serde_json::to_string(&serde_json::json!({
         "client_tools_raw": input.client_tools_raw
-    })).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    }))
+    .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     let index_json = extract_client_tool_index_json(tools_raw_json)?;
     #[derive(serde::Deserialize)]
@@ -1355,7 +1472,9 @@ pub fn remap_responses_tool_calls_json(input_json: String) -> NapiResult<String>
     // Lookup helper
     let lookup = |name: &str, namespace: Option<&str>| -> Option<serde_json::Value> {
         let trimmed = name.trim();
-        if trimmed.is_empty() { return None; }
+        if trimmed.is_empty() {
+            return None;
+        }
 
         if let Some(ns) = namespace {
             let ns_key = format!("{}::{}", ns.to_lowercase(), trimmed.to_lowercase());
@@ -1382,28 +1501,52 @@ pub fn remap_responses_tool_calls_json(input_json: String) -> NapiResult<String>
         None
     };
 
-    let update_tool_name = |obj: &mut serde_json::Map<String, serde_json::Value>, name: &str, matched: &serde_json::Value| {
+    let update_tool_name = |obj: &mut serde_json::Map<String, serde_json::Value>,
+                            name: &str,
+                            matched: &serde_json::Value| {
         if let Some(declared) = matched.get("declaredName").and_then(|d| d.as_str()) {
-            obj.insert("name".to_string(), serde_json::Value::String(declared.to_string()));
+            obj.insert(
+                "name".to_string(),
+                serde_json::Value::String(declared.to_string()),
+            );
             if let Some(ns) = matched.get("namespace").and_then(|n| n.as_str()) {
-                obj.insert("namespace".to_string(), serde_json::Value::String(ns.to_string()));
+                obj.insert(
+                    "namespace".to_string(),
+                    serde_json::Value::String(ns.to_string()),
+                );
             }
             if let Some(function) = obj.get_mut("function").and_then(|f| f.as_object_mut()) {
-                function.insert("name".to_string(), serde_json::Value::String(declared.to_string()));
+                function.insert(
+                    "name".to_string(),
+                    serde_json::Value::String(declared.to_string()),
+                );
             }
         }
     };
 
     // Process required_action calls
-    if let Some(required_action) = payload.get_mut("required_action").and_then(|a| a.as_object_mut()) {
-        if let Some(submit_tool_outputs) = required_action.get_mut("submit_tool_outputs")
-            .and_then(|o| o.as_object_mut()) {
-            if let Some(tool_calls) = submit_tool_outputs.get_mut("tool_calls")
-                .and_then(|tc| tc.as_array_mut()) {
+    if let Some(required_action) = payload
+        .get_mut("required_action")
+        .and_then(|a| a.as_object_mut())
+    {
+        if let Some(submit_tool_outputs) = required_action
+            .get_mut("submit_tool_outputs")
+            .and_then(|o| o.as_object_mut())
+        {
+            if let Some(tool_calls) = submit_tool_outputs
+                .get_mut("tool_calls")
+                .and_then(|tc| tc.as_array_mut())
+            {
                 for call in tool_calls {
                     if let Some(call_obj) = call.as_object_mut() {
-                        let name = call_obj.get("name").and_then(|n| n.as_str()).map(|s| s.trim().to_string());
-                        let name = match name { Some(n) => n, None => continue };
+                        let name = call_obj
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .map(|s| s.trim().to_string());
+                        let name = match name {
+                            Some(n) => n,
+                            None => continue,
+                        };
 
                         let namespace = call_obj.get("namespace").and_then(|n| n.as_str());
 
@@ -1424,13 +1567,22 @@ pub fn remap_responses_tool_calls_json(input_json: String) -> NapiResult<String>
     if let Some(output) = payload.get_mut("output").and_then(|o| o.as_array_mut()) {
         for item in output {
             if let Some(item_obj) = item.as_object_mut() {
-                let type_str = item_obj.get("type").and_then(|t| t.as_str()).map(|s| s.trim().to_lowercase());
+                let type_str = item_obj
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.trim().to_lowercase());
                 if type_str.as_deref() != Some("function_call") {
                     continue;
                 }
 
-                let name = item_obj.get("name").and_then(|n| n.as_str()).map(|s| s.trim().to_string());
-                let name = match name { Some(n) => n, None => continue };
+                let name = item_obj
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .map(|s| s.trim().to_string());
+                let name = match name {
+                    Some(n) => n,
+                    None => continue,
+                };
 
                 let namespace = item_obj.get("namespace").and_then(|n| n.as_str());
 
@@ -1445,7 +1597,10 @@ pub fn remap_responses_tool_calls_json(input_json: String) -> NapiResult<String>
         }
     }
 
-    let output = Output { payload, unknown_names };
+    let output = Output {
+        payload,
+        unknown_names,
+    };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -1463,11 +1618,14 @@ pub fn as_record_json(input_json: String) -> NapiResult<String> {
 }
 
 pub fn build_slim_responses_context_json(input_json: String) -> NapiResult<String> {
-    let value: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let value: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let src = match value.as_object() {
         Some(obj) => obj,
-        None => return serde_json::to_string(&serde_json::Value::Null).map_err(|e| napi::Error::from_reason(e.to_string())),
+        None => {
+            return serde_json::to_string(&serde_json::Value::Null)
+                .map_err(|e| napi::Error::from_reason(e.to_string()))
+        }
     };
     let mut result = serde_json::Map::with_capacity(src.len().saturating_sub(2));
     for (k, v) in src {
@@ -1476,7 +1634,8 @@ pub fn build_slim_responses_context_json(input_json: String) -> NapiResult<Strin
         }
         result.insert(k.clone(), v.clone());
     }
-    serde_json::to_string(&Value::Object(result)).map_err(|e| napi::Error::from_reason(e.to_string()))
+    serde_json::to_string(&Value::Object(result))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 pub fn normalize_reasoning_payload_v2_json(input_json: String) -> NapiResult<String> {
@@ -1508,7 +1667,8 @@ pub fn normalize_reasoning_payload_v2_json(input_json: String) -> NapiResult<Str
                 "normalizedRequest": payload.clone(),
                 "strategy": "fast_path"
             });
-            return serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()));
+            return serde_json::to_string(&result)
+                .map_err(|e| napi::Error::from_reason(e.to_string()));
         }
     };
     match protocol.as_str() {

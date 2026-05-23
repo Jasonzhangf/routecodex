@@ -27,6 +27,31 @@ describe('hub pipeline router metadata builder', () => {
     });
   });
 
+
+  it('preserves provider-binding allowed provider keys for provider-mode relay', () => {
+    const output = buildRouterMetadataInputWithNative({
+      requestId: 'req-provider-relay-router-meta',
+      entryEndpoint: '/v1/chat/completions',
+      processMode: 'chat',
+      stream: false,
+      direction: 'request',
+      providerProtocol: 'openai-chat',
+      metadata: {
+        routecodexPortMode: 'provider',
+        routecodexPortBinding: 'anthropic.claude',
+        routecodexProviderRelayBinding: 'anthropic.claude',
+        routecodexProviderRelayProtocol: 'anthropic-messages',
+        allowedProviders: ['anthropic.claude'],
+      },
+    });
+
+    expect(output).toMatchObject({
+      routecodexPortMode: 'provider',
+      routecodexPortBinding: 'anthropic.claude',
+      allowedProviders: ['anthropic.claude'],
+    });
+  });
+
   it('hydrates router continuation from request semantics and routes by unified request-chain key', () => {
     const output = buildRouterMetadataInputWithNative({
       requestId: 'req-cont-router-meta',

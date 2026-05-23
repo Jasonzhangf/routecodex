@@ -274,7 +274,11 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
     });
   }
   const at = nowMs();
-  const guardedItems: ClockScheduleItem[] = normalized.items.map((item) => {
+  const toolCallOwnedItems: ClockScheduleItem[] = normalized.items.map((item) => ({
+    ...item,
+    setBy: item.setBy ?? 'agent'
+  }));
+  const guardedItems: ClockScheduleItem[] = toolCallOwnedItems.map((item) => {
     if (!item || typeof item !== 'object') return item;
     if (!Number.isFinite(item.dueAtMs)) return item;
     // When dueAt is already within the trigger window, do NOT allow same-request injection.

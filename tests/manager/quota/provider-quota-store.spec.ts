@@ -111,6 +111,91 @@ describe('provider-quota-store snapshot', () => {
     expect(reloaded?.consecutiveErrorCount).toBe(0);
   });
 
+  it('restores persisted repeated 5xx cooldown to keep provider in pool', async () => {
+    const now = new Date('2026-05-23T21:30:00.000Z');
+    const state = createInitialQuotaState(providerKey, { priorityTier: 42, authType: 'apikey' }, now.getTime());
+    const snapshot = {
+      [providerKey]: {
+        ...state,
+        inPool: false,
+        reason: 'cooldown',
+        cooldownUntil: now.getTime() + 60_000,
+        cooldownKeepsPool: undefined,
+        lastErrorSeries: 'E5XX',
+        lastErrorCode: 'HTTP_502',
+        lastErrorAtMs: now.getTime(),
+        consecutiveErrorCount: 4
+      }
+    };
+
+    await saveProviderQuotaSnapshot(snapshot, now);
+    const loaded = await loadProviderQuotaSnapshot();
+    expect(loaded).not.toBeNull();
+    const reloaded = loaded?.providers[providerKey];
+    expect(reloaded?.reason).toBe('cooldown');
+    expect(reloaded?.inPool).toBe(true);
+    expect(reloaded?.cooldownKeepsPool).toBe(true);
+    expect(reloaded?.cooldownUntil).toBe(now.getTime() + 60_000);
+    expect(reloaded?.consecutiveErrorCount).toBe(4);
+  });
+
+  it('restores persisted generic external cooldown to keep provider in pool', async () => {
+    const now = new Date('2026-05-23T21:35:00.000Z');
+    const state = createInitialQuotaState(providerKey, { priorityTier: 42, authType: 'apikey' }, now.getTime());
+    const snapshot = {
+      [providerKey]: {
+        ...state,
+        inPool: false,
+        reason: 'cooldown',
+        cooldownUntil: now.getTime() + 60_000,
+        cooldownKeepsPool: undefined,
+        lastErrorSeries: 'EOTHER',
+        lastErrorCode: 'EXTERNAL_ERROR',
+        lastErrorAtMs: now.getTime(),
+        consecutiveErrorCount: 4
+      }
+    };
+
+    await saveProviderQuotaSnapshot(snapshot, now);
+    const loaded = await loadProviderQuotaSnapshot();
+    const reloaded = loaded?.providers[providerKey];
+    expect(reloaded?.reason).toBe('cooldown');
+    expect(reloaded?.inPool).toBe(true);
+    expect(reloaded?.cooldownKeepsPool).toBe(true);
+    expect(reloaded?.lastErrorCode).toBe('EXTERNAL_ERROR');
+  });
+
+  it('drops stale cooldown snapshots without active cooldownUntil so providers re-enter pool after restart', async () => {
+    const now = new Date('2026-01-15T10:40:00.000Z');
+    const state = createInitialQuotaState(providerKey, { priorityTier: 42, authType: 'apikey' }, now.getTime());
+    const rawPayload = {
+      version: 1,
+      updatedAt: now.toISOString(),
+      providers: {
+        [providerKey]: {
+          ...state,
+          inPool: false,
+          reason: 'cooldown',
+          cooldownUntil: null,
+          blacklistUntil: null,
+          lastErrorSeries: 'E5XX',
+          lastErrorCode: 'WINDSURF_SERVICE_UNREACHABLE',
+          lastErrorAtMs: now.getTime(),
+          consecutiveErrorCount: 4
+        }
+      }
+    };
+
+    await fs.writeFile(path.join(quotaDir(), 'provider-quota.json'), `${JSON.stringify(rawPayload, null, 2)}\n`, 'utf8');
+    const loaded = await loadProviderQuotaSnapshot();
+    const reloaded = loaded?.providers[providerKey];
+    expect(reloaded?.inPool).toBe(true);
+    expect(reloaded?.reason).toBe('ok');
+    expect(reloaded?.cooldownUntil).toBeNull();
+    expect(reloaded?.lastErrorCode).toBeNull();
+    expect(reloaded?.consecutiveErrorCount).toBe(0);
+  });
+
   it('sanitizes legacy auth-fatal cooldown snapshots on load', async () => {
     const now = new Date('2026-01-15T10:30:00.000Z');
     const state = createInitialQuotaState(providerKey, { priorityTier: 42, authType: 'apikey' }, now.getTime());

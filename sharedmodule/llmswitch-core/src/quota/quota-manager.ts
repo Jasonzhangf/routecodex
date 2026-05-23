@@ -288,7 +288,7 @@ export class QuotaManager {
 
     const state = this.ensureProvider(providerKey);
 
-    // HTTP 402: treat as quota depleted -> blacklist until reset.
+    // HTTP 402: treat as quota cooldown until reset, but never remove the provider from routing pool.
     if (status === 402 || code.toUpperCase() === 'HTTP_402') {
       const resetAtIso =
         extractResetAtIso(details) ??
@@ -310,9 +310,11 @@ export class QuotaManager {
       }
       const next: QuotaState = {
         ...state,
-        inPool: false,
-        reason: 'blacklist',
-        blacklistUntil: Math.max(state.blacklistUntil ?? 0, resetAtMs) || resetAtMs,
+        inPool: true,
+        reason: 'cooldown',
+        cooldownUntil: Math.max(state.cooldownUntil ?? 0, resetAtMs) || resetAtMs,
+        cooldownKeepsPool: true,
+        blacklistUntil: null,
         lastErrorAtMs: nowMs,
         lastErrorCode: code || 'HTTP_402',
         lastErrorSeries: 'EOTHER',

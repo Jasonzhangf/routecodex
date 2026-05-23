@@ -362,9 +362,6 @@ function normalizeResponsesToolCallsViaRustSsot(args: {
     requestSemantics: args.requestSemantics,
     originalRequest: args.originalRequest
   });
-  if (!Array.isArray(toolsRaw) || toolsRaw.length === 0) {
-    return args.payload;
-  }
   return normalizeResponsesToolCallArgumentsForClientWithNative(args.payload, toolsRaw);
 }
 
@@ -1023,8 +1020,8 @@ export async function convertProviderResponseIfNeeded(
           pipelineMetadata: options.pipelineMetadata
         })
       : undefined;
+    const finishReason = deriveFinishReason(converted.body ?? body);
     if (effectiveGoalState?.status === 'active' && adapterContext) {
-      const finishReason = deriveFinishReason(converted.body ?? body);
       persistGoalProgressLedger({
         adapterContext,
         pipelineMetadata: options.pipelineMetadata,

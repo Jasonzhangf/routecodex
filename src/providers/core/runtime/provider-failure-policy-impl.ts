@@ -285,6 +285,17 @@ export function resolveProviderFailureClassification(args: {
   }
 
   if (
+    statusCode === 520
+    && (
+      upstreamCode === 'PROVIDER_STATUS_1000'
+      || nestedCode === 'PROVIDER_STATUS_1000'
+      || reason.includes('unknown error, 520')
+    )
+  ) {
+    return 'recoverable';
+  }
+
+  if (
     errorCode === 'MALFORMED_RESPONSE'
     || upstreamCode === 'MALFORMED_RESPONSE'
     || nestedCode === 'MALFORMED_RESPONSE'
@@ -767,6 +778,22 @@ export function isProviderFailureHealthNeutral(args: {
     return true;
   }
   if (errorCode === 'PROVIDER_TRAFFIC_SATURATED' || upstreamCode === 'PROVIDER_TRAFFIC_SATURATED') {
+    return true;
+  }
+  if (
+    args.classification === 'recoverable'
+    && statusCode !== 503
+    && (
+      statusCode === 429
+      || statusCode === 500
+      || statusCode === 520
+      || errorCode === 'HTTP_429'
+      || upstreamCode === 'HTTP_429'
+      || errorCode === 'HTTP_500'
+      || upstreamCode === 'HTTP_500'
+      || upstreamCode === 'PROVIDER_STATUS_1000'
+    )
+  ) {
     return true;
   }
   if (errorCode === 'CLIENT_TOOL_ARGS_INVALID') {

@@ -76,7 +76,7 @@ describe('ProviderQuotaDaemonModule', () => {
       message: 'HTTP 429: {"error":{"message":"You have exhausted your capacity on this model. Your quota will reset after 1s."}}',
       stage: 'provider.provider.http',
       status: 429,
-      recoverable: false,
+      recoverable: true,
       timestamp: now,
       runtime: {
         requestId: 'req_test',
@@ -201,6 +201,155 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
+  it('single provider_status_1000 520 wrapper stays in pool and only records transient backoff', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-23T22:11:24.000Z'));
+    const now = Date.now();
+    const providerKey = 'mini27.key1.MiniMax-M2.7';
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    await emitProviderError(mod, {
+      code: 'MALFORMED_RESPONSE',
+      message: '[hub_response] upstream returned unknown error, 520',
+      stage: 'chat_process.response.entry',
+      status: 520,
+      recoverable: true,
+      affectsHealth: false,
+      timestamp: now,
+      runtime: {
+        requestId: 'req_provider_status_1000_520',
+        providerKey,
+        providerId: 'mini27'
+      },
+      details: {
+        errorClassification: 'recoverable',
+        errorCode: 'MALFORMED_RESPONSE',
+        upstreamCode: 'provider_status_1000',
+        reason: 'unknown error, 520',
+        routePoolSize: 1
+      }
+    } as any);
+    await jest.advanceTimersByTimeAsync(5);
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey]).toBeDefined();
+    expect(snapshot[providerKey].reason).toBe('cooldown');
+    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].cooldownKeepsPool).toBe(true);
+    expect(snapshot[providerKey].consecutiveErrorCount).toBe(1);
+
+    const quotaView = mod.getQuotaView();
+    expect(quotaView(providerKey)?.inPool).toBe(true);
+
+    await mod.stop();
+  });
+
+  it('unknown route pool repeated 5xx stays in pool as last-provider backoff', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-15T20:03:00.000Z'));
+    const baseNow = Date.now();
+    const providerKey = 'mini27.key1.MiniMax-M2.7';
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    for (let i = 0; i < 4; i += 1) {
+      const ts = baseNow + i * 2_000;
+      await emitProviderError(mod, {
+        code: 'EXTERNAL_ERROR',
+        message: 'provider temporary failure',
+        stage: 'provider.send',
+        status: 502,
+        recoverable: false,
+        affectsHealth: true,
+        timestamp: ts,
+        runtime: {
+          requestId: `req_unknown_pool_5xx_${i}`,
+          providerKey,
+          providerId: 'mini27'
+        },
+        details: {
+          errorClassification: 'unrecoverable',
+          errorCode: 'EXTERNAL_ERROR',
+          upstreamCode: 'provider_status_2056',
+          reason: 'temporary_provider_error'
+        }
+      } as any);
+      await jest.advanceTimersByTimeAsync(5);
+    }
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey]).toBeDefined();
+    expect(snapshot[providerKey].reason).toBe('cooldown');
+    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].cooldownKeepsPool).toBe(true);
+    expect(snapshot[providerKey].consecutiveErrorCount).toBeGreaterThanOrEqual(3);
+
+    const quotaView = mod.getQuotaView();
+    expect(quotaView(providerKey)?.inPool).toBe(true);
+    expect((quotaView(providerKey) as any)?.cooldownKeepsPool).toBe(true);
+
+    await mod.stop();
+  });
+
+  it('last provider already evicted by 5xx is restored to pool for backoff-only retry', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-15T20:04:00.000Z'));
+    const baseNow = Date.now();
+    const providerKey = 'mini27.key1.MiniMax-M2.7';
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    (mod as any).quotaStates.set(providerKey, {
+      ...createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow - 10_000),
+      inPool: false,
+      reason: 'cooldown',
+      cooldownUntil: baseNow + 60_000,
+      cooldownKeepsPool: undefined,
+      lastErrorSeries: 'E5XX',
+      lastErrorCode: 'HTTP_502',
+      lastErrorAtMs: baseNow - 1_000,
+      consecutiveErrorCount: 3
+    });
+
+    await emitProviderError(mod, {
+      code: 'HTTP_502',
+      message: 'provider temporary failure',
+      stage: 'provider.send',
+      status: 502,
+      recoverable: true,
+      affectsHealth: true,
+      timestamp: baseNow,
+      runtime: {
+        requestId: 'req_last_provider_restore_from_evicted_5xx',
+        providerKey,
+        providerId: 'mini27'
+      },
+      details: {
+        errorClassification: 'unrecoverable',
+        errorCode: 'HTTP_502',
+        upstreamCode: 'provider_status_2056',
+        reason: 'temporary_provider_error',
+        routePoolSize: 1
+      }
+    } as any);
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey]).toBeDefined();
+    expect(snapshot[providerKey].reason).toBe('cooldown');
+    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].cooldownKeepsPool).toBe(true);
+    expect(snapshot[providerKey].consecutiveErrorCount).toBeGreaterThanOrEqual(3);
+
+    await mod.stop();
+  });
+
   it('single-provider unrecoverable 3x still does not evict (no alternate route)', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-05-15T20:05:00.000Z'));
@@ -247,6 +396,137 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
+  it('resets consecutive provider errors after an intervening success event', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-15T20:08:00.000Z'));
+    const baseNow = Date.now();
+    const providerKey = 'mini27.key1.MiniMax-M2.7';
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    await emitProviderError(mod, {
+      code: 'MALFORMED_RESPONSE',
+      message: 'provider business error',
+      stage: 'provider.send',
+      status: 502,
+      recoverable: false,
+      affectsHealth: true,
+      timestamp: baseNow,
+      runtime: {
+        requestId: 'req_non_continuous_error_1',
+        providerKey,
+        providerId: 'mini27'
+      },
+      details: {
+        errorClassification: 'unrecoverable',
+        upstreamCode: 'provider_status_2056',
+        routePoolSize: 2
+      }
+    } as any);
+
+    (mod as any).onProviderSuccess({
+      runtime: { providerKey },
+      usage: { totalTokens: 10 },
+      timestamp: baseNow + 1_000
+    });
+
+    await emitProviderError(mod, {
+      code: 'MALFORMED_RESPONSE',
+      message: 'provider business error',
+      stage: 'provider.send',
+      status: 502,
+      recoverable: false,
+      affectsHealth: true,
+      timestamp: baseNow + 2_000,
+      runtime: {
+        requestId: 'req_non_continuous_error_2',
+        providerKey,
+        providerId: 'mini27'
+      },
+      details: {
+        errorClassification: 'unrecoverable',
+        upstreamCode: 'provider_status_2056',
+        routePoolSize: 2
+      }
+    } as any);
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey]).toBeDefined();
+    expect(snapshot[providerKey].consecutiveErrorCount).toBe(1);
+    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].cooldownKeepsPool).toBe(true);
+
+    await mod.stop();
+  });
+
+  it('resets consecutive provider errors through the quota adapter success hook', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-15T20:09:00.000Z'));
+    const baseNow = Date.now();
+    const providerKey = 'mini27.key1.MiniMax-M2.7';
+    const { createQuotaManagerAdapter } = await import('../../../src/manager/modules/quota/quota-adapter.js');
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+    const adapter = createQuotaManagerAdapter({ coreManager: null, legacyDaemon: mod as any });
+
+    await emitProviderError(mod, {
+      code: 'MALFORMED_RESPONSE',
+      message: 'provider business error',
+      stage: 'provider.send',
+      status: 502,
+      recoverable: false,
+      affectsHealth: true,
+      timestamp: baseNow,
+      runtime: {
+        requestId: 'req_adapter_non_continuous_error_1',
+        providerKey,
+        providerId: 'mini27'
+      },
+      details: {
+        errorClassification: 'unrecoverable',
+        upstreamCode: 'provider_status_2056',
+        routePoolSize: 2
+      }
+    } as any);
+
+    adapter.onProviderSuccess({
+      runtime: { requestId: 'req_adapter_success', providerKey },
+      timestamp: baseNow + 1_000,
+      details: { totalTokens: 10 }
+    } as any);
+
+    await emitProviderError(mod, {
+      code: 'MALFORMED_RESPONSE',
+      message: 'provider business error',
+      stage: 'provider.send',
+      status: 502,
+      recoverable: false,
+      affectsHealth: true,
+      timestamp: baseNow + 2_000,
+      runtime: {
+        requestId: 'req_adapter_non_continuous_error_2',
+        providerKey,
+        providerId: 'mini27'
+      },
+      details: {
+        errorClassification: 'unrecoverable',
+        upstreamCode: 'provider_status_2056',
+        routePoolSize: 2
+      }
+    } as any);
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey]).toBeDefined();
+    expect(snapshot[providerKey].consecutiveErrorCount).toBe(1);
+    expect(snapshot[providerKey].inPool).toBe(true);
+
+    await mod.stop();
+  });
+
   it('unrecoverable 3x evicts only when alternate routes exist', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-05-15T20:10:00.000Z'));
@@ -286,8 +566,9 @@ describe('ProviderQuotaDaemonModule', () => {
 
     const snapshot = mod.getAdminSnapshot();
     expect(snapshot[providerKey]).toBeDefined();
-    expect(snapshot[providerKey].inPool).toBe(false);
+    expect(snapshot[providerKey].inPool).toBe(true);
     expect(snapshot[providerKey].reason).toBe('cooldown');
+    expect(snapshot[providerKey].cooldownKeepsPool).toBe(true);
     expect(snapshot[providerKey].consecutiveErrorCount).toBe(3);
 
     await mod.stop();
@@ -502,18 +783,18 @@ describe('ProviderQuotaDaemonModule', () => {
     const snapshot = mod.getAdminSnapshot();
     expect(snapshot[providerKey]).toBeDefined();
     expect(snapshot[providerKey].reason).toBe('cooldown');
-    expect(snapshot[providerKey].inPool).toBe(false);
-    expect(snapshot[providerKey].cooldownKeepsPool).not.toBe(true);
+    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].cooldownKeepsPool).toBe(true);
     expect(snapshot[providerKey].consecutiveErrorCount).toBe(3);
 
     const cooldownUntil = snapshot[providerKey].cooldownUntil as number;
     jest.setSystemTime(cooldownUntil + 1);
     const quotaView = mod.getQuotaView();
     const entryAfterExpiry = quotaView(providerKey);
-    expect(entryAfterExpiry?.inPool).toBe(false);
-    expect(entryAfterExpiry?.reason).toBe('cooldown');
+    expect(entryAfterExpiry?.inPool).toBe(true);
+    expect(entryAfterExpiry?.reason).toBe('ok');
     expect(entryAfterExpiry?.cooldownUntil).toBeNull();
-    expect(entryAfterExpiry?.consecutiveErrorCount).toBe(3);
+    expect(entryAfterExpiry?.consecutiveErrorCount).toBe(0);
 
     await mod.stop();
   });
@@ -908,10 +1189,12 @@ describe('ProviderQuotaDaemonModule', () => {
 
     const snapshotBeforeStop = mod1.getAdminSnapshot();
     expect(snapshotBeforeStop[providerKey]).toBeDefined();
-    expect(snapshotBeforeStop[providerKey].inPool).toBe(false);
-    expect(snapshotBeforeStop[providerKey].reason).toBe('blacklist');
+    expect(snapshotBeforeStop[providerKey].inPool).toBe(true);
+    expect(snapshotBeforeStop[providerKey].reason).toBe('cooldown');
+    expect(snapshotBeforeStop[providerKey].cooldownKeepsPool).toBe(true);
     const expectedLocalMidnight = new Date(2026, 4, 22, 0, 0, 0, 0).getTime();
-    expect(snapshotBeforeStop[providerKey].blacklistUntil).toBe(expectedLocalMidnight);
+    expect(snapshotBeforeStop[providerKey].cooldownUntil).toBe(expectedLocalMidnight);
+    expect(snapshotBeforeStop[providerKey].blacklistUntil).toBeNull();
 
     await mod1.stop();
 
@@ -921,13 +1204,93 @@ describe('ProviderQuotaDaemonModule', () => {
 
     const snapshotAfterRestart = mod2.getAdminSnapshot();
     expect(snapshotAfterRestart[providerKey]).toBeDefined();
-    expect(snapshotAfterRestart[providerKey].inPool).toBe(false);
-    expect(snapshotAfterRestart[providerKey].reason).toBe('blacklist');
-    expect(snapshotAfterRestart[providerKey].blacklistUntil).toBe(expectedLocalMidnight);
+    expect(snapshotAfterRestart[providerKey].inPool).toBe(true);
+    expect(snapshotAfterRestart[providerKey].reason).toBe('cooldown');
+    expect(snapshotAfterRestart[providerKey].cooldownKeepsPool).toBe(true);
+    expect(snapshotAfterRestart[providerKey].cooldownUntil).toBe(expectedLocalMidnight);
+    expect(snapshotAfterRestart[providerKey].blacklistUntil).toBeNull();
 
     const quotaView = mod2.getQuotaView();
     expect(quotaView).not.toBeNull();
-    expect(quotaView!(providerKey)?.inPool).toBe(false);
-    expect(quotaView!(providerKey)?.reason).toBe('blacklist');
+    expect(quotaView!(providerKey)?.inPool).toBe(true);
+    expect(quotaView!(providerKey)?.reason).toBe('cooldown');
+  });
+
+  it('startup recovers registered providers from stale cooldown without deadline', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-23T22:40:00.000Z'));
+    const now = Date.now();
+    const providerKey = 'windsurf.ws-pro-5.gpt-5.4-none';
+    const staleState = {
+      ...createInitialQuotaState(providerKey, { authType: 'apikey' }, now),
+      inPool: false,
+      reason: 'cooldown',
+      cooldownUntil: null,
+      blacklistUntil: null,
+      lastErrorSeries: 'E5XX',
+      lastErrorCode: 'WINDSURF_SERVICE_UNREACHABLE',
+      lastErrorAtMs: now - 60_000,
+      consecutiveErrorCount: 4
+    };
+    await fs.writeFile(path.join(tempQuotaDir!, 'provider-quota.json'), `${JSON.stringify({
+      version: 1,
+      updatedAt: new Date(now).toISOString(),
+      providers: { [providerKey]: staleState }
+    }, null, 2)}\n`, 'utf8');
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    mod.registerProviderStaticConfig(providerKey, { authType: 'apikey' });
+    await mod.start();
+
+    const quotaView = mod.getQuotaView();
+    expect(quotaView!(providerKey)?.inPool).toBe(true);
+    expect(quotaView!(providerKey)?.reason).toBe('ok');
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].reason).toBe('ok');
+    expect(snapshot[providerKey].lastErrorCode).toBeNull();
+    expect(snapshot[providerKey].consecutiveErrorCount).toBe(0);
+
+    await mod.stop();
+  });
+
+  it('does not persist cooldown when Windsurf local service is unreachable', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-23T22:50:00.000Z'));
+    const now = Date.now();
+    const providerKey = 'windsurf.ws-pro-4.gpt-5.4-none';
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    mod.registerProviderStaticConfig(providerKey, { authType: 'oauth' });
+    await mod.start();
+
+    await emitProviderError(mod, {
+      code: 'WINDSURF_SERVICE_UNREACHABLE',
+      message: '[windsurf] service unreachable',
+      stage: 'provider.send',
+      status: 502,
+      recoverable: true,
+      affectsHealth: true,
+      timestamp: now,
+      runtime: {
+        requestId: 'req_ws_unreachable',
+        providerKey,
+        providerId: 'windsurf'
+      },
+      details: {}
+    } as any);
+
+    await jest.advanceTimersByTimeAsync(5);
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].reason).toBe('ok');
+    expect(snapshot[providerKey].cooldownUntil).toBeNull();
+    expect(snapshot[providerKey].lastErrorCode).toBeNull();
+    expect(snapshot[providerKey].consecutiveErrorCount).toBe(0);
+
+    await mod.stop();
   });
 });

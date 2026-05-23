@@ -139,10 +139,16 @@ function readClientInjectMeta(followup: any): { clientInjectOnly: boolean; clien
   const rawOnly = (metadata as Record<string, unknown>).clientInjectOnly;
   const clientInjectOnly =
     rawOnly === true || (typeof rawOnly === 'string' && rawOnly.trim().toLowerCase() === 'true');
-  const clientInjectText =
-    typeof (metadata as Record<string, unknown>).clientInjectText === 'string'
-      ? String((metadata as Record<string, unknown>).clientInjectText)
-      : '';
+  const metadataText = typeof (metadata as Record<string, unknown>).clientInjectText === 'string'
+    ? String((metadata as Record<string, unknown>).clientInjectText)
+    : '';
+  const injection = followup?.injection && typeof followup.injection === 'object' ? followup.injection : {};
+  const ops = Array.isArray((injection as Record<string, unknown>).ops) ? (injection as Record<string, unknown>).ops as unknown[] : [];
+  const injectedText = ops.map((op) => {
+    const record = op && typeof op === 'object' && !Array.isArray(op) ? op as Record<string, unknown> : {};
+    return record.op === 'append_user_text' && typeof record.text === 'string' ? record.text : '';
+  }).filter(Boolean).join('\n');
+  const clientInjectText = metadataText || injectedText;
   return { clientInjectOnly, clientInjectText };
 }
 

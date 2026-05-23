@@ -54,10 +54,29 @@ pub struct BuildBridgeHistoryInput {
     pub allow_pending_terminal_tool_call: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeToolHistoryPair {
+    pub call_id: String,
+    pub name: String,
+    pub arguments: Value,
+    pub output: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeToolHistorySchema {
+    pub version: u32,
+    pub pairs: Vec<BridgeToolHistoryPair>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildBridgeHistoryOutput {
     pub input: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_history: Option<BridgeToolHistorySchema>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub combined_system_instruction: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

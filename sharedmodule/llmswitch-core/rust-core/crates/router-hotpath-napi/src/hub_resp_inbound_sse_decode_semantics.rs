@@ -105,8 +105,7 @@ fn extract_context_length_diagnostics(adapter_context: &Value) -> Map<String, Va
 
 fn is_context_length_exceeded_signal(code: &str, message: &str, context: &Value) -> bool {
     let code_lower = code.trim().to_ascii_lowercase();
-    if code_lower.contains("context_length_exceeded")
-        || code_lower.contains("input_exceeds_limit")
+    if code_lower.contains("context_length_exceeded") || code_lower.contains("input_exceeds_limit")
     {
         return true;
     }
@@ -544,9 +543,12 @@ mod tests {
 
     #[test]
     fn extract_decode_stats_returns_null_when_stats_missing() {
-        let raw = extract_decode_stats_json(json!({
-            "id": "resp_1"
-        }).to_string())
+        let raw = extract_decode_stats_json(
+            json!({
+                "id": "resp_1"
+            })
+            .to_string(),
+        )
         .expect("extract decode stats");
 
         assert_eq!(raw, "null");
@@ -554,15 +556,18 @@ mod tests {
 
     #[test]
     fn extract_decode_stats_keeps_only_known_non_null_fields() {
-        let raw = extract_decode_stats_json(json!({
-            "__rccDecodeStats": {
-                "chunkCount": 12,
-                "byteCount": 2048,
-                "tokenRate": 31.5,
-                "ignoredField": "drop-me",
-                "errors": null
-            }
-        }).to_string())
+        let raw = extract_decode_stats_json(
+            json!({
+                "__rccDecodeStats": {
+                    "chunkCount": 12,
+                    "byteCount": 2048,
+                    "tokenRate": 31.5,
+                    "ignoredField": "drop-me",
+                    "errors": null
+                }
+            })
+            .to_string(),
+        )
         .expect("extract decode stats");
 
         let parsed: Value = serde_json::from_str(&raw).expect("parse");
@@ -585,11 +590,23 @@ pub fn extract_decode_stats_json(payload_json: String) -> napi::Result<String> {
     };
 
     let allowed_keys = [
-        "chunkCount", "byteCount", "totalEvents", "contentBlocks",
-        "toolUseBlocks", "thinkingBlocks", "textBlocks", "errors",
-        "streamMs", "eventSpanMs", "parserMs", "builderMs",
-        "messageStopSeen", "firstContentAtMs", "lastContentAtMs",
-        "totalTokens", "tokenRate"
+        "chunkCount",
+        "byteCount",
+        "totalEvents",
+        "contentBlocks",
+        "toolUseBlocks",
+        "thinkingBlocks",
+        "textBlocks",
+        "errors",
+        "streamMs",
+        "eventSpanMs",
+        "parserMs",
+        "builderMs",
+        "messageStopSeen",
+        "firstContentAtMs",
+        "lastContentAtMs",
+        "totalTokens",
+        "tokenRate",
     ];
 
     let mut out = serde_json::Map::new();
@@ -620,9 +637,12 @@ fn read_positive_timeout(value: &serde_json::Value) -> Option<u64> {
                 None
             }
         }
-        serde_json::Value::String(s) if !s.trim().is_empty() => {
-            s.trim().parse::<f64>().ok().filter(|&f| f.is_finite() && f > 0.0).map(|f| f.floor() as u64)
-        }
+        serde_json::Value::String(s) if !s.trim().is_empty() => s
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|&f| f.is_finite() && f > 0.0)
+            .map(|f| f.floor() as u64),
         _ => None,
     }
 }
@@ -640,7 +660,12 @@ pub fn resolve_sse_timeout_options_json(adapter_context_json: String) -> napi::R
         .and_then(|p| p.get("extensions"))
         .and_then(|e| e.as_object());
 
-    fn get_timeout(ctx: &serde_json::Value, runtime: Option<&serde_json::Map<String, serde_json::Value>>, profile_extensions: Option<&serde_json::Map<String, serde_json::Value>>, keys: &[&str]) -> Option<u64> {
+    fn get_timeout(
+        ctx: &serde_json::Value,
+        runtime: Option<&serde_json::Map<String, serde_json::Value>>,
+        profile_extensions: Option<&serde_json::Map<String, serde_json::Value>>,
+        keys: &[&str],
+    ) -> Option<u64> {
         for k in keys {
             if let Some(v) = ctx.get(*k) {
                 if let Some(t) = read_positive_timeout(v) {
@@ -668,38 +693,70 @@ pub fn resolve_sse_timeout_options_json(adapter_context_json: String) -> napi::R
     let mut result = serde_json::Map::new();
 
     // firstFrameTimeoutMs
-    if let Some(t) = get_timeout(&ctx, runtime, profile_extensions, &[
-        "providerStreamFirstFrameTimeoutMs",
-        "streamFirstFrameTimeoutMs",
-    ]) {
-        result.insert("firstFrameTimeoutMs".to_string(), serde_json::Value::Number(t.into()));
+    if let Some(t) = get_timeout(
+        &ctx,
+        runtime,
+        profile_extensions,
+        &[
+            "providerStreamFirstFrameTimeoutMs",
+            "streamFirstFrameTimeoutMs",
+        ],
+    ) {
+        result.insert(
+            "firstFrameTimeoutMs".to_string(),
+            serde_json::Value::Number(t.into()),
+        );
     }
 
     // noContentTimeoutMs
-    if let Some(t) = get_timeout(&ctx, runtime, profile_extensions, &[
-        "providerStreamNoContentTimeoutMs",
-        "streamNoContentTimeoutMs",
-        "noContentTimeoutMs",
-    ]) {
-        result.insert("noContentTimeoutMs".to_string(), serde_json::Value::Number(t.into()));
+    if let Some(t) = get_timeout(
+        &ctx,
+        runtime,
+        profile_extensions,
+        &[
+            "providerStreamNoContentTimeoutMs",
+            "streamNoContentTimeoutMs",
+            "noContentTimeoutMs",
+        ],
+    ) {
+        result.insert(
+            "noContentTimeoutMs".to_string(),
+            serde_json::Value::Number(t.into()),
+        );
     }
 
     // preAnchorIdleTimeoutMs
-    if let Some(t) = get_timeout(&ctx, runtime, profile_extensions, &[
-        "providerStreamPreAnchorIdleTimeoutMs",
-        "streamPreAnchorIdleTimeoutMs",
-        "preAnchorIdleTimeoutMs",
-    ]) {
-        result.insert("preAnchorIdleTimeoutMs".to_string(), serde_json::Value::Number(t.into()));
+    if let Some(t) = get_timeout(
+        &ctx,
+        runtime,
+        profile_extensions,
+        &[
+            "providerStreamPreAnchorIdleTimeoutMs",
+            "streamPreAnchorIdleTimeoutMs",
+            "preAnchorIdleTimeoutMs",
+        ],
+    ) {
+        result.insert(
+            "preAnchorIdleTimeoutMs".to_string(),
+            serde_json::Value::Number(t.into()),
+        );
     }
 
     // contentIdleTimeoutMs
-    if let Some(t) = get_timeout(&ctx, runtime, profile_extensions, &[
-        "providerStreamContentIdleTimeoutMs",
-        "streamContentIdleTimeoutMs",
-        "contentIdleTimeoutMs",
-    ]) {
-        result.insert("contentIdleTimeoutMs".to_string(), serde_json::Value::Number(t.into()));
+    if let Some(t) = get_timeout(
+        &ctx,
+        runtime,
+        profile_extensions,
+        &[
+            "providerStreamContentIdleTimeoutMs",
+            "streamContentIdleTimeoutMs",
+            "contentIdleTimeoutMs",
+        ],
+    ) {
+        result.insert(
+            "contentIdleTimeoutMs".to_string(),
+            serde_json::Value::Number(t.into()),
+        );
     }
 
     if result.is_empty() {

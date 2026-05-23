@@ -155,7 +155,10 @@ pub(crate) fn enforce_builtin_tool_schema(name: &str, candidate: Option<&Value>)
     normalize_generic_tool_schema(candidate)
 }
 
-pub(crate) fn rewrite_builtin_tool_description(name: &str, existing: Option<&Value>) -> Option<String> {
+pub(crate) fn rewrite_builtin_tool_description(
+    name: &str,
+    existing: Option<&Value>,
+) -> Option<String> {
     let _ = name;
     read_trimmed_string(existing)
 }
@@ -688,9 +691,7 @@ pub(crate) fn build_anthropic_tool_alias_map_from_slice(
 /// Build a bidirectional alias map from a JSON array value of raw tool definitions.
 ///
 /// Convenience wrapper around [`build_anthropic_tool_alias_map_from_slice`].
-pub(crate) fn build_anthropic_tool_alias_map(
-    raw_tools: &Value,
-) -> Option<Map<String, Value>> {
+pub(crate) fn build_anthropic_tool_alias_map(raw_tools: &Value) -> Option<Map<String, Value>> {
     let rows = raw_tools.as_array()?;
     build_anthropic_tool_alias_map_from_slice(rows)
 }

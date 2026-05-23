@@ -9,11 +9,13 @@ use crate::hub_reasoning_tool_normalizer::{
     collect_reasoning_summary_segments, normalize_message_reasoning_ssot,
     project_message_reasoning_text,
 };
-use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
-use crate::shared_tool_result_text_normalizer::normalize_tool_result_text;
-use crate::shared_tool_mapping::{build_anthropic_tool_alias_map, build_flattened_namespace_child_alias, normalize_anthropic_tool_name};
 use crate::hub_resp_outbound_sse_stream::resolve_sse_stream_mode;
-
+use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
+use crate::shared_tool_mapping::{
+    build_anthropic_tool_alias_map, build_flattened_namespace_child_alias,
+    normalize_anthropic_tool_name,
+};
+use crate::shared_tool_result_text_normalizer::normalize_tool_result_text;
 
 fn normalize_alias_map(candidate: &Value) -> Option<Map<String, Value>> {
     let row = candidate.as_object()?;
@@ -1611,7 +1613,13 @@ fn resolve_client_tool_name(
         .trim()
         .trim_start_matches("functions.")
         .chars()
-        .map(|ch| if ch == '_' || ch == '-' || ch == ' ' { '.' } else { ch.to_ascii_lowercase() })
+        .map(|ch| {
+            if ch == '_' || ch == '-' || ch == ' ' {
+                '.'
+            } else {
+                ch.to_ascii_lowercase()
+            }
+        })
         .collect::<String>()
         .split('.')
         .filter(|part| !part.is_empty())
@@ -1649,7 +1657,13 @@ fn resolve_client_tool_name(
                 .trim()
                 .trim_start_matches("functions.")
                 .chars()
-                .map(|ch| if ch == '_' || ch == '-' || ch == ' ' { '.' } else { ch.to_ascii_lowercase() })
+                .map(|ch| {
+                    if ch == '_' || ch == '-' || ch == ' ' {
+                        '.'
+                    } else {
+                        ch.to_ascii_lowercase()
+                    }
+                })
                 .collect::<String>()
                 .split('.')
                 .filter(|part| !part.is_empty())
@@ -1700,6 +1714,23 @@ fn resolve_client_tool_name(
     None
 }
 
+fn normalize_apply_patch_client_args_raw(args_raw: &Value) -> Option<Value> {
+    let normalized = crate::resp_process_stage1_tool_governance::normalize_apply_patch_schema_args(
+        Some(args_raw),
+    );
+    let parsed: Value = serde_json::from_str(&normalized.0).ok()?;
+    let patch = parsed
+        .as_object()
+        .and_then(|row| row.get("patch"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if patch.is_empty() || patch.contains("__APPLY_PATCH_ERROR__/") {
+        return None;
+    }
+    Some(Value::String(normalized.0))
+}
+
 fn normalize_call_args(tool_name: &str, args_raw: &Value, spec: &ClientToolDefinition) -> Value {
     let Some(parameters) = spec.parameters.as_ref() else {
         return args_raw.clone();
@@ -1743,9 +1774,6 @@ fn normalize_responses_tool_call_arguments_for_client(
     let mut payload = payload_row.clone();
 
     let tool_index = build_client_tool_index(tools_raw);
-    if tool_index.by_name.is_empty() && tool_index.by_namespace_name.is_empty() {
-        return Value::Object(payload);
-    }
 
     if let Some(output_items) = payload.get_mut("output").and_then(|v| v.as_array_mut()) {
         for item in output_items.iter_mut() {
@@ -1770,7 +1798,18 @@ fn normalize_responses_tool_call_arguments_for_client(
                 continue;
             }
             let namespace = item_row.get("namespace").and_then(|v| v.as_str());
-            let Some(spec) = resolve_client_tool_name(&tool_index, namespace, name.as_str()) else {
+            let spec = resolve_client_tool_name(&tool_index, namespace, name.as_str());
+            if name == "apply_patch" {
+                let args_raw = item_row
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Null);
+                if let Some(normalized) = normalize_apply_patch_client_args_raw(&args_raw) {
+                    item_row.insert("arguments".to_string(), normalized);
+                    continue;
+                }
+            }
+            let Some(spec) = spec else {
                 continue;
             };
             if spec.declared_name != name {
@@ -1794,7 +1833,13 @@ fn normalize_responses_tool_call_arguments_for_client(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| Value::Null);
-            let normalized = normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec);
+            let normalized = if spec.declared_name == "apply_patch" {
+                normalize_apply_patch_client_args_raw(&args_raw).unwrap_or_else(|| {
+                    normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec)
+                })
+            } else {
+                normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec)
+            };
             item_row.insert("arguments".to_string(), normalized);
         }
     }
@@ -1838,7 +1883,27 @@ fn normalize_responses_tool_call_arguments_for_client(
                         .and_then(|v| v.get("namespace"))
                         .and_then(|v| v.as_str())
                 });
-            let Some(spec) = resolve_client_tool_name(&tool_index, namespace, name.as_str()) else {
+            let fn_args = call_row
+                .get("function")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("arguments"))
+                .cloned();
+            let call_args = call_row.get("arguments").cloned();
+            let args_raw = fn_args.or(call_args).unwrap_or(Value::Null);
+            let spec = resolve_client_tool_name(&tool_index, namespace, name.as_str());
+            if name == "apply_patch" {
+                if let Some(normalized) = normalize_apply_patch_client_args_raw(&args_raw) {
+                    call_row.insert("arguments".to_string(), normalized.clone());
+                    if let Some(fn_row) =
+                        call_row.get_mut("function").and_then(|v| v.as_object_mut())
+                    {
+                        fn_row.insert("name".to_string(), Value::String("apply_patch".to_string()));
+                        fn_row.insert("arguments".to_string(), normalized);
+                    }
+                    continue;
+                }
+            }
+            let Some(spec) = spec else {
                 continue;
             };
             if let Some(name_value) = call_row.get("name") {
@@ -1860,15 +1925,13 @@ fn normalize_responses_tool_call_arguments_for_client(
                     call_row.remove("namespace");
                 }
             }
-            let fn_args = call_row
-                .get("function")
-                .and_then(|v| v.as_object())
-                .and_then(|v| v.get("arguments"))
-                .cloned();
-            let call_args = call_row.get("arguments").cloned();
-            let args_raw = fn_args.or(call_args).unwrap_or(Value::Null);
-
-            let normalized = normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec);
+            let normalized = if spec.declared_name == "apply_patch" {
+                normalize_apply_patch_client_args_raw(&args_raw).unwrap_or_else(|| {
+                    normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec)
+                })
+            } else {
+                normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec)
+            };
             call_row.insert("arguments".to_string(), normalized.clone());
             if let Some(fn_row) = call_row.get_mut("function").and_then(|v| v.as_object_mut()) {
                 fn_row.insert(
@@ -2800,10 +2863,18 @@ fn build_responses_payload_from_chat_core(
     });
 
     // has_text_reasoning: text-only (summary or content) — drives message emission
-    let has_text_reasoning = reasoning_payload.as_ref().and_then(Value::as_object).map_or(false, |rp| {
-        rp.get("summary").and_then(Value::as_array).map_or(false, |s| !s.is_empty())
-            || rp.get("content").and_then(Value::as_array).map_or(false, |c| !c.is_empty())
-    });
+    let has_text_reasoning = reasoning_payload
+        .as_ref()
+        .and_then(Value::as_object)
+        .map_or(false, |rp| {
+            rp.get("summary")
+                .and_then(Value::as_array)
+                .map_or(false, |s| !s.is_empty())
+                || rp
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .map_or(false, |c| !c.is_empty())
+        });
 
     let tool_calls = message
         .get("tool_calls")
@@ -2922,19 +2993,30 @@ fn build_responses_payload_from_chat_core(
             if reasoning_row.get("type").and_then(|v| v.as_str()) == Some("reasoning")
                 && message_row.get("type").and_then(|v| v.as_str()) == Some("message")
             {
-                let reasoning_text = reasoning_row.get("content")
+                let reasoning_text = reasoning_row
+                    .get("content")
                     .and_then(|v| v.as_array())
                     .map(|arr| {
-                        arr.iter().filter_map(|e| e.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>()
+                        arr.iter()
+                            .filter_map(|e| e.get("text").and_then(|t| t.as_str()))
+                            .collect::<Vec<_>>()
                     })
                     .filter(|t| !t.is_empty())
                     .map(|t| t.join(""))
-                    .map(|t| t.trim().trim_start_matches("**Thinking**").trim().to_string())
+                    .map(|t| {
+                        t.trim()
+                            .trim_start_matches("**Thinking**")
+                            .trim()
+                            .to_string()
+                    })
                     .unwrap_or_default();
-                let message_text = message_row.get("content")
+                let message_text = message_row
+                    .get("content")
                     .and_then(|v| v.as_array())
                     .map(|arr| {
-                        arr.iter().filter_map(|e| e.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>()
+                        arr.iter()
+                            .filter_map(|e| e.get("text").and_then(|t| t.as_str()))
+                            .collect::<Vec<_>>()
                     })
                     .filter(|t| !t.is_empty())
                     .map(|t| t.join(""))
@@ -2965,11 +3047,12 @@ fn build_responses_payload_from_chat_core(
             .cloned()
             .unwrap_or_else(|| Value::Array(Vec::new()));
         let tool_index = build_client_tool_index(&client_tools_raw);
-        let client_spec = if tool_index.by_name.is_empty() && tool_index.by_namespace_name.is_empty() {
-            None
-        } else {
-            resolve_client_tool_name(&tool_index, None, name.as_str())
-        };
+        let client_spec =
+            if tool_index.by_name.is_empty() && tool_index.by_namespace_name.is_empty() {
+                None
+            } else {
+                resolve_client_tool_name(&tool_index, None, name.as_str())
+            };
         let client_declared_name = client_spec.as_ref().map(|spec| spec.declared_name.clone());
 
         let call_id = require_explicit_tool_call_id(
@@ -3383,6 +3466,7 @@ pub fn build_responses_payload_from_chat_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn normalize_openai_chat_reasoning_outbound_maps_structured_reasoning_for_clients() {
@@ -3499,7 +3583,8 @@ mod tests {
     }
 
     #[test]
-    fn build_responses_payload_from_chat_filters_native_tool_output_id_alias_from_required_action() {
+    fn build_responses_payload_from_chat_filters_native_tool_output_id_alias_from_required_action()
+    {
         let payload = serde_json::json!({
             "id": "resp_native_completed",
             "model": "gpt-5.4-medium",
@@ -3529,10 +3614,7 @@ mod tests {
             &serde_json::json!({ "toolsRaw": [] }),
         )
         .expect("build responses payload");
-        assert_eq!(
-            output["status"],
-            Value::String("completed".to_string())
-        );
+        assert_eq!(output["status"], Value::String("completed".to_string()));
         assert!(output.get("required_action").is_none());
         let output_items = output["output"].as_array().cloned().expect("output array");
         let function_items: Vec<&Value> = output_items
@@ -3887,6 +3969,59 @@ mod tests {
             normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
                 ["name"],
             Value::String("mailbox.status".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_responses_tool_call_arguments_for_client_bridges_apply_patch_minus_plus_args() {
+        let payload = json!({
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_apply_patch",
+                "name": "apply_patch",
+                "arguments": serde_json::to_string(&json!({
+                    "patch": "- old\n+ new",
+                    "filePath": "sample.txt",
+                    "fileContent": "old\n"
+                })).unwrap()
+            }],
+            "required_action": {
+                "type": "submit_tool_outputs",
+                "submit_tool_outputs": {
+                    "tool_calls": [{
+                        "id": "call_apply_patch",
+                        "type": "function",
+                        "name": "apply_patch",
+                        "arguments": serde_json::to_string(&json!({
+                            "patch": "- old\n+ new",
+                            "filePath": "sample.txt",
+                            "fileContent": "old\n"
+                        })).unwrap(),
+                        "function": {
+                            "name": "apply_patch",
+                            "arguments": serde_json::to_string(&json!({
+                                "patch": "- old\n+ new",
+                                "filePath": "sample.txt",
+                                "fileContent": "old\n"
+                            })).unwrap()
+                        }
+                    }]
+                }
+            }
+        });
+        let output = normalize_responses_tool_call_arguments_for_client(
+            &payload,
+            &json!([{ "type": "function", "name": "apply_patch", "parameters": { "type": "object", "properties": { "patch": { "type": "string" } }, "required": ["patch"] } }]),
+        );
+        let args = output["output"][0]["arguments"].as_str().unwrap();
+        assert!(args.contains("*** Begin Patch"));
+        assert!(args.contains("*** Update File: sample.txt"));
+        assert!(args.contains("-old"));
+        assert!(args.contains("+new"));
+        assert_eq!(
+            output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["arguments"],
+            output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+                ["arguments"]
         );
     }
 
@@ -4283,8 +4418,6 @@ mod tests {
         );
     }
 
-
-
     #[test]
     fn build_responses_payload_from_chat_preserves_structured_message_reasoning() {
         let payload = serde_json::json!({
@@ -4640,14 +4773,12 @@ mod tests {
         }))
         .expect("client tools raw from anthropic semantics mirror");
         assert_eq!(output.len(), 1);
-        assert_eq!(
-            output[0]["function"]["name"].as_str(),
-            Some("Bash")
-        );
+        assert_eq!(output[0]["function"]["name"].as_str(), Some("Bash"));
     }
 
     #[test]
-    fn resolve_alias_map_from_sources_derives_shell_command_alias_from_anthropic_client_tools_raw() {
+    fn resolve_alias_map_from_sources_derives_shell_command_alias_from_anthropic_client_tools_raw()
+    {
         let output = resolve_alias_map_from_sources(
             &serde_json::json!({}),
             &serde_json::json!({
@@ -4824,13 +4955,24 @@ mod tests {
             }]
         });
         let result = build_responses_payload_from_chat_core(
-            &payload, Some("test_req"), &serde_json::json!({ "toolsRaw": [] }),
-        ).expect("payload");
+            &payload,
+            Some("test_req"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("payload");
         let items = result["output"].as_array().expect("output array");
         let reasoning: Vec<_> = items.iter().filter(|i| i["type"] == "reasoning").collect();
         let messages: Vec<_> = items.iter().filter(|i| i["type"] == "message").collect();
-        assert_eq!(reasoning.len(), 1, "encrypted-only should emit reasoning item");
-        assert_eq!(messages.len(), 0, "encrypted-only should NOT emit empty message");
+        assert_eq!(
+            reasoning.len(),
+            1,
+            "encrypted-only should emit reasoning item"
+        );
+        assert_eq!(
+            messages.len(),
+            0,
+            "encrypted-only should NOT emit empty message"
+        );
     }
 
     // P0: reasoning + content both present -> both emitted
@@ -4850,8 +4992,11 @@ mod tests {
             }]
         });
         let result = build_responses_payload_from_chat_core(
-            &payload, Some("test_req"), &serde_json::json!({ "toolsRaw": [] }),
-        ).expect("payload");
+            &payload,
+            Some("test_req"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("payload");
         let items = result["output"].as_array().expect("output array");
         let reasoning: Vec<_> = items.iter().filter(|i| i["type"] == "reasoning").collect();
         let messages: Vec<_> = items.iter().filter(|i| i["type"] == "message").collect();
@@ -4876,14 +5021,21 @@ mod tests {
             }]
         });
         let result = build_responses_payload_from_chat_core(
-            &payload, Some("test_req"), &serde_json::json!({ "toolsRaw": [] }),
-        ).expect("payload");
+            &payload,
+            Some("test_req"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("payload");
         let items = result["output"].as_array().expect("output array");
         let reasoning: Vec<_> = items.iter().filter(|i| i["type"] == "reasoning").collect();
         let messages: Vec<_> = items.iter().filter(|i| i["type"] == "message").collect();
         // reasoning.summary present = has_text_reasoning = true -> message emitted
         assert_eq!(reasoning.len(), 1, "should emit reasoning item");
-        assert_eq!(messages.len(), 1, "reasoning with text summary should emit message too");
+        assert_eq!(
+            messages.len(),
+            1,
+            "reasoning with text summary should emit message too"
+        );
     }
 
     // P0: reasoning text matches message text -> dedup: only message, no reasoning item
@@ -4903,13 +5055,20 @@ mod tests {
             }]
         });
         let result = build_responses_payload_from_chat_core(
-            &payload, Some("test_req"), &serde_json::json!({ "toolsRaw": [] }),
-        ).expect("payload");
+            &payload,
+            Some("test_req"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("payload");
         let items = result["output"].as_array().expect("output array");
         let reasoning: Vec<_> = items.iter().filter(|i| i["type"] == "reasoning").collect();
         let messages: Vec<_> = items.iter().filter(|i| i["type"] == "message").collect();
         assert_eq!(messages.len(), 1, "should emit message");
-        assert_eq!(reasoning.len(), 0, "matching reasoning+content should dedup reasoning");
+        assert_eq!(
+            reasoning.len(),
+            0,
+            "matching reasoning+content should dedup reasoning"
+        );
     }
 }
 
@@ -4947,8 +5106,13 @@ fn normalize_shell_like_tool_input(tool_name: &str, input: &Value) -> Value {
             Value::Object(m)
         }
         Value::Array(arr) => {
-            let parts: Vec<String> = arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.trim().to_string()).filter(|t| !t.is_empty()))
+            let parts: Vec<String> = arr
+                .iter()
+                .filter_map(|v| {
+                    v.as_str()
+                        .map(|s| s.trim().to_string())
+                        .filter(|t| !t.is_empty())
+                })
                 .collect();
             if parts.is_empty() {
                 let mut m = Map::new();
@@ -4979,7 +5143,11 @@ fn normalize_shell_like_tool_input(tool_name: &str, input: &Value) -> Value {
 
             if let Some(cmd) = cmd_val {
                 if obj.get("command").is_some() || (is_exec && obj.get("cmd").is_some()) {
-                    let key = if obj.get("command").is_some() { "command" } else { "cmd" };
+                    let key = if obj.get("command").is_some() {
+                        "command"
+                    } else {
+                        "cmd"
+                    };
                     next.insert(key.to_string(), Value::String(cmd.to_string()));
                 }
             }
@@ -5042,26 +5210,22 @@ struct BuildAnthropicFullOutput {
 #[napi]
 pub fn build_anthropic_response_from_chat_full_json(input_json: String) -> NapiResult<String> {
     use crate::responses_reasoning_registry::{
-        register_responses_reasoning_json,
-        register_responses_output_text_meta_json,
-        register_responses_payload_snapshot_json,
-        register_responses_passthrough_json,
+        register_responses_output_text_meta_json, register_responses_passthrough_json,
+        register_responses_payload_snapshot_json, register_responses_reasoning_json,
     };
 
-    let input: BuildAnthropicFullInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: BuildAnthropicFullInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     let chat_response: Value = serde_json::from_str(&input.chat_response)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
-    let alias_map: Option<Value> = input.alias_map
+    let alias_map: Option<Value> = input
+        .alias_map
         .as_ref()
         .and_then(|s| serde_json::from_str(s).ok());
 
-    let mut sanitized = build_anthropic_response_from_chat_core(
-        &chat_response,
-        alias_map.as_ref(),
-    );
+    let mut sanitized = build_anthropic_response_from_chat_core(&chat_response, alias_map.as_ref());
 
     if let Some(content) = sanitized.as_object_mut().and_then(|o| o.get_mut("content")) {
         if let Some(arr) = content.as_array_mut() {
@@ -5073,10 +5237,7 @@ pub fn build_anthropic_response_from_chat_full_json(input_json: String) -> NapiR
                 if block_obj.get("type").and_then(|v| v.as_str()) != Some("tool_use") {
                     continue;
                 }
-                let name = block_obj
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let name = block_obj.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 if let Some(input_val) = block_obj.get("input") {
                     let normalized = normalize_shell_like_tool_input(name, input_val);
                     block_obj.insert("input".to_string(), normalized);
@@ -5115,12 +5276,13 @@ pub fn build_anthropic_response_from_chat_full_json(input_json: String) -> NapiR
     if let (Some(passthrough), Some(id)) = (&input.responses_passthrough, &sanitized_id) {
         let t = passthrough.trim();
         if !t.is_empty() && t != "null" && t != "undefined" {
-            let _ = register_responses_passthrough_json(id.clone(), passthrough.clone(), Some(false));
+            let _ =
+                register_responses_passthrough_json(id.clone(), passthrough.clone(), Some(false));
         }
     }
 
-    let result = serde_json::to_string(&sanitized)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let result =
+        serde_json::to_string(&sanitized).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     serde_json::to_string(&BuildAnthropicFullOutput {
         result,
         id: sanitized_id,

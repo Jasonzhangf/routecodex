@@ -481,7 +481,6 @@ fn attach_requested_tool_names(payload: &mut Value, adapter_context: &AdapterCon
     }
 }
 
-
 fn strip_rcc_text(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -566,8 +565,8 @@ pub(crate) fn apply_deepseek_web_response_compat(
         Ok(output) => output.governed_payload,
         Err(err) => {
             let mut error_probe = normalized.clone();
-            let forbidden_transport_detected =
-                hidden_transport_detected_before_governance || sanitize_deepseek_meta_leakage(&mut error_probe);
+            let forbidden_transport_detected = hidden_transport_detected_before_governance
+                || sanitize_deepseek_meta_leakage(&mut error_probe);
             if forbidden_transport_detected
                 && (declared_tools_present || tool_choice_required)
                 && count_tool_calls_from_choices(&error_probe) <= 0
@@ -595,8 +594,8 @@ pub(crate) fn apply_deepseek_web_response_compat(
         resolve_requested_exec_tool_alias(adapter_context).as_deref(),
     );
     ensure_exec_command_args_have_cmd(&mut governed);
-    let forbidden_transport_detected =
-        hidden_transport_detected_before_governance || sanitize_deepseek_meta_leakage(&mut governed);
+    let forbidden_transport_detected = hidden_transport_detected_before_governance
+        || sanitize_deepseek_meta_leakage(&mut governed);
     normalize_tool_call_only_content_to_null(&mut governed);
 
     let after_count = count_tool_calls_from_choices(&governed);

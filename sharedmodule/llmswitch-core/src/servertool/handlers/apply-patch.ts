@@ -149,19 +149,30 @@ function fail(filePath: string | undefined, reason: string, message: string, nex
   };
 }
 
+function applyPatchUsageGuide(filePath = 'tmp/example.txt'): string {
+  const safePath = filePath && filePath.trim() ? filePath.trim() : 'tmp/example.txt';
+  return [
+    `Call apply_patch again with JSON only: {"filePath":"${safePath}","patch":"+ hello"}`,
+    'Create file: {"filePath":"tmp/new.txt","patch":"+ first line\\n+ second line"}',
+    'Append to existing file: {"filePath":"tmp/existing.txt","patch":"+ appended line"}',
+    'Update existing file: {"filePath":"src/main.ts","patch":"- exact old line\\n+ replacement line"}',
+    'Use apply_patch itself for the next file edit.'
+  ].join(' ');
+}
+
 function resolveSafeTargetPath(workspace: string, filePath: string): { ok: true; absPath: string; relPath: string } | { ok: false; payload: ApplyPatchPayload } {
   const rel = filePath.trim();
   if (!rel) {
-    return { ok: false, payload: fail(undefined, 'PATH_MISSING', 'filePath is required.', 'Retry with workspace-relative filePath.') };
+    return { ok: false, payload: fail(undefined, 'PATH_MISSING', 'filePath is required.', `Retry with workspace-relative filePath. ${applyPatchUsageGuide()}`) };
   }
   if (path.isAbsolute(rel)) {
-    return { ok: false, payload: fail(rel, 'PATH_ABSOLUTE', 'Absolute filePath is not allowed.', 'Retry with a workspace-relative filePath.') };
+    return { ok: false, payload: fail(rel, 'PATH_ABSOLUTE', 'Absolute filePath is not allowed.', `Retry with a workspace-relative filePath. ${applyPatchUsageGuide(path.basename(rel))}`) };
   }
   const root = path.resolve(workspace);
   const absPath = path.resolve(root, rel);
   const relative = path.relative(root, absPath);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    return { ok: false, payload: fail(rel, 'PATH_OUTSIDE_WORKSPACE', 'filePath resolves outside workspace.', 'Retry with a path inside the workspace.') };
+    return { ok: false, payload: fail(rel, 'PATH_OUTSIDE_WORKSPACE', 'filePath resolves outside workspace.', `Retry with a path inside the workspace. ${applyPatchUsageGuide(path.basename(rel))}`) };
   }
   return { ok: true, absPath, relPath: relative || path.basename(absPath) };
 }
@@ -231,7 +242,7 @@ function splitContentLines(content: string): string[] {
 
 function preserveTrailingNewline(original: string, lines: string[]): string {
   const body = lines.join('\n');
-  return original.endsWith('\n') ? `${body}\n` : body;
+  return original.length === 0 || original.endsWith('\n') ? `${body}\n` : body;
 }
 
 function findSubsequence(source: string[], needle: string[]): number {
@@ -327,8 +338,9 @@ function resolvePatchFilePath(args: Record<string, unknown>, rawPatch: string): 
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
-    if (match?.[1]) {
-      const value = stripOuterQuotes(match[1]);
+    const captured = match?.[1];
+    if (captured) {
+      const value = stripOuterQuotes(captured);
       if (value && value !== '/dev/null') {
         return value;
       }
@@ -360,9 +372,37 @@ function normalizePatchLine(raw: string): string {
   return raw;
 }
 
+function extractFencedPatchText(text: string): string | null {
+  const fence = text.match(/```(?:diff|patch|text)?\s*\n([\s\S]*?)\n```/i);
+  if (!fence?.[1]) {
+    return null;
+  }
+  return fence[1];
+}
+
+function normalizeLineEditBlock(text: string): { ok: true; patch: string } | { ok: false } {
+  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').map(normalizePatchLine);
+  const rows = normalized.filter((line) => line.trim().length > 0);
+  const allLineEdit = rows.length > 0 && rows.every((line) =>
+    line === '+' || line === '-' || line.startsWith('+ ') || line.startsWith('- ')
+  );
+  return allLineEdit ? { ok: true, patch: normalized.join('\n') } : { ok: false };
+}
+
 function convertNativePatchToLineEdit(rawPatch: string, targetPath: string): string {
   const text = rawPatch.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   if (!text.includes('*** Begin Patch')) {
+    const direct = normalizeLineEditBlock(text);
+    if (direct.ok) {
+      return direct.patch;
+    }
+    const fenced = extractFencedPatchText(text);
+    if (fenced !== null) {
+      const fencedLineEdit = normalizeLineEditBlock(fenced);
+      if (fencedLineEdit.ok) {
+        return fencedLineEdit.patch;
+      }
+    }
     return text.split('\n').map(normalizePatchLine).join('\n');
   }
   const lines = text.split('\n');
@@ -414,7 +454,7 @@ async function executeApplyPatch(ctx: ServerToolHandlerContext, toolCall: ToolCa
   canonicalArgs.filePath = resolved.relPath;
   canonicalArgs.patch = patch;
   if (!patch.trim()) {
-    return { payload: fail(resolved.relPath, 'PATCH_EMPTY', 'patch is required.', 'Retry with minimal line-edit patch entries.'), canonicalArgs };
+    return { payload: fail(resolved.relPath, 'PATCH_EMPTY', 'patch is required.', `Retry with minimal line-edit patch entries. ${applyPatchUsageGuide(resolved.relPath)}`), canonicalArgs };
   }
 
   let current = '';
@@ -431,14 +471,14 @@ async function executeApplyPatch(ctx: ServerToolHandlerContext, toolCall: ToolCa
   }
   const parsed = parseLineEditPatch(patch);
   if (isParseLineEditFailureResult(parsed)) {
-    return { payload: fail(resolved.relPath, parsed.reason, parsed.message, 'Retry with only `- old line` and `+ new line` entries.'), canonicalArgs };
+    return { payload: fail(resolved.relPath, parsed.reason, parsed.message, `Retry with only line-edit entries. ${applyPatchUsageGuide(resolved.relPath)}`), canonicalArgs };
   }
   if (!exists && parsed.hunks.some((hunk) => hunk.remove.length > 0)) {
-    return { payload: fail(resolved.relPath, 'FILE_NOT_FOUND', 'Target file does not exist for a removal/update patch.', 'Create the file with `+ line` entries or use an existing file path.'), canonicalArgs };
+    return { payload: fail(resolved.relPath, 'FILE_NOT_FOUND', 'Target file does not exist for a removal/update patch.', applyPatchUsageGuide(resolved.relPath)), canonicalArgs };
   }
   const applied = applyLineEditPatch(current, parsed.hunks);
   if (isApplyLineEditFailureResult(applied)) {
-    return { payload: fail(resolved.relPath, applied.reason, applied.message, 'Retry with line-edit patch entries that match the current target file.'), canonicalArgs };
+    return { payload: fail(resolved.relPath, applied.reason, applied.message, `Retry with line-edit patch entries that match the current target file. ${applyPatchUsageGuide(resolved.relPath)}`), canonicalArgs };
   }
   try {
     await fsp.mkdir(path.dirname(resolved.absPath), { recursive: true });

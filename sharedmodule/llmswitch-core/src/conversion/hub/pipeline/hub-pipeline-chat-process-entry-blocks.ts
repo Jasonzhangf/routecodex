@@ -25,7 +25,7 @@ export function prepareChatProcessRuntimeMetadata(args: {
     metadata: args.normalized.metadata,
     webSearchConfig: args.config.virtualRouter?.webSearch as any,
     execCommandGuard: args.config.virtualRouter?.execCommandGuard as any,
-    clockConfig: args.config.virtualRouter?.clock as any,
+    clockConfig: args.config.virtualRouter?.clock as any, applyPatchConfig: (args.config.virtualRouter as any)?.applyPatch as any,
   });
   args.normalized.metadata = metaBase;
   return metaBase;

@@ -11,8 +11,8 @@ pub use hashline_hash::{compute_line_hash, compute_line_hashes, verify_anchor};
 pub use hashline_parser::parse_hashline_ops;
 pub use hashline_to_apply_patch::emit_apply_patch;
 pub use hashline_types::{
-    ApplyResult, HashlineChangeset, HashlineConflict, HashlineError, HashlineErrorCode,
-    HashlineOp, OpKind,
+    ApplyResult, HashlineChangeset, HashlineConflict, HashlineError, HashlineErrorCode, HashlineOp,
+    OpKind,
 };
 
 #[derive(Debug, Deserialize)]
@@ -33,9 +33,9 @@ pub struct HashlineNativeEditResult {
 }
 
 pub fn run_hashline_native_edit(input: HashlineNativeEditInput) -> HashlineNativeEditResult {
-    match parse_hashline_ops(&input.patch)
-        .and_then(|ops| apply_hashline_ops(&ops, input.file_path.as_str(), input.file_content.as_str()))
-    {
+    match parse_hashline_ops(&input.patch).and_then(|ops| {
+        apply_hashline_ops(&ops, input.file_path.as_str(), input.file_content.as_str())
+    }) {
         Ok(changeset) => HashlineNativeEditResult {
             ok: true,
             normalized_patch: Some(emit_apply_patch(&changeset)),

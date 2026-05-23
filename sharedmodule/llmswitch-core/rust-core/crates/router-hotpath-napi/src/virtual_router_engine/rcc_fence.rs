@@ -68,7 +68,12 @@ fn trim_blank_edges(text: &str) -> String {
     text.trim_matches(|ch| ch == '\n' || ch == '\r').to_string()
 }
 
-fn parse_block(content: &str, raw: String, start_offset: usize, end_offset: usize) -> Result<RccFenceBlock, String> {
+fn parse_block(
+    content: &str,
+    raw: String,
+    start_offset: usize,
+    end_offset: usize,
+) -> Result<RccFenceBlock, String> {
     let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
     let lines: Vec<&str> = normalized.split('\n').collect();
     let Some(command_index) = lines.iter().position(|line| !line.trim().is_empty()) else {
@@ -81,7 +86,11 @@ fn parse_block(content: &str, raw: String, start_offset: usize, end_offset: usiz
     }
     let domain = tokens[0].trim().to_ascii_lowercase();
     let action = tokens[1].trim().to_ascii_lowercase();
-    let args = tokens.iter().skip(2).map(|entry| entry.trim().to_string()).collect();
+    let args = tokens
+        .iter()
+        .skip(2)
+        .map(|entry| entry.trim().to_string())
+        .collect();
     let body = if command_index + 1 >= lines.len() {
         String::new()
     } else {
@@ -532,10 +541,10 @@ mod tests {
     fn supports_body_forward_private_only_and_state_only_passthrough_modes() {
         let start = parse_rcc_fence_document("<**rcc**>\nstopless start\nship it\n</rcc**>")
             .expect("start");
-        let pause = parse_rcc_fence_document("<**rcc**>\nstopless pause\nwaiting for Jason\n</rcc**>")
-            .expect("pause");
-        let clear = parse_rcc_fence_document("<**rcc**>\nclock clear\n</rcc**>")
-            .expect("clear");
+        let pause =
+            parse_rcc_fence_document("<**rcc**>\nstopless pause\nwaiting for Jason\n</rcc**>")
+                .expect("pause");
+        let clear = parse_rcc_fence_document("<**rcc**>\nclock clear\n</rcc**>").expect("clear");
 
         assert_eq!(start.directives[0].passthrough, "body-forward");
         assert_eq!(pause.directives[0].passthrough, "private-only");
@@ -544,8 +553,8 @@ mod tests {
 
     #[test]
     fn rejects_unclosed_block() {
-        let error = parse_rcc_fence_document("<**rcc**>\nstopless start\nbody")
-            .expect_err("should fail");
+        let error =
+            parse_rcc_fence_document("<**rcc**>\nstopless start\nbody").expect_err("should fail");
         assert_eq!(error, "RCC_FENCE_UNCLOSED");
     }
 

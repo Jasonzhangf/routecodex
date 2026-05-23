@@ -3561,9 +3561,19 @@ describe('HubRequestExecutor failover', () => {
         reason: 'fetch failed'
       });
 
-      expect(delayA1).toBe(2000);
-      expect(delayA2).toBe(4000);
-      expect(delayB1).toBe(2000);
+      expect(delayA1).toBe(1000);
+      expect(delayA2).toBe(2000);
+      expect(delayB1).toBe(1000);
+
+      __requestExecutorTestables.clearRecoverableErrorBackoffForProvider({
+        providerKey: 'tabglm.key1.glm-5.1'
+      });
+      const delayAAfterSuccess = __requestExecutorTestables.consumeRecoverableErrorBackoffMs(keyA, {
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        reason: 'fetch failed'
+      });
+      expect(delayAAfterSuccess).toBe(1000);
     } finally {
       if (prevBase === undefined) {
         delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
@@ -3830,15 +3840,15 @@ describe('HubRequestExecutor provider transport backoff', () => {
       statusCode: 429
     };
 
-    expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(2000);
-    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(2000);
+    expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(1000);
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(1000);
 
     jest.setSystemTime(new Date('2026-04-22T13:00:00.500Z'));
-    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(1500);
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(500);
 
     jest.setSystemTime(new Date('2026-04-22T13:00:02.000Z'));
-    expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(4000);
-    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(4000);
+    expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(2000);
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(2000);
 
     __requestExecutorTestables.clearProviderTransportBackoff(key!);
     expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(0);

@@ -228,8 +228,7 @@ fn build_duplicate_responses_call_id_rewrites(
         output_indexes: Vec<usize>,
     }
 
-    let mut occurrences =
-        std::collections::HashMap::<String, CallIdOccurrences>::new();
+    let mut occurrences = std::collections::HashMap::<String, CallIdOccurrences>::new();
 
     for (index, entry) in items.iter().enumerate() {
         let Some(row) = entry.as_object() else {
@@ -247,8 +246,8 @@ fn build_duplicate_responses_call_id_rewrites(
                 continue;
             };
             let lowered_name = name.to_ascii_lowercase();
-            let name_allowed = allowed_tool_names.is_empty()
-                || allowed_tool_names.contains(lowered_name.as_str());
+            let name_allowed =
+                allowed_tool_names.is_empty() || allowed_tool_names.contains(lowered_name.as_str());
             if name.len() > 128 || !name_allowed {
                 continue;
             }
@@ -266,7 +265,10 @@ fn build_duplicate_responses_call_id_rewrites(
             continue;
         }
 
-        if matches!(ty.as_str(), "function_call_output" | "tool_result" | "tool_message") {
+        if matches!(
+            ty.as_str(),
+            "function_call_output" | "tool_result" | "tool_message"
+        ) {
             let call_id = read_trimmed_string(row.get("call_id"))
                 .or_else(|| read_trimmed_string(row.get("tool_call_id")))
                 .or_else(|| read_trimmed_string(row.get("tool_use_id")))
@@ -338,7 +340,10 @@ fn rewrite_responses_tool_history_entry_call_id(
         return next;
     }
 
-    if matches!(ty.as_str(), "function_call_output" | "tool_result" | "tool_message") {
+    if matches!(
+        ty.as_str(),
+        "function_call_output" | "tool_result" | "tool_message"
+    ) {
         next.insert(
             "call_id".to_string(),
             Value::String(rewritten_call_id.clone()),
@@ -381,10 +386,7 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
                             let mut child_out = Map::new();
                             child_out
                                 .insert("type".to_string(), Value::String("function".to_string()));
-                            child_out.insert(
-                                "name".to_string(),
-                                Value::String(child_name.clone()),
-                            );
+                            child_out.insert("name".to_string(), Value::String(child_name.clone()));
                             if let Some(description) = read_trimmed_string(
                                 child_function
                                     .and_then(|v| v.get("description"))
@@ -555,10 +557,7 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                 let call_id = read_trimmed_string(row.get("call_id"))
                     .or_else(|| read_trimmed_string(row.get("tool_call_id")))
                     .or_else(|| read_trimmed_string(row.get("id")));
-                let effective_call_id = call_id_rewrites
-                    .get(&index)
-                    .cloned()
-                    .or(call_id);
+                let effective_call_id = call_id_rewrites.get(&index).cloned().or(call_id);
                 if let Some(value) = effective_call_id {
                     valid_call_ids.insert(value);
                 }
@@ -590,10 +589,7 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                     let call_id = read_trimmed_string(row.get("call_id"))
                         .or_else(|| read_trimmed_string(row.get("tool_call_id")))
                         .or_else(|| read_trimmed_string(row.get("id")));
-                    let effective_call_id = call_id_rewrites
-                        .get(&index)
-                        .cloned()
-                        .or(call_id);
+                    let effective_call_id = call_id_rewrites.get(&index).cloned().or(call_id);
                     if let Some(value) = effective_call_id {
                         valid_call_ids.insert(value);
                     }
@@ -613,10 +609,7 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                         .or_else(|| read_trimmed_string(row.get("tool_call_id")))
                         .or_else(|| read_trimmed_string(row.get("tool_use_id")))
                         .or_else(|| read_trimmed_string(row.get("id")));
-                    let effective_call_id = call_id_rewrites
-                        .get(&index)
-                        .cloned()
-                        .or(call_id);
+                    let effective_call_id = call_id_rewrites.get(&index).cloned().or(call_id);
                     let Some(call_id) = effective_call_id else {
                         continue;
                     };
@@ -625,8 +618,9 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                     }
                     let rewritten_row =
                         rewrite_responses_tool_history_entry_call_id(index, row, &call_id_rewrites);
-                    let payload_signature = serde_json::to_string(&Value::Object(rewritten_row.clone()))
-                        .unwrap_or_else(|_| format!("{:?}", row));
+                    let payload_signature =
+                        serde_json::to_string(&Value::Object(rewritten_row.clone()))
+                            .unwrap_or_else(|_| format!("{:?}", row));
                     let seen_signatures = completed_tool_output_signatures
                         .entry(call_id.clone())
                         .or_default();
@@ -698,7 +692,8 @@ fn has_responses_input_chat_messages(input: &[Value]) -> bool {
 }
 
 fn has_responses_submit_tool_outputs(raw_request_row: &Map<String, Value>) -> bool {
-    let has_previous_response_id = read_trimmed_string(raw_request_row.get("previous_response_id")).is_some();
+    let has_previous_response_id =
+        read_trimmed_string(raw_request_row.get("previous_response_id")).is_some();
     let has_tool_outputs = raw_request_row
         .get("tool_outputs")
         .and_then(Value::as_array)
@@ -1367,8 +1362,14 @@ mod tests {
             .and_then(Value::as_str)
             .unwrap_or("");
         assert_eq!(description, "Use the `apply_patch` tool to edit files.");
-        let parameters = function.get("parameters").and_then(Value::as_object).unwrap();
-        let properties = parameters.get("properties").and_then(Value::as_object).unwrap();
+        let parameters = function
+            .get("parameters")
+            .and_then(Value::as_object)
+            .unwrap();
+        let properties = parameters
+            .get("properties")
+            .and_then(Value::as_object)
+            .unwrap();
         assert!(!properties.contains_key("patch"));
         assert!(!properties.contains_key("input"));
         assert!(!properties.contains_key("filePath"));
@@ -1393,24 +1394,21 @@ mod tests {
             tool_call_id_style: None,
         };
 
-        let captured =
-            capture_req_inbound_responses_context_snapshot(input).expect("submit tool outputs capture");
+        let captured = capture_req_inbound_responses_context_snapshot(input)
+            .expect("submit tool outputs capture");
         let row = captured.as_object().expect("captured object");
 
-        assert_eq!(row.get("requestId"), Some(&Value::String("req_submit_outputs_1".to_string())));
+        assert_eq!(
+            row.get("requestId"),
+            Some(&Value::String("req_submit_outputs_1".to_string()))
+        );
         assert_eq!(
             row.get("__captured_tool_results")
                 .and_then(Value::as_array)
                 .map(|items| items.len()),
             Some(1)
         );
-        assert_eq!(
-            row.get("isResponsesPayload"),
-            Some(&Value::Bool(false))
-        );
-        assert_eq!(
-            row.get("isChatPayload"),
-            Some(&Value::Bool(false))
-        );
+        assert_eq!(row.get("isResponsesPayload"), Some(&Value::Bool(false)));
+        assert_eq!(row.get("isChatPayload"), Some(&Value::Bool(false)));
     }
 }

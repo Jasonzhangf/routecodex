@@ -6,7 +6,9 @@ use crate::hub_reasoning_tool_normalizer::{
 };
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
-use crate::shared_tool_result_text_normalizer::{normalize_tool_result_text, normalize_tool_result_value};
+use crate::shared_tool_result_text_normalizer::{
+    normalize_tool_result_text, normalize_tool_result_value,
+};
 
 use super::history::can_allow_terminal_pending_tool_calls;
 use super::reasoning::{
@@ -325,7 +327,10 @@ fn process_message_blocks(
             reasoning_segments.extend(to_reasoning_segments(block_obj.get("reasoning_content")));
             continue;
         }
-        if matches!(block_type.as_str(), "reasoning_text" | "thinking" | "reasoning") {
+        if matches!(
+            block_type.as_str(),
+            "reasoning_text" | "thinking" | "reasoning"
+        ) {
             // Extract from primary block-level text field (one source per block to avoid duplicates)
             if let Some(text) = block_obj.get("text").and_then(Value::as_str) {
                 let trimmed = text.trim();
@@ -344,11 +349,24 @@ fn process_message_blocks(
                 }
             }
             // Only extend from reasoning_content if NO block-level text was found (avoid duplicates)
-            let has_block_text = block_obj.get("text").and_then(Value::as_str).map(|t| !t.trim().is_empty()).unwrap_or(false)
-                || block_obj.get("thinking").and_then(Value::as_str).map(|t| !t.trim().is_empty()).unwrap_or(false)
-                || block_obj.get("content").and_then(Value::as_str).map(|t| !t.trim().is_empty()).unwrap_or(false);
+            let has_block_text = block_obj
+                .get("text")
+                .and_then(Value::as_str)
+                .map(|t| !t.trim().is_empty())
+                .unwrap_or(false)
+                || block_obj
+                    .get("thinking")
+                    .and_then(Value::as_str)
+                    .map(|t| !t.trim().is_empty())
+                    .unwrap_or(false)
+                || block_obj
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(|t| !t.trim().is_empty())
+                    .unwrap_or(false);
             if !has_block_text {
-                reasoning_segments.extend(to_reasoning_segments(block_obj.get("reasoning_content")));
+                reasoning_segments
+                    .extend(to_reasoning_segments(block_obj.get("reasoning_content")));
             }
             continue;
         }
@@ -815,7 +833,10 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                     tool_msg.insert("name".to_string(), Value::String(name.clone()));
                 }
             }
-            if pending_tool_call_ids.iter().any(|entry| entry == &tool_call_id) {
+            if pending_tool_call_ids
+                .iter()
+                .any(|entry| entry == &tool_call_id)
+            {
                 consume_pending_tool_call(
                     &mut pending_tool_call_ids,
                     tool_call_id.as_str(),
@@ -824,7 +845,12 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 messages.push(Value::Object(tool_msg));
                 continue;
             }
-            if future_tool_call_counts.get(&tool_call_id).copied().unwrap_or(0) > 0 {
+            if future_tool_call_counts
+                .get(&tool_call_id)
+                .copied()
+                .unwrap_or(0)
+                > 0
+            {
                 deferred_tool_results
                     .entry(tool_call_id.clone())
                     .or_insert_with(VecDeque::new)

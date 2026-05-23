@@ -125,7 +125,11 @@ fn rough_estimate_input_tokens_from_request(request: &Value) -> i64 {
 
 fn read_estimated_tokens_from_metadata(metadata: &Value) -> Option<i64> {
     let obj = metadata.as_object()?;
-    for key in ["estimatedInputTokens", "estimatedTokens", "estimated_tokens"] {
+    for key in [
+        "estimatedInputTokens",
+        "estimatedTokens",
+        "estimated_tokens",
+    ] {
         if let Some(v) = obj.get(key).and_then(|x| x.as_f64()) {
             if v.is_finite() && v > 0.0 {
                 return Some(v.floor() as i64);
@@ -292,8 +296,8 @@ fn chat_envelope_to_standardized_fast(
     chat_envelope: &Value,
     adapter_context: &Value,
 ) -> Result<Value, String> {
-    let chat_envelope = normalize_chat_envelope_tool_calls(chat_envelope)
-        .map_err(|err| err.to_string())?;
+    let chat_envelope =
+        normalize_chat_envelope_tool_calls(chat_envelope).map_err(|err| err.to_string())?;
 
     let model = chat_envelope
         .get("model")

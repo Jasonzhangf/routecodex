@@ -18,7 +18,7 @@ import {
 } from '../utils/request-log-color.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { extractClientModelId } from '../runtime/http-server/executor/provider-response-utils.js';
-import { createResponsesJsonToSseConverter, importCoreDist, recordResponsesResponseForRequest, requireCoreDist } from '../../modules/llmswitch/bridge.js';
+import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, createResponsesJsonToSseConverter, finalizeResponsesConversationRequestRetention, importCoreDist, recordResponsesResponseForRequest, requireCoreDist } from '../../modules/llmswitch/bridge.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 
@@ -26,6 +26,12 @@ interface DispatchOptions {
   forceSSE?: boolean;
   entryEndpoint?: string;
   sseTotalTimeoutMs?: number;
+  responsesRequestContext?: {
+    payload: Record<string, unknown>;
+    context: Record<string, unknown>;
+    sessionId?: string;
+    conversationId?: string;
+  };
 }
 
 export interface SsePayloadShape {
@@ -85,6 +91,9 @@ function resolveResponsesConversationRecordRequestIds(
     target.push(trimmed);
   };
   add(responseIds, responseId);
+  if (responseIds.length > 0) {
+    return responseIds;
+  }
   add(requestIds, requestLabel);
   if (Array.isArray(timingRequestIds)) {
     for (const id of timingRequestIds) add(requestIds, id);
@@ -92,13 +101,51 @@ function resolveResponsesConversationRecordRequestIds(
   return [...responseIds, ...requestIds];
 }
 
-function recordResponsesConversationToolCallResponse(args: {
+function readResponsesConversationResponseId(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  const record = body as Record<string, unknown>;
+  const nested = record.response && typeof record.response === 'object' && !Array.isArray(record.response)
+    ? record.response as Record<string, unknown>
+    : undefined;
+  for (const value of [record.id, record.response_id, nested?.id]) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+async function cleanupResponsesConversationSupersededRequestIds(args: {
+  requestLabel: string;
+  timingRequestIds?: string[];
+  responseId?: string;
+}): Promise<void> {
+  if (!args.responseId) return;
+  const supersededIds: string[] = [];
+  const add = (value: unknown): void => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === args.responseId || supersededIds.includes(trimmed)) return;
+    supersededIds.push(trimmed);
+  };
+  add(args.requestLabel);
+  if (Array.isArray(args.timingRequestIds)) {
+    for (const id of args.timingRequestIds) add(id);
+  }
+  for (const requestId of supersededIds) {
+    await clearResponsesConversationByRequestId(requestId).catch((error) => {
+      logResponseNonBlockingError(`responses-conversation-clear-superseded:${requestId}`, error);
+    });
+  }
+}
+
+async function recordResponsesConversationToolCallResponse(args: {
   entryEndpoint?: string;
   requestLabel: string;
   timingRequestIds?: string[];
   routeHint?: string;
+  sessionId?: unknown;
+  conversationId?: unknown;
   body: unknown;
-}): void {
+}): Promise<void> {
   if (
     args.entryEndpoint !== '/v1/responses'
     && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
@@ -112,17 +159,63 @@ function recordResponsesConversationToolCallResponse(args: {
     return;
   }
   const recordBody = args.body as Record<string, unknown>;
+  const responseId = readResponsesConversationResponseId(recordBody);
   for (const recordRequestId of resolveResponsesConversationRecordRequestIds(
     args.requestLabel,
     args.timingRequestIds,
-    recordBody.id
+    responseId
   )) {
-    void recordResponsesResponseForRequest({
+    await recordResponsesResponseForRequest({
       requestId: recordRequestId,
       response: recordBody,
       routeHint: args.routeHint,
+      sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
+      conversationId: typeof args.conversationId === 'string' ? args.conversationId : undefined,
     }).catch((error) => {
       logResponseNonBlockingError(`responses-conversation-record:${recordRequestId}`, error);
+    });
+  }
+  await cleanupResponsesConversationSupersededRequestIds({
+    requestLabel: args.requestLabel,
+    timingRequestIds: args.timingRequestIds,
+    responseId,
+  });
+  if (responseId) {
+    await finalizeResponsesConversationRequestRetention(responseId, {
+      keepForSubmitToolOutputs: true,
+    }).catch((error) => {
+      logResponseNonBlockingError(`responses-conversation-finalize:${responseId}`, error);
+    });
+  }
+}
+
+async function captureResponsesConversationToolCallRequestContext(args: {
+  entryEndpoint?: string;
+  requestLabel: string;
+  routeHint?: string;
+  body: unknown;
+  requestContext?: DispatchOptions['responsesRequestContext'];
+}): Promise<void> {
+  if (args.entryEndpoint !== '/v1/responses') return;
+  if (!args.requestContext) return;
+  if (deriveFinishReason(args.body) !== 'tool_calls') return;
+  const body = args.body && typeof args.body === 'object' && !Array.isArray(args.body)
+    ? args.body as Record<string, unknown>
+    : undefined;
+  const responseId = readResponsesConversationResponseId(body);
+  const ids = (responseId ? [responseId] : [args.requestLabel]).filter((value, index, array): value is string => {
+    return typeof value === 'string' && value.trim().length > 0 && array.indexOf(value) === index;
+  });
+  for (const requestId of ids) {
+    await captureResponsesRequestContextForRequest({
+      requestId,
+      payload: args.requestContext.payload,
+      context: args.requestContext.context,
+      sessionId: args.requestContext.sessionId,
+      conversationId: args.requestContext.conversationId,
+      routeHint: args.routeHint,
+    }).catch((error) => {
+      logResponseNonBlockingError(`responses-conversation-capture:${requestId}`, error);
     });
   }
 }
@@ -583,6 +676,28 @@ function sendStructuredSseError(res: Response, requestLabel: string, payload: Re
   }
 }
 
+
+function normalizeResponsesToolCallsForClientBody(body: unknown, entryEndpoint?: string): unknown {
+  if (entryEndpoint !== '/v1/responses') {
+    return body;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
+    return body;
+  }
+  try {
+    const mod = requireCoreDist<{ normalizeResponsesToolCallArgumentsForClientWithNative?: (payload: unknown, toolsRaw: unknown[]) => Record<string, unknown> }>(
+      'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics'
+    );
+    if (typeof mod.normalizeResponsesToolCallArgumentsForClientWithNative !== 'function') {
+      throw new Error('[handler-response] normalizeResponsesToolCallArgumentsForClientWithNative not available');
+    }
+    return mod.normalizeResponsesToolCallArgumentsForClientWithNative(body, []);
+  } catch (error) {
+    logResponseNonBlockingError('normalizeResponsesToolCallsForClientBody', error);
+    return body;
+  }
+}
+
 function isResponsesJsonBody(body: unknown, entryEndpoint?: string): body is Record<string, unknown> {
   if (entryEndpoint !== '/v1/responses') {
     return false;
@@ -640,15 +755,25 @@ function streamResponsesJsonAsSse(args: {
             requestId: args.requestLabel
           }) as Record<string, unknown>;
         })();
-      const sanitizedResponsesPayload = stripInternalKeysDeep(responsesPayload);
-      recordResponsesConversationToolCallResponse({
+      const normalizedResponsesPayload = normalizeResponsesToolCallsForClientBody(responsesPayload, args.entryEndpoint) as Record<string, unknown>;
+      const sanitizedResponsesPayload = stripInternalKeysDeep(normalizedResponsesPayload);
+      await captureResponsesConversationToolCallRequestContext({
+        entryEndpoint: args.entryEndpoint,
+        requestLabel: args.requestLabel,
+        routeHint: args.result.usageLogInfo?.routeName,
+        body: sanitizedResponsesPayload,
+        requestContext: args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined,
+      });
+      await recordResponsesConversationToolCallResponse({
         entryEndpoint: args.entryEndpoint,
         requestLabel: args.requestLabel,
         timingRequestIds: args.result.usageLogInfo?.timingRequestIds,
         routeHint: args.result.usageLogInfo?.routeName,
+        sessionId: args.result.usageLogInfo?.sessionId,
+        conversationId: args.result.usageLogInfo?.conversationId,
         body: sanitizedResponsesPayload
       });
-      const sse = await converter.convertResponseToJsonToSse(responsesPayload, {
+      const sse = await converter.convertResponseToJsonToSse(normalizedResponsesPayload, {
         requestId: args.requestLabel
       });
       const stream = toNodeReadable(sse);
@@ -717,12 +842,12 @@ export function isAnalysisModeEnabled(): boolean {
   return false;
 }
 
-export function sendPipelineResponse(
+export async function sendPipelineResponse(
   res: Response,
   result: PipelineExecutionResult,
   requestId?: string,
   options?: DispatchOptions
-): void {
+): Promise<void> {
   const status = typeof result.status === 'number' ? result.status : 200;
   const body = result.body;
   const requestLabel = formatRequestId(requestId);
@@ -836,7 +961,7 @@ export function sendPipelineResponse(
       return;
     }
     sendSseBridgeError(res, requestLabel, 502);
-    return;
+    return Promise.resolve();
   }
 
   logPipelineStage('response.dispatch.start', requestLabel, { status, stream: expectsStream, forced: forceSSE });
@@ -1160,7 +1285,7 @@ export function sendPipelineResponse(
     });
     res.on('finish', () => cleanup('finish'));
     outboundStream.pipe(res, { end: false });
-    return;
+    return Promise.resolve();
   }
 
   applyHeaders(res, result.headers, false);
@@ -1179,12 +1304,15 @@ export function sendPipelineResponse(
     res.status(status).end();
     logPipelineStage('response.json.completed', requestLabel, { status });
     logResponseCompleted({ status, mode: 'json', empty: true });
-    return;
+    return Promise.resolve();
   }
   logPipelineStage('response.json.write', requestLabel, { status });
   // E1 boundary rule: internal env variables use "__*" and must never reach client payloads.
   // Preserve the SSE carrier key (it is handled above and never JSON-encoded).
-  const normalizedJsonBody = normalizeResponsesJsonBody(body, entryEndpoint, requestLabel);
+  const normalizedJsonBody = normalizeResponsesToolCallsForClientBody(
+    normalizeResponsesJsonBody(body, entryEndpoint, requestLabel),
+    entryEndpoint
+  );
   const usageNormalized = normalizeChatUsagePayload(normalizedJsonBody, {
     entryEndpoint,
     usageFallback: result.usageLogInfo?.usage
@@ -1197,11 +1325,20 @@ export function sendPipelineResponse(
   const clientBody = usageNormalized.payload;
   const sanitized = stripInternalKeysDeep(clientBody);
   const jsonFinishReason = deriveFinishReason(clientBody);
-  recordResponsesConversationToolCallResponse({
+  await captureResponsesConversationToolCallRequestContext({
+    entryEndpoint,
+    requestLabel,
+    routeHint: result.usageLogInfo?.routeName,
+    body: sanitized,
+    requestContext: options?.responsesRequestContext,
+  });
+  await recordResponsesConversationToolCallResponse({
     entryEndpoint,
     requestLabel,
     timingRequestIds: result.usageLogInfo?.timingRequestIds,
     routeHint: result.usageLogInfo?.routeName,
+    sessionId: result.usageLogInfo?.sessionId,
+    conversationId: result.usageLogInfo?.conversationId,
     body: sanitized
   });
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);

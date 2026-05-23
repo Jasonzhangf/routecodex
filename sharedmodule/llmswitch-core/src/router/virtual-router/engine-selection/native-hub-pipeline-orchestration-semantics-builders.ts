@@ -81,6 +81,7 @@ type ServertoolRuntimeMetadataBuildInput = {
   webSearchConfig?: Record<string, unknown>;
   execCommandGuard?: Record<string, unknown>;
   clockConfig?: Record<string, unknown>;
+  applyPatchConfig?: Record<string, unknown>;
 };
 
 type HasImageAttachmentFlagInput = {

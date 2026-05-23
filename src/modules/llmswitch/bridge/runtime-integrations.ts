@@ -47,6 +47,8 @@ export async function writeSnapshotViaHooks(channelOrOptions: string | AnyRecord
 
 type ResponsesConversationStoreLike = {
   clearRequest?: (requestId?: string) => void;
+  releaseRequestPayload?: (requestId?: string) => void;
+  finalizeResponsesConversationRequestRetention?: (requestId?: string, options?: { keepForSubmitToolOutputs?: boolean }) => void;
   rebindRequestId?: (oldId: string, newId: string) => void;
 };
 
@@ -66,6 +68,7 @@ type ResponsesConversationModule = {
   }) => { payload: AnyRecord; meta: AnyRecord } | null;
   rebindResponsesConversationRequestId?: (oldId: string, newId: string) => void;
   clearResponsesConversationByRequestId?: (requestId?: string) => void;
+  finalizeResponsesConversationRequestRetention?: (requestId?: string, options?: { keepForSubmitToolOutputs?: boolean }) => void;
 };
 
 function readGlobalResponsesConversationStore(): ResponsesConversationStoreLike | null {
@@ -109,6 +112,8 @@ export async function recordResponsesResponseForRequest(args: {
   requestId: string;
   response: AnyRecord;
   routeHint?: string;
+  sessionId?: string;
+  conversationId?: string;
 }): Promise<void> {
   const mod = await getResponsesConversationModule();
   const fn = mod.recordResponsesResponse;
@@ -161,6 +166,26 @@ export async function clearResponsesConversationByRequestId(requestId?: string):
   if (typeof fn === 'function') {
     fn(requestId);
   }
+}
+
+export async function finalizeResponsesConversationRequestRetention(
+  requestId?: string,
+  options?: { keepForSubmitToolOutputs?: boolean }
+): Promise<void> {
+  if (!requestId) {
+    return;
+  }
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.finalizeResponsesConversationRequestRetention === 'function') {
+    globalStore.finalizeResponsesConversationRequestRetention(requestId, options);
+    return;
+  }
+  const mod = await getResponsesConversationModule();
+  const fn = mod.finalizeResponsesConversationRequestRetention;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] finalizeResponsesConversationRequestRetention not available');
+  }
+  fn(requestId, options);
 }
 
 export async function resumeLatestResponsesContinuationByScope(args: {

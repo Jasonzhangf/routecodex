@@ -53,6 +53,7 @@ export {
   resumeLatestResponsesContinuationByScope,
   rebindResponsesConversationRequestId,
   clearResponsesConversationByRequestId,
+  finalizeResponsesConversationRequestRetention,
   createResponsesSseToJsonConverter,
   createResponsesJsonToSseConverter,
   reportProviderErrorToRouterPolicy,

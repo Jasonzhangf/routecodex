@@ -262,10 +262,7 @@ impl ProviderHealthManager {
     }
 
     pub(crate) fn import_persistable_state(&mut self, raw: &Value, now_ms: i64) {
-        let Some(entries) = raw
-            .get("providerCooldowns")
-            .and_then(|v| v.as_array())
-        else {
+        let Some(entries) = raw.get("providerCooldowns").and_then(|v| v.as_array()) else {
             return;
         };
         for entry in entries {
@@ -285,7 +282,12 @@ impl ProviderHealthManager {
         }
     }
 
-    pub(crate) fn record_http_502_failure(&mut self, provider_key: &str, reason: Option<String>, now_ms: i64) {
+    pub(crate) fn record_http_502_failure(
+        &mut self,
+        provider_key: &str,
+        reason: Option<String>,
+        now_ms: i64,
+    ) {
         let threshold = self.config.failure_threshold.max(3);
         let cooldown_ms = self.config.cooldown_ms;
         let state = self.get_state_mut(provider_key);

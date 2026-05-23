@@ -8,7 +8,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
 
-use crate::hub_reasoning_tool_normalizer::{normalize_assistant_text_to_tool_calls_json, repair_arguments_to_string};
+use crate::hub_reasoning_tool_normalizer::{
+    normalize_assistant_text_to_tool_calls_json, repair_arguments_to_string,
+};
 
 #[cfg(test)]
 mod tests;

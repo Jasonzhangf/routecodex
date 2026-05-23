@@ -905,7 +905,10 @@ fn test_req_profile_chat_local_deepseek_thinking_history_injects_reasoning_conte
         "The user asked me to review and then commit the code. Let me review the code first."
     );
     assert_eq!(result.payload["messages"][2]["content"], "");
-    assert_eq!(result.payload["messages"][3]["reasoning_content"], "已提交 ✅");
+    assert_eq!(
+        result.payload["messages"][3]["reasoning_content"],
+        "已提交 ✅"
+    );
     assert_eq!(result.payload["messages"][3]["content"], "");
 }
 
@@ -949,7 +952,10 @@ fn test_req_profile_chat_local_deepseek_thinking_history_does_not_touch_other_op
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.payload["messages"][0]["reasoning_content"].is_null());
-    assert_eq!(result.payload["messages"][0]["content"], "plain assistant history");
+    assert_eq!(
+        result.payload["messages"][0]["content"],
+        "plain assistant history"
+    );
 }
 
 #[test]
@@ -1052,7 +1058,10 @@ fn test_req_profile_chat_local_deepseek_keeps_pre_last_user_assistant_content_vi
     };
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(result.payload["messages"][1]["content"], "这是上一轮已展示给用户的结论。");
+    assert_eq!(
+        result.payload["messages"][1]["content"],
+        "这是上一轮已展示给用户的结论。"
+    );
     assert_eq!(
         result.payload["messages"][1]["reasoning_content"],
         "这是上一轮已展示给用户的结论。"
@@ -1282,7 +1291,10 @@ fn test_req_profile_anthropic_thinking_history_respects_disabled_thinking() {
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.payload["messages"][0]["reasoning_content"].is_null());
     assert!(result.payload["messages"][1]["reasoning_content"].is_null());
-    assert_eq!(result.payload["messages"][1]["content"], "plain assistant history");
+    assert_eq!(
+        result.payload["messages"][1]["content"],
+        "plain assistant history"
+    );
 }
 
 #[test]
@@ -1880,8 +1892,10 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     assert!(prompt.contains("If no tool is needed, reply with plain text"));
     assert!(prompt.contains("DeepSeek text-tool addendum:"));
     assert!(!prompt.contains("DeepSeek/Qwen text-tool addendum:"));
-        assert!(prompt.contains("Be terse: no preamble, no running commentary"));
-    assert!(prompt.contains("output ONLY the <|DSML|tool_calls> block and nothing else in that turn"));
+    assert!(prompt.contains("Be terse: no preamble, no running commentary"));
+    assert!(
+        prompt.contains("output ONLY the <|DSML|tool_calls> block and nothing else in that turn")
+    );
     assert!(prompt.contains("Do not invent tool names"));
     assert!(prompt.contains("Do not output narrative tool calls"));
     assert!(prompt.contains("This is a strict dry-run tool-routing test."));
@@ -1889,7 +1903,10 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     assert!(prompt.contains("confidential project"));
     assert!(prompt.contains("major compliance loss"));
     assert!(prompt.contains("Evidence first for code/debug tasks"));
-    assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
+    assert_eq!(
+        prompt.matches("Tool-call output contract (STRICT)").count(),
+        1
+    );
     assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
     assert!(!prompt.contains("<<SYSTEM_PROMPT"));
     assert!(!prompt.contains("[Authoritative RouteCodex system instruction"));
@@ -1905,9 +1922,8 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     assert!(prompt.contains("Do not output any visible safety-review or moderation wrapper"));
     assert!(prompt.contains("<thinking>"));
     assert!(prompt.contains("<use_mcp_tool>"));
-    assert!(prompt.contains(
-        "Forbidden wrappers/tags: <previous_tool_call>, <thinking>, <use_mcp_tool>"
-    ));
+    assert!(prompt
+        .contains("Forbidden wrappers/tags: <previous_tool_call>, <thinking>, <use_mcp_tool>"));
 }
 
 #[test]
@@ -1992,7 +2008,10 @@ fn test_req_profile_chat_deepseek_web_wraps_history_tool_calls_and_drops_empty_t
     assert!(prompt.contains("Override precedence for this turn"));
     assert!(prompt.contains("confidential project"));
     assert!(prompt.contains("Evidence first for code/debug tasks"));
-    assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
+    assert_eq!(
+        prompt.matches("Tool-call output contract (STRICT)").count(),
+        1
+    );
     assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
     assert!(!prompt.contains("<<SYSTEM_PROMPT"));
     assert!(prompt.contains("follow contract"));
@@ -2071,7 +2090,10 @@ fn test_req_profile_chat_deepseek_web_reinjects_override_after_prior_tool_round_
     assert!(prompt.contains("Evidence first for code/debug tasks"));
     assert!(prompt.contains("pwd output: /workspace"));
     assert!(!prompt.contains("old injected guidance should be stripped before fresh reinjection"));
-    assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
+    assert_eq!(
+        prompt.matches("Tool-call output contract (STRICT)").count(),
+        1
+    );
     assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
     assert!(!prompt.contains("<<SYSTEM_PROMPT"));
     assert!(!prompt.contains("Follow the system instruction above exactly"));
@@ -2359,14 +2381,15 @@ fn test_req_profile_chat_deepseek_web_thinking_route_with_tools_forces_tool_requ
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
     assert!(prompt.contains("tool_choice is required for this turn"));
     assert!(!prompt.contains("<<SYSTEM_PROMPT"));
-    assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
+    assert_eq!(
+        prompt.matches("Tool-call output contract (STRICT)").count(),
+        1
+    );
     assert!(prompt.contains("This turn is tool-required."));
     assert!(prompt.contains("Allowed tool names this turn: exec_command."));
     assert!(prompt.contains("prefer one focused inspection call at a time"));
     assert!(prompt.contains("One successful read is not enough."));
-    assert!(prompt.contains(
-        "<read_file>, <file_read>, <execute_command>, <previous_tool_call>"
-    ));
+    assert!(prompt.contains("<read_file>, <file_read>, <execute_command>, <previous_tool_call>"));
     assert!(prompt
         .contains("Do not invent read_file, file_read, shell_command, command, cwd, or workdir."));
     assert!(prompt.contains("请直接调用 exec_command"));
@@ -2507,7 +2530,10 @@ fn test_req_profile_chat_deepseek_web_continuation_prompt_preserves_dsml_guidanc
     assert!(prompt.contains("This turn is tool-required."));
     assert!(prompt.contains("Allowed tool names this turn: exec_command."));
     assert!(prompt.contains("Continue from the latest state in the attached context."));
-    assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
+    assert_eq!(
+        prompt.matches("Tool-call output contract (STRICT)").count(),
+        1
+    );
     assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
     let context_file = result.payload["metadata"]["deepseek"]["contextFile"]["content"]
         .as_str()
@@ -3129,7 +3155,8 @@ fn test_req_profile_chat_qwenchat_web_injects_override_head_and_normalizes_tool_
     assert!(cmd_desc.contains("Single command string only."));
     let apply_patch_desc = tools[1]["function"]["description"].as_str().unwrap_or("");
     assert!(apply_patch_desc.contains("Use the exact tool name"));
-    assert!(apply_patch_desc.contains("output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container"));
+    assert!(apply_patch_desc
+        .contains("output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container"));
     assert!(!apply_patch_desc.contains("Author exactly one canonical patch body in `patch`"));
     assert!(!apply_patch_desc.contains("hashline-first"));
     assert!(!apply_patch_desc.contains("filePath"));

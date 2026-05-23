@@ -3,8 +3,8 @@ use super::glm::apply_glm_response_compat;
 use super::iflow::apply_iflow_response_compat;
 use super::lmstudio::apply_lmstudio_response_compat;
 use super::profile::{
-    build_compat_result, is_claude_code_profile, is_deepseek_web_profile,
-    is_gemini_profile, is_glm_profile, is_iflow_profile, is_lmstudio_profile, is_qwen_profile,
+    build_compat_result, is_claude_code_profile, is_deepseek_web_profile, is_gemini_profile,
+    is_glm_profile, is_iflow_profile, is_lmstudio_profile, is_qwen_profile,
     is_qwenchat_web_profile, is_responses_c4m_profile, is_responses_output2choices_profile,
     pick_compat_profile, provider_protocol_matches,
 };
@@ -129,7 +129,6 @@ pub fn run_resp_inbound_stage3_compat(
             }
             return Ok(build_compat_result(input.payload, None));
         }
-
 
         if is_gemini_profile(profile_id) {
             if provider_protocol_matches(

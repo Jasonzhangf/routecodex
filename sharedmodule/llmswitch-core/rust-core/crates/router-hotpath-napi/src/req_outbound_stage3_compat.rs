@@ -68,14 +68,6 @@ pub struct CompatResult {
     pub rate_limit_detected: Option<bool>,
 }
 
-
-
-
-
-
-
-
-
 #[cfg(test)]
 const DEFAULT_SYSTEM_TEXT: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 
@@ -157,7 +149,6 @@ pub fn apply_claude_thinking_tool_schema_compat_json(payload_json: String) -> na
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
 
-
 #[napi_derive::napi]
 pub fn apply_tool_text_request_guidance_json(
     payload_json: String,
@@ -165,12 +156,6 @@ pub fn apply_tool_text_request_guidance_json(
 ) -> napi::Result<String> {
     tool_text_request_guidance::apply_tool_text_request_guidance_json(payload_json, config_json)
 }
-
-
-
-
-
-
 
 #[napi_derive::napi]
 pub fn apply_iflow_tool_text_fallback_json(

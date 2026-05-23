@@ -29,10 +29,26 @@ impl VirtualRouterEngineCore {
             return;
         }
         self.health_manager.record_success(provider_key);
+        if let Some(runtime_key) = event
+            .get("runtime")
+            .and_then(|v| v.get("runtimeKey"))
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.trim().is_empty() && *value != provider_key)
+        {
+            self.health_manager.record_success(runtime_key);
+        }
+        if let Some(alias_key) = provider_key.rsplit_once('.').map(|(base, _)| base) {
+            if alias_key != provider_key {
+                self.health_manager.record_success(alias_key);
+            }
+        }
         self.persist_provider_health();
     }
 
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
+        if self.quota_view.is_some() {
+            return;
+        }
         if !event_affects_health(event) {
             return;
         }
@@ -59,6 +75,9 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_error(&mut self, event: &Value) {
+        if self.quota_view.is_some() {
+            return;
+        }
         if !event_affects_health(event) {
             return;
         }
@@ -78,7 +97,6 @@ impl VirtualRouterEngineCore {
         self.apply_series_cooldown(event);
         self.persist_provider_health();
     }
-
 
     fn apply_qwen_auth_family_blacklist(&mut self, event: &Value) -> bool {
         let Some(provider_key) = resolve_provider_key(event) else {
@@ -126,7 +144,8 @@ impl VirtualRouterEngineCore {
                     self.persist_provider_health();
                     return true;
                 }
-                self.health_manager.record_failure(provider_key, reason, now);
+                self.health_manager
+                    .record_failure(provider_key, reason, now);
                 self.apply_series_cooldown(event);
                 self.persist_provider_health();
                 true
@@ -136,7 +155,8 @@ impl VirtualRouterEngineCore {
                     self.health_manager
                         .trip_provider(provider_key, reason, Some(cooldown_ms), now);
                 } else {
-                    self.health_manager.record_failure(provider_key, reason, now);
+                    self.health_manager
+                        .record_failure(provider_key, reason, now);
                 }
                 let _ = self.apply_qwen_auth_family_blacklist(event);
                 self.persist_provider_health();
@@ -450,7 +470,6 @@ fn is_qwen_auth_invalid_event(event: &Value) -> bool {
             || lowered.contains("http_403")
     })
 }
-
 
 fn extract_series_cooldown_detail(event: &Value) -> Option<SeriesCooldownDetail> {
     let details = event.get("details")?.as_object()?;

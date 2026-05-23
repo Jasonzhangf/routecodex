@@ -20,7 +20,10 @@ fn is_transcript_collapsed_placeholder(line: &str) -> bool {
 }
 
 fn transcript_tree_marker(line: &str) -> Option<char> {
-    line.trim_start().chars().next().filter(|ch| matches!(ch, '│' | '└' | '├'))
+    line.trim_start()
+        .chars()
+        .next()
+        .filter(|ch| matches!(ch, '│' | '└' | '├'))
 }
 
 fn unwrap_ran_transcript_shape(raw: &str) -> Option<String> {

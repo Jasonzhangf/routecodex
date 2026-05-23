@@ -23,7 +23,8 @@ describe('route-aware responses continuation', () => {
       sessionId: 'sess-route-aware-1',
       routeHint: 'tools',
       payload: {
-        model: 'gpt-5.3-codex'
+        model: 'gpt-5.3-codex',
+        tools: [{ type: 'function', function: { name: 'exec_command' } }]
       },
       context: {
         input: [
@@ -32,7 +33,8 @@ describe('route-aware responses continuation', () => {
             role: 'user',
             content: [{ type: 'input_text', text: 'hello' }]
           }
-        ]
+        ],
+        toolsRaw: [{ type: 'function', function: { name: 'exec_command' } }]
       }
     });
 
@@ -98,6 +100,9 @@ describe('route-aware responses continuation', () => {
       routeHint: 'thinking',
       restored: true
     });
+    expect((resolved as any).semantics?.responses?.resume?.restoredTools).toEqual([
+      { type: 'function', function: { name: 'exec_command' } }
+    ]);
     expect((resolved as any).semantics?.responses?.resume?.deltaInput).toEqual([
       {
         type: 'message',
@@ -363,6 +368,120 @@ describe('route-aware responses continuation', () => {
         content: '/tmp'
       },
       { role: 'user', content: '继续' }
+    ]);
+  });
+
+  it('RED: restores responses previous_response_id when history continuation includes tool output and declared tools', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-route-aware-1',
+      sessionId: 'sess-route-aware-1',
+      routeHint: 'tools/gateway-priority-5520-tools',
+      payload: {
+        model: 'gpt-5.4',
+        tools: [{ type: 'function', function: { name: 'exec_command' } }]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'first coding request' }]
+          }
+        ],
+        toolsRaw: [{ type: 'function', function: { name: 'exec_command' } }]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: 'req-route-aware-1',
+      routeHint: 'coding/gateway-priority-5520-coding',
+      response: {
+        id: 'resp-route-aware-history-tool-1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_route_aware_history_tool_1',
+            call_id: 'call_route_aware_history_tool_1',
+            name: 'exec_command',
+            arguments: JSON.stringify({ cmd: 'pwd' })
+          }
+        ]
+      }
+    });
+
+    const resolved = resolveRouteAwareResponsesContinuation({
+      request: {
+        model: 'gpt-5.4',
+        messages: [{ role: 'user', content: 'continue coding' }],
+        parameters: {},
+        metadata: {}
+      } as any,
+      rawRequest: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'first coding request' }]
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_route_aware_history_tool_1',
+            output: '/Users/fanzhang/Documents/github/routecodex'
+          },
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'continue coding' }]
+          }
+        ]
+      } as any,
+      normalizedMetadata: {
+        sessionId: 'sess-route-aware-1'
+      },
+      requestId: 'req-route-aware-2',
+      entryProtocol: 'openai-responses',
+      outboundProtocol: 'openai-responses'
+    });
+
+    expect((resolved as any).semantics?.responses?.resume).toMatchObject({
+      previousRequestId: 'req-route-aware-1',
+      restoredFromResponseId: 'resp-route-aware-history-tool-1',
+      routeHint: 'coding/gateway-priority-5520-coding',
+      restored: true
+    });
+    expect((resolved as any).semantics?.responses?.resume?.deltaInput).toEqual([
+      {
+        type: 'function_call_output',
+        call_id: 'call_route_aware_history_tool_1',
+        output: '/Users/fanzhang/Documents/github/routecodex'
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'continue coding' }]
+      }
+    ]);
+
+    const outbound = buildResponsesRequestFromChat(resolved as any, {
+      requestId: 'req-route-aware-2',
+      metadata: {}
+    });
+    expect((outbound.request as any).previous_response_id).toBe('resp-route-aware-history-tool-1');
+    expect((outbound.request as any).tools).toEqual([{ type: 'function', function: { name: 'exec_command' } }]);
+    expect((outbound.request as any).input).toEqual([
+      {
+        type: 'function_call_output',
+        call_id: 'call_route_aware_history_tool_1',
+        output: '/Users/fanzhang/Documents/github/routecodex'
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'continue coding' }]
+      }
     ]);
   });
 

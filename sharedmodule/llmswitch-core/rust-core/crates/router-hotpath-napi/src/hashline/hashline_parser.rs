@@ -24,17 +24,18 @@ fn parse_header(line: &str, src_line: u32) -> Result<HashlineOp, HashlineError> 
         "-" => OpKind::Delete,
         "=" => OpKind::Replace,
         _ => {
-            return Err(
-                HashlineError::new(
-                    HashlineErrorCode::ParseError,
-                    format!("unsupported hashline op `{}`", op_token),
-                )
-                .with_src_line(src_line),
+            return Err(HashlineError::new(
+                HashlineErrorCode::ParseError,
+                format!("unsupported hashline op `{}`", op_token),
             )
+            .with_src_line(src_line))
         }
     };
 
-    let line_num = parts.next().map(|raw| parse_u32(raw, src_line, "line number")).transpose()?;
+    let line_num = parts
+        .next()
+        .map(|raw| parse_u32(raw, src_line, "line number"))
+        .transpose()?;
     let anchor_bigram = match op {
         OpKind::Delete | OpKind::Replace => {
             let raw = parts.next().ok_or_else(|| {
@@ -54,13 +55,11 @@ fn parse_header(line: &str, src_line: u32) -> Result<HashlineOp, HashlineError> 
     };
 
     if parts.next().is_some() {
-        return Err(
-            HashlineError::new(
-                HashlineErrorCode::ParseError,
-                "phase1 hashline parser only supports op + line_num + anchor_bigram",
-            )
-            .with_src_line(src_line),
-        );
+        return Err(HashlineError::new(
+            HashlineErrorCode::ParseError,
+            "phase1 hashline parser only supports op + line_num + anchor_bigram",
+        )
+        .with_src_line(src_line));
     }
 
     Ok(HashlineOp {
@@ -87,13 +86,11 @@ fn is_header_line(line: &str) -> bool {
 
 fn ensure_payload_requirements(op: &HashlineOp) -> Result<(), HashlineError> {
     match op.op {
-        OpKind::Insert | OpKind::Replace if op.payload.is_empty() => Err(
-            HashlineError::new(
-                HashlineErrorCode::ParseError,
-                "insert/replace op requires payload lines",
-            )
-            .with_src_line(op.src_line),
-        ),
+        OpKind::Insert | OpKind::Replace if op.payload.is_empty() => Err(HashlineError::new(
+            HashlineErrorCode::ParseError,
+            "insert/replace op requires payload lines",
+        )
+        .with_src_line(op.src_line)),
         _ => Ok(()),
     }
 }
@@ -137,13 +134,11 @@ pub fn parse_hashline_ops(patch_body: &str) -> Result<Vec<HashlineOp>, HashlineE
         match ops[op_idx].op {
             OpKind::Insert | OpKind::Replace => ops[op_idx].payload.push(raw_line.to_string()),
             _ => {
-                return Err(
-                    HashlineError::new(
-                        HashlineErrorCode::ParseError,
-                        "only insert/replace ops may carry payload lines",
-                    )
-                    .with_src_line(src_line),
+                return Err(HashlineError::new(
+                    HashlineErrorCode::ParseError,
+                    "only insert/replace ops may carry payload lines",
                 )
+                .with_src_line(src_line))
             }
         }
     }

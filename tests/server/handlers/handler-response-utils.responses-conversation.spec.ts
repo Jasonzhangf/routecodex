@@ -6,6 +6,7 @@ const recordResponsesResponseForRequestMock = jest.fn(async () => undefined);
 const convertResponseToJsonToSseMock = jest.fn(async () => Readable.from(['event: response.completed\n', 'data: {}\n\n']));
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+  captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
   createResponsesJsonToSseConverter: jest.fn(async () => ({
     convertResponseToJsonToSse: convertResponseToJsonToSseMock
   })),
@@ -55,7 +56,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
     recordResponsesResponseForRequestMock.mockImplementationOnce(async () => { throw new Error('missing request context'); });
 
     const res = new MockResponse();
-    sendPipelineResponse(
+    await sendPipelineResponse(
       res as any,
       {
         status: 200,
@@ -83,18 +84,16 @@ describe('sendPipelineResponse responses conversation recording', () => {
 
     expect(res.statusCode).toBe(200);
     expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toEqual([
-      'resp_response_id_only_fallback',
-      'openai-responses-router-missing-context',
-      'openai-responses-provider-missing-context'
+      'resp_response_id_only_fallback'
     ]);
   });
 
-  it('RED: records requires_action under provider timing request id, not only outer router request id', async () => {
+  it('records requires_action only under the client-visible response id', async () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     recordResponsesResponseForRequestMock.mockClear();
 
     const res = new MockResponse();
-    sendPipelineResponse(
+    await sendPipelineResponse(
       res as any,
       {
         status: 200,
@@ -140,9 +139,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
 
     expect(res.statusCode).toBe(200);
     expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toEqual([
-      'resp_windsurf_native_tool_1',
-      'openai-responses-windsurf.ws-pro-4-gpt-5.4-medium-20260523T053402638-222073-757',
-      'openai-responses-router-gpt-5.4-medium-20260523T053402638-222073-757'
+      'resp_windsurf_native_tool_1'
     ]);
   });
 
@@ -151,7 +148,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
     recordResponsesResponseForRequestMock.mockClear();
 
     const res = new MockResponse();
-    sendPipelineResponse(
+    await sendPipelineResponse(
       res as any,
       {
         status: 200,
@@ -202,7 +199,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
     convertResponseToJsonToSseMock.mockClear();
 
     const res = new MockResponse();
-    sendPipelineResponse(
+    await sendPipelineResponse(
       res as any,
       {
         status: 200,
@@ -250,9 +247,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
     expect(res.statusCode).toBe(200);
     expect(convertResponseToJsonToSseMock).toHaveBeenCalledTimes(1);
     expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toEqual([
-      'resp_windsurf_streamed_tool_100318513',
-      'openai-responses-router-gpt-5.3-codex-20260523T100318513-222172-856',
-      'openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T100318513-222172-856'
+      'resp_windsurf_streamed_tool_100318513'
     ]);
   });
 

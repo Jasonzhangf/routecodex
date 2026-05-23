@@ -202,7 +202,10 @@ fn apply_target_metadata(
     write_if_missing_non_empty(normalized_metadata, "clientModelId", original_model_trimmed);
 }
 
-fn apply_route_params(normalized_metadata: &mut Map<String, Value>, target_map: &Map<String, Value>) {
+fn apply_route_params(
+    normalized_metadata: &mut Map<String, Value>,
+    target_map: &Map<String, Value>,
+) {
     let Some(route_params) = target_map.get("routeParams").and_then(Value::as_object) else {
         return;
     };
@@ -224,9 +227,15 @@ fn apply_route_params(normalized_metadata: &mut Map<String, Value>, target_map: 
                 Value::String(existing_effort.to_string()),
             );
         }
-        normalized_metadata.insert("reasoning_effort".to_string(), Value::String(value.to_string()));
+        normalized_metadata.insert(
+            "reasoning_effort".to_string(),
+            Value::String(value.to_string()),
+        );
     }
-    if let Some(value) = route_params.get("thinking_enabled").and_then(Value::as_bool) {
+    if let Some(value) = route_params
+        .get("thinking_enabled")
+        .and_then(Value::as_bool)
+    {
         normalized_metadata.insert("thinking_enabled".to_string(), Value::Bool(value));
     }
     if let Some(value) = route_params.get("thinking") {

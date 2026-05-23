@@ -98,7 +98,7 @@ describe('tool guidance for nested apply_patch prevention', () => {
     expect(patchDesc).toBe('');
   });
 
-  it('does not rewrite apply_patch into hashline mode at generic guidance layer', () => {
+  it('does not rewrite apply_patch into internal line-edit mode at generic guidance layer', () => {
     const tools: any[] = [
       {
         type: 'function',

@@ -103,10 +103,7 @@ pub fn affects_health(classification: FailureClassification) -> bool {
     matches!(classification, FailureClassification::Unrecoverable)
 }
 
-pub fn is_blocking_recoverable(
-    classification: FailureClassification,
-    stage: Option<&str>,
-) -> bool {
+pub fn is_blocking_recoverable(classification: FailureClassification, stage: Option<&str>) -> bool {
     if classification == FailureClassification::Recoverable {
         if stage == Some("host.response_contract") {
             return false;
@@ -148,7 +145,10 @@ mod tests {
     #[test]
     fn test_unrecoverable_codes() {
         let classification = classify_failure(Some(401), Some("INVALID_API_KEY"), None, false);
-        assert!(matches!(classification, FailureClassification::Unrecoverable));
+        assert!(matches!(
+            classification,
+            FailureClassification::Unrecoverable
+        ));
     }
 
     #[test]
@@ -160,7 +160,13 @@ mod tests {
     #[test]
     fn test_blocking_recoverable() {
         let classification = FailureClassification::Recoverable;
-        assert!(is_blocking_recoverable(classification, Some("provider.send")));
-        assert!(!is_blocking_recoverable(classification, Some("host.response_contract")));
+        assert!(is_blocking_recoverable(
+            classification,
+            Some("provider.send")
+        ));
+        assert!(!is_blocking_recoverable(
+            classification,
+            Some("host.response_contract")
+        ));
     }
 }

@@ -17,14 +17,12 @@ pub(crate) use direct_model::{
     parse_direct_provider_model, select_direct_provider_model,
     should_fallback_direct_model_for_media,
 };
+pub(crate) use key_utils::{extract_key_alias, extract_key_index, extract_provider_id};
 #[allow(unused_imports)]
 pub(crate) use metadata::{
     build_scoped_session_key, extract_excluded_provider_keys, extract_runtime_now_ms,
     is_server_tool_followup_request, resolve_session_scope, resolve_sticky_key,
     resolve_stop_message_scope,
-};
-pub(crate) use key_utils::{
-    extract_key_alias, extract_key_index, extract_provider_id,
 };
 pub(crate) use selection::{
     filter_candidates_by_state, resolve_instruction_process_mode_for_selection,

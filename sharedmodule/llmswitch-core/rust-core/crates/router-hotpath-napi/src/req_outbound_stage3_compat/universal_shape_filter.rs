@@ -986,7 +986,9 @@ mod tests {
         });
 
         let parsed = apply_request_filter(payload, config);
-        let content = parsed["messages"][0]["content"].as_str().expect("tool content");
+        let content = parsed["messages"][0]["content"]
+            .as_str()
+            .expect("tool content");
         assert!(content.contains("File \"<stdin>\", line 21"));
         assert!(content.contains("SyntaxError: invalid syntax"));
         assert!(!content.contains("│····"));

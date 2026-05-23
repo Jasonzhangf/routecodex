@@ -229,8 +229,13 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
             .and_then(Value::as_str)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        let reasoning_obj = build_message_reasoning_value(&summary_segments, &content_segments, encrypted.as_deref());
-        let reasoning_text = project_message_reasoning_text(reasoning_obj.as_ref().unwrap_or(&Value::Null));
+        let reasoning_obj = build_message_reasoning_value(
+            &summary_segments,
+            &content_segments,
+            encrypted.as_deref(),
+        );
+        let reasoning_text =
+            project_message_reasoning_text(reasoning_obj.as_ref().unwrap_or(&Value::Null));
         let mut out = Map::new();
         out.insert("type".to_string(), Value::String("message".to_string()));
         out.insert("role".to_string(), Value::String(role.clone()));
@@ -511,7 +516,10 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
         base_payload.insert("routeHint".to_string(), Value::String(route_hint));
     }
 
-    let route_hint_value = base_payload.get("routeHint").cloned().unwrap_or(Value::Null);
+    let route_hint_value = base_payload
+        .get("routeHint")
+        .cloned()
+        .unwrap_or(Value::Null);
 
     serde_json::json!({
         "basePayload": Value::Object(base_payload),
@@ -672,6 +680,52 @@ fn find_exact_prefix_delta(prefix: &[Value], incoming: &[Value]) -> Option<Vec<V
     Some(incoming[prefix.len()..].to_vec())
 }
 
+fn find_prefix_delta_allowing_pending_tool_call_replay(
+    prefix: &[Value],
+    incoming: &[Value],
+) -> Option<Vec<Value>> {
+    if prefix.is_empty() || incoming.is_empty() {
+        return None;
+    }
+    let mut incoming_index = 0usize;
+    for (prefix_index, expected) in prefix.iter().enumerate() {
+        let candidate = incoming.get(incoming_index)?;
+        if !values_equal(expected, candidate) {
+            let expected_row = expected.as_object()?;
+            let expected_type = expected_row
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            if expected_type != "function_call" || prefix_index + 1 != prefix.len() {
+                return None;
+            }
+            let pending_call_id = read_bridge_function_call_id(expected_row)?;
+            let candidate_row = candidate.as_object()?;
+            let candidate_type = candidate_row
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            if !is_bridge_tool_output_item_type(candidate_type.as_str()) {
+                return None;
+            }
+            let candidate_call_id = read_bridge_function_call_id(candidate_row)?;
+            if candidate_call_id != pending_call_id {
+                return None;
+            }
+            return Some(incoming[incoming_index..].to_vec());
+        }
+        incoming_index += 1;
+    }
+    if incoming.len() <= incoming_index {
+        return None;
+    }
+    Some(incoming[incoming_index..].to_vec())
+}
+
 fn count_common_leading_items(left: &[Value], right: &[Value]) -> usize {
     let mut count = 0usize;
     let max = left.len().min(right.len());
@@ -730,7 +784,12 @@ fn collect_pending_bridge_function_call_ids(input_items: &[Value]) -> Vec<String
         let Some(row) = entry.as_object() else {
             continue;
         };
-        let item_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim().to_ascii_lowercase();
+        let item_type = row
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
         if item_type == "function_call" {
             if let Some(call_id) = read_bridge_function_call_id(row) {
                 if !pending.iter().any(|existing| existing == &call_id) {
@@ -752,6 +811,19 @@ fn collect_pending_bridge_function_call_ids(input_items: &[Value]) -> Vec<String
     pending
 }
 
+fn read_released_pending_tool_call_ids(entry_obj: &Map<String, Value>) -> Vec<String> {
+    entry_obj
+        .get("releasedPendingToolCallIds")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default()
+}
+
 fn leading_input_consumes_pending_tool_calls(
     incoming_items: &[Value],
     pending_call_ids: &[String],
@@ -764,7 +836,12 @@ fn leading_input_consumes_pending_tool_calls(
         let Some(row) = entry.as_object() else {
             return false;
         };
-        let item_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim().to_ascii_lowercase();
+        let item_type = row
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
         if !is_bridge_tool_output_item_type(item_type.as_str()) {
             break;
         }
@@ -780,6 +857,21 @@ fn leading_input_consumes_pending_tool_calls(
         }
     }
     remaining.is_empty()
+}
+
+fn find_delta_from_released_pending_tool_outputs(
+    incoming_items: &[Value],
+    pending_call_ids: &[String],
+) -> Option<Vec<Value>> {
+    if pending_call_ids.is_empty() {
+        return Some(incoming_items.to_vec());
+    }
+    for start_index in 0..incoming_items.len() {
+        if leading_input_consumes_pending_tool_calls(&incoming_items[start_index..], pending_call_ids) {
+            return Some(incoming_items[start_index..].to_vec());
+        }
+    }
+    None
 }
 
 fn restore_responses_continuation_payload(
@@ -801,8 +893,25 @@ fn restore_responses_continuation_payload(
     };
     let submitted_details = collect_submitted_tool_output_details(&input_items);
     let prefix = clone_array(entry_obj.get("input"));
-    let Some(delta_input) = find_exact_prefix_delta(&prefix, &input_items) else {
-        return Value::Null;
+    let delta_input = if prefix.is_empty() {
+        let released_pending_call_ids = read_released_pending_tool_call_ids(&entry_obj);
+        if !released_pending_call_ids.is_empty() {
+            let Some(delta_input) =
+                find_delta_from_released_pending_tool_outputs(&input_items, &released_pending_call_ids)
+            else {
+                return Value::Null;
+            };
+            delta_input
+        } else {
+            input_items.clone()
+        }
+    } else {
+        let Some(delta_input) = find_exact_prefix_delta(&prefix, &input_items)
+            .or_else(|| find_prefix_delta_allowing_pending_tool_call_replay(&prefix, &input_items))
+        else {
+            return Value::Null;
+        };
+        delta_input
     };
 
     let mut payload = pick_responses_persisted_fields(&Value::Object(incoming_obj.clone()))
@@ -836,6 +945,12 @@ fn restore_responses_continuation_payload(
         Value::String(response_id.clone()),
     );
 
+    let restored_tools = entry_obj
+        .get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
     serde_json::json!({
         "payload": Value::Object(payload),
         "meta": {
@@ -845,6 +960,7 @@ fn restore_responses_continuation_payload(
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "deltaInputItems": delta_input.len(),
+            "restoredTools": restored_tools,
             "toolOutputsDetailed": submitted_details,
             "restored": true,
         }
@@ -1176,14 +1292,18 @@ mod tests {
             Some("session:sess-1"),
         );
 
-        let payload = materialized.get("payload").and_then(Value::as_object).unwrap();
+        let payload = materialized
+            .get("payload")
+            .and_then(Value::as_object)
+            .unwrap();
         let input = payload.get("input").and_then(Value::as_array).unwrap();
         assert_eq!(input.len(), 3);
         assert_eq!(input[2]["content"][0]["text"].as_str(), Some("next"));
     }
 
     #[test]
-    fn does_not_materialize_plain_continuation_when_prefix_has_pending_tool_call_without_leading_output() {
+    fn does_not_materialize_plain_continuation_when_prefix_has_pending_tool_call_without_leading_output(
+    ) {
         let materialized = materialize_responses_continuation_payload(
             &json!({
                 "requestId": "req_prev",
@@ -1230,7 +1350,10 @@ mod tests {
             Some("session:sess-1"),
         );
 
-        let payload = materialized.get("payload").and_then(Value::as_object).unwrap();
+        let payload = materialized
+            .get("payload")
+            .and_then(Value::as_object)
+            .unwrap();
         let input = payload.get("input").and_then(Value::as_array).unwrap();
         assert_eq!(input.len(), 4);
         assert_eq!(input[1]["type"].as_str(), Some("function_call"));
@@ -1340,17 +1463,34 @@ mod tests {
             }]
         });
         let items = convert_responses_output_to_input_items(&response)
-            .as_array().cloned().unwrap_or_default();
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         assert_eq!(items.len(), 1);
         let item = &items[0];
         // P1 fix: reasoning at top level for collect_message_reasoning_state to read
-        assert!(item.get("reasoning").is_some(), "reasoning object must be at top level");
+        assert!(
+            item.get("reasoning").is_some(),
+            "reasoning object must be at top level"
+        );
         let reasoning = item.get("reasoning").unwrap().as_object().unwrap();
-        assert!(reasoning.get("summary").is_some(), "summary must be in reasoning object");
-        assert!(reasoning.get("content").is_some(), "content must be in reasoning object");
-        assert_eq!(reasoning.get("encrypted_content").and_then(|v| v.as_str()), Some("opaque-sig-abc"));
+        assert!(
+            reasoning.get("summary").is_some(),
+            "summary must be in reasoning object"
+        );
+        assert!(
+            reasoning.get("content").is_some(),
+            "content must be in reasoning object"
+        );
+        assert_eq!(
+            reasoning.get("encrypted_content").and_then(|v| v.as_str()),
+            Some("opaque-sig-abc")
+        );
         // reasoning_content top-level also present for downstream consumers
-        assert!(item.get("reasoning_content").is_some(), "reasoning_content text must be at top level");
+        assert!(
+            item.get("reasoning_content").is_some(),
+            "reasoning_content text must be at top level"
+        );
     }
 
     // P1: encrypted_content in reasoning item is preserved in top-level reasoning object
@@ -1365,12 +1505,20 @@ mod tests {
             }]
         });
         let items = convert_responses_output_to_input_items(&response)
-            .as_array().cloned().unwrap_or_default();
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         assert_eq!(items.len(), 1);
         let item = &items[0];
         // encrypted_content must survive through the conversion
-        assert!(item.get("reasoning").is_some(), "reasoning object must exist");
+        assert!(
+            item.get("reasoning").is_some(),
+            "reasoning object must exist"
+        );
         let reasoning = item.get("reasoning").unwrap().as_object().unwrap();
-        assert_eq!(reasoning.get("encrypted_content").and_then(|v| v.as_str()), Some("encrypted-opaque-value"));
+        assert_eq!(
+            reasoning.get("encrypted_content").and_then(|v| v.as_str()),
+            Some("encrypted-opaque-value")
+        );
     }
 }

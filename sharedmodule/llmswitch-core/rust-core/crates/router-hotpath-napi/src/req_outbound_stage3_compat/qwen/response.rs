@@ -1,5 +1,5 @@
 use regex::Regex;
-use serde_json::{Map, Number, Value, json};
+use serde_json::{json, Map, Number, Value};
 
 fn number_or_default(value: Option<&Value>, fallback: i64) -> Value {
     if let Some(raw) = value {
@@ -71,16 +71,21 @@ fn transform_qwen_tool_calls(tool_calls: Option<&Value>) -> Vec<Value> {
         .collect::<Vec<Value>>()
 }
 
-
 fn read_text_from_content_part(part: &Value) -> Option<String> {
     match part {
         Value::String(raw) => {
             let trimmed = raw.trim();
-            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
         }
         Value::Object(obj) => {
             for key in ["thinking", "text", "content", "value"] {
-                let Some(raw) = obj.get(key).and_then(Value::as_str) else { continue; };
+                let Some(raw) = obj.get(key).and_then(Value::as_str) else {
+                    continue;
+                };
                 let trimmed = raw.trim();
                 if !trimmed.is_empty() {
                     return Some(trimmed.to_string());
@@ -113,7 +118,9 @@ fn collect_message_text_segments(message_obj: &Map<String, Value>) -> Vec<String
         }
     }
     for key in ["reasoning_content", "reasoning"] {
-        let Some(raw) = message_obj.get(key).and_then(Value::as_str) else { continue; };
+        let Some(raw) = message_obj.get(key).and_then(Value::as_str) else {
+            continue;
+        };
         let trimmed = raw.trim();
         if !trimmed.is_empty() {
             segments.push(trimmed.to_string());
@@ -149,13 +156,19 @@ fn normalize_qwen_marker_tokens(raw: &str) -> String {
         text = re.replace_all(&text, "tool_call_end|>").to_string();
     }
     if let Ok(re) = Regex::new(r"(?i)tool_calls_section_begin\s*\|>") {
-        text = re.replace_all(&text, "tool_calls_section_begin|>").to_string();
+        text = re
+            .replace_all(&text, "tool_calls_section_begin|>")
+            .to_string();
     }
     if let Ok(re) = Regex::new(r"(?i)tool_calls_section_end\s*\|>") {
-        text = re.replace_all(&text, "tool_calls_section_end|>").to_string();
+        text = re
+            .replace_all(&text, "tool_calls_section_end|>")
+            .to_string();
     }
     if let Ok(re) = Regex::new(r"(?i)tool_call_argument_begin\s*\|>") {
-        text = re.replace_all(&text, "tool_call_argument_begin|>").to_string();
+        text = re
+            .replace_all(&text, "tool_call_argument_begin|>")
+            .to_string();
     }
     text
 }
@@ -219,7 +232,11 @@ fn parse_qwen_marker_tool_calls_from_text(raw: &str) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     let now_ms = chrono::Utc::now().timestamp_millis();
     for (index, caps) in call_re.captures_iter(&normalized).enumerate() {
-        let Some(name) = caps.get(1).map(|m| m.as_str().trim()).filter(|v| !v.is_empty()) else {
+        let Some(name) = caps
+            .get(1)
+            .map(|m| m.as_str().trim())
+            .filter(|v| !v.is_empty())
+        else {
             continue;
         };
         let args_raw = caps.get(3).map(|m| m.as_str().trim()).unwrap_or("{}");
@@ -257,7 +274,10 @@ fn harvest_qwen_marker_tool_calls(message_obj: &Map<String, Value>) -> Vec<Value
     out
 }
 
-fn pick_qwen_message_content(message_obj: &Map<String, Value>, harvested_tool_calls: &[Value]) -> String {
+fn pick_qwen_message_content(
+    message_obj: &Map<String, Value>,
+    harvested_tool_calls: &[Value],
+) -> String {
     let Some(content) = message_obj.get("content") else {
         return String::new();
     };
@@ -273,7 +293,11 @@ fn pick_qwen_message_content(message_obj: &Map<String, Value>, harvested_tool_ca
             let mut texts: Vec<String> = Vec::new();
             for part in parts {
                 if let Some(text) = read_text_from_content_part(part) {
-                    let next = if harvested_tool_calls.is_empty() { text } else { strip_qwen_markers_from_text(&text) };
+                    let next = if harvested_tool_calls.is_empty() {
+                        text
+                    } else {
+                        strip_qwen_markers_from_text(&text)
+                    };
                     if !next.trim().is_empty() {
                         texts.push(next.trim().to_string());
                     }
@@ -285,16 +309,27 @@ fn pick_qwen_message_content(message_obj: &Map<String, Value>, harvested_tool_ca
     }
 }
 
-fn pick_qwen_reasoning_content(message_obj: &Map<String, Value>, harvested_tool_calls: &[Value]) -> Option<String> {
+fn pick_qwen_reasoning_content(
+    message_obj: &Map<String, Value>,
+    harvested_tool_calls: &[Value],
+) -> Option<String> {
     let direct = message_obj
         .get("reasoning_content")
         .and_then(Value::as_str)
         .or_else(|| message_obj.get("reasoning").and_then(Value::as_str))
         .map(|v| v.to_string());
     let from_reasoning_content = if let Some(raw) = direct {
-        let next = if harvested_tool_calls.is_empty() { raw } else { strip_qwen_markers_from_text(&raw) };
+        let next = if harvested_tool_calls.is_empty() {
+            raw
+        } else {
+            strip_qwen_markers_from_text(&raw)
+        };
         let trimmed = next.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     } else {
         None
     };
@@ -310,14 +345,22 @@ fn pick_qwen_reasoning_content(message_obj: &Map<String, Value>, harvested_tool_
     let mut texts: Vec<String> = Vec::new();
     for part in parts {
         if let Some(text) = read_text_from_content_part(part) {
-            let next = if harvested_tool_calls.is_empty() { text } else { strip_qwen_markers_from_text(&text) };
+            let next = if harvested_tool_calls.is_empty() {
+                text
+            } else {
+                strip_qwen_markers_from_text(&text)
+            };
             let trimmed = next.trim();
             if !trimmed.is_empty() {
                 texts.push(trimmed.to_string());
             }
         }
     }
-    if texts.is_empty() { None } else { Some(texts.join("\n")) }
+    if texts.is_empty() {
+        None
+    } else {
+        Some(texts.join("\n"))
+    }
 }
 
 fn transform_qwen_choices(raw_choices: Option<&Value>) -> Vec<Value> {

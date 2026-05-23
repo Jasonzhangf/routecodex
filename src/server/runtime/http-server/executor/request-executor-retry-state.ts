@@ -88,7 +88,7 @@ export function consumeRecoverableErrorBackoffMs(
   return computeProviderFailureBackoffDelayMs({
     scope: 'recoverable',
     statusCode: args.statusCode,
-    consecutive: consecutive + 1
+    consecutive
   });
 }
 
@@ -156,7 +156,7 @@ export function consumeProviderTransportBackoffMs(
     scope: 'provider',
     error: args.error,
     statusCode: args.statusCode,
-    consecutive: consecutive + 1
+    consecutive
   });
   providerTransportBackoffState.set(key, {
     consecutive,
@@ -182,6 +182,31 @@ export function peekProviderTransportBackoffWaitMs(key: string): number {
 export function clearProviderTransportBackoff(key?: string): void {
   if (key) {
     providerTransportBackoffState.delete(key);
+  }
+}
+
+export function clearRecoverableErrorBackoff(key?: string): void {
+  if (key) {
+    recoverableErrorBackoffState.delete(key);
+    return;
+  }
+  recoverableErrorBackoffState.clear();
+}
+
+export function clearRecoverableErrorBackoffForProvider(args: {
+  providerKey?: string;
+  runtimeKey?: string;
+}): void {
+  const prefixes = [args.providerKey, args.runtimeKey]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => `provider:${value.trim()}|`);
+  if (prefixes.length === 0) {
+    return;
+  }
+  for (const key of recoverableErrorBackoffState.keys()) {
+    if (prefixes.some((prefix) => key.startsWith(prefix))) {
+      recoverableErrorBackoffState.delete(key);
+    }
   }
 }
 

@@ -208,6 +208,15 @@ fn builds_bridge_history_for_tool_turn() {
             .and_then(|v| v.as_str())
             == Some("function_call_output")
     }));
+    let paired = output.tool_history.expect("tool history schema");
+    assert_eq!(paired.version, 1);
+    assert_eq!(paired.pairs.len(), 1);
+    let pair = &paired.pairs[0];
+    assert_eq!(pair.call_id, "call_1");
+    assert_eq!(pair.name, "read");
+    assert_eq!(pair.status, "completed");
+    assert_eq!(pair.arguments, json!({"path":"a.txt"}));
+    assert_eq!(pair.output, "ok");
 }
 
 #[test]
@@ -429,6 +438,24 @@ fn resolves_responses_bridge_tools_does_not_inject_builtin_web_search_without_we
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0]["function"]["name"], "exec_command");
     assert!(!merged.iter().any(|tool| tool["type"] == "web_search"));
+}
+
+#[test]
+fn resolves_responses_bridge_tools_preserves_resume_original_tools_without_chat_tools() {
+    let output = resolve_responses_bridge_tools(ResolveResponsesBridgeToolsInput {
+        original_tools: Some(vec![json!({
+            "type": "function",
+            "function": { "name": "exec_command" }
+        })]),
+        chat_tools: Some(vec![]),
+        allow_builtin_web_search: Some(false),
+        has_server_side_web_search: Some(true),
+        passthrough_keys: None,
+        request: None,
+    });
+    let merged = output.merged_tools.unwrap();
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0]["function"]["name"], "exec_command");
 }
 
 #[test]
@@ -1072,7 +1099,10 @@ fn applies_bridge_capture_tool_results_strips_exec_transcript_wrapper() {
     });
     let captured = output.captured_tool_results.unwrap();
     let first = captured[0].as_object().cloned().unwrap();
-    assert_eq!(first.get("output").and_then(Value::as_str), Some("alpha\nbeta"));
+    assert_eq!(
+        first.get("output").and_then(Value::as_str),
+        Some("alpha\nbeta")
+    );
     let mirrored = output
         .metadata
         .unwrap()
@@ -1864,10 +1894,16 @@ fn convert_bridge_input_responses_reasoning_only_message_restores_assistant_reas
         Some("The user wants me to call echo_json with {\"message\":\"ping\"} and not output a regular answer.")
     );
     let tool_call = messages[2].as_object().unwrap();
-    assert_eq!(tool_call.get("role").and_then(Value::as_str), Some("assistant"));
+    assert_eq!(
+        tool_call.get("role").and_then(Value::as_str),
+        Some("assistant")
+    );
     assert!(tool_call.get("tool_calls").is_some());
     let tool_result = messages[3].as_object().unwrap();
-    assert_eq!(tool_result.get("role").and_then(Value::as_str), Some("tool"));
+    assert_eq!(
+        tool_result.get("role").and_then(Value::as_str),
+        Some("tool")
+    );
     assert_eq!(
         tool_result.get("tool_call_id").and_then(Value::as_str),
         Some("call_c367dbc1c78542d5ad004fcb")

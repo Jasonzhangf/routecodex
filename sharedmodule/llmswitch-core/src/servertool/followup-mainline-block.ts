@@ -22,6 +22,8 @@ import {
   shouldShortCircuitRequiresActionFollowup
 } from './finalize-followup-block.js';
 import { buildServerToolLoopState } from './loop-state-block.js';
+import { inspectStopGatewaySignal } from './stop-gateway-context.js';
+import { applyStopMessageFinishReasonBudget } from './stop-message-counter.js';
 import {
   createClientDisconnectWatcher,
   createServerToolTimeoutError,
@@ -105,6 +107,20 @@ function disableStopMessageAfterFailedFollowup(args: {
   } catch (error) {
     args.logNonBlocking('disable_stop_message_after_failed_followup', error);
   }
+}
+
+function resetStopMessageBudgetAfterNonStopFollowup(args: {
+  adapterContext: AdapterContext;
+  followupBody: JsonObject;
+}): void {
+  const stopSignal = inspectStopGatewaySignal(args.followupBody);
+  if (!stopSignal.observed || stopSignal.eligible) {
+    return;
+  }
+  applyStopMessageFinishReasonBudget({
+    payload: args.followupBody,
+    adapterContext: args.adapterContext
+  });
 }
 
 export async function runFollowupMainline(args: {
@@ -399,6 +415,10 @@ export async function runFollowupMainline(args: {
     return reenterResult.result;
   }
   const followupBody = reenterResult.followupBody;
+  resetStopMessageBudgetAfterNonStopFollowup({
+    adapterContext: args.adapterContext,
+    followupBody
+  });
 
   if (shouldShortCircuitRequiresActionFollowup({
     flowId: args.execution.flowId,

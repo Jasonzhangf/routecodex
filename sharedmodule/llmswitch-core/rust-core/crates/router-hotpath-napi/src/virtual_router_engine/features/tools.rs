@@ -227,7 +227,8 @@ pub(super) fn detect_web_search_tool_declared(tools: Option<&Value>) -> bool {
             return true;
         }
         // Bridge injects {type: "web_search"} after stripping server-side web_search function
-        if raw_type == "web_search" || raw_type == "websearch" || raw_type.starts_with("web_search") {
+        if raw_type == "web_search" || raw_type == "websearch" || raw_type.starts_with("web_search")
+        {
             return true;
         }
         // Match by function name (Chat Completions style)
@@ -324,10 +325,7 @@ fn classify_tool_call(call: &Value) -> Option<ToolClassification> {
         .get("function")
         .and_then(|v| v.get("arguments"))
         .or_else(|| call.get("arguments"));
-    if should_skip_malformed_tool_call_for_routing(
-        function_name.as_str(),
-        raw_arguments,
-    ) {
+    if should_skip_malformed_tool_call_for_routing(function_name.as_str(), raw_arguments) {
         return None;
     }
     let args = parse_tool_arguments(raw_arguments);
@@ -448,15 +446,13 @@ fn looks_like_valid_write_stdin_arguments_for_routing(raw_arguments: Option<&Val
             false
         }
         Value::Object(map) => {
-            let has_session = map
-                .get("session_id")
-                .and_then(|v| v.as_i64())
-                .is_some()
-                || map
-                    .get("sessionId")
-                    .and_then(|v| v.as_i64())
-                    .is_some();
-            let chars = map.get("chars").and_then(|v| v.as_str()).unwrap_or("").trim();
+            let has_session = map.get("session_id").and_then(|v| v.as_i64()).is_some()
+                || map.get("sessionId").and_then(|v| v.as_i64()).is_some();
+            let chars = map
+                .get("chars")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
             has_session && !chars.is_empty()
         }
         _ => false,
@@ -831,7 +827,10 @@ fn shell_script_looks_like_read(command: &str) -> bool {
             || command.contains("console.log(")
             || command.contains("process.stdout.write(");
     }
-    if contains_command(command, "perl") || contains_command(command, "ruby") || contains_command(command, "php") {
+    if contains_command(command, "perl")
+        || contains_command(command, "ruby")
+        || contains_command(command, "php")
+    {
         return command.contains("readfile(")
             || command.contains("fileread(")
             || command.contains("puts file.read")

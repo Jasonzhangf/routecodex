@@ -74,6 +74,22 @@ function resolveProviderIdsFromProviderPorts(userConfig: UnknownRecord): Set<str
   return ids;
 }
 
+
+function extractApplyPatchConfigFromUserConfig(userConfig: UnknownRecord): UnknownRecord | undefined {
+  const candidates: unknown[] = [];
+  const vrNode = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : undefined;
+  const topServertool = isRecord(userConfig.servertool) ? (userConfig.servertool as UnknownRecord) : undefined;
+  const vrServertool = vrNode && isRecord(vrNode.servertool) ? (vrNode.servertool as UnknownRecord) : undefined;
+
+  if (topServertool && isRecord(topServertool.applyPatch)) candidates.push(topServertool.applyPatch);
+  if (topServertool && isRecord(topServertool.apply_patch)) candidates.push(topServertool.apply_patch);
+  if (vrServertool && isRecord(vrServertool.applyPatch)) candidates.push(vrServertool.applyPatch);
+  if (vrServertool && isRecord(vrServertool.apply_patch)) candidates.push(vrServertool.apply_patch);
+
+  const first = candidates[0];
+  return isRecord(first) ? { ...(first as UnknownRecord) } : undefined;
+}
+
 function withRoutePolicyGroupTag(routeEntry: unknown, groupId: string): unknown {
   if (!routeEntry || typeof routeEntry !== 'object') {
     return routeEntry;
@@ -156,9 +172,11 @@ export async function buildVirtualRouterInputV2(
     providers[providerId] = cfg.provider;
   }
 
+  const applyPatch = extractApplyPatchConfigFromUserConfig(userConfig);
   const input: VirtualRouterInput = {
     providers,
-    routing
+    routing,
+    ...(applyPatch ? { applyPatch } : {})
   };
   return input;
 }

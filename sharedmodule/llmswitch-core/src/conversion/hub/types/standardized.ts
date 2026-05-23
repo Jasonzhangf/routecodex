@@ -94,6 +94,13 @@ export interface ProcessedRequest extends StandardizedRequest {
   };
   processingMetadata: {
     toolCalls?: ToolCallResult[];
+    heartbeatDirective?: {
+      action: 'on' | 'off';
+      intervalMs?: number;
+      tmuxSessionId?: string;
+      workdir?: string;
+      contentChanged?: boolean;
+    };
     streaming?: {
       enabled: boolean;
       chunkCount?: number;

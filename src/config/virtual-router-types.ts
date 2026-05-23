@@ -19,6 +19,7 @@ export type VirtualRouterProvidersConfig = Record<string, UnknownRecord>;
 export interface VirtualRouterInput extends UnknownRecord {
   providers: VirtualRouterProvidersConfig;
   routing: VirtualRouterRoutingConfig;
+  applyPatch?: UnknownRecord;
 }
 
 /**

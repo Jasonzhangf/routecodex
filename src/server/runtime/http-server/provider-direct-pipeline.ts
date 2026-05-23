@@ -1,10 +1,9 @@
 /**
- * Provider Direct Pipeline — Bypass virtual router for provider-mode ports
+ * Provider Direct Pipeline — Bypass virtual router for provider-mode ports.
  *
- * Handles requests on ports with mode="provider":
- * - Direct:  same protocol, pass-through with snapshot hooks
- * - Relay:   different protocol, convert then forward
- * - Auto:    automatic resolution based on protocol match
+ * Contract: this path is same-protocol direct passthrough only. Cross-protocol
+ * relay is owned by the Hub Pipeline / chat process; do not add protocol or
+ * tool-shape rewrites here.
  */
 
 import type { PortConfig } from './port-config-types.js';
@@ -65,14 +64,13 @@ export async function executeProviderDirectPipeline(
     protocol: inboundProtocol,
   });
 
-  let payloadToSend = requestPayload;
   if (actualBehavior === 'relay') {
-    payloadToSend = await convertProtocolForRelay(
-      requestPayload,
-      inboundProtocol,
-      providerHandle.providerProtocol,
+    throw new Error(
+      `Provider mode relay must run through Hub Pipeline/chat process, not provider-direct: inbound=${inboundProtocol}, provider=${providerHandle.providerProtocol}`,
     );
   }
+
+  const payloadToSend = requestPayload;
   options.preparePayload?.(payloadToSend, {
     port: portConfig.port,
     providerKey: providerBinding,
@@ -97,78 +95,6 @@ export async function executeProviderDirectPipeline(
     inboundProtocol,
     providerProtocol: providerHandle.providerProtocol,
   };
-}
-
-async function convertProtocolForRelay(
-  payload: Record<string, unknown>,
-  inboundProtocol: ProviderProtocol,
-  providerProtocol: ProviderProtocol,
-): Promise<Record<string, unknown>> {
-  if (inboundProtocol === providerProtocol) {
-    return payload;
-  }
-  if (!isSupportedRelayPair(inboundProtocol, providerProtocol)) {
-    throw new Error(
-      `Provider mode relay only supports openai-chat <-> anthropic-messages today: inbound=${inboundProtocol}, provider=${providerProtocol}`,
-    );
-  }
-  return remapPayloadFields(payload, inboundProtocol, providerProtocol);
-}
-
-/**
- * Supported relay pairs for provider-direct pipeline.
- * Covers all 4 major protocol families. Unsupported pairs must fail-fast.
- */
-function isSupportedRelayPair(from: ProviderProtocol, to: ProviderProtocol): boolean {
-  if (from === to) return true;
-  const pairs: [ProviderProtocol, ProviderProtocol][] = [
-    ['openai-chat', 'anthropic-messages'],
-    ['anthropic-messages', 'openai-chat'],
-    ['openai-chat', 'openai-responses'],
-    ['openai-responses', 'openai-chat'],
-    ['anthropic-messages', 'openai-responses'],
-    ['openai-responses', 'anthropic-messages'],
-    ['openai-chat', 'gemini-chat'],
-    ['gemini-chat', 'openai-chat'],
-    ['anthropic-messages', 'gemini-chat'],
-    ['gemini-chat', 'anthropic-messages'],
-    ['openai-responses', 'gemini-chat'],
-    ['gemini-chat', 'openai-responses'],
-  ];
-  return pairs.some(([a, b]) => a === from && b === to);
-}
-
-function remapPayloadFields(
-  payload: Record<string, unknown>,
-  from: ProviderProtocol,
-  to: ProviderProtocol,
-): Record<string, unknown> {
-  const result = { ...payload };
-
-  if (from === 'openai-chat' && to === 'anthropic-messages') {
-    if (result.messages) {
-      const messages = result.messages as Array<Record<string, unknown>>;
-      const systemMsgs = messages.filter((m) => m.role === 'system');
-      if (systemMsgs.length > 0) {
-        result.system = systemMsgs.map((m) => m.content).join('\n\n');
-        result.messages = messages.filter((m) => m.role !== 'system');
-      }
-    }
-    if (result.max_tokens === undefined) {
-      result.max_tokens = 4096;
-    }
-    result.stream = result.stream ?? false;
-  } else if (from === 'anthropic-messages' && to === 'openai-chat') {
-    if (result.system && typeof result.system === 'string') {
-      const messages = (result.messages as Array<Record<string, unknown>>) ?? [];
-      messages.unshift({ role: 'system', content: result.system });
-      result.messages = messages;
-      delete result.system;
-    }
-    result.stream = result.stream ?? false;
-  }
-
-  return result;
 }
 
 export function detectInboundProtocolFromRequest(

@@ -100,6 +100,16 @@ describe('request log color registry', () => {
     expect(new Set([colorA, colorB, colorC]).size).toBeGreaterThan(1);
   });
 
+  it('does not assign red, white, black, or gray ansi colors to session logs', () => {
+    const blocked = new Set(['\x1b[30m', '\x1b[31m', '\x1b[37m', '\x1b[90m', '\x1b[91m', '\x1b[97m']);
+
+    for (let i = 0; i < 512; i += 1) {
+      const color = resolveSessionAnsiColor(`session-palette-${i}`);
+      expect(color).toBeDefined();
+      expect(blocked.has(String(color))).toBe(false);
+    }
+  });
+
   it('colors completion logs with explicit session context when request id lacks prior registration', () => {
     const line = colorizeRequestLog('✅ [/v1/chat/completions] request openai-chat-demo completed', 'openai-chat-demo', {
       sessionId: 'session-response-colored'

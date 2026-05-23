@@ -112,9 +112,17 @@ fn render_xml_value(name: &str, value: &Value, indent: &str) -> String {
 fn render_xml_item(value: &Value, indent: &str) -> String {
     match value {
         Value::Null => format!("{indent}<item></item>", indent = indent),
-        Value::Bool(v) => format!(r#"{indent}<item>{value}</item>"#, indent = indent, value = v),
+        Value::Bool(v) => format!(
+            r#"{indent}<item>{value}</item>"#,
+            indent = indent,
+            value = v
+        ),
         Value::Number(v) => {
-            format!(r#"{indent}<item>{value}</item>"#, indent = indent, value = v)
+            format!(
+                r#"{indent}<item>{value}</item>"#,
+                indent = indent,
+                value = v
+            )
         }
         Value::String(v) => format!(
             r#"{indent}<item>{value}</item>"#,

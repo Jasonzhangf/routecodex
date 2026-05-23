@@ -29,8 +29,11 @@ async function main() {
   });
   const s1 = mgr.getSnapshot().providers['crs.key1.gpt-5.2'];
   assert.ok(s1, 'quota state must exist');
-  assert.equal(s1.inPool, false, '402 must remove key from pool');
-  assert.equal(s1.blacklistUntil, Date.parse(resetAt1), 'resetAt must be used');
+  assert.equal(s1.inPool, true, '402 must stay in pool');
+  assert.equal(s1.reason, 'cooldown', '402 must become keep-pool cooldown');
+  assert.equal(s1.cooldownKeepsPool, true, '402 cooldown must keep pool');
+  assert.equal(s1.cooldownUntil, Date.parse(resetAt1), 'resetAt must be used');
+  assert.equal(s1.blacklistUntil, null, '402 must not blacklist');
 
   // Case 1b: 402 with resetAt embedded in message JSON must be respected (even if details.resetAt is missing).
   const mgr1b = new QuotaManager();
@@ -49,7 +52,8 @@ async function main() {
   });
   const s1b = mgr1b.getSnapshot().providers['crs.key1b.gpt-5.2'];
   assert.ok(s1b);
-  assert.equal(s1b.blacklistUntil, Date.parse(resetAt1b), 'resetAt in message must be used');
+  assert.equal(s1b.cooldownUntil, Date.parse(resetAt1b), 'resetAt in message must be used');
+  assert.equal(s1b.blacklistUntil, null, '402 must not blacklist');
 
   // Case 2: 402 without resetAt falls back to configured daily reset time (UTC).
   const mgr2 = new QuotaManager();
@@ -67,7 +71,8 @@ async function main() {
   });
   const s2 = mgr2.getSnapshot().providers['crs.key2.gpt-5.2'];
   assert.ok(s2);
-  assert.equal(s2.blacklistUntil, Date.parse('2026-02-02T16:00:00.000Z'), 'configured reset time must be applied');
+  assert.equal(s2.cooldownUntil, Date.parse('2026-02-02T16:00:00.000Z'), 'configured reset time must be applied');
+  assert.equal(s2.blacklistUntil, null, '402 must not blacklist');
 
   // Case 3: if now is after reset time, next day should be chosen.
   const mgr3 = new QuotaManager();
@@ -85,7 +90,8 @@ async function main() {
   });
   const s3 = mgr3.getSnapshot().providers['crs.key3.gpt-5.2'];
   assert.ok(s3);
-  assert.equal(s3.blacklistUntil, Date.parse('2026-02-03T16:00:00.000Z'), 'next day reset must be used');
+  assert.equal(s3.cooldownUntil, Date.parse('2026-02-03T16:00:00.000Z'), 'next day reset must be used');
+  assert.equal(s3.blacklistUntil, null, '402 must not blacklist');
 
   // Case 4: manual blacklist must not be overridden by automated error cooldowns.
   const mgr4 = new QuotaManager();
@@ -131,7 +137,8 @@ async function main() {
       });
       const s = mgr.getSnapshot().providers['crs.dst.gpt-5.2'];
       assert.ok(s);
-      assert.equal(s.blacklistUntil, Date.parse(expectedResetIso), 'local resetAt must match expected UTC timestamp');
+      assert.equal(s.cooldownUntil, Date.parse(expectedResetIso), 'local resetAt must match expected UTC timestamp');
+      assert.equal(s.blacklistUntil, null, '402 must not blacklist');
     }
 
     // America/Los_Angeles: DST starts on 2026-03-08 (offset -08 -> -07).

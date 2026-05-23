@@ -600,7 +600,9 @@ mod tests {
         let out = build_gemini_tools_from_bridge(&defs, None);
         let families = out.as_array().unwrap();
         let declarations = families[0]["functionDeclarations"].as_array().unwrap();
-        let properties = declarations[0]["parameters"]["properties"].as_object().unwrap();
+        let properties = declarations[0]["parameters"]["properties"]
+            .as_object()
+            .unwrap();
         assert_eq!(
             declarations[0]["description"].as_str().unwrap_or(""),
             "Edit files by patch"

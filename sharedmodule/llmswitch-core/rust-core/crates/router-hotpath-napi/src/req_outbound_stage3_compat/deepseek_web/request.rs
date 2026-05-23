@@ -166,7 +166,10 @@ fn enrich_root_with_captured_semantics(
 }
 
 fn deepseek_config_node<'a>(adapter_context: &'a AdapterContext) -> Option<&'a Map<String, Value>> {
-    adapter_context.deepseek.as_ref().and_then(|v| v.as_object())
+    adapter_context
+        .deepseek
+        .as_ref()
+        .and_then(|v| v.as_object())
 }
 
 fn metadata_deepseek_node<'a>(root: &'a Map<String, Value>) -> Option<&'a Map<String, Value>> {
@@ -188,7 +191,9 @@ fn should_enable_context_file(root: &Map<String, Value>, adapter_context: &Adapt
                 .and_then(|v| v.as_object())
                 .and_then(|obj| read_optional_boolean(obj.get("enabled")))
         })
-        .or_else(|| read_boolean_from_node(deepseek_config_node(adapter_context), "contextFileEnabled"))
+        .or_else(|| {
+            read_boolean_from_node(deepseek_config_node(adapter_context), "contextFileEnabled")
+        })
         .or_else(|| {
             deepseek_config_node(adapter_context)
                 .and_then(|obj| obj.get("contextFile"))
@@ -198,10 +203,7 @@ fn should_enable_context_file(root: &Map<String, Value>, adapter_context: &Adapt
         .unwrap_or(false)
 }
 
-fn append_context_file_metadata(
-    metadata: &mut Map<String, Value>,
-    transcript: &str,
-) {
+fn append_context_file_metadata(metadata: &mut Map<String, Value>, transcript: &str) {
     let mut deepseek = metadata
         .get("deepseek")
         .and_then(|v| v.as_object())
@@ -212,10 +214,7 @@ fn append_context_file_metadata(
         "filename".to_string(),
         Value::String(RCC_HISTORY_FILENAME.to_string()),
     );
-    context_file.insert(
-        "content".to_string(),
-        Value::String(transcript.to_string()),
-    );
+    context_file.insert("content".to_string(), Value::String(transcript.to_string()));
     context_file.insert(
         "contentType".to_string(),
         Value::String(RCC_HISTORY_CONTENT_TYPE.to_string()),
@@ -409,7 +408,8 @@ pub(crate) fn apply_deepseek_web_request_compat(
     next.insert("prompt".to_string(), Value::String(prompt));
     next.insert(
         "ref_file_ids".to_string(),
-        raw_root.get("ref_file_ids")
+        raw_root
+            .get("ref_file_ids")
             .and_then(|v| v.as_array())
             .map(|v| Value::Array(v.clone()))
             .unwrap_or_else(|| Value::Array(Vec::new())),

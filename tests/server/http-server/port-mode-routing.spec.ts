@@ -275,7 +275,7 @@ describe('port mode routing admin integration', () => {
     }
   });
 
-  it('dispatches provider-mode ports through the direct pipeline owner instead of requestExecutor', async () => {
+  it('dispatches provider-mode same-protocol ports through direct pipeline only', async () => {
     const server = new RouteCodexHttpServer(createTestConfig(0, path.join(os.tmpdir(), 'noop-config.json')));
     const input = {
       requestId: 'req_port_mode_dispatch',
@@ -291,6 +291,7 @@ describe('port mode routing admin integration', () => {
     const providerExecute = jest.fn(async () => ({ status: 200, body: { mode: 'provider' } }));
     (server as any).requestExecutor = { execute: routerExecute };
     (server as any).executeProviderDirectPipelineForPort = providerExecute;
+    (server as any).resolveProviderHandleForBinding = jest.fn(() => ({ providerProtocol: 'openai-chat' }));
     (server as any).getPortConfigForLocalPort = jest
       .fn()
       .mockReturnValueOnce({ port: 4100, host: '127.0.0.1', mode: 'router' })
@@ -309,6 +310,42 @@ describe('port mode routing admin integration', () => {
     expect(providerExecute).toHaveBeenCalledTimes(1);
     expect(routerResult.body).toEqual({ mode: 'router' });
     expect(providerResult.body).toEqual({ mode: 'provider' });
+  });
+
+  it('dispatches provider-mode relay through Hub Pipeline with binding constrained metadata', async () => {
+    const server = new RouteCodexHttpServer(createTestConfig(0, path.join(os.tmpdir(), 'noop-config.json')));
+    const input = {
+      requestId: 'req_port_mode_relay_dispatch',
+      entryEndpoint: '/v1/chat/completions',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: { messages: [{ role: 'user', content: 'hello' }] },
+      metadata: { stream: false, inboundStream: false },
+    };
+
+    const routerExecute = jest.fn(async () => ({ status: 200, body: { mode: 'hub' } }));
+    const providerExecute = jest.fn(async () => ({ status: 200, body: { mode: 'provider' } }));
+    (server as any).requestExecutor = { execute: routerExecute };
+    (server as any).executeProviderDirectPipelineForPort = providerExecute;
+    (server as any).resolveProviderHandleForBinding = jest.fn(() => ({ providerProtocol: 'anthropic-messages' }));
+    (server as any).getPortConfigForLocalPort = jest.fn().mockReturnValue({
+      port: 4201,
+      host: '127.0.0.1',
+      mode: 'provider',
+      providerBinding: 'anthropic.claude',
+      protocolBehavior: 'auto',
+    });
+
+    const result = await (server as any).executePortAwarePipeline(4201, input);
+
+    expect(providerExecute).not.toHaveBeenCalled();
+    expect(routerExecute).toHaveBeenCalledTimes(1);
+    const relayedInput = routerExecute.mock.calls[0]?.[0] as any;
+    expect(relayedInput.metadata.allowedProviders).toEqual(['anthropic.claude']);
+    expect(relayedInput.metadata.routecodexProviderRelayBinding).toBe('anthropic.claude');
+    expect(relayedInput.metadata.routecodexProviderRelayProtocol).toBe('anthropic-messages');
+    expect(result.body).toEqual({ mode: 'hub' });
   });
 
   it('builds available provider list from user config when runtime views are not populated yet', () => {

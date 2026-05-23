@@ -1,8 +1,10 @@
+use crate::shared_tool_mapping::{
+    build_anthropic_tool_alias_map_from_slice, normalize_anthropic_tool_name,
+};
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use crate::shared_tool_mapping::{build_anthropic_tool_alias_map_from_slice, normalize_anthropic_tool_name};
 
 #[derive(Debug, Serialize, Clone)]
 struct ResumeToolOutput {
@@ -279,7 +281,8 @@ fn resolve_req_inbound_semantic_lift_plan(
         && !raw_tools.is_empty()
         && should_capture_alias_map(input.protocol.as_deref(), input.entry_endpoint.as_deref())
     {
-        output.tool_name_alias_map = build_anthropic_tool_alias_map_from_slice(raw_tools.as_slice());
+        output.tool_name_alias_map =
+            build_anthropic_tool_alias_map_from_slice(raw_tools.as_slice());
     }
 
     let responses_resume = input.responses_resume.as_ref().and_then(|value| {

@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn deepseek_prompt_content_unwraps_running_chunked_exec_transcript_shape() {
-    let content = json!("Chunk ID: 8297fb\nWall time: 10.0016 seconds\nProcess running with session ID 92528\nOriginal token count: 0\nOutput:\n<｜end▁of▁sentence｜>\n<｜Assistant｜><tool_call>\n{\"arguments\":{\"cmd\":\"echo next\"},\"id\":\"call_1\",\"name\":\"exec_command\"}\n</tool_call>");
+        let content = json!("Chunk ID: 8297fb\nWall time: 10.0016 seconds\nProcess running with session ID 92528\nOriginal token count: 0\nOutput:\n<｜end▁of▁sentence｜>\n<｜Assistant｜><tool_call>\n{\"arguments\":{\"cmd\":\"echo next\"},\"id\":\"call_1\",\"name\":\"exec_command\"}\n</tool_call>");
         assert_eq!(normalize_content_to_text(&content), "");
     }
 

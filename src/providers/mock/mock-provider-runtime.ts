@@ -281,7 +281,7 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
   }
 }
 
-function detectEntryHint(
+export function detectMockProviderEntryHintForTest(
   payload: { entryEndpoint?: string; endpoint?: string } | undefined,
   body: Record<string, unknown> | undefined
 ): string | undefined {
@@ -300,11 +300,18 @@ function detectEntryHint(
     const inputList = Array.isArray((body as Record<string, unknown>).input)
       ? ((body as Record<string, unknown>).input as Array<Record<string, unknown>>)
       : [];
+    const messages = Array.isArray((body as Record<string, unknown>).messages)
+      ? ((body as Record<string, unknown>).messages as Array<Record<string, unknown>>)
+      : [];
     const hasOutputEntries = inputList.some((entry) => {
       const type = typeof entry?.type === 'string' ? entry.type.toLowerCase() : '';
       return type === 'function_call_output' || type === 'tool_result' || type === 'tool_message';
     });
-    if (submitOutputs || hasOutputEntries) {
+    const hasChatToolMessages = messages.some((entry) => {
+      const role = typeof entry?.role === 'string' ? entry.role.toLowerCase() : '';
+      return role === 'tool';
+    });
+    if (submitOutputs || hasOutputEntries || hasChatToolMessages) {
       return 'openai-responses.submit_tool_outputs';
     }
   }
@@ -348,7 +355,7 @@ export class MockProviderRuntime {
       ? payload.requestId
       : 'unknown';
     const body = extractRequestBody(payload);
-    const entryHint = detectEntryHint(payload, body);
+    const entryHint = detectMockProviderEntryHintForTest(payload, body);
     const modelCandidate =
       body && typeof body === 'object'
         ? (body as Record<string, unknown>).model

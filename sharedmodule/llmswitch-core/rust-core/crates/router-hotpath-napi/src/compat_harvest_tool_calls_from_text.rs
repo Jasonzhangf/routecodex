@@ -257,7 +257,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_assistant_message_rejects_malformed_parameter_reasoning_payload_without_explicit_tool_name() {
+    fn normalize_assistant_message_rejects_malformed_parameter_reasoning_payload_without_explicit_tool_name(
+    ) {
         let raw_reasoning = "<parameter name=\"input\">pwd</</parameter>\n<parameter name=\"type\">string</parameter>\n</command></arg_value>";
 
         let message = serde_json::json!({

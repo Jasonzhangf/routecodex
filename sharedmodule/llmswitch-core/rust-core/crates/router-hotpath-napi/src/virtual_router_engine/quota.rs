@@ -3,7 +3,9 @@ use napi::{Env, JsFunction, JsObject, JsUnknown, Ref, ValueType};
 #[derive(Debug, Clone, Default)]
 pub(crate) struct QuotaViewEntry {
     pub in_pool: Option<bool>,
+    pub reason: Option<String>,
     pub cooldown_until: Option<i64>,
+    pub cooldown_keeps_pool: Option<bool>,
     pub blacklist_until: Option<i64>,
     pub selection_penalty: Option<i64>,
     pub last_error_at_ms: Option<i64>,
@@ -24,7 +26,9 @@ pub(crate) fn call_quota_view(
     let obj = result.coerce_to_object().ok()?;
     Some(QuotaViewEntry {
         in_pool: read_bool_prop(&obj, "inPool"),
+        reason: read_string_prop(&obj, "reason"),
         cooldown_until: read_i64_prop(&obj, "cooldownUntil"),
+        cooldown_keeps_pool: read_bool_prop(&obj, "cooldownKeepsPool"),
         blacklist_until: read_i64_prop(&obj, "blacklistUntil"),
         selection_penalty: read_i64_prop(&obj, "selectionPenalty"),
         last_error_at_ms: read_i64_prop(&obj, "lastErrorAtMs"),
@@ -37,6 +41,15 @@ fn is_js_null_or_undefined(value: &JsUnknown) -> bool {
         Ok(ValueType::Null) | Ok(ValueType::Undefined) => true,
         _ => false,
     }
+}
+
+fn read_string_prop(obj: &JsObject, key: &str) -> Option<String> {
+    let value: JsUnknown = obj.get_named_property(key).ok()?;
+    if is_js_null_or_undefined(&value) {
+        return None;
+    }
+    let js_string = value.coerce_to_string().ok()?;
+    js_string.into_utf8().ok()?.as_str().ok().map(|v| v.to_string())
 }
 
 fn read_bool_prop(obj: &JsObject, key: &str) -> Option<bool> {

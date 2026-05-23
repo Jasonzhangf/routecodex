@@ -5,7 +5,7 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
     jest.resetModules();
   });
 
-  it('blacklists windsurf weekly quota exhausted key until next local 00:00 when upstream omits cooldown override', async () => {
+  it('keeps windsurf weekly quota exhausted key in pool with keep-pool cooldown', async () => {
     const { handleProviderQuotaErrorEvent } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.events.js');
     const { createInitialQuotaState } = await import('../../../../src/manager/quota/provider-quota-center.js');
     const { ProviderModelBackoffTracker } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.model-backoff.js');
@@ -50,11 +50,11 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
 
     const state = quotaStates.get(providerKey);
     expect(state).toBeDefined();
-    expect(state.inPool).toBe(false);
-    expect(state.cooldownKeepsPool).not.toBe(true);
-    expect(state.reason).toBe('blacklist');
-    expect(state.cooldownUntil).toBeNull();
-    expect(state.blacklistUntil).toBe(new Date('2026-05-24T00:00:00+08:00').getTime());
+    expect(state.inPool).toBe(true);
+    expect(state.cooldownKeepsPool).toBe(true);
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownUntil).toBe(new Date('2026-05-24T00:00:00+08:00').getTime());
+    expect(state.blacklistUntil).toBeNull();
   });
 
 
@@ -122,7 +122,7 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
     expect(aliasState.reason).toBe('ok');
   });
 
-  it('blacklists entire windsurf account alias family until next local 00:00 when one model hits weekly exhausted', async () => {
+  it('keeps entire windsurf account alias family in pool during weekly keep-pool cooldown', async () => {
     const { handleProviderQuotaErrorEvent } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.events.js');
     const { createInitialQuotaState } = await import('../../../../src/manager/quota/provider-quota-center.js');
     const { ProviderModelBackoffTracker } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.model-backoff.js');
@@ -177,13 +177,21 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
     const siblingState = quotaStates.get(siblingKey);
     const rootAliasState = quotaStates.get(rootAliasKey);
     const otherAliasState = quotaStates.get(otherAliasKey);
-    expect(hitState.reason).toBe('blacklist');
-    expect(siblingState.reason).toBe('blacklist');
-    expect(rootAliasState.reason).toBe('blacklist');
+    expect(hitState.reason).toBe('cooldown');
+    expect(siblingState.reason).toBe('cooldown');
+    expect(rootAliasState.reason).toBe('cooldown');
+    expect(hitState.inPool).toBe(true);
+    expect(siblingState.inPool).toBe(true);
+    expect(rootAliasState.inPool).toBe(true);
+    expect(hitState.cooldownKeepsPool).toBe(true);
+    expect(siblingState.cooldownKeepsPool).toBe(true);
+    expect(rootAliasState.cooldownKeepsPool).toBe(true);
     expect(otherAliasState.reason).toBe('ok');
     const nextMidnight = new Date('2026-05-24T00:00:00+08:00').getTime();
-    expect(siblingState.blacklistUntil).toBe(nextMidnight);
-    expect(rootAliasState.blacklistUntil).toBe(nextMidnight);
+    expect(siblingState.cooldownUntil).toBe(nextMidnight);
+    expect(rootAliasState.cooldownUntil).toBe(nextMidnight);
+    expect(siblingState.blacklistUntil).toBeNull();
+    expect(rootAliasState.blacklistUntil).toBeNull();
   });
 
 
@@ -296,6 +304,7 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
     expect(sibling.reason).toBe('cooldown');
     expect(typeof sibling.cooldownUntil).toBe('number');
     expect(sibling.cooldownUntil).toBeGreaterThanOrEqual(baseNow + 2_000 + 30_000);
-    expect(sibling.inPool).toBe(false);
+    expect(sibling.inPool).toBe(true);
+    expect(sibling.cooldownKeepsPool).toBe(true);
   });
 });

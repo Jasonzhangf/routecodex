@@ -126,9 +126,9 @@ fn normalize_tool_result_content(block: &Map<String, Value>) -> String {
             .filter(|entry| !entry.is_empty())
             .collect::<Vec<String>>()
             .join("\n"),
-        Some(other) => normalize_tool_result_text(
-            serde_json::to_string(other).unwrap_or_default().as_str(),
-        ),
+        Some(other) => {
+            normalize_tool_result_text(serde_json::to_string(other).unwrap_or_default().as_str())
+        }
         None => String::new(),
     };
     normalize_tool_result_text(normalized.as_str())
@@ -318,7 +318,8 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
         return Value::Object(Map::new());
     };
 
-    let model = read_trimmed_string(request_row.get("model")).unwrap_or_else(|| "unknown".to_string());
+    let model =
+        read_trimmed_string(request_row.get("model")).unwrap_or_else(|| "unknown".to_string());
     let messages_source = request_row
         .get("messages")
         .and_then(|v| v.as_array())
@@ -413,7 +414,10 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
             let Some(tool_call_id) = tool_call_id else {
                 continue;
             };
-            if !known_tool_call_ids.iter().any(|entry| entry == &tool_call_id) {
+            if !known_tool_call_ids
+                .iter()
+                .any(|entry| entry == &tool_call_id)
+            {
                 continue;
             }
             let content = collect_openai_chat_text(row.get("content").unwrap_or(&Value::Null));
@@ -450,7 +454,8 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
                             .unwrap_or_default()
                             .to_ascii_lowercase();
                         if source_type == "base64" {
-                            let media_type = read_trimmed_string(source.get("media_type")).unwrap_or_default();
+                            let media_type =
+                                read_trimmed_string(source.get("media_type")).unwrap_or_default();
                             let data = read_trimmed_string(source.get("data")).unwrap_or_default();
                             if media_type.is_empty() || data.is_empty() {
                                 panic!("Anthropic bridge constraint violated: embedded image source must include non-empty base64 data and media_type");
@@ -489,7 +494,10 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
                             .unwrap_or("image/png");
                         Value::Object(Map::from_iter([
                             ("type".to_string(), Value::String("base64".to_string())),
-                            ("media_type".to_string(), Value::String(media_type.to_string())),
+                            (
+                                "media_type".to_string(),
+                                Value::String(media_type.to_string()),
+                            ),
                             ("data".to_string(), Value::String(data.to_string())),
                         ]))
                     } else if is_likely_url(&url) {
@@ -546,7 +554,8 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
                 let Some(tool_row) = tool_call.as_object() else {
                     continue;
                 };
-                let Some(function_row) = tool_row.get("function").and_then(|v| v.as_object()) else {
+                let Some(function_row) = tool_row.get("function").and_then(|v| v.as_object())
+                else {
                     continue;
                 };
                 let Some(name) = read_trimmed_string(function_row.get("name")) else {
@@ -1031,14 +1040,18 @@ mod tests {
         let messages = output["messages"].as_array().expect("messages array");
         assert_eq!(messages.len(), 4);
         assert_eq!(messages[1]["role"].as_str(), Some("assistant"));
-        let assistant_blocks = messages[1]["content"].as_array().expect("assistant content");
+        let assistant_blocks = messages[1]["content"]
+            .as_array()
+            .expect("assistant content");
         assert_eq!(assistant_blocks.len(), 1);
         assert_eq!(assistant_blocks[0]["type"].as_str(), Some("thinking"));
         assert_eq!(
             assistant_blocks[0]["text"].as_str(),
             Some("The user wants me to call the echo_json tool with {\"message\":\"ping\"}.")
         );
-        let tool_use_blocks = messages[2]["content"].as_array().expect("assistant tool use content");
+        let tool_use_blocks = messages[2]["content"]
+            .as_array()
+            .expect("assistant tool use content");
         assert_eq!(messages[2]["role"].as_str(), Some("assistant"));
         assert_eq!(tool_use_blocks[0]["type"].as_str(), Some("tool_use"));
         assert_eq!(tool_use_blocks[0]["id"].as_str(), Some("call_x"));

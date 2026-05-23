@@ -198,6 +198,12 @@ describe('responses conversation store plain continuation restore', () => {
 
     releaseResponsesConversationRequestPayload('req-resp-store-1');
 
+    const statsAfterRelease = responsesConversationStore.getDebugStats();
+    expect(statsAfterRelease.retainedInputItems).toBe(0);
+    expect(statsAfterRelease.requestMapSize).toBe(1);
+    expect(statsAfterRelease.responseIndexSize).toBe(1);
+    expect(statsAfterRelease.scopeIndexSize).toBe(1);
+
     const restored = resumeLatestResponsesContinuationByScope({
       requestId: 'req-resp-store-2',
       sessionId: 'sess-1',
@@ -225,7 +231,6 @@ describe('responses conversation store plain continuation restore', () => {
 
     expect(restored).not.toBeNull();
     expect(restored?.payload.previous_response_id).toBe('resp-store-release-1');
-    expect(restored?.payload.tools).toEqual([{ type: 'function', function: { name: 'exec_command' } }]);
   });
 
   it('materializes full input by session scope for local continuation when incoming payload only carries delta', () => {

@@ -131,23 +131,20 @@ describe('anthropic tool schema stability (root regression)', () => {
     expect(Object.keys(questions.items.properties.options.items.properties).sort()).toEqual(['description', 'label']);
   });
 
-  test('preserves apply_patch hashline fields from chat process contract for anthropic outbound', () => {
+  test('preserves apply_patch internal line-edit fields from chat process contract for anthropic outbound', () => {
     const tools: any[] = [
       {
         type: 'function',
         function: {
           name: 'apply_patch',
           description:
-            'Edit files through apply_patch. The upstream authoring contract is hashline-first: provide `filePath`/`file_path`, provide `fileContent`/`file_content`, and write `patch` in hashline syntax.',
+            'Edit files through apply_patch. The upstream authoring contract is internal line-edit format: provide `filePath`, provide `fileContent`, and write `patch` in internal line-edit syntax.',
           parameters: {
             type: 'object',
             properties: {
-              patch: { type: 'string', description: 'hashline patch text' },
-              input: { type: 'string', description: 'compat alias' },
+              patch: { type: 'string', description: 'internal line-edit patch text' },
               filePath: { type: 'string', description: 'target file path' },
-              file_path: { type: 'string', description: 'target file path snake' },
-              fileContent: { type: 'string', description: 'current file content' },
-              file_content: { type: 'string', description: 'current file content snake' }
+              fileContent: { type: 'string', description: 'current file content' }
             },
             required: ['patch'],
             additionalProperties: false
@@ -164,9 +161,6 @@ describe('anthropic tool schema stability (root regression)', () => {
     expect(Object.keys(properties).sort()).toEqual([
       'fileContent',
       'filePath',
-      'file_content',
-      'file_path',
-      'input',
       'patch'
     ]);
     expect(schema.required).toEqual(['patch']);

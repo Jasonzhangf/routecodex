@@ -1,11 +1,9 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-
 import type { StandardizedMessage, StandardizedRequest } from '../types/standardized.js';
 import {
-  setHeartbeatEnabled,
-  startHeartbeatDaemonIfNeeded
-} from '../../../servertool/heartbeat/task-store.js';
+  applyHeartbeatDirectiveRuntimeSideEffects,
+  readTmuxSessionId,
+  readWorkdirFromRecord
+} from './blocks/chat-process-heartbeat-runtime-side-effects.js';
 import { findLastUserMessageIndex } from './chat-process-clock-reminder-messages.js';
 import {
   stripMarkerSyntaxFromText,
@@ -17,130 +15,6 @@ type HeartbeatDirective =
   | { action: 'on' }
   | { action: 'off' }
   | { action: 'on'; intervalMs: number };
-
-function logHeartbeatDirectiveNonBlockingError(
-  operation: string,
-  error: unknown,
-  details?: Record<string, unknown>
-): void {
-  const reason = error instanceof Error ? error.message : String(error);
-  const detailPairs = Object.entries(details || {})
-    .map(([key, value]) => `${key}=${String(value)}`)
-    .join(' ');
-  const suffix = detailPairs ? ` ${suffixSanitize(detailPairs)}` : '';
-  console.warn(`[heartbeat-directives] ${operation} failed (non-blocking): ${reason}${suffix}`);
-}
-
-function suffixSanitize(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
-function readTmuxSessionId(source?: Record<string, unknown> | null): string | undefined {
-  if (!source || typeof source !== 'object') {
-    return undefined;
-  }
-  const record = source as Record<string, unknown>;
-  const candidates = [
-    record.tmuxSessionId,
-    record.clientTmuxSessionId,
-    record.tmux_session_id,
-    record.client_tmux_session_id,
-    record.stopMessageClientInjectSessionScope,
-    record.stop_message_client_inject_session_scope
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate !== 'string') {
-      continue;
-    }
-    const trimmed = candidate.trim();
-    if (!trimmed) {
-      continue;
-    }
-    if (trimmed.startsWith('tmux:')) {
-      return trimmed.slice('tmux:'.length).trim() || undefined;
-    }
-    return trimmed;
-  }
-  return undefined;
-}
-
-function readWorkdirFromRecord(record?: Record<string, unknown> | null): string | undefined {
-  if (!record || typeof record !== 'object') {
-    return undefined;
-  }
-  const directCandidates = [
-    record.workdir,
-    record.cwd,
-    record.workingDirectory,
-    record.clientWorkdir
-  ];
-  for (const candidate of directCandidates) {
-    if (typeof candidate !== 'string') {
-      continue;
-    }
-    const trimmed = candidate.trim();
-    if (trimmed) {
-      return trimmed;
-    }
-  }
-  const rt = (record as { __rt?: unknown }).__rt;
-  if (!rt || typeof rt !== 'object' || Array.isArray(rt)) {
-    return undefined;
-  }
-  const rtRecord = rt as Record<string, unknown>;
-  const rtCandidates = [
-    rtRecord.workdir,
-    rtRecord.cwd,
-    rtRecord.workingDirectory,
-    rtRecord.clientWorkdir
-  ];
-  for (const candidate of rtCandidates) {
-    if (typeof candidate !== 'string') {
-      continue;
-    }
-    const trimmed = candidate.trim();
-    if (trimmed) {
-      return trimmed;
-    }
-  }
-  return undefined;
-}
-
-function stripHeartbeatStopMarkerFromText(raw: string): { updated: string; changed: boolean } {
-  const lines = String(raw || '').split(/\r?\n/);
-  let changed = false;
-  const kept: string[] = [];
-  for (const line of lines) {
-    if (/^\s*Heartbeat-Stop-When:\s*.+$/i.test(line)) {
-      changed = true;
-      continue;
-    }
-    kept.push(line);
-  }
-  return { updated: kept.join('\n'), changed };
-}
-
-async function clearHeartbeatStopMarkerForReactivation(workdir: string | undefined): Promise<void> {
-  if (!workdir) {
-    return;
-  }
-  const heartbeatPath = path.join(workdir, 'HEARTBEAT.md');
-  let raw = '';
-  try {
-    raw = await fs.readFile(heartbeatPath, 'utf8');
-  } catch (error) {
-    const code = (error as { code?: unknown })?.code;
-    if (code === 'ENOENT') {
-      return;
-    }
-    throw error;
-  }
-  const stripped = stripHeartbeatStopMarkerFromText(raw);
-  if (!stripped.changed) {
-    return;
-  }
-  await fs.writeFile(heartbeatPath, stripped.updated, 'utf8');
-}
 
 function parseHeartbeatDirectiveBody(raw: string): HeartbeatDirective | undefined {
   const body = String(raw || '').trim().toLowerCase();
@@ -172,57 +46,6 @@ function parseHeartbeatDirectiveBody(raw: string): HeartbeatDirective | undefine
     return undefined;
   }
   return { action: 'on', intervalMs: amount * multiplier };
-}
-
-async function persistHeartbeatDirective(
-  tmuxSessionId: string | undefined,
-  directive: HeartbeatDirective | undefined,
-  workdir: string | undefined
-): Promise<void> {
-  if (!tmuxSessionId || !directive) {
-    return;
-  }
-  const intervalMs = 'intervalMs' in directive ? directive.intervalMs : undefined;
-  try {
-    if (directive.action === 'off') {
-      await setHeartbeatEnabled(tmuxSessionId, false, {
-        clearIntervalOverride: true,
-        source: 'directive',
-        reason: 'disabled_by_directive'
-      });
-      return;
-    }
-    await setHeartbeatEnabled(
-      tmuxSessionId,
-      true,
-      typeof intervalMs === 'number'
-        ? { intervalMs, source: 'directive' }
-        : { clearIntervalOverride: true, source: 'directive' }
-    );
-    try {
-      await clearHeartbeatStopMarkerForReactivation(workdir);
-    } catch (error) {
-      logHeartbeatDirectiveNonBlockingError('clearHeartbeatStopMarkerForReactivation', error, {
-        tmuxSessionId,
-        workdir: workdir || 'n/a'
-      });
-    }
-    try {
-      await startHeartbeatDaemonIfNeeded(undefined);
-    } catch (error) {
-      logHeartbeatDirectiveNonBlockingError('startHeartbeatDaemonIfNeeded', error, {
-        tmuxSessionId,
-        action: directive.action,
-        ...(typeof intervalMs === 'number' ? { intervalMs } : {})
-      });
-    }
-  } catch (error) {
-    logHeartbeatDirectiveNonBlockingError('setHeartbeatEnabled', error, {
-      tmuxSessionId,
-      action: directive.action,
-      ...(typeof intervalMs === 'number' ? { intervalMs } : {})
-    });
-  }
 }
 
 function stripHeartbeatDirectivesFromContent(
@@ -329,8 +152,8 @@ export async function applyHeartbeatDirectives(
   });
   const lastDirective = nativeDirective.action === 'off'
     ? ({ action: 'off' } as HeartbeatDirective)
-    : nativeDirective.action === 'on' && typeof nativeDirective.interval_ms === 'number'
-      ? ({ action: 'on', intervalMs: nativeDirective.interval_ms } as HeartbeatDirective)
+    : nativeDirective.action === 'on' && typeof nativeDirective.intervalMs === 'number'
+      ? ({ action: 'on', intervalMs: nativeDirective.intervalMs } as HeartbeatDirective)
       : nativeDirective.action === 'on'
         ? ({ action: 'on' } as HeartbeatDirective)
         : undefined;
@@ -344,8 +167,8 @@ export async function applyHeartbeatDirectives(
     content: stripped.content
   };
 
-  const tmuxSessionId = typeof nativeDirective.tmux_session_id === 'string' && nativeDirective.tmux_session_id.trim().length
-    ? nativeDirective.tmux_session_id.trim()
+  const tmuxSessionId = typeof nativeDirective.tmuxSessionId === 'string' && nativeDirective.tmuxSessionId.trim().length
+    ? nativeDirective.tmuxSessionId.trim()
     : readTmuxSessionId(metadata);
   const workdir = typeof nativeDirective.workdir === 'string' && nativeDirective.workdir.trim().length
     ? nativeDirective.workdir.trim()
@@ -355,7 +178,17 @@ export async function applyHeartbeatDirectives(
         ? (request.metadata as Record<string, unknown>)
         : null
     );
-  await persistHeartbeatDirective(tmuxSessionId, lastDirective, workdir);
+  await applyHeartbeatDirectiveRuntimeSideEffects(
+    lastDirective
+      ? {
+          action: lastDirective.action,
+          intervalMs: 'intervalMs' in lastDirective ? lastDirective.intervalMs : undefined,
+          tmuxSessionId,
+          workdir,
+          contentChanged: stripped.content !== targetMessage.content
+        }
+      : null
+  );
 
   return {
     ...request,

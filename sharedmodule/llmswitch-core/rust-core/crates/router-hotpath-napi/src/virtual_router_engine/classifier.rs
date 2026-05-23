@@ -71,8 +71,7 @@ impl RoutingClassifier {
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
         let has_tool_activity =
             features.has_tools || (!latest_message_from_user && features.has_tool_call_responses);
-        let has_visual =
-            features.has_image_attachment
+        let has_visual = features.has_image_attachment
             || (features.has_video_attachment && features.has_remote_video_attachment);
         // Jason 规则：thinking 只看当前轮是否为 fresh user input。
         // 历史轮（包括上一轮 assistant thinking/tool 延续）不得继承 thinking 命中。
@@ -110,7 +109,8 @@ impl RoutingClassifier {
             );
         // Web-search routing is current-turn intent only.
         // Servertool declaration itself must not force route switch.
-        let should_route_search = web_search_tool_intent || (!has_visual && search_intent_from_text);
+        let should_route_search =
+            web_search_tool_intent || (!has_visual && search_intent_from_text);
 
         let mut evaluation: Vec<(String, bool, String)> = Vec::new();
         evaluation.push((
@@ -442,10 +442,7 @@ mod tests {
         assert_eq!(result.route_name, "longcontext");
         assert_eq!(
             result.candidates,
-            vec![
-                "longcontext".to_string(),
-                DEFAULT_ROUTE.to_string()
-            ]
+            vec!["longcontext".to_string(), DEFAULT_ROUTE.to_string()]
         );
     }
 

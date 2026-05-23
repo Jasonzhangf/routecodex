@@ -103,6 +103,51 @@ describe('provider-quota-center error handling', () => {
     expect(state.lastErrorSeries).toBe('ENET');
   });
 
+  it('does not cooldown provider for Windsurf service unreachable', () => {
+    const baseNow = 4_600_000;
+    let state = createInitialQuotaState('windsurf.ws-pro-5.gpt-5.4-none', { authType: 'oauth' }, baseNow);
+
+    state = applyErrorEvent(
+      state,
+      {
+        providerKey: 'windsurf.ws-pro-5.gpt-5.4-none',
+        code: 'WINDSURF_SERVICE_UNREACHABLE',
+        httpStatus: 502,
+        message: '[windsurf] service unreachable'
+      },
+      baseNow
+    );
+
+    expect(state.inPool).toBe(true);
+    expect(state.reason).toBe('ok');
+    expect(state.cooldownUntil).toBeNull();
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.consecutiveErrorCount).toBe(0);
+    expect(state.lastErrorCode).toBeNull();
+  });
+
+  it('keeps HTTP 402 quota exhaustion in pool as keep-pool cooldown', () => {
+    const baseNow = 4_700_000;
+    let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
+
+    state = applyErrorEvent(
+      state,
+      {
+        providerKey,
+        code: 'HTTP_402',
+        httpStatus: 402,
+        message: 'usage limit exceeded, weekly usage limit reached'
+      },
+      baseNow
+    );
+
+    expect(state.inPool).toBe(true);
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownKeepsPool).toBe(true);
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.consecutiveErrorCount).toBe(1);
+  });
+
   it('cools down 502 internal network failures for one minute after the third hit', () => {
     const baseNow = 4_800_000;
     let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
@@ -392,7 +437,7 @@ describe('provider-quota-center usage and window handling', () => {
     expect(state.cooldownUntil).toBe((cooldownUntil + 2) + 61_000);
   });
 
-  it('keeps repeated 5xx providers out of pool after cooldown expiry until success', () => {
+  it('restores repeated 5xx providers after cooldown expiry instead of leaving dead cooldown state', () => {
     const baseNow = 60_000;
     let state = createInitialQuotaState(providerKey, undefined, baseNow);
 
@@ -405,15 +450,15 @@ describe('provider-quota-center usage and window handling', () => {
     const cooldownUntil = state.cooldownUntil as number;
 
     state = tickQuotaStateTime(state, cooldownUntil + 1);
-    expect(state.inPool).toBe(false);
-    expect(state.reason).toBe('cooldown');
+    expect(state.inPool).toBe(true);
+    expect(state.reason).toBe('ok');
     expect(state.cooldownUntil).toBeNull();
-    expect(state.consecutiveErrorCount).toBe(3);
+    expect(state.consecutiveErrorCount).toBe(0);
 
     state = tickQuotaStateTime(state, baseNow + 10 * 60_000 + 20_001);
-    expect(state.inPool).toBe(false);
-    expect(state.reason).toBe('cooldown');
-    expect(state.consecutiveErrorCount).toBe(3);
+    expect(state.inPool).toBe(true);
+    expect(state.reason).toBe('ok');
+    expect(state.consecutiveErrorCount).toBe(0);
 
     state = applySuccessEvent(state, { providerKey }, baseNow + 10 * 60_000 + 20_002);
     expect(state.inPool).toBe(true);

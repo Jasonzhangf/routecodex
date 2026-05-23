@@ -10,6 +10,30 @@ use super::types::{
 
 pub(crate) fn build_metadata_instructions(metadata: &Value) -> Vec<RoutingInstruction> {
     let mut instructions = Vec::new();
+    if let Some(allowed) = metadata.get("allowedProviders").and_then(|v| v.as_array()) {
+        for entry in allowed {
+            let Some(raw) = entry.as_str() else {
+                continue;
+            };
+            let provider = raw
+                .trim()
+                .split('.')
+                .map(|part| part.trim())
+                .find(|part| !part.is_empty())
+                .unwrap_or("")
+                .to_string();
+            if provider.is_empty() {
+                continue;
+            }
+            instructions.push(RoutingInstruction {
+                kind: "allow".to_string(),
+                target: None,
+                provider: Some(provider),
+                stop_message: None,
+                pre_command: None,
+            });
+        }
+    }
     let forced_field = "__shadowCompareForcedProviderKey";
     if let Some(raw) = metadata.get(forced_field).and_then(|v| v.as_str()) {
         let trimmed = raw.trim();

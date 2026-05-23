@@ -139,10 +139,7 @@ impl ProviderRegistry {
         );
         if let Some(runtime) = profile.runtime_key.clone() {
             target.insert("runtimeKey".to_string(), Value::String(runtime.clone()));
-            target.insert(
-                "concurrencyScopeKey".to_string(),
-                Value::String(runtime),
-            );
+            target.insert("concurrencyScopeKey".to_string(), Value::String(runtime));
         }
         target.insert("modelId".to_string(), Value::String(model_id));
         target.insert(
@@ -235,10 +232,19 @@ impl ProviderRegistry {
             .unwrap_or(false);
         // Collect provider-specific config keys (everything not in the common schema)
         let common_keys: &[&str] = &[
-            "providerKey", "providerType", "enabled", "modelId", "runtimeKey",
-            "outboundProfile", "compatibilityProfile", "processMode",
-            "responsesConfig", "streaming", "modelCapabilities",
-            "maxContextTokens", "serverToolsDisabled",
+            "providerKey",
+            "providerType",
+            "enabled",
+            "modelId",
+            "runtimeKey",
+            "outboundProfile",
+            "compatibilityProfile",
+            "processMode",
+            "responsesConfig",
+            "streaming",
+            "modelCapabilities",
+            "maxContextTokens",
+            "serverToolsDisabled",
         ];
         let mut provider_specific_config: HashMap<String, Value> = HashMap::new();
         for (k, v) in map {

@@ -20,7 +20,7 @@ describe('stopless re-enter path (no tmux inject)', () => {
     expect(mode).toBe('reenter');
   });
 
-  test('stop_message_flow defaults to client inject for plain stop_message followup', () => {
+  test('stop_message_flow uses standard servertool reenter path for plain stop_message followup', () => {
     const decision = resolveFollowupFlowDecision('stop_message_flow');
     const metadata = { clientInjectSource: 'servertool.stop_message' } as any;
     const mode = resolveFollowupExecutionMode({
@@ -29,7 +29,7 @@ describe('stopless re-enter path (no tmux inject)', () => {
       metadata,
       readClientInjectOnly: () => false,
     });
-    expect(mode).toBe('client_inject_only');
+    expect(mode).toBe('reenter');
   });
 
   test('execution mode follows provided decision instead of hardcoded stop_message_flow special-case', () => {

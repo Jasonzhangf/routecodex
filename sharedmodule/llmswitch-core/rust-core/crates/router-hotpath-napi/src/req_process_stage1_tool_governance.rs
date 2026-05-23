@@ -1,5 +1,6 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::{Map, Value};
@@ -12,6 +13,13 @@ use crate::chat_servertool_orchestration::{
 };
 use crate::chat_web_search_tool_schema::build_web_search_tool_append_operations_json;
 use crate::hub_req_inbound_context_capture::resolve_client_inject_ready_json;
+use crate::hub_heartbeat_directives::{
+    apply_heartbeat_directive_semantics, HeartbeatDirectiveRuntimeSummary,
+};
+use crate::shared_response_compat::{
+    sanitize_chat_process_messages_value, SanitizeMessagesOutput,
+};
+use crate::virtual_router_engine::instructions::parse_routing_instructions_from_messages;
 use crate::web_search_mode::{
     resolve_web_search_execution_mode_from_value, WebSearchExecutionMode,
 };
@@ -150,7 +158,7 @@ fn ensure_apply_patch_chat_process_contract(request: &mut Map<String, Value>, me
             "patch".to_string(),
             json!({
                 "type": "string",
-                "description": "Required. Line-edit operations only. Correct examples: create or append `+ first line`; replace `- old line\n+ new line`; multi-line create `+ first line\n+ second line`."
+                "description": "Required. Line-edit operations only. Create file: `+ first line\n+ second line`. Append to existing file: `+ appended line`. Update existing file: `- exact old line\n+ replacement line`. Removed lines must exactly match the current file."
             }),
         );
 
@@ -164,7 +172,7 @@ fn ensure_apply_patch_chat_process_contract(request: &mut Map<String, Value>, me
         function_obj.insert(
             "description".to_string(),
             Value::String(
-                r#"Call apply_patch to edit files. Provide only workspace-relative `filePath` and line-edit `patch`. Correct examples: `{ "filePath": "tmp/example.txt", "patch": "+ hello" }`; `{ "filePath": "src/main.ts", "patch": "- old line\n+ new line" }`."#.to_string(),
+                r#"Call apply_patch directly for workspace-relative file edits. Provide exactly JSON fields `filePath` and `patch`. Create file: `{ "filePath": "tmp/new.txt", "patch": "+ first line\n+ second line" }`. Append to existing file: `{ "filePath": "tmp/existing.txt", "patch": "+ appended line" }`. Update existing file: `{ "filePath": "src/main.ts", "patch": "- old line\n+ new line" }`. Use this tool call itself for file edits."#.to_string(),
             ),
         );
     }
@@ -246,6 +254,190 @@ fn apply_post_governed_media_cleanup(request: &mut Map<String, Value>) {
             }
         }
     }
+}
+
+fn compact_marker_whitespace(input: &str) -> String {
+    let without_inline_space = Regex::new(r"[ \t]+\n")
+        .expect("valid inline marker whitespace regex")
+        .replace_all(input, "\n")
+        .to_string();
+    Regex::new(r"\n{3,}")
+        .expect("valid repeated newline regex")
+        .replace_all(without_inline_space.trim(), "\n\n")
+        .to_string()
+}
+
+fn strip_marker_syntax_from_text(raw: &str) -> String {
+    if !raw.contains("<**") {
+        return raw.to_string();
+    }
+
+    let mut output = String::with_capacity(raw.len());
+    let mut cursor = 0usize;
+
+    while cursor < raw.len() {
+        let marker_start = match raw[cursor..].find("<**") {
+            Some(offset) => cursor + offset,
+            None => {
+                output.push_str(&raw[cursor..]);
+                break;
+            }
+        };
+
+        output.push_str(&raw[cursor..marker_start]);
+
+        let close_index = raw[marker_start + 3..]
+            .find("**>")
+            .map(|offset| marker_start + 3 + offset);
+        let newline_index = raw[marker_start + 3..]
+            .find('\n')
+            .map(|offset| marker_start + 3 + offset);
+        let has_closed_marker = match (close_index, newline_index) {
+            (Some(close), Some(newline)) => close < newline,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        let marker_end = if has_closed_marker {
+            close_index.unwrap() + 3
+        } else {
+            newline_index.unwrap_or(raw.len())
+        };
+        cursor = marker_end;
+    }
+
+    compact_marker_whitespace(output.as_str())
+}
+
+fn strip_marker_syntax_from_content_value(content: &Value) -> Value {
+    match content {
+        Value::String(text) => Value::String(strip_marker_syntax_from_text(text)),
+        Value::Array(parts) => {
+            let next_parts = parts
+                .iter()
+                .map(|part| match part {
+                    Value::String(text) => Value::String(strip_marker_syntax_from_text(text)),
+                    Value::Object(obj) => {
+                        let mut next = obj.clone();
+                        for key in ["text", "content"] {
+                            let Some(Value::String(raw)) = next.get(key) else {
+                                continue;
+                            };
+                            next.insert(
+                                key.to_string(),
+                                Value::String(strip_marker_syntax_from_text(raw)),
+                            );
+                        }
+                        Value::Object(next)
+                    }
+                    _ => part.clone(),
+                })
+                .collect::<Vec<Value>>();
+            Value::Array(next_parts)
+        }
+        _ => content.clone(),
+    }
+}
+
+fn request_has_routing_instruction_markers(request: &Map<String, Value>) -> bool {
+    let messages = request
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    parse_routing_instructions_from_messages(messages.as_slice())
+        .map(|instructions| !instructions.is_empty())
+        .unwrap_or(false)
+}
+
+fn strip_generic_markers_from_request(request: &mut Map<String, Value>) {
+    if request_has_routing_instruction_markers(request) {
+        return;
+    }
+
+    if let Some(messages) = request.get_mut("messages").and_then(|v| v.as_array_mut()) {
+        for message in messages.iter_mut() {
+            let Some(message_obj) = message.as_object_mut() else {
+                continue;
+            };
+            let Some(content) = message_obj.get("content").cloned() else {
+                continue;
+            };
+            message_obj.insert(
+                "content".to_string(),
+                strip_marker_syntax_from_content_value(&content),
+            );
+        }
+    }
+
+    let Some(context_input) = request
+        .get_mut("semantics")
+        .and_then(|v| v.as_object_mut())
+        .and_then(|semantics| semantics.get_mut("responses"))
+        .and_then(|v| v.as_object_mut())
+        .and_then(|responses| responses.get_mut("context"))
+        .and_then(|v| v.as_object_mut())
+        .and_then(|context| context.get_mut("input"))
+        .and_then(|v| v.as_array_mut())
+    else {
+        return;
+    };
+
+    for entry in context_input.iter_mut() {
+        let Some(entry_obj) = entry.as_object_mut() else {
+            continue;
+        };
+        let Some(content) = entry_obj.get("content").cloned() else {
+            continue;
+        };
+        entry_obj.insert(
+            "content".to_string(),
+            strip_marker_syntax_from_content_value(&content),
+        );
+    }
+}
+
+fn attach_chat_process_sanitizer_metadata(
+    request: &mut Map<String, Value>,
+    sanitize_output: &SanitizeMessagesOutput,
+) {
+    if sanitize_output.removed_assistant_turns < 1 && !sanitize_output.did_mutate_message_shapes {
+        return;
+    }
+
+    let metadata = request
+        .entry("metadata".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !metadata.is_object() {
+        *metadata = Value::Object(Map::new());
+    }
+    let Some(metadata_obj) = metadata.as_object_mut() else {
+        return;
+    };
+
+    metadata_obj.insert(
+        "chatProcessSanitizer".to_string(),
+        json!({
+            "removedAssistantTurns": sanitize_output.removed_assistant_turns,
+            "removedEmptyAssistantTurns": sanitize_output.removed_empty_assistant_turns,
+            "removedTemplateAssistantTurns": sanitize_output.removed_template_assistant_turns,
+            "removedDuplicateMirrorAssistantTurns": sanitize_output.removed_duplicate_mirror_assistant_turns,
+            "removedHistoricalGoalTurns": sanitize_output.removed_historical_goal_turns,
+            "removedToolTurns": 0,
+            "removedEmptyToolTurns": 0,
+            "removedOrphanToolTurns": 0,
+            "backfilledToolCallIds": 0
+        }),
+    );
+}
+
+fn apply_chat_process_request_sanitizer(request: &mut Map<String, Value>) {
+    strip_generic_markers_from_request(request);
+    let sanitized = sanitize_chat_process_messages_value(&Value::Object(request.clone()));
+    request.insert(
+        "messages".to_string(),
+        Value::Array(sanitized.messages.clone()),
+    );
+    attach_chat_process_sanitizer_metadata(request, &sanitized);
 }
 
 fn build_governed_filter_payload(request: &Value) -> Value {
@@ -837,7 +1029,11 @@ fn build_node_result(
     Value::Object(result)
 }
 
-fn build_processed_request(governed: Value, metadata: &Map<String, Value>) -> Value {
+fn build_processed_request(
+    governed: Value,
+    metadata: &Map<String, Value>,
+    heartbeat_directive: Option<HeartbeatDirectiveRuntimeSummary>,
+) -> Value {
     let mut processed = normalize_record(governed);
     let stream_enabled = processed
         .get("parameters")
@@ -866,14 +1062,22 @@ fn build_processed_request(governed: Value, metadata: &Map<String, Value>) -> Va
           "status": "success"
         }),
     );
+    let mut processing_metadata = Map::new();
+    processing_metadata.insert(
+        "streaming".to_string(),
+        json!({
+          "enabled": stream_enabled,
+          "chunkCount": 0
+        }),
+    );
+    if let Some(summary) = heartbeat_directive {
+        if let Ok(value) = serde_json::to_value(summary) {
+            processing_metadata.insert("heartbeatDirective".to_string(), value);
+        }
+    }
     processed.insert(
         "processingMetadata".to_string(),
-        json!({
-          "streaming": {
-            "enabled": stream_enabled,
-            "chunkCount": 0
-          }
-        }),
+        Value::Object(processing_metadata),
     );
     Value::Object(processed)
 }
@@ -885,15 +1089,23 @@ pub fn apply_req_process_tool_governance(
 
     let ctx = resolve_governance_context(&input.metadata, &input.entry_endpoint);
 
-    let request_metadata = input.metadata.clone();
-    let mut request = normalize_record(input.request);
     let metadata = normalize_record(input.metadata);
+    let request_metadata = Value::Object(metadata.clone());
+    let mut request = normalize_record(input.request);
+    let request_messages = request
+        .get("messages")
+        .cloned()
+        .unwrap_or(Value::Array(Vec::new()));
+    let heartbeat_applied = apply_heartbeat_directive_semantics(request_messages, &request_metadata);
+    let heartbeat_directive = heartbeat_applied.runtime_summary.clone();
+    request.insert("messages".to_string(), heartbeat_applied.messages);
+    apply_chat_process_request_sanitizer(&mut request);
 
     apply_anthropic_tool_alias_semantics(&mut request, &ctx.entry_endpoint);
 
     let governed = build_governed_filter_payload(&Value::Object(request));
     let mut governed_request = normalize_record(governed);
-    ensure_apply_patch_chat_process_contract(&mut governed_request, &request_metadata);
+    ensure_apply_patch_chat_process_contract(&mut governed_request, &Value::Object(metadata.clone()));
     maybe_apply_servertool_orchestration(
         &mut governed_request,
         &metadata,
@@ -903,7 +1115,11 @@ pub fn apply_req_process_tool_governance(
     );
     apply_post_governed_media_cleanup(&mut governed_request);
 
-    let processed = build_processed_request(Value::Object(governed_request), &metadata);
+    let processed = build_processed_request(
+        Value::Object(governed_request),
+        &metadata,
+        heartbeat_directive,
+    );
     let processed_request_map = normalize_record_ref(&processed);
     let end_time_ms = now_millis();
 

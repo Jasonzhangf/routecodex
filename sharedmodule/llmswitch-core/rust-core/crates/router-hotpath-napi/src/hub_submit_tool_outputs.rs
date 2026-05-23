@@ -41,15 +41,25 @@ pub struct SubmitToolOutputEntry {
 }
 
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    if raw.is_empty() { None } else { Some(raw) }
+    let raw = value
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw)
+    }
 }
 
 fn normalize_output_text(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(text)) => text.clone(),
         Some(Value::Null) | None => String::new(),
-        Some(other) => serde_json::to_string(other).unwrap_or_else(|_| String::from("[object Object]")),
+        Some(other) => {
+            serde_json::to_string(other).unwrap_or_else(|_| String::from("[object Object]"))
+        }
     }
 }
 
@@ -71,8 +81,12 @@ fn collect_tool_outputs(chat_envelope: &Value) -> Vec<(String, String, Option<St
             let id = read_trimmed_string(row.get("tool_call_id"))
                 .or_else(|| read_trimmed_string(row.get("call_id")))
                 .or_else(|| read_trimmed_string(row.get("id")));
-            let Some(id) = id else { continue; };
-            if seen.contains(&id) { continue; }
+            let Some(id) = id else {
+                continue;
+            };
+            if seen.contains(&id) {
+                continue;
+            }
             seen.insert(id.clone());
             let content = normalize_output_text(row.get("content"));
             let name = read_trimmed_string(row.get("name"));
@@ -82,7 +96,10 @@ fn collect_tool_outputs(chat_envelope: &Value) -> Vec<(String, String, Option<St
 
     let internal_ctx = responses_context_internal(chat_envelope);
     if let Some(ctx) = internal_ctx.as_ref().and_then(|v| v.as_object()) {
-        if let Some(captured) = ctx.get("__captured_tool_results").and_then(|v| v.as_array()) {
+        if let Some(captured) = ctx
+            .get("__captured_tool_results")
+            .and_then(|v| v.as_array())
+        {
             for entry in captured {
                 let row = match entry.as_object() {
                     Some(r) => r,
@@ -92,8 +109,12 @@ fn collect_tool_outputs(chat_envelope: &Value) -> Vec<(String, String, Option<St
                     Some(v) => Some(v),
                     None => read_trimmed_string(row.get("call_id")),
                 };
-                let Some(id) = id else { continue; };
-                if seen.contains(&id) { continue; }
+                let Some(id) = id else {
+                    continue;
+                };
+                if seen.contains(&id) {
+                    continue;
+                }
                 seen.insert(id.clone());
                 let content = normalize_output_text(row.get("output"));
                 let name = read_trimmed_string(row.get("name"));
@@ -112,9 +133,12 @@ fn responses_context_internal(chat_envelope: &Value) -> Option<&Value> {
         .and_then(|obj| obj.get("responsesContext"))
 }
 
-fn build_submit_tool_outputs_payload(input: SubmitToolOutputsInput) -> Result<SubmitToolOutputsOutput, String> {
-    let response_id = resolve_submit_response_id(&input.responses_context)
-        .ok_or_else(|| "Submit tool outputs requires response_id from Responses context".to_string())?;
+fn build_submit_tool_outputs_payload(
+    input: SubmitToolOutputsInput,
+) -> Result<SubmitToolOutputsOutput, String> {
+    let response_id = resolve_submit_response_id(&input.responses_context).ok_or_else(|| {
+        "Submit tool outputs requires response_id from Responses context".to_string()
+    })?;
 
     let outputs_raw = collect_tool_outputs(&input.chat_envelope);
     if outputs_raw.is_empty() {
@@ -131,12 +155,14 @@ fn build_submit_tool_outputs_payload(input: SubmitToolOutputsInput) -> Result<Su
         })
         .collect();
 
-    let model = input.chat_envelope
+    let model = input
+        .chat_envelope
         .get("parameters")
         .and_then(|v| v.as_object())
         .and_then(|obj| read_trimmed_string(obj.get("model")));
 
-    let stream = input.chat_envelope
+    let stream = input
+        .chat_envelope
         .get("parameters")
         .and_then(|v| v.as_object())
         .and_then(|obj| obj.get("stream").and_then(|v| v.as_bool()));
@@ -152,8 +178,8 @@ fn build_submit_tool_outputs_payload(input: SubmitToolOutputsInput) -> Result<Su
 
 #[napi]
 pub fn build_submit_tool_outputs_payload_json(input_json: String) -> NapiResult<String> {
-    let input: SubmitToolOutputsInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: SubmitToolOutputsInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = build_submit_tool_outputs_payload(input)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))

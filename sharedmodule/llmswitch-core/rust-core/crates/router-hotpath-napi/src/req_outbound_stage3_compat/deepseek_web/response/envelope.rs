@@ -141,10 +141,7 @@ fn resolve_fragment_target_from_path(
     if !path.starts_with(prefix) || !path.ends_with("/content") {
         return None;
     }
-    let index_raw = path
-        .strip_prefix(prefix)?
-        .strip_suffix("/content")?
-        .trim();
+    let index_raw = path.strip_prefix(prefix)?.strip_suffix("/content")?.trim();
     if index_raw == "-1" {
         return state.fragment_targets.last().copied();
     }

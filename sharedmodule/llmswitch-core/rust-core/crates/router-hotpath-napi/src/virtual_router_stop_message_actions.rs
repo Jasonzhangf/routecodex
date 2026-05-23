@@ -236,12 +236,9 @@ mod tests {
             "stopMessageStageMode": "on",
             "stopMessageAiMode": "off"
         });
-        let output = apply_stop_message_instruction_json(
-            instruction.to_string(),
-            state.to_string(),
-            12345,
-        )
-        .unwrap();
+        let output =
+            apply_stop_message_instruction_json(instruction.to_string(), state.to_string(), 12345)
+                .unwrap();
         let parsed: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(
             parsed

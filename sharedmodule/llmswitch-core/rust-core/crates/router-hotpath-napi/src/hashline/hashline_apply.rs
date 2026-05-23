@@ -9,7 +9,10 @@ fn split_lines(file_content: &str) -> Vec<String> {
     if file_content.is_empty() {
         return Vec::new();
     }
-    file_content.split('\n').map(|line| line.to_string()).collect()
+    file_content
+        .split('\n')
+        .map(|line| line.to_string())
+        .collect()
 }
 
 fn join_lines(lines: &[String]) -> String {
@@ -25,17 +28,19 @@ fn line_num_to_index(line_num: u32) -> Result<usize, HashlineError> {
     })
 }
 
-fn ensure_single_file_scope(op: &HashlineOp, file_path: &str, op_idx: usize) -> Result<(), HashlineError> {
+fn ensure_single_file_scope(
+    op: &HashlineOp,
+    file_path: &str,
+    op_idx: usize,
+) -> Result<(), HashlineError> {
     if let Some(op_file_path) = op.file_path.as_ref() {
         if op_file_path != file_path {
-            return Err(
-                HashlineError::new(
-                    HashlineErrorCode::MultiFileUnsupported,
-                    "phase1 hashline only supports a single target file",
-                )
-                .with_src_line(op.src_line)
-                .with_op_idx(op_idx),
-            );
+            return Err(HashlineError::new(
+                HashlineErrorCode::MultiFileUnsupported,
+                "phase1 hashline only supports a single target file",
+            )
+            .with_src_line(op.src_line)
+            .with_op_idx(op_idx));
         }
     }
     Ok(())
@@ -51,14 +56,12 @@ fn ensure_no_conflict(ops: &[HashlineOp]) -> Result<(), HashlineError> {
             continue;
         }
         if !seen.insert(line_num) {
-            return Err(
-                HashlineError::new(
-                    HashlineErrorCode::OpConflict,
-                    format!("multiple mutating ops target line {}", line_num),
-                )
-                .with_src_line(op.src_line)
-                .with_op_idx(op_idx),
-            );
+            return Err(HashlineError::new(
+                HashlineErrorCode::OpConflict,
+                format!("multiple mutating ops target line {}", line_num),
+            )
+            .with_src_line(op.src_line)
+            .with_op_idx(op_idx));
         }
     }
     Ok(())
@@ -131,15 +134,13 @@ pub fn apply_hashline_ops(
                 })?;
                 let computed = compute_line_hash(&original_line);
                 if computed != expected {
-                    return Err(
-                        HashlineError::new(
-                            HashlineErrorCode::AnchorMismatch,
-                            format!("anchor mismatch at line {}", line_num),
-                        )
-                        .with_src_line(op.src_line)
-                        .with_op_idx(op_idx)
-                        .with_anchor(expected, computed),
-                    );
+                    return Err(HashlineError::new(
+                        HashlineErrorCode::AnchorMismatch,
+                        format!("anchor mismatch at line {}", line_num),
+                    )
+                    .with_src_line(op.src_line)
+                    .with_op_idx(op_idx)
+                    .with_anchor(expected, computed));
                 }
 
                 let line_idx = line_num_to_index(line_num)?;
@@ -186,14 +187,12 @@ pub fn apply_hashline_ops(
                     Some(line_num) => {
                         let line_idx = line_num_to_index(line_num)?;
                         if line_idx > next_lines.len() {
-                            return Err(
-                                HashlineError::new(
-                                    HashlineErrorCode::LineNotFound,
-                                    format!("insert line {} exceeds file length", line_num),
-                                )
-                                .with_src_line(op.src_line)
-                                .with_op_idx(op_idx),
-                            );
+                            return Err(HashlineError::new(
+                                HashlineErrorCode::LineNotFound,
+                                format!("insert line {} exceeds file length", line_num),
+                            )
+                            .with_src_line(op.src_line)
+                            .with_op_idx(op_idx));
                         }
                         line_idx
                     }
@@ -243,7 +242,10 @@ pub fn materialize_changeset(
                 if line_idx >= next_lines.len() {
                     return Err(HashlineError::new(
                         HashlineErrorCode::LineNotFound,
-                        format!("materialize delete line {} out of bounds", result.line_idx + 1),
+                        format!(
+                            "materialize delete line {} out of bounds",
+                            result.line_idx + 1
+                        ),
                     ));
                 }
                 next_lines.remove(line_idx);
@@ -252,7 +254,10 @@ pub fn materialize_changeset(
                 if line_idx >= next_lines.len() {
                     return Err(HashlineError::new(
                         HashlineErrorCode::LineNotFound,
-                        format!("materialize replace line {} out of bounds", result.line_idx + 1),
+                        format!(
+                            "materialize replace line {} out of bounds",
+                            result.line_idx + 1
+                        ),
                     ));
                 }
                 next_lines.remove(line_idx);
@@ -264,7 +269,10 @@ pub fn materialize_changeset(
                 if line_idx > next_lines.len() {
                     return Err(HashlineError::new(
                         HashlineErrorCode::LineNotFound,
-                        format!("materialize insert line {} out of bounds", result.line_idx + 1),
+                        format!(
+                            "materialize insert line {} out of bounds",
+                            result.line_idx + 1
+                        ),
                     ));
                 }
                 for line in result.new_lines.iter().rev() {

@@ -19,9 +19,6 @@ import { normalizeChatResponseReasoningToolsWithNative } from '../../../router/v
 
 function normalizeResponsesToolCallArgumentsForClient(responsesPayload: Record<string, unknown>, context?: ResponsesRequestContext): void {
   const toolsRaw = Array.isArray(context?.toolsRaw) ? (context?.toolsRaw as unknown[]) : [];
-  if (!toolsRaw.length) {
-    return;
-  }
   const normalized = normalizeResponsesToolCallArgumentsForClientWithNative(responsesPayload, toolsRaw);
   for (const key of Object.keys(responsesPayload)) {
     if (!Object.prototype.hasOwnProperty.call(normalized, key)) {

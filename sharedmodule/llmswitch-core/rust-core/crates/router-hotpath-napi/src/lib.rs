@@ -39,14 +39,13 @@ mod hashline;
 mod hub_bridge_actions;
 mod hub_bridge_policies;
 mod hub_chat_envelope_validator;
-// heartbeat directive parser is temporarily disabled (not in active path).
-// Re-enable after dedicated Rust module cleanup lands.
+mod hub_heartbeat_directives;
 mod failure_policy;
 mod hub_pipeline;
-mod hub_provider_response_helpers;
 mod hub_pipeline_session_identifiers;
 mod hub_pipeline_target_utils;
 mod hub_protocol_spec_semantics;
+mod hub_provider_response_helpers;
 mod hub_reasoning_tool_normalizer;
 mod hub_req_inbound_context_capture;
 mod hub_req_inbound_format_parse;
@@ -75,8 +74,9 @@ mod req_process_stage2_route_select;
 mod resp_process_stage1_tool_governance;
 mod resp_process_stage2_finalize;
 mod responses_openai_codec;
-mod servertool_skeleton_config;
+mod responses_reasoning_registry;
 mod servertool_skeleton;
+mod servertool_skeleton_config;
 mod shared_args_mapping;
 mod shared_bridge_instructions;
 mod shared_chat_output_normalizer;
@@ -91,12 +91,11 @@ mod shared_payload_budget;
 mod shared_provider_errors;
 mod shared_response_compat;
 mod shared_responses_conversation_utils;
-mod responses_reasoning_registry;
 mod shared_responses_response_utils;
-mod shared_tool_result_text_normalizer;
 mod shared_responses_tool_utils;
 mod shared_tool_call_id_manager;
 mod shared_tool_mapping;
+mod shared_tool_result_text_normalizer;
 mod shared_tooling;
 mod streaming_tool_extractor;
 mod thought_signature_validator;
@@ -108,23 +107,6 @@ mod virtual_router_stop_message_instruction;
 mod virtual_router_stop_message_state_codec;
 mod web_search_mode;
 use crate::virtual_router_engine::routing::resolve_sticky_key as resolve_virtual_router_sticky_key;
-
-#[napi(js_name = "resolveHeartbeatDirectiveJson")]
-pub fn resolve_heartbeat_directive_json(input_json: String) -> NapiResult<String> {
-    // Heartbeat directives are temporarily disabled.
-    // Keep native export stable for loader required-exports contract.
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = serde_json::json!({
-        "action": "none",
-        "intervalMs": Value::Null,
-        "tmuxSessionId": Value::Null,
-        "workdir": Value::Null,
-        "contentChanged": false,
-        "messages": input.get("messages").cloned().unwrap_or(Value::Null)
-    });
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct QuotaBucketInputEntry {
@@ -268,7 +250,6 @@ pub fn resolve_virtual_router_sticky_key_json(metadata_json: String) -> NapiResu
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-
 fn analyze_pending_tool_sync(
     messages: Vec<Value>,
     after_tool_call_ids: Vec<String>,
@@ -392,7 +373,6 @@ pub fn compute_quota_buckets_json(entries_json: String, now_ms: f64) -> NapiResu
     let output = compute_quota_buckets(parsed, now_ms);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
-
 
 #[napi]
 pub fn analyze_pending_tool_sync_json(
@@ -742,7 +722,6 @@ pub fn normalize_reasoning_in_anthropic_payload_json(input_json: String) -> Napi
 pub fn normalize_req_inbound_reasoning_payload_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::normalize_req_inbound_reasoning_payload_json(input_json)
 }
-
 
 #[napi]
 pub fn should_normalize_reasoning_payload_json(input_json: String) -> NapiResult<String> {
@@ -1185,7 +1164,6 @@ pub fn apply_field_mappings_json_bridge(
     compat_field_mapping::apply_field_mappings_json(payload_json, mappings_json)
 }
 
-
 #[napi(js_name = "sanitizeToolSchemaGlmShellJson")]
 pub fn sanitize_tool_schema_glm_shell_json_bridge(payload_json: String) -> NapiResult<String> {
     compat_tool_schema::sanitize_tool_schema_glm_shell_json(payload_json)
@@ -1350,13 +1328,23 @@ pub fn classify_provider_failure_json(
         upstream_code.as_deref(),
         is_network_error,
     );
-    Ok(serde_json::to_string(&classification).map_err(|e| napi::Error::from_reason(e.to_string()))?)
+    Ok(serde_json::to_string(&classification)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?)
 }
 
 #[napi(js_name = "networkErrorSetJson")]
 pub fn network_error_set_json() -> NapiResult<String> {
-    serde_json::to_string(&["ECONNRESET","ECONNREFUSED","EHOSTUNREACH","ENOTFOUND","EAI_AGAIN","EPIPE","ETIMEDOUT","ECONNABORTED"])
-        .map_err(|e| napi::Error::from_reason(e.to_string()))
+    serde_json::to_string(&[
+        "ECONNRESET",
+        "ECONNREFUSED",
+        "EHOSTUNREACH",
+        "ENOTFOUND",
+        "EAI_AGAIN",
+        "EPIPE",
+        "ETIMEDOUT",
+        "ECONNABORTED",
+    ])
+    .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi(js_name = "isProviderFailureBlockingRecoverableJson")]
@@ -1364,9 +1352,13 @@ pub fn is_provider_failure_blocking_recoverable_json(
     classification_json: String,
     stage: Option<String>,
 ) -> NapiResult<bool> {
-    let classification: failure_policy::FailureClassification = serde_json::from_str(&classification_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    Ok(failure_policy::is_blocking_recoverable(classification, stage.as_deref()))
+    let classification: failure_policy::FailureClassification =
+        serde_json::from_str(&classification_json)
+            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(failure_policy::is_blocking_recoverable(
+        classification,
+        stage.as_deref(),
+    ))
 }
 
 #[napi(js_name = "shouldRetryProviderFailureJson")]
@@ -1375,9 +1367,14 @@ pub fn should_retry_provider_failure_json(
     attempt: u32,
     max_attempts: u32,
 ) -> NapiResult<bool> {
-    let classification: failure_policy::FailureClassification = serde_json::from_str(&classification_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    Ok(failure_policy::should_retry(classification, attempt, max_attempts))
+    let classification: failure_policy::FailureClassification =
+        serde_json::from_str(&classification_json)
+            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(failure_policy::should_retry(
+        classification,
+        attempt,
+        max_attempts,
+    ))
 }
 
 #[napi(js_name = "computeProviderBackoffMsJson")]
@@ -1387,9 +1384,13 @@ pub fn compute_provider_backoff_ms_json(
     base_ms: i64,
     max_ms: i64,
 ) -> NapiResult<i64> {
-    let classification: failure_policy::FailureClassification = serde_json::from_str(&classification_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    Ok(failure_policy::compute_backoff(classification, attempt, base_ms as u64, max_ms as u64) as i64)
+    let classification: failure_policy::FailureClassification =
+        serde_json::from_str(&classification_json)
+            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(
+        failure_policy::compute_backoff(classification, attempt, base_ms as u64, max_ms as u64)
+            as i64,
+    )
 }
 
 #[napi(js_name = "filterOutExecutedServerToolCallsJson")]
@@ -1410,21 +1411,16 @@ pub fn filter_out_executed_server_tool_calls_json(
 
 #[napi(js_name = "runHashlineNativeEditJson")]
 pub fn run_hashline_native_edit_json(input_json: String) -> NapiResult<String> {
-    let input: hashline::HashlineNativeEditInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: hashline::HashlineNativeEditInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = hashline::run_hashline_native_edit(input);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 pub use responses_reasoning_registry::{
-    register_responses_reasoning_json,
-    consume_responses_reasoning_json,
-    register_responses_output_text_meta_json,
-    consume_responses_output_text_meta_json,
-    register_responses_payload_snapshot_json,
-    consume_responses_payload_snapshot_json,
-    consume_responses_payload_snapshot_by_aliases_json,
-    register_responses_passthrough_json,
-    consume_responses_passthrough_json,
-    consume_responses_passthrough_by_aliases_json,
+    consume_responses_output_text_meta_json, consume_responses_passthrough_by_aliases_json,
+    consume_responses_passthrough_json, consume_responses_payload_snapshot_by_aliases_json,
+    consume_responses_payload_snapshot_json, consume_responses_reasoning_json,
+    register_responses_output_text_meta_json, register_responses_passthrough_json,
+    register_responses_payload_snapshot_json, register_responses_reasoning_json,
 };

@@ -5,10 +5,76 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::resp_process_stage1_tool_governance::normalize_apply_patch_schema_args;
 
 fn normalize_shell_like_output_text(raw: &str) -> String {
     raw.to_string()
+}
+
+fn normalize_apply_patch_output_text(raw: &str) -> String {
+    const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with workspace-relative filePath and a line-edit patch only. Create/append lines start with `+ `. Updates use exact current target lines as `- ` entries followed by replacement `+ ` entries.";
+    const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future apply_patch calls with workspace-relative filePath and line-edit patch entries.";
+
+    let text = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let trimmed = text.trim();
+    if trimmed.starts_with("APPLY_PATCH_ERROR:") {
+        return APPLY_PATCH_ERROR_TEXT.to_string();
+    }
+
+    if let Ok(Value::Object(row)) = serde_json::from_str::<Value>(trimmed) {
+        let status = row
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_uppercase();
+        if row.get("ok").and_then(Value::as_bool) == Some(true)
+            || status == "APPLY_PATCH_APPLIED"
+            || status == "APPLY_PATCH_RESULT"
+        {
+            return APPLY_PATCH_RESULT_TEXT.to_string();
+        }
+        if row.get("ok").and_then(Value::as_bool) == Some(false)
+            || status == "APPLY_PATCH_FAILED"
+            || status == "APPLY_PATCH_ERROR"
+        {
+            return APPLY_PATCH_ERROR_TEXT.to_string();
+        }
+    }
+
+    let lowered = text.to_ascii_lowercase();
+    if lowered.trim() == "aborted" {
+        return APPLY_PATCH_ERROR_TEXT.to_string();
+    }
+    if matches!(lowered.trim(), "done" | "done!") {
+        return APPLY_PATCH_RESULT_TEXT.to_string();
+    }
+    if !(lowered.contains("apply_patch") || lowered.contains("patch")) {
+        return raw.to_string();
+    }
+    if lowered.contains("verification failed")
+        || lowered.contains("invalid patch")
+        || lowered.contains("missing")
+        || lowered.contains("failed")
+        || lowered.contains("error")
+    {
+        return APPLY_PATCH_ERROR_TEXT.to_string();
+    }
+    raw.to_string()
+}
+
+fn is_apply_patch_tool_name(raw_name: &str) -> bool {
+    raw_name.trim().eq_ignore_ascii_case("apply_patch")
+}
+
+fn is_synthetic_apply_patch_guard_call(arguments: Option<&Value>) -> bool {
+    let Some(args) = parse_json_record(arguments) else {
+        return false;
+    };
+    args.get("patch")
+        .or_else(|| args.get("input"))
+        .and_then(Value::as_str)
+        .map(|raw| raw.contains("__APPLY_PATCH_ERROR__/") || raw.contains("APPLY_PATCH_ERROR:"))
+        .unwrap_or(false)
 }
 
 fn prune_responses_input_tool_history(items: &mut Vec<Value>) {
@@ -46,7 +112,9 @@ fn prune_message_tool_history(messages: &mut Vec<Value>) {
                                 ) && !is_invalid_write_stdin_call(
                                     raw_name.as_str(),
                                     function_row.get("arguments"),
-                                ) {
+                                ) && !(is_apply_patch_tool_name(raw_name.as_str())
+                                    && is_synthetic_apply_patch_guard_call(function_row.get("arguments")))
+                                {
                                     return Some(false);
                                 }
                                 let call_id = read_trimmed_string(call_row.get("id"))
@@ -276,7 +344,11 @@ fn value_to_string(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::String(text) => text.clone(),
-        Value::Array(entries) => entries.iter().map(value_to_string).collect::<Vec<_>>().join(""),
+        Value::Array(entries) => entries
+            .iter()
+            .map(value_to_string)
+            .collect::<Vec<_>>()
+            .join(""),
         other => other.to_string(),
     }
 }
@@ -388,6 +460,7 @@ fn normalize_message_tool_calls(
     };
 
     let mut shell_tool_call_ids = HashSet::<String>::new();
+    let mut apply_patch_tool_call_ids = HashSet::<String>::new();
 
     for message in messages.iter_mut() {
         let Some(message_row) = message.as_object_mut() else {
@@ -399,7 +472,7 @@ fn normalize_message_tool_calls(
         if role == "tool" {
             let tool_call_id = read_trimmed_string(message_row.get("tool_call_id"));
             let tool_name = read_trimmed_string(message_row.get("name"));
-            let should_normalize = tool_call_id
+            let should_normalize_shell = tool_call_id
                 .as_ref()
                 .map(|id| shell_tool_call_ids.contains(id))
                 .unwrap_or(false)
@@ -407,9 +480,21 @@ fn normalize_message_tool_calls(
                     .as_ref()
                     .map(|name| is_shell_like_tool_name(name))
                     .unwrap_or(false);
-            if should_normalize {
+            let should_normalize_apply_patch = tool_call_id
+                .as_ref()
+                .map(|id| apply_patch_tool_call_ids.contains(id))
+                .unwrap_or(false)
+                || tool_name
+                    .as_ref()
+                    .map(|name| is_apply_patch_tool_name(name))
+                    .unwrap_or(false);
+            if should_normalize_shell || should_normalize_apply_patch {
                 if let Some(content) = message_row.get("content").and_then(Value::as_str) {
-                    let normalized = normalize_shell_like_output_text(content);
+                    let normalized = if should_normalize_apply_patch {
+                        normalize_apply_patch_output_text(content)
+                    } else {
+                        normalize_shell_like_output_text(content)
+                    };
                     if normalized != content {
                         message_row.insert("content".to_string(), Value::String(normalized));
                     }
@@ -431,6 +516,8 @@ fn normalize_message_tool_calls(
             let Some(call_row) = call.as_object_mut() else {
                 continue;
             };
+            let call_id_hint = read_trimmed_string(call_row.get("id"))
+                .or_else(|| read_trimmed_string(call_row.get("call_id")));
             let Some(fn_row) = call_row
                 .get_mut("function")
                 .and_then(|node| node.as_object_mut())
@@ -440,6 +527,11 @@ fn normalize_message_tool_calls(
             let Some(raw_name) = read_trimmed_string(fn_row.get("name")) else {
                 continue;
             };
+            if is_apply_patch_tool_name(raw_name.as_str()) {
+                if let Some(call_id) = call_id_hint.as_ref() {
+                    apply_patch_tool_call_ids.insert(call_id.clone());
+                }
+            }
             if let Some((resolved_name, arguments)) = normalize_shell_like_function_call_arguments(
                 raw_name.as_str(),
                 fn_row.get("arguments"),
@@ -449,19 +541,15 @@ fn normalize_message_tool_calls(
                     fn_row.insert("name".to_string(), Value::String(resolved_name));
                 }
                 fn_row.insert("arguments".to_string(), Value::String(arguments));
-                if let Some(call_id) = read_trimmed_string(call_row.get("id"))
-                    .or_else(|| read_trimmed_string(call_row.get("call_id")))
-                {
-                    shell_tool_call_ids.insert(call_id);
+                if let Some(call_id) = call_id_hint.as_ref() {
+                    shell_tool_call_ids.insert(call_id.clone());
                 }
                 continue;
             }
-            if let Some((resolved_name, arguments)) =
-                normalize_write_stdin_function_call_arguments(
-                    raw_name.as_str(),
-                    fn_row.get("arguments"),
-                )
-            {
+            if let Some((resolved_name, arguments)) = normalize_write_stdin_function_call_arguments(
+                raw_name.as_str(),
+                fn_row.get("arguments"),
+            ) {
                 if resolved_name != raw_name {
                     fn_row.insert("name".to_string(), Value::String(resolved_name));
                 }
@@ -488,6 +576,7 @@ fn normalize_responses_input_function_calls(
 
     let mut dropped_call_ids: HashSet<String> = HashSet::new();
     let mut shell_like_call_ids: HashSet<String> = HashSet::new();
+    let mut apply_patch_call_ids: HashSet<String> = HashSet::new();
     let mut normalized_items = Vec::<Value>::with_capacity(input_items.len());
 
     for mut item in std::mem::take(input_items) {
@@ -497,6 +586,13 @@ fn normalize_responses_input_function_calls(
                 .to_ascii_lowercase();
             if item_type == "function_call" {
                 if let Some(raw_name) = read_trimmed_string(item_row.get("name")) {
+                    if is_apply_patch_tool_name(raw_name.as_str()) {
+                        let call_id = read_trimmed_string(item_row.get("call_id"))
+                            .or_else(|| read_trimmed_string(item_row.get("id")));
+                        if let Some(call_id) = call_id {
+                            apply_patch_call_ids.insert(call_id);
+                        }
+                    }
                     if let Some((resolved_name, arguments)) =
                         normalize_shell_like_function_call_arguments(
                             raw_name.as_str(),
@@ -548,9 +644,15 @@ fn normalize_responses_input_function_calls(
                         // Keep request chain coherent: remove orphan output for a dropped malformed call.
                         continue;
                     }
-                    if shell_like_call_ids.contains(call_id.as_str()) {
+                    if shell_like_call_ids.contains(call_id.as_str())
+                        || apply_patch_call_ids.contains(call_id.as_str())
+                    {
                         if let Some(raw_output) = item_row.get("output").and_then(Value::as_str) {
-                            let normalized = normalize_shell_like_output_text(raw_output);
+                            let normalized = if apply_patch_call_ids.contains(call_id.as_str()) {
+                                normalize_apply_patch_output_text(raw_output)
+                            } else {
+                                normalize_shell_like_output_text(raw_output)
+                            };
                             if normalized != raw_output {
                                 item_row.insert("output".to_string(), Value::String(normalized));
                             }
@@ -847,7 +949,10 @@ mod tests {
         let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
             .as_str()
             .expect("arguments text");
-        assert_eq!(args_text, "{\"input\":\"*** note.txt\\n--- note.txt\\n@@ -0,0 +1 @@\\n+hello\"}");
+        assert_eq!(
+            args_text,
+            "{\"input\":\"*** note.txt\\n--- note.txt\\n@@ -0,0 +1 @@\\n+hello\"}"
+        );
     }
 
     #[test]
@@ -879,6 +984,45 @@ mod tests {
             args_text,
             "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\""
         );
+    }
+
+    #[test]
+    fn prunes_synthetic_apply_patch_guard_history_pair() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+          "messages": [
+            { "role": "user", "content": "test apply_patch" },
+            {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [{
+                "id": "call_bad_patch_guard",
+                "type": "function",
+                "function": {
+                  "name": "apply_patch",
+                  "arguments": serde_json::to_string(&json!({
+                    "input": "*** Begin Patch\n*** Update File: __APPLY_PATCH_ERROR__/missing_patch.txt\n@@\n-guard\n+APPLY_PATCH_ERROR: apply_patch requires schema arguments with patch as a string.\n*** End Patch",
+                    "patch": "*** Begin Patch\n*** Update File: __APPLY_PATCH_ERROR__/missing_patch.txt\n@@\n-guard\n+APPLY_PATCH_ERROR: apply_patch requires schema arguments with patch as a string.\n*** End Patch"
+                  })).unwrap()
+                }
+              }]
+            },
+            {
+              "role": "tool",
+              "name": "apply_patch",
+              "tool_call_id": "call_bad_patch_guard",
+              "content": "APPLY_PATCH_ERROR: patch was rejected by Codex apply_patch executor. Retry with filePath, exact current fileContent, and minimal `- old` / `+ new` patch lines."
+            },
+            { "role": "user", "content": "try again" }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let messages = payload["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["content"], "try again");
+        assert!(!payload.to_string().contains("__APPLY_PATCH_ERROR__/"));
     }
 
     #[test]
@@ -1343,15 +1487,199 @@ mod tests {
         });
 
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
-        let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
-            .as_str()
-            .expect("arguments text");
-        let args: Value = serde_json::from_str(args_text).expect("args object");
+        let args_value = &payload["messages"][0]["tool_calls"][0]["function"]["arguments"];
+        let args: Value = match args_value.as_str() {
+            Some(args_text) => serde_json::from_str(args_text).expect("args object"),
+            None => args_value.clone(),
+        };
         assert_eq!(args["patch"], "= 1 123\nworld");
         assert_eq!(args["filePath"], "note.txt");
     }
 
     #[test]
+    fn normalizes_apply_patch_tool_error_message_for_chat_history() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [{
+                "id": "call_patch_error",
+                "type": "function",
+                "function": {
+                  "name": "apply_patch",
+                  "arguments": "{\"patch\":\"*** Begin Patch\\n*** Add File: demo.txt\\n+hi\\n*** End Patch\"}"
+                }
+              }]
+            },
+            {
+              "role": "tool",
+              "name": "apply_patch",
+              "tool_call_id": "call_patch_error",
+              "content": "aborted"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let content = payload["messages"][1]["content"]
+            .as_str()
+            .expect("tool output");
+        assert!(content.contains("APPLY_PATCH_ERROR"));
+        assert!(content.contains("line-edit"));
+        assert!(content.contains("filePath"));
+        assert!(!content.contains("Codex apply_patch executor"));
+        assert!(!content.contains("fileContent"));
+        assert!(!content.contains("*** Begin Patch\n"));
+    }
+
+    #[test]
+    fn normalizes_apply_patch_function_call_output_error_for_responses_history() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "name": "apply_patch" }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "fc_patch_error",
+              "name": "apply_patch",
+              "arguments": "{\"patch\":\"*** Begin Patch\\n*** Add File: demo.txt\\n+hi\\n*** End Patch\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "fc_patch_error",
+              "output": "apply_patch verification failed: invalid patch"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let output = payload["input"][1]["output"].as_str().expect("tool output");
+        assert!(output.contains("APPLY_PATCH_ERROR"));
+        assert!(output.contains("filePath"));
+        assert!(output.contains("line-edit"));
+        assert!(!output.contains("Original executor output"));
+        assert!(!output.contains("Codex apply_patch executor"));
+        assert!(!output.contains("fileContent"));
+    }
+
+    #[test]
+    fn normalizes_apply_patch_success_output_for_responses_history() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "name": "apply_patch" }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "fc_patch_success",
+              "name": "apply_patch",
+              "arguments": "{\"patch\":\"*** Begin Patch\\n*** Add File: demo.txt\\n+hi\\n*** End Patch\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "fc_patch_success",
+              "output": "Done!"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let output = payload["input"][1]["output"].as_str().expect("tool output");
+        assert!(output.starts_with("APPLY_PATCH_RESULT:"));
+        assert!(output.contains("line-edit"));
+        assert!(output.contains("filePath"));
+        assert!(!output.contains("Codex apply_patch executor"));
+        assert!(!output.contains("fileContent"));
+    }
+
+    #[test]
+    fn preserves_apply_patch_success_json_even_with_diagnostic_words() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "name": "apply_patch" }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "fc_patch_success_json",
+              "name": "apply_patch",
+              "arguments": "{\"filePath\":\"tmp/apply_patch_test.txt\",\"patch\":\"+ first line\\n+ second line\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "fc_patch_success_json",
+              "output": "{\"status\":\"APPLY_PATCH_APPLIED\",\"ok\":true,\"filePath\":\"tmp/apply_patch_test.txt\",\"message\":\"created; no missing lines or errors\"}"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let output = payload["input"][1]["output"].as_str().expect("tool output");
+        assert!(output.starts_with("APPLY_PATCH_RESULT:"));
+        assert!(!output.contains("APPLY_PATCH_ERROR"));
+        assert!(!output.contains("fileContent"));
+    }
+
+    #[test]
+    fn does_not_double_wrap_apply_patch_error_for_responses_history() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "name": "apply_patch" }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "fc_patch_error_once",
+              "name": "apply_patch",
+              "arguments": "{\"patch\":\"*** Begin Patch\\n*** Add File: demo.txt\\n+hi\\n*** End Patch\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "fc_patch_error_once",
+              "output": "APPLY_PATCH_ERROR: patch was rejected by Codex apply_patch executor. Keep the same filePath and exact current fileContent, then retry using only the internal line-edit patch format (`- old` / `+ new`)."
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let output = payload["input"][1]["output"].as_str().expect("tool output");
+        assert!(output.starts_with("APPLY_PATCH_ERROR:"));
+        assert_eq!(output.matches("APPLY_PATCH_ERROR:").count(), 1);
+        assert!(!output.contains("Original executor output"));
+        assert!(!output.contains("Codex apply_patch executor"));
+        assert!(!output.contains("fileContent"));
+    }
+
+    #[test]
+    fn masks_legacy_apply_patch_error_tool_message_from_chat_history() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [{
+                "id": "call_legacy_patch_error",
+                "type": "function",
+                "function": {
+                  "name": "apply_patch",
+                  "arguments": "{\"filePath\":\"demo.txt\",\"patch\":\"+ hi\"}"
+                }
+              }]
+            },
+            {
+              "role": "tool",
+              "name": "apply_patch",
+              "tool_call_id": "call_legacy_patch_error",
+              "content": "APPLY_PATCH_ERROR: patch was rejected by Codex apply_patch executor. Retry with filePath, exact current fileContent, and minimal `- old` / `+ new` patch lines."
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let content = payload["messages"][1]["content"]
+            .as_str()
+            .expect("tool output");
+        assert!(content.contains("APPLY_PATCH_ERROR"));
+        assert!(content.contains("filePath"));
+        assert!(content.contains("line-edit"));
+        assert!(!content.contains("Codex apply_patch executor"));
+        assert!(!content.contains("fileContent"));
+    }
+
     fn does_not_normalize_nested_hashline_apply_patch_anymore() {
         let mut payload = json!({
           "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
@@ -1379,10 +1707,11 @@ mod tests {
         });
 
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
-        let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
-            .as_str()
-            .expect("arguments text");
-        let args: Value = serde_json::from_str(args_text).expect("args object");
+        let args_value = &payload["messages"][0]["tool_calls"][0]["function"]["arguments"];
+        let args: Value = match args_value.as_str() {
+            Some(args_text) => serde_json::from_str(args_text).expect("args object"),
+            None => args_value.clone(),
+        };
         assert_eq!(args["input"]["patch"], "+ 2 deadbeef\nhello");
         assert_eq!(args["input"]["filePath"], "note.txt");
     }

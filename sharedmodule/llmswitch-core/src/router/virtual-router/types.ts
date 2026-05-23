@@ -399,6 +399,10 @@ export interface VirtualRouterClockConfig {
   includeTimeTag?: boolean;
 }
 
+export interface VirtualRouterApplyPatchConfig {
+  mode: "client" | "servertool";
+}
+
 export interface VirtualRouterConfig {
   routing: RoutingPools;
   providers: Record<string, ProviderProfile>;
@@ -409,6 +413,7 @@ export interface VirtualRouterConfig {
   webSearch?: VirtualRouterWebSearchConfig;
   execCommandGuard?: VirtualRouterExecCommandGuardConfig;
   clock?: VirtualRouterClockConfig;
+  applyPatch?: VirtualRouterApplyPatchConfig;
 }
 
 export interface VirtualRouterContextRoutingConfig {
@@ -431,6 +436,7 @@ export interface VirtualRouterBootstrapInput extends Record<string, unknown> {
     | VirtualRouterExecCommandGuardConfig
     | Record<string, unknown>;
   clock?: VirtualRouterClockConfig | Record<string, unknown>;
+  applyPatch?: VirtualRouterApplyPatchConfig | Record<string, unknown>;
 }
 
 export type ProviderRuntimeMap = Record<string, ProviderRuntimeProfile>;
@@ -795,6 +801,7 @@ export interface ProviderQuotaViewEntry {
    */
   consecutiveErrorCount?: number;
   cooldownUntil?: number | null;
+  cooldownKeepsPool?: boolean;
   blacklistUntil?: number | null;
 }
 

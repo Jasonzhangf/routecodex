@@ -260,6 +260,25 @@ function readResumeDeltaInputFromChatSemantics(chat: Record<string, unknown>): B
     : undefined;
 }
 
+function readResumeToolsFromChatSemantics(chat: Record<string, unknown>): BridgeToolDefinition[] | undefined {
+  const semantics =
+    chat?.semantics && typeof chat.semantics === 'object' && !Array.isArray(chat.semantics)
+      ? (chat.semantics as Record<string, unknown>)
+      : undefined;
+  const responses =
+    semantics?.responses && typeof semantics.responses === 'object' && !Array.isArray(semantics.responses)
+      ? (semantics.responses as Record<string, unknown>)
+      : undefined;
+  const responsesResume =
+    responses?.resume && typeof responses.resume === 'object' && !Array.isArray(responses.resume)
+      ? (responses.resume as Record<string, unknown>)
+      : undefined;
+  const restoredTools = responsesResume?.restoredTools;
+  return Array.isArray(restoredTools)
+    ? (jsonClone(restoredTools as JsonValue) as BridgeToolDefinition[])
+    : undefined;
+}
+
 export function captureResponsesContext(
   payload: Record<string, unknown>,
   dto?: { route?: { requestId?: string } }
@@ -495,8 +514,15 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   });
 
   const originalTools = Array.isArray(ctx?.toolsRaw) ? (ctx!.toolsRaw as BridgeToolDefinition[]) : undefined;
+  const resumeTools = continuationPreviousResponseId.length > 0
+    ? readResumeToolsFromChatSemantics(chat as Record<string, unknown>)
+    : undefined;
   const resolvedBridgeTools = resolveResponsesBridgeToolsWithNative({
-    originalTools: Array.isArray(originalTools) ? (originalTools as Array<Record<string, unknown>>) : undefined,
+    originalTools: Array.isArray(originalTools)
+      ? (originalTools as Array<Record<string, unknown>>)
+      : Array.isArray(resumeTools)
+        ? (resumeTools as Array<Record<string, unknown>>)
+        : undefined,
     chatTools: Array.isArray(responsesToolsFromChat) ? (responsesToolsFromChat as Array<Record<string, unknown>>) : undefined,
     allowBuiltinWebSearch: bridgeDecisions.allowBuiltinWebSearch === true,
     hasServerSideWebSearch: true,

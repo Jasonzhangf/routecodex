@@ -167,6 +167,9 @@ export function buildServerToolAdapterContext(args: {
   const baseContext: Record<string, unknown> = {
     ...metadataBag
   };
+  if (!asFlatRecord(baseContext.capturedChatRequest) && asFlatRecord(args.originalRequest)) {
+    baseContext.capturedChatRequest = args.originalRequest as Record<string, unknown>;
+  }
 
   backfillAdapterContextSessionIdentifiersFromOriginalRequest(baseContext, args.originalRequest);
   preferOriginalRequestForStoplessGoalSync(baseContext, args.originalRequest);

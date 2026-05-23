@@ -41,7 +41,7 @@ impl RouteLoadBalancer {
                 strategy: Some("round-robin".to_string()),
                 weights: None,
                 health_weighted: None,
-                }),
+            }),
             states: HashMap::new(),
         }
     }
@@ -202,6 +202,17 @@ impl RouteLoadBalancer {
         ))
     }
 
+    pub(crate) fn select_round_robin_for_route(
+        &mut self,
+        route_name: &str,
+        candidates: &[String],
+    ) -> Option<String> {
+        if candidates.is_empty() {
+            return None;
+        }
+        Some(self.select_round_robin(route_name, candidates))
+    }
+
     fn select_round_robin(&mut self, route_name: &str, candidates: &[String]) -> String {
         let state = self.get_state_mut(route_name);
         let idx = state.pointer % candidates.len();
@@ -287,5 +298,26 @@ impl RouteLoadBalancer {
         self.states
             .entry(route_name.to_string())
             .or_insert_with(RouteState::default)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_robin_covers_all_aliases_in_single_model_pool() {
+        let mut lb = RouteLoadBalancer::new(None);
+        let candidates = (1..=5)
+            .map(|idx| format!("windsurf.ws-pro-{idx}.gpt-5.4-none"))
+            .collect::<Vec<_>>();
+        let mut hits = Vec::new();
+        for _ in 0..5 {
+            hits.push(
+                lb.select_round_robin_for_route("thinking", &candidates)
+                    .expect("candidate should be selected"),
+            );
+        }
+        assert_eq!(hits, candidates);
     }
 }

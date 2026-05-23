@@ -154,6 +154,41 @@ function extractChatToolOutputs(finalChatResponse: JsonObject): Array<{ tool_cal
   return out;
 }
 
+function prunePendingToolCallsForOutputs(messages: JsonObject[], toolCallIds: Set<string>): void {
+  if (toolCallIds.size === 0) {
+    return;
+  }
+  const keptMessages: JsonObject[] = [];
+  for (const message of messages) {
+    const role = typeof message.role === 'string' ? message.role.trim().toLowerCase() : '';
+    const calls = Array.isArray(message.tool_calls) ? message.tool_calls as unknown[] : [];
+    if (role !== 'assistant' || calls.length === 0) {
+      keptMessages.push(message);
+      continue;
+    }
+    const keptCalls = calls.filter((call) => {
+      const record = asRecord(call);
+      const id = typeof record?.id === 'string' && record.id.trim()
+        ? record.id.trim()
+        : typeof record?.call_id === 'string' && record.call_id.trim()
+          ? record.call_id.trim()
+          : '';
+      return !id || !toolCallIds.has(id);
+    });
+    if (keptCalls.length > 0) {
+      message.tool_calls = keptCalls as JsonValue[];
+      keptMessages.push(message);
+      continue;
+    }
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (content) {
+      delete message.tool_calls;
+      keptMessages.push(message);
+    }
+  }
+  messages.splice(0, messages.length, ...keptMessages);
+}
+
 function appendToolMessagesFromToolOutputs(messages: JsonObject[], adapterContext: AdapterContext, finalChatResponse: JsonObject, required?: boolean): boolean {
   const record = asRecord(adapterContext);
   const responsesContext = asRecord(record?.responsesContext) as any;
@@ -163,6 +198,12 @@ function appendToolMessagesFromToolOutputs(messages: JsonObject[], adapterContex
   if (!outputs.length) {
     return required !== true;
   }
+  prunePendingToolCallsForOutputs(
+    messages,
+    new Set(outputs
+      .map((entry) => typeof entry.tool_call_id === 'string' ? entry.tool_call_id.trim() : '')
+      .filter((entry) => entry.length > 0))
+  );
   if (chatOutputs.length) {
     const toolCalls = chatOutputs
       .map((entry) => {

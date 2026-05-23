@@ -84,7 +84,59 @@ function shouldDropCooldownPersistence(state: QuotaState): boolean {
   return reason === 'cooldown' || reason === 'fatal' || reason === 'authVerify';
 }
 
+function shouldRestoreKeepPoolCooldown(state: QuotaState): boolean {
+  if (!state || typeof state !== 'object') {
+    return false;
+  }
+  const reason = typeof state.reason === 'string' ? state.reason : '';
+  const lastErrorSeries = typeof state.lastErrorSeries === 'string' ? state.lastErrorSeries : '';
+  const lastErrorCode = typeof state.lastErrorCode === 'string' ? state.lastErrorCode.trim().toUpperCase() : '';
+  const consecutiveErrorCount =
+    typeof state.consecutiveErrorCount === 'number' && Number.isFinite(state.consecutiveErrorCount)
+      ? Math.max(0, Math.floor(state.consecutiveErrorCount))
+      : 0;
+  const isTransientSeries =
+    lastErrorSeries === 'E5XX' ||
+    lastErrorSeries === 'ENET' ||
+    (lastErrorSeries === 'EOTHER' && lastErrorCode === 'EXTERNAL_ERROR');
+  return (
+    reason === 'cooldown' &&
+    state.inPool === false &&
+    state.cooldownKeepsPool !== true &&
+    isTransientSeries &&
+    consecutiveErrorCount > 0 &&
+    typeof state.cooldownUntil === 'number' &&
+    Number.isFinite(state.cooldownUntil)
+  );
+}
+
+function shouldDropStaleCooldownWithoutDeadline(state: QuotaState): boolean {
+  if (!state || typeof state !== 'object') {
+    return false;
+  }
+  return state.reason === 'cooldown' && state.inPool === false && state.cooldownUntil === null && state.blacklistUntil === null;
+}
+
 function sanitizeQuotaStateForSnapshot(state: QuotaState): QuotaState {
+  if (shouldDropStaleCooldownWithoutDeadline(state)) {
+    return {
+      ...state,
+      inPool: true,
+      reason: 'ok',
+      cooldownKeepsPool: undefined,
+      lastErrorSeries: null,
+      lastErrorCode: null,
+      lastErrorAtMs: null,
+      consecutiveErrorCount: 0
+    };
+  }
+  if (shouldRestoreKeepPoolCooldown(state)) {
+    return {
+      ...state,
+      inPool: true,
+      cooldownKeepsPool: true
+    };
+  }
   if (!shouldDropCooldownPersistence(state)) {
     return state;
   }

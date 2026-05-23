@@ -8,7 +8,9 @@ use super::super::instructions::RoutingInstructionState;
 use super::super::load_balancer::{LoadBalancingPolicy, RouteLoadBalancer};
 use super::super::provider_registry::ProviderRegistry;
 use super::super::routing::{parse_routing, RoutingPools};
-use super::super::routing_state_store::{load_provider_health_state, persist_provider_health_state};
+use super::super::routing_state_store::{
+    load_provider_health_state, persist_provider_health_state,
+};
 use super::super::time_utils::now_ms;
 
 /// Default TTL for concurrency busy entries (60 seconds).
@@ -27,7 +29,7 @@ pub(crate) struct VirtualRouterEngineCore {
     pub quota_view: Option<Ref<()>>,
     pub context_warn_ratio: f64,
     pub context_hard_limit: bool,
-    pub(crate) concurrency_busy_keys: HashMap<String, i64>,  // key -> expires_at_ms
+    pub(crate) concurrency_busy_keys: HashMap<String, i64>, // key -> expires_at_ms
 }
 
 impl VirtualRouterEngineCore {
@@ -124,7 +126,8 @@ impl VirtualRouterEngineCore {
     /// GC expired concurrency busy entries. Call periodically (e.g. at route entry/exit).
     pub(crate) fn gc_concurrency_busy_expired(&mut self) {
         let now = now_ms();
-        self.concurrency_busy_keys.retain(|_, expires_at| *expires_at > now);
+        self.concurrency_busy_keys
+            .retain(|_, expires_at| *expires_at > now);
     }
 
     pub(crate) fn is_concurrency_busy(&self, provider_key: &str) -> bool {
@@ -135,7 +138,11 @@ impl VirtualRouterEngineCore {
         }
     }
 
-    pub(crate) fn concurrency_busy_remaining_ms(&self, provider_key: &str, now_ms: i64) -> Option<i64> {
+    pub(crate) fn concurrency_busy_remaining_ms(
+        &self,
+        provider_key: &str,
+        now_ms: i64,
+    ) -> Option<i64> {
         let expires_at = *self.concurrency_busy_keys.get(provider_key)?;
         if expires_at <= now_ms {
             return None;

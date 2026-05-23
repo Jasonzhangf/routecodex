@@ -283,6 +283,11 @@ function computeTransientKeepPoolCooldownMs(series: ErrorSeries, consecutive: nu
   return COOLDOWN_SCHEDULE_TRANSIENT_KEEP_POOL_MS[idx] ?? null;
 }
 
+function isQuotaNeutralProviderError(event: ErrorEventForQuota): boolean {
+  const code = String(event.code || '').trim().toUpperCase();
+  return code === 'WINDSURF_SERVICE_UNREACHABLE';
+}
+
 export function applyErrorEvent(
   state: QuotaState,
   event: ErrorEventForQuota,
@@ -291,6 +296,10 @@ export function applyErrorEvent(
   // Manual/operator blacklist is rigid: automated error events must not override it.
   if (state.blacklistUntil !== null && nowMs < state.blacklistUntil) {
     return state;
+  }
+
+  if (isQuotaNeutralProviderError(event)) {
+    return tickQuotaStateTime(state, nowMs);
   }
 
   const series = normalizeErrorSeries(event);
@@ -449,8 +458,10 @@ export function applyUsageEvent(
 
 export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState {
   let next = state;
+  const hadCooldownDeadline = next.cooldownUntil !== null;
+  const expiredCooldown = hadCooldownDeadline && nowMs >= next.cooldownUntil!;
 
-  if (next.cooldownUntil !== null && nowMs >= next.cooldownUntil) {
+  if (expiredCooldown) {
     next = { ...next, cooldownUntil: null, cooldownKeepsPool: undefined };
   }
   if (next.blacklistUntil !== null && nowMs >= next.blacklistUntil) {
@@ -467,6 +478,33 @@ export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState
   // due to legacy window reset behavior. Ensure active cooldown/blacklist always removes the provider from pool.
   const withinBlacklist = next.blacklistUntil !== null && nowMs < next.blacklistUntil;
   const withinCooldown = next.cooldownUntil !== null && nowMs < next.cooldownUntil;
+  if (next.reason === 'cooldown' && next.cooldownUntil === null) {
+    const clearExpiredErrorChain =
+      expiredCooldown &&
+      next.lastErrorSeries === 'E5XX' &&
+      typeof next.consecutiveErrorCount === 'number' &&
+      next.consecutiveErrorCount >= 3;
+    const clearStaleCooldown = !hadCooldownDeadline;
+    if (!clearExpiredErrorChain && !clearStaleCooldown) {
+      next = {
+        ...next,
+        inPool: true,
+        reason: 'ok',
+        cooldownKeepsPool: undefined
+      };
+    } else {
+      next = {
+        ...next,
+        inPool: true,
+        reason: 'ok',
+        cooldownKeepsPool: undefined,
+        lastErrorSeries: null,
+        lastErrorCode: null,
+        lastErrorAtMs: null,
+        consecutiveErrorCount: 0
+      };
+    }
+  }
   if (withinBlacklist) {
     if (next.inPool !== false || next.reason !== 'blacklist') {
       next = {

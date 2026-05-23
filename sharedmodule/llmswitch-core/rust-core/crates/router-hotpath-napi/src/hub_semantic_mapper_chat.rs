@@ -9,7 +9,6 @@ use crate::shared_metadata_semantics::ensure_protocol_state_mut;
 use crate::shared_openai_message_normalize::normalize_openai_chat_messages;
 use crate::shared_tool_mapping::flatten_chat_tools_for_function_calling;
 
-
 const CHAT_PARAMETER_KEYS: [&str; 19] = [
     "model",
     "temperature",
@@ -798,7 +797,10 @@ mod tests {
             "Chunk ID: abc\nWall time: 0.1s\nProcess exited with code 1\nOriginal token count: 12\nOutput:\nSyntaxError: invalid syntax\n"
                 .to_string(),
         );
-        assert_eq!(normalize_tool_content(&content), "SyntaxError: invalid syntax");
+        assert_eq!(
+            normalize_tool_content(&content),
+            "SyntaxError: invalid syntax"
+        );
     }
 
     #[test]

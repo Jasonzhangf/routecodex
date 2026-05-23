@@ -105,6 +105,64 @@ describe('router-direct-pipeline', () => {
       expect(ctx.providerProtocol).toBe('openai-chat');
     });
 
+    it('passes apply_patch payload through unchanged in router direct mode', async () => {
+      const applyPatchTool = {
+        type: 'function',
+        function: {
+          name: 'apply_patch',
+          description: 'canonical client apply_patch tool',
+          parameters: {
+            type: 'object',
+            properties: { patch: { type: 'string' } },
+            required: ['patch'],
+            additionalProperties: false,
+          },
+        },
+      };
+      const applyPatchArguments = JSON.stringify({
+        patch: '*** Begin Patch\n*** Add File: direct-router.txt\n+ok\n*** End Patch',
+      });
+      const requestPayload = {
+        model: 'gpt-4o',
+        messages: [
+          { role: 'user', content: 'edit a file' },
+          {
+            role: 'assistant',
+            tool_calls: [
+              {
+                id: 'call_apply_patch_direct_router',
+                type: 'function',
+                function: { name: 'apply_patch', arguments: applyPatchArguments },
+              },
+            ],
+          },
+        ],
+        tools: [applyPatchTool],
+      } as Record<string, unknown>;
+      const originalSnapshot = structuredClone(requestPayload);
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'gpt-4o', messages: [{ role: 'user', content: 'edit a file' }] },
+        requestPayload,
+        target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey, processMode: 'chat' },
+        routingDecision: { routeName: 'default', pool: ['openai.gpt-4'] },
+        processMode: 'chat',
+        requestInfo: { path: '/v1/chat/completions', headers: {} },
+        resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
+      };
+
+      const result = await executeRouterDirectPipeline(input);
+
+      expect(result.used).toBe(true);
+      expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
+      const sentPayload = (openaiHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sentPayload).toBe(requestPayload);
+      expect(sentPayload).toEqual(originalSnapshot);
+      expect(JSON.stringify(sentPayload)).not.toContain('hashline-first');
+      expect(JSON.stringify(sentPayload)).not.toContain('fileContent');
+      expect(openaiHandle.instance.processIncoming).not.toHaveBeenCalled();
+    });
+
     it('skips when protocols do not match', async () => {
       const anthropicHandle = createMockProviderHandle('anthropic-messages');
       const input = {
@@ -218,7 +276,6 @@ describe('router-direct-pipeline', () => {
       expect(result.used).toBe(false);
       expect((result as any).reason).toContain('protocol mismatch');
     });
-
 
     it('skips Windsurf responses even when protocols match because full executor response conversion is required', async () => {
       const handle = {

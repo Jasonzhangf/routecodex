@@ -71,7 +71,6 @@ pub(super) fn is_gemini_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:gemini")
 }
 
-
 pub(super) fn is_glm_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:glm")
 }

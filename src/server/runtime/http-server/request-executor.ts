@@ -24,7 +24,8 @@ import {
 } from './executor-metadata.js';
 import {
   rebindResponsesConversationRequestId,
-  clearResponsesConversationByRequestId
+  clearResponsesConversationByRequestId,
+  finalizeResponsesConversationRequestRetention
 } from '../../../modules/llmswitch/bridge.js';
 import {
   convertProviderResponseIfNeeded as convertProviderResponseWithBridge
@@ -150,6 +151,8 @@ import {
   isLastAvailableProvider429,
   buildProviderTransportBackoffKey,
   buildRecoverableErrorBackoffKey,
+  clearRecoverableErrorBackoff,
+  clearRecoverableErrorBackoffForProvider,
   clearSessionStormBackoff,
   clearProviderTransportBackoff,
   consumeLogicalChainRecoverableRetry,
@@ -1005,7 +1008,9 @@ export class HubRequestExecutor implements RequestExecutor {
             : mergedMetadata;
           const converted = shouldBypassProviderResponseConversion(normalized, {
             entryEndpoint: input.entryEndpoint,
-            providerProtocol: handle.providerProtocol || providerProtocol
+            providerProtocol: handle.providerProtocol || providerProtocol,
+            serverToolsEnabled,
+            metadata: conversionPipelineMetadata
           })
             ? (() => {
               logStage('provider.response_convert.skipped', input.requestId, {
@@ -1115,7 +1120,10 @@ export class HubRequestExecutor implements RequestExecutor {
             logNonBlockingError: logRequestExecutorNonBlockingError,
             queuePayloadContractErrorsample,
             writeProviderSnapshot,
-            clearProviderTransportBackoff: () => clearProviderTransportBackoff(providerTransportBackoffKey)
+            clearProviderTransportBackoff: () => {
+              clearProviderTransportBackoff(providerTransportBackoffKey);
+              clearRecoverableErrorBackoffForProvider({ providerKey: target.providerKey, runtimeKey });
+            }
           });
           aggregatedUsage = providerResponseResult.aggregatedUsage;
 
@@ -1136,6 +1144,10 @@ export class HubRequestExecutor implements RequestExecutor {
             );
           if (shouldClearResponsesConversation) {
             await clearResponsesConversationByRequestId(input.requestId || executorRequestId);
+          } else if (input.entryEndpoint?.includes('/v1/responses')) {
+            await finalizeResponsesConversationRequestRetention(input.requestId || executorRequestId, {
+              keepForSubmitToolOutputs: finishReason === 'tool_calls'
+            });
           }
 
           recordAttempt({ usage: aggregatedUsage, error: false });
@@ -1296,6 +1308,8 @@ export const __requestExecutorTestables = {
   isLastAvailableProvider429,
   shouldApplyProviderTransportBackoff,
   buildRecoverableErrorBackoffKey,
+  clearRecoverableErrorBackoff,
+  clearRecoverableErrorBackoffForProvider,
   consumeRecoverableErrorBackoffMs,
   buildProviderTransportBackoffKey,
   consumeProviderTransportBackoffMs,

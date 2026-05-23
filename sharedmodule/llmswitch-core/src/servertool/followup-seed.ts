@@ -95,8 +95,19 @@ export function extractCapturedChatSeed(source: unknown): CapturedChatSeed | nul
   }
 
   const rawInput = Array.isArray(record.input) ? (record.input as unknown[]) : null;
-  if (!rawInput) {
+  const textInput = typeof record.input === 'string' && record.input.trim().length ? record.input.trim() : '';
+  if (!rawInput && !textInput) {
     return null;
+  }
+  if (textInput) {
+    const tools = Array.isArray(record.tools) ? (cloneJson(record.tools as JsonObject[]) as JsonObject[]) : undefined;
+    const parameters = normalizeFollowupParameters(extractResponsesTopLevelParameters(record));
+    return {
+      ...(model ? { model } : {}),
+      messages: [{ role: 'user', content: textInput }],
+      ...(tools ? { tools } : {}),
+      ...(parameters ? { parameters } : {})
+    };
   }
   try {
     const ctx = captureResponsesContext(record as Record<string, unknown>);

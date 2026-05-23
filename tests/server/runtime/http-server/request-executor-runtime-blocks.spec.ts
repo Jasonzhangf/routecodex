@@ -103,4 +103,36 @@ describe('request-executor-runtime-blocks', () => {
       }
     })).toBe(true);
   });
+
+  test('does not bypass conversion for apply_patch tool_calls in servertool mode', () => {
+    expect(shouldBypassProviderResponseConversion({
+      status: 200,
+      body: {
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_patch',
+                  type: 'function',
+                  function: {
+                    name: 'apply_patch',
+                    arguments: JSON.stringify({ filePath: 'a.txt', patch: '+ hello' })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }, {
+      metadata: { __rt: { applyPatch: { mode: 'servertool' } } },
+      serverToolsEnabled: true
+    })).toBe(false);
+  });
 });

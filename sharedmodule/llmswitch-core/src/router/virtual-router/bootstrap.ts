@@ -61,7 +61,8 @@ export function bootstrapVirtualRouterConfig(
     contextRouting: configMeta.contextRouting,
     ...(configMeta.webSearch ? { webSearch: configMeta.webSearch } : {}),
     ...(configMeta.execCommandGuard ? { execCommandGuard: configMeta.execCommandGuard } : {}),
-    ...(configMeta.clock ? { clock: configMeta.clock } : {})
+    ...(configMeta.clock ? { clock: configMeta.clock } : {}),
+    ...(configMeta.applyPatch ? { applyPatch: configMeta.applyPatch } : {})
   };
 
   return {
@@ -85,6 +86,7 @@ function extractVirtualRouterSection(
   webSearch?: unknown;
   execCommandGuard?: unknown;
   clock?: unknown;
+  applyPatch?: unknown;
 } {
   const root = asRecord(input);
   const section = root.virtualrouter && typeof root.virtualrouter === 'object' ? asRecord(root.virtualrouter) : root;
@@ -98,11 +100,21 @@ function extractVirtualRouterSection(
   const execCommandGuard =
     (section as Record<string, unknown>).execCommandGuard ?? (root as Record<string, unknown>).execCommandGuard;
   const clock = (section as Record<string, unknown>).clock ?? (root as Record<string, unknown>).clock;
+  const servertool = (section as Record<string, unknown>).servertool ?? (root as Record<string, unknown>).servertool;
+  const servertoolRecord = servertool && typeof servertool === 'object' && !Array.isArray(servertool)
+    ? (servertool as Record<string, unknown>)
+    : undefined;
+  const applyPatch = (section as Record<string, unknown>).applyPatch
+    ?? (section as Record<string, unknown>).apply_patch
+    ?? servertoolRecord?.applyPatch
+    ?? servertoolRecord?.apply_patch
+    ?? (root as Record<string, unknown>).applyPatch
+    ?? (root as Record<string, unknown>).apply_patch;
 
-  return { providers, routing, classifier, loadBalancing, health, contextRouting, webSearch, execCommandGuard, clock };
+  return { providers, routing, classifier, loadBalancing, health, contextRouting, webSearch, execCommandGuard, clock, applyPatch };
 }
 
-type NativeBootstrapConfigMeta = Pick<VirtualRouterConfig, 'classifier' | 'health' | 'contextRouting' | 'webSearch' | 'execCommandGuard' | 'clock' | 'loadBalancing'>;
+type NativeBootstrapConfigMeta = Pick<VirtualRouterConfig, 'classifier' | 'health' | 'contextRouting' | 'webSearch' | 'execCommandGuard' | 'clock' | 'applyPatch' | 'loadBalancing'>;
 
 function requireNativeBootstrapConfigFunction(exportName: string): (...args: string[]) => unknown {
   if (isNativeDisabledByEnv()) {

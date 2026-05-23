@@ -208,7 +208,10 @@ fn test_resp_profile_chat_deepseek_web_harvests_real_sample_with_extra_trailing_
     };
     let result = run_resp_inbound_stage3_compat(input).expect("deepseek-web compat");
     assert!(result.native_applied);
-    assert_eq!(result.applied_profile, Some("chat:deepseek-web".to_string()));
+    assert_eq!(
+        result.applied_profile,
+        Some("chat:deepseek-web".to_string())
+    );
     assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
     assert_eq!(
         result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
@@ -635,10 +638,7 @@ fn test_resp_profile_chat_qwen_harvests_marker_tool_calls_in_compat_layer() {
     assert!(result.native_applied);
     assert_eq!(result.applied_profile, Some("chat:qwen".to_string()));
     assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
-    assert_eq!(
-        result.payload["choices"][0]["message"]["content"],
-        "继续"
-    );
+    assert_eq!(result.payload["choices"][0]["message"]["content"], "继续");
     assert_eq!(
         result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
         "exec_command"
@@ -769,7 +769,6 @@ fn test_resp_profile_chat_qwen_repairs_newline_inside_marker_json_and_split_toke
     assert!(command.contains("head -70 /tmp/a.py"));
     assert!(command.contains("more.py"));
 }
-
 
 #[test]
 fn test_resp_profile_chat_iflow_unwraps_body_and_harvests_tool_calls() {
@@ -1791,7 +1790,8 @@ fn test_resp_profile_chat_deepseek_web_declared_tools_missing_returns_error_with
         explicit_profile: None,
     };
 
-    let error = run_resp_inbound_stage3_compat(input).expect_err("strict declared tools should fail without tool call");
+    let error = run_resp_inbound_stage3_compat(input)
+        .expect_err("strict declared tools should fail without tool call");
     assert!(error.contains("DeepSeek declared tools present but no valid tool call was produced"));
 }
 
@@ -2156,7 +2156,10 @@ fn test_resp_profile_chat_deepseek_web_harvests_tool_call_from_reasoning_content
     assert!(completion > 0);
     assert_eq!(total, prompt + completion);
     assert_eq!(result.payload["usage"]["input_tokens"], Value::from(prompt));
-    assert_eq!(result.payload["usage"]["output_tokens"], Value::from(completion));
+    assert_eq!(
+        result.payload["usage"]["output_tokens"],
+        Value::from(completion)
+    );
 }
 
 #[test]

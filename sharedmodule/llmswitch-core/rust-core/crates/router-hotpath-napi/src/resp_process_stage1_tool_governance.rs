@@ -1,14 +1,14 @@
+use crate::hashline::{self, HashlineNativeEditInput};
 use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, create_harvested_tool_call_id, create_servertool_tool_call_id,
     is_synthetic_routecodex_tool_call_id,
 };
-use crate::hashline::{self, HashlineNativeEditInput};
 use napi_derive::napi;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::env;
 use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -31,11 +31,23 @@ pub struct ToolGovernanceSummary {
     pub disallowed_tool_calls_dropped: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ToolGovernancePreparationSummary {
     pub converted: bool,
     pub shape_sanitized: bool,
     pub harvested_tool_calls: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct GovernResponseJsonInput {
+    pub payload: Value,
+    pub client_protocol: String,
+    pub entry_endpoint: String,
+    pub request_id: String,
+    #[serde(default)]
+    pub prepared: bool,
+    #[serde(default)]
+    pub preparation_summary: Option<ToolGovernancePreparationSummary>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -158,10 +170,14 @@ fn text_contains_explicit_tool_markup(text: &str) -> bool {
 fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
     // Pre-normalize fullwidth pipe (U+FF5C) and block drawing chars (U+258F, U+2590)
     // DeepSeek sometimes emits DSML markup with fullwidth characters
-    let pre_normalized: String = raw.trim().chars().map(|c| match c {
-        '\u{ff5c}' | '\u{258f}' | '\u{2590}' => '|',
-        c => c,
-    }).collect();
+    let pre_normalized: String = raw
+        .trim()
+        .chars()
+        .map(|c| match c {
+            '\u{ff5c}' | '\u{258f}' | '\u{2590}' => '|',
+            c => c,
+        })
+        .collect();
     let normalized = normalize_dsml_tool_markup(pre_normalized.as_str());
     let lowered = normalized.to_ascii_lowercase();
     if lowered.is_empty() {
@@ -336,17 +352,14 @@ fn payload_contains_harvestable_text_tool_payload(payload: &Value) -> bool {
             .get("message")
             .and_then(Value::as_object)
             .map(|message| {
-                read_message_text_candidates(message)
-                    .iter()
-                    .any(|text| {
-                        collect_stage1_harvest_input_texts(text)
-                            .iter()
-                            .any(|candidate| {
-                                text_contains_explicit_tool_markup(candidate)
-                                    || !extract_tool_calls_from_text_candidate(candidate, 1)
-                                        .is_empty()
-                            })
-                    })
+                read_message_text_candidates(message).iter().any(|text| {
+                    collect_stage1_harvest_input_texts(text)
+                        .iter()
+                        .any(|candidate| {
+                            text_contains_explicit_tool_markup(candidate)
+                                || !extract_tool_calls_from_text_candidate(candidate, 1).is_empty()
+                        })
+                })
             })
             .unwrap_or(false)
     })
@@ -417,6 +430,57 @@ fn copy_internal_tool_governance_state(source: &Value, target: &mut Value) {
     if !target_root.contains_key("__rcc_tool_governance") {
         target_root.insert("__rcc_tool_governance".to_string(), source_state);
     }
+}
+
+fn inject_requested_tool_names_into_internal_governance(
+    payload: &mut Value,
+    requested_tool_names: &[String],
+) {
+    if requested_tool_names.is_empty() {
+        return;
+    }
+    let Some(root) = payload.as_object_mut() else {
+        return;
+    };
+    let governance_entry = root
+        .entry("__rcc_tool_governance".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !governance_entry.is_object() {
+        *governance_entry = Value::Object(Map::new());
+    }
+    let Some(governance) = governance_entry.as_object_mut() else {
+        return;
+    };
+
+    let mut merged: Vec<String> = governance
+        .get("requestedToolNames")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flat_map(|rows| rows.iter())
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect();
+
+    for raw_name in requested_tool_names {
+        let normalized = raw_name.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        if !merged.iter().any(|existing| existing == normalized) {
+            merged.push(normalized.to_string());
+        }
+    }
+
+    if merged.is_empty() {
+        return;
+    }
+
+    governance.insert(
+        "requestedToolNames".to_string(),
+        Value::Array(merged.into_iter().map(Value::String).collect()),
+    );
 }
 
 fn normalize_requested_tool_name_key(raw_name: &str) -> Option<String> {
@@ -636,9 +700,7 @@ fn repair_arg_key_artifacts_in_raw_json(raw: &str) -> String {
     {
         return out;
     }
-    if let Ok(re) = Regex::new(
-        r#""([^"]+?)\s*</?\s*arg_key\s*>\s*</?\s*arg_value\s*>([^"]*?)""#,
-    ) {
+    if let Ok(re) = Regex::new(r#""([^"]+?)\s*</?\s*arg_key\s*>\s*</?\s*arg_value\s*>([^"]*?)""#) {
         out = re.replace_all(out.as_str(), r#""$1":"$2""#).to_string();
     }
     strip_arg_key_artifacts(out.as_str())
@@ -710,10 +772,8 @@ fn escape_invalid_backslashes_inside_json_strings(raw: &str) -> String {
         let ch = chars[idx];
         if in_string {
             if escaped {
-                let is_valid_json_escape = matches!(
-                    ch,
-                    '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u'
-                );
+                let is_valid_json_escape =
+                    matches!(ch, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u');
                 if !is_valid_json_escape {
                     out.push('\\');
                 }
@@ -775,8 +835,7 @@ pub(crate) fn try_parse_json_value_lenient(raw: &str) -> Option<Value> {
     if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_quotes_newlines) {
         return Some(parsed);
     }
-    let escaped_invalid_backslashes =
-        escape_invalid_backslashes_inside_json_strings(trimmed);
+    let escaped_invalid_backslashes = escape_invalid_backslashes_inside_json_strings(trimmed);
     if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_invalid_backslashes) {
         return Some(parsed);
     }
@@ -962,7 +1021,10 @@ Use apply_patch for file creation or updates instead of cat <<EOF / bulk shell w
 Adjust and retry with apply_patch. Command preview: {}",
         preview
     );
-    format!("printf '%s\\n' {} >&2; exit 64", shell_single_quote(message.as_str()))
+    format!(
+        "printf '%s\\n' {} >&2; exit 64",
+        shell_single_quote(message.as_str())
+    )
 }
 
 fn build_exec_command_object_with_shape(
@@ -1131,16 +1193,15 @@ fn repair_bash_lc_inline_eval_single_quotes(raw: &str) -> String {
             break;
         };
         let quote_idx = cursor + rel_quote_idx;
-        let prefix = inner[..quote_idx]
-            .trim_end_matches('\\')
-            .trim_end();
+        let prefix = inner[..quote_idx].trim_end_matches('\\').trim_end();
         if !looks_like_inline_interpreter_eval_prefix(prefix) {
             cursor = quote_idx + 1;
             continue;
         }
-        let end_quote_idx = inner.rfind('"').filter(|idx| *idx > quote_idx).or_else(|| {
-            find_matching_double_quote(inner, quote_idx + 1)
-        });
+        let end_quote_idx = inner
+            .rfind('"')
+            .filter(|idx| *idx > quote_idx)
+            .or_else(|| find_matching_double_quote(inner, quote_idx + 1));
         let Some(end_quote_idx) = end_quote_idx else {
             break;
         };
@@ -1728,9 +1789,10 @@ fn line_sequence_matches_trimmed(haystack: &[String], start: usize, needle: &[St
     if needle.is_empty() || start + needle.len() > haystack.len() {
         return false;
     }
-    needle.iter().enumerate().all(|(offset, line)| {
-        haystack[start + offset].trim_end() == line.trim_end()
-    })
+    needle
+        .iter()
+        .enumerate()
+        .all(|(offset, line)| haystack[start + offset].trim_end() == line.trim_end())
 }
 
 fn line_sequence_matches_whitespace_normalized(
@@ -1762,9 +1824,7 @@ where
     }
     let max_start = haystack.len().saturating_sub(needle.len());
     let window_start = preferred_index.saturating_sub(window_radius).min(max_start);
-    let window_end = preferred_index
-        .saturating_add(window_radius)
-        .min(max_start);
+    let window_end = preferred_index.saturating_add(window_radius).min(max_start);
     let mut matches = Vec::<usize>::new();
     for start in window_start..=window_end {
         if matcher(haystack, start, needle) {
@@ -1863,7 +1923,8 @@ fn try_rebuild_line_number_hunk_with_live_context(
     header: &str,
     body_lines: &[String],
 ) -> Option<Vec<String>> {
-    let (old_start, old_len, _new_start, _new_len) = parse_unified_hunk_header_line_numbers(header)?;
+    let (old_start, old_len, _new_start, _new_len) =
+        parse_unified_hunk_header_line_numbers(header)?;
     let cwd = current_workspace_root()?;
     let absolute_path = cwd.join(file_path);
     let source = fs::read_to_string(absolute_path).ok()?;
@@ -1892,7 +1953,11 @@ fn try_rebuild_line_number_hunk_with_live_context(
 
     let preferred_index = old_start.saturating_sub(1);
     let block_start = if !removed_lines.is_empty() {
-        locate_live_file_block(file_lines.as_slice(), removed_lines.as_slice(), preferred_index)?
+        locate_live_file_block(
+            file_lines.as_slice(),
+            removed_lines.as_slice(),
+            preferred_index,
+        )?
     } else {
         preferred_index.min(file_lines.len())
     };
@@ -1981,9 +2046,13 @@ fn repair_line_number_update_hunks_with_live_context(patch_text: &str) -> String
                 cursor += 1;
             }
 
-            let rebuilt = current_update_path
-                .as_deref()
-                .and_then(|path| try_rebuild_line_number_hunk_with_live_context(path, header.as_str(), body.as_slice()));
+            let rebuilt = current_update_path.as_deref().and_then(|path| {
+                try_rebuild_line_number_hunk_with_live_context(
+                    path,
+                    header.as_str(),
+                    body.as_slice(),
+                )
+            });
             if let Some(next_hunk) = rebuilt {
                 out.extend(next_hunk);
             } else {
@@ -2000,7 +2069,6 @@ fn repair_line_number_update_hunks_with_live_context(patch_text: &str) -> String
 
     out.join("\n")
 }
-
 
 fn build_apply_patch_guard_patch(reason: &str, message: &str) -> String {
     let reason_slug: String = reason
@@ -2137,6 +2205,32 @@ fn make_apply_patch_guard_args(reason: &str) -> String {
     })
 }
 
+fn build_current_apply_patch_schema_args(args: &Map<String, Value>) -> Option<(String, bool)> {
+    if args.contains_key("fileContent") || args.contains_key("file_content") {
+        return None;
+    }
+    let file_path = read_hashline_file_path_from_apply_patch_args(args)?;
+    let patch_source = args
+        .get("patch")
+        .or_else(|| args.get("input"))
+        .and_then(Value::as_str)
+        .map(|value| value.replace("\r\n", "\n").replace('\r', "\n"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    if patch_source.trim_start().starts_with("*** Begin Patch")
+        || looks_like_native_hashline_header_patch(patch_source.as_str())
+    {
+        return None;
+    }
+    let mut out = Map::new();
+    out.insert("filePath".to_string(), Value::String(file_path));
+    out.insert("patch".to_string(), Value::String(patch_source));
+    Some((
+        serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
+        true,
+    ))
+}
+
 fn detect_apply_patch_invalid_reason(patch: &str) -> Option<&'static str> {
     let trimmed = patch.trim();
     if trimmed.is_empty() {
@@ -2160,9 +2254,11 @@ fn detect_apply_patch_invalid_reason(patch: &str) -> Option<&'static str> {
     if !has_file_marker {
         return Some("unsupported_patch_format");
     }
-    if trimmed.contains("*** Add File:") && !trimmed.lines().any(|line| {
-        line.starts_with('+') && !line.starts_with("+++")
-    }) {
+    if trimmed.contains("*** Add File:")
+        && !trimmed
+            .lines()
+            .any(|line| line.starts_with('+') && !line.starts_with("+++"))
+    {
         return Some("empty_add_file_block");
     }
     None
@@ -2180,6 +2276,25 @@ fn looks_like_hashline_patch(raw: &str) -> bool {
     };
     matches!(lead, '<' | '+' | '-' | '=')
         && chars.next().map(|ch| ch.is_whitespace()).unwrap_or(true)
+}
+
+fn looks_like_native_hashline_header_patch(raw: &str) -> bool {
+    let first = raw
+        .lines()
+        .map(str::trim_start)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+    let mut parts = first.split_whitespace();
+    let Some(op) = parts.next() else {
+        return false;
+    };
+    if !matches!(op, "<" | "+" | "-" | "=") {
+        return false;
+    }
+    parts
+        .next()
+        .map(|line_num| line_num.chars().all(|ch| ch.is_ascii_digit()))
+        .unwrap_or(false)
 }
 
 fn read_hashline_file_path_from_apply_patch_args(args: &Map<String, Value>) -> Option<String> {
@@ -2268,7 +2383,8 @@ fn normalize_plain_text_new_file_apply_patch_schema_args(
     {
         return None;
     }
-    let canonical_patch = build_add_file_apply_patch_from_plain_text(file_path.as_str(), patch_source);
+    let canonical_patch =
+        build_add_file_apply_patch_from_plain_text(file_path.as_str(), patch_source);
     let mut out = Map::new();
     out.insert("patch".to_string(), Value::String(canonical_patch.clone()));
     out.insert("input".to_string(), Value::String(canonical_patch));
@@ -2285,6 +2401,129 @@ enum HashlineApplyPatchNormalization {
         normalized: (String, bool),
         reason: &'static str,
     },
+}
+
+fn split_hashline_bridge_file_lines(file_content: &str) -> Vec<String> {
+    if file_content.is_empty() {
+        return Vec::new();
+    }
+    let mut lines: Vec<String> = file_content
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .split('\n')
+        .map(|line| line.to_string())
+        .collect();
+    if lines.last().map(|line| line.is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
+    lines
+}
+
+fn find_exact_line_block_once(haystack: &[String], needle: &[String]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    let mut found: Option<usize> = None;
+    for index in 0..=haystack.len().saturating_sub(needle.len()) {
+        if haystack[index..index + needle.len()] == needle[..] {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(index);
+        }
+    }
+    found
+}
+
+fn normalize_simple_line_edit_apply_patch_schema_args(
+    args: &Map<String, Value>,
+) -> Option<HashlineApplyPatchNormalization> {
+    let patch_source = args
+        .get("patch")
+        .or_else(|| args.get("input"))
+        .and_then(Value::as_str)
+        .map(|value| value.replace("\r\n", "\n").replace('\r', "\n"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    if looks_like_native_hashline_header_patch(patch_source.as_str()) {
+        return None;
+    }
+    let mut old_lines: Vec<String> = Vec::new();
+    let mut new_lines: Vec<String> = Vec::new();
+    let mut saw_edit_line = false;
+    for raw_line in patch_source.lines() {
+        if let Some(rest) = raw_line.strip_prefix('-') {
+            saw_edit_line = true;
+            old_lines.push(rest.strip_prefix(' ').unwrap_or(rest).to_string());
+            continue;
+        }
+        if let Some(rest) = raw_line.strip_prefix('+') {
+            saw_edit_line = true;
+            new_lines.push(rest.strip_prefix(' ').unwrap_or(rest).to_string());
+            continue;
+        }
+        if raw_line.trim().is_empty() {
+            continue;
+        }
+        return None;
+    }
+    if !saw_edit_line || new_lines.is_empty() {
+        return None;
+    }
+    let Some(file_path) = read_hashline_file_path_from_apply_patch_args(args) else {
+        return Some(HashlineApplyPatchNormalization::Guarded {
+            normalized: (make_apply_patch_guard_args("missing_patch"), true),
+            reason: "hashline_missing_file_path",
+        });
+    };
+    let Some(file_content) = read_hashline_file_content_preserve_empty_from_apply_patch_args(args)
+    else {
+        return Some(HashlineApplyPatchNormalization::Guarded {
+            normalized: (make_apply_patch_guard_args("missing_patch"), true),
+            reason: "hashline_missing_file_content",
+        });
+    };
+    let file_lines = split_hashline_bridge_file_lines(file_content.as_str());
+    let mut patch_lines: Vec<String> = vec!["*** Begin Patch".to_string()];
+    if old_lines.is_empty() {
+        if !file_lines.is_empty() {
+            return Some(HashlineApplyPatchNormalization::Guarded {
+                normalized: (
+                    make_apply_patch_guard_args("unsupported_patch_format"),
+                    true,
+                ),
+                reason: "hashline_simple_add_requires_empty_file",
+            });
+        }
+        patch_lines.push(format!("*** Add File: {}", file_path));
+    } else {
+        if find_exact_line_block_once(&file_lines, &old_lines).is_none() {
+            return Some(HashlineApplyPatchNormalization::Guarded {
+                normalized: (
+                    make_apply_patch_guard_args("unsupported_patch_format"),
+                    true,
+                ),
+                reason: "hashline_simple_edit_not_unique",
+            });
+        }
+        patch_lines.push(format!("*** Update File: {}", file_path));
+        patch_lines.push("@@".to_string());
+        for line in old_lines {
+            patch_lines.push(format!("-{}", line));
+        }
+    }
+    for line in new_lines {
+        patch_lines.push(format!("+{}", line));
+    }
+    patch_lines.push("*** End Patch".to_string());
+    let canonical_patch = patch_lines.join("\n");
+    let mut out = Map::new();
+    out.insert("patch".to_string(), Value::String(canonical_patch.clone()));
+    out.insert("input".to_string(), Value::String(canonical_patch));
+    Some(HashlineApplyPatchNormalization::Normalized((
+        serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
+        true,
+    )))
 }
 
 fn normalize_hashline_apply_patch_schema_args(
@@ -2321,13 +2560,19 @@ fn normalize_hashline_apply_patch_schema_args(
     });
     if !result.ok {
         return HashlineApplyPatchNormalization::Guarded {
-            normalized: (make_apply_patch_guard_args("unsupported_patch_format"), true),
+            normalized: (
+                make_apply_patch_guard_args("unsupported_patch_format"),
+                true,
+            ),
             reason: "hashline_native_edit_failed",
         };
     }
     let Some(normalized_patch) = result.normalized_patch else {
         return HashlineApplyPatchNormalization::Guarded {
-            normalized: (make_apply_patch_guard_args("unsupported_patch_format"), true),
+            normalized: (
+                make_apply_patch_guard_args("unsupported_patch_format"),
+                true,
+            ),
             reason: "hashline_missing_normalized_patch",
         };
     };
@@ -2340,9 +2585,7 @@ fn normalize_hashline_apply_patch_schema_args(
     ))
 }
 
-fn detect_hashline_apply_patch_guard_reason(
-    raw_args: Option<&Value>,
-) -> Option<&'static str> {
+fn detect_hashline_apply_patch_guard_reason(raw_args: Option<&Value>) -> Option<&'static str> {
     let args = parse_json_record(raw_args).unwrap_or_default();
     match normalize_hashline_apply_patch_schema_args(&args) {
         HashlineApplyPatchNormalization::Guarded { reason, .. } => Some(reason),
@@ -2360,15 +2603,17 @@ fn looks_like_unparseable_apply_patch_json_args(raw_args: Option<&Value>) -> boo
     }
     let first = trimmed.chars().next().unwrap_or_default();
     let last = trimmed.chars().last().unwrap_or_default();
-    let looks_json_container =
-        (first == '{' && last == '}') || (first == '[' && last == ']');
+    let looks_json_container = (first == '{' && last == '}') || (first == '[' && last == ']');
     looks_json_container && try_parse_json_value_lenient(trimmed).is_none()
 }
 
 fn split_apply_patch_text_lines(raw: &str) -> Vec<String> {
     let decoded = decode_escaped_newlines_if_needed(raw).replace("\r\n", "\n");
     let normalized = decoded.replace('\r', "\n");
-    let mut parts: Vec<String> = normalized.split('\n').map(|line| line.to_string()).collect();
+    let mut parts: Vec<String> = normalized
+        .split('\n')
+        .map(|line| line.to_string())
+        .collect();
     if parts.last().map(|line| line.is_empty()).unwrap_or(false) {
         parts.pop();
     }
@@ -2409,9 +2654,9 @@ fn read_apply_patch_stringish(value: Option<&Value>) -> Option<String> {
                 Some(trimmed.to_string())
             }
         }
-        Value::Array(items) if items.len() == 1 => {
-            items.first().and_then(|item| read_apply_patch_stringish(Some(item)))
-        }
+        Value::Array(items) if items.len() == 1 => items
+            .first()
+            .and_then(|item| read_apply_patch_stringish(Some(item))),
         Value::Object(row) => {
             for key in ["path", "file", "filename", "filepath", "file_path"] {
                 if let Some(found) = read_apply_patch_stringish(row.get(key)) {
@@ -2469,14 +2714,14 @@ fn looks_like_patch_instructions(value: Option<&Value>) -> bool {
         .and_then(Value::as_str)
         .map(|raw| {
             let trimmed = raw.trim_start();
-            trimmed.starts_with("*** ") || trimmed.starts_with("--- ") || trimmed.starts_with("+++ ")
+            trimmed.starts_with("*** ")
+                || trimmed.starts_with("--- ")
+                || trimmed.starts_with("+++ ")
         })
         .unwrap_or(false)
 }
 
-fn build_structured_apply_patch_from_record(
-    args: &Map<String, Value>,
-) -> Option<(String, bool)> {
+fn build_structured_apply_patch_from_record(args: &Map<String, Value>) -> Option<(String, bool)> {
     let changes = args.get("changes").and_then(Value::as_array)?;
     if changes.is_empty() {
         return None;
@@ -2799,13 +3044,23 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
         );
     };
     let args = parse_json_record(Some(raw_args)).unwrap_or_default();
+    if let Some(normalized) = build_current_apply_patch_schema_args(&args) {
+        return normalized;
+    }
+    if let Some(normalized) = normalize_plain_text_new_file_apply_patch_schema_args(&args) {
+        return normalized;
+    }
+    if let Some(normalized) = normalize_simple_line_edit_apply_patch_schema_args(&args) {
+        match normalized {
+            HashlineApplyPatchNormalization::Normalized(value) => return value,
+            HashlineApplyPatchNormalization::Guarded { normalized, .. } => return normalized,
+            HashlineApplyPatchNormalization::NotHashline => {}
+        }
+    }
     match normalize_hashline_apply_patch_schema_args(&args) {
         HashlineApplyPatchNormalization::Normalized(normalized) => return normalized,
         HashlineApplyPatchNormalization::Guarded { normalized, .. } => return normalized,
         HashlineApplyPatchNormalization::NotHashline => {}
-    }
-    if let Some(normalized) = normalize_plain_text_new_file_apply_patch_schema_args(&args) {
-        return normalized;
     }
     if let Some((structured_patch, structured_repaired)) =
         build_structured_apply_patch_from_record(&args)
@@ -3052,9 +3307,8 @@ fn repair_update_file_blocks_missing_hunk_header(raw: &str) -> String {
         let is_file_header = trimmed.starts_with("*** Add File:")
             || trimmed.starts_with("*** Update File:")
             || trimmed.starts_with("*** Delete File:");
-        let is_block_boundary = trimmed == "*** Begin Patch"
-            || trimmed == "*** End Patch"
-            || is_file_header;
+        let is_block_boundary =
+            trimmed == "*** Begin Patch" || trimmed == "*** End Patch" || is_file_header;
 
         if is_block_boundary {
             in_update_block = trimmed.starts_with("*** Update File:");
@@ -3686,6 +3940,57 @@ fn decode_basic_xml_entities(raw: &str) -> String {
         .replace("&amp;", "&")
 }
 
+fn extract_tool_prefixed_exec_command_block(text: &str, fallback_id: usize) -> Option<Value> {
+    let pattern = Regex::new(
+        r#"(?is)tool\s*:\s*exec_command\b.*?<command>\s*([\s\S]*?)\s*</command>(?:[\s\S]*?<workdir>\s*([\s\S]*?)\s*</workdir>)?"#,
+    )
+    .ok()?;
+    let captures = pattern.captures(text)?;
+    let command = captures
+        .get(1)
+        .map(|m| decode_basic_xml_entities(m.as_str()).trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let workdir = captures
+        .get(2)
+        .map(|m| decode_basic_xml_entities(m.as_str()).trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let mut input = Map::new();
+    input.insert("cmd".to_string(), Value::String(command));
+    if let Some(workdir) = workdir {
+        input.insert("workdir".to_string(), Value::String(workdir));
+    }
+
+    let entry = Value::Object(
+        [
+            ("name".to_string(), Value::String("exec_command".to_string())),
+            ("input".to_string(), Value::Object(input)),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    normalize_tool_call_entry(&entry, fallback_id)
+}
+
+fn extract_reasoning_inline_exec_command_arg_key(text: &str, fallback_id: usize) -> Option<Value> {
+    let pattern = Regex::new(
+        r#"(?is)exec_command\s*<arg_key>\s*cmd\s*</arg_key>\s*<arg_value>\s*([\s\S]*?)\s*</arg_value>"#,
+    )
+    .ok()?;
+    let captures = pattern.captures(text)?;
+    let command = captures
+        .get(1)
+        .map(|m| decode_basic_xml_entities(m.as_str()).trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let entry = json!({
+        "name": "exec_command",
+        "input": {
+            "cmd": command
+        }
+    });
+    normalize_tool_call_entry(&entry, fallback_id)
+}
+
 fn unwrap_xml_cdata_sections(raw: &str) -> String {
     if !raw.contains("<![CDATA[") {
         return raw.to_string();
@@ -3896,10 +4201,13 @@ fn parse_xml_tag_attributes(raw_tag: &str) -> Vec<(String, String)> {
 
 fn normalize_dsml_tool_markup(raw: &str) -> String {
     // Normalize fullwidth pipe chars (U+FF5C, U+258F, U+2590) to ASCII pipe
-    let raw: String = raw.chars().map(|c| match c {
-        '\u{ff5c}' | '\u{258f}' | '\u{2590}' => '|',
-        c => c,
-    }).collect();
+    let raw: String = raw
+        .chars()
+        .map(|c| match c {
+            '\u{ff5c}' | '\u{258f}' | '\u{2590}' => '|',
+            c => c,
+        })
+        .collect();
     let mut normalized = raw;
     let replacements = [
         (
@@ -3912,10 +4220,7 @@ fn normalize_dsml_tool_markup(raw: &str) -> String {
         ),
         (r#"(?is)<\s*\|?\s*dsml\s*\|\s*invoke\b"#, "<invoke"),
         (r#"(?is)</\s*\|?\s*dsml\s*\|\s*invoke\s*>"#, "</invoke>"),
-        (
-            r#"(?is)<\s*\|?\s*dsml\s*\|\s*parameter\b"#,
-            "<parameter",
-        ),
+        (r#"(?is)<\s*\|?\s*dsml\s*\|\s*parameter\b"#, "<parameter"),
         (
             r#"(?is)</\s*\|?\s*dsml\s*\|\s*parameter\s*>"#,
             "</parameter>",
@@ -4042,7 +4347,8 @@ fn build_xml_named_tool_call_entry(
             let decoded = unwrap_xml_cdata_sections(decode_basic_xml_entities(raw_value).as_str())
                 .trim()
                 .to_string();
-            let cleaned_value = if !contains_cdata && decoded.contains('<') && decoded.contains('>') {
+            let cleaned_value = if !contains_cdata && decoded.contains('<') && decoded.contains('>')
+            {
                 let stripped = strip_xml_tags_preserve_text(decoded.as_str());
                 if stripped.trim().is_empty() {
                     decoded.clone()
@@ -4222,14 +4528,17 @@ fn strip_supported_xml_named_tool_blocks(raw: &str) -> String {
 }
 
 fn extract_xml_tool_call_blocks(text: &str, fallback_start_id: usize) -> Vec<Value> {
-    let Ok(pattern) =
-        Regex::new(r#"(?is)<tool_call(?:\s+name\s*=\s*["']([^"']+)["'])?\s*>\s*([\s\S]*?)\s*</tool_call>"#)
-    else {
+    let Ok(pattern) = Regex::new(
+        r#"(?is)<tool_call(?:\s+name\s*=\s*["']([^"']+)["'])?\s*>\s*([\s\S]*?)\s*</tool_call>"#,
+    ) else {
         return Vec::new();
     };
     let mut recovered: Vec<Value> = Vec::new();
     for (idx, caps) in pattern.captures_iter(text).enumerate() {
-        let wrapper_name = caps.get(1).map(|m| m.as_str().trim()).filter(|v| !v.is_empty());
+        let wrapper_name = caps
+            .get(1)
+            .map(|m| m.as_str().trim())
+            .filter(|v| !v.is_empty());
         let Some(raw) = caps.get(2).map(|m| m.as_str().trim()) else {
             continue;
         };
@@ -4596,10 +4905,9 @@ fn extract_tool_call_entries_from_malformed_tool_calls_text(
                 if object_depth == 0 {
                     let repaired = auto_close_jsonish_shape(current.trim());
                     if let Some(parsed) = try_parse_json_value_lenient(repaired.as_str()) {
-                        if let Some(entry) = normalize_tool_call_entry(
-                            &parsed,
-                            fallback_start_id + recovered.len(),
-                        ) {
+                        if let Some(entry) =
+                            normalize_tool_call_entry(&parsed, fallback_start_id + recovered.len())
+                        {
                             recovered.push(entry);
                         }
                     }
@@ -4618,10 +4926,9 @@ fn extract_tool_call_entries_from_malformed_tool_calls_text(
                     saw_array_close = true;
                     let repaired = auto_close_jsonish_shape(current.trim());
                     if let Some(parsed) = try_parse_json_value_lenient(repaired.as_str()) {
-                        if let Some(entry) = normalize_tool_call_entry(
-                            &parsed,
-                            fallback_start_id + recovered.len(),
-                        ) {
+                        if let Some(entry) =
+                            normalize_tool_call_entry(&parsed, fallback_start_id + recovered.len())
+                        {
                             recovered.push(entry);
                         }
                     }
@@ -4637,10 +4944,9 @@ fn extract_tool_call_entries_from_malformed_tool_calls_text(
                     saw_entry_separator_repair = true;
                     let repaired = auto_close_jsonish_shape(current.trim());
                     if let Some(parsed) = try_parse_json_value_lenient(repaired.as_str()) {
-                        if let Some(entry) = normalize_tool_call_entry(
-                            &parsed,
-                            fallback_start_id + recovered.len(),
-                        ) {
+                        if let Some(entry) =
+                            normalize_tool_call_entry(&parsed, fallback_start_id + recovered.len())
+                        {
                             recovered.push(entry);
                         }
                     }
@@ -4659,7 +4965,9 @@ fn extract_tool_call_entries_from_malformed_tool_calls_text(
         idx += 1;
     }
 
-    if !current.trim().is_empty() && (saw_entry_separator_repair || !recovered.is_empty() || saw_array_close) {
+    if !current.trim().is_empty()
+        && (saw_entry_separator_repair || !recovered.is_empty() || saw_array_close)
+    {
         let repaired = auto_close_jsonish_shape(current.trim());
         if let Some(parsed) = try_parse_json_value_lenient(repaired.as_str()) {
             if let Some(entry) =
@@ -5314,6 +5622,11 @@ fn strip_empty_tool_calls_payload_noise(raw: &str) -> String {
 }
 
 fn strip_tool_call_marker_payload(raw: &str) -> String {
+    let inline_reasoning_exec_pattern = Regex::new(
+        r#"(?is)exec_command\s*<arg_key>\s*cmd\s*</arg_key>\s*<arg_value>\s*[\s\S]*?\s*</arg_value>\s*</tool_call>"#,
+    )
+    .ok();
+
     fn is_rcc_wrapper_only_text(raw: &str) -> bool {
         let patterns = [
             r"(?s)<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)[\s\S]*?(?:\n?\s*RCC_TOOL_CALLS_JSON\b|$)",
@@ -5421,6 +5734,9 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
     }
 
     let mut text = raw.to_string();
+    if let Some(re) = inline_reasoning_exec_pattern.as_ref() {
+        text = re.replace_all(text.as_str(), "").to_string();
+    }
     let rcc_patterns = [
         r"(?s)<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS_JSON\b|$)",
         r"(?s)<<RCC_TOOL_CALLS(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS\b|$)",
@@ -5480,10 +5796,14 @@ fn strip_orphan_tool_markup_lines(raw: &str) -> String {
     let patterns = [
         r"(?im)^[ \t]*</function_calls>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</tool_call>[ \t]*\r?\n?",
+        r"(?im)^[ \t]*</tool:exec_command>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</function>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</parameter>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</arg_key>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</arg_value>[ \t]*\r?\n?",
+        r"(?im)^[ \t]*<timeout_ms>[\s\S]*?</timeout_ms>[ \t]*\r?\n?",
+        r"(?im)^[ \t]*tool\s*:\s*exec_command\b.*\r?\n?",
+        r"(?im)^[ \t]*exec_command\s*<arg_key>\s*cmd\s*</arg_key>\s*<arg_value>[\s\S]*?</arg_value>[ \t]*\r?\n?",
     ];
     for pattern in patterns {
         if let Ok(re) = Regex::new(pattern) {
@@ -5507,6 +5827,7 @@ fn strip_known_non_tool_xml_tags_preserve_text(raw: &str) -> String {
 fn strip_text_tool_wrapper_noise(raw: &str) -> String {
     let mut text = raw.to_string();
     let patterns = [
+        r"(?im)^\s*\[Time/Date\]:.*$",
         r"(?is)<\|ChunkingError\|>[\s\S]*?(?:<｜end▁of▁thinking｜>|<\|end▁of▁thinking\|>|$)",
         r"(?is)<｜end▁of▁thinking｜>",
         r"(?im)^\s*Tool\s+[A-Za-z0-9_.-]+\s+does\s+not\s+exists\.\s*$",
@@ -5885,7 +6206,11 @@ fn sanitize_content_field_after_tool_markup(
                 ) {
                     *content = Value::String(preserved);
                 } else {
-                    *content = Value::String(String::new());
+                    *content = if allow_empty_clear {
+                        Value::Null
+                    } else {
+                        Value::String(String::new())
+                    };
                 }
             } else {
                 let cleaned = if allow_empty_clear && raw.contains("<<RCC_TOOL_CALLS") {
@@ -6267,12 +6592,11 @@ fn extract_tool_calls_from_text_candidate(text: &str, fallback_start_id: usize) 
 
     let mut recovered: Vec<Value> = Vec::new();
 
-    recovered =
-        extract_tool_call_entries_from_malformed_tool_calls_text(text, fallback_start_id);
+    recovered = extract_tool_call_entries_from_malformed_tool_calls_text(text, fallback_start_id);
 
     if recovered.is_empty() {
         if let Some(parsed) = maybe_parse_tool_call_text_value(text) {
-        recovered = extract_tool_call_entries_from_unknown(&parsed);
+            recovered = extract_tool_call_entries_from_unknown(&parsed);
         }
     }
 
@@ -6295,13 +6619,22 @@ fn extract_tool_calls_from_text_candidate(text: &str, fallback_start_id: usize) 
         recovered = extract_xml_tool_call_blocks(text, fallback_start_id);
     }
     if recovered.is_empty() {
+        if let Some(entry) = extract_tool_prefixed_exec_command_block(text, fallback_start_id) {
+            recovered.push(entry);
+        }
+    }
+    if recovered.is_empty() {
         recovered = extract_xml_named_tool_call_blocks(text, fallback_start_id);
     }
     if recovered.is_empty() {
-        recovered = extract_strict_wrapper_tool_calls_from_tool_calls_container(
-            text,
-            fallback_start_id,
-        );
+        if let Some(entry) = extract_reasoning_inline_exec_command_arg_key(text, fallback_start_id)
+        {
+            recovered.push(entry);
+        }
+    }
+    if recovered.is_empty() {
+        recovered =
+            extract_strict_wrapper_tool_calls_from_tool_calls_container(text, fallback_start_id);
     }
     if recovered.is_empty() {
         recovered = extract_strict_wrapper_tool_calls_from_function_calls(text, fallback_start_id);
@@ -6495,6 +6828,10 @@ fn drop_disallowed_tool_calls_from_payload(payload: &mut Value) -> i64 {
 fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_protocol: &str) {
     let protocol = client_protocol.trim().to_ascii_lowercase();
     let wants_anthropic_shell = protocol == "anthropic-messages";
+    let wants_exec_command_cmd = matches!(
+        protocol.as_str(),
+        "openai-responses" | "openai-chat" | "anthropic-messages"
+    );
     let Some(choices) = payload.get_mut("choices").and_then(|v| v.as_array_mut()) else {
         return;
     };
@@ -6549,7 +6886,37 @@ fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_protocol: &s
                 normalize_tool_args_preserving_raw_shape(name.as_str(), Some(&arguments))
             };
             if let Some(normalized_args) = normalized_args {
-                function.insert("arguments".to_string(), Value::String(normalized_args));
+                let final_args = if wants_exec_command_cmd && target_name == "exec_command" {
+                    if let Ok(mut parsed) = serde_json::from_str::<Value>(normalized_args.as_str()) {
+                        if let Some(obj) = parsed.as_object_mut() {
+                            let has_cmd = obj
+                                .get("cmd")
+                                .and_then(Value::as_str)
+                                .map(|value| !value.trim().is_empty())
+                                .unwrap_or(false);
+                            let has_workdir_shape = obj.get("cwd").is_some() || obj.get("workdir").is_some();
+                            if !has_cmd && !has_workdir_shape {
+                                if let Some(command) = obj
+                                    .get("command")
+                                    .and_then(Value::as_str)
+                                    .map(str::trim)
+                                    .filter(|value| !value.is_empty())
+                                {
+                                    obj.insert(
+                                        "cmd".to_string(),
+                                        Value::String(command.to_string()),
+                                    );
+                                }
+                            }
+                        }
+                        serde_json::to_string(&parsed).unwrap_or(normalized_args)
+                    } else {
+                        normalized_args
+                    }
+                } else {
+                    normalized_args
+                };
+                function.insert("arguments".to_string(), Value::String(final_args));
             }
         }
     }
@@ -6576,11 +6943,16 @@ fn count_normalized_tool_calls(payload: &Value) -> i64 {
         .unwrap_or(0)
 }
 
-fn prepare_payload_for_governance(
+fn prepare_payload_for_governance_with_requested_tool_names(
     payload: &Value,
+    requested_tool_names: &[String],
 ) -> Result<ToolGovernancePreparationOutput, String> {
     let (mut prepared_payload, converted) = coerce_to_canonical_chat_completion(payload);
     copy_internal_tool_governance_state(payload, &mut prepared_payload);
+    inject_requested_tool_names_into_internal_governance(
+        &mut prepared_payload,
+        requested_tool_names,
+    );
     let harvested_tool_calls = if resolve_text_harvest_enabled(&prepared_payload) {
         maybe_harvest_empty_tool_calls_from_json_content(&mut prepared_payload)
     } else {
@@ -6606,11 +6978,19 @@ fn prepare_payload_for_governance(
     })
 }
 
-pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutput, String> {
-    let prepared = prepare_payload_for_governance(&input.payload)?;
-    let mut payload = prepared.prepared_payload;
-    let tool_call_ids_assigned =
-        ensure_payload_tool_call_ids(&mut payload, input.request_id.as_str())?;
+fn prepare_payload_for_governance(
+    payload: &Value,
+) -> Result<ToolGovernancePreparationOutput, String> {
+    prepare_payload_for_governance_with_requested_tool_names(payload, &[])
+}
+
+fn govern_prepared_payload(
+    mut payload: Value,
+    client_protocol: &str,
+    request_id: &str,
+    preparation_summary: Option<&ToolGovernancePreparationSummary>,
+) -> Result<ToolGovernanceOutput, String> {
+    let tool_call_ids_assigned = ensure_payload_tool_call_ids(&mut payload, request_id)?;
 
     let apply_patch_repaired = normalize_apply_patch_tool_calls(&mut payload);
     let disallowed_tool_calls_dropped = drop_disallowed_tool_calls_from_payload(&mut payload);
@@ -6620,12 +7000,14 @@ pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutpu
             reason
         ));
     }
-    remap_tool_calls_for_client_protocol(&mut payload, &input.client_protocol);
+    remap_tool_calls_for_client_protocol(&mut payload, client_protocol);
     strip_internal_tool_governance_state(&mut payload);
     let tool_calls_normalized = count_normalized_tool_calls(&payload);
 
-    let applied = prepared.summary.harvested_tool_calls > 0
-        || prepared.summary.shape_sanitized
+    let prepared_applied = preparation_summary
+        .map(|summary| summary.harvested_tool_calls > 0 || summary.shape_sanitized)
+        .unwrap_or(false);
+    let applied = prepared_applied
         || tool_call_ids_assigned > 0
         || tool_calls_normalized > 0
         || apply_patch_repaired > 0
@@ -6642,14 +7024,42 @@ pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutpu
     })
 }
 
+pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutput, String> {
+    let prepared = prepare_payload_for_governance(&input.payload)?;
+    let payload = prepared.prepared_payload;
+    let preparation_summary = Some(prepared.summary);
+
+    govern_prepared_payload(
+        payload,
+        input.client_protocol.as_str(),
+        input.request_id.as_str(),
+        preparation_summary.as_ref(),
+    )
+}
+
 #[napi]
 pub fn govern_response_json(input_json: String) -> napi::Result<String> {
     if input_json.trim().is_empty() {
         return Err(napi::Error::from_reason("Input JSON is empty"));
     }
-    let input: ToolGovernanceInput = serde_json::from_str(&input_json)
+    let input: GovernResponseJsonInput = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = govern_response(input).map_err(napi::Error::from_reason)?;
+    let output = if input.prepared {
+        govern_prepared_payload(
+            input.payload,
+            input.client_protocol.as_str(),
+            input.request_id.as_str(),
+            input.preparation_summary.as_ref(),
+        )
+    } else {
+        govern_response(ToolGovernanceInput {
+            payload: input.payload,
+            client_protocol: input.client_protocol,
+            entry_endpoint: input.entry_endpoint,
+            request_id: input.request_id,
+        })
+    }
+    .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
@@ -6661,9 +7071,36 @@ pub fn prepare_resp_process_tool_governance_payload_json(
     if payload_json.trim().is_empty() {
         return Err(napi::Error::from_reason("Payload JSON is empty"));
     }
-    let payload: Value = serde_json::from_str(&payload_json)
+    let input: Value = serde_json::from_str(&payload_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload JSON: {}", e)))?;
-    let output = prepare_payload_for_governance(&payload).map_err(napi::Error::from_reason)?;
+    let (payload, requested_tool_names) = if let Some(root) = input.as_object() {
+        if root.contains_key("payload") {
+            let payload = root.get("payload").cloned().unwrap_or(Value::Null);
+            let requested_tool_names = root
+                .get("requested_tool_names")
+                .or_else(|| root.get("requestedToolNames"))
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(|value| value.to_string())
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default();
+            (payload, requested_tool_names)
+        } else {
+            (input, Vec::new())
+        }
+    } else {
+        (input, Vec::new())
+    };
+    let output = prepare_payload_for_governance_with_requested_tool_names(
+        &payload,
+        requested_tool_names.as_slice(),
+    )
+    .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
@@ -6985,6 +7422,125 @@ mod tests {
     }
 
     #[test]
+    fn test_govern_response_apply_patch_simple_minus_plus_with_file_context_converts_to_canonical_patch(
+    ) {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [{
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": serde_json::to_string(&serde_json::json!({
+                                    "patch": "- old\n+ new",
+                                    "filePath": "sample.txt",
+                                    "fileContent": "old"
+                                })).unwrap()
+                            }
+                        }]
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat".to_string(),
+            request_id: "req_hashline_response_apply_patch_simple_minus_plus".to_string(),
+        };
+        let result = govern_response(input).unwrap();
+        let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+            ["arguments"]
+            .as_str()
+            .unwrap_or("");
+        let parsed: Value = serde_json::from_str(args).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        assert_eq!(
+            patch,
+            "*** Begin Patch
+*** Update File: sample.txt
+@@
+-old
++new
+*** End Patch"
+        );
+        assert_eq!(parsed["input"], parsed["patch"]);
+        assert!(parsed.get("filePath").is_none());
+        assert!(parsed.get("fileContent").is_none());
+    }
+
+    #[test]
+    fn test_govern_response_apply_patch_current_schema_preserves_filepath_and_patch_without_guard() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [{
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": serde_json::to_string(&serde_json::json!({
+                                    "filePath": "tmp/apply-patch-smoke.txt",
+                                    "patch": "+ alpha\n+ beta"
+                                })).unwrap()
+                            }
+                        }]
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat".to_string(),
+            request_id: "req_apply_patch_current_schema_no_guard".to_string(),
+        };
+        let result = govern_response(input).unwrap();
+        let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+            ["arguments"]
+            .as_str()
+            .unwrap_or("");
+        let parsed: Value = serde_json::from_str(args).unwrap();
+        assert_eq!(parsed["filePath"], "tmp/apply-patch-smoke.txt");
+        assert_eq!(parsed["patch"], "+ alpha\n+ beta");
+        assert!(parsed.get("input").is_none());
+        assert!(!args.contains("__APPLY_PATCH_ERROR__/"));
+    }
+
+    #[test]
+    fn test_govern_response_apply_patch_simple_add_with_empty_file_context_converts_to_add_file_patch(
+    ) {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [{
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": serde_json::to_string(&serde_json::json!({
+                                    "patch": "+ smoke-ok",
+                                    "filePath": "rcc_apply_patch_smoke.txt",
+                                    "fileContent": ""
+                                })).unwrap()
+                            }
+                        }]
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat".to_string(),
+            request_id: "req_hashline_response_apply_patch_simple_add".to_string(),
+        };
+        let result = govern_response(input).unwrap();
+        let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+            ["arguments"]
+            .as_str()
+            .unwrap_or("");
+        let parsed: Value = serde_json::from_str(args).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        assert_eq!(
+            patch,
+            "*** Begin Patch\n*** Add File: rcc_apply_patch_smoke.txt\n+smoke-ok\n*** End Patch"
+        );
+        assert_eq!(parsed["input"], parsed["patch"]);
+        assert!(parsed.get("filePath").is_none());
+        assert!(parsed.get("fileContent").is_none());
+    }
+
+    #[test]
     fn test_govern_response_apply_patch_hashline_shape_is_converted_to_canonical_patch() {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
@@ -7024,7 +7580,8 @@ mod tests {
     }
 
     #[test]
-    fn test_govern_response_apply_patch_new_file_plain_text_with_hashline_shape_repairs_to_add_file_patch() {
+    fn test_govern_response_apply_patch_new_file_plain_text_with_hashline_shape_repairs_to_add_file_patch(
+    ) {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
                 "choices": [{
@@ -7064,7 +7621,8 @@ mod tests {
     }
 
     #[test]
-    fn test_govern_response_apply_patch_hashline_missing_file_content_fails_closed_with_guard_patch() {
+    fn test_govern_response_apply_patch_hashline_missing_file_content_fails_closed_with_guard_patch(
+    ) {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
                 "choices": [{
@@ -8060,7 +8618,6 @@ console.log('ok')"#;
         assert_eq!(out[0]["function"]["name"], "update_plan");
         assert_eq!(out[1]["function"]["name"], "agent.dispatch");
         assert_eq!(out[2]["function"]["name"], "agent.dispatch");
-
     }
 
     #[test]
@@ -8386,7 +8943,7 @@ console.log('ok')"#;
         );
         assert_eq!(
             extract_apply_patch_text(Some(&shell_wrapped)).unwrap(),
-            "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\""
+            "*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch"
         );
     }
 
@@ -8764,7 +9321,8 @@ console.log('ok')"#;
     #[test]
     #[ignore = "diagnostic replay against local /Volumes error samples"]
     fn test_validate_apply_patch_arguments_replay_latest_20260516_samples() {
-        let base = std::path::Path::new("/Volumes/extension/.rcc/errorsamples/apply-patch-regression");
+        let base =
+            std::path::Path::new("/Volumes/extension/.rcc/errorsamples/apply-patch-regression");
         if !base.exists() {
             eprintln!("skip sample replay: {} not found", base.display());
             return;
@@ -8784,7 +9342,10 @@ console.log('ok')"#;
                 Ok(v) => v,
                 Err(_) => continue,
             };
-            let ts = sample.get("timestamp").and_then(Value::as_str).unwrap_or_default();
+            let ts = sample
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             if !ts.starts_with("2026-05-16") {
                 continue;
             }
@@ -8804,7 +9365,10 @@ console.log('ok')"#;
                 eprintln!(
                     "sample not repaired: {} reason={}",
                     path.display(),
-                    parsed.get("reason").and_then(Value::as_str).unwrap_or("unknown")
+                    parsed
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
                 );
             }
         }
@@ -9252,6 +9816,33 @@ console.log('ok')"#;
     }
 
     #[test]
+    fn test_extract_tool_prefixed_exec_command_block() {
+        let text = r#"
+tool:exec_command (tool:exec_command)
+  <command>which flutter</command>
+  <timeout_ms>10000</timeout_ms>
+  </tool:exec_command>
+"#;
+        let entry = extract_tool_prefixed_exec_command_block(text, 1).unwrap();
+        assert_eq!(entry["function"]["name"], "exec_command");
+        let args: Value =
+            serde_json::from_str(entry["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "which flutter");
+    }
+
+    #[test]
+    fn test_extract_reasoning_inline_exec_command_arg_key() {
+        let text = r#"exec_command<arg_key>cmd</arg_key><arg_value>pwd</arg_value></tool_call>"#;
+        let entry = extract_reasoning_inline_exec_command_arg_key(text, 1).unwrap();
+        assert_eq!(entry["function"]["name"], "exec_command");
+        let args: Value =
+            serde_json::from_str(entry["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "pwd");
+    }
+
+    #[test]
     fn test_extract_xml_named_tool_call_blocks_recovers_when_inner_tags_are_truncated() {
         let text = r#"
 <execute_command>
@@ -9354,10 +9945,7 @@ console.log('ok')"#;
     #[test]
     fn test_unwrap_xml_cdata_sections_merges_split_segments() {
         let raw = "<![CDATA[bash -lc 'echo ]]]]><![CDATA[> ok']]>";
-        assert_eq!(
-            unwrap_xml_cdata_sections(raw),
-            "bash -lc 'echo ]]> ok'"
-        );
+        assert_eq!(unwrap_xml_cdata_sections(raw), "bash -lc 'echo ]]> ok'");
     }
 
     #[test]
@@ -9684,8 +10272,21 @@ console.log('ok')"#;
                 "finish_reason": "stop"
             }]
         });
-        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
-        assert!(payload["choices"][0]["message"]["tool_calls"].as_array().unwrap().is_empty());
+        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
+        let tool_calls = payload["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .unwrap();
+        assert_eq!(tool_calls[0]["function"]["name"], "apply_patch");
+        let args: Value = serde_json::from_str(
+            tool_calls[0]["function"]["arguments"]
+                .as_str()
+                .expect("arguments text"),
+        )
+        .expect("arguments json");
+        assert_eq!(
+            args["patch"].as_str().unwrap(),
+            "*** Begin Patch\n*** Add File: demo.txt\n+hi\n*** End Patch"
+        );
     }
 
     #[test]
@@ -10153,6 +10754,98 @@ console.log('ok')"#;
     }
 
     #[test]
+    fn test_govern_response_clears_tool_prefixed_exec_command_wrapper_content_to_null() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "id": "resp_test_1",
+                "object": "response",
+                "created_at": 1,
+                "model": "test-model",
+                "status": "completed",
+                "output": [],
+                "output_text": "tool:exec_command (tool:exec_command)\n  <command>which flutter</command>\n  <timeout_ms>10000</timeout_ms>\n  </tool:exec_command>"
+            }),
+            client_protocol: "openai-responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            request_id: "req_test_resp_process_normalize".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        let message = &result.governed_payload["choices"][0]["message"];
+        let args: Value = serde_json::from_str(
+            message["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "which flutter");
+        assert!(message["content"].is_null());
+    }
+
+    #[test]
+    fn test_govern_response_adds_cmd_for_exec_command_after_shell_wrapper_harvest() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": "{\"tool_calls\":[{\"name\":\"shell_command\",\"input\":{\"command\":\"bd --no-db ready\"}},{\"name\":\"shell_command\",\"input\":{\"command\":\"bd --no-db list --status in_progress\"}}]}"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "anthropic-messages".to_string(),
+            entry_endpoint: "/v1/messages".to_string(),
+            request_id: "req_test_empty_tool_calls_json_wrapper".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        let calls = result.governed_payload["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(calls.len(), 2);
+        let args0: Value =
+            serde_json::from_str(calls[0]["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        let args1: Value =
+            serde_json::from_str(calls[1]["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert_eq!(args0["cmd"], "bd --no-db ready");
+        assert_eq!(args1["cmd"], "bd --no-db list --status in_progress");
+        assert_eq!(args0["command"], "bd --no-db ready");
+        assert_eq!(args1["command"], "bd --no-db list --status in_progress");
+    }
+
+    #[test]
+    fn test_govern_response_removes_reasoning_content_after_inline_exec_command_harvest() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "reasoning_content": "[Time/Date]: utc=`2026-03-10T12:19:19.410Z` local=`2026-03-10 20:19:19.410 +08:00` tz=`Asia/Shanghai` nowMs=`1773145159410` ntpOffsetMs=`33`\nexec_command<arg_key>cmd</arg_key><arg_value>pwd</arg_value></tool_call>"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            request_id: "req_test_reasoning_native_tool".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        let message = &result.governed_payload["choices"][0]["message"];
+        let args: Value = serde_json::from_str(
+            message["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "pwd");
+        assert!(message.get("reasoning_content").is_none());
+    }
+
+    #[test]
     fn test_govern_response_fails_fast_for_malformed_rcc_wrapper_multiline_whitespace_when_name_missing(
     ) {
         let raw = "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"bash -lc 'cat << \\\"EOF\\\"\\n  line1\\n    line2\\nEOF\\n'\"}}]}\nRCC_TOOL_CALLS_JSON";
@@ -10373,19 +11066,35 @@ pub fn collect_tool_names_from_candidate_json(candidate_json: String) -> napi::R
         let name = match item {
             serde_json::Value::String(s) => {
                 let t = s.trim();
-                if t.is_empty() { None } else { Some(t.to_string()) }
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t.to_string())
+                }
             }
             serde_json::Value::Object(m) => {
                 // Try function.name first
                 if let Some(serde_json::Value::Object(func)) = m.get("function") {
                     if let Some(serde_json::Value::String(n)) = func.get("name") {
                         let t = n.trim();
-                        if t.is_empty() { None } else { Some(t.to_string()) }
-                    } else { None }
+                        if t.is_empty() {
+                            None
+                        } else {
+                            Some(t.to_string())
+                        }
+                    } else {
+                        None
+                    }
                 } else if let Some(serde_json::Value::String(n)) = m.get("name") {
                     let t = n.trim();
-                    if t.is_empty() { None } else { Some(t.to_string()) }
-                } else { None }
+                    if t.is_empty() {
+                        None
+                    } else {
+                        Some(t.to_string())
+                    }
+                } else {
+                    None
+                }
             }
             _ => None,
         };
@@ -10405,34 +11114,80 @@ pub fn resolve_requested_tool_names_json(input_json: String) -> napi::Result<Str
         .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
     let mut names: Vec<String> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    fn collect(candidate: &serde_json::Value, names: &mut Vec<String>, seen: &mut std::collections::HashSet<String>) {
-        let arr = match candidate { serde_json::Value::Array(a) => a, _ => return };
+    fn collect(
+        candidate: &serde_json::Value,
+        names: &mut Vec<String>,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        let arr = match candidate {
+            serde_json::Value::Array(a) => a,
+            _ => return,
+        };
         for item in arr {
             let name = match item {
-                serde_json::Value::String(s) => { let t = s.trim(); if t.is_empty() { None } else { Some(t.to_string()) } }
+                serde_json::Value::String(s) => {
+                    let t = s.trim();
+                    if t.is_empty() {
+                        None
+                    } else {
+                        Some(t.to_string())
+                    }
+                }
                 serde_json::Value::Object(m) => {
                     if let Some(serde_json::Value::Object(func)) = m.get("function") {
-                        if let Some(serde_json::Value::String(n)) = func.get("name") { let t = n.trim(); if t.is_empty() { None } else { Some(t.to_string()) } } else { None }
-                    } else if let Some(serde_json::Value::String(n)) = m.get("name") { let t = n.trim(); if t.is_empty() { None } else { Some(t.to_string()) } } else { None }
+                        if let Some(serde_json::Value::String(n)) = func.get("name") {
+                            let t = n.trim();
+                            if t.is_empty() {
+                                None
+                            } else {
+                                Some(t.to_string())
+                            }
+                        } else {
+                            None
+                        }
+                    } else if let Some(serde_json::Value::String(n)) = m.get("name") {
+                        let t = n.trim();
+                        if t.is_empty() {
+                            None
+                        } else {
+                            Some(t.to_string())
+                        }
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
             };
-            if let Some(n) = name { if !seen.contains(&n) { seen.insert(n.clone()); names.push(n); } }
+            if let Some(n) = name {
+                if !seen.contains(&n) {
+                    seen.insert(n.clone());
+                    names.push(n);
+                }
+            }
         }
     }
     if let Some(serde_json::Value::Object(sem)) = input.get("requestSemantics") {
-        if let Some(tools) = sem.get("tools") { collect(tools, &mut names, &mut seen); }
+        if let Some(tools) = sem.get("tools") {
+            collect(tools, &mut names, &mut seen);
+        }
         if let Some(serde_json::Value::Object(t)) = sem.get("tools") {
-            if let Some(v) = t.get("clientToolsRaw") { collect(v, &mut names, &mut seen); }
-            if let Some(v) = t.get("baselineTools") { collect(v, &mut names, &mut seen); }
+            if let Some(v) = t.get("clientToolsRaw") {
+                collect(v, &mut names, &mut seen);
+            }
+            if let Some(v) = t.get("baselineTools") {
+                collect(v, &mut names, &mut seen);
+            }
         }
     }
     if let Some(serde_json::Value::Object(ac)) = input.get("adapterContext") {
         if let Some(serde_json::Value::Object(cr)) = ac.get("capturedChatRequest") {
-            if let Some(tools) = cr.get("tools") { collect(tools, &mut names, &mut seen); }
+            if let Some(tools) = cr.get("tools") {
+                collect(tools, &mut names, &mut seen);
+            }
         }
     }
-    serde_json::to_string(&names).map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+    serde_json::to_string(&names)
+        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
 }
 
 #[napi]
@@ -10481,20 +11236,21 @@ pub fn validate_apply_patch_arguments_json(input_json: String) -> napi::Result<S
         .unwrap_or("")
         .trim()
         .to_string();
-    let invalid_reason = if let Some(hashline_reason) = detect_hashline_apply_patch_guard_reason(raw_args) {
-        Some(hashline_reason)
-    } else if raw_args_invalid_json {
-        Some("invalid_json")
-    } else if matches!(raw_args, Some(Value::Object(obj)) if obj.is_empty()) {
-        Some("invalid_json")
-    } else if matches!(raw_args, Some(Value::Object(_))) {
-        detect_structured_apply_patch_invalid_reason(&parsed_args)
-    } else if normalized.1 {
-        detect_apply_patch_invalid_reason(patch.as_str())
-    } else {
-        detect_apply_patch_authoring_invalid_reason(raw_source.as_str())
-            .or_else(|| detect_apply_patch_invalid_reason(patch.as_str()))
-    };
+    let invalid_reason =
+        if let Some(hashline_reason) = detect_hashline_apply_patch_guard_reason(raw_args) {
+            Some(hashline_reason)
+        } else if raw_args_invalid_json {
+            Some("invalid_json")
+        } else if matches!(raw_args, Some(Value::Object(obj)) if obj.is_empty()) {
+            Some("invalid_json")
+        } else if matches!(raw_args, Some(Value::Object(_))) {
+            detect_structured_apply_patch_invalid_reason(&parsed_args)
+        } else if normalized.1 {
+            detect_apply_patch_invalid_reason(patch.as_str())
+        } else {
+            detect_apply_patch_authoring_invalid_reason(raw_source.as_str())
+                .or_else(|| detect_apply_patch_invalid_reason(patch.as_str()))
+        };
 
     let mut out = Map::new();
     out.insert("ok".to_string(), Value::Bool(invalid_reason.is_none()));

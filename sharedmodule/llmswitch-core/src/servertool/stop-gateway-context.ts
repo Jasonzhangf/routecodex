@@ -115,11 +115,28 @@ export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
         typeof finishReasonRaw === 'string' && finishReasonRaw.trim()
           ? finishReasonRaw.trim().toLowerCase()
           : '';
-      if (!finishReason || finishReason === 'tool_calls') {
+      if (!finishReason) {
         continue;
       }
-      if (finishReason !== 'stop' && finishReason !== 'length') {
-        continue;
+      if (finishReason === 'tool_calls') {
+        return {
+          observed: true,
+          eligible: false,
+          source: 'chat',
+          reason: 'finish_reason_tool_calls',
+          choiceIndex: idx,
+          hasToolCalls: true
+        };
+      }
+      if (finishReason !== 'stop') {
+        return {
+          observed: true,
+          eligible: false,
+          source: 'chat',
+          reason: `finish_reason_${finishReason}`,
+          choiceIndex: idx,
+          hasToolCalls: false
+        };
       }
 
       const message =

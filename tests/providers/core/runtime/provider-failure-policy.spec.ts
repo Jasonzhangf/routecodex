@@ -350,6 +350,52 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('treats provider_status_1000 520 malformed-response wrapper as recoverable and health-neutral', () => {
+    const error = Object.assign(new Error('[hub_response] upstream returned unknown error, 520'), {
+      code: 'MALFORMED_RESPONSE',
+      upstreamCode: 'provider_status_1000',
+      statusCode: 520
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 520,
+      errorCode: 'MALFORMED_RESPONSE',
+      upstreamCode: 'provider_status_1000',
+      reason: '[hub_response] upstream returned unknown error, 520'
+    });
+
+    expect(classification).toBe('recoverable');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      error,
+      errorCode: 'MALFORMED_RESPONSE',
+      upstreamCode: 'provider_status_1000',
+      statusCode: 520,
+      classification
+    })).toBe(true);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 520,
+      errorCode: 'MALFORMED_RESPONSE',
+      upstreamCode: 'provider_status_1000',
+      reason: '[hub_response] upstream returned unknown error, 520',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      affectsHealth: false,
+      blockingRecoverable: true,
+      shouldRetry: true,
+      action: 'retry_same_provider',
+      decisionLabel: 'recoverable_backoff_same_provider',
+      backoff: expect.objectContaining({
+        scope: 'recoverable'
+      })
+    }));
+  });
+
   it('supports provider-scoped reroute decision labels from the shared policy', () => {
     expect(describeProviderFailureDecision({
       action: 'reroute_explicit_alternative',

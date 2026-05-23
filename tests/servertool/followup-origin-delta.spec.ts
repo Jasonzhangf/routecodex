@@ -64,4 +64,91 @@ describe('servertool followup origin clone delta', () => {
     expect(JSON.stringify(payload)).not.toContain('fileContent');
     expect(JSON.stringify(payload)).not.toContain('*** Begin Patch');
   });
+
+  test('normalizes split pending tool calls before appending multiple tool outputs', () => {
+    const seed = {
+      model: 'gpt-test',
+      messages: [
+        { role: 'user', content: 'run two edits' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'call_patch_1',
+            type: 'function',
+            function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: 'tmp/a.txt', patch: '+ a' }) }
+          }]
+        },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'call_patch_2',
+            type: 'function',
+            function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: 'tmp/b.txt', patch: '+ b' }) }
+          }]
+        }
+      ],
+      tools: [
+        { type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } }
+      ]
+    } as any;
+    const finalChatResponse = {
+      tool_outputs: [
+        {
+          tool_call_id: 'call_patch_1',
+          name: 'apply_patch',
+          arguments: JSON.stringify({ filePath: 'tmp/a.txt', patch: '+ a' }),
+          content: JSON.stringify({ status: 'APPLY_PATCH_APPLIED', ok: true, filePath: 'tmp/a.txt' })
+        },
+        {
+          tool_call_id: 'call_patch_2',
+          name: 'apply_patch',
+          arguments: JSON.stringify({ filePath: 'tmp/b.txt', patch: '+ b' }),
+          content: JSON.stringify({ status: 'APPLY_PATCH_APPLIED', ok: true, filePath: 'tmp/b.txt' })
+        }
+      ]
+    } as any;
+
+    const payload = applyFollowupDeltaPlan({
+      adapterContext: {},
+      finalChatResponse,
+      seed,
+      injection: {
+        ops: [
+          { op: 'append_tool_messages_from_tool_outputs', required: true },
+          { op: 'drop_tool_by_name', name: 'apply_patch' }
+        ]
+      } as any
+    }) as any;
+
+    expect(payload.messages.slice(1)).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_patch_1',
+            type: 'function',
+            function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: 'tmp/a.txt', patch: '+ a' }) }
+          },
+          {
+            id: 'call_patch_2',
+            type: 'function',
+            function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: 'tmp/b.txt', patch: '+ b' }) }
+          }
+        ]
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call_patch_1',
+        content: JSON.stringify({ status: 'APPLY_PATCH_APPLIED', ok: true, filePath: 'tmp/a.txt' })
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call_patch_2',
+        content: JSON.stringify({ status: 'APPLY_PATCH_APPLIED', ok: true, filePath: 'tmp/b.txt' })
+      }
+    ]);
+  });
 });

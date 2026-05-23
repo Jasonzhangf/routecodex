@@ -106,7 +106,9 @@ mod tests {
         });
         let root: Map<String, Value> = root_value.as_object().expect("root").clone();
         let transcript = build_history_context_transcript(&root).expect("transcript");
-        assert!(transcript.starts_with("# context\nPrior conversation history and tool progress.\n\n"));
+        assert!(
+            transcript.starts_with("# context\nPrior conversation history and tool progress.\n\n")
+        );
         assert!(transcript.contains("=== 1. SYSTEM ===\nfollow contract"));
         assert!(transcript.contains("=== 2. USER ===\n请继续"));
         assert!(transcript.contains("=== 3. ASSISTANT ==="));

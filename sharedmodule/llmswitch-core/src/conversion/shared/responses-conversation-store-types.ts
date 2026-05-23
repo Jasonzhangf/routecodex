@@ -13,6 +13,8 @@ export interface RecordResponseArgs {
   requestId?: string;
   response: AnyRecord;
   routeHint?: string;
+  sessionId?: string;
+  conversationId?: string;
 }
 
 export interface ResumeOptions {
@@ -35,6 +37,7 @@ export interface ConversationEntry {
   requestId: string;
   basePayload: AnyRecord;
   input: AnyRecord[];
+  releasedPendingToolCallIds?: string[];
   tools?: AnyRecord[];
   routeHint?: string;
   createdAt: number;

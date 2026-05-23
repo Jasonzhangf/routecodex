@@ -334,6 +334,13 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     this.schedulePersist(nowMs);
   }
 
+  onProviderSuccess(event: { runtime?: { providerKey?: unknown }; usage?: { totalTokens?: unknown }; timestamp?: unknown }): void {
+    const providerKey = typeof event?.runtime?.providerKey === 'string' ? event.runtime.providerKey : '';
+    const usedTokens = typeof event?.usage?.totalTokens === 'number' ? event.usage.totalTokens : 0;
+    const timestampMs = typeof event?.timestamp === 'number' ? event.timestamp : Date.now();
+    this.recordProviderSuccess({ providerKey, usedTokens, timestampMs });
+  }
+
   registerProviderStaticConfig(
     providerKey: string,
     config: { authType?: string | null; priorityTier?: number | null; apikeyDailyResetTime?: string | null } = {}

@@ -1,5 +1,5 @@
 //! Responses reasoning registry - Rust reimplementation of responses-reasoning-registry.ts
-//! 
+//!
 //! Thread-safe in-memory registry with TTL and LRU eviction.
 //! Follows the same semantics as the TS version.
 
@@ -199,7 +199,9 @@ pub fn register_responses_reasoning_json(
     let reasoning: Option<ResponsesReasoningPayload> = reasoning_json
         .as_ref()
         .and_then(|s| serde_json::from_str(s).ok());
-    let mut reg = registry().lock().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut reg = registry()
+        .lock()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let now = Instant::now();
     let _entry = reg.ensure_entry(&id, now);
     if let Some(ref mut entry) = reg.entry_mut(&id) {
@@ -207,7 +209,12 @@ pub fn register_responses_reasoning_json(
             let summary_raw: Vec<String> = reasoning
                 .summary
                 .as_ref()
-                .map(|s| s.iter().map(|i| i.text.trim().to_string()).filter(|t| !t.is_empty()).collect())
+                .map(|s| {
+                    s.iter()
+                        .map(|i| i.text.trim().to_string())
+                        .filter(|t| !t.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default();
             let summary_collapsed: Option<Vec<ReasoningSegment>> = if !summary_raw.is_empty() {
                 Some(
@@ -226,7 +233,12 @@ pub fn register_responses_reasoning_json(
             let content_raw: Vec<String> = reasoning
                 .content
                 .as_ref()
-                .map(|s| s.iter().map(|i| i.text.trim().to_string()).filter(|t| !t.is_empty()).collect())
+                .map(|s| {
+                    s.iter()
+                        .map(|i| i.text.trim().to_string())
+                        .filter(|t| !t.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default();
             let content_collapsed: Option<Vec<ReasoningSegment>> = if !content_raw.is_empty() {
                 Some(
@@ -260,7 +272,9 @@ pub fn register_responses_reasoning_json(
 
 #[napi]
 pub fn consume_responses_reasoning_json(id: String) -> NapiResult<Option<String>> {
-    let mut reg = registry().lock().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut reg = registry()
+        .lock()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     reg.prune(Instant::now());
     let entry = reg.entry_mut(&id);
     let reasoning = match entry {
@@ -285,7 +299,8 @@ pub fn consume_responses_reasoning_json(id: String) -> NapiResult<Option<String>
 
     match reasoning {
         Some(r) => {
-            let json = serde_json::to_string(&r).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+            let json =
+                serde_json::to_string(&r).map_err(|e| napi::Error::from_reason(e.to_string()))?;
             Ok(Some(json))
         }
         None => Ok(None),
@@ -293,13 +308,12 @@ pub fn consume_responses_reasoning_json(id: String) -> NapiResult<Option<String>
 }
 
 #[napi]
-pub fn register_responses_output_text_meta_json(
-    id: String,
-    meta_json: String,
-) -> NapiResult<()> {
+pub fn register_responses_output_text_meta_json(id: String, meta_json: String) -> NapiResult<()> {
     let meta: ResponsesOutputTextMeta =
         serde_json::from_str(&meta_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let mut reg = registry().lock().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut reg = registry()
+        .lock()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let now = Instant::now();
     let _entry = reg.ensure_entry(&id, now);
     if let Some(ref mut entry) = reg.entry_mut(&id) {
@@ -310,7 +324,9 @@ pub fn register_responses_output_text_meta_json(
 
 #[napi]
 pub fn consume_responses_output_text_meta_json(id: String) -> NapiResult<Option<String>> {
-    let mut reg = registry().lock().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut reg = registry()
+        .lock()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     reg.prune(Instant::now());
     let value = match reg.entry_mut(&id) {
         Some(e) if e.output_text.is_some() => {
@@ -345,9 +361,11 @@ pub fn register_responses_payload_snapshot_json(
     snapshot_json: String,
     clone: Option<bool>,
 ) -> NapiResult<()> {
-    let snapshot: Value =
-        serde_json::from_str(&snapshot_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let mut reg = registry().lock().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let snapshot: Value = serde_json::from_str(&snapshot_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut reg = registry()
+        .lock()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let now = Instant::now();
     let _entry = reg.ensure_entry(&id, now);
     if let Some(ref mut entry) = reg.entry_mut(&id) {
@@ -362,7 +380,9 @@ pub fn register_responses_payload_snapshot_json(
 
 #[napi]
 pub fn consume_responses_payload_snapshot_json(id: String) -> NapiResult<Option<String>> {
-    let mut reg = registry().lock().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut reg = registry()
+        .lock()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     reg.prune(Instant::now());
     let value = match reg.entry_mut(&id) {
         Some(e) if e.payload_snapshot.is_some() => {
@@ -398,7 +418,9 @@ pub fn consume_responses_payload_snapshot_by_aliases_json(
     let ids: Vec<Value> =
         serde_json::from_str(&ids_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let aliases = normalize_aliases(&ids);
-    let mut reg = registry().lock().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut reg = registry()
+        .lock()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     reg.prune(Instant::now());
 
     let mut matched: Option<Value> = None;
@@ -454,7 +476,9 @@ pub fn register_responses_passthrough_json(
 ) -> NapiResult<()> {
     let payload: Value =
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let mut reg = registry().lock().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut reg = registry()
+        .lock()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let now = Instant::now();
     let _entry = reg.ensure_entry(&id, now);
     if let Some(ref mut entry) = reg.entry_mut(&id) {
@@ -469,7 +493,9 @@ pub fn register_responses_passthrough_json(
 
 #[napi]
 pub fn consume_responses_passthrough_json(id: String) -> NapiResult<Option<String>> {
-    let mut reg = registry().lock().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut reg = registry()
+        .lock()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     reg.prune(Instant::now());
     let value = match reg.entry_mut(&id) {
         Some(e) if e.passthrough_payload.is_some() => {
@@ -505,7 +531,9 @@ pub fn consume_responses_passthrough_by_aliases_json(
     let ids: Vec<Value> =
         serde_json::from_str(&ids_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let aliases = normalize_aliases(&ids);
-    let mut reg = registry().lock().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut reg = registry()
+        .lock()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     reg.prune(Instant::now());
 
     let mut matched: Option<Value> = None;

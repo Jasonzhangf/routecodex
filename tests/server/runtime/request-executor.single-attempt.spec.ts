@@ -16,6 +16,34 @@ import {
 } from '../../../src/utils/snapshot-local-disk-gate.js';
 import { setRuntimeFlag, runtimeFlags } from '../../../src/runtime/runtime-flags.js';
 
+function writeStopMessageState(sessionId: string, used: number): void {
+  fs.mkdirSync(SESSION_DIR, { recursive: true });
+  fs.writeFileSync(
+    path.join(SESSION_DIR, `session-${sessionId}.json`),
+    JSON.stringify({
+      version: 1,
+      state: {
+        stopMessageSource: 'default',
+        stopMessageText: '继续执行',
+        stopMessageMaxRepeats: 3,
+        stopMessageUsed: used,
+        stopMessageStageMode: 'on',
+        stopMessageAiMode: 'off'
+      }
+    }),
+    'utf8'
+  );
+}
+
+function readStopMessageUsed(sessionId: string): number | undefined {
+  const filepath = path.join(SESSION_DIR, `session-${sessionId}.json`);
+  if (!fs.existsSync(filepath)) {
+    return undefined;
+  }
+  const payload = JSON.parse(fs.readFileSync(filepath, 'utf8')) as { state?: { stopMessageUsed?: number } };
+  return payload.state?.stopMessageUsed;
+}
+
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-request-executor-single-attempt-sessions');
 
 function createRuntimeHandle(processImpl: () => Promise<unknown>): ProviderHandle {
@@ -23,6 +51,22 @@ function createRuntimeHandle(processImpl: () => Promise<unknown>): ProviderHandl
     providerType: 'gemini',
     providerFamily: 'gemini',
     providerId: 'gemini',
+    instance: {
+      processIncoming: jest.fn().mockImplementation(processImpl),
+      cleanup: jest.fn()
+    }
+  } as unknown as ProviderHandle;
+}
+
+function createRuntimeHandleWithProtocol(
+  processImpl: () => Promise<unknown>,
+  providerProtocol: string
+): ProviderHandle {
+  return {
+    providerType: 'openai',
+    providerFamily: 'openai',
+    providerId: 'mini27',
+    providerProtocol,
     instance: {
       processIncoming: jest.fn().mockImplementation(processImpl),
       cleanup: jest.fn()
@@ -147,6 +191,208 @@ describe('HubRequestExecutor single attempt behaviour', () => {
 
     expect(response).toBeDefined();
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-enters stopless for openai-responses relay provider stop response', async () => {
+    const providerResponse = {
+      status: 200,
+      data: {
+        id: 'chatcmpl-minimax-stopless-red',
+        object: 'chat.completion',
+        model: 'MiniMax-M2.7',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'stopped'
+            }
+          }
+        ]
+      }
+    };
+    const handle = createRuntimeHandleWithProtocol(async () => providerResponse, 'openai-responses');
+    const relayPipelineResult: PipelineExecutionResult = {
+      providerPayload: { model: 'MiniMax-M2.7', messages: [] },
+      target: {
+        providerKey: 'mini27.key1-MiniMax-M2.7',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:key',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {
+        routeName: 'coding',
+        routecodexLocalPort: 10000,
+        routecodexPortMode: 'router',
+        routecodexRoutingPolicyGroup: 'gateway_coding_10000'
+      }
+    } as PipelineExecutionResult;
+    const nested = jest.fn(async () => ({
+      status: 200,
+      body: {
+        id: 'resp-stopless-reentered',
+        object: 'response',
+        status: 'completed',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'continued' }] }]
+      }
+    }));
+    const { executor, request } = createExecutor(relayPipelineResult, handle);
+    (executor as any).deps.executeNestedInput = nested;
+
+    let response: PipelineExecutionResult | undefined;
+    try {
+      response = await executor.execute({
+        ...request,
+        requestId: 'req_executor_minimax_relay_stopless_red',
+        entryEndpoint: '/v1/responses',
+        body: { model: 'gpt-5.4', input: 'continue', stream: true },
+        metadata: {
+          stream: true,
+          inboundStream: true,
+          routecodexLocalPort: 10000,
+          routecodexPortMode: 'router',
+          routecodexRoutingPolicyGroup: 'gateway_coding_10000',
+          stoplessGoalState: { status: 'idle', objective: 'test', createdAt: 1, updatedAt: 1 }
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      if (!message.includes('Must use import to load ES Module')) {
+        throw error;
+      }
+    }
+
+    expect(nested).toHaveBeenCalledTimes(1);
+    if (response) {
+      expect(response.status).toBe(200);
+    }
+  });
+
+  it('resets stopless default budget after openai-responses relay tool_calls response', async () => {
+    const sessionId = 'executor-relay-tool-calls-reset';
+    writeStopMessageState(sessionId, 3);
+    const providerResponse = {
+      status: 200,
+      data: {
+        id: 'chatcmpl-minimax-tool-calls-reset',
+        object: 'chat.completion',
+        model: 'MiniMax-M2.7',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              tool_calls: [
+                {
+                  id: 'call_reset_budget',
+                  type: 'function',
+                  function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    };
+    const handle = createRuntimeHandleWithProtocol(async () => providerResponse, 'openai-responses');
+    const relayPipelineResult: PipelineExecutionResult = {
+      providerPayload: { model: 'MiniMax-M2.7', messages: [] },
+      target: {
+        providerKey: 'mini27.key1-MiniMax-M2.7',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:key',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {
+        sessionId,
+        routeName: 'coding',
+        routecodexLocalPort: 10000,
+        routecodexPortMode: 'router',
+        routecodexRoutingPolicyGroup: 'gateway_coding_10000'
+      }
+    } as PipelineExecutionResult;
+    const { executor, request } = createExecutor(relayPipelineResult, handle);
+
+    try {
+      await executor.execute({
+        ...request,
+        requestId: 'req_executor_minimax_relay_tool_calls_reset',
+        entryEndpoint: '/v1/responses',
+        body: { model: 'gpt-5.4', input: 'continue', stream: true },
+        metadata: {
+          stream: true,
+          inboundStream: true,
+          sessionId,
+          routecodexLocalPort: 10000,
+          routecodexPortMode: 'router',
+          routecodexRoutingPolicyGroup: 'gateway_coding_10000'
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      if (!message.includes('Must use import to load ES Module')) {
+        throw error;
+      }
+    }
+
+    expect(readStopMessageUsed(sessionId)).toBe(0);
+  });
+
+  it('finalizes responses conversation retention after successful tool_calls response', async () => {
+    const finalizeSpy = jest.fn();
+    const globalStoreKey = '__rccResponsesConversationStore';
+    const previousStore = (globalThis as Record<string, unknown>)[globalStoreKey];
+    (globalThis as Record<string, unknown>)[globalStoreKey] = {
+      finalizeResponsesConversationRequestRetention: finalizeSpy
+    };
+    const handle = createRuntimeHandle(async () => ({ ok: true }));
+    const { executor, request } = createExecutor(pipelineResult, handle);
+    stubConvertProviderResponse({
+      status: 200,
+      body: {
+        id: 'resp_retention_tool_calls',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}',
+            call_id: 'call_retention_tool'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: { tool_calls: [] }
+        },
+        finish_reason: 'tool_calls'
+      }
+    });
+
+    try {
+      await executor.execute({
+        ...request,
+        requestId: 'req_executor_responses_retention_tool_calls',
+        entryEndpoint: '/v1/responses',
+        body: { model: 'gpt-5.4', input: 'call a tool' }
+      });
+
+      expect(finalizeSpy).toHaveBeenCalledWith('req_executor_responses_retention_tool_calls', {
+        keepForSubmitToolOutputs: true
+      });
+    } finally {
+      if (previousStore === undefined) {
+        delete (globalThis as Record<string, unknown>)[globalStoreKey];
+      } else {
+        (globalThis as Record<string, unknown>)[globalStoreKey] = previousStore;
+      }
+    }
   });
 
   it('writes payload-contract-error errorsample for empty provider request payload by default', async () => {

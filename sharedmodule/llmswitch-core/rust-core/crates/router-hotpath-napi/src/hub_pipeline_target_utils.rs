@@ -395,7 +395,13 @@ mod tests {
           "processMode": "chat",
           "forceWebSearch": true
         });
-        apply_target_metadata(&mut metadata, &target, Some("thinking"), Some("gpt-5"), None);
+        apply_target_metadata(
+            &mut metadata,
+            &target,
+            Some("thinking"),
+            Some("gpt-5"),
+            None,
+        );
         let obj = metadata.as_object().expect("metadata object");
         assert_eq!(
             obj.get("routeName").and_then(|v| v.as_str()),

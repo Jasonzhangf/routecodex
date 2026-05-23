@@ -654,7 +654,6 @@ pub fn normalize_tool_call_ids_json(payload_json: String) -> NapiResult<String> 
     serde_json::to_string(&payload).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-
 /// Input: JSON object with optional messages array.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -675,11 +674,21 @@ fn extract_message_text(content: &Value) -> String {
             let mut buf = String::new();
             for part in parts {
                 if let Some(s) = part.as_str() {
-                    buf.push_str(s.trim()); buf.push(' ');
+                    buf.push_str(s.trim());
+                    buf.push(' ');
                 } else if let Some(obj) = part.as_object() {
-                    for key in ["text","output_text","input_text","content","thinking","reasoning","reasoning_content"] {
+                    for key in [
+                        "text",
+                        "output_text",
+                        "input_text",
+                        "content",
+                        "thinking",
+                        "reasoning",
+                        "reasoning_content",
+                    ] {
                         if let Some(v) = obj.get(key).and_then(|v| v.as_str()) {
-                            buf.push_str(v.trim()); buf.push(' ');
+                            buf.push_str(v.trim());
+                            buf.push(' ');
                         }
                     }
                 }
@@ -696,9 +705,13 @@ fn is_meaningless_dot_text(text: &str) -> bool {
 }
 
 fn is_template_assistant_text(text: &str) -> bool {
-    let n = text.trim().replace(|c: char| c.is_whitespace(), " ").to_lowercase();
+    let n = text
+        .trim()
+        .replace(|c: char| c.is_whitespace(), " ")
+        .to_lowercase();
     (n.contains("i'm here to help") && n.contains("what would you like me to do"))
-        || (n.contains("i'm ready to help you with whatever you need") && n.contains("what would you like me to do"))
+        || (n.contains("i'm ready to help you with whatever you need")
+            && n.contains("what would you like me to do"))
 }
 
 // Legacy /goal transport cleanup only.
@@ -894,11 +907,15 @@ fn should_drop_historical_goal_turn(
 }
 
 fn message_has_block_type(content: &Value, target: &str) -> bool {
-    let Some(arr) = content.as_array() else { return false };
+    let Some(arr) = content.as_array() else {
+        return false;
+    };
     for item in arr {
         if let Some(obj) = item.as_object() {
             if let Some(typ) = obj.get("type").and_then(|v| v.as_str()) {
-                if typ.to_lowercase() == target { return true; }
+                if typ.to_lowercase() == target {
+                    return true;
+                }
             }
         }
     }
@@ -912,21 +929,48 @@ fn collect_mirror_indices(messages: &[Value]) -> Vec<bool> {
         let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
         let content = msg.get("content").unwrap_or(&Value::Null);
         if role == "assistant" {
-            if msg.get("tool_calls").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false)
-                || message_has_block_type(content, "tool_use") {
-                has_boundary = true; continue;
+            if msg
+                .get("tool_calls")
+                .and_then(|v| v.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(false)
+                || message_has_block_type(content, "tool_use")
+            {
+                has_boundary = true;
+                continue;
             }
         }
         if (role == "user" || role == "tool") && message_has_block_type(content, "tool_result") {
-            has_boundary = true; continue;
+            has_boundary = true;
+            continue;
         }
-        if role == "tool" { has_boundary = true; continue; }
-        if !has_boundary || role != "assistant" { continue; }
+        if role == "tool" {
+            has_boundary = true;
+            continue;
+        }
+        if !has_boundary || role != "assistant" {
+            continue;
+        }
         let t1 = extract_message_text(content);
-        let t2 = extract_message_text(msg.get("reasoning_content").or_else(|| msg.get("reasoning")).or_else(|| msg.get("reasoningContent")).unwrap_or(&Value::Null));
-        let n1 = if is_meaningless_dot_text(&t1) { String::new() } else { t1 };
-        let n2 = if is_meaningless_dot_text(&t2) { String::new() } else { t2 };
-        if !n1.is_empty() && !n2.is_empty() && n1 == n2 { result[i] = true; }
+        let t2 = extract_message_text(
+            msg.get("reasoning_content")
+                .or_else(|| msg.get("reasoning"))
+                .or_else(|| msg.get("reasoningContent"))
+                .unwrap_or(&Value::Null),
+        );
+        let n1 = if is_meaningless_dot_text(&t1) {
+            String::new()
+        } else {
+            t1
+        };
+        let n2 = if is_meaningless_dot_text(&t2) {
+            String::new()
+        } else {
+            t2
+        };
+        if !n1.is_empty() && !n2.is_empty() && n1 == n2 {
+            result[i] = true;
+        }
     }
     result
 }
@@ -934,13 +978,27 @@ fn collect_mirror_indices(messages: &[Value]) -> Vec<bool> {
 pub(crate) fn sanitize_chat_process_messages_value(input: &Value) -> SanitizeMessagesOutput {
     let messages = match input.get("messages").and_then(|v| v.as_array()) {
         Some(a) => a.clone(),
-        None => return SanitizeMessagesOutput { messages: vec![], removed_assistant_turns: 0, removed_empty_assistant_turns: 0, removed_template_assistant_turns: 0, removed_duplicate_mirror_assistant_turns: 0, removed_historical_goal_turns: 0, did_mutate_message_shapes: false },
+        None => {
+            return SanitizeMessagesOutput {
+                messages: vec![],
+                removed_assistant_turns: 0,
+                removed_empty_assistant_turns: 0,
+                removed_template_assistant_turns: 0,
+                removed_duplicate_mirror_assistant_turns: 0,
+                removed_historical_goal_turns: 0,
+                did_mutate_message_shapes: false,
+            }
+        }
     };
     let mirror_set = collect_mirror_indices(&messages);
     let last_user_idx = latest_user_index(&messages);
     let mut dropped_goal_call_ids = std::collections::HashSet::new();
     let mut out: Vec<Value> = Vec::with_capacity(messages.len());
-    let mut re = 0i64; let mut rt = 0i64; let mut rm = 0i64; let mut rg = 0i64; let mut did_mut = false;
+    let mut re = 0i64;
+    let mut rt = 0i64;
+    let mut rm = 0i64;
+    let mut rg = 0i64;
+    let mut did_mut = false;
 
     for (i, msg) in messages.iter().enumerate() {
         if should_drop_historical_goal_turn(msg, last_user_idx, i, &mut dropped_goal_call_ids) {
@@ -964,8 +1022,14 @@ pub(crate) fn sanitize_chat_process_messages_value(input: &Value) -> SanitizeMes
                 .filter(|s| !s.is_empty());
             if let Some(tool_call_id) = canonical_id {
                 let mut nm = obj.clone();
-                let existing = nm.get("tool_call_id").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
-                nm.insert("tool_call_id".to_string(), Value::String(tool_call_id.clone()));
+                let existing = nm
+                    .get("tool_call_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string());
+                nm.insert(
+                    "tool_call_id".to_string(),
+                    Value::String(tool_call_id.clone()),
+                );
                 if existing.as_deref() != Some(tool_call_id.as_str()) {
                     did_mut = true;
                 }
@@ -975,42 +1039,88 @@ pub(crate) fn sanitize_chat_process_messages_value(input: &Value) -> SanitizeMes
             out.push(msg.clone());
             continue;
         }
-        if role != "assistant" { out.push(msg.clone()); continue; }
+        if role != "assistant" {
+            out.push(msg.clone());
+            continue;
+        }
         if let Some(calls) = msg.get("tool_calls").and_then(|v| v.as_array()) {
             if !calls.is_empty() {
                 let mut ncalls: Vec<Value> = Vec::with_capacity(calls.len());
                 let mut changed = false;
                 for c in calls {
-                    let Some(obj) = c.as_object() else { ncalls.push(c.clone()); continue; };
-                    let id = obj.get("id").or_else(|| obj.get("call_id")).or_else(|| obj.get("tool_call_id"))
-                        .and_then(|v| v.as_str()).map(|s| s.trim().to_string());
+                    let Some(obj) = c.as_object() else {
+                        ncalls.push(c.clone());
+                        continue;
+                    };
+                    let id = obj
+                        .get("id")
+                        .or_else(|| obj.get("call_id"))
+                        .or_else(|| obj.get("tool_call_id"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().to_string());
                     if let Some(id) = id {
                         let mut n = obj.clone();
                         let had_call_id_alias = n.remove("call_id").is_some();
                         let had_tool_call_id_alias = n.remove("tool_call_id").is_some();
-                        let existing_id = n.get("id").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
+                        let existing_id = n
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.trim().to_string());
                         n.insert("id".to_string(), Value::String(id.clone()));
-                        if had_call_id_alias || had_tool_call_id_alias || existing_id.as_deref() != Some(id.as_str()) {
+                        if had_call_id_alias
+                            || had_tool_call_id_alias
+                            || existing_id.as_deref() != Some(id.as_str())
+                        {
                             changed = true;
                         }
                         ncalls.push(Value::Object(n));
-                    } else { ncalls.push(c.clone()); }
+                    } else {
+                        ncalls.push(c.clone());
+                    }
                 }
-                if changed { did_mut = true; }
+                if changed {
+                    did_mut = true;
+                }
                 let mut nm = msg.as_object().unwrap().clone();
                 nm.insert("tool_calls".to_string(), Value::Array(ncalls));
-                out.push(Value::Object(nm)); continue;
+                out.push(Value::Object(nm));
+                continue;
             }
         }
         let content = msg.get("content").unwrap_or(&Value::Null);
-        if message_has_block_type(content, "tool_use") { out.push(msg.clone()); continue; }
+        if message_has_block_type(content, "tool_use") {
+            out.push(msg.clone());
+            continue;
+        }
         let t = extract_message_text(content);
-        let r = extract_message_text(msg.get("reasoning_content").or_else(|| msg.get("reasoning")).or_else(|| msg.get("reasoningContent")).unwrap_or(&Value::Null));
-        let nt = if is_meaningless_dot_text(&t) { String::new() } else { t };
-        let nr = if is_meaningless_dot_text(&r) { String::new() } else { r };
-        if nt.is_empty() && nr.is_empty() { re += 1; continue; }
-        if is_template_assistant_text(&nt) { rt += 1; continue; }
-        if mirror_set[i] { rm += 1; continue; }
+        let r = extract_message_text(
+            msg.get("reasoning_content")
+                .or_else(|| msg.get("reasoning"))
+                .or_else(|| msg.get("reasoningContent"))
+                .unwrap_or(&Value::Null),
+        );
+        let nt = if is_meaningless_dot_text(&t) {
+            String::new()
+        } else {
+            t
+        };
+        let nr = if is_meaningless_dot_text(&r) {
+            String::new()
+        } else {
+            r
+        };
+        if nt.is_empty() && nr.is_empty() {
+            re += 1;
+            continue;
+        }
+        if is_template_assistant_text(&nt) {
+            rt += 1;
+            continue;
+        }
+        if mirror_set[i] {
+            rm += 1;
+            continue;
+        }
         if is_apply_patch_teaching_assistant_text(&nt) {
             rm += 1;
             continue;
@@ -1030,7 +1140,8 @@ pub(crate) fn sanitize_chat_process_messages_value(input: &Value) -> SanitizeMes
 
 #[napi_derive::napi]
 pub fn sanitize_chat_process_messages_json(input_json: String) -> NapiResult<String> {
-    let input: Value = serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = sanitize_chat_process_messages_value(&input);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

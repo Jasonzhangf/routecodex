@@ -128,6 +128,12 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
      3. 再写/改 RouteCodex 测试；
      4. 最后才改实现。
    - **禁止伪造 happy-path 测试**：如果 reference 没证明某条 send-path / poll-path / tool-path / history-path 存在，就不能写成“已验证主线”测试。
+
+9. **Windsurf 工具真相（2026-05-23，强制）**
+   - 已确认 native-equivalent：`exec_command` / `shell_command` 只能映射到 Cascade `run_command` 的 one-shot blocking shell 子集。
+   - `apply_patch` 不是已确认 native-equivalent。Windsurf.app 仅确认 `write_to_file` / `propose_code` 是 trajectory/proto step，不能确认它们是可控 executor，也不能表达 Codex `apply_patch` 的 multi-file patch 与失败/aborted 语义。
+   - 禁止把不完全兼容工具伪装成 native tool。此类工具只能二选一：显式配置打开 RouteCodex servertool 由 RCC 执行，或走 RCC 文本引导/收割。
+   - Windsurf provider 当前 `apply_patch` 必须走 RCC 文本收割；不得再恢复 `apply_patch -> write_to_file/propose_code` native 伪装。
    - **禁止把未验证 cloud endpoint 当真源**：没有 reference 或实机证据的路径，不得作为实现前提，不得作为测试锚点。
    - 若 reference 未覆盖，而本地又必须处理，只能：
      - 明确标成 `derived from reference anchor` 或 `local fail-fast invariant`
@@ -156,14 +162,15 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
    - 先抓 `provider-request` / outbound payload / same-shape fixture，确认请求字段、协议主形、历史消息、tools/tool_choice/stream 等是否已坏；
    - 只有在请求 shape 被证明确实正确后，才允许继续查看响应分类、contract、错误映射与处理分支；
    - 禁止看到 `502`、`EMPTY_ASSISTANT_RESPONSE`、`HTTP_502`、`completed+output=[]` 之类响应表象后，直接去修 response handler / error mapper / fallback。
-0.22 **若问题属于 apply_patch/hashline，请先确认 chat process 真入口是否真的接线。**
+0.22 **若问题属于 apply_patch，请先确认 chat process 真入口是否真的接线。**
    - 先确认真实请求主链命中的是哪一个入口函数，而不是只看 helper 是否存在；
    - 当前 RouteCodex 若是 chat process 问题，优先核对 `processChatRequestTools()` / 对应 request governance 主入口有没有真正串上 request-side normalization；
    - 禁止只测孤立 helper（如单独的 normalize 函数）就宣称主链已修复。
-0.21 **apply_patch/hashline 专项：先锁“请求 shape 命中了哪条归一链”，再看结果。**
-   - 若 schema 声明了 `filePath/file_path`，默认先判定为 hashline authoring mode；
-   - 先补红测锁“命中 hashline 后不得静默掉回旧 schema normalizer”；
-   - hashline native 若返回坏 payload / 抛错，必须 fail-fast 暴露 `runHashlineNativeEditJson` 真错误，禁止再走 legacy schema normalizer 糊过去。
+0.21 **apply_patch 专项：先锁“请求 shape 命中了哪条归一链”，再看结果。**
+   - direct/provider-direct same-protocol 必须 payload identity passthrough；
+   - relay/chat-process 才能把 schema 改成 internal line-edit；
+   - response/outbound 才能把 internal line-edit 映射回 canonical apply_patch；
+   - 任何额外 prompt/guidance/provider alias 都是污染点，必须先移除。
 0.3 **mem-observer 先看 retention 指标，不先猜 GC。** 若 `requestMap` / `pendingNoResponseId` / `retainedInputItems` 同步增长，优先排查“capture 后是否漏了唯一收口（record/finalize/clear）”；对定向测试也先确认 `requestId` 等请求 shape 已带齐，否则会伪装成清理失败。
 1. 先拿原 requestId / codex-sample / errorsample / 最小 fixture 复现。
 2. 先补会红的测试：
@@ -188,8 +195,10 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 1. 需要落到真实运行时的改动，必须执行：
    - `build`
    - `install:global`
-   - 受管 `restart --port 5555`（必要时 5520）
+   - 受管 `restart --port 5555`（必要时 5520 / 10000）
 2. 禁止把“源码测试通过”当成“运行态已修复”。
+3. **用户已明确：以后重启服务器统一使用 `routecodex restart --port <port>`，不要再把 `routecodex start --port <port>` 当作重启手段。**
+4. Responses + Windsurf 工具续接回归必须覆盖“streamed tool_calls 记录 provider context + 后续 `function_call_output` + restored tools 同时存在”，避免只测 previous_response_id 或只测 tools 的半链路绿。
 
 ### R5. 验证（必须包含原错误形状）
 1. 必须复测原错误请求或 same-shape 样本。
@@ -472,7 +481,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ## 工具治理唯一真源
 
 - Hub Pipeline Rust-only 铁律（2026-05-16）：`llmswitch-core Hub Pipeline / chat process / req_process / resp_process / servertool followup orchestration` 已经是 **Rust-only** 责任域；凡发现 TS 里还残留语义判定、followup tools sanitize、兼容修复、注入裁剪等第二实现，必须立即迁回 `rust-core/crates/router-hotpath-napi/`，TS 只保留薄壳调用。
-- apply_patch/hashline 单一路径（2026-05-21）：**对 client 只暴露 `apply_patch`，对 upstream authoring 在声明 `filePath/file_path` 时切到 hashline 主路径**；Rust 负责 hashline ↔ canonical apply_patch 的透明桥接。GNU diff、wrapped/raw/json envelope、absolute path、line-number-only hunk 等兼容只允许在 Rust ingress 归一；TS 不得自定 mode，也不得保留第二语义面。重复 apply_patch 失败后的 `read-before-repatch` 必须走真实工具列表上的硬门禁（保留工具，不伪造/清洗工具面）。
+- apply_patch 配置门控单一路径（2026-05-23）：client-facing 只暴露 `apply_patch`；默认 `[servertool.apply_patch].mode=client` 时 request/response 都透传 client 原生 schema/tool_call，servertool dispatch 必须跳过。显式 `mode=servertool` 时，唯一请求侧改写点是 Rust `req_process_stage1_tool_governance.rs`，upstream schema 为 `filePath + fileContent + patch(-/+ internal line-edit)`，response 由 Hub/servertool 本地执行并通过标准 followup 骨架回模型。TS/guidance/provider/system prompt 不得再注入第二套 apply_patch authoring 文本。
 - req inbound tool normalize 唯一入口（2026-05-17）：`messages[].assistant.tool_calls` 与 `/v1/responses input.function_call` 的 ingress shape 修复必须共用 Rust `hub_req_inbound_tool_call_normalization`；至少统一三类工具：`exec_command -> {cmd,workdir}`、`apply_patch -> {patch,input}`、`write_stdin -> {session_id,chars}`。`req_inbound stage2 record`、`standardizedRequest`、followup/history 必须吃同一份归一结果，禁止 TS 再补第二语义面。
 - Virtual Router shell 读写判定护栏（2026-05-17）：`virtual_router_engine/features/tools.rs::classify_shell_command()` 里，**read-only python/node 文件读取脚本必须归 thinking，不得掉进 tools/other，更不能因路径/正文含 write/patch 词误进 coding**；最小证据形状是 `python -c "print(Path(...).read_text())"` 与 `node -e "console.log(fs.readFileSync(...))"`。
 - Responses tool-args scope 边界（2026-05-16）：`/v1/responses required_action/output function_call` 的 client args 归一（如 `exec_command command -> cmd`）必须先走 Rust `hub_resp_outbound_client_semantics` 的 schema-based SSOT；Host/TS 若在此之前直接校验并报 `CLIENT_TOOL_ARGS_INVALID`，属于 scope 越权。唯一修复点是在 Host validator 前复用该 Rust normalize，而不是放宽 TS validator。
@@ -959,6 +968,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 验证：Rust outbound 单测 + `tests/monitoring/resp-outbound-stage.test.ts` 断言 `reasoning_details.join('')` 可用 + 5555 live chat 验证 `reasoning/reasoning_content/reasoning_details` 三者同时存在。
 - 本地 DeepSeek thinking 历史形状短路（2026-05-10）：若 `omlx/rapidmlx` 的 `DeepSeek-V4-Flash-mxfp8` 在 `/v1/responses` 或 openai-chat thinking 链上报 `ThinkingMode: thinking, invalid message without reasoning_content/tool_calls`，先查 `req_outbound_stage3_compat/request_stage.rs` 是否被某个 **未知 request-stage profile**（如 `search/omlx-search`）短路；`assistant history -> reasoning_content` 补齐必须挂在 provider/model/protocol 判定上统一执行，不能再受 `profile.is_none()` 之类条件限制。
 
+- apply_patch 三段透明桥接事实（2026-05-23）：relay/chat-process 请求侧 schema 由 Rust `req_process_stage1_tool_governance.rs` 改为 internal line-edit；响应侧由 Rust `resp_process_stage1_tool_governance.rs`/`hub_resp_outbound_client_semantics.rs` 转回 canonical `*** Begin Patch`；下一轮工具结果由 Rust `hub_req_inbound_tool_call_normalization.rs` 把 executor 成功/失败转成 `APPLY_PATCH_RESULT`/`APPLY_PATCH_ERROR` internal line-edit 语义。模型不能看 canonical schema，client 不能看 internal schema。
+
 ## 服务器重启与热加载（合并自 rcc-server-restart）
 
 ### Jason 重启固定动作（2026-04-14）
@@ -1149,7 +1160,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Windsurf 工具调用目标（2026-05-22）：最终路径必须是 Cascade structured protocol：`planner_mode=DEFAULT(1)` + `CascadeToolConfig.tool_allowlist(field32)` + trajectory fields 45/47/49/50 + `additional_steps(field9)`；文本 `function_call` / `<tool_call>` prompt 注入与 harvest 只能作为待删除旧实现，不能作为完成标准。
 - Windsurf 文档事实清理（2026-05-22）：当前事实只写 `docs/providers/windsurf-chat-provider-design.md` 与 `docs/design/windsurf-cascade-tool-protocol.md`；audit/goal/note 只能写历史取证且必须标注 superseded。发现 `GetChatCompletions`、cloud JSON baseurl、`tools_preamble`、文本 harvest、`~/.routecodex` 被当成当前事实时，必须立即改成 local managed LS gRPC + Cascade 与 `~/.rcc`。
 - Windsurf 旧语义处置（2026-05-22）：skipped 测试、未调用 helper、注释中的旧文本工具协议都不能长期保留；确认由 structured protocol 覆盖后必须物理删除。
-- Windsurf hybrid tool 边界（2026-05-23）：不要做能力路由 gating；App `SendUserCascadeMessageRequest` 只有 fields 1-9、无 tool definitions 输入槽位，所以 Codex/MCP/custom 任意工具不得进入 Cascade native structured protocol。Jason 已授权 unsupported tools 使用显式 RCC text-tool protocol：native-equivalent tools 走 Cascade structured，unsupported tools 走 `<|RCC|tool_calls>` / `<|RCC|tool_result>`；这不是 native 失败后的 fallback，RCC guidance 只能列 unsupported tool names，harvest 必须 native/RCC 分离并对 conflict/malformed/undeclared fail-fast。
+- Windsurf hybrid tool 边界（2026-05-23）：不要做能力路由 gating；App `SendUserCascadeMessageRequest` 只有 fields 1-9、无 tool definitions 输入槽位，所以 Codex/MCP/custom 任意工具不得进入 Cascade native structured protocol。Jason 已授权 unsupported tools 使用显式 RCC text-tool protocol：当前只有已证明等价的 one-shot shell 工具（`exec_command`/`shell_command`）走 Cascade native `run_command`；`apply_patch`、MCP/custom 工具走 `<|RCC|tool_calls>` / `<|RCC|tool_result>` 或未来显式 servertool。这不是 native 失败后的 fallback，RCC guidance 只能列 unsupported tool names，harvest 必须 native/RCC 分离并对 conflict/malformed/undeclared fail-fast。
 - Windsurf fence 命名（2026-05-23）：Windsurf unsupported-tool fence 只能写 `RCC`，不得借用其他 provider 的历史协议名；若参考 DeepSeek/Qwen 文本 harvest 经验，只能迁移“容器边界/harvest 思路”，不能迁移协议名。
 
 - Windsurf multi-account / quota / stopMessage 事实（2026-05-23）：配置账号必须是“多 key -> 多 runtime”生效，形如 `windsurf.ws-pro-N.<model>`；runtime auth 若缺 `accountAlias`，必须从 `windsurf.ws-pro-N` 派生，避免 token/session 落到 default。Windsurf 每个 runtime 启动时默认做一次 `checkHealth()` auth/model-config probe；失败即该 runtime init 失败并按 provider-init error/quota 路径移出池，不允许继续伪装可用。weekly quota 是 alias-family 级别：命中一个 model 要回收同 alias 下所有 Windsurf target，默认冷却到本地 00:00 自动恢复；显式 upstream cooldown 才能覆盖。5520 这种纯 HTTP 测试端口若 `[[httpserver.ports]].stopMessage.enabled=false`，stopMessage 必须被端口元数据关闭，不能触发 tmux followup。
@@ -1163,3 +1174,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Windsurf 5520 多账号配置铁律（2026-05-23）：多账号同时工作不是 `mode="priority"`，priority 会固定首个可用 target；5520 这种多账号池必须使用 `mode="round-robin"` 或明确 weighted，同时保持 provider `maxInFlight=1` 实现“单账号不并发、多账号并行”。账号配置必须去重 alias，重复 alias 会造成认证/状态语义混淆。
 
 - Responses SSE tool_calls 调试锚点（2026-05-23）：如果 `/v1/responses stream=true` 日志显示 `finish_reason=tool_calls` 但 mem-observer 仍 `responseIndex=0 scopeIndex=0 pendingNoResponseId>0`，先查 `src/server/handlers/handler-response-utils.ts::streamResponsesJsonAsSse()` 是否像 JSON path 一样调用 conversation store 记录。样本必须进 `tests/server/handlers/handler-response-utils.responses-conversation.spec.ts` 红测，断言 response id + router id + provider timing id 均入库。
+- apply_patch servertool 骨架事实（2026-05-23）：`[servertool.apply_patch].mode=servertool` 时，`apply_patch` 只在 Hub/servertool 层本地执行，并通过标准 servertool followup 骨架（captured origin + injection ops）把 `APPLY_PATCH_APPLIED/FAILED` 回给模型；不得走 tmux/client injection，不得在 provider/Windsurf 层处理。默认 `client` 模式必须保持 client 原生 tool_call 透传，runtime dispatch gate 不得消费。
+- stop_message_flow 路径修正（2026-05-23）：stopless/stopMessage 普通续杯不再走 tmux/client injection；Rust `servertool_skeleton_config.rs` 中 `stop_message_flow` 的 active fact 是 `stickyProvider + seedLoopPayload + retryEmptyFollowupOnce`，无 `clientInjectOnly/clientInjectSource`。测试或实现若看到 `servertool.stop_message -> client_inject_only`，这是旧事实污染。
+- Responses retention cleanup（2026-05-23）：`retainedInputItems` 与 `pendingNoResponseId` 同步增长时，唯一先查 `handler-response-utils.ts` 在拿到 client `resp_*` 后是否清掉 superseded router/provider requestId；释放 payload 只能保留工具定义与 pending tool-call ids 摘要，禁止保留完整 input prefix 伪装指标下降。
+- Windsurf RCC text-tool typed args（2026-05-23）：若 unsupported tool 经 RCC fence 后工具层报 `plan expected sequence` / 参数类型错，先查 `windsurf-chat-provider.ts` harvester 是否按 JSON schema 还原 array/object/boolean/number；禁止把所有 `<|RCC|parameter>` 都当 string。guidance 必须列出所有 required 参数，不能只示例第一个。
+- apply_patch samples 排查（2026-05-23）：若 codex-samples 里反复 `APPLY_PATCH_ERROR`，先看 provider-request history 是否有 synthetic `__APPLY_PATCH_ERROR__` tool_call；真源可能是 response governance 生成旧 `{input,patch}` guard + request inbound 未剪历史。当前 schema `{filePath,patch}` 必须原样保留，不能被归一成旧 `{input,patch}`。

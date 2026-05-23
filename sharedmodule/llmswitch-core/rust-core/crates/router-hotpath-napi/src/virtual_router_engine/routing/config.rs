@@ -84,8 +84,8 @@ pub(crate) fn build_route_queue(
     routing: &RoutingPools,
 ) -> Vec<String> {
     let mut queue: Vec<String> = Vec::new();
-    let protects_default_fallback = protects_default_fallback(requested_route, routing);
     let requested_route_trimmed = requested_route.trim();
+    let protects_default_fallback = protects_default_fallback(requested_route_trimmed, routing);
     let has_multimodal_targets = route_has_targets(routing, "multimodal");
     let has_vision_targets = route_has_targets(routing, "vision");
     let has_video_targets = route_has_targets(routing, "video");
@@ -116,9 +116,12 @@ pub(crate) fn build_route_queue(
     }
 
     let should_fallback_tool_route_to_tools =
-        is_tool_route_with_tools_fallback(requested_route_trimmed) && has_tools_targets;
+        is_tool_route_with_tools_fallback(requested_route_trimmed, features) && has_tools_targets;
     if should_fallback_tool_route_to_tools && !queue.iter().any(|v| v == "tools") {
-        if let Some(requested_index) = queue.iter().position(|route| route == requested_route_trimmed) {
+        if let Some(requested_index) = queue
+            .iter()
+            .position(|route| route == requested_route_trimmed)
+        {
             queue.insert(requested_index + 1, "tools".to_string());
         } else if let Some(default_index) = queue
             .iter()
@@ -144,14 +147,13 @@ pub(crate) fn build_route_queue(
     deduped
 }
 
-fn is_tool_route_with_tools_fallback(route: &str) -> bool {
-    matches!(route, "search" | "read" | "write" | "web_search")
+fn is_tool_route_with_tools_fallback(route: &str, features: &RoutingFeatures) -> bool {
+    matches!(route, "tools" | "search" | "read" | "write" | "web_search")
+        || (route == "thinking" && features.has_tools)
 }
 
 fn protects_default_fallback(requested_route: &str, routing: &RoutingPools) -> bool {
-    let _ = requested_route;
-    let _ = routing;
-    false
+    requested_route == "thinking" && route_has_targets(routing, "thinking")
 }
 
 pub(crate) fn build_route_candidates(
@@ -316,6 +318,47 @@ mod tests {
     }
 
     #[test]
+    fn thinking_tool_request_falls_back_to_tools_before_default() {
+        let routing = parse_routing(&Map::from_iter([
+            (
+                "thinking".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "thinking",
+                    "priority": 100,
+                    "targets": ["provider.thinking"]
+                })]),
+            ),
+            (
+                "tools".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "tools",
+                    "priority": 100,
+                    "targets": ["provider.tools"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "default",
+                    "priority": 100,
+                    "targets": ["provider.default"]
+                })]),
+            ),
+        ]));
+        let features = RoutingFeatures {
+            has_tools: true,
+            ..Default::default()
+        };
+        let queue = build_route_queue(
+            "thinking",
+            &["thinking".to_string(), "tools".to_string(), "default".to_string()],
+            &features,
+            &routing,
+        );
+        assert_eq!(queue, vec!["thinking".to_string(), "tools".to_string()]);
+    }
+
+    #[test]
     fn coding_route_without_targets_can_still_fall_back_to_default() {
         let routing = parse_routing(&Map::from_iter([(
             "default".to_string(),
@@ -403,12 +446,7 @@ mod tests {
             ..Default::default()
         };
 
-        let queue = build_route_queue(
-            "coding",
-            &["default".to_string()],
-            &features,
-            &routing,
-        );
+        let queue = build_route_queue("coding", &["default".to_string()], &features, &routing);
 
         assert_eq!(
             queue,
@@ -445,12 +483,7 @@ mod tests {
             ..Default::default()
         };
 
-        let queue = build_route_queue(
-            "coding",
-            &["default".to_string()],
-            &features,
-            &routing,
-        );
+        let queue = build_route_queue("coding", &["default".to_string()], &features, &routing);
 
         assert_eq!(queue, vec!["coding".to_string(), "default".to_string()]);
     }

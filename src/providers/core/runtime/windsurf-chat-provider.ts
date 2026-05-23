@@ -18,6 +18,7 @@ import {
 import { HttpTransportProvider } from './http-transport-provider.js';
 import { ApiKeyAuthProvider } from '../../auth/apikey-auth.js';
 import { resolveRccAuthDir } from '../../../config/user-data-paths.js';
+import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 
 const MERGE_EFFORT_MAP: Record<string, string> = {
   minimal: 'none', none: 'none', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh'
@@ -163,6 +164,8 @@ type WindsurfLiveLocalGrpcRuntime = {
   csrfToken?: string;
   pid?: number;
   command?: string;
+  codeiumDir?: string;
+  runChild?: boolean;
 };
 
 type WindsurfManagedLocalGrpcRuntime = {
@@ -508,10 +511,32 @@ function windsurfToolLookupName(name: unknown): string {
   return String(name || '').trim().toLowerCase();
 }
 
+function normalizeWindsurfToolDefinition(tool: Record<string, unknown>): Record<string, unknown> | null {
+  const fn = tool && typeof tool.function === 'object' && !Array.isArray(tool.function)
+    ? tool.function as Record<string, unknown>
+    : null;
+  if (fn && typeof fn.name === 'string' && fn.name.trim()) {
+    return tool;
+  }
+  if (typeof tool.name !== 'string' || !tool.name.trim()) {
+    return null;
+  }
+  return {
+    type: 'function',
+    function: {
+      name: tool.name,
+      ...(typeof tool.description === 'string' ? { description: tool.description } : {}),
+      ...(tool.parameters && typeof tool.parameters === 'object' && !Array.isArray(tool.parameters) ? { parameters: tool.parameters } : {}),
+      ...(tool.strict !== undefined ? { strict: tool.strict } : {}),
+    },
+  };
+}
+
 function collectWindsurfMappedTools(tools: Array<Record<string, unknown>>): Array<{ name: string; kind: WindsurfCascadeToolStepKind }> {
   const out: Array<{ name: string; kind: WindsurfCascadeToolStepKind }> = [];
   for (const tool of tools) {
-    const fn = tool && typeof tool === 'object' && !Array.isArray(tool) ? (tool.function as Record<string, unknown> | undefined) : undefined;
+    const normalized = normalizeWindsurfToolDefinition(tool);
+    const fn = normalized?.function as Record<string, unknown> | undefined;
     const name = typeof fn?.name === 'string' ? fn.name : '';
     const mapped = WINDSURF_TOOL_MAP[windsurfToolLookupName(name)];
     if (mapped) out.push({ name, kind: mapped.kind });
@@ -528,14 +553,16 @@ function partitionWindsurfTools(tools: Array<Record<string, unknown>>): {
   const unsupportedTools: Array<Record<string, unknown>> = [];
   const mappedNativeTools: Array<{ name: string; kind: WindsurfCascadeToolStepKind }> = [];
   for (const tool of tools) {
-    const fn = tool && typeof tool === 'object' && !Array.isArray(tool) ? (tool.function as Record<string, unknown> | undefined) : undefined;
+    const normalized = normalizeWindsurfToolDefinition(tool);
+    if (!normalized) continue;
+    const fn = normalized.function as Record<string, unknown> | undefined;
     const name = typeof fn?.name === 'string' ? fn.name : '';
     const mapped = WINDSURF_TOOL_MAP[windsurfToolLookupName(name)];
     if (mapped) {
-      nativeTools.push(tool);
+      nativeTools.push(normalized);
       mappedNativeTools.push({ name, kind: mapped.kind });
     } else if (name) {
-      unsupportedTools.push(tool);
+      unsupportedTools.push(normalized);
     }
   }
   return { nativeTools, unsupportedTools, mappedNativeTools };
@@ -554,6 +581,106 @@ function windsurfToolNameSet(tools: unknown): Set<string> {
     }
   }
   return out;
+}
+
+function findWindsurfToolDefinition(tools: unknown, name: string): Record<string, unknown> | undefined {
+  const lookup = windsurfToolLookupName(name);
+  if (!lookup || !Array.isArray(tools)) return undefined;
+  for (const tool of tools) {
+    const row = tool && typeof tool === 'object' && !Array.isArray(tool) ? tool as Record<string, unknown> : undefined;
+    const fn = row?.function && typeof row.function === 'object' && !Array.isArray(row.function) ? row.function as Record<string, unknown> : undefined;
+    const candidate = typeof fn?.name === 'string' ? fn.name : typeof row?.name === 'string' ? row.name : '';
+    if (windsurfToolLookupName(candidate) === lookup) return row;
+  }
+  return undefined;
+}
+
+function readWindsurfToolFunction(tool: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!tool) return undefined;
+  return tool.function && typeof tool.function === 'object' && !Array.isArray(tool.function)
+    ? tool.function as Record<string, unknown>
+    : tool;
+}
+
+function readWindsurfToolParameterSchema(tool: Record<string, unknown> | undefined, paramName: string): Record<string, unknown> | undefined {
+  const fn = readWindsurfToolFunction(tool);
+  const params = fn?.parameters && typeof fn.parameters === 'object' && !Array.isArray(fn.parameters)
+    ? fn.parameters as Record<string, unknown>
+    : undefined;
+  const props = params?.properties && typeof params.properties === 'object' && !Array.isArray(params.properties)
+    ? params.properties as Record<string, unknown>
+    : undefined;
+  const schema = props?.[paramName];
+  return schema && typeof schema === 'object' && !Array.isArray(schema) ? schema as Record<string, unknown> : undefined;
+}
+
+function readWindsurfJsonSchemaTypes(schema: Record<string, unknown> | undefined): Set<string> {
+  const out = new Set<string>();
+  const raw = schema?.type;
+  if (typeof raw === 'string' && raw.trim()) out.add(raw.trim().toLowerCase());
+  if (Array.isArray(raw)) {
+    for (const item of raw) if (typeof item === 'string' && item.trim()) out.add(item.trim().toLowerCase());
+  }
+  return out;
+}
+
+function describeWindsurfRccParameterSchema(tool: Record<string, unknown> | undefined, paramName: string): string {
+  const types = readWindsurfJsonSchemaTypes(readWindsurfToolParameterSchema(tool, paramName));
+  if (types.size === 0) return 'string';
+  return Array.from(types).join('|');
+}
+
+function parseWindsurfRccParameterValue(tool: Record<string, unknown> | undefined, paramName: string, value: string): unknown {
+  const schema = readWindsurfToolParameterSchema(tool, paramName);
+  const types = readWindsurfJsonSchemaTypes(schema);
+  const expectsJson = ['array', 'object', 'boolean', 'number', 'integer', 'null'].some((type) => types.has(type));
+  if (!expectsJson || types.has('string')) return value;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw createWindsurfProviderError(`[windsurf] malformed RCC parameter ${paramName}: expected JSON ${Array.from(types).join('|')}`, {
+      code: 'WINDSURF_RCC_MALFORMED',
+      status: 502,
+      retryable: false,
+    });
+  }
+  if (types.has('array') && !Array.isArray(parsed)) {
+    throw createWindsurfProviderError(`[windsurf] malformed RCC parameter ${paramName}: expected array`, {
+      code: 'WINDSURF_RCC_MALFORMED',
+      status: 502,
+      retryable: false,
+    });
+  }
+  if (types.has('object') && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) {
+    throw createWindsurfProviderError(`[windsurf] malformed RCC parameter ${paramName}: expected object`, {
+      code: 'WINDSURF_RCC_MALFORMED',
+      status: 502,
+      retryable: false,
+    });
+  }
+  if ((types.has('number') || types.has('integer')) && typeof parsed !== 'number') {
+    throw createWindsurfProviderError(`[windsurf] malformed RCC parameter ${paramName}: expected number`, {
+      code: 'WINDSURF_RCC_MALFORMED',
+      status: 502,
+      retryable: false,
+    });
+  }
+  if (types.has('integer') && typeof parsed === 'number' && !Number.isInteger(parsed)) {
+    throw createWindsurfProviderError(`[windsurf] malformed RCC parameter ${paramName}: expected integer`, {
+      code: 'WINDSURF_RCC_MALFORMED',
+      status: 502,
+      retryable: false,
+    });
+  }
+  if (types.has('boolean') && typeof parsed !== 'boolean') {
+    throw createWindsurfProviderError(`[windsurf] malformed RCC parameter ${paramName}: expected boolean`, {
+      code: 'WINDSURF_RCC_MALFORMED',
+      status: 502,
+      retryable: false,
+    });
+  }
+  return parsed;
 }
 
 function uniqueWindsurfToolKinds(mapped: Array<{ kind: WindsurfCascadeToolStepKind }>): WindsurfCascadeToolStepKind[] {
@@ -1052,7 +1179,7 @@ function classifyWindsurfUpstreamPayloadError(payloadError: Record<string, unkno
   }
   return {
     code: isTrueRateLimit ? 'WINDSURF_RATE_LIMITED' : 'WINDSURF_SERVICE_UNREACHABLE',
-    status: isTrueRateLimit ? 429 : 502,
+    status: isTrueRateLimit ? 429 : 503,
     retryable: isTrueRateLimit ? false : true,
     upstreamCode,
     upstreamStatus,
@@ -1078,7 +1205,15 @@ type WindsurfFailureClass = {
 type WindsurfSemanticTurn =
   | { type: 'user'; text: string }
   | { type: 'assistant'; text: string; tool_calls?: Array<{ call_id: string; name: string; arguments: Record<string, unknown> }> }
-  | { type: 'function_call_output'; call_id: string; name?: string; output: string };
+  | { type: 'function_call_output'; call_id: string; name?: string; output: string; source?: 'bridge_tool_history' };
+
+type WindsurfBridgeToolHistoryPair = {
+  callId: string;
+  name: string;
+  arguments?: unknown;
+  output: string;
+  status?: string;
+};
 
 function contentToString(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -1267,6 +1402,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     for (let attempt = 1; attempt <= maxCascadeAttempts; attempt += 1) {
       try {
         const semanticConversation = this.parseCascadeSemanticRoundtripSync(body.messages);
+        this.appendBridgeToolHistoryToSemanticConversation(semanticConversation, this.readBridgeToolHistoryPairs(body));
         void wantsSse;
         if (!this.getPinnedGrpcRuntime()) {
           this.setPinnedGrpcRuntime(await this.resolveManagedRuntimeOptions());
@@ -2072,7 +2208,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     if (!response.ok) {
       throw createWindsurfProviderError(`HTTP ${response.status}: ${raw}`, {
         code: response.status === 401 ? 'WINDSURF_AUTH_FAILED' : 'WINDSURF_SERVICE_UNREACHABLE',
-        status: response.status || (response.status === 401 ? 401 : 502),
+        status: response.status || (response.status === 401 ? 401 : 503),
         retryable: response.status !== 401,
       });
     }
@@ -2220,33 +2356,106 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       return typeof fn?.name === 'string' && fn.name.trim();
     });
     if (tools.length === 0) return '';
-    const lines: string[] = ['Tool-call output contract (STRICT)', 'Allowed unsupported tool names this turn:'];
+    const lines: string[] = ['Text tool calling format (STRICT)', 'Available text tool names for this turn:'];
     for (const tool of tools) {
       const fn = tool.function as Record<string, unknown>;
       const name = String(fn.name).trim();
       const description = typeof fn.description === 'string' && fn.description.trim() ? ` - ${fn.description.trim()}` : '';
       lines.push(`- ${name}${description}`);
       const params = fn.parameters && typeof fn.parameters === 'object' && !Array.isArray(fn.parameters) ? fn.parameters as Record<string, unknown> : {};
-      const props = params.properties && typeof params.properties === 'object' && !Array.isArray(params.properties) ? Object.keys(params.properties as Record<string, unknown>) : [];
-      if (props.length > 0) lines.push(`  parameters: ${props.join(', ')}`);
+      const propsRecord = params.properties && typeof params.properties === 'object' && !Array.isArray(params.properties) ? params.properties as Record<string, unknown> : {};
+      const props = Object.keys(propsRecord);
+      if (props.length > 0) {
+        const parameterList = props
+          .map((paramName) => `${paramName}:${describeWindsurfRccParameterSchema(tool, paramName)}`)
+          .join(', ');
+        lines.push(`  parameters: ${parameterList}`);
+      }
+      if (windsurfToolLookupName(name) === 'apply_patch') {
+        lines.push('  apply_patch contract: filePath must be workspace-relative, not absolute. patch must be a strict line-edit patch: create/append lines start with `+ `; updates use exact current target lines as `- ` entries followed by replacement `+ ` entries.');
+      }
     }
     const first = tools[0]!.function as Record<string, unknown>;
     const firstName = String(first.name).trim();
     const params = first.parameters && typeof first.parameters === 'object' && !Array.isArray(first.parameters) ? first.parameters as Record<string, unknown> : {};
-    const props = params.properties && typeof params.properties === 'object' && !Array.isArray(params.properties) ? Object.keys(params.properties as Record<string, unknown>) : [];
-    const paramName = props[0] || 'input';
-    lines.push('If you need one of these unsupported tools, output only this RCC block and no prose:');
+    const propsRecord = params.properties && typeof params.properties === 'object' && !Array.isArray(params.properties) ? params.properties as Record<string, unknown> : {};
+    const props = Object.keys(propsRecord);
+    const required = Array.isArray(params.required) ? params.required.filter((item): item is string => typeof item === 'string' && props.includes(item)) : [];
+    const exampleParams = required.length > 0 ? required : [props[0] || 'input'];
+    lines.push('When a tool is required, output only this tool-call block and no prose:');
     lines.push('<|RCC|tool_calls>');
     lines.push(`<|RCC|invoke name="${firstName}">`);
-    lines.push(`<|RCC|parameter name="${paramName}"><![CDATA[value]]></|RCC|parameter>`);
+    for (const paramName of exampleParams) {
+      const schema = propsRecord[paramName] && typeof propsRecord[paramName] === 'object' && !Array.isArray(propsRecord[paramName]) ? propsRecord[paramName] as Record<string, unknown> : undefined;
+      const types = readWindsurfJsonSchemaTypes(schema);
+      const value = types.has('array')
+        ? '[{"step":"do the work","status":"in_progress"}]'
+        : types.has('object')
+          ? '{"key":"value"}'
+          : types.has('boolean')
+            ? 'true'
+            : types.has('number') || types.has('integer')
+              ? '1'
+              : 'value';
+      lines.push(`<|RCC|parameter name="${paramName}"><![CDATA[${value}]]></|RCC|parameter>`);
+    }
     lines.push('</|RCC|invoke>');
     lines.push('</|RCC|tool_calls>');
-    lines.push('Do not use markdown fences, narrative tool intent, JSON-only tool payloads, invented tool names, MCP pseudo wrappers, or legacy tool protocols.');
+    lines.push('For array/object/boolean/number parameters, put a valid JSON literal inside CDATA. For string parameters, put the exact string inside CDATA. Include every required parameter exactly once.');
+    lines.push('Do not use markdown fences, narrative tool intent, JSON-only payloads, invented tool names, or alternate tool-call formats.');
     return lines.join('\n');
   }
 
   private escapeRccCdata(value: string): string {
     return String(value || '').replaceAll(']]>', ']]]]><![CDATA[>');
+  }
+
+  private readBridgeToolHistoryPairs(body: Record<string, unknown>): WindsurfBridgeToolHistoryPair[] {
+    const semantics = body.semantics && typeof body.semantics === 'object' && !Array.isArray(body.semantics) ? body.semantics as Record<string, unknown> : {};
+    const responses = semantics.responses && typeof semantics.responses === 'object' && !Array.isArray(semantics.responses) ? semantics.responses as Record<string, unknown> : {};
+    const context = responses.context && typeof responses.context === 'object' && !Array.isArray(responses.context) ? responses.context as Record<string, unknown> : {};
+    const toolHistory = context.toolHistory && typeof context.toolHistory === 'object' && !Array.isArray(context.toolHistory) ? context.toolHistory as Record<string, unknown> : {};
+    if (toolHistory.version !== 1 || !Array.isArray(toolHistory.pairs)) return [];
+    return toolHistory.pairs.map((entry) => {
+      const row = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
+      return {
+        callId: typeof row.callId === 'string' ? row.callId.trim() : '',
+        name: typeof row.name === 'string' ? row.name.trim() : '',
+        arguments: row.arguments,
+        output: typeof row.output === 'string' ? row.output : row.output == null ? '' : JSON.stringify(row.output),
+        status: typeof row.status === 'string' ? row.status.trim() : undefined,
+      };
+    }).filter((pair) => pair.callId && pair.name);
+  }
+
+  private appendBridgeToolHistoryToSemanticConversation(semanticConversation: WindsurfSemanticTurn[], pairs: WindsurfBridgeToolHistoryPair[]): void {
+    if (pairs.length === 0) return;
+    const existingToolCallIds = new Set<string>();
+    const existingToolResultIds = new Set<string>();
+    for (const turn of semanticConversation) {
+      if (turn.type === 'assistant' && Array.isArray(turn.tool_calls)) {
+        for (const call of turn.tool_calls) existingToolCallIds.add(call.call_id);
+      }
+      if (turn.type === 'function_call_output') existingToolResultIds.add(turn.call_id);
+    }
+    for (const pair of pairs) {
+      if (!existingToolCallIds.has(pair.callId)) {
+        semanticConversation.push({
+          type: 'assistant',
+          text: '',
+          tool_calls: [{
+            call_id: pair.callId,
+            name: pair.name,
+            arguments: pair.arguments && typeof pair.arguments === 'object' && !Array.isArray(pair.arguments) ? pair.arguments as Record<string, unknown> : {},
+          }],
+        });
+        existingToolCallIds.add(pair.callId);
+      }
+      if (!existingToolResultIds.has(pair.callId)) {
+        semanticConversation.push({ type: 'function_call_output', call_id: pair.callId, name: pair.name, output: pair.output, source: 'bridge_tool_history' });
+        existingToolResultIds.add(pair.callId);
+      }
+    }
   }
 
   private buildWindsurfRccToolResultContext(semanticConversation: WindsurfSemanticTurn[], unsupportedTools: Array<Record<string, unknown>>): string {
@@ -2279,7 +2488,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       ? `Required marker evidence to include verbatim in the final answer: ${Array.from(markerLines).join(', ')}.`
       : 'If a tool result contains explicit marker/sentinel lines such as BEGIN_*, MIDDLE_*, or END_*, mention each marker line exactly in the final answer so the caller can verify that the full tool result was preserved.';
     return [
-      'RCC tool results already returned. Use these results to answer or continue. Do not repeat the same RCC invocation unless a genuinely new tool call with new arguments is required.',
+      'Tool results are feedback for the next reasoning step, not content to explain back to the user. Use each tool result to decide the next action. If a tool result is empty, treat the paired tool id as completed with empty output and continue reasoning from that fact.',
       markerInstruction,
       ...blocks,
       markerEvidence,
@@ -2351,8 +2560,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     });
     if (!hasCompletedNativeStep) return '';
     return [
-      `You have not yet called these required unsupported tools: ${pending.join(', ')}.`,
-      'If the user request still requires them, output the RCC block now and no prose.',
+      `Available remaining text tool names: ${pending.join(', ')}.`,
+      'If the user request requires one of them, output the tool-call block now and no prose.',
     ].join('\n');
   }
 
@@ -2769,7 +2978,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const terminalToolResults: string[] = [];
     for (let index = semanticConversation.length - 1; index >= 0; index -= 1) {
       const turn = semanticConversation[index];
-      if (turn?.type === 'function_call_output' && typeof turn.output === 'string' && turn.output.trim()) {
+      if (turn?.type === 'function_call_output' && turn.source !== 'bridge_tool_history' && !this.isWindsurfRccTextToolResult(turn) && typeof turn.output === 'string' && turn.output.trim()) {
         terminalToolResults.unshift(`Tool result for ${turn.name || turn.call_id}:\n${turn.output}`);
         continue;
       }
@@ -2805,6 +3014,12 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       return '';
     }
     return turn.text;
+  }
+
+  private isWindsurfRccTextToolResult(turn: WindsurfSemanticTurn): boolean {
+    if (turn.type !== 'function_call_output') return false;
+    const name = windsurfToolLookupName(turn.name || '');
+    return Boolean(name && !WINDSURF_TOOL_MAP[name]);
   }
 
   private buildCascadePromptText(messages: unknown, semanticConversation: WindsurfSemanticTurn[], modelUid: string, unsupportedTextTools: Array<Record<string, unknown>> = []): string {
@@ -2899,13 +3114,65 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     nativeAllowlist?: WindsurfCascadeToolStepKind[];
     additionalSteps?: Buffer[];
   }): Promise<void> {
+    const payload = this.buildSendCascadeMessageRequest(args);
+    await this.snapshotWindsurfCascadeProviderRequest(args, payload);
     try {
       await this.grpcUnaryLocal(
         `${WINDSURF_LS_SERVICE}/SendUserCascadeMessage`,
-        this.buildSendCascadeMessageRequest(args),
+        payload,
       );
     } catch (error) {
       throw this.handleWindsurfCascadeTransportFailure(error);
+    }
+  }
+
+  private async snapshotWindsurfCascadeProviderRequest(args: {
+    cascadeId: string;
+    text: string;
+    sessionId: string;
+    modelEnum: number;
+    modelUid: string;
+    nativeMode?: boolean;
+    nativeAllowlist?: WindsurfCascadeToolStepKind[];
+    additionalSteps?: Buffer[];
+  }, payload: Buffer): Promise<void> {
+    const context = this.createProviderContext();
+    const additionalSteps = Array.isArray(args.additionalSteps) ? args.additionalSteps.filter((step) => Buffer.isBuffer(step) && step.length > 0) : [];
+    const text = String(args.text || '');
+    try {
+      await writeProviderSnapshot({
+        phase: 'provider-request',
+        requestId: context.requestId,
+        data: {
+          transport: 'windsurf-local-cascade-grpc',
+          grpcPath: `${WINDSURF_LS_SERVICE}/SendUserCascadeMessage`,
+          cascadeId: args.cascadeId,
+          sessionId: args.sessionId,
+          modelEnum: args.modelEnum,
+          modelUid: args.modelUid,
+          nativeMode: args.nativeMode === true,
+          nativeAllowlist: args.nativeAllowlist || [],
+          additionalStepsCount: additionalSteps.length,
+          payloadBytes: payload.length,
+          textBytes: Buffer.byteLength(text, 'utf8'),
+          text,
+          promptDiagnostics: {
+            hasRccToolCallsGuidance: text.includes('<|RCC|tool_calls>'),
+            hasRccToolResult: text.includes('<|RCC|tool_result'),
+            hasApplyPatch: text.includes('apply_patch'),
+            hasFilePathParameter: text.includes('<|RCC|parameter name="filePath">'),
+            hasPatchParameter: text.includes('<|RCC|parameter name="patch">'),
+          },
+        },
+        url: `grpc://127.0.0.1:${this.getPinnedGrpcRuntime()?.lsPort || 'unknown'}${WINDSURF_LS_SERVICE}/SendUserCascadeMessage`,
+        entryEndpoint: context.metadata?.entryEndpoint as string | undefined,
+        clientRequestId: typeof context.runtimeMetadata?.clientRequestId === 'string' ? context.runtimeMetadata.clientRequestId : undefined,
+        providerKey: context.providerKey,
+        providerId: context.providerId,
+      });
+    } catch (snapshotError) {
+      const reason = snapshotError instanceof Error ? snapshotError.message : String(snapshotError ?? 'unknown');
+      console.warn(`[windsurf.snapshot.provider-request] failed requestId=${context.requestId} providerKey=${context.providerKey || ''} error=${reason}`);
     }
   }
 
@@ -3281,7 +3548,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     }
     throw createWindsurfProviderError(`[windsurf] no free local LS port starting at ${preferredPort}`, {
       code: 'WINDSURF_SERVICE_UNREACHABLE',
-      status: 502,
+      status: 503,
       retryable: true,
     });
   }
@@ -3316,7 +3583,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     }
     throw createWindsurfProviderError(`[windsurf] managed LS port ${port} not ready: ${lastError instanceof Error ? lastError.message : String(lastError)}`, {
       code: 'WINDSURF_SERVICE_UNREACHABLE',
-      status: 502,
+      status: 503,
       retryable: true,
     });
   }
@@ -3327,9 +3594,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     if (existing && existing.ready && existing.process.exitCode == null && existing.process.signalCode == null && this.isTcpPortListening(existing.port)) {
       return existing;
     }
-    const live = this.findPreferredRoutecodexWindsurfRuntime(this.windsurfRuntime.lsPort);
-    const expectedDir = path.join(os.homedir(), '.rcc', 'windsurf-ls', key.replace(/[^a-zA-Z0-9._-]/g, '_'));
-    if (live?.lsPort && live.command?.includes(`--codeium_dir=${expectedDir}`) && this.isTcpPortListening(live.lsPort)) {
+    const live = this.findPreferredManagedWindsurfRuntimeForKey(key);
+    if (live?.lsPort && this.isTcpPortListening(live.lsPort)) {
       const adopted: WindsurfManagedLocalGrpcRuntime = {
         port: live.lsPort,
         csrfToken: live.csrfToken || this.windsurfRuntime.csrfToken || WINDSURF_MANAGED_LS_CSRF,
@@ -3344,18 +3610,20 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       };
       this.logWindsurfStage('managedLs.adopt', { key, port: adopted.port });
       WINDSURF_MANAGED_LS_POOL.set(key, adopted);
+      this.terminateStaleManagedLocalGrpcRuntimes(key, live.lsPort);
       return adopted;
     }
     const pending = WINDSURF_MANAGED_LS_PENDING.get(key);
     if (pending) return pending;
     const promise = (async () => {
+      this.terminateStaleManagedLocalGrpcRuntimes(key);
       const preferred = this.windsurfRuntime.lsPort && this.windsurfRuntime.lsPort > 0
         ? this.windsurfRuntime.lsPort
         : WINDSURF_MANAGED_LS_DEFAULT_PORT;
       const port = this.findFreeManagedLsPort(preferred);
       const csrfToken = this.windsurfRuntime.csrfToken || WINDSURF_MANAGED_LS_CSRF;
       const binary = this.resolveWindsurfManagedLsBinaryPath();
-      const codeiumDir = path.join(os.homedir(), '.rcc', 'windsurf-ls', key);
+      const codeiumDir = this.resolveManagedLsCodeiumDir(key);
       const databaseDir = path.join(codeiumDir, 'db');
       await fs.mkdir(databaseDir, { recursive: true });
       const args = [
@@ -3368,9 +3636,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         '--detect_proxy=false',
       ];
       this.logWindsurfStage('managedLs.spawn', { key, port, binary });
-      const proc = childProcess.spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
-      proc.stdout?.on('data', (chunk) => this.logWindsurfStage('managedLs.stdout', { key, text: String(chunk).slice(0, 500) }));
-      proc.stderr?.on('data', (chunk) => this.logWindsurfStage('managedLs.stderr', { key, text: String(chunk).slice(0, 500) }));
+      const proc = childProcess.spawn(binary, args, { stdio: 'ignore', env: process.env, detached: false });
+      proc.unref?.();
       proc.on('exit', (code, signal) => {
         this.logWindsurfStage('managedLs.exit', { key, port, code, signal });
         const current = WINDSURF_MANAGED_LS_POOL.get(key);
@@ -3421,6 +3688,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     if (!(command.includes('/.windsurf/language_server_macos_arm') || command.includes('/extensions/windsurf/bin/language_server_macos_arm'))) return null;
     const portMatch = command.match(/--server_port=(\d+)/);
     const csrfMatch = command.match(/--csrf_token=([^\s]+)/);
+    const codeiumDirMatch = command.match(/--codeium_dir=(?:"([^"]+)"|'([^']+)'|([^\s]+))/);
     const lsPort = portMatch ? Number.parseInt(portMatch[1] || '', 10) : 0;
     if (!Number.isFinite(lsPort) || lsPort <= 0) return null;
     return {
@@ -3428,6 +3696,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       csrfToken: csrfMatch?.[1],
       pid: Number.isFinite(pid) ? pid : undefined,
       command,
+      codeiumDir: codeiumDirMatch?.[1] || codeiumDirMatch?.[2] || codeiumDirMatch?.[3],
+      runChild: /(?:^|\s)--run_child(?:\s|$)/.test(command),
     };
   }
 
@@ -3455,6 +3725,49 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       .sort((a, b) => Number(b.pid || 0) - Number(a.pid || 0));
     if (routecodexScoped.length > 0) return routecodexScoped[0] || null;
     return null;
+  }
+
+  private resolveManagedLsCodeiumDir(key: string): string {
+    const safeKey = String(key || 'windsurf-default-runtime').replace(/[^a-zA-Z0-9._-]/g, '_');
+    return path.join(os.homedir(), '.rcc', 'windsurf-ls', safeKey);
+  }
+
+  private isSameFilesystemPath(left?: string, right?: string): boolean {
+    if (!left || !right) return false;
+    return path.resolve(left) === path.resolve(right);
+  }
+
+  private listManagedLocalGrpcRuntimesForKey(key: string): WindsurfLiveLocalGrpcRuntime[] {
+    const expectedDir = this.resolveManagedLsCodeiumDir(key);
+    return this.listLiveLocalGrpcRuntimes()
+      .filter((runtime) => this.isSameFilesystemPath(runtime.codeiumDir, expectedDir));
+  }
+
+  private findPreferredManagedWindsurfRuntimeForKey(key: string): WindsurfLiveLocalGrpcRuntime | null {
+    const runtimes = this.listManagedLocalGrpcRuntimesForKey(key)
+      .sort((a, b) => {
+        if (a.runChild !== b.runChild) return a.runChild ? 1 : -1;
+        return Number(b.pid || 0) - Number(a.pid || 0);
+      });
+    return runtimes[0] || null;
+  }
+
+  private terminateStaleManagedLocalGrpcRuntimes(key: string, keepPort?: number): void {
+    for (const runtime of this.listManagedLocalGrpcRuntimesForKey(key)) {
+      const pid = runtime.pid;
+      if (!pid || (keepPort && runtime.lsPort === keepPort)) continue;
+      try {
+        process.kill(pid, 'SIGTERM');
+        this.logWindsurfStage('managedLs.staleTerm', { key, pid, keepPort });
+      } catch (error) {
+        this.logWindsurfStage('managedLs.staleTermFailed', {
+          key,
+          pid,
+          keepPort,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   private buildRoutecodexWindsurfRuntimeCandidates(): WindsurfProviderRuntimeOptions[] {
@@ -4295,7 +4608,7 @@ ${stderr}` : '');
     const raw = String(text || '');
     if (!raw.includes('<|RCC|tool_calls>')) return { text: raw, toolCalls: [] };
     if (!Array.isArray(unsupportedTextTools) || unsupportedTextTools.length === 0) {
-      throw createWindsurfProviderError('[windsurf] RCC tool call emitted but no unsupported tools were declared', {
+      throw createWindsurfProviderError('[windsurf] tool call emitted but no matching tool declarations were available', {
         code: 'WINDSURF_RCC_UNDECLARED_TOOL',
         status: 502,
         retryable: false,
@@ -4324,6 +4637,7 @@ ${stderr}` : '');
             retryable: false,
           });
         }
+        const toolDefinition = findWindsurfToolDefinition(unsupportedTextTools, name);
         const body = invoke[2] || '';
         const params: Record<string, unknown> = {};
         const paramRe = /<\|RCC\|parameter\s+name="([^"]+)">\s*([\s\S]*?)\s*<\/\|RCC\|parameter>/g;
@@ -4334,7 +4648,7 @@ ${stderr}` : '');
           let value = String(param[2] || '');
           const cdata = value.match(/^<!\[CDATA\[([\s\S]*?)\]\]>$/);
           if (cdata) value = cdata[1] || '';
-          params[paramName] = value;
+          params[paramName] = parseWindsurfRccParameterValue(toolDefinition, paramName, value);
         }
         if (!sawParam) {
           throw createWindsurfProviderError('[windsurf] malformed RCC tool call: missing parameter', {
@@ -4380,7 +4694,6 @@ ${stderr}` : '');
     const reasoningParts: string[] = [];
     const toolCalls: Array<Record<string, unknown>> = [];
     const seenToolCallIds = new Set<string>();
-    const seenToolCallSignatures = new Set<string>();
 
     if (typeof record.reasoning_content === 'string' && record.reasoning_content) {
       reasoningParts.push(record.reasoning_content);
@@ -4442,15 +4755,10 @@ ${stderr}` : '');
         throw new Error('[windsurf] assistant tool call missing call_id');
       }
       const argsJson = stableStringify(args);
-      const signature = `${name}:${argsJson}`;
       if (seenToolCallIds.has(callId)) {
         throw new Error('[windsurf] duplicate assistant tool call id in assistant candidate');
       }
-      if (seenToolCallSignatures.has(signature)) {
-        throw new Error('[windsurf] duplicate assistant tool call signature in assistant candidate');
-      }
       seenToolCallIds.add(callId);
-      seenToolCallSignatures.add(signature);
       toolCalls.push({
         id: callId,
         type: 'function',
@@ -4522,15 +4830,10 @@ ${stderr}` : '');
         throw new Error('[windsurf] assistant tool call arguments must be object');
       }
       const argsJson = stableStringify(args);
-      const signature = `${name}:${argsJson}`;
       if (seenToolCallIds.has(callId)) {
         throw new Error('[windsurf] duplicate assistant tool call id in assistant candidate');
       }
-      if (seenToolCallSignatures.has(signature)) {
-        throw new Error('[windsurf] duplicate assistant tool call signature in assistant candidate');
-      }
       seenToolCallIds.add(callId);
-      seenToolCallSignatures.add(signature);
       toolCalls.push({
         id: callId,
         type: 'function',
@@ -4545,7 +4848,7 @@ ${stderr}` : '');
     if (/<\/?\s*(?:tool_call|function_call)\b/i.test(rawText)) {
       throw createWindsurfProviderError('[windsurf] legacy tool_call text protocol is not allowed in cascade assistant content', {
         code: 'WINDSURF_TOOL_PROTOCOL_CONFLICT',
-        status: 502,
+        status: 400,
         retryable: false,
       });
     }
@@ -4554,7 +4857,7 @@ ${stderr}` : '');
       if (toolCalls.length > 0) {
         throw createWindsurfProviderError('[windsurf] native trajectory tool call conflicts with RCC text tool call', {
           code: 'WINDSURF_TOOL_PROTOCOL_CONFLICT',
-          status: 502,
+          status: 400,
           retryable: false,
         });
       }
@@ -4580,11 +4883,8 @@ ${stderr}` : '');
       return [];
     }
     const out: WindsurfSemanticTurn[] = [];
-    const matchedCalls = new Map<string, { name: string; signature: string }>();
+    const matchedCalls = new Map<string, { name: string }>();
     const completedToolCallIds = new Set<string>();
-    let lastMatchedRoundSignatures: string[] = [];
-
-    const buildSignature = (name: string, args: Record<string, unknown>): string => `${name}:${stableStringify(args)}`;
     const normalizeTextContent = (content: unknown): string => {
       if (typeof content === 'string') {
         return content;
@@ -4619,7 +4919,6 @@ ${stderr}` : '');
 
       if (role === 'user') {
         const text = normalizeTextContent(msg.content);
-        lastMatchedRoundSignatures = [];
         out.push({ type: 'user', text });
         continue;
       }
@@ -4633,7 +4932,6 @@ ${stderr}` : '');
         }
         const normalizedCalls: Array<{ call_id: string; name: string; arguments: Record<string, unknown> }> = [];
         const seenHistoryToolCallIds = new Set<string>();
-        const seenHistoryToolCallSignatures = new Set<string>();
 
         for (const entry of toolCallsRaw) {
           if (!entry || typeof entry !== 'object') {
@@ -4683,11 +4981,6 @@ ${stderr}` : '');
             throw new Error('[windsurf] duplicate assistant tool call id in history');
           }
           seenHistoryToolCallIds.add(callId);
-          const signature = buildSignature(name, args);
-          if (seenHistoryToolCallSignatures.has(signature)) {
-            throw new Error('[windsurf] duplicate assistant tool call signature in history');
-          }
-          seenHistoryToolCallSignatures.add(signature);
           normalizedCalls.push({ call_id: callId, name, arguments: args });
         }
 
@@ -4749,13 +5042,9 @@ ${stderr}` : '');
             if (!callId) {
               throw new Error('[windsurf] assistant tool call missing call_id');
             }
-            const signature = buildSignature(name, args);
             if (hasChatToolCalls) {
               if (seenHistoryToolCallIds.has(callId)) {
                 throw new Error('[windsurf] duplicate assistant tool call id in history');
-              }
-              if (seenHistoryToolCallSignatures.has(signature)) {
-                throw new Error('[windsurf] duplicate assistant tool call signature in history');
               }
               throw new Error('[windsurf] assistant history mixed chat tool_calls with content tool call');
             }
@@ -4763,10 +5052,6 @@ ${stderr}` : '');
               throw new Error('[windsurf] duplicate assistant tool call id in history');
             }
             seenHistoryToolCallIds.add(callId);
-            if (seenHistoryToolCallSignatures.has(signature)) {
-              throw new Error('[windsurf] duplicate assistant tool call signature in history');
-            }
-            seenHistoryToolCallSignatures.add(signature);
             normalizedCalls.push({ call_id: callId, name, arguments: args });
           }
         }
@@ -4777,18 +5062,9 @@ ${stderr}` : '');
           throw new Error('[windsurf] empty assistant completion');
         }
 
-        if (lastMatchedRoundSignatures.length > 0 && normalizedCalls.length > 0) {
-          const current = normalizedCalls.map((entry) => buildSignature(entry.name, entry.arguments)).sort();
-          const previous = [...lastMatchedRoundSignatures].sort();
-          if (current.length === previous.length && current.every((value, index) => value === previous[index])) {
-            throw new Error('[windsurf] upstream repeated prior tool call after tool_result');
-          }
-        }
-
         for (const call of normalizedCalls) {
           matchedCalls.set(call.call_id, {
             name: call.name,
-            signature: buildSignature(call.name, call.arguments),
           });
         }
 
@@ -4805,12 +5081,8 @@ ${stderr}` : '');
         if (completedToolCallIds.has(parsedToolResult.call_id)) {
           throw new Error('[windsurf] duplicate tool_result for completed tool call');
         }
-        const matched = matchedCalls.get(parsedToolResult.call_id)!;
         out.push(parsedToolResult);
         completedToolCallIds.add(parsedToolResult.call_id);
-        if (!lastMatchedRoundSignatures.includes(matched.signature)) {
-          lastMatchedRoundSignatures = [...lastMatchedRoundSignatures, matched.signature];
-        }
         continue;
       }
     }
@@ -4820,7 +5092,7 @@ ${stderr}` : '');
 
   private parseCascadeToolResultTurnSync(
     message: unknown,
-    matchedCalls: Map<string, { name: string; signature: string }>,
+    matchedCalls: Map<string, { name: string }>,
   ): Extract<WindsurfSemanticTurn, { type: 'function_call_output' }> {
     const msg = message && typeof message === 'object' ? message as Record<string, unknown> : {};
     const extractNestedToolResultCallId = (content: unknown): string => {
@@ -5094,11 +5366,16 @@ ${stderr}` : '');
       || message.includes('unauthenticated')
       || message.includes('invalid authentication credentials')
       || message.includes('permission_denied');
-    const isUnavailable =
-      message.includes('connect') ||
+    const isServiceUnavailable =
+      message.includes('econnrefused')
+      || message.includes('connection refused')
+      || message.includes('managed ls port')
+      || message.includes('not ready')
+      || message.includes('no free local ls port')
+      || message.includes('runtime lsport missing');
+    const isTransportTransient =
       message.includes('econnreset') ||
       message.includes('err_http2') ||
-      message.includes('econnrefused') ||
       message.includes('pending stream has been canceled') ||
       message.includes('err_http2_stream_cancel') ||
       message.includes('session closed') ||
@@ -5114,8 +5391,10 @@ ${stderr}` : '');
         ? 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED'
         : isPolicyBlocked
           ? 'WINDSURF_POLICY_BLOCKED'
-        : isInternalTransient || isUnavailable
+        : isInternalTransient || isTransportTransient
           ? 'WINDSURF_UPSTREAM_TRANSIENT'
+        : isServiceUnavailable
+          ? 'WINDSURF_SERVICE_UNREACHABLE'
         : isResourceExhausted
           ? 'WINDSURF_RATE_LIMITED'
         : isAuth
@@ -5124,7 +5403,7 @@ ${stderr}` : '');
             ? 'WINDSURF_RESPONSE_PARSE_FAILED'
             : 'WINDSURF_SERVICE_UNREACHABLE',
       retryable: isWeeklyQuota || isResourceExhausted || isPolicyBlocked ? false : isAuth ? false : isParseFailure ? false : true,
-      status: isWeeklyQuota || isResourceExhausted ? 429 : isPolicyBlocked ? 451 : isAuth ? 401 : 502,
+      status: isWeeklyQuota || isResourceExhausted ? 429 : isPolicyBlocked ? 451 : isAuth ? 401 : isServiceUnavailable ? 503 : 502,
       rateLimitKind: isWeeklyQuota || isResourceExhausted ? 'daily_limit' : undefined,
       cooldownOverrideMs: isWeeklyQuota ? computeWindsurfQuotaCooldownUntilNextMidnightMs() : isResourceExhausted ? 24 * 60 * 60_000 : undefined,
       quotaScope: isWeeklyQuota ? 'weekly' : isResourceExhausted ? 'model' : undefined,

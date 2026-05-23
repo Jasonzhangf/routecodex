@@ -176,11 +176,11 @@ export async function handleProviderQuotaErrorEvent(
         : (resetUntil && resetUntil > nowMs ? resetUntil - nowMs : 24 * 60 * 60_000);
     const nextState: QuotaState = {
       ...previous,
-      inPool: false,
-      reason: 'blacklist',
-      cooldownUntil: null,
-      cooldownKeepsPool: undefined,
-      blacklistUntil: nowMs + cooldownMs,
+      inPool: true,
+      reason: 'cooldown',
+      cooldownUntil: nowMs + cooldownMs,
+      cooldownKeepsPool: true,
+      blacklistUntil: null,
       lastErrorSeries: 'E429',
       lastErrorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
       lastErrorAtMs: nowMs,
@@ -199,11 +199,11 @@ export async function handleProviderQuotaErrorEvent(
           createInitialQuotaState(canonicalFamilyKey, ctx.staticConfigs.get(canonicalFamilyKey), nowMs);
         const nextFamily: QuotaState = {
           ...prevFamily,
-          inPool: false,
-          reason: 'blacklist',
-          cooldownUntil: null,
-          cooldownKeepsPool: undefined,
-          blacklistUntil: nowMs + cooldownMs,
+          inPool: true,
+          reason: 'cooldown',
+          cooldownUntil: nowMs + cooldownMs,
+          cooldownKeepsPool: true,
+          blacklistUntil: null,
           lastErrorSeries: 'E429',
           lastErrorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
           lastErrorAtMs: nowMs,
@@ -390,8 +390,6 @@ export async function handleProviderQuotaErrorEvent(
       if (withinBlacklist) {
         return;
       }
-      const isCapacityCooldown =
-        typeof seriesCooldown.source === 'string' && seriesCooldown.source.toLowerCase().includes('capacity');
       const until = capAutoCooldownUntil(seriesCooldown.until, nowMs);
       const existingCooldownUntil = previous.cooldownUntil;
       const cooldownUntil =
@@ -400,20 +398,15 @@ export async function handleProviderQuotaErrorEvent(
           : until;
       const nextState: QuotaState = {
         ...previous,
-        inPool: isCapacityCooldown ? true : false,
-        reason: isCapacityCooldown ? 'cooldown' : 'quotaDepleted',
+        inPool: true,
+        reason: 'cooldown',
         cooldownUntil,
         lastErrorSeries: null,
         lastErrorCode: null,
         lastErrorAtMs: null,
         consecutiveErrorCount: 0,
-        ...(isCapacityCooldown
-          ? { cooldownKeepsPool: true }
-          : {
-              blacklistUntil: null,
-              // deterministic quota signals should clear blacklist to avoid sticky long locks
-              // when upstream provides explicit reset delay.
-            })
+        cooldownKeepsPool: true,
+        blacklistUntil: null
       };
       ctx.quotaStates.set(providerKey, nextState);
       ctx.schedulePersist(nowMs);
@@ -440,10 +433,11 @@ export async function handleProviderQuotaErrorEvent(
               : until;
           ctx.quotaStates.set(siblingKey, {
             ...prevSibling,
-            inPool: false,
+            inPool: true,
             reason: 'cooldown',
             cooldownUntil,
-            cooldownKeepsPool: undefined,
+            cooldownKeepsPool: true,
+            blacklistUntil: null,
           });
         }
         ctx.schedulePersist(nowMs);
@@ -455,17 +449,18 @@ export async function handleProviderQuotaErrorEvent(
       const ttl = parseQuotaResetDelayMs(event);
       if (ttl && ttl > 0) {
         const capped = capAutoCooldownMs(ttl);
-	        const nextState: QuotaState = {
-	          ...previous,
-	          inPool: false,
-	          reason: 'quotaDepleted',
-	          cooldownUntil: nowMs + (capped ?? ttl),
-	          blacklistUntil: null,
-	          lastErrorSeries: null,
-	          lastErrorCode: null,
-	          lastErrorAtMs: null,
-	          consecutiveErrorCount: 0
-	        };
+        const nextState: QuotaState = {
+          ...previous,
+          inPool: true,
+          reason: 'cooldown',
+          cooldownUntil: nowMs + (capped ?? ttl),
+          cooldownKeepsPool: true,
+          blacklistUntil: null,
+          lastErrorSeries: null,
+          lastErrorCode: null,
+          lastErrorAtMs: null,
+          consecutiveErrorCount: 0
+        };
         ctx.quotaStates.set(providerKey, nextState);
         ctx.schedulePersist(nowMs);
         return;
@@ -499,14 +494,15 @@ export async function handleProviderQuotaErrorEvent(
   const shouldEvictFromPool =
     (errorClassification === 'unrecoverable' || isRepeated5xxOutOfPool)
     && appliedState.consecutiveErrorCount >= 3
-    && (routePoolSize > 1 || isRepeated5xxOutOfPool);
+    && routePoolSize > 1;
   const nextState: QuotaState =
     shouldEvictFromPool
       ? {
           ...appliedState,
-          inPool: false,
+          inPool: true,
           reason: 'cooldown',
-          cooldownKeepsPool: undefined
+          cooldownKeepsPool: true,
+          blacklistUntil: null
         }
       : {
           ...appliedState,

@@ -156,7 +156,6 @@ impl VirtualRouterEngineProxy {
             .map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
-
     #[napi]
     pub fn mark_provider_cooldown(
         &self,
@@ -232,5 +231,4 @@ fn is_js_null_or_undefined(value: &JsUnknown) -> bool {
     }
 }
 
-impl VirtualRouterEngineProxy {
-}
+impl VirtualRouterEngineProxy {}

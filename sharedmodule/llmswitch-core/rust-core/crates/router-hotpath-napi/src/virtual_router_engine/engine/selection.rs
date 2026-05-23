@@ -18,10 +18,10 @@ use crate::virtual_router_engine::health_weighted::{
 use crate::virtual_router_engine::instructions::RoutingInstructionState;
 use crate::virtual_router_engine::quota::{call_quota_view, QuotaViewEntry};
 use crate::virtual_router_engine::routing::{
-    build_route_queue, default_pool_supports_capability,
-    extract_excluded_provider_keys, extract_provider_id, extract_runtime_now_ms,
-    filter_candidates_by_state, filter_pools_by_capability, resolve_instruction_target,
-    route_has_targets, InstructionTargetMatchMode,
+    build_route_queue, default_pool_supports_capability, extract_excluded_provider_keys,
+    extract_provider_id, extract_runtime_now_ms, filter_candidates_by_state,
+    filter_pools_by_capability, resolve_instruction_target, route_has_targets,
+    InstructionTargetMatchMode,
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
@@ -40,7 +40,10 @@ fn pool_matches_route_policy_group(
     pool: &crate::virtual_router_engine::routing::RoutePoolTier,
     requested_group: Option<&str>,
 ) -> bool {
-    let Some(requested_group) = requested_group.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(requested_group) = requested_group
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return true;
     };
     let pool_group = pool
@@ -122,11 +125,8 @@ impl VirtualRouterEngineCore {
         routing_state: &RoutingInstructionState,
         excluded_keys: &HashSet<String>,
     ) -> Vec<String> {
-        let filtered = filter_candidates_by_state(
-            candidates,
-            routing_state,
-            &self.provider_registry,
-        );
+        let filtered =
+            filter_candidates_by_state(candidates, routing_state, &self.provider_registry);
         filtered
             .into_iter()
             .filter(|key| !excluded_keys.contains(key))
@@ -144,16 +144,14 @@ impl VirtualRouterEngineCore {
         bound_alias_prefix: Option<&str>,
         env: Env,
     ) -> Result<SelectionResult, String> {
-        let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata).into_iter().collect();
+        let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata)
+            .into_iter()
+            .collect();
 
         if let Some(target) = &routing_state.forced_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
-                let available = self.apply_standard_filters(
-                    env,
-                    &resolved.keys,
-                    routing_state,
-                    &excluded_keys,
-                );
+                let available =
+                    self.apply_standard_filters(env, &resolved.keys, routing_state, &excluded_keys);
                 if let Some(forced_key) = available.into_iter().next() {
                     return Ok(SelectionResult::new(
                         forced_key.clone(),
@@ -169,12 +167,8 @@ impl VirtualRouterEngineCore {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
                 let ordered_keys =
                     order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
-                let available = self.apply_standard_filters(
-                    env,
-                    &ordered_keys,
-                    routing_state,
-                    &excluded_keys,
-                );
+                let available =
+                    self.apply_standard_filters(env, &ordered_keys, routing_state, &excluded_keys);
                 let available_set: HashSet<String> = available.iter().cloned().collect();
                 let sticky_key = match resolved.mode {
                     InstructionTargetMatchMode::Exact => available.into_iter().next(),
@@ -199,12 +193,8 @@ impl VirtualRouterEngineCore {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
                 let ordered_keys =
                     order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
-                let available = self.apply_standard_filters(
-                    env,
-                    &ordered_keys,
-                    routing_state,
-                    &excluded_keys,
-                );
+                let available =
+                    self.apply_standard_filters(env, &ordered_keys, routing_state, &excluded_keys);
                 let available_set: HashSet<String> = available.iter().cloned().collect();
                 let mutation_only = metadata
                     .get("routingInstructionMutationOnly")
@@ -314,9 +304,7 @@ impl VirtualRouterEngineCore {
                     filter_pools_by_capability(&pools, &self.provider_registry, "multimodal");
                 if !capability_filtered.is_empty() {
                     pools = capability_filtered;
-                } else if use_default_pool_multimodal_fallback
-                    && route_name == "multimodal"
-                {
+                } else if use_default_pool_multimodal_fallback && route_name == "multimodal" {
                     // Multimodal direct-routing may point to non-multimodal targets.
                     // When default pool contains multimodal-capable targets, skip this route
                     // and fall through to default-pool capability fallback instead.
@@ -324,18 +312,15 @@ impl VirtualRouterEngineCore {
                 }
             }
             for pool in pools {
-                if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref()) {
+                if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref())
+                {
                     continue;
                 }
                 if pool.targets.is_empty() {
                     continue;
                 }
-                let mut available = self.apply_standard_filters(
-                    env,
-                    &pool.targets,
-                    routing_state,
-                    &excluded_keys,
-                );
+                let mut available =
+                    self.apply_standard_filters(env, &pool.targets, routing_state, &excluded_keys);
                 if let Some(prefix) = bound_alias_prefix {
                     let alias_candidates: Vec<String> = available
                         .iter()
@@ -347,12 +332,13 @@ impl VirtualRouterEngineCore {
                     }
                 }
                 if longcontext_candidate_active {
-                    let (safe_context, risky_context, overflow_context) = classify_context_candidates(
-                        &self.provider_registry,
-                        &available,
-                        features.estimated_tokens,
-                        self.context_warn_ratio,
-                    );
+                    let (safe_context, risky_context, overflow_context) =
+                        classify_context_candidates(
+                            &self.provider_registry,
+                            &available,
+                            features.estimated_tokens,
+                            self.context_warn_ratio,
+                        );
                     if !safe_context.is_empty() {
                         available = safe_context;
                     } else if !risky_context.is_empty() {
@@ -396,7 +382,8 @@ impl VirtualRouterEngineCore {
                                     route_name.to_string(),
                                     pool.targets.clone(),
                                     Some(pool.id.clone()),
-                                ).with_route_params(pool.route_params.clone()));
+                                )
+                                .with_route_params(pool.route_params.clone()));
                             }
                         }
                         dynamic_weight_map = Some(weights);
@@ -490,7 +477,8 @@ impl VirtualRouterEngineCore {
                         route_name.to_string(),
                         pool.targets.clone(),
                         Some(pool.id.clone()),
-                    ).with_route_params(pool.route_params.clone()));
+                    )
+                    .with_route_params(pool.route_params.clone()));
                 }
             }
         }
@@ -502,7 +490,8 @@ impl VirtualRouterEngineCore {
             &self.routing,
         ) {
             for pool in self.routing.get(&route_name) {
-                if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref()) {
+                if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref())
+                {
                     continue;
                 }
                 for key in filter_candidates_by_state(
@@ -543,11 +532,8 @@ impl VirtualRouterEngineCore {
         let now = now_ms();
         if let Some(ref quota_view) = self.quota_view {
             if let Some(entry) = call_quota_view(env, quota_view, provider_key) {
-                if entry.in_pool == Some(false) {
-                    return false;
-                }
                 if let Some(cooldown) = entry.cooldown_until {
-                    if cooldown > now {
+                    if cooldown > now && entry.cooldown_keeps_pool != Some(true) {
                         return false;
                     }
                 }
@@ -555,6 +541,12 @@ impl VirtualRouterEngineCore {
                     if blacklist > now {
                         return false;
                     }
+                }
+                if entry.in_pool == Some(false)
+                    && (entry.cooldown_until.is_some()
+                        || entry.reason.as_deref() != Some("cooldown"))
+                {
+                    return false;
                 }
             }
             // Both sources are mandatory:
@@ -714,7 +706,7 @@ fn collect_recoverable_cooldown_for_key(
                 }
             }
             if let Some(cooldown_until) = entry.cooldown_until {
-                if cooldown_until > now_ms {
+                if cooldown_until > now_ms && entry.cooldown_keeps_pool != Some(true) {
                     record_recoverable_cooldown(
                         provider_key,
                         cooldown_until - now_ms,

@@ -1606,3 +1606,44 @@ Tags: responses, sse, windsurf, tool_calls, continuation-store, previous_respons
 
 - 2026-05-23: Windsurf upstream payload error 的原始 `error.code` 不得被 `WINDSURF_UPSTREAM_TRANSIENT` 覆盖；HTTP `status=502` 只表示代理分类，真实 upstream identity 必须透传为 `upstreamCode`（字符串）和 numeric `upstreamStatus`，并在 provider-switch 日志中同时显示。回归锚点：`tests/providers/core/runtime/windsurf-chat-provider.spec.ts` numeric upstream error code；`tests/server/runtime/http-server/request-executor-runtime-blocks.spec.ts` upstreamStatus log。
 Tags: windsurf, upstream-error, provider-switch, retry-telemetry, no-502-collapse, 2026-05-23
+
+## 2026-05-23 apply_patch / Windsurf 工具协议当前真源
+- `apply_patch` client-facing 只暴露标准 canonical tool call；direct/provider-direct 与 router-direct same-protocol 必须原样透传，不注入第二套 authoring。
+- relay/chat-process 的唯一请求侧改写点是 Rust `req_process_stage1_tool_governance.rs`：上游内部 schema 为 `filePath + fileContent + patch(-/+ internal line-edit)`；response/outbound 唯一映射点是 Rust response governance，把 internal line-edit 转回 canonical `*** Begin Patch ... *** End Patch`。
+- Windsurf provider 当前 native caller map 只允许已证明等同的 one-shot shell 子集：`exec_command` / `shell_command -> run_command`；`apply_patch` 不映射到 `propose_code/write_to_file`，走 RCC unsupported text protocol 或未来显式 servertool。
+- 通用 system prompt、provider prompt、文档和测试不得再引入 `apply_patch` 第二套 authoring guidance 或 Windsurf native alias guidance。
+
+- 2026-05-23: 已废弃旧结论：Windsurf `apply_patch` 三段 native bridge（`apply_patch -> write_to_file/propose_code -> apply_patch`）经 app bundle 与 WindsurfAPI 对照后判定为错误方向；不得再按该条实现或测试。
+Tags: windsurf, apply-patch, deprecated-native-bridge, write-to-file, propose-code, 2026-05-23
+- 2026-05-23 apply_patch 当前唯一事实：Hub/chat-process 使用三段透明桥接——请求给模型改成 internal line-edit `filePath/fileContent/patch(- old/+ new)`；模型响应回 client 前转成 canonical Codex `*** Begin Patch`；client 执行结果/错误进入下一轮请求前转成 `APPLY_PATCH_RESULT`/`APPLY_PATCH_ERROR` internal line-edit 指导。唯一实现层是 Rust Hub Pipeline，不在 provider/Windsurf/TS prompt 增加第二语义。
+
+- 2026-05-23: Windsurf 工具真相最终结论：Windsurf.app 只确认 `write_to_file`/`propose_code` 为 Cascade trajectory/proto step，未确认可控本地 executor；`apply_patch` 的 multi-file patch 与失败/aborted 语义不能等价 native 映射。RouteCodex 必须撤回 `apply_patch -> write_to_file/propose_code` native 伪装，改回 RCC 文本引导收割；所有不完全兼容工具只能做显式配置打开的 servertool 或文本收割，禁止伪装 native。`exec_command`/`shell_command` 可继续桥接到 `run_command`，仅限 one-shot blocking shell 子集。
+
+## 2026-05-23 build/install/restart/live smoke outcome
+- `npm run build:min` and `npm run install:global` both pass after fixing two Rust compile blockers in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/` (`req_process_stage1_tool_governance.rs` borrow-after-move, `chat_servertool_orchestration.rs` stale `v` reference).
+- `routecodex restart --port 5520` succeeds and `/health` reports `status=ok`, `ready=true`, `pipelineReady=true`, `version=0.90.2224`.
+- Live `/v1/responses` smoke on 5520 still times out under a 30s client timeout, so runtime validation is not fully green yet; the remaining issue is live request latency/flow, not compile/install.
+
+
+## 2026-05-23 Windsurf LS fd leak stopgap
+- 真正的句柄/进程泄露止血点是 `src/providers/core/runtime/windsurf-chat-provider.ts` 的 managed local grpc runtime pool，不是单个 RouteCodex server。
+- 已补 `WindsurfChatProvider.releaseManagedLocalGrpcRuntimes()` + `cleanup()` 统一收口，清理 managed LS pool / pending map，并对活的子进程发送 `SIGTERM` / `SIGKILL`。
+- 回归锚点：`tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 新增 cleanup 清理池测试，确保以后不会再把 managed LS 留成活尸。
+- 这只是止血；如果 live 仍然 fd 饱和，下一步继续查是否有更多未关闭的 Windsurf LS 进程或外部守护进程重复拉起。
+
+
+- 2026-05-23: Windsurf 5520 timeout / fd exhaustion 的当前真源是 RouteCodex-managed local LS 生命周期与端口探测。已确认同一 `~/.rcc/windsurf-ls/<key>` 曾产生多组 `language_server_macos_arm`，导致 `ENFILE`、`lsof can't open pipes`、随后 provider lock/open 失败。可复用规则：Windsurf managed LS 必须按 account key 复用唯一 live runtime；同 key 多端口是冲突必须 fail-fast；`lsof/ps` 探测失败不得当作“端口空闲”或“无 live runtime”。禁止 fallback，先修 LS 真源再谈 retry。
+
+Tags: windsurf, local-ls, fd-exhaustion, no-fallback, fail-fast, port-probe, managed-runtime, 2026-05-23
+
+- 2026-05-23: apply_patch/stopless servertool followup 事实更新：`apply_patch` 默认 client 模式透传，显式 `[servertool.apply_patch].mode=servertool` 才在 Hub/servertool 本地执行；servertool 模式使用标准 followup 骨架（captured origin + injection ops），不得走 tmux/client injection，不得改 provider/Windsurf。`stop_message_flow` 也从旧 clientInjectOnly 事实迁出，Rust skeleton 中仅保留 stickyProvider/seedLoopPayload/retryEmptyFollowupOnce。验证：cargo `servertool`/`apply_patch` 通过；Jest stopless/apply_patch targeted 19/19；build/install/restart 10000 health 0.90.2226。
+Tags: apply-patch, servertool, stopless, followup, no-tmux-inject, hub-pipeline
+
+- 2026-05-23: Windsurf routing config 规则：业务配置不得手写 `windsurf.ws-pro-N.<model>` targets；只写 provider+model（如 `windsurf.gpt-5.4-none`），账号/alias 真源在 `~/.rcc/provider/windsurf/config.v2.toml` 的 `provider.auth.entries[]`，由 Virtual Router bootstrap 展开为多 runtime/target。验证锚点：`tests/sharedmodule/provider-model-direct-access.spec.ts` 覆盖 `ws-pro-1..5` 展开，活体 loader 产物确认 `windsurf.ws-pro-5` runtime 与 target 均存在。
+Tags: windsurf, routing-config, auth-entries-expansion, no-handwritten-key-alias, 2026-05-23
+
+- 2026-05-23: Windsurf 502 false-positive root cause: `pollCascadeTrajectorySteps()` previously treated any parsed trajectory `errorText` as `WINDSURF_UPSTREAM_TRANSIENT` 502. WindsurfAPI caller only throws when `step.type === 17 && step.errorText`; other field24/31 metadata can coexist with valid final text. Unique fix point is the provider poll execution predicate, not retry policy. Regression anchors in `tests/providers/core/runtime/windsurf-chat-provider.spec.ts`: non-error metadata must continue to final text; ERROR step still fail-fast.
+Tags: windsurf, 502, trajectory, errorText, WindsurfAPI-parity, no-retry-fix, 2026-05-23
+
+- 2026-05-23: `apply_patch_flow` servertool followup 的 `MISSING_REQUIRED_TOOL_CALL` 502 根因是 `/v1/responses` nested followup 仍带 messages-only shape / stale requestSemantics，host contract 把 tool-result followup 误判为 required tool-call turn。唯一修复点在 `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts` 的 nested input 构造：responses followup 必须先 normalize 成 input shape，并基于 normalized `function_call_output` 同步 `toolOutputs` 到 body semantics 与 metadata requestSemantics；不是 provider/retry 问题。
+Tags: apply-patch, servertool-followup, responses, MISSING_REQUIRED_TOOL_CALL, 502, requestSemantics, 2026-05-23

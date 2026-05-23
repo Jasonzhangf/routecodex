@@ -12,6 +12,7 @@ const ROUTING_POLICY_OPTIONAL_KEYS = [
   'contextRouting',
   'webSearch',
   'execCommandGuard',
+  'servertool',
   'session'
 ] as const;
 
@@ -32,7 +33,8 @@ export async function materializeRouteCodexConfig(
   userConfig.virtualrouter = {
     ...vrBase,
     providers: v2Input.providers,
-    routing: v2Input.routing
+    routing: v2Input.routing,
+    ...(v2Input.applyPatch ? { applyPatch: v2Input.applyPatch } : {})
   };
   const providerProfiles = buildProviderProfiles(userConfig);
   return {
@@ -48,7 +50,7 @@ export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[]
   if (mode !== 'v2') {
     errors.push('RouteCodex only supports virtualrouterMode="v2"');
   }
-  const allowedTopLevel = new Set(['version', 'httpserver', 'virtualrouter', 'virtualrouterMode']);
+  const allowedTopLevel = new Set(['version', 'httpserver', 'virtualrouter', 'virtualrouterMode', 'servertool']);
   for (const key of Object.keys(userConfig)) {
     if (!allowedTopLevel.has(key)) {
       errors.push(`v2 config disallows top-level field "${key}"`);
@@ -57,7 +59,7 @@ export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[]
 
   const httpserver = isRecord(userConfig.httpserver) ? (userConfig.httpserver as UnknownRecord) : undefined;
   if (httpserver) {
-    const allowedHttp = new Set(['host', 'port', 'apikey', 'ports']);
+    const allowedHttp = new Set(['host', 'port', 'apikey', 'ports', 'sameProtocolBehavior']);
     for (const key of Object.keys(httpserver)) {
       if (!allowedHttp.has(key)) {
         errors.push(`v2 config disallows httpserver field "${key}" (only host/port/apikey allowed)`);

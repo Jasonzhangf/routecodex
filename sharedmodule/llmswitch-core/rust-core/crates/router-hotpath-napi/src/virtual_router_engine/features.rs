@@ -419,7 +419,6 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     }
 }
 
-
 fn estimate_request_tokens(request: &Value, latest_user_text: &str) -> i64 {
     let mut total_chars: usize = latest_user_text.len();
     if let Some(messages) = request.get("messages").and_then(|v| v.as_array()) {

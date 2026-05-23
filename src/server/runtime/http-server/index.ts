@@ -985,7 +985,31 @@ export class RouteCodexHttpServer {
       }
       return await this.executePipeline(nextInput);
     }
-    return await this.executeProviderDirectPipelineForPort(portConfig, nextInput);
+
+    const handle = this.resolveProviderHandleForBinding(portConfig.providerBinding);
+    if (!handle) {
+      throw new Error(`Provider not found for binding: ${portConfig.providerBinding ?? ''}`);
+    }
+    const inboundProtocol = detectInboundProtocolFromRequest({
+      path: input.entryEndpoint,
+      headers: input.headers as Record<string, string | string[] | undefined>,
+    });
+    const behavior = portConfig.protocolBehavior ?? 'auto';
+    const shouldUseDirect =
+      behavior === 'direct' || (behavior === 'auto' && inboundProtocol === handle.providerProtocol);
+    if (shouldUseDirect) {
+      return await this.executeProviderDirectPipelineForPort(portConfig, nextInput);
+    }
+
+    return await this.executePipeline({
+      ...nextInput,
+      metadata: {
+        ...(nextInput.metadata ?? {}),
+        allowedProviders: [portConfig.providerBinding].filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+        routecodexProviderRelayBinding: portConfig.providerBinding,
+        routecodexProviderRelayProtocol: handle.providerProtocol,
+      },
+    });
   }
 
 

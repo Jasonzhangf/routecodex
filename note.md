@@ -7995,3 +7995,730 @@ Protocol target:
 - 红测: `parseGetChatMessageResponse must expose numeric upstream error code instead of collapsing to 502 only` 修复前缺 `upstreamCode=13/upstreamStatus=13`；`request-executor-runtime-blocks` 日志红测修复前缺 `upstreamStatus=13`。
 - 唯一修复点: Windsurf provider classifier 保留 raw payload `error.code` 为 `upstreamCode/upstreamStatus`；request-executor retry snapshot/telemetry/log 透传该字段，不改变 HTTP status/retry 分类。
 - 验证: Windsurf provider spec 213/213 passed；runtime-blocks spec 4/4 passed；`npx tsc --noEmit --pretty false` passed。
+
+## 2026-05-23 Windsurf Responses history + tools continuation
+- Repro: streamed Windsurf `/v1/responses` tool_calls could record response under response/router ids but miss provider/session scope, so next turn with `function_call_output` failed to restore `previous_response_id` + `tools` together.
+- Root cause: Responses store resume meta did not carry restored tools; bridge resolver ignored resume-only original tools when chat tools were empty; handler response recording did not pass session/conversation scope into `recordResponsesResponse`.
+- Fix points: Rust store restores pending function_call replay + `restoredTools`; Rust bridge tool resolver preserves original tools when chat tools are absent; handler/store recording carries session scope; Windsurf error classifier preserves Connect/gRPC `FAILED_PRECONDITION`/code 9 as tool protocol conflict instead of generic 502.
+- Verification: route-aware continuation, handler response store integration, responses conversation, and Windsurf Connect/gRPC error red tests pass; `build:min` and `install:global` pass with version 0.90.2200.
+- Added regression anchors:
+  - router direct same-protocol apply_patch payload identity/deep-equality passthrough;
+  - provider direct same-protocol apply_patch payload identity/deep-equality passthrough;
+  - provider-direct relay bypass audit showing no apply_patch hashline rewrite there;
+  - chat-process req_process stage test showing apply_patch canonical schema is rewritten to hashline-first in native chat process.
+- Verification: target Jest suites passed (5 suites / 33 tests) and `npx tsc --noEmit --pretty false` passed.
+
+## 2026-05-23 apply_patch 10000 live red test follow-up
+- Current installed 0.90.2202 / health ok. Recent 10000 provider request proves chat-process schema reached upstream with filePath/fileContent required and hashline-first descriptions.
+- Live provider response still returned structured apply_patch args `{fileContent:"old", filePath:"sample.txt", patch:"- old\n+ new"}`. So failure is not direct/provider request bypass; it is response bridge not accepting common structured minus/plus edit emitted under hashline contract.
+- Unique fix remains Rust response governance/hashline bridge: request shape owner stays req_process Rust; provider/direct stay passthrough/fail-fast.
+
+## 2026-05-23 windsurf 工具 native/text 真源修正
+
+- WindsurfAPI 真源 `/Volumes/extension/code/WindsurfAPI/src/cascade-native-bridge.js` 已确认：Codex 工具里只有 `shell_command` 有 clean cascade-native equivalent；`exec_command/apply_patch/update_plan/read_file/list_dir/grep/write` 等必须走 RCC/text toolPreamble 语义，不得伪造成 native trajectory step。
+- 本地旧实现把 `exec_command` 等大量工具放进 `WINDSURF_TOOL_MAP`，并在 history additional_steps overlay 中把任意 observation 写成 `stdout/full_output + exit_code=0`，会把失败执行伪装成成功，解释了模型认为工具结果 shape 和预期不同。
+- 本轮唯一修复点在 `src/providers/core/runtime/windsurf-chat-provider.ts`：声明侧 native map 收窄到 WindsurfAPI 对齐的 `shell_command`/`web_search`；上游 history 仍允许识别已完成的 `run_command/search_web` trajectory kind，但不重新开放 caller tool native 映射。
+- RCC 文本收割新增 schema-aware 参数恢复：`update_plan.plan` 这类 array/object 参数从 CDATA JSON 恢复为结构值；`apply_patch` aborted/失败文本保留在 RCC tool_result context，不再进入 native exit_code=0 路径。
+- 回归：`tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 已加入 `exec_command` 非 native、失败结果文本回灌、`apply_patch`/`update_plan` RCC 收割三类红测；全量 Windsurf provider spec 217 passed。
+
+## 2026-05-23 windsurf native tool bridge correction
+
+- 用户纠正后当前目标已更新：`exec_command` 必须作为最高优先级 native shell bridge，而不是长期走 RCC text。目标链路是客户端声明 `exec_command` -> Cascade native `run_command/shell_command` -> provider 反向归一为客户端 `exec_command` tool_call 执行。
+- 已实现 `exec_command` native map：forward 到 `run_command.command_line/cwd/blocking`；poll trajectory 时如果客户端声明了 `exec_command`，将 Windsurf `run_command` tool call 反投影为 `{name:"exec_command", args:{cmd, workdir}}`。
+- DEPRECATED 2026-05-23: 旧过程结论 `apply_patch` 进入 native edit path 已废弃；最终规则见下方“Windsurf 工具真相最终结论”，不得再映射到 `propose_code/write_to_file`。
+- 回归：Windsurf provider spec 已新增/更新 exec bridge 与 apply_patch propose_code bridge 红测；全量 `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 220 passed；`build:min`、`install:global`、5520 restart、`/health` 与 `/v1/models` smoke 均通过，运行版本 0.90.2212。
+
+## 2026-05-23 apply_patch 引导污染巡检
+- 目标：全链路搜索非唯一 apply_patch 引导；唯一允许请求侧改写点是 Rust chat process `req_process_stage1_tool_governance.rs`，直连模式应透传，响应侧只做内部 line-edit -> canonical client mapping。
+- 初步发现的污染候选：`src/config/system-prompts/codex-cli.txt` 仍强制模型使用 canonical `*** Begin Patch`；`src/providers/core/runtime/windsurf-chat-provider.ts` 仍把 `apply_patch` native 映射到 Cascade `propose_code` 并把 `propose_code/write_to_file` 回映成 apply_patch；若走该路径会绕开 chat-process 唯一 line-edit schema。
+- 测试命名/样例也有 hashline/多字段残留，需要同步改为 internal line-edit，避免后续误读。
+- 本轮已移除/收口污染点：1) `src/config/system-prompts/codex-cli.txt` 删除全局 canonical `*** Begin Patch` 引导；2) `windsurf-chat-provider.ts` 删除 native alias guidance，避免把 `apply_patch` 引到 `propose_code/write_to_file`、把 `exec_command` 引到 native run_command；3) Windsurf native map 保持只支持 `shell_command` 等已确认 native 工具，`apply_patch/exec_command` 作为 RCC unsupported text tools；4) 相关测试命名/断言改为 internal line-edit/RCC，不再写 hashline-first 当前事实。
+- 验证：`npx tsc --noEmit --pretty false` 通过；Windsurf/apply_patch 相关 Jest 7 suites / 253 tests 通过。
+
+## 2026-05-23 Windsurf native apply_patch continuation
+- 接手状态：exec_command live smoke 已过；apply_patch live smoke 返回 MISSING_REQUIRED_TOOL_CALL。
+- 当前假设：propose_code native config 或 alias/prompt 未按 Cascade 真实协议启用，需对照 WindsurfAPI schema。
+
+## 2026-05-23 apply_patch hubpipeline 收口继续
+- 约束：只处理 Hub Pipeline/Rust chat-process/apply_patch；禁止触碰 Windsurf 文件（不读不改不restore不测不提交）。
+- 验证目标：Rust apply_patch cargo tests、Jest hub/apply_patch tests、构建安装、10000 端口 MiniMax/Anthropic apply_patch smoke。
+
+## 2026-05-23 Windsurf tool bridge write-success audit
+- Verified target files were MM; staged and worktree diverged, so previous code was not safe to claim written.
+- DEPRECATED 2026-05-23: 旧过程结论 apply_patch add-file -> write_to_file 已废弃；仅 `exec_command`/`shell_command -> run_command` 的 one-shot blocking shell 子集保留。
+- Re-staged src/providers/core/runtime/windsurf-chat-provider.ts and tests/providers/core/runtime/windsurf-chat-provider.spec.ts so cached commit content matches green worktree.
+- Focused jest passed: windsurf provider apply_patch/exec_command/hybrid preprocess/unsupported tool results/error classification, 9 passed.
+
+## 2026-05-23 apply_patch 透明桥接纠偏
+- 用户纠正：模型侧应只见 internal line-edit；客户端侧应只见 Codex 标准 apply_patch；Hub 必须透明双向桥接。
+- 当前需查：10000 样本里 internal args 是否在 response/client outbound 阶段没有翻译成 *** Begin Patch。
+
+## 2026-05-23 apply_patch 三段透明桥接
+- 新事实：A 请求 schema 改写给模型；B 模型 tool call 翻译回 Codex 标准；C Codex apply_patch 执行结果/错误也必须翻译回模型可理解的 internal line-edit/hashline 语义。
+- 继续范围：只查/改 Hub Pipeline/Rust chat-process，不碰 Windsurf。
+
+
+## 2026-05-23 apply_patch three-part transparent bridge
+- Scope: only Hub Pipeline/Rust chat-process/apply_patch; do not touch Windsurf files.
+- User correction: bridge is three parts: request schema -> internal hashline/line-edit, model tool call args -> Codex canonical apply_patch for client executor, executor result/error -> internal hashline guidance back to model.
+
+## 2026-05-23 Windsurf apply_patch 三段 native 桥接纠偏
+- DEPRECATED 2026-05-23: 旧过程结论 `apply_patch` 不是 RCC/text tool 已废弃；最终规则为 Windsurf `apply_patch` 走 RCC 文本收割或显式 servertool。
+- DEPRECATED 2026-05-23: 旧三段 native edit/write proto 结论已废弃；不得恢复 `apply_patch -> write_to_file/propose_code`。
+- 当前 worktree 曾被错误改成 apply_patch RCC，需要先改测试锚点，再修实现。
+
+- Verified apply_patch bridge: cargo apply_patch tests 67 passed; jest targeted 48 passed; build/install global 0.90.2221; local Node bridge check confirmed request schema internal, client args canonical, result/error inbound translated. 10000 health smoke blocked by live long Windsurf request occupying single event loop; log evidence in ~/.rcc/logs/server-5520.log.
+
+## 2026-05-23 Windsurf apply_patch live after three-part patch
+- Local checks after doc/test/code order: focused Windsurf Jest passed (11 selected), full provider spec passed 216/216, build:min passed and bumped 0.90.2221, install:global passed, restart 5520 health ok 0.90.2221.
+- Live smoke status: exec_command smoke timed out at 180s in this run; apply_patch smoke returned MISSING_REQUIRED_TOOL_CALL (`openai-responses-windsurf.ws-pro-2-gpt-5.4-none-20260523T135953792-222256-37`).
+- DEPRECATED 2026-05-23: 旧 live 后续方向已废弃；不再诱导 native write_to_file/propose_code，改为 RCC 文本收割或显式 servertool。
+
+## 2026-05-23 apply_patch direction update
+- User changed design: config-gated servertool apply_patch. If enabled: apply_patch executes locally in Hub/servertool and follows up to model, not returned to client. If disabled: compatibility route, revert to pre-hashline behavior. Scope must stay Hub Pipeline/Rust; do not touch Windsurf provider.
+
+## 2026-05-23 Windsurf 工具真相最终结论
+- 已对照 Windsurf.app bundle 与 WindsurfAPI：`write_to_file`/`propose_code` 只是 Cascade trajectory step/proto，不是可控本地 executor；`apply_patch` 的 multi-file patch、失败/aborted 语义不能等价映射到 native `write_to_file`。最终决策：撤回 Windsurf `apply_patch` native 伪装，改回 RCC 文本引导收割；不完全兼容工具只能二选一：配置显式打开 servertool 并由 RCC 执行，或走文本收割，禁止伪装 native 导致执行结果不可控。`exec_command`/`shell_command` 仍可映射 `run_command` 的 one-shot blocking shell 子集。
+- Final correction supersedes earlier same-day notes about Windsurf native `apply_patch` bridge: those notes are deprecated. The active rule is RCC text harvest (or future explicit servertool), never native `write_to_file`/`propose_code` impersonation for `apply_patch`.
+
+## 2026-05-23 apply_patch config-gated servertool design landed
+- 落盘设计文档：`docs/design/apply-patch-config-gated-servertool.md`。
+- 落盘实施计划与 `/goal` 提示词：`docs/goals/apply-patch-config-gated-servertool-plan.md`。
+- 当前唯一事实：`apply_patch` 改为配置门控双模式；默认 `client` 回到 hashline 前兼容路线；显式 `servertool` 才由 Hub/servertool 本地执行 + followup。禁止 provider/Windsurf 分支，禁止 fallback。
+
+## 2026-05-23 build/install/restart/live smoke
+- `npm run build:min` initially failed twice in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi`:
+  1) `req_process_stage1_tool_governance.rs`: moved `input.metadata` then borrowed it again for `ensure_apply_patch_chat_process_contract`.
+  2) `chat_servertool_orchestration.rs`: stale `v` reference in `resolve_apply_patch_dispatch_mode`.
+- Fixed both as minimal Rust truth-source edits and reran `npm run build:min` successfully.
+- `npm run install:global` passed and self-check reported `✅ 全局 CLI 端到端检查通过`.
+- `routecodex restart --port 5520` succeeded with in-place signal restart.
+- `curl http://127.0.0.1:5520/health` returned `status=ok`, `ready=true`, `pipelineReady=true`, `version=0.90.2224`.
+- Live `/v1/responses` smoke on 5520 with a 30s timeout returned `timeout`; this is a live runtime symptom that still needs follow-up, not a green end-to-end validation yet.
+
+## 2026-05-23 fd exhaustion stopgap
+- 止血证据：系统 `kern.num_files` 接近 `kern.maxfiles`；`lsof` 自身报 `Too many open files`。
+- 定位方式：使用 macOS `proc_pidinfo(PROC_PIDLISTFDS)` 按 PID 统计 fd，避免依赖 lsof。
+- 根因止血点：大量 Windsurf `language_server_macos_arm --server_port=421xx --csrf_token=windsurf-api-csrf-fixed-token` 遗留进程，每个约 11204 fd；明确 PID SIGTERM 回收后 `kern.num_files` 从约 476k 降到约 16k。
+- 后续修复方向：RouteCodex/Windsurf LS 管理必须复用或显式关闭 LS 子进程；黑盒/测试不得反复启动遗留 LS。
+
+## 2026-05-23 Windsurf 5520 LS/端口排查
+- 用户强调：不要 fallback。Windsurf/RouteCodex 本轮排查必须 fail-fast；端口探测、LS 选择、工具治理遇到未知状态不得降级为“可用/空闲/文本兜底”。
+- 当前问题顺序：先证明 5520/Windsurf LS 为什么不该错却错，再谈 retry 策略；MiniMax 10000 可用不代表 5520 provider 链路可用，因为 10000 绕过 Windsurf LS。
+
+## 2026-05-23 stopless/apply_patch servertool skeleton followup
+- User correction: stopless continuation must use standard servertool reenter/followup path, not tmux injection; apply_patch servertool should use the same skeleton. Scope is Hub Pipeline/Rust servertool/config only; Windsurf provider is out of scope and must not be touched.
+
+## 2026-05-23 Windsurf LS 真源修复记录
+- 止血：显式 PID 回收 36 个 RouteCodex/Windsurf LS；未使用 pkill/killall/broad kill。回收后 `kern.num_files` 回到约 14526/491520，仅剩 Windsurf App 自身 workspace LS。
+- 红测锚点：`managed LS port probe must fail fast when lsof cannot inspect listeners`；`managed LS must reuse existing RouteCodex runtime for the same key instead of spawning another port`；`managed LS must fail fast when multiple RouteCodex runtimes exist for the same key`。
+- 实现真源：`src/providers/core/runtime/windsurf-chat-provider.ts`。端口探测遇到 ENFILE/EMFILE/Too many open files 直接 `WINDSURF_LOCAL_LS_PORT_PROBE_FAILED`；按 `--codeium_dir=$HOME/.rcc/windsurf-ls/<key>` 复用 live LS；同 key 多端口 `WINDSURF_LOCAL_LS_CONFLICT`；测试 afterEach 释放 managed LS，避免 spec 自身泄露。
+- 验证：`npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand` = 221/221 passed 且进程干净退出。
+
+## 2026-05-23 apply_patch/stopless servertool followup verification
+- 修正方向：stop_message_flow 从 Rust skeleton 移除 clientInjectOnly/clientInjectSource，stop-message-auto metadata 不再写 servertool.stop_message client injection 字段。
+- apply_patch servertool contract：默认 client 不改 schema/不执行；servertool mode 改写 schema、本地执行、strip tool_calls，执行响应包含 APPLY_PATCH_APPLIED 且不调用 clientInjectDispatch。
+- 验证：`cargo test -p router-hotpath-napi servertool -- --nocapture`、`cargo test -p router-hotpath-napi apply_patch -- --nocapture`、targeted Jest 19/19、`npm run build:min`、`npm run install:global`、`routecodex restart --port 10000`、10000 `/health` = 0.90.2226。
+
+## 2026-05-23 apply_patch servertool followup skeleton
+- 用户要求：stopless 续杯必须走 servertool 标准路径，不走 tmux injection；apply_patch 走同一骨架。
+- 当前交接证据：client 模式 smoke 通过；servertool 模式 provider schema 已改写但 response orchestration 报 followup payload missing。
+- 本轮约束：只查/改 Hub Pipeline、Rust servertool、config 链路；不碰 Windsurf provider。
+
+## 2026-05-23 Windsurf routing target config correction
+- 用户纠正：5520 Windsurf routing config 不应手写 `windsurf.ws-pro-N.<model>` key；正确写法是单一 provider+model target，例如 `windsurf.gpt-5.4-none`。
+- 真源：账号/alias 列表只属于 `~/.rcc/provider/windsurf/config.v2.toml` 的 `provider.auth.entries[]`；Virtual Router bootstrap 负责展开成 `windsurf.ws-pro-1..N.<model>` 与 runtime `windsurf.ws-pro-1..N`。
+- 已改活跃配置：`~/.rcc/config.toml` 的 `gateway_priority_5520` 各 routing targets 均改为 `targets = ["windsurf.gpt-5.4-none"]`，不再手写 `ws-pro-*`。
+- 已加回归锚点：`tests/sharedmodule/provider-model-direct-access.spec.ts` 覆盖 `windsurf.gpt-5.4-none` 通过 `auth.entries[]` 展开到 `ws-pro-1..5`，并验证 `targetRuntime["windsurf.ws-pro-5.gpt-5.4-none"]` 存在。
+- 活体 loader 验证：`loadRouteCodexConfig('/Users/fanzhang/.rcc/config.toml') + bootstrapVirtualRouterConfig` 实际产物含 `windsurf.ws-pro-1..5` runtime，`hasWs5Runtime=true`，`hasWs5Target=true`。
+
+## 2026-05-23 Windsurf 502 trajectory metadata false positive
+- 用户判断：backup 很久仍 502，怀疑不是无响应，而是 RouteCodex 响应解析/分类有问题。
+- 复盘 request `openai-responses-windsurf.ws-pro-3-gpt-5.4-none-20260523T162729016-222324-105`：provider.send 阶段把 trajectory step 的 `errorText` 统一包装为 `WINDSURF_UPSTREAM_TRANSIENT` 502。
+- 对照 `/Volumes/extension/code/WindsurfAPI/src/client.js`：只有 `step.type === 17 && step.errorText` 才作为 cascade model error 抛出；`parseTrajectorySteps()` 保留其它 step 的 error metadata，但 caller 不应把任意 field24/31 当失败。
+- 已加红绿锚点：非 ERROR trajectory metadata 携带 `an internal error occurred` 时必须继续收最终文本；type=17 ERROR step 仍 fail-fast 为 `WINDSURF_UPSTREAM_TRANSIENT`。
+- 唯一修复点：`src/providers/core/runtime/windsurf-chat-provider.ts` 的 `pollCascadeTrajectorySteps()` 执行判定，从“任意 row.errorText 抛错”改成“仅 row.type === 17 的 errorText 抛错”。
+
+## 2026-05-23 apply_patch servertool followup 502 MISSING_REQUIRED_TOOL_CALL
+- 用户贴出的 `openai-responses-mini27...222328-109` 不是 Windsurf 502，而是 `apply_patch_flow` servertool followup：nested responses followup 仍被 host contract 当作“required tool call turn”，模型返回 final text 后被误判 `MISSING_REQUIRED_TOOL_CALL`。
+- 根因：`servertool-followup-dispatch` 只在 body 已经是 responses `input` 且包含 `function_call_output` 时才给 requestSemantics 标记 `toolOutputs`；真实 apply_patch followup 是 messages-only，经后续 shape normalize 才转成 `function_call_output`，metadata/body semantics 没同步成 tool-result turn。
+- 唯一修复点：`src/server/runtime/http-server/executor/servertool-followup-dispatch.ts` 的 nested input 构造：先把 `/v1/responses` followup body 规范化为 input shape，再清理 stale responses-only settings，并在 normalized input 含 `function_call_output` 时同步 `semantics.toolOutputs` 和 `metadata.requestSemantics.toolOutputs`。
+- 回归锚点：`tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts` 新增 messages-only apply_patch followup 规范化测试；相关 3 组 Jest 60/60 通过。
+
+## 2026-05-23 apply_patch servertool guidance fix
+- User requirement: servertool provider-facing guidance must explicitly require workspace-relative `filePath`, include only correct examples, and avoid failure/anti-pattern examples. Must not leak native Codex `*** Begin Patch` schema in provider-facing prompt/schema. Scope remains Hub Pipeline/servertool only; do not touch Windsurf provider.
+
+## [2026-05-23] Windsurf 502 regression re-audit
+- 现象: 用户复测 5520 Windsurf tool request 仍反复 WINDSURF_UPSTREAM_TRANSIENT 502，git 基线可用，当前工作区全面不可用。
+- 约束: 不再按 502 表象猜测；必须对比 git 基线，找唯一破坏点，先红测再改。
+- 已发现线索: 当前 `windsurf-chat-provider.ts` 同时删除了 `WINDSURF_CASCADE_TOOL_CONFIG_FIELDS.write_to_file`，但 `isWindsurfNativeToolKind()` 仍把 `write_to_file` 当 native allowlist 可用；这会形成“声明 native 支持但 proto tool config 不注入”的不一致。
+- 待验证: 是否因此导致模型看不到/误判工具能力或上游 payload 不一致，需用 focused spec 先红测。
+
+## 2026-05-23 servertool apply_patch followup canonical 审计
+- 用户审计指出 P0：`sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts::injectApplyPatchToolOutput` 使用 `arguments: toolCall.arguments`，会把 fileContent / native patch / 错误字段回灌 followup。
+- 已核证：目标文件当前确实原样写入 `tool_outputs[].arguments`；错误文案仍含 `fileContent`。
+- 修正后范围：不改 followup 骨架；只在现有 apply_patch servertool handler 输出 canonical arguments，避免 followup 历史被原始参数污染。
+
+## 2026-05-23 Windsurf provider cascade send hang investigation
+- User symptom: `/v1/responses` routed to `windsurf.ws-pro-4.gpt-5.4-none`, HTTP headers never returned, only RCC-managed LS websocket seen, provider debug logs absent.
+- Working hypothesis: request entered router and selected provider, but either provider `sendRequestInternal` is not invoked or it enters LS/Cascade bootstrap before debug env/log point.
+- Constraint: no fallback; identify unique send boundary and add minimal evidence logs before semantic changes.
+- 用户纠正：不能改设计；本次只允许在现有 servertool handler / followup 链路做 canonical 污染修复。已撤回错误测试改法，重新按 followup 真入口锚定。
+- Added host-side Windsurf-only provider send boundary logs in `request-executor.ts`: `before_traffic` and `before_process_incoming`, independent of stage logger verbosity/env, to prove whether requests reach traffic gate and provider runtime.
+- Verified existing traffic state for `windsurf.ws-pro-4` has no active leases; traffic lease saturation is not the observed 16:54 hang root cause.
+- Removed duplicate dead retry/backoff state declarations left in `request-executor.ts`; retry/backoff state truth is imported from executor retry planner/state modules.
+- 2026-05-23 followup 骨架证据：Rust skeleton 真源声明 `apply_patch` 为 internal `tool_call` + `reenter`；`followup-mainline-block` 在 reenter 模式下 `loadFollowupOriginSeed()` 后 `applyFollowupDeltaPlan()`，不是直接手改 response；`runReenterFollowup()` 再调用 `reenterPipeline`。
+- 新增回归 `tests/servertool/followup-origin-delta.spec.ts` 证明 origin seed clone 后只追加 canonical assistant tool_call + tool result，并执行 `drop_tool_by_name('apply_patch')`；原 seed 未被改写。
+- 验证：`npm run build --prefix sharedmodule/llmswitch-core` + 4 个 focused Jest（followup-origin-delta、servertool-followup-dispatch、apply-patch-chat-process-contract、apply-patch-error-hints）共 30 tests passed。
+- User correction: provider-send boundary is not enough; first acceptance is proof that request is actually written to LS/Cascade gRPC method. Added unconditional `windsurf.cascade_send.*` logs at warmup/start/message enter and exact `grpc.write` point.
+- Refined send proof: `grpc.write` proves RouteCodex wrote to local Windsurf LS, but the first acceptance gate also needs `grpc.end/error/timeout` to know whether LS accepted the method. Added unconditional `windsurf.cascade_send.grpc.end/error/timeout` logs.
+- 2026-05-23 req_inbound origin snapshot 修正：已把 `saveOriginSnapshot()` 从 adapter-context metadata 阶段迁到 `req_inbound.stage3.context_capture`，旧 adapter-context 保存职责已移除；新增 `tests/sharedmodule/req-inbound-origin-snapshot.spec.ts` 证明每个带 session scope 的 inbound 请求会保存原始 raw request 作为 followup clone 真源。
+- apply_patch 请求接管验证：`native-governance-apply-patch-line-edit`、`request-tool-governor-apply-patch-guidance`、`tool-governor-apply-patch-rewrite`、`tool-governor-apply-patch-failfast` 已纳入 focused 套件；修复 `tool-governor-apply-patch-rewrite.spec.ts` mock 漏导出 shell native helpers 的加载问题。
+- 最新 focused 验证：`npm run build --prefix sharedmodule/llmswitch-core` + 9 个 focused Jest suites，56 tests passed。仍未做真实入口 smoke，所以 goal 不标 complete。
+
+## 2026-05-23 Windsurf online verification goal continuation
+- Goal requirements: (1) prove cloud send path works, (2) run online validation for equivalent native tool conversion, (3) run online validation for non-equivalent tools via RCC text request/harvest, all with codex samples/log evidence.
+- Current verified evidence before continuation: host wrote to local Windsurf LS methods through `grpc.write`, including `SendUserCascadeMessage`; not yet proven that trajectory result is parsed/accepted or that LS forwarded to cloud successfully.
+- User correction: do not spam trajectory polling logs; stop and inspect samples/logs before retrying.
+- User direction: before more runtime retries, align against git because this part was previously good. Next action: inspect git history/diff for `windsurf-chat-provider.ts`, especially trajectory polling / StartCascade / SendUserCascadeMessage path.
+- Git alignment finding: current working tree changed trajectory error handling from HEAD's "any parsed `errorText` fails fast" to "only `type === 17` fails". That can hide LS/Cascade error steps and turn a real send/trajectory error into repeated polling. Re-aligned this line to HEAD semantics.
+- Git alignment finding: current working tree had broadened native mapping to non-Cascade-config kinds (`grep_search`, `read_url_content`, `search_web`, `write_to_file`) while HEAD only let `WINDSURF_CASCADE_TOOL_CONFIG_FIELDS` kinds go native. Re-aligned partition/allowlist/completed-step handling so unsupported/non-equivalent tools remain in RCC text/harvest path.
+- Online native-tool validation after git alignment: single `/v1/responses` exec_command request timed out client-side at 35s with no headers. Evidence: warmup methods, StartCascade, and SendUserCascadeMessage all returned `grpcStatus:0`; no client response yet. Next: inspect only logs/samples for this request, no repeat retry.
+- Historical evidence in current log: `windsurf.ws-pro-4.gpt-5.4-none` completed tool_calls successfully around 2026-05-23 08:40 (`222144-828` through `222150-834`). Next action: compare those successful samples/logs against current `171716...129` timeout instead of retrying.
+- Need targeted comparison: previous grep was too broad because `tool_calls` matched unrelated lines. Re-check exact current request terminal state and exact old success line context only.
+- Current online request remains server-active after client timeout: traffic lease `openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T171716669-222348-129` pid 42642, no terminal log yet. Difference from old success: old was streaming Codex client; current curl is non-stream synthetic tool request. Need inspect active cascade trajectory/status instead of issuing another request.
+- Current request final state: server failed at 17:19:20 with `CLIENT_RESPONSE_CLOSED`; traffic lease released. This proves request did not complete online validation. It also proves `SendUserCascadeMessage` returned `grpcStatus:0`, so send/connect path to LS is working; missing evidence is trajectory result/steps. Need low-noise poll terminal diagnostics (not per-poll logs) before another online attempt.
+- Streaming online native-tool validation after low-noise poll summary: request `20260523T172124565-222349-130` still timed out client-side at 45s. Evidence shows `SendUserCascadeMessage` grpcStatus=0 and poll status active (`status=2`) with growing text bytes on ws-pro-5 (93 -> 138), so cloud/LS is producing text but not a tool call within the client window. Need inspect final server terminal and decide whether prompt/native guidance is failing to elicit tool call or poll finalization is too slow.
+
+## 2026-05-23 Windsurf git alignment reset
+- 用户要求：先用 git 对齐，因为 Windsurf 发送链路之前是好的。
+- 操作：仅精确恢复 `src/providers/core/runtime/windsurf-chat-provider.ts`、`tests/providers/core/runtime/windsurf-chat-provider.spec.ts`、`src/server/runtime/http-server/request-executor.ts`、`tests/server/runtime/request-executor.single-attempt.spec.ts` 到 HEAD；未使用批量 checkout/reset，未触碰其他脏文件。
+- 证据：恢复后上述 4 个文件 `git diff` 与 `git diff --cached` 均为空；当前代码回到 HEAD 的 Cascade send/poll/tool native 映射语义。
+- 下一步：运行 Windsurf 定向测试、build/install/restart，再用真实入口验证是否恢复“请求发出到 Cascade/LS”。
+- 验证：Windsurf 定向 Jest 6/6 passed（Jest open handle 挂住后仅显式 PID 62714 停止）；`npm run build:min` passed；`npm run install:global` passed；`routecodex --version` = 0.90.2242；`routecodex restart --port 5520` 后 `/health` OK。
+- 真实入口 smoke：2026-05-23 17:28:27 `/v1/responses` request `openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T172827794-222350-131` 完成 200，finish_reason=stop，body 返回 `git-aligned-smoke-okgit-aligned-smoke-ok`；证明恢复 git 对齐版本后请求不再卡死，可经 Windsurf provider 完成返回。
+- 剩余：该 smoke 是 no-tool 基础发送验证；native tool 与 RCC text/harvest 在线验证尚未完成，不能宣称工具接入完成。
+
+## 2026-05-23 apply_patch servertool followup smoke closeout
+- 真实 HTTP smoke 首轮失败不是 servertool handler 未执行，而是 `/v1/chat/completions` router port 默认 same-protocol direct 把 chat.completion 当最终响应绕过 response conversion；relay 后确认 servertool match、apply_patch 写盘、followup reenter 均触发。
+- 唯一代码断点在 `shouldBypassProviderResponseConversion`：当 `__rt.applyPatch.mode=servertool` 且 provider chat.completion 含 `apply_patch` tool_call 时，不能把它当 client-final response；否则 response-side servertool 永远无机会接管。
+- v2 source validator 另有入口一致性漏项：`httpserver.sameProtocolBehavior` 已被 port-config-validator 支持，但 `collectV2ConfigSourceErrors` 未放行，导致无法配置 relay 验证完整 hub response 链。
+- 临时 smoke 的 mock fallback 会反复选择首条样本，导致最终文本仍是第一跳；但日志已证明 servertool `match/final completed`、target 文件从 `old\n` 变 `new\n`、followup reenter 发起。
+
+## 2026-05-23 apply_patch servertool smoke final closeout
+- 真实 smoke `node tmp/servertool-apply-patch-smoke.mjs` 已闭合：首跳 `apply_patch_flow stage=match result=matched`，followup reenter，最终 `finish_reason=stop` 且 body 为 `patched smoke done`，workspace `target.txt` 从 `old\n` 改为 `new\n`。
+- 本次新增的唯一产品代码改动是 mock runtime 夹具入口判定：chat followup 中 `role: tool` 应视为 submit-tool-output 形态，否则 smoke 二跳会继续命中首跳 tool_calls 样本。该改动只影响 mock-provider 样本选择，不改变 servertool/followup 设计。
+- `npm run build:min` 被既有/无关 TS 错误阻断：`src/server/handlers/handler-response-utils.ts(1281,21)` 与 `src/server/handlers/responses-handler.ts(77,9)/(86,9)`；但 `tsc` 已在 noEmitOnError=false 下产出 dist，本次 smoke 使用的 dist 包含 mock runtime 修复。
+
+## 2026-05-23 Windsurf native tool online continuation blocker
+- 已验证基础发送：0.90.2242 起 `/v1/responses` no-tool smoke 可经 Windsurf provider 返回 200。
+- 等价 native 工具首轮在线验证通过：`shell_command` 请求返回 `status=requires_action`、`finish_reason=tool_calls`，示例 request `openai-responses-windsurf.ws-pro-2-gpt-5.4-none-20260523T173018979-222351-132` / `openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T175311078-222359-140`，tool call 为 `native:run_command:3`，参数包含 `printf native-windsurf-ok`。
+- native 工具闭环 submit 仍未通过：`POST /v1/responses/<resp_*>/submit_tool_outputs` 返回 `Responses conversation expired or not found`，示例 `resp_1779529999360` / request `openai-responses-router-request-20260523T175319445-222360-141`。
+- 关键证据：线上日志首轮 tool_calls 后仍出现 `[handler-response] responses-conversation-record:<router-id> failed ... missing request context`，随后 mem-observer 显示 `responseIndex=0`，说明问题不在 Windsurf 发送/工具生成，而在 Responses continuation store 没把 client-visible `resp_*` 建索引。
+- 本轮代码进展：`src/server/handlers/responses-handler.ts` 把 `/v1/responses` 入站 payload/context 传给 response writer；`src/server/handlers/handler-response-utils.ts` 在 JSON client body 写出前执行 capture/record，并扩展 response id 读取到 `id` / `response_id` / `response.id`；新增/修正 handler 单测覆盖 capture context 与 response id 记录。
+- 本轮验证：`tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts -t "captures /v1/responses request context"` 通过；`tests/server/handlers/handler-response-utils.responses-conversation.spec.ts -t "provider timing|submit continuation"` 通过；`npm run build:min`、`npm run install:global`、`routecodex restart --port 5520` 通过，线上版本 `0.90.2251`。
+- 未完成：native tool submit 在线闭环仍失败；RCC 文本请求/收割在线验证尚未开始。下一步必须继续查 response store 记录为什么没有 `responseIndex`，不要继续重复发 Windsurf 请求。
+
+## 2026-05-23 servertool apply_patch goal verification closeout
+- Goal item 1: servertool skeleton truth is Rust `servertool_skeleton_config.rs`; `apply_patch` is registered as internal tool_call with `execution.mode=reenter` and runtime-gated dispatch. Rust test `test_plan_servertool_dispatch_apply_patch_gated_by_runtime_mode` passed.
+- Goal item 2: reenter uses inbound origin snapshot (`req_inbound_stage3_context_capture`) plus `applyFollowupDeltaPlan` delta ops. JS tests `followup-origin-delta.spec.ts` and `servertool-followup-dispatch.spec.ts` passed; real smoke showed nested reenter and final stop response.
+- Goal item 3/4: apply_patch servertool execution now covered by `tests/servertool/apply-patch-flow.spec.ts`: malformed JSON recovery, native patch canonicalization, file write, canonical tool_outputs args, and clean followup history without `fileContent` / native patch syntax. Real smoke passed after `build:min`.
+- Rust governance broad `cargo test -p router-hotpath-napi apply_patch` passed: 68 passed, 0 failed, 1 ignored. Updated stale Rust assertion to assert servertool schema does not leak `fileContent` or native patch grammar.
+
+## 2026-05-23 Responses continuation git-alignment fix
+- 先按 git 差异定位：当前坏点不是 Windsurf 发送链路，而是 `/v1/responses` tool_calls 记录阶段同时按 client-visible `resp_*`、router id、timing id 多次 record 同一 response。
+- 唯一真源冲突：`responses-conversation-store` 的 scopeIndex 是单 owner；同 scope 后续 record 到 router/timing entry 会 `detachEntry(previous)`，删除 `resp_*` 的 responseIndex，导致 submit 返回 `Responses conversation expired or not found`。
+- 修复方向：当 response body 已有 client-visible response id 时，只用该 id 作为 continuation 唯一记录键；没有 response id 时才退回 requestLabel/timing ids 暴露 missing context。
+
+## 2026-05-23 servertool_multi followup payload missing
+- Reproduced original failure shape with regression: multi servertool execution returned `servertool_multi` followup containing only `requestIdSuffix`, causing reenter fail-fast `followup_payload_missing`.
+- Unique root cause: generic all-servertool branch in `execution-shell` did not materialize skeleton `genericInjectionOps`; single-tool branch reused handler followup so it did not expose the bug.
+- Fix: generic followup now materializes `append_assistant_message` + `append_tool_messages_from_tool_outputs` from Rust skeleton config before reenter. Regression `server-side-tools.dispatch-native.spec.ts` covers `/v1/responses` multi-servertool shape.
+- Validation: focused multi test passed; followup/apply-patch/mock/runtime related Jest set passed 33/33 but Jest had an existing open handle and required explicit PID-scoped TERM; `build:min` passed; `tmp/servertool-apply-patch-smoke.mjs` passed on release 0.90.2254.
+
+## 2026-05-23 Windsurf native continuation online 0.90.2253
+- 服务重启后 `/health` 显示 `version=0.90.2253`，与 CLI/build 对齐。
+- Native first turn online passed: `/v1/responses` returned HTTP 200 in ~7.9s, `id=resp_1779530934651`, request `openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T180846752-222405-186`, `status=requires_action`, tool_call `shell_command` with `call_id=native:run_command:3` and args `printf native-windsurf-ok`.
+- Native submit no longer fails with `Responses conversation expired or not found`: `POST /v1/responses/resp_1779530934651/submit_tool_outputs` returned HTTP 200 in ~18.6s and produced next response `resp_1779530971179` / request `openai-responses-windsurf.ws-pro-2-gpt-5.4-none-20260523T180912536-222406-187`.
+- Remaining native closeout issue: after submit, upstream requested `shell_command` again (`native:run_command:4`) instead of final text; inspect exact logs before deciding whether this is prompt-loop behavior or continuation payload issue.
+
+## 2026-05-23 Windsurf submit re-capture fix 0.90.2255
+- New issue after 0.90.2253: first submit no longer expired and did reach Windsurf, but when upstream returned another `requires_action`, log showed `responses-conversation-record:resp_1779530971179 failed ... missing request context`.
+- Root cause: submit_tool_outputs is rewritten to pipeline `/v1/responses`, but response writer still received synthetic `entryEndpoint=/v1/responses.submit_tool_outputs`; capture helper only captures `/v1/responses`, so next response id was not captured.
+- Fix: after submit rewrite, pass `pipelineEntryEndpoint` into `sendPipelineResponse`, and allow `responsesRequestContext` for rewritten submit requests too. Focused tests cover first-turn and resumed-submit tool_call context capture.
+- Validation: focused Jest passed: `handler-request-executor.unified-semantics.e2e.spec.ts`, `handler-response-utils.responses-store-integration.spec.ts`, `handler-response-utils.responses-conversation.spec.ts` with 5 passed. Built/installed/restarted 0.90.2255; `/health` reports version 0.90.2255.
+- Caution: attempted submit for old `resp_1779530971179` after restart returned expired because that response was produced before the recapture fix and was never indexed. Must validate with a fresh 0.90.2255 chain.
+
+## 2026-05-23 Windsurf native full online closeout 0.90.2255
+- Fresh 0.90.2255 native first turn passed: `/tmp/rcc-windsurf-native-tool-2255.body`, request `openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T181653380-222408-189`, response `resp_1779531422488`, `status=requires_action`, tool_call `native:run_command:3` args `printf native-windsurf-ok`.
+- Fresh native submit passed: `POST /v1/responses/resp_1779531422488/submit_tool_outputs` returned HTTP 200 in ~30s, `/tmp/rcc-windsurf-native-tool-submit-2255.body`, final response `resp_1779531466045`, `status=completed`, `output_text=NATIVE_DONE`, `previous_response_id=resp_1779531422488`.
+- This proves equivalent native tool conversion online end-to-end for `shell_command`: tool request, client-visible Responses tool_call, submit continuation, upstream final answer.
+
+## 2026-05-23 stopless simple default restore
+- User requirement: stopless default enabled, simple mode, non-goal `finish_reason=stop` with no followup auto-continues, default budget 3, tool_call resets budget to 3, `/goal` completed transition only gets one continuation.
+- Unique root cause: stopless default state was treated like a tombstone/exhausted snapshot and older tests expected default stop to passthrough; tool_calls were not observed by stop gateway, so budget reset could not fire.
+- Fix: keep default budget state at used=max instead of clearing to `default_exhausted`, reset default budget on observed chat tool_calls, and cap managed non-active goal default snapshot to 1.
+- Validation: focused stopless/servertool Jest set passed 27/27; `npm run build:min` passed; `tmp/stopless-smoke.mjs` hit real mock HTTP entry and returned second followup response; `install:global` + `routecodex restart --port 10000` passed with health version 0.90.2256.
+
+## 2026-05-23 Windsurf cascade timeout 5min alignment
+- User correction accepted: Windsurf/Cascade 30s timeout is too short; successful native submit already took ~29.96s, so 30s creates false `WINDSURF_FETCH_TIMEOUT`/504 near the normal latency boundary.
+- Code change: `WindsurfChatProvider` now uses `WINDSURF_CASCADE_TIMEOUT_MS = 300_000` for local LS gRPC unary calls and Windsurf PostAuth fetches, with env override `ROUTECODEX_WINDSURF_CASCADE_TIMEOUT_MS` / `RCC_WINDSURF_CASCADE_TIMEOUT_MS`.
+- Validation: focused `tests/providers/core/runtime/windsurf-chat-provider.spec.ts -t "postauth|five-minute default timeout"` passed (9 tests). Build/install/restart completed; next online validation should use server version after restart.
+
+## 2026-05-23 WindsurfAPI history/output audit
+- User requested no modification to `/Volumes/extension/code/WindsurfAPI`; performed read-only comparison only.
+- Audit report written to `docs/audit/windsurf-history-output-audit.md`.
+- Key finding: WindsurfAPI uses 600KB history budget and explicit truncation note, separates normal `<human>/<assistant>` history from tool bridge semantics, and invalidates cascade reuse on upstream timeout to avoid half-broken history loops.
+- RouteCodex direction matches three-channel design (normal history, native additionalSteps, RCC tool_result context), but remaining online risk is whether every tool result lands in the right channel and whether long outputs keep tail markers.
+
+## 2026-05-23 Windsurf RCC apply_patch online first turn 0.90.2257
+- Fresh RCC first turn passed: `/tmp/rcc-windsurf-rcc-apply-patch-2257.body`, request `openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T182614480-222433-214`, response `resp_1779531987659`, `status=requires_action`.
+- Returned tool_call name `apply_patch`, call_id `call_57215fddf8ddf393`, args `{"filePath":"README.md","patch":"\n+ \n"}`. This is non-equivalent tool path candidate; next step is submit a tool result and verify no repeat + final answer.
+
+## 2026-05-23 RCC submit payload construction mistake
+- The first RCC submit to `resp_1779531987659` returned another `apply_patch` call, but the local submit JSON was only 156 bytes because shell variables were not exported into the Node JSON generator. This did not submit the intended BEGIN/MIDDLE/END long output, so it is not valid evidence of RouteCodex truncation or provider repeat-loop behavior.
+- Continue from the second response `resp_1779532039432` / call `call_9a2f4a5ec3571c6f` with a correctly generated long output payload.
+
+## 2026-05-23 RCC second response record failure cause
+- Exact log for `resp_1779532039432`: `responses-conversation-record:resp_1779532039432 failed ... missing_tool_call_id at index 2`.
+- This was caused by the previous local submit payload bug: `/tmp/rcc-windsurf-rcc-apply-patch-submit-2257.json` contained `tool_outputs: [{}]`, so the continuation history had a malformed tool output with no call_id/tool_call_id. The store correctly rejected recording the next response under the tool-history contract.
+- This chain is poisoned by invalid local test input and cannot prove provider repeat-loop or truncation. Start a fresh RCC chain with correctly generated non-empty tool output.
+
+## 2026-05-23 apply_patch compatibility + followup stopless closeout
+- Added red test for model natural-language schema explanation mixed into `patch`: recover `filePath: "created.txt"` and only `+` line-edit entries, write new file, keep canonical tool output without `input`/`fileContent`.
+- Fixed apply_patch canonicalization at handler truth: `resolvePatchFilePath()` now extracts `filePath:` / `file_path:` from mixed text; line-edit conversion extracts only valid `+/-` entries when surrounding prose is present; new-file add-only patches preserve trailing newline.
+- Added red test for response-stage `serverToolFollowup` bypass: an `apply_patch_followup` returning `finish_reason=stop` must still enter stopless instead of being bypassed.
+- Fixed response-stage orchestration bypass narrowly: followup hops still bypass by default, but stop-eligible payloads are allowed into stopless orchestration.
+- Validation: apply_patch + stopless focused Jest passed 17/17; `npm run build:min` passed; `tmp/servertool-apply-patch-smoke.mjs` and `tmp/stopless-smoke.mjs` passed; `install:global` + `routecodex restart --port 10000` passed with health version 0.90.2258.
+
+## 2026-05-23 RCC tool_result latest-human fix
+- Online long-output RCC submit showed final model saw `rcc tool output body preserved for history audit ... <truncated 15348 bytes>` and did not mention BEGIN/MIDDLE/END. The submit JSON did contain all markers, so the failure is in history projection/model visibility, not HTTP transport.
+- Root cause: `buildCascadePromptText()` put `rccResults` in `prefixParts`, outside the latest `<human>` turn. Cascade/model treated it like summary/context and compressed it, losing exact markers.
+- Fix: move `rccResults` into `tailParts`, so RCC tool_result appears inside the latest `<human>` turn together with latest user/tool-result continuation. Keep guidance/reminder in prefix/tail as appropriate.
+- Regression: focused Windsurf provider tests passed for `unsupported tool results become RCC` and `RCC terminal tool result markers`.
+
+## 2026-05-23 Windsurf history audit answer draft
+- User asks why multi-turn loses history and whether WindsurfAPI aligns with Windsurf app.
+- Verified audit report and readonly WindsurfAPI code: Windsurf app/API Cascade path uses three separated history channels: normal text history projected as <human>/<assistant>, native tool bridge through additionalSteps/additional_steps, and emulated/non-native tool results through explicit tool_result context.
+- RouteCodex risk/root cause: any tool result that is neither encoded as native additionalSteps nor injected as RCC tool_result into the latest human turn disappears from normal history; 30s Cascade timeout can amplify this into apparent history loss/repeated tool calls.
+- Solution direction: keep 5min+ Cascade timeout; enforce classification at preprocessing; native equivalent tools only via additionalSteps; non-equivalent tools only via RCC tool_result in latest human turn; online marker smoke must prove BEGIN/MIDDLE/END retained after submit.
+
+## 2026-05-23 apply_patch fence+mask correction
+- User correction: apply_patch compatibility must not guess semantics. It may use fence+mask to hit semantics, repair incomplete fence/format shape, and return explicit errors for missing semantic fields so the next loop can fix it.
+- Corrected implementation: removed prose-based filePath/line extraction; only explicit `filePath/file_path/path`, native patch headers, unified diff headers, or fenced line-edit blocks are accepted. Prose-only schema explanation returns `PATH_MISSING` instead of creating a file.
+- Validation: apply_patch focused test now covers prose rejection + fenced line-edit repair; apply_patch/stopless focused Jest passed 18/18; build, apply_patch smoke, stopless smoke, install, and 10000 restart passed at 0.90.2260.
+
+## 2026-05-23 Windsurf 502/504 + RCC marker online 0.90.2261
+- Built/installed/restarted 0.90.2261 after changing retryable cascade transport reset to dispose the managed LS runtime instead of only clearing HTTP/2/session state. Focused Jest passed for reset disposal, 5min timeout, RCC latest-human marker projection, and mixed native/RCC history.
+- Online fresh RCC first turn `/tmp/rcc-windsurf-rcc-apply-patch-2261.body`: response `resp_1779532910863`, request `openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T184133961-222444-225`, status `requires_action`, tool `apply_patch`, call `call_ed356c51fbf9294d`.
+- Online submit `/tmp/rcc-windsurf-rcc-apply-patch-submit-2261.json` contains BEGIN/MIDDLE/END markers and curl succeeded after one 502 retry; final `resp_1779532982915` completed with no repeated function_call, but final text did not mention markers. This proves non-repeat continuity is fixed but long-output marker visibility/obedience is not yet accepted.
+- Exact log: submit attempt ws-pro-3 hit `WINDSURF_UPSTREAM_TRANSIENT` 502 then ws-pro-2 completed. 502 is still present after 0.90.2261; next step is inspect whether reset/dispose log fired and whether managed LS was actually replaced before retry.
+
+## 2026-05-23 stopless /v1/responses bypass root cause
+- Symptom: /v1/responses returned status=200 finish_reason=stop with no `[servertool][stop_watch]` or `stop_message_flow`; stopless did not refill.
+- Verified root cause: `shouldBypassProviderResponseConversion()` treated OpenAI Responses `object: "response"` as already-client-final and bypassed provider response conversion when servertools were enabled, so `resp_process.stage3_servertool_orchestration` never ran.
+- Red test: `tests/servertool/stop-message-responses-bypass.spec.ts` failed before fix because `/v1/responses` completed response returned `bypass=true`.
+- Fix: `src/server/runtime/http-server/executor/request-executor-runtime-blocks.ts` now returns `false` for `/v1/responses` + `openai-responses` + `object: "response"` when servertools are enabled, forcing the unique bridge/orchestration path so stopless can observe stop.
+- Verification: targeted stopless/servertool jest suite 19/19 passed; `npm run build:min` passed.
+
+## 2026-05-23 Windsurf RCC online pass + remaining 502 0.90.2263
+- Added managed LS adoption so RouteCodex restart can reuse latest live scoped LS by `--codeium_dir=~/.rcc/windsurf-ls/<account>` instead of spawning a new port every process restart. Focused Jest passed: `managed runtime should adopt latest live scoped LS`, reset disposal, timeout, RCC history marker tests.
+- Added RCC result instruction: if tool output contains BEGIN/MIDDLE/END markers, final answer must mention each marker exactly. Focused Jest confirms the instruction and markers are inside latest human turn.
+- Built/installed/restarted 0.90.2263. Fresh RCC online chain passed: first response `resp_1779533257590` required `apply_patch`; submit response `resp_1779533292720` completed, no function_call repeated, final output contained all three markers. Files: `/tmp/rcc-windsurf-rcc-apply-patch-2263.body`, `/tmp/rcc-windsurf-rcc-apply-patch-submit-2263.body`.
+- Remaining issue: submit still logged one provider-switch 502 on `windsurf.ws-pro-3.gpt-5.4-none` before succeeding on `windsurf.ws-pro-2.gpt-5.4-none`: request `openai-responses-windsurf.ws-pro-3-gpt-5.4-none-20260523T184757497-222447-228`. Therefore RCC correctness is online-verified, but 502 frequency is not fully solved. Need next inspect dynamic provider/account health/quota source and why ws-pro-3 is selected despite repeated transient failures.
+
+## 2026-05-23 stopless relay followup loop-state fix
+- User correction: MiniMax path is relay, not direct. The earlier router-direct hypothesis was wrong and was reverted.
+- Verified relay root cause with red test: when a servertool followup stop carried `__rt.serverToolLoopState.flowId = apply_patch_flow`, `stop-message-auto` skipped immediately with `skip_servertool_followup_hop` before checking stop eligibility.
+- Fix: `stop-message-auto` now allows stopless to proceed on servertool followup hops when the current response is stop-eligible; non-stop followup hops still skip to prevent recursive servertool loops.
+- Regression: `tests/servertool/stop-message-flow-followup-reentry.spec.ts` covers loop-state followup stop and openai-responses relay chat.completion stop. Target stopless/apply_patch suite passed 22/22. Direct response store suite still has unrelated retention failures and is not the relay stopless gate.
+
+## 2026-05-23 Windsurf 502 quota isolation follow-up
+- 502 frequent root cause: `windsurf.ws-pro-3.gpt-5.4-none` had `lastErrorSeries=E5XX`, `lastErrorCode=WINDSURF_UPSTREAM_TRANSIENT`, `consecutiveErrorCount=4`, but persisted quota snapshot had `inPool=true`, `reason=ok`, `cooldownUntil=null`; selector therefore kept routing it after each short cooldown expired.
+- Unique fix point: `tickQuotaStateTime()` in `src/manager/quota/provider-quota-center.ts`, because both daemon `getQuotaView()` and maintenance snapshot normalization call it before router consumes quota. Third+ E5XX now remains out of pool for the existing 10-minute error-chain window after cooldown expiry; success still clears the streak and restores pool.
+- Regression coverage: `provider-quota-center.spec.ts` now asserts repeated 5xx stays out of pool after cooldown expiry within chain window; daemon test asserts `getQuotaView()` reads the expired 3x 5xx snapshot as out-of-pool.
+- Focused verification passed: `npm run jest:run -- tests/manager/quota/provider-quota-center.spec.ts tests/manager/quota/provider-quota-daemon-module.spec.ts tests/providers/core/runtime/windsurf-chat-provider.spec.ts -t "5xx providers in pool only|recoverable 5xx 3x evicts|repeated 5xx providers out of pool|managed runtime should adopt latest live scoped LS|five-minute default timeout|retryable cascade transport reset" --runInBand`.
+- Installed verification correction: 10-minute error-chain isolation was too weak because persisted `ws-pro-3.gpt-5.4-none` had older `lastErrorAtMs` and still re-entered pool. Final policy: third+ E5XX stays out of pool until provider success or manual recover/reset clears `consecutiveErrorCount`.
+- Installed verification passed after rebuild/install/restart: `routecodex --version` = `0.90.2269`, `/health` version `0.90.2269`, persisted quota shows `windsurf.ws-pro-3.gpt-5.4-none` as `inPool=false`, `reason=cooldown`, `consecutiveErrorCount=4`, `lastErrorCode=WINDSURF_UPSTREAM_TRANSIENT`, `cooldownUntil=null`.
+
+## 2026-05-23 Windsurf 0.90.2269 online verification continuation
+- Send-path smoke passed on installed `0.90.2269`: `/tmp/rcc-windsurf-send-2269.json` -> `/v1/responses` returned HTTP 200 in 20s, response `resp_1779534607462`, output text `SEND_OK_2269SEND_OK_2269`; server log request `openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T190947525-222458-239`, route `thinking/gateway-priority-5520-thinking -> windsurf.ws-pro-4.gpt-5.4-none`, attempts=1, retries=0, external=19553ms. This proves the installed provider can send to Windsurf/LS/Cascade and receive a cloud result after the 502 quota isolation fix.
+
+## 2026-05-23 stopless red-test correction
+- User correction accepted: previous stopless red tests were insufficient because they mainly covered handler/response-stage, not the MiniMax relay executor path that must call nested followup after `/v1/responses` `chat.completion` `finish_reason=stop`.
+- Added executor-level focused test `tests/server/runtime/request-executor.single-attempt.spec.ts` / `re-enters stopless for openai-responses relay provider stop response`: mock MiniMax relay `openai-responses` provider response as `object: chat.completion`, `finish_reason: stop`, and assert `executeNestedInput` is called.
+- Focused verification passed after narrowing the assertion to the actual stopless trigger: logs show `stop_watch eligible=true`, `stop_message_flow activated`, `stop_compare ... captured=true seed=true`, and Jest reports the relay executor test passed.
+- Online user sample `req_1779534098281_e633d0e9/__runtime.json` still reports RouteCodex `0.90.2267`, so that log cannot prove the current source fix is installed/effective. Need rebuild/install/restart and then verify `/health` + a fresh MiniMax relay stop sample before claiming online fixed.
+- Native equivalent tool online smoke passed on installed `0.90.2269`: `/tmp/rcc-windsurf-native-tool-2269.json` returned `resp_1779534654912` with `status=requires_action` and `function_call` `name=shell_command`, `call_id=native:run_command:3`, arguments `printf native-windsurf-ok-2269`; submit `/tmp/rcc-windsurf-native-tool-submit-2269.json` to `/v1/responses/resp_1779534654912/submit_tool_outputs` returned `resp_1779534675926`, `status=completed`, `output_text=NATIVE_DONE_2269`. Server log: first request `openai-responses-windsurf.ws-pro-2-gpt-5.4-none-20260523T191046832-222459-240`, submit `openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T191054952-222460-241`; both attempts=1, retries=0; no ws-pro-3 502 after quota isolation.
+- RCC submit online failure root cause found after stopping retries and inspecting logs/code: submit response `resp_1779534727166` did not repeat tool_call, but final text said it saw only a placeholder/truncated prior apply_patch result and omitted markers. The provider prompt builder would preserve full `<|RCC|tool_result>` only if `function_call_output` can be matched to prior unsupported tool name. Parser bug: assistant history preferred item `id` over OpenAI Responses `call_id`; submit continuation has function_call `id=fc_*` and `call_id=call_*`, while tool output references `call_*`, so matchedCalls used `fc_*` and the tool result became orphan / lost RCC name context. Unique fix: prefer `row.call_id` over `row.id` when parsing assistant function_call history in `parseCascadeSemanticRoundtripSync()`.
+- Regression added: `Responses submit function_call_output without name still resolves prior unsupported tool name`; focused suite passed with RCC terminal marker and unsupported/native split tests.
+- RCC marker still failed on installed `0.90.2271` after call_id fix: submit response `resp_1779535000236` saw the tool output but focused on “audit placeholder/truncated” and omitted marker line. The prompt had marker instruction before the large CDATA block; model attention was lost after long output. Minimal fix: repeat the same marker instruction after the `<|RCC|tool_result>` block, so the latest human turn ends with the required marker evidence contract. Regression tightened to assert the final marker instruction appears after `</|RCC|tool_result>`.
+- RCC `0.90.2272` improved but was still not sufficient for strict completion: final included all three markers, but claimed `MIDDLE_Rcc_Long_Output` was not visible, so it only satisfied the literal output check, not evidence of preserved history. Added a tail evidence sentence after `</|RCC|tool_result>`: `Verified marker lines observed inside the RCC tool_result body: ...`, derived from the provider parser's marker extraction, to make marker visibility explicit after the long CDATA block. Focused tests passed.
+- Final online verification on installed `0.90.2273` passed all three goal legs:
+  1. Send path: `/tmp/rcc-windsurf-send-2273.json` -> `resp_1779535350749`, `status=completed`, output `SEND_OK_2273SEND_OK_2273`; log request `openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T192206380-222472-253`, attempts=1, retries=0.
+  2. Native equivalent tool: `/tmp/rcc-windsurf-native-tool-2273.json` -> `resp_1779535356074`, `status=requires_action`, `shell_command` call `native:run_command:3`; submit -> `resp_1779535364032`, `status=completed`, `output_text=NATIVE_DONE_2273`; logs `222473-254` and `222474-255`, attempts=1, retries=0.
+  3. RCC non-equivalent tool: `/tmp/rcc-windsurf-rcc-apply-patch-2273.json` -> `resp_1779535289850`, `apply_patch` call `call_ed356c51fbf9294d`; submit -> `resp_1779535295067`, `status=completed`, final contains `BEGIN_Rcc_Long_Output`, `MIDDLE_Rcc_Long_Output`, `END_Rcc_Long_Output`, and no `function_call` in submit response. Logs `222470-251` and `222471-252`, attempts=1, retries=0.
+- Completion audit: send-to-cloud/LS/Cascade, native tool conversion, and RCC text request + harvest/submit are all proven on the installed runtime. `ws-pro-3.gpt-5.4-none` remains isolated (`inPool=false`) so the prior hot 502 provider was not used in final smokes.
+
+## 2026-05-23 stopless continuous-stop budget simplification
+- User correction: stopless repeat budget should be based on consecutive `finish_reason=stop`, not tool-call semantics. If the current chat-process-visible finish reason is not stop, reset default stopless budget to 0; then the next stop can start a fresh 3-count window.
+- Fix point: `stop-message-auto` after `resolveStopGatewayContext()` and before skip; when `stopGateway.observed && !stopGateway.eligible && snapshot.source === 'default'`, reset persisted budget. `stop-gateway-context` now treats any non-empty non-stop chat `finish_reason` as observed but not eligible.
+- Removed the earlier tool-call-reset engine-entry special case. Focused tests passed, build/install/restart completed on `0.90.2274`; `/health` confirms server version `0.90.2274`.
+
+## 2026-05-23 Windsurf 工具历史/502 补强
+- 现象：RouteCodex 已能执行 Windsurf native/RCC 工具，但非 native RCC 工具结果若只作为普通历史/弱提示，长输出 marker 可能在下一轮被模型当成 placeholder/truncated，导致重复调用或误判历史丢失。
+- 真源：`src/providers/core/runtime/windsurf-chat-provider.ts` 的 Cascade 历史投影层；不是 HTTP/router，也不是单纯 timeout。Windsurf app/WindsurfAPI 的模型是普通文本、native additionalSteps、非 native tool_result 语义分通道。
+- 修复：`buildCascadePromptText()` 在构建 Cascade prompt 前调用 RCC marker hard gate：若最新用户要求 BEGIN/MIDDLE/END 等 marker，而已完成的 unsupported RCC tool_result 中缺失任一 marker，直接 fail-fast，不向 Windsurf 发送半坏历史；`buildWindsurfRccToolResultContext()` 仍把 RCC 结果放进最新 human turn 的 `<|RCC|tool_result>` CDATA 并追加 marker evidence。
+- 修复：`handleWindsurfCascadeTransportFailure()` 对 `WINDSURF_FETCH_TIMEOUT` 与 `WINDSURF_UPSTREAM_TRANSIENT` 一样 reset local gRPC session / warmup / pinned runtime，避免 504 后复用半坏 trajectory。
+- 重复调用审计：现有 `parseCascadeSemanticRoundtripSync()` 已在同一 user turn、已有 tool_result 后，对相同 tool name+args 的 assistant tool call fail-fast；新 user turn 后允许重调。无需新增第二套 guard。
+- 502 处理：`provider-quota-center` 已将 E5XX 保池限制为前 2 次，第 3 次起 out-of-pool 且 cooldown 过期后也保持 out-of-pool，直到 success/manual recover/reset；避免热坏 provider 反复进入路由。
+- 验证：`npm run jest:run -- tests/providers/core/runtime/windsurf-chat-provider.spec.ts -t "Responses submit function_call_output without name|RCC terminal tool result markers|unsupported tool results become RCC|RCC marker contract must fail fast|cascade timeout must invalidate|repeated prior tool call after tool_result|same tool signature repeats after tool_result|allows repeating same tool signature after a new user turn|uses configurable five-minute default timeout" --runInBand` 通过 9 项。
+- 验证：`npm run build:min` 通过；`npm run install:global && routecodex restart --port 5520 && routecodex --version && curl -sS --max-time 5 http://127.0.0.1:5520/health` 通过，入口版本 `0.90.2275`，health ready=true。
+- 验证：`provider-quota-center.spec.ts` 通过；新增 daemon 502 隔离用例 `recoverable 5xx 3x evicts` 单独通过。完整 daemon suite 仍有既有旧断言失败：single-provider unrecoverable 401 仍期待 inPool=true、weekly blacklist UTC 日期断言与当前本地时区计算不一致；未在本轮修改。
+- 2026-05-23 Jason 要求先建测试矩阵，再 Rust 实现，通过后移除 TS；去除双实现；禁止 fallback；按公共函数库+blocks+纯编排执行。需产出执行计划与 /goal prompt。
+- 2026-05-23 进入 P0 主链审计：先核对 runtime ssot 路由、项目 skill 与实际 stage/index 调用链，目标是建立 residue matrix 与测试矩阵，不先写 Rust。
+- 2026-05-23 P0 residue 证据已落盘：docs/audit/p0-hub-stage-residue-matrix.md。新增红测 tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts，当前按预期失败：req_process stage1 仍直接 import/call chat-process-clock-reminders 与 sanitizer；resp_process stage1 仍在 TS stage 内写 __rcc_tool_governance sidecar。
+
+## 2026-05-23 stopless finish_reason 唯一计数点
+- 现象：MiniMax relay `/v1/responses` 出现 `tool_calls -> stop` 后，后续 stop 没有续杯；旧实现把计数散在 stop-message handler / converter，tool_calls 轮可能不进入 handler，导致预算不 reset。
+- 真源：chat process servertool orchestration 入口拿到最终 `finish_reason` 后统一调用 `applyStopMessageFinishReasonBudget()`；`stop` 自增，任何 observed 非 stop（如 `tool_calls` / `length` / responses `function_call`）重置为 0。
+- 边界：handler 只消费已持久化的 `used/maxRepeats` 决策是否触发 followup，不再写计数；converter 不写计数。
+- 验证：`npm run jest:run -- --runTestsByPath tests/servertool/stop-message-auto.goal-default.spec.ts tests/servertool/stop-message-flow-followup-reentry.spec.ts --runInBand --no-cache --forceExit` 通过；executor relay 目标用例 `resets stopless default budget after openai-responses relay tool_calls response` 通过；`routecodex --version` 与 `/health` 均为 `0.90.2277`。
+
+## 2026-05-23 Responses store retainedInputItems 未回收根因
+- 现象：`[mem-observer] ... [store requestMap=5 responseIndex=2 scopeIndex=2 pendingNoResponseId=3 retainedInputItems=289]` 中 `retainedInputItems` 来自 `ResponsesConversationStore.getDebugStats()` 遍历 `requestMap.values()` 累加 `entry.input.length`。
+- 真源：`responses-conversation-store.ts` 已有 `releaseRequestPayload()` / `finalizeResponsesConversationRequestRetention()`，可在保留 `responseIndex/scopeIndex` 继续支持 submit/scope resume 的同时清空 `basePayload/input/tools`；但 server runtime bridge 没导出 finalize，`HubRequestExecutor` 成功路径只在错误 response 时 `clearResponsesConversationByRequestId()`，成功 `tool_calls` 不 finalize，导致成功首轮工具调用的 input 保留到 TTL/prune，形成 retainedInputItems 增长。
+- 修复：`src/modules/llmswitch/bridge/runtime-integrations.ts` 与 `src/modules/llmswitch/bridge.ts` 导出 `finalizeResponsesConversationRequestRetention()`；`src/server/runtime/http-server/request-executor.ts` 在 `/v1/responses` 成功非错误路径调用 finalize，`finishReason === 'tool_calls'` 时 `keepForSubmitToolOutputs=true`，保留索引但释放 payload；非 tool_calls 成功按 store 规则清理/释放。
+- 验证：`tests/server/runtime/request-executor.single-attempt.spec.ts` 新增 executor 回归，断言成功 tool_calls 调用 finalize；focused 2 项通过。`tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` 2 项通过。`npm run build:min` 通过，版本 `0.90.2278`。
+
+## 2026-05-23 quota keep-pool 与 provider 不可空池修复
+- 纠偏：MiniMax relay 不是 SSE 透传问题；不要在 HTTP SSE bridge 里把 Chat SSE 桥成 Responses SSE。relay 的协议形状应在 chat process/codec 已完成。
+- 真源：Rust virtual router selection 读 quotaView 时只看 `cooldownUntil`，没读 `cooldownKeepsPool`，导致 quota state 已声明 transient cooldown keep-pool 仍被 selector 排除。
+- 第二真源：quotaView 启用时 Rust router-local health 仍处理 provider error，产生本地 tripped 状态，与动态 quotaView 双写冲突。quotaView 存在时 provider success/error 健康写入应跳过，由 quota manager 作为唯一状态源。
+- 验证：`tests/servertool/virtual-router-quota-routing.spec.ts` 覆盖 keep-pool cooldown 不出池、单 provider 不空池、hard cooldown 仍排除；`tests/servertool/virtual-router-series-cooldown.spec.ts` 覆盖 quotaView 启用时不产生 router-local cooldown。版本已安装重启到 `0.90.2281`。
+
+## 2026-05-23 retainedInputItems releaseRequestPayload 真修复
+- 现象：安装 `0.90.2279` 后 `retainedInputItems` 仍从 543 增到 712。原因不是 executor finalize 没调用，而是 `ResponsesConversationStore.releaseRequestPayload()` 只改 `basePayload`，没有清 `entry.input` / `entry.tools`，所以 debug stats 仍累加旧 input。
+- 修复真源：`sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts` 与同目录 `.js` 的 `releaseRequestPayload()` 现在清空 `entry.input=[]`、`entry.tools=undefined`，同时保留 `requestMap/responseIndex/scopeIndex`。
+- Rust 公共函数同步：`shared_responses_conversation_utils.rs::restore_responses_continuation_payload()` 在 entry prefix 已释放为空时，允许使用 incoming input 作为 delta，并继续写 `previous_response_id`；避免释放 input 后 scope continuation 失效。
+- 验证：`tests/sharedmodule/responses-continuation-store.spec.ts -t "releasing request payload preserves scope-based continuation lookup"` 通过，断言 release 后 `retainedInputItems=0` 且 request/response/scope index 仍为 1。`tests/server/runtime/request-executor.single-attempt.spec.ts -t "finalizes responses conversation retention"` 通过。`npm run build:min`、`npm run install:global`、`routecodex restart --port 5520` 通过；health version `0.90.2283`。
+
+## 2026-05-23 apply_patch 引导样例修复
+- 现象：模型拿到 `FILE_NOT_FOUND` 后知道 schema 是 `{filePath, patch}`，但仍继续用 shell/cat 猜测测试；说明 provider-facing schema 与错误 nextAction 缺少可复制的 create/append/update JSON 调用。
+- 修复：Rust req governance 的 apply_patch schema 明确三种正例：Create file / Append / Update existing file；TS handler 错误反馈统一返回可复制 `apply_patch` JSON nextAction，不再提旧字段或 shell 反例。
+- 边界：不猜语义，仍只修形状；缺 filePath/patch 或 remove 行不匹配时显式失败并指导下一轮用正确 JSON 重试。
+- 验证：`tests/servertool/apply-patch-flow.spec.ts` 与 `tests/servertool/apply-patch-schema-guidance.spec.ts` 通过；quota/stopless 关键回归通过；版本已安装重启到 `0.90.2283`。
+
+## 2026-05-23 provider 连续错误计数 success reset 断接修复
+- 现象：一次 provider business error 后，中间出现成功 `tool_calls`/非错误响应，再次错误仍可能按连续错误链处理，用户日志表现为非连续错误后 provider 被排除，甚至看到 `No available providers after applying routing instructions`。
+- 真源：`ProviderQuotaDaemonModule` 已有 `recordProviderSuccess()` 会调用 `applySuccessEvent()` 清空 `lastError*` 和 `consecutiveErrorCount`，但 quota adapter 的公共入口调用的是 `legacy.onProviderSuccess(event)`；daemon 没有 `onProviderSuccess()` 方法，导致 provider success 事件没有进入 quota state，连续错误计数不会被成功响应 reset。
+- 修复：在 `src/manager/modules/quota/provider-quota-daemon.ts` 增加 `onProviderSuccess()` 薄入口，只从 success event 读取 `runtime.providerKey` / timestamp / token usage 后转发到既有 `recordProviderSuccess()`；不新增第二套计数逻辑。
+- 验证：`tests/manager/quota/provider-quota-daemon-module.spec.ts` 新增 daemon 直接入口与 `createQuotaManagerAdapter(...).onProviderSuccess()` 公共入口回归，证明 error -> success -> same error 后 `consecutiveErrorCount=1` 且 `inPool=true`。目标集 `provider-quota-daemon-module`、`provider-quota-center`、`virtual-router-quota-routing`、`virtual-router-series-cooldown` 共 45 tests 通过；`npm run build:min`、`npm run install:global`、`routecodex restart --port 10000` 通过，health version `0.90.2284`。
+
+## 2026-05-23 retainedInputItems orphan cleanup
+- 现象：mem-observer 中 `pendingNoResponseId` 与 `retainedInputItems` 同步增长，即使 responseIndex/scopeIndex 较小也不下降。
+- 真源：`/v1/responses` tool_calls 拿到 client-visible `resp_*` 后，只在 `resp_*` 上 record/finalize，早期捕获的 router/provider requestId context 没有被清理，成为 pending orphan；同时 submit_tool_outputs 需要保留 tools 与 pending tool call 摘要，不能保留完整 input prefix。
+- 修复点：`src/server/handlers/handler-response-utils.ts` 在 record client responseId 后清理被 supersede 的 requestLabel/timingRequestIds，并 finalize responseId；store release 只保留 tools + released pending tool call ids，Rust restore 用 pending tool output 定位 delta。
+- 验证：`npm run build:min`、handler responses store integration、responses-continuation-store 定向、request-executor retention 定向、`npm run install:global`、`routecodex restart --port 5520`、`/health` 0.90.2286 ready/pipelineReady。
+
+## 2026-05-23 resp_process stage1 residue closeout in-progress
+- Moved requestedToolNames injection and prepared-path governance application into Rust resp_process_stage1_tool_governance.
+- Removed TS stage-shell sidecar writers attachRequestedToolNames/markTextHarvestApplied from resp_process stage1 index.
+- Next verify: residue audit + resp_process stage1 native wrapper + rust cargo slice.
+
+## 2026-05-23 Windsurf RCC text-tool typed parameter fix
+- 现象：Windsurf RCC 文本工具 smoke 中 `update_plan.plan` 被收割成字符串，导致工具层报 `invalid type: string, expected sequence`；multi-param `apply_patch` guidance 只示例第一个参数，容易漏 `patch`/`filePath` 等 required 参数。
+- 真源：`src/providers/core/runtime/windsurf-chat-provider.ts` 的 RCC harvester 对 `<|RCC|parameter>` 一律按 string 写入 arguments；`buildWindsurfRccToolGuidance()` 只输出首个参数模板，没有按 schema 类型/required 参数投影。
+- 修复：harvester 按 unsupported tool JSON schema 把 array/object/boolean/number 参数从 CDATA JSON literal 还原成真实类型；guidance 为所有 required 参数生成模板，并明确 JSON typed 参数规则。
+- 验证：Windsurf provider RCC 邻近 Jest 5/5 通过；`npm run build:min`、`npm run install:global`、`routecodex restart --port 5520`、`/health` 0.90.2288 ready/pipelineReady。
+
+- Release native rebuilt for resp_process stage1 prepared-path validation; rerunning focused Jest against release binding.
+
+## 2026-05-23 stopless stop investigation
+- Reported request `openai-responses-mini27.key1-MiniMax-M2.7-20260523T203928604-222619-400` completed `/v1/responses` with `finish_reason=stop` and no visible stop followup.
+- Investigation target: verify single finish_reason budget point and live sticky-key state before changing code.
+- Root cause verified by sample/log: request `203928604` had no `stop_followup`; previous `203916023` stop followup returned `tool_calls` while stop counter stayed at `used=3`.
+- Added red regression: stop followup returning `tool_calls` must reset persisted default consecutive-stop budget to `0`, so next stop starts a fresh 3-count window.
+- Fix point: `followup-mainline-block.ts` observes reenter followup body and applies the same finish_reason budget logic for observed non-stop followup results.
+- Validation: focused stopless Jest suites passed; build/install/restart passed; 10000/5520 health OK on version `0.90.2289`.
+
+## 2026-05-23 resp_process stage1 closeout follow-up
+- 焦点继续只改 Rust 真源: resp_process_stage1_tool_governance.rs
+- 现状红测仍只剩 3 条：tool:exec_command content cleanup、shell_command wrapper 输出补 cmd、reasoning_content time-tag/arg_key cleanup
+- 本轮已补 Rust 侧最小改动：strip_text_tool_wrapper_noise 增加 [Time/Date] 行剥离；sanitize_content_field_after_tool_markup 在 allow_empty_clear 下把纯工具残留清成 null；remap_tool_calls_for_client_protocol 为最终 exec_command 出口补 cmd（保留 command 不删）
+- 已补 3 条对应 Rust 回归，接下来等 cargo/jest 结果确认是否全绿。
+- cargo test -p router-hotpath-napi resp_process_stage1_tool_governance --release 当前未全绿；其中多条失败看起来与本轮 3 个焦点分支无关，需后续分层甄别是否为既有脏工作树问题。
+- 第二轮补丁：strip_orphan_tool_markup_lines 新增 tool:exec_command / timeout_ms / inline exec_command<arg_key> 清理；cmd 双写收窄为 command-only 且无 cwd/workdir 的 wrapper 路径。
+- 第三轮补丁：strip_tool_call_marker_payload 追加 bare inline reasoning exec_command<arg_key>... </tool_call> 剥离。
+
+## 2026-05-23 hub pipeline P0 residue audit tightening
+- 继续遵循“先测试矩阵，后 Rust”：本轮未进入 Rust 实现，先补 P0 residue gate 与矩阵。
+- 现状核对结果：
+  - `req_process_stage1_tool_governance/index.ts` 仍直接 import/call：
+    - `applyHeartbeatDirectives(...)`
+    - `applyChatProcessClockRuntimeBridge(...)`
+    - `applyChatProcessRequestSanitizerRuntimeBridge(...)`
+  - 这 3 条仍属于 TS-authoritative residue，不是薄壳；对应 bridge 内仍保留 heartbeat persistence、clock reminder inject/metadata build、sanitizer marker strip/metadata append 等语义。
+  - `resp_process_stage1_tool_governance/index.ts` 当前 stage shell 已收成 native prepare + native apply + recordStage；旧 `__rcc_tool_governance` sidecar 写入已不在 TS stage。
+- 已更新 `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`：
+  - req_process stage1 新增禁止项：heartbeat directives、clock runtime bridge、request sanitizer runtime bridge 的 import/call
+  - resp_process stage1 保持“禁止 TS sidecar 语义回流”门禁
+- 已更新 `docs/audit/p0-hub-stage-residue-matrix.md`：
+  - req_process stage1 明确升级为 heartbeat + clock + sanitizer 三段 TS-authoritative residue
+  - resp_process stage1 更新为当前 `thin-shell` 事实，避免继续把已删除的 stage residue 当作现存缺口
+- residue audit 已验证：
+  - `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache`
+  - 结果符合预期：req_process stage1 红，命中 6 条 finding（3 import + 3 call）；resp_process stage1 绿，证明 stage shell 没有回流 sidecar 语义。
+- 已把 req_process heartbeat/clock/sanitizer 的 deletion gate 候选测试集合固化进：
+  - `docs/goals/hub-pipeline-rust-closeout-test-matrix-plan.md`
+  - 当前固定套件：
+    - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
+    - `tests/servertool/servertool-heartbeat.spec.ts`
+    - `tests/servertool/servertool-clock.spec.ts`
+    - `tests/servertool/chat-request-marker-strip.spec.ts`
+    - `tests/sharedmodule/chat-process-request-sanitizer.spec.ts`
+    - `tests/sharedmodule/apply-patch-chat-process-contract.spec.ts`
+    - `tests/sharedmodule/hub-pipeline-execute-chat-process-entry.spec.ts`
+- 下一步：先跑上述 green baseline 套件，确认当前工作树可作为 deletion gate 基线；然后才进入 req_process 对应 Rust shared functions + blocks 收口。
+
+## 2026-05-23 req_process heartbeat/clock baseline split
+- 删除门禁 baseline 分组后，当前工作树不是“整体可绿”的状态；已拆成更可执行的红因：
+  1. `servertool-heartbeat.spec.ts` 当前大面积失败，根因证据已锁到 heartbeat directive native path：
+     - Rust `hub_heartbeat_directives.rs` 已存在真实实现；
+     - 但 `rust-core/.../src/lib.rs` 当前导出的 `resolveHeartbeatDirectiveJson` 仍是 disabled stub，固定返回 `action=none`；
+     - 新红测 `tests/sharedmodule/heartbeat-directive-native-contract.spec.ts` 已证明 active native resolver 不能解析 `<**hb:15m**>`，当前收到 `action=none`。
+  2. `chat-process-heartbeat-directives.ts` 当前 TS bridge 还在读取 snake_case 字段：
+     - `interval_ms`
+     - `tmux_session_id`
+     - `content_changed`
+     - 这与 TS native wrapper 对外 camelCase contract 不一致；已新增审计红测 `tests/sharedmodule/heartbeat-directive-bridge-contract-audit.spec.ts` 锁定该残留。
+  3. `servertool-clock.spec.ts` 当前也非全绿，但失败点与本轮 req_process residue gate 不同：
+     - `setBy` 期望 `agent` 实得 `user`
+     - `clock_hold_flow` 期望 `clock_hold_flow` 实得 `stop_message_flow`
+     - 这些说明 clock baseline 还需要单独分层，不能直接和 heartbeat 根因混写成一个 Rust 修改点。
+  4. `apply-patch-chat-process-contract.spec.ts` 当前有 1 条基线失败：
+     - servertool mode 下 `apply_patch` 描述文案不再含 `workspace-relative`
+     - 这是 req_process Rust 真源 `req_process_stage1_tool_governance.rs` 的既有行为差异，不是本轮新引入。
+- 结论：当前 P0 里最适合先收口成唯一 Rust 修改点的不是“大而全的 req_process stage1”，而是 heartbeat directive 这一条清晰切片：active native export + TS bridge contract。
+
+## 2026-05-23 heartbeat directive native export closeout
+- 本轮正式进入 P0 的第一个唯一真源切片：heartbeat directive native export + bridge contract。
+- 唯一 Rust 真源修改点：
+  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
+  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_heartbeat_directives.rs`
+- TS 边界修改点：
+  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-heartbeat-directives.ts`
+- 做了什么：
+  1. 删除 `lib.rs` 里 `resolveHeartbeatDirectiveJson` 的 disabled stub，启用 `hub_heartbeat_directives.rs` 作为 active native export。
+  2. 修复 `hub_heartbeat_directives.rs` 的真实激活后暴露出来的边界缺陷：
+     - marker body move 后再次借用导致编译失败
+     - `extract_hb_from_text()` 在短文本上的 slice 越界 panic
+  3. TS heartbeat bridge 改为消费 camelCase native contract：
+     - `intervalMs`
+     - `tmuxSessionId`
+     - 不再从 `nativeDirective.*` 读取 snake_case
+  4. 新增 Rust 单测：
+     - `resolves_latest_hb_directive_with_camelcase_metadata`
+- 新增/更新的测试证据：
+  - `tests/sharedmodule/heartbeat-directive-native-contract.spec.ts`：PASS
+  - `tests/sharedmodule/heartbeat-directive-bridge-contract-audit.spec.ts`：PASS
+  - `tests/servertool/servertool-heartbeat.spec.ts`：PASS（18/18）
+- 关键命令证据：
+  - `cargo test -p router-hotpath-napi resolves_latest_hb_directive_with_camelcase_metadata --release` → PASS
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` → PASS
+  - `npm run jest:run -- --runTestsByPath tests/sharedmodule/heartbeat-directive-native-contract.spec.ts --runInBand --no-cache` → PASS
+  - `npm run jest:run -- --runTestsByPath tests/sharedmodule/heartbeat-directive-bridge-contract-audit.spec.ts --runInBand --no-cache` → PASS
+  - `npm run jest:run -- --runTestsByPath tests/servertool/servertool-heartbeat.spec.ts --runInBand --no-cache` → PASS
+- 当前结论：
+  - heartbeat directive 这一条已经从“TS residue + disabled native export”推进到“active native truth + TS 边界对齐 + 行为回归通过”。
+  - 但整个 req_process stage1 仍未 Rust-only；clock runtime bridge、request sanitizer runtime bridge 以及后续 stage residue 仍在。
+- 下一切片：
+  - 优先继续 P0 的 `clock runtime bridge`，因为它仍被 req_process stage1 直接 import/call，且 `servertool-clock.spec.ts` 当前已有 3 条独立红因。
+
+## 2026-05-23 apply_patch codex-samples failure root cause
+- 样本：`~/.rcc/codex-samples/openai-responses/mini27.key1.MiniMax-M2.7/req_1779539814312_91365fc8/provider-request.json` 与 `req_1779539682097_6c040392/provider-request.json`。
+- 证据：provider request history 中反复出现 `assistant.tool_calls[].function.name=apply_patch` 且 `arguments={"input":"*** Begin Patch...__APPLY_PATCH_ERROR__/missing_patch.txt...","patch":"..."}`，缺少当前工具 schema 必需的 `filePath`；紧随 `tool` 结果为同一个 `APPLY_PATCH_ERROR`。
+- 真源：Rust `resp_process_stage1_tool_governance::normalize_apply_patch_schema_args()` 把当前 `{filePath, patch}`/失败 guard 历史归一成旧 `{input, patch}`，丢失 `filePath`；请求侧又没有剪掉 synthetic `__APPLY_PATCH_ERROR__` 历史对，导致模型持续复用坏样本。
+- 修复：当前 schema `{filePath, patch}` 且无 `fileContent` 时原样保留；旧 hashline `{filePath, fileContent, patch}` 仍走既有转换；请求入站剪掉 synthetic `__APPLY_PATCH_ERROR__` assistant/tool 历史对。
+- 验证：Rust `govern_response_apply_patch` 11/11 通过；Rust `prunes_synthetic_apply_patch_guard_history_pair` 通过；dist native smoke 确认 `{filePath, patch}` 保留、synthetic guard history 被剪；`npm run build:min`、`npm run install:global`、`routecodex restart --port 5520`、health 0.90.2291。
+
+## 2026-05-23 apply_patch servertool smoke
+- Direct handler smoke via `sharedmodule/llmswitch-core/dist/servertool/handlers/apply-patch.js` in `/tmp/rcc-apply-patch-smoke-1779542427759` passed create/update/append/negative.
+- Evidence: create `+ alpha/+ beta` -> `alpha\nbeta\n`; update `- beta/+ beta-updated` -> `alpha\nbeta-updated\n`; append `+ gamma` -> `alpha\nbeta-updated\ngamma\n`; negative `- not-present/+ should-not-apply` returned `APPLY_PATCH_FAILED/PATCH_CONTEXT_NOT_FOUND` and final file stayed unchanged.
+- Important nuance: handler writes trailing newline for line-edit patches; test expectations must include final `\n`.
+
+## 2026-05-23 provider unavailable backoff investigation
+- Reported repeated `/v1/responses` failures at 21:24-21:25: `No available providers after applying routing instructions` before provider acquire.
+- Investigation target: provider failure cooldown/backoff selection truth; user rule says only 3 consecutive errors count, non-continuous resets, and last provider must not be blacklisted into zero-provider state.
+
+## 2026-05-23 Windsurf flat Responses tool loss
+- Symptom from live request `openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T212223310-222654-435`: route reason saw tools, but Windsurf returned `finish_reason=stop`; no provider sample captured for that request.
+- Red test confirmed root cause: Windsurf preprocessing only recognized Chat tool shape `{type:"function", function:{name,...}}`; Responses flat function tool shape `{type:"function", name, parameters}` was deleted with `body.tools` but not moved into `windsurf_unsupported_text_tools`, so Cascade prompt had no RCC apply_patch guidance.
+- Fix: normalize flat tool definitions to canonical function object at `partitionWindsurfTools` / `collectWindsurfMappedTools` unique entry, preserving name/description/parameters/strict and keeping no fallback path.
+- Verification: targeted Windsurf jest 20 passed; `npm run build:min`; `npm run install:global`; `routecodex restart --port 5520`; health version `0.90.2292`; dist smoke shows protocol `rcc`, unsupportedNames `[apply_patch]`, prompt contains apply_patch/filePath/patch parameters.
+
+## 2026-05-23 startup missing dist module check
+- Symptom: server start failed with `ERR_MODULE_NOT_FOUND dist/providers/core/runtime/provider-request-preprocessor.js`.
+- Verified current runtime: `dist/providers/core/runtime/provider-request-preprocessor.js` exists, `http-transport-provider.js` import passes from a real `.mjs`, and health on 5520/10000 reports version `0.90.2295` ready.
+- Cause for pasted error: stale/partial `dist` from earlier interrupted build; not a live source import bug after full rebuild.
+
+## 2026-05-23 clock P0 slice: setBy + clock_hold_flow
+- 本轮继续按 P0 先测后改，直接命中 `tests/servertool/servertool-clock.spec.ts` 当前 3 条红测，不扩散到其它能力块。
+- 先用实跑证据确认真实红因：
+  1. `end-to-end: schedule via tool_call → next request injects due reminder → commit marks delivered`
+     - 期望 `stateBefore.tasks[0].setBy === 'agent'`
+     - 实得 `user`
+  2. `clock_hold_flow followup keeps original providerKey pinned`
+     - 期望 `flowId === 'clock_hold_flow'`
+     - 实得 `stop_message_flow`
+  3. `unit: schedule/update/list/cancel/clear via clock handler outputs`
+     - 期望 `scheduled[0].setBy === 'agent'`
+     - 实得 `user`
+- 第一处唯一正确修改点：
+  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts`
+  - 原因：`runPrimaryServerToolEngineSelection()` 硬编码先跑 `stop_message_auto`，这与 skeleton config 已声明的 auto hook primary order (`clock_auto -> stop_message_auto`) 冲突，导致 stop response 被 stop_message_flow 抢走，clock hold 永远拿不到优先匹配权。
+  - 修复：改成读取 `buildServertoolAutoHookQueueConfig().optionalPrimaryOrder` 作为第一轮 include/exclude 名单；这样主引擎与 skeleton config 单一真源对齐，不再硬编码 `stop_message_auto`。
+- 第二处真实根因不是业务逻辑，而是运行真源偏移：
+  - 我先改了 `/src/servertool/handlers/clock.ts`，给 tool-call schedule 默认补 `setBy: item.setBy ?? 'agent'`，但 red test 仍旧失败；
+  - 继续查证后发现 `tests/servertool/servertool-clock.spec.ts` 当前实际加载的是 `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/handlers/clock.js`（源目录下的旧 JS 实文件），而不是 `clock.ts`；
+  - 这意味着 `src/*.js` 在当前仓内是活的运行真源影子，TS 改动不会自动生效；如果不先承认这一点，就会反复误判“代码已改但测试不变”。
+- 因此本轮 `setBy` 的唯一实际生效修改点是：
+  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/handlers/clock.js`
+  - 修改：tool-call `schedule` 路径在 `normalized.items` 上先补 `setBy: 'agent'`（仅当调用参数未显式传 `setBy` 时）；marker path 仍保留原有 `user` 语义，不影响 `clock marker scheduling` 相关测试。
+- 验证结果：
+  - `npm run jest:run -- --runTestsByPath /Users/fanzhang/Documents/github/routecodex/tests/servertool/server-side-tools.auto-hook-config.spec.ts /Users/fanzhang/Documents/github/routecodex/tests/servertool/servertool-auto-hook-trace.spec.ts --runInBand --no-cache` → PASS
+  - `npm run jest:run -- --runTestsByPath /Users/fanzhang/Documents/github/routecodex/tests/servertool/servertool-clock.spec.ts --runInBand --no-cache` → PASS（31/31）
+- 本轮新增的重要真相：
+  - `src/servertool/handlers/clock.js` 是当前活的运行真源影子，覆盖了 `clock.ts`；
+  - 这属于典型“双实现 / 双入口”风险，后续 Hub Pipeline Rust/TS closeout 不能只看 `.ts`，还必须把 `src` 下仍被直接 import 的 `.js` 一并纳入 residue matrix，否则会持续出现“改了 TS 不生效”的假推进。
+- 下一步：
+  - 把 `req_process stage1` 的 `clock runtime bridge / sanitizer bridge` deletion gate 继续推进；
+  - 同时补一条文档/审计约束：凡 `src/**` 下存在 `.ts` / `.js` 同名并被测试或主链直接 import 的，都应视为 active residue，不得忽略。
+
+## 2026-05-23 P0 closeout gate split: active JS shadow vs req_process residue
+- 本轮没有贸然删 bridge，而是继续把 P0 的“真实阻塞点”拆成可验证门禁，符合“先测试矩阵，后迁移/删除”。
+- 新增红门禁：
+  - `/Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts`
+  - 作用：锁定 `src/servertool/*.js` sibling shadow 当前确实是**活跃运行真源影子**，而不是“无害构建物”。
+- 该门禁当前实跑结果：FAIL（这是正确状态）
+  - 命中 5 条 active shadow 证据：
+    1. `engine.ts -> server-side-tools.js`
+    2. `server-side-tools.js -> handlers/clock.js`
+    3. `server-side-tools.js -> handlers/clock-auto.js`
+    4. `handlers/clock.js -> clock/task-store.js`
+    5. `handlers/clock.js -> handlers/clock-pure-blocks.js`
+- 这说明：
+  - 当前 servertool P0 路径不只是“有 TS residue”；
+  - 还存在“同名 `.ts` 与 `.js` 并存，但主链/测试命中 `.js`”的 active dual-source residue；
+  - 如果不先把这层做成门禁，后续每次改 `.ts` 都可能再次出现“看起来改了，实际没命中”的假推进。
+- 同轮再次验证两类 baseline：
+  1. `/Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` → FAIL（正确）
+     - 仍锁到 `req_process_stage1_tool_governance/index.ts` 直接 import/call：
+       - `chat-process-heartbeat-directives.js`
+       - `chat-process-clock-runtime-bridge.js`
+       - `chat-process-request-sanitizer-runtime-bridge.js`
+       - `applyHeartbeatDirectives(...)`
+       - `applyChatProcessClockRuntimeBridge(...)`
+       - `applyChatProcessRequestSanitizerRuntimeBridge(...)`
+  2. `/Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/chat-process-request-sanitizer.spec.ts` → PASS（16 passed, 2 skipped）
+     - 结论：sanitizer 行为基线目前是稳的；当前问题不是“sanitizer 功能坏了”，而是“主链仍通过 TS bridge + active shadow 跑这层语义”。
+- 文档同步：
+  - `/Users/fanzhang/Documents/github/routecodex/docs/goals/hub-pipeline-rust-closeout-test-matrix-plan.md`
+  - `/Users/fanzhang/Documents/github/routecodex/docs/audit/p0-hub-stage-residue-matrix.md`
+  已补充：active `.js` shadow 也算双实现 residue，必须进入 audit / deletion gate。
+- 当前最重要结论：
+  - `req_process stage1` 仍是 `TS-authoritative residue`；
+  - `servertool` 关键路径还额外存在 `active js shadow`；
+  - 下一个正确方向不是改 sanitizer 细节，而是优先减少运行路径对 `src/*.js` shadow 的命中，并继续收缩 stage 对 heartbeat/clock/sanitizer bridge 的直接依赖。
+
+## 2026-05-23 P0 deletion gate closeout: servertool clock active JS shadow
+- 本轮不是只做审计，而是沿着新增 red gate 继续完成了一个真实的“测试通过后物理删除双实现”切片。
+- 删除前新增并验证的门禁：
+  - `/Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts`
+  - 该门禁先红，锁定以下 5 个 `src/*.js` sibling shadow 与同名 `.ts` 并存：
+    1. `sharedmodule/llmswitch-core/src/servertool/server-side-tools.js`
+    2. `sharedmodule/llmswitch-core/src/servertool/handlers/clock.js`
+    3. `sharedmodule/llmswitch-core/src/servertool/handlers/clock-auto.js`
+    4. `sharedmodule/llmswitch-core/src/servertool/handlers/clock-pure-blocks.js`
+    5. `sharedmodule/llmswitch-core/src/servertool/clock/task-store.js`
+- 这 5 个文件已经**物理删除**；删除依据：
+  - 同名 `.ts` 真源已存在；
+  - 这些 `.js` 在 `src` 目录里不是被动构建物，而是 active shadow，会覆盖 `.ts` 改动；
+  - 这符合用户要求“去除双实现”“测试通过后物理删除 TS/旧实现”。
+- 同轮保留的最小必要逻辑修改：
+  1. `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts`
+     - 不再硬编码第一轮只跑 `stop_message_auto`；
+     - 改为读取 skeleton config primary auto hook 顺序，恢复 `clock_auto -> stop_message_auto` 单一真源。
+  2. `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/handlers/clock.ts`
+     - tool-call `schedule` 默认补 `setBy: 'agent'`（仅当参数未显式给出时），marker path 仍保留 `user`。
+- 删除后的验证证据：
+  1. deletion gate：
+     - `npm run jest:run -- --runTestsByPath /Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts --runInBand --no-cache` → PASS
+  2. 行为回归：
+     - `npm run jest:run -- --runTestsByPath /Users/fanzhang/Documents/github/routecodex/tests/servertool/servertool-clock.spec.ts /Users/fanzhang/Documents/github/routecodex/tests/servertool/server-side-tools.auto-hook-config.spec.ts /Users/fanzhang/Documents/github/routecodex/tests/servertool/servertool-auto-hook-trace.spec.ts --runInBand --no-cache` → PASS（38/38）
+  3. 构建：
+     - `npm run build:min` → PASS
+- 当前 closeout 含义：
+  - 这不是“Hub Pipeline 全完成”，但确实完成了一个 P0 子切片：
+    - **servertool clock 路径上的 active JS sibling shadow 已删除**；
+    - 删除后测试与构建仍通过；
+    - 对应 deletion gate 已从红转绿。
+- 与总目标的关系：
+  - 这一步让“公共函数库 + blocks + 纯编排”的运行路径更真实，因为当前 clock/servertool 关键链不再被 `src/*.js` shadow 劫持；
+  - 但 `req_process stage1` residue audit 仍红，heartbeat / clock runtime bridge / sanitizer runtime bridge 仍直接挂在主链里，所以下一阶段仍必须继续围绕 stage 主链收口。
+
+## 2026-05-23 apply_patch output false error investigation
+- Symptom: provider sample shows apply_patch call with canonical `{filePath, patch}` followed by `APPLY_PATCH_ERROR`, while filesystem evidence showed target file was created later in the same session.
+- Hypothesis under test: Rust inbound history normalization in `hub_req_inbound_tool_call_normalization.rs` may classify successful apply_patch tool outputs as error when the success payload contains diagnostic words like `error`/`missing`.
+- Verification plan: add Rust red tests around `normalize_shell_like_tool_calls_before_governance` for successful JSON/status outputs before changing logic.
+
+## 2026-05-23 hub pipeline rust closeout - clock bridge residue
+
+- heartbeat 已从 `req_process_stage1_tool_governance/index.ts` 主链直连移入 Rust `req_process_stage1_tool_governance.rs`；stage 只剩 runtime side effects wrapper。
+- 当前下一处真实 residue 在 `sharedmodule/llmswitch-core/src/conversion/hub/process/blocks/chat-process-clock-runtime-bridge.ts`：它仍直接 `import { applyHeartbeatDirectives }` 并在进入 clock reminder 编排前再次执行 TS heartbeat strip。
+- 这会形成二次语义路径：主链 Rust 已处理 heartbeat，而 clock bridge 仍偷偷再走一遍 TS heartbeat 语义，不符合单一真源。
+- 本轮先按测试矩阵要求补 focused deletion gate：锁定 `chat-process-clock-runtime-bridge.ts` 不得再 import/call `applyHeartbeatDirectives`。
+- 然后把 clock runtime bridge 收缩为“假定上游已完成 heartbeat 语义，只负责 clock runtime orchestration + side effects”。
+- 风险点：`chat-process-governance-orchestration.ts` / `chat-process-servertool-orchestration.ts` 仍经 `chat-process-clock-reminders.ts` 间接调用 clock bridge；若测试命中这些旧 TS 路径，需要继续为它们补独立 heartbeat 入口或进一步收口到 native，而不能把 heartbeat 语义继续塞回 clock bridge。
+
+## 2026-05-23 quota startup/probe cleanup
+- Symptom: Windsurf 5520 pool could become unavailable because stale `reason=cooldown,inPool=false,cooldownUntil=null,blacklistUntil=null` snapshots persisted after service/transient errors.
+- Root source: quota state projection/snapshot sanitization, not router routing. Startup probe already exists at `createProviderHandle -> enforceWindsurfStartupProbeForHandle`; `checkHealth=false` rejects Windsurf runtime with `WINDSURF_STARTUP_PROBE_FAILED`.
+- Fix direction: dead cooldown without deadline is physically normalized back to `ok`; expired 5xx cooldown clears error chain; `WINDSURF_SERVICE_UNREACHABLE` is quota-neutral and must not create provider cooldown.
+- Verification: targeted jest passed for `provider-quota-center`, `provider-quota-store`, `provider-quota-daemon-module`, and `windsurf-runtime-startup-probe`.
+
+## 2026-05-23 quota keep-pool simplification
+- Decision: automatic quota/provider errors must not remove providers from routing pools; only manual admin disable/blacklist may set `inPool:false`.
+- Root cause fixed: daemon weekly/deterministic quota branches and core HTTP 402 branch produced `inPool:false`/`blacklist`, causing Rust virtual router to correctly filter every candidate and return `PROVIDER_NOT_AVAILABLE` on 10000.
+- New invariant: automatic quota states use `reason:"cooldown"`, `inPool:true`, `cooldownKeepsPool:true`, `blacklistUntil:null`; cooldown remains observable/backoff metadata but does not empty pools.
+- Verification: quota daemon/module/router Jest suites passed, `npm run build:min` passed, `routecodex restart --port 10000` succeeded, `/health` on 10000 returned version 0.90.2306.
+
+## 2026-05-23 23:xx 5520 Windsurf context loss audit
+- Evidence: latest 5520 Windsurf smoke samples `20260523T230150069`, `20260523T230704899`, `20260523T230855344`, `20260523T230900867` have `textBytes=14`, `additionalStepsCount=0`, text is only `只回复 OK N`; these are intentionally single-turn smoke, not proof of missing history.
+- Evidence: real apply_patch sample `~/.rcc/codex-samples/openai-responses/windsurf.ws-pro-4.gpt-5.4-none/openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T225602105-222999-780/provider-request_1.json` has `textBytes=107287`, `additionalStepsCount=13`, `<human>` count 5, `<assistant>` count 3; full system/user history exists.
+- Problem evidence in same sample: `promptDiagnostics.hasRccToolResult=false`; tool results appear as plain `Tool result for exec_command:` inside the latest `<human>` block, not as `<|RCC|tool_result>` and not as native `additionalSteps`. This can make Windsurf treat tool output as ordinary user text instead of paired tool-result history.
+- Leak evidence: older samples `20260523T2151...` contain Rust-generated wording `Tool-call output contract (STRICT)` / `Allowed unsupported tool names this turn`; must be changed to neutral classification wording, no internal unsupported/harness explanation.
+- Code likely truth points: TS projection `src/providers/core/runtime/windsurf-chat-provider.ts` `extractLatestCascadeUserText` appends terminal `function_call_output` as plain text; `buildWindsurfRccToolResultContext` only emits RCC result when function output call_id matches an assistant RCC tool call. Rust capture/placeholder path is in `hub_bridge_actions/history.rs` + `hub_tool_session_compat.rs` + `hub_req_inbound_tool_output_snapshot.rs`.
+- 2026-05-23 fix: Rust `BuildBridgeHistoryOutput` now emits `toolHistory { version:1, pairs:[{callId,name,arguments,output,status}] }`; hub pipeline writes it to `semantics.responses.context.toolHistory`. Windsurf provider consumes that schema only as projection input and marks injected results as `bridge_tool_history`, so prompt gets `<|RCC|tool_result>` without duplicate `Tool result for ...` plain-text injection. Windsurf text guidance now says `text tool`, not `unsupported tool`.
+- Verification: `cargo test -p router-hotpath-napi hub_bridge_actions::tests::builds_bridge_history_for_tool_turn` passed; `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand` passed 226/226; `npx tsc --noEmit` passed. Broader `cargo test -p router-hotpath-napi hub_bridge_actions::tests::` still has 3 unrelated pre-existing failures in tool_argument_repairer / transcript wrapper / malformed parameter markup tests.
+## 2026-05-23 apply_patch test
+- target: /tmp mirror under workspace tmp/
+- action: create/update/append via apply_patch
+- 2026-05-23 23:25 5520 913 audit: request `openai-responses-windsurf.ws-pro-3-gpt-5.4-none-20260523T232535433-223132-913` sent to LS (`provider-request` snapshot URL `SendUserCascadeMessage`). Attempts ws-pro-3/ws-pro-2 logged 502, but ws-pro-4 completed with `finish_reason=tool_calls`; so the user-visible 502 was retry noise, not final request failure.
+- Fix: Windsurf service/LS/account unreachable now classifies as HTTP 503 `WINDSURF_SERVICE_UNREACHABLE`; protocol conflict classifies as HTTP 400 `WINDSURF_TOOL_PROTOCOL_CONFLICT`; only real transport/internal transient remains 502. Verification: targeted Jest passed; full Windsurf provider spec 227/227 passed; `npx tsc --noEmit` passed.
+- 2026-05-23 complex apply_patch failure audit: 5520 sample `20260523T233005450-223145-926` showed `APPLY_PATCH_ERROR` present both as plain `Tool result for apply_patch:` and as `<|RCC|tool_result>`, and prompt only discouraged repeat calls. Fix: RCC text tool results are no longer appended as plain terminal `Tool result for ...`; failure guidance now explicitly says to adjust tool arguments and call the same text tool again with corrected args, not stop with a failure report. Verification: Windsurf provider spec 228/228 passed and `npx tsc --noEmit` passed.
+
+## 2026-05-23 Windsurf RCC tool repeat-governance cleanup
+- Root cause: Windsurf provider had signature-based duplicate/repeat governance in TS (`parseCascadeAssistantTurnSync` / `parseCascadeSemanticRoundtripSync`) that blocked same tool name+args even when `call_id` was new.
+- Correct model: RouteCodex only enforces structural pairing by `call_id` and injects tool results as feedback; whether to repeat a tool call is the model's decision, not prompt/provider governance.
+- Validation: `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand` passed 228/228; `npx tsc --noEmit` passed.
+
+## 2026-05-23 Windsurf apply_patch text guidance path contract
+- Failure evidence showed RCC apply_patch needs explicit guidance: `filePath` must be workspace-relative and `patch` must be strict line-edit syntax (`+ ` create/append; exact `- ` old lines followed by `+ ` replacement lines).
+- Fixed in Windsurf RCC text-tool guidance, not executor fallback, because the provider prompt was missing the path/patch contract while servertool schema already had it.
+- Validation: Windsurf provider Jest 228/228 passed and `npx tsc --noEmit` passed.
+
+## 2026-05-23 Windsurf tool verification coverage audit
+- Current evidence is not enough to claim all tools are fully verified on live 5520. Unit coverage is strong for tool partitioning, RCC prompt guidance, tool_result pairing, repeated same-args/new-call-id handling, and apply_patch schema/guidance.
+- Verified by tests: Windsurf provider suite 228/228, TS compile, apply_patch servertool flow/schema tests exist. Live 5520 codex-samples show tool guidance injection for broad text tools, but no complete live model-executed matrix for every text tool.
+- Missing closeout: real 5520 smoke matrix for representative native tool (`shell_command`/`exec_command`) plus RCC text tools (`apply_patch`, `update_plan`, `write_stdin`) and at least one generic MCP/computer-use text tool, each proving call harvest -> executor result -> paired tool_result reinjection -> next-turn model uses result.

@@ -77,6 +77,7 @@ export function restoreContinuationPayload(
       requestId: entry.requestId,
       basePayload: entry.basePayload,
       input: entry.input,
+      releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
       routeHint: entry.routeHint,
       lastResponseId: entry.lastResponseId
@@ -105,6 +106,7 @@ export function materializeContinuationPayload(
       requestId: entry.requestId,
       basePayload: entry.basePayload,
       input: entry.input,
+      releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
       routeHint: entry.routeHint,
       lastResponseId: entry.lastResponseId

@@ -1,3 +1,4 @@
+use crate::resp_process_stage1_tool_governance::try_parse_json_value_lenient;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use regex::Regex;
@@ -6,7 +7,6 @@ use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use uuid::Uuid;
-use crate::resp_process_stage1_tool_governance::try_parse_json_value_lenient;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -540,9 +540,8 @@ fn extract_explicit_tool_name_from_broken_json_text(
                     idx = cursor;
                     continue;
                 }
-                let explicit_name_scope =
-                    (depth == 1 && token == "name")
-                        || (function_object_depth == Some(depth) && token == "name");
+                let explicit_name_scope = (depth == 1 && token == "name")
+                    || (function_object_depth == Some(depth) && token == "name");
                 if explicit_name_scope {
                     if let Some((raw_name, _)) = parse_quoted_token(&chars, cursor) {
                         return canonicalize_json_tool_name(&Value::String(raw_name), options);
@@ -1228,8 +1227,7 @@ fn extract_broken_explicit_top_level_tool_call_prefix_candidates(
         if candidate.is_empty() {
             continue;
         }
-        let Some(tool_name) =
-            extract_explicit_tool_name_from_broken_json_text(candidate, options)
+        let Some(tool_name) = extract_explicit_tool_name_from_broken_json_text(candidate, options)
         else {
             continue;
         };
@@ -1304,14 +1302,14 @@ fn salvage_broken_explicit_top_level_tool_calls(
         else {
             continue;
         };
-        let Some(args_obj) = salvage_tool_args_from_raw_text(tool_name.as_str(), candidate.as_str()) else {
+        let Some(args_obj) =
+            salvage_tool_args_from_raw_text(tool_name.as_str(), candidate.as_str())
+        else {
             continue;
         };
-        let Some(filtered) = normalize_json_tool_args(
-            tool_name.as_str(),
-            &Value::Object(args_obj),
-            options,
-        ) else {
+        let Some(filtered) =
+            normalize_json_tool_args(tool_name.as_str(), &Value::Object(args_obj), options)
+        else {
             continue;
         };
         let args = serde_json::to_string(&filtered).unwrap_or_else(|_| "{}".to_string());
@@ -1564,9 +1562,11 @@ fn extract_json_tool_calls_from_text_impl(
                     push_entry(&mut out, &mut seen, &entry);
                 }
                 if out.is_empty() {
-                    if let Some(normalized) =
-                        normalize_json_tool_call_entry_with_mode(&parsed, options, *trusted_explicit)
-                    {
+                    if let Some(normalized) = normalize_json_tool_call_entry_with_mode(
+                        &parsed,
+                        options,
+                        *trusted_explicit,
+                    ) {
                         let key = format!("{}:{}", normalized.name, normalized.args);
                         if seen.insert(key) {
                             out.push(normalized);
@@ -2649,8 +2649,7 @@ continue"#;
     }
 
     #[test]
-    fn extract_json_tool_calls_from_text_impl_salvages_broken_explicit_exec_command_prefix_shape()
-    {
+    fn extract_json_tool_calls_from_text_impl_salvages_broken_explicit_exec_command_prefix_shape() {
         let text = r#"{"name":"exec_command","arguments":"cmd":"cd /Users/fanzhang/Documents/github/routecodex && git status --short | head -40"}"#;
         let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
         assert_eq!(calls.len(), 1);
@@ -2664,8 +2663,7 @@ continue"#;
 
     #[test]
     fn extract_json_tool_calls_from_text_impl_rejects_broken_prefix_without_explicit_name() {
-        let text =
-            r#"{"arguments":"cmd":"cd /Users/fanzhang/Documents/github/routecodex && git status --short | head -40"}"#;
+        let text = r#"{"arguments":"cmd":"cd /Users/fanzhang/Documents/github/routecodex && git status --short | head -40"}"#;
         let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
         assert!(calls.is_empty());
     }
@@ -2698,7 +2696,9 @@ continue"#;
         let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
         assert_eq!(
             args.get("cmd").and_then(Value::as_str),
-            Some(r"cd /Users/fanzhang/Documents/github/routecodex && grep -n '\.catch.*return null' src/index.ts src/cli/guardian/client.ts")
+            Some(
+                r"cd /Users/fanzhang/Documents/github/routecodex && grep -n '\.catch.*return null' src/index.ts src/cli/guardian/client.ts"
+            )
         );
     }
 

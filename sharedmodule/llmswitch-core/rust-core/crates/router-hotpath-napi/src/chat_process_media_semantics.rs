@@ -414,7 +414,9 @@ pub fn strip_latest_user_turn_media(
         };
     }
 
-    let latest_user_index = messages.iter().rposition(|message| read_role(message) == "user");
+    let latest_user_index = messages
+        .iter()
+        .rposition(|message| read_role(message) == "user");
     let Some(latest_user_index) = latest_user_index else {
         return ChatProcessMediaStripOutput {
             changed: false,
@@ -490,8 +492,9 @@ pub fn strip_latest_responses_input_media(
         };
     }
 
-    let latest_user_index =
-        input_entries.iter().rposition(|entry| read_message_entry_role(entry) == "user");
+    let latest_user_index = input_entries
+        .iter()
+        .rposition(|entry| read_message_entry_role(entry) == "user");
     let Some(latest_user_index) = latest_user_index else {
         return ChatProcessMediaStripOutput {
             changed: false,

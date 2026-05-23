@@ -10,6 +10,8 @@ const { convertProviderResponse: coreConvertProviderResponse } = await import(
 const actualBridge = await import('../../../src/modules/llmswitch/bridge.ts');
 
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
+const mockCaptureResponsesRequestContext = jest.fn(async () => undefined);
+const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
 const mockResumeResponsesConversation = jest.fn();
 const mockResumeLatestResponsesContinuationByScope = jest.fn();
 
@@ -17,6 +19,8 @@ const mockBridgeModule = () => ({
   ...actualBridge,
   convertProviderResponse: coreConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
+  captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContext,
+  recordResponsesResponseForRequest: mockRecordResponsesResponseForRequest,
   loadRoutingInstructionStateSync: () => undefined,
   rebindResponsesConversationRequestId: async () => {},
   resumeLatestResponsesContinuationByScope: mockResumeLatestResponsesContinuationByScope,
@@ -82,6 +86,13 @@ async function fetchJson(baseUrl: string, routePath: string, body: unknown): Pro
     status: response.status,
     payload: text ? JSON.parse(text) : null
   };
+}
+
+async function waitForMockCalls(mock: { mock: { calls: unknown[] } }, minCalls: number): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (mock.mock.calls.length < minCalls && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 async function fetchText(baseUrl: string, routePath: string, options: {
@@ -638,6 +649,78 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(processIncoming).toHaveBeenCalledWith(expect.objectContaining({
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: '继续执行 submit_tool_outputs 整链验证' }]
+      }));
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('captures /v1/responses request context before returning tool_calls so submit_tool_outputs can resume', async () => {
+    const pipelineExecute = jest.fn(async (_input: any) => ({
+      status: 200,
+      body: {
+        id: 'resp_capture_tool_1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'call_capture_shell_1',
+            name: 'shell_command',
+            arguments: JSON.stringify({ command: 'pwd' })
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: { tool_calls: [] }
+        }
+      },
+      usageLogInfo: {
+        finishReason: 'tool_calls',
+        routeName: 'thinking/gateway-priority-5520-thinking',
+        sessionId: 'rcc-routecodex-capture'
+      }
+    }));
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses', (req, res) => {
+      void handleResponses(req as any, res as any, {
+        executePipeline: pipelineExecute,
+        errorHandling: null
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const payload = {
+        model: 'gpt-5.3-codex',
+        metadata: { session_id: 'rcc-routecodex-capture' },
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'call shell_command' }] }],
+        tools: [{ type: 'function', name: 'shell_command', parameters: { type: 'object' } }]
+      };
+
+      const result = await fetchJson(baseUrl, '/v1/responses', payload);
+
+      expect(result.status).toBe(200);
+      expect(result.payload).toMatchObject({ id: 'resp_capture_tool_1', status: 'requires_action' });
+      await waitForMockCalls(mockCaptureResponsesRequestContext, 1);
+      expect(mockCaptureResponsesRequestContext).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'resp_capture_tool_1',
+        payload: expect.objectContaining({ model: 'gpt-5.3-codex' }),
+        context: expect.objectContaining({
+          input: payload.input,
+          toolsRaw: payload.tools
+        }),
+        sessionId: 'rcc-routecodex-capture',
+        routeHint: 'thinking/gateway-priority-5520-thinking'
+      }));
+      expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'resp_capture_tool_1',
+        response: expect.objectContaining({ id: 'resp_capture_tool_1' }),
+        sessionId: 'rcc-routecodex-capture',
+        routeHint: 'thinking/gateway-priority-5520-thinking'
       }));
     } finally {
       await closeServer(server);
@@ -1391,4 +1474,93 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       await closeServer(server);
     }
   });
+
+  it('captures resumed submit_tool_outputs request context before returning another tool_call', async () => {
+    mockResumeResponsesConversation.mockResolvedValue({
+      payload: {
+        model: 'gpt-5.3-codex',
+        previous_response_id: 'resp_submit_prev_capture_1',
+        input: [
+          { type: 'function_call', call_id: 'call_submit_capture_1', name: 'shell_command', arguments: '{"cmd":"printf ok"}' },
+          { type: 'function_call_output', call_id: 'call_submit_capture_1', output: 'ok' }
+        ],
+        tools: [{ type: 'function', name: 'shell_command', parameters: { type: 'object' } }]
+      },
+      meta: {
+        previousRequestId: 'req_chain_submit_capture_1',
+        restoredFromResponseId: 'resp_submit_prev_capture_1',
+        routeHint: 'thinking/gateway-priority-5520-thinking'
+      }
+    });
+
+    const pipelineExecute = jest.fn(async (_input: any) => ({
+      status: 200,
+      body: {
+        id: 'resp_submit_capture_next_1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'call_submit_capture_2',
+            name: 'shell_command',
+            arguments: JSON.stringify({ cmd: 'printf again' })
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: { tool_calls: [] }
+        }
+      },
+      usageLogInfo: {
+        finishReason: 'tool_calls',
+        routeName: 'thinking/gateway-priority-5520-thinking'
+      }
+    }));
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses/:id/submit_tool_outputs', (req, res) => {
+      void handleResponses(
+        req as any,
+        res as any,
+        { executePipeline: pipelineExecute, errorHandling: null },
+        {
+          entryEndpoint: '/v1/responses.submit_tool_outputs',
+          responseIdFromPath: (req as any).params.id
+        }
+      );
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const result = await fetchJson(baseUrl, '/v1/responses/resp_submit_prev_capture_1/submit_tool_outputs', {
+        tool_outputs: [{ tool_call_id: 'call_submit_capture_1', output: 'ok' }]
+      });
+
+      expect(result.status).toBe(200);
+      expect(result.payload).toMatchObject({ id: 'resp_submit_capture_next_1', status: 'requires_action' });
+      await waitForMockCalls(mockCaptureResponsesRequestContext, 3);
+      expect(mockCaptureResponsesRequestContext).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'resp_submit_capture_next_1',
+        payload: expect.objectContaining({ previous_response_id: 'resp_submit_prev_capture_1' }),
+        context: expect.objectContaining({
+          input: expect.arrayContaining([
+            expect.objectContaining({ type: 'function_call_output', call_id: 'call_submit_capture_1', output: 'ok' })
+          ]),
+          toolsRaw: [{ type: 'function', name: 'shell_command', parameters: { type: 'object' } }]
+        }),
+        routeHint: 'thinking/gateway-priority-5520-thinking'
+      }));
+      expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'resp_submit_capture_next_1',
+        response: expect.objectContaining({ id: 'resp_submit_capture_next_1' }),
+        routeHint: 'thinking/gateway-priority-5520-thinking'
+      }));
+    } finally {
+      await closeServer(server);
+    }
+  });
+
 });

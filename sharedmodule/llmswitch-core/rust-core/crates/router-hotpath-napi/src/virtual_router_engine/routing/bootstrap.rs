@@ -274,11 +274,11 @@ fn build_legacy_route_pool(route_name: &str, targets: Vec<String>) -> Normalized
         backup: false,
         targets,
         mode: None,
-            force: None,
-            load_balancing: None,
-            route_params: None,
-            thinking: None,
-        }
+        force: None,
+        load_balancing: None,
+        route_params: None,
+        thinking: None,
+    }
 }
 
 fn normalize_route_pool_entry(
@@ -312,7 +312,10 @@ fn normalize_route_pool_entry(
             id: read_optional_string(record.get("id"))
                 .or_else(|| read_optional_string(record.get("poolId")))
                 .unwrap_or_else(|| format!("{}:pool{}", route_name, index + 1)),
-            priority: normalize_priority_value(record.get("priority"), (total.saturating_sub(index)) as i64),
+            priority: normalize_priority_value(
+                record.get("priority"),
+                (total.saturating_sub(index)) as i64,
+            ),
             backup: false,
             targets: vec![target.clone()],
             mode: Some("priority".to_string()),
@@ -377,7 +380,6 @@ fn normalize_route_pool_entry(
         thinking: normalize_thinking(record),
     })
 }
-
 
 fn normalize_simplified_weighted_route(
     route_name: &str,
@@ -458,7 +460,11 @@ fn normalize_route_params(record: &Map<String, Value>) -> Option<Map<String, Val
             params.insert(key.to_string(), value.clone());
         }
     }
-    if params.is_empty() { None } else { Some(params) }
+    if params.is_empty() {
+        None
+    } else {
+        Some(params)
+    }
 }
 
 /// Extract the top-level `thinking` field from a route pool record.

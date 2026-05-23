@@ -19,8 +19,8 @@ use crate::virtual_router_engine::instructions::{
 };
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
-    extract_excluded_provider_keys, extract_key_alias,
-    filter_candidates_by_state, is_server_tool_followup_request, parse_direct_provider_model,
+    extract_excluded_provider_keys, extract_key_alias, filter_candidates_by_state,
+    is_server_tool_followup_request, parse_direct_provider_model,
     resolve_instruction_process_mode_for_selection, resolve_instruction_target,
     resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
     should_fallback_direct_model_for_media,
@@ -163,7 +163,9 @@ impl VirtualRouterEngineCore {
         }
         match (&existing.stopless_goal_state, &loaded.stopless_goal_state) {
             (None, Some(_)) => true,
-            (Some(existing_goal), Some(loaded_goal)) => loaded_goal.updated_at > existing_goal.updated_at,
+            (Some(existing_goal), Some(loaded_goal)) => {
+                loaded_goal.updated_at > existing_goal.updated_at
+            }
             _ => false,
         }
     }
@@ -360,8 +362,7 @@ impl VirtualRouterEngineCore {
 
         if let Some(scope) = stop_message_scope.as_ref() {
             if !stop_instructions.is_empty() {
-                let session_state =
-                    self.load_routing_state_for_scope(scope);
+                let session_state = self.load_routing_state_for_scope(scope);
                 let mut next_state = session_state;
                 apply_routing_instructions(&stop_instructions, &mut next_state)?;
                 self.routing_instruction_state
@@ -529,7 +530,6 @@ impl VirtualRouterEngineCore {
                 (classification, requested_route, selection)
             };
 
-
         let target = self
             .provider_registry
             .build_target(&selection.provider_key)
@@ -696,7 +696,9 @@ mod tests {
                 .insert(key.to_string(), RoutingInstructionState::default());
 
             let loaded = engine.load_routing_state_for_scope(key);
-            let goal = loaded.stopless_goal_state.expect("goal should reload from disk");
+            let goal = loaded
+                .stopless_goal_state
+                .expect("goal should reload from disk");
             assert_eq!(goal.status, "active");
             assert_eq!(goal.objective, "reload goal from disk");
         });
@@ -764,7 +766,9 @@ mod tests {
                 .insert(key.to_string(), cached);
 
             let loaded = engine.load_routing_state_for_scope(key);
-            let goal = loaded.stopless_goal_state.expect("goal should reload from disk");
+            let goal = loaded
+                .stopless_goal_state
+                .expect("goal should reload from disk");
             assert_eq!(goal.updated_at, 200);
             assert_eq!(goal.consecutive_validation_failures, Some(1));
         });

@@ -6,9 +6,9 @@ use super::iflow::apply_iflow_request_compat;
 use super::lmstudio::apply_lmstudio_request_compat;
 use super::profile::{
     build_compat_result, has_request_stage, is_claude_code_profile, is_deepseek_web_profile,
-    is_gemini_profile, is_glm_profile, is_iflow_profile,
-    is_lmstudio_profile, is_qwen_profile, is_qwenchat_web_profile, is_responses_c4m_profile,
-    is_responses_crs_profile, pick_compat_profile, provider_protocol_matches,
+    is_gemini_profile, is_glm_profile, is_iflow_profile, is_lmstudio_profile, is_qwen_profile,
+    is_qwenchat_web_profile, is_responses_c4m_profile, is_responses_crs_profile,
+    pick_compat_profile, provider_protocol_matches,
 };
 use super::qwen::apply_qwen_request_compat;
 use super::qwenchat::apply_qwenchat_request_compat;
@@ -17,8 +17,7 @@ use super::thinking_history::{
     ensure_deepseek_anthropic_thinking_block_for_tool_use_history,
     ensure_deepseek_thinking_content_for_assistant_history,
     ensure_reasoning_content_for_anthropic_assistant_history,
-    ensure_reasoning_content_for_assistant_history,
-    should_apply_anthropic_thinking_history_compat,
+    ensure_reasoning_content_for_assistant_history, should_apply_anthropic_thinking_history_compat,
     should_apply_deepseek_thinking_history_compat,
     should_apply_local_deepseek_thinking_history_compat,
 };
@@ -159,10 +158,8 @@ pub fn run_req_outbound_stage3_compat(
         }
 
         if is_qwen_profile(profile_id) {
-            if provider_protocol_matches(
-                adapter_context.provider_protocol.as_ref(),
-                "openai-chat",
-            ) {
+            if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat")
+            {
                 let payload = if let Some(root) = payload.as_object() {
                     apply_qwen_request_compat(root)
                 } else {
@@ -191,10 +188,8 @@ pub fn run_req_outbound_stage3_compat(
         }
 
         if is_iflow_profile(profile_id) {
-            if provider_protocol_matches(
-                adapter_context.provider_protocol.as_ref(),
-                "openai-chat",
-            ) {
+            if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat")
+            {
                 return Ok(CompatResult {
                     payload: apply_iflow_request_compat(payload, &adapter_context),
                     applied_profile: Some(profile_id.to_string()),
@@ -206,10 +201,8 @@ pub fn run_req_outbound_stage3_compat(
         }
 
         if is_glm_profile(profile_id) {
-            if provider_protocol_matches(
-                adapter_context.provider_protocol.as_ref(),
-                "openai-chat",
-            ) {
+            if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat")
+            {
                 let payload = apply_glm_request_compat(payload);
                 return Ok(CompatResult {
                     payload,
@@ -222,10 +215,8 @@ pub fn run_req_outbound_stage3_compat(
         }
 
         if is_deepseek_web_profile(profile_id) {
-            if provider_protocol_matches(
-                adapter_context.provider_protocol.as_ref(),
-                "openai-chat",
-            ) {
+            if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat")
+            {
                 return Ok(CompatResult {
                     payload: apply_deepseek_web_request_compat(payload, &adapter_context),
                     applied_profile: Some(profile_id.to_string()),
@@ -237,10 +228,8 @@ pub fn run_req_outbound_stage3_compat(
         }
 
         if is_qwenchat_web_profile(profile_id) {
-            if provider_protocol_matches(
-                adapter_context.provider_protocol.as_ref(),
-                "openai-chat",
-            ) {
+            if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat")
+            {
                 let payload = if let Some(root) = payload.as_object() {
                     apply_qwenchat_request_compat(root)
                 } else {
@@ -257,10 +246,8 @@ pub fn run_req_outbound_stage3_compat(
         }
 
         if is_gemini_profile(profile_id) {
-            if provider_protocol_matches(
-                adapter_context.provider_protocol.as_ref(),
-                "gemini-chat",
-            ) {
+            if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "gemini-chat")
+            {
                 return Ok(CompatResult {
                     payload: apply_gemini_request_compat(payload, &adapter_context),
                     applied_profile: Some(profile_id.to_string()),
@@ -270,7 +257,6 @@ pub fn run_req_outbound_stage3_compat(
             }
             return Ok(build_compat_result(payload, None));
         }
-
 
         if !has_request_stage(profile_id) {
             return Ok(build_compat_result(payload, None));

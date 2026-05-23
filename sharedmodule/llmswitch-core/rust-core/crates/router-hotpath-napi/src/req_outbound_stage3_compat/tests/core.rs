@@ -199,7 +199,6 @@ fn test_pinned_alias_lookup_and_unpin_json_api() {
         session_id: Some(session_id.to_string()),
         conversation_id: None,
     };
-
 }
 
 #[test]

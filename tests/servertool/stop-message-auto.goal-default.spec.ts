@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
-import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import {
   serializeRoutingInstructionState,
   type RoutingInstructionState
@@ -57,6 +57,69 @@ function buildStopChatResponse(): JsonObject {
   };
 }
 
+function buildToolCallChatResponse(): JsonObject {
+  return {
+    id: 'chatcmpl-stop-goal-default-tool-call',
+    object: 'chat.completion',
+    model: 'gpt-test',
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_reset_budget',
+              type: 'function',
+              function: {
+                name: 'client_tool',
+                arguments: '{}'
+              }
+            }
+          ]
+        },
+        finish_reason: 'tool_calls'
+      }
+    ]
+  };
+}
+
+function buildLengthChatResponse(): JsonObject {
+  return {
+    id: 'chatcmpl-stop-goal-default-length',
+    object: 'chat.completion',
+    model: 'gpt-test',
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'partial'
+        },
+        finish_reason: 'length'
+      }
+    ]
+  };
+}
+
+function buildResponsesFunctionCallResponse(): JsonObject {
+  return {
+    id: 'resp-stop-goal-default-function-call',
+    object: 'response',
+    status: 'completed',
+    output: [
+      {
+        id: 'fc_reset_budget',
+        type: 'function_call',
+        name: 'apply_patch',
+        call_id: 'call_reset_budget',
+        arguments: '{}'
+      }
+    ]
+  };
+}
+
 function buildAdapterContext(sessionId: string): AdapterContext {
   return {
     requestId: `req-${sessionId}`,
@@ -68,6 +131,21 @@ function buildAdapterContext(sessionId: string): AdapterContext {
       messages: [{ role: 'user', content: '继续处理' }]
     }
   } as any;
+}
+
+function runStopOrchestration(args: {
+  sessionId: string;
+  requestId: string;
+  adapterContext?: AdapterContext;
+}) {
+  return runServerToolOrchestration({
+    chat: buildStopChatResponse(),
+    adapterContext: args.adapterContext ?? buildAdapterContext(args.sessionId),
+    entryEndpoint: '/v1/chat/completions',
+    requestId: args.requestId,
+    providerProtocol: 'openai-chat',
+    reenterPipeline: async () => ({ body: buildStopChatResponse('reentered') })
+  });
 }
 
 function buildGoalOnlyStickyState(status: 'active' | 'completed'): RoutingInstructionState {
@@ -163,64 +241,163 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
         updatedAt: now
       }
     } as any;
-    const result = await runServerSideToolEngine({
-      chatResponse: buildStopChatResponse(),
+    const result = await runStopOrchestration({
+      sessionId,
       adapterContext,
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-goal-active-skip',
-      providerProtocol: 'openai-chat'
+      requestId: 'req-goal-active-skip'
     });
 
-    expect(result.mode).toBe('passthrough');
-    expect(result.execution).toBeUndefined();
+    expect(result.executed).toBe(false);
     expect(adapterContext.stoplessGoalState).toMatchObject({ status: 'active' });
   });
 
   test('非 /goal 场景默认自动续三次，并在耗尽后 tombstone', async () => {
     const sessionId = 'non-goal-default-repeat-3';
-    const runOnce = (requestId: string) => runServerSideToolEngine({
-      chatResponse: buildStopChatResponse(),
+    const runOnce = (requestId: string) => runServerToolOrchestration({
+      chat: buildStopChatResponse(),
       adapterContext: buildAdapterContext(sessionId),
       entryEndpoint: '/v1/chat/completions',
       requestId,
-      providerProtocol: 'openai-chat'
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => ({ body: buildStopChatResponse('reentered') })
     });
     const first = await runOnce('req-non-goal-default-repeat-1');
-    expect(first.mode).toBe('tool_flow');
-    expect(first.execution?.flowId).toBe('stop_message_flow');
+    expect(first.executed).toBe(true);
+    expect(first.flowId).toBe('stop_message_flow');
     expect(readState(sessionId)?.stopMessageUsed).toBe(1);
 
     const second = await runOnce('req-non-goal-default-repeat-2');
-    expect(second.mode).toBe('tool_flow');
-    expect(second.execution?.flowId).toBe('stop_message_flow');
+    expect(second.executed).toBe(true);
+    expect(second.flowId).toBe('stop_message_flow');
     expect(readState(sessionId)?.stopMessageUsed).toBe(2);
 
     const third = await runOnce('req-non-goal-default-repeat-3');
-    expect(third.mode).toBe('tool_flow');
-    expect(third.execution?.flowId).toBe('stop_message_flow');
-    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
-    expect(readState(sessionId)?.stopMessageSource).toBe('default_exhausted');
+    expect(third.executed).toBe(true);
+    expect(third.flowId).toBe('stop_message_flow');
+    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
+    expect(readState(sessionId)?.stopMessageSource).toBe('default');
 
     const fourth = await runOnce('req-non-goal-default-repeat-4');
-    expect(fourth.mode).toBe('passthrough');
-    expect(fourth.execution).toBeUndefined();
-    expect(readState(sessionId)?.stopMessageSource).toBe('default_exhausted');
+    expect(fourth.executed).toBe(false);
+    expect(readState(sessionId)?.stopMessageUsed).toBe(4);
+    expect(readState(sessionId)?.stopMessageSource).toBe('default');
+  });
+
+  test('非 /goal 场景出现 tool call 后默认续杯预算重置为三次', async () => {
+    const sessionId = 'non-goal-default-reset-after-tool-call';
+    const runStop = (requestId: string) => runServerToolOrchestration({
+      chat: buildStopChatResponse(),
+      adapterContext: buildAdapterContext(sessionId),
+      entryEndpoint: '/v1/chat/completions',
+      requestId,
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => ({ body: buildStopChatResponse('reentered') })
+    });
+
+    await runStop('req-reset-after-tool-stop-1');
+    await runStop('req-reset-after-tool-stop-2');
+    await runStop('req-reset-after-tool-stop-3');
+    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
+
+    const toolCall = await runServerToolOrchestration({
+      chat: buildToolCallChatResponse(),
+      adapterContext: buildAdapterContext(sessionId),
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-reset-after-tool-call',
+      providerProtocol: 'openai-chat'
+    });
+    expect(toolCall.executed).toBe(false);
+    expect(readState(sessionId)?.stopMessageUsed).toBe(0);
+
+    const afterReset = await runStop('req-reset-after-tool-stop-4');
+    expect(afterReset.executed).toBe(true);
+    expect(afterReset.flowId).toBe('stop_message_flow');
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
+  });
+
+  test('非 /goal 场景出现非 stop finish_reason 后默认续杯预算重置为三次', async () => {
+    const sessionId = 'non-goal-default-reset-after-non-stop';
+    const runStop = (requestId: string) => runServerToolOrchestration({
+      chat: buildStopChatResponse(),
+      adapterContext: buildAdapterContext(sessionId),
+      entryEndpoint: '/v1/chat/completions',
+      requestId,
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => ({ body: buildStopChatResponse('reentered') })
+    });
+
+    await runStop('req-reset-after-non-stop-1');
+    await runStop('req-reset-after-non-stop-2');
+    await runStop('req-reset-after-non-stop-3');
+    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
+
+    const nonStop = await runServerToolOrchestration({
+      chat: buildLengthChatResponse(),
+      adapterContext: buildAdapterContext(sessionId),
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-reset-after-length',
+      providerProtocol: 'openai-chat'
+    });
+    expect(nonStop.executed).toBe(false);
+    expect(readState(sessionId)?.stopMessageUsed).toBe(0);
+
+    const afterReset = await runStop('req-reset-after-non-stop-4');
+    expect(afterReset.executed).toBe(true);
+    expect(afterReset.flowId).toBe('stop_message_flow');
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
+  });
+
+  test('/v1/responses function_call 后默认续杯预算重置为三次', async () => {
+    const sessionId = 'responses-default-reset-after-function-call';
+    const runStop = (requestId: string) => runServerToolOrchestration({
+      chat: buildStopChatResponse(),
+      adapterContext: {
+        ...buildAdapterContext(sessionId),
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses'
+      } as any,
+      entryEndpoint: '/v1/responses',
+      requestId,
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => ({ body: buildStopChatResponse('reentered') })
+    });
+
+    await runStop('req-responses-reset-after-tool-stop-1');
+    await runStop('req-responses-reset-after-tool-stop-2');
+    await runStop('req-responses-reset-after-tool-stop-3');
+    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
+
+    const toolCall = await runServerToolOrchestration({
+      chat: buildResponsesFunctionCallResponse(),
+      adapterContext: {
+        ...buildAdapterContext(sessionId),
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses'
+      } as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-responses-reset-after-function-call',
+      providerProtocol: 'openai-responses'
+    });
+    expect(toolCall.executed).toBe(false);
+    expect(readState(sessionId)?.stopMessageUsed).toBe(0);
+
+    const afterReset = await runStop('req-responses-reset-after-tool-stop-4');
+    expect(afterReset.executed).toBe(true);
+    expect(afterReset.flowId).toBe('stop_message_flow');
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
 
   test('非 /goal 场景即使 sticky 里有 completed goal 也默认自动续', async () => {
     const sessionId = 'non-goal-sticky-completed-repeat';
     writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState('completed'));
 
-    const result = await runServerSideToolEngine({
-      chatResponse: buildStopChatResponse(),
-      adapterContext: buildAdapterContext(sessionId),
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-non-goal-sticky-completed-skip',
-      providerProtocol: 'openai-chat'
+    const result = await runStopOrchestration({
+      sessionId,
+      requestId: 'req-non-goal-sticky-completed-skip'
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('stop_message_flow');
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe('stop_message_flow');
     expect(readState(sessionId)?.stoplessGoalState).toMatchObject({ status: 'completed' });
     expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
@@ -229,40 +406,32 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
     const sessionId = 'sticky-active-goal-skip';
     writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState('active'));
 
-    const result = await runServerSideToolEngine({
-      chatResponse: buildStopChatResponse(),
-      adapterContext: buildAdapterContext(sessionId),
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-non-goal-sticky-active-skip',
-      providerProtocol: 'openai-chat'
+    const result = await runStopOrchestration({
+      sessionId,
+      requestId: 'req-non-goal-sticky-active-skip'
     });
 
-    expect(result.mode).toBe('passthrough');
-    expect(result.execution).toBeUndefined();
+    expect(result.executed).toBe(false);
     expect(readState(sessionId)?.stoplessGoalState).toMatchObject({ status: 'active' });
-    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
 
   test('/goal active 即使来自 persisted sticky state 也不自动续', async () => {
     const sessionId = 'goal-active-persisted-skip';
     writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState('active'));
 
-    const result = await runServerSideToolEngine({
-      chatResponse: buildStopChatResponse(),
-      adapterContext: buildAdapterContext(sessionId),
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-goal-active-persisted-skip',
-      providerProtocol: 'openai-chat'
+    const result = await runStopOrchestration({
+      sessionId,
+      requestId: 'req-goal-active-persisted-skip'
     });
 
-    expect(result.mode).toBe('passthrough');
-    expect(result.execution).toBeUndefined();
+    expect(result.executed).toBe(false);
     expect(readState(sessionId)?.stoplessGoalState).toMatchObject({ status: 'active' });
-    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
 
-  test('/goal non-active 默认自动续三次，并按次数归零', async () => {
-    const sessionId = 'goal-completed-default-repeat-3';
+  test('/goal completed 只自动续一次', async () => {
+    const sessionId = 'goal-completed-default-repeat-1';
     const now = Date.now();
     const buildNonActiveGoalContext = () => ({
       ...buildAdapterContext(sessionId),
@@ -274,49 +443,21 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
       }
     }) as any;
 
-    const first = await runServerSideToolEngine({
-      chatResponse: buildStopChatResponse(),
+    const first = await runStopOrchestration({
+      sessionId,
       adapterContext: buildNonActiveGoalContext(),
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-goal-completed-repeat-1',
-      providerProtocol: 'openai-chat'
+      requestId: 'req-goal-completed-repeat-1'
     });
-    expect(first.mode).toBe('tool_flow');
-    expect(first.execution?.flowId).toBe('stop_message_flow');
+    expect(first.executed).toBe(true);
+    expect(first.flowId).toBe('stop_message_flow');
     expect(readState(sessionId)?.stopMessageUsed).toBe(1);
 
-    const second = await runServerSideToolEngine({
-      chatResponse: buildStopChatResponse(),
+    const second = await runStopOrchestration({
+      sessionId,
       adapterContext: buildNonActiveGoalContext(),
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-goal-completed-repeat-2',
-      providerProtocol: 'openai-chat'
+      requestId: 'req-goal-completed-repeat-2'
     });
-    expect(second.mode).toBe('tool_flow');
-    expect(second.execution?.flowId).toBe('stop_message_flow');
+    expect(second.executed).toBe(false);
     expect(readState(sessionId)?.stopMessageUsed).toBe(2);
-
-    const third = await runServerSideToolEngine({
-      chatResponse: buildStopChatResponse(),
-      adapterContext: buildNonActiveGoalContext(),
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-goal-completed-repeat-3',
-      providerProtocol: 'openai-chat'
-    });
-    expect(third.mode).toBe('tool_flow');
-    expect(third.execution?.flowId).toBe('stop_message_flow');
-    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
-    expect(readState(sessionId)?.stopMessageSource).toBe('default_exhausted');
-
-    const fourth = await runServerSideToolEngine({
-      chatResponse: buildStopChatResponse(),
-      adapterContext: buildNonActiveGoalContext(),
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-goal-completed-repeat-4',
-      providerProtocol: 'openai-chat'
-    });
-    expect(fourth.mode).toBe('passthrough');
-    expect(fourth.execution).toBeUndefined();
-    expect(readState(sessionId)?.stopMessageSource).toBe('default_exhausted');
   });
 });

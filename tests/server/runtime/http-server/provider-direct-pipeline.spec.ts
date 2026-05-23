@@ -54,45 +54,35 @@ describe('provider-direct-pipeline', () => {
     ).rejects.toThrow(/protocolBehavior=direct requires matching protocols/i);
   });
 
-  it('auto mode relays cross-protocol payloads and remaps system messages', async () => {
+  it('fails fast when cross-protocol relay reaches provider-direct instead of Hub Pipeline', async () => {
     const { handle, processIncoming } = createHandle('anthropic-messages');
-    const result = await executeProviderDirectPipeline(
-      {
-        messages: [
-          { role: 'system', content: 'system prompt' },
-          { role: 'user', content: 'hello' },
-        ],
-        stream: true,
-      },
-      { path: '/v1/chat/completions', headers: {} },
-      {
-        portConfig: {
-          port: 5001,
-          host: '127.0.0.1',
-          mode: 'provider',
-          protocolBehavior: 'auto',
-          providerBinding: 'mock.model',
+    await expect(
+      executeProviderDirectPipeline(
+        {
+          messages: [
+            { role: 'system', content: 'system prompt' },
+            { role: 'user', content: 'hello' },
+          ],
+          stream: true,
         },
-        resolveProvider: () => handle,
-        detectInboundProtocol: detectInboundProtocolFromRequest,
-      },
-    );
-
-    expect(result.actualBehavior).toBe('relay');
-    expect(processIncoming).toHaveBeenCalledTimes(1);
-    expect(processIncoming).toHaveBeenCalledWith(
-      expect.objectContaining({
-        system: 'system prompt',
-        stream: true,
-        max_tokens: 4096,
-      }),
-    );
-    const sentPayload = processIncoming.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(Array.isArray(sentPayload.messages)).toBe(true);
-    expect((sentPayload.messages as Array<Record<string, unknown>>).some((entry) => entry.role === 'system')).toBe(false);
+        { path: '/v1/chat/completions', headers: {} },
+        {
+          portConfig: {
+            port: 5001,
+            host: '127.0.0.1',
+            mode: 'provider',
+            protocolBehavior: 'auto',
+            providerBinding: 'mock.model',
+          },
+          resolveProvider: () => handle,
+          detectInboundProtocol: detectInboundProtocolFromRequest,
+        },
+      ),
+    ).rejects.toThrow(/Provider mode relay must run through Hub Pipeline\/chat process/i);
+    expect(processIncoming).not.toHaveBeenCalled();
   });
 
-  it('fails fast when relay would require an unsupported cross-protocol semantic map', async () => {
+  it('fails fast when relay would require provider-direct cross-protocol semantic mapping', async () => {
     const { handle } = createHandle('openai-chat');
     await expect(
       executeProviderDirectPipeline(
@@ -112,7 +102,7 @@ describe('provider-direct-pipeline', () => {
           detectInboundProtocol: () => 'unknown-protocol' as any,
         },
       ),
-    ).rejects.toThrow(/relay only supports openai-chat <-> anthropic-messages today/i);
+    ).rejects.toThrow(/Provider mode relay must run through Hub Pipeline\/chat process/i);
   });
 
   it('keeps openai-responses same-protocol requests on direct path in auto mode', async () => {
@@ -150,6 +140,111 @@ describe('provider-direct-pipeline', () => {
     expect(beforeSnapshots).toHaveLength(1);
     expect(beforeSnapshots[0]).toBe(requestPayload);
     expect(afterSnapshots).toHaveLength(1);
+  });
+
+  it('passes apply_patch payload through unchanged in provider same-protocol direct mode', async () => {
+    const { handle, processIncoming, processIncomingDirect } = createHandle('openai-chat');
+    const applyPatchArguments = JSON.stringify({
+      patch: '*** Begin Patch\n*** Add File: provider-direct.txt\n+ok\n*** End Patch',
+    });
+    const requestPayload = {
+      model: 'gpt-4o',
+      messages: [
+        { role: 'user', content: 'edit a file' },
+        {
+          role: 'assistant',
+          tool_calls: [
+            {
+              id: 'call_apply_patch_provider_direct',
+              type: 'function',
+              function: { name: 'apply_patch', arguments: applyPatchArguments },
+            },
+          ],
+        },
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'apply_patch',
+            description: 'canonical client apply_patch tool',
+            parameters: {
+              type: 'object',
+              properties: { patch: { type: 'string' } },
+              required: ['patch'],
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+    } as Record<string, unknown>;
+    const originalSnapshot = structuredClone(requestPayload);
+
+    const result = await executeProviderDirectPipeline(
+      requestPayload,
+      { path: '/v1/chat/completions', headers: {} },
+      {
+        portConfig: {
+          port: 5005,
+          host: '127.0.0.1',
+          mode: 'provider',
+          protocolBehavior: 'auto',
+          providerBinding: 'mock.model',
+        },
+        resolveProvider: () => handle,
+        detectInboundProtocol: detectInboundProtocolFromRequest,
+      },
+    );
+
+    expect(result.actualBehavior).toBe('direct');
+    expect(processIncomingDirect).toHaveBeenCalledTimes(1);
+    const sentPayload = processIncomingDirect.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(sentPayload).toBe(requestPayload);
+    expect(sentPayload).toEqual(originalSnapshot);
+    expect(JSON.stringify(sentPayload)).not.toContain('hashline-first');
+    expect(JSON.stringify(sentPayload)).not.toContain('fileContent');
+    expect(processIncoming).not.toHaveBeenCalled();
+  });
+
+  it('rejects apply_patch relay in provider-direct so chat process remains the only hashline owner', async () => {
+    const { handle, processIncoming } = createHandle('anthropic-messages');
+    const requestPayload = {
+      messages: [{ role: 'user', content: 'edit a file' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'apply_patch',
+            description: 'canonical client apply_patch tool',
+            parameters: {
+              type: 'object',
+              properties: { patch: { type: 'string', description: 'canonical patch' } },
+              required: ['patch'],
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+    } as Record<string, unknown>;
+
+    await expect(
+      executeProviderDirectPipeline(
+        requestPayload,
+        { path: '/v1/chat/completions', headers: {} },
+        {
+          portConfig: {
+            port: 5006,
+            host: '127.0.0.1',
+            mode: 'provider',
+            protocolBehavior: 'auto',
+            providerBinding: 'mock.model',
+          },
+          resolveProvider: () => handle,
+          detectInboundProtocol: detectInboundProtocolFromRequest,
+        },
+      ),
+    ).rejects.toThrow(/Provider mode relay must run through Hub Pipeline\/chat process/i);
+    expect(processIncoming).not.toHaveBeenCalled();
   });
 
   it('allows provider-mode direct path to apply lightweight thinking overrides without relay conversion', async () => {

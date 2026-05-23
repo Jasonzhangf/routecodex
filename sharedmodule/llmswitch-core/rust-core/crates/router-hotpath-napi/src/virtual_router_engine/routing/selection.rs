@@ -237,4 +237,3 @@ pub(crate) fn resolve_instruction_process_mode_for_selection(
     }
     None
 }
-

@@ -17,6 +17,12 @@ export type NativeRespProcessToolGovernanceInput = {
   clientProtocol: string;
   entryEndpoint: string;
   requestId: string;
+  prepared?: boolean;
+  preparationSummary?: {
+    converted?: boolean;
+    shapeSanitized?: boolean;
+    harvestedToolCalls?: number;
+  };
 };
 export type NativeRespProcessToolGovernanceOutput = {
   governedPayload: Record<string, unknown>;
@@ -403,7 +409,18 @@ export function applyRespProcessToolGovernanceWithNative(
       payload: input.payload,
       client_protocol: input.clientProtocol,
       entry_endpoint: input.entryEndpoint,
-      request_id: input.requestId
+      request_id: input.requestId,
+      prepared: input.prepared === true,
+      preparation_summary: input.preparationSummary
+        ? {
+            converted: input.preparationSummary.converted === true,
+            shape_sanitized: input.preparationSummary.shapeSanitized === true,
+            harvested_tool_calls:
+              typeof input.preparationSummary.harvestedToolCalls === 'number'
+                ? input.preparationSummary.harvestedToolCalls
+                : 0
+          }
+        : undefined
     }]);
     const parsed = parseRespProcessToolGovernancePayload(raw);
     return parsed ?? fail('invalid payload');
@@ -413,13 +430,21 @@ export function applyRespProcessToolGovernanceWithNative(
   }
 }
 export function prepareRespProcessToolGovernancePayloadWithNative(
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  options?: {
+    requestedToolNames?: string[];
+  }
 ): NativeRespProcessToolGovernancePreparationOutput {
   const capability = 'prepareRespProcessToolGovernancePayloadJson';
   const fail = (reason?: string): NativeRespProcessToolGovernancePreparationOutput =>
     failNativeRequired<NativeRespProcessToolGovernancePreparationOutput>(capability, reason);
   try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? {}]);
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{
+      payload: payload ?? {},
+      requested_tool_names: Array.isArray(options?.requestedToolNames)
+        ? options?.requestedToolNames
+        : []
+    }]);
     const parsed = parseRespProcessToolGovernancePreparationPayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {

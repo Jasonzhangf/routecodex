@@ -6,14 +6,17 @@ use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
 use crate::hub_tool_session_compat::{normalize_tool_session_payload, ToolSessionCompatInput};
 use crate::shared_metadata_semantics::read_runtime_metadata_json;
 use crate::shared_responses_tool_utils::resolve_tool_call_id_style_json;
-use crate::shared_tool_result_text_normalizer::{normalize_tool_result_text, normalize_tool_result_value};
+use crate::shared_tool_result_text_normalizer::{
+    normalize_tool_result_text, normalize_tool_result_value,
+};
 use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 
 use super::types::{
     ApplyBridgeCaptureToolResultsInput, ApplyBridgeCaptureToolResultsOutput,
     ApplyBridgeEnsureToolPlaceholdersInput, ApplyBridgeEnsureToolPlaceholdersOutput,
-    ApplyBridgeNormalizeHistoryInput, ApplyBridgeNormalizeHistoryOutput, BuildBridgeHistoryInput,
-    BuildBridgeHistoryOutput, EnsureBridgeOutputFieldsInput, EnsureBridgeOutputFieldsOutput,
+    ApplyBridgeNormalizeHistoryInput, ApplyBridgeNormalizeHistoryOutput, BridgeToolHistoryPair,
+    BridgeToolHistorySchema, BuildBridgeHistoryInput, BuildBridgeHistoryOutput,
+    EnsureBridgeOutputFieldsInput, EnsureBridgeOutputFieldsOutput,
     FilterBridgeInputForUpstreamInput, FilterBridgeInputForUpstreamOutput,
     PrepareResponsesRequestEnvelopeInput, PrepareResponsesRequestEnvelopeOutput,
     ResolveResponsesBridgeToolsInput, ResolveResponsesBridgeToolsOutput,
@@ -404,6 +407,7 @@ pub(crate) fn normalize_bridge_history_seed(seed: &Value) -> Option<BuildBridgeH
 
     Some(BuildBridgeHistoryOutput {
         input: normalized_input,
+        tool_history: normalize_bridge_tool_history_seed(record.get("toolHistory")),
         combined_system_instruction: normalize_bridge_history_seed_text(
             record.get("combinedSystemInstruction"),
         ),
@@ -412,6 +416,36 @@ pub(crate) fn normalize_bridge_history_seed(seed: &Value) -> Option<BuildBridgeH
         ),
         original_system_messages,
     })
+}
+
+fn normalize_bridge_tool_history_seed(value: Option<&Value>) -> Option<BridgeToolHistorySchema> {
+    let record = value?.as_object()?;
+    let pairs = record
+        .get("pairs")?
+        .as_array()?
+        .iter()
+        .filter_map(|entry| {
+            let row = entry.as_object()?;
+            let call_id = read_trimmed_string(row.get("callId"))?;
+            let name = read_trimmed_string(row.get("name"))?;
+            let output = row
+                .get("output")
+                .map(serialize_tool_result_payload)
+                .unwrap_or_default();
+            Some(BridgeToolHistoryPair {
+                call_id,
+                name,
+                arguments: row.get("arguments").cloned().unwrap_or(Value::Object(Map::new())),
+                output,
+                status: read_trimmed_string(row.get("status")).unwrap_or_else(|| "completed".to_string()),
+            })
+        })
+        .collect::<Vec<_>>();
+    if pairs.is_empty() {
+        None
+    } else {
+        Some(BridgeToolHistorySchema { version: 1, pairs })
+    }
 }
 
 fn normalize_tool_key(value: Option<&Value>) -> Option<String> {
@@ -515,6 +549,22 @@ pub(crate) fn resolve_responses_bridge_tools(
                 continue;
             }
             register(tool);
+        }
+    }
+
+    let has_chat_tools = input
+        .chat_tools
+        .as_ref()
+        .map(|tools| !tools.is_empty())
+        .unwrap_or(false);
+    if !has_chat_tools {
+        if let Some(original_tools) = input.original_tools.as_ref() {
+            for tool in original_tools {
+                if is_builtin_web_search_tool(tool) {
+                    continue;
+                }
+                register(tool);
+            }
         }
     }
 
@@ -662,7 +712,8 @@ fn read_builtin_web_search_passthrough(context: Option<&Value>) -> bool {
         }
         let engine_provider_key = read_trimmed_string(row.get("providerKey")).unwrap_or_default();
         let engine_model_id = read_trimmed_string(row.get("modelId")).unwrap_or_default();
-        let provider_matches = engine_provider_key.is_empty() || provider_key == engine_provider_key;
+        let provider_matches =
+            engine_provider_key.is_empty() || provider_key == engine_provider_key;
         let model_matches = engine_model_id.is_empty() || model_id == engine_model_id;
         if provider_matches && model_matches {
             return true;
@@ -1099,6 +1150,8 @@ pub(crate) fn build_bridge_history(
     let mut pending_tool_call_ids: VecDeque<String> = VecDeque::new();
     let mut pending_tool_call_message_index: HashMap<String, usize> = HashMap::new();
     let mut known_tool_call_ids: HashSet<String> = HashSet::new();
+    let mut tool_call_by_id: HashMap<String, (String, Value)> = HashMap::new();
+    let mut tool_history_pairs: Vec<BridgeToolHistoryPair> = Vec::new();
     let mut non_system_message_indices: Vec<usize> = Vec::new();
     let _tools = input.tools;
 
@@ -1161,11 +1214,27 @@ pub(crate) fn build_bridge_history(
                 .get("content")
                 .map(serialize_tool_result_payload)
                 .unwrap_or_else(|| text.clone());
+            let (tool_name, tool_arguments) = tool_call_by_id
+                .get(resolved_call_id.as_str())
+                .cloned()
+                .ok_or_else(|| {
+                    format!(
+                        "orphan_tool_result: tool message references unknown tool_call_id: {}",
+                        resolved_call_id
+                    )
+                })?;
             let entry = serde_json::json!({
                 "type": "function_call_output",
                 "id": normalized_output_id,
                 "call_id": resolved_call_id,
                 "output": output_payload
+            });
+            tool_history_pairs.push(BridgeToolHistoryPair {
+                call_id: resolved_call_id,
+                name: tool_name,
+                arguments: tool_arguments,
+                output: output_payload,
+                status: "completed".to_string(),
             });
             items.push(entry);
             continue;
@@ -1201,6 +1270,9 @@ pub(crate) fn build_bridge_history(
                 });
                 items.push(entry);
                 known_tool_call_ids.insert(call_id.clone());
+                let arguments_value = serde_json::from_str::<Value>(args.as_str())
+                    .unwrap_or_else(|_| Value::String(args.clone()));
+                tool_call_by_id.insert(call_id.clone(), (name, arguments_value));
                 register_pending_tool_call(&mut pending_tool_call_ids, call_id.as_str());
                 pending_tool_call_message_index.insert(call_id.clone(), message_index);
             }
@@ -1304,6 +1376,7 @@ pub(crate) fn build_bridge_history(
         {
             return Ok(BuildBridgeHistoryOutput {
                 input: items,
+                tool_history: build_bridge_tool_history_schema(tool_history_pairs),
                 combined_system_instruction,
                 latest_user_instruction,
                 original_system_messages,
@@ -1317,10 +1390,21 @@ pub(crate) fn build_bridge_history(
 
     Ok(BuildBridgeHistoryOutput {
         input: items,
+        tool_history: build_bridge_tool_history_schema(tool_history_pairs),
         combined_system_instruction,
         latest_user_instruction,
         original_system_messages,
     })
+}
+
+fn build_bridge_tool_history_schema(
+    pairs: Vec<BridgeToolHistoryPair>,
+) -> Option<BridgeToolHistorySchema> {
+    if pairs.is_empty() {
+        None
+    } else {
+        Some(BridgeToolHistorySchema { version: 1, pairs })
+    }
 }
 
 pub(crate) fn apply_bridge_normalize_history(
