@@ -176,7 +176,7 @@ describe('provider-quota-center error handling', () => {
     expect(state.consecutiveErrorCount).toBe(1);
   });
 
-  it('keeps 5xx providers in pool during the first two cooldown steps', () => {
+  it('keeps 5xx providers in pool only during the first two cooldown steps', () => {
     const baseNow = 2_500_000;
     let state = createInitialQuotaState(providerKey, undefined, baseNow);
 
@@ -208,7 +208,8 @@ describe('provider-quota-center error handling', () => {
       thirdNow
     );
     expect(state.reason).toBe('cooldown');
-    expect(state.inPool).toBe(true);
+    expect(state.inPool).toBe(false);
+    expect(state.cooldownKeepsPool).toBe(false);
     expect(state.cooldownUntil).toBe(thirdNow + 31_000);
     expect(state.consecutiveErrorCount).toBe(3);
   });
@@ -389,5 +390,34 @@ describe('provider-quota-center usage and window handling', () => {
     state = applyErrorEvent(state, { providerKey, httpStatus: 429 }, cooldownUntil + 2);
     expect(state.consecutiveErrorCount).toBe(4);
     expect(state.cooldownUntil).toBe((cooldownUntil + 2) + 61_000);
+  });
+
+  it('keeps repeated 5xx providers out of pool after cooldown expiry until success', () => {
+    const baseNow = 60_000;
+    let state = createInitialQuotaState(providerKey, undefined, baseNow);
+
+    state = applyErrorEvent(state, { providerKey, httpStatus: 500 }, baseNow);
+    state = applyErrorEvent(state, { providerKey, httpStatus: 500 }, baseNow + 10_000);
+    state = applyErrorEvent(state, { providerKey, httpStatus: 500 }, baseNow + 20_000);
+
+    expect(state.inPool).toBe(false);
+    expect(state.consecutiveErrorCount).toBe(3);
+    const cooldownUntil = state.cooldownUntil as number;
+
+    state = tickQuotaStateTime(state, cooldownUntil + 1);
+    expect(state.inPool).toBe(false);
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownUntil).toBeNull();
+    expect(state.consecutiveErrorCount).toBe(3);
+
+    state = tickQuotaStateTime(state, baseNow + 10 * 60_000 + 20_001);
+    expect(state.inPool).toBe(false);
+    expect(state.reason).toBe('cooldown');
+    expect(state.consecutiveErrorCount).toBe(3);
+
+    state = applySuccessEvent(state, { providerKey }, baseNow + 10 * 60_000 + 20_002);
+    expect(state.inPool).toBe(true);
+    expect(state.reason).toBe('ok');
+    expect(state.consecutiveErrorCount).toBe(0);
   });
 });

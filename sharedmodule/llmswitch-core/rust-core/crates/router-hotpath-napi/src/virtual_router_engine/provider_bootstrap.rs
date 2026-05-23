@@ -1244,10 +1244,7 @@ fn push_auth_entry(
         raw_type: Some(raw_type_source.clone()),
         oauth_provider_id,
         value: candidate.value.clone(),
-        mobile: candidate
-            .mobile
-            .clone()
-            .or_else(|| defaults.mobile.clone()),
+        mobile: candidate.mobile.clone().or_else(|| defaults.mobile.clone()),
         password: candidate
             .password
             .clone()
@@ -1503,7 +1500,8 @@ mod tests {
             }
         });
 
-        let output = bootstrap_virtual_router_providers_json(providers.to_string()).expect("bootstrap should succeed");
+        let output = bootstrap_virtual_router_providers_json(providers.to_string())
+            .expect("bootstrap should succeed");
         let parsed: Value = serde_json::from_str(&output).expect("output json should parse");
         let auth = &parsed["runtimeEntries"]["windsurf.ws-pro-1"]["auth"];
         assert_eq!(auth["type"], "apiKey");
@@ -1517,21 +1515,34 @@ mod tests {
         assert_eq!(extensions["lsPort"], 42101);
         assert_eq!(extensions["csrfToken"], "windsurf-api-csrf-fixed-token");
         assert_eq!(extensions["sessionId"], "routecodex-windsurf-session-1");
-        assert_eq!(extensions["workspacePath"], "/Users/fanzhang/Documents/github/routecodex");
-        assert_eq!(extensions["workspaceUri"], "file:///Users/fanzhang/Documents/github/routecodex");
-        let keys = extensions.as_object().expect("windsurf extensions should be object").keys().cloned().collect::<Vec<_>>();
-        assert_eq!(keys, vec![
-            "csrfToken",
-            "enableThinking",
-            "lsPort",
-            "pollIntervalMs",
-            "pollMaxWaitMs",
-            "sessionId",
-            "workspacePath",
-            "workspaceUri"
-        ]);
+        assert_eq!(
+            extensions["workspacePath"],
+            "/Users/fanzhang/Documents/github/routecodex"
+        );
+        assert_eq!(
+            extensions["workspaceUri"],
+            "file:///Users/fanzhang/Documents/github/routecodex"
+        );
+        let keys = extensions
+            .as_object()
+            .expect("windsurf extensions should be object")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            vec![
+                "csrfToken",
+                "enableThinking",
+                "lsPort",
+                "pollIntervalMs",
+                "pollMaxWaitMs",
+                "sessionId",
+                "workspacePath",
+                "workspaceUri"
+            ]
+        );
     }
-
 
     #[test]
     fn bootstrap_preserves_qwenchat_guest_raw_type_in_runtime_auth() {
@@ -1565,7 +1576,8 @@ mod tests {
             }
         });
 
-        let output = bootstrap_virtual_router_providers_json(providers.to_string()).expect("bootstrap should succeed");
+        let output = bootstrap_virtual_router_providers_json(providers.to_string())
+            .expect("bootstrap should succeed");
         let parsed: Value = serde_json::from_str(&output).expect("output json should parse");
         let auth = &parsed["runtimeEntries"]["qwenchat.key1"]["auth"];
         assert_eq!(auth["type"], "apiKey");
@@ -1850,22 +1862,47 @@ fn normalize_windsurf_options(provider: &Map<String, Value>) -> Option<Value> {
     if let Some(sanitize_paths) = source.get("sanitizePaths").and_then(Value::as_bool) {
         out.insert("sanitizePaths".to_string(), Value::Bool(sanitize_paths));
     }
-    if let Some(preserve_upstream_identity) = source.get("preserveUpstreamIdentity").and_then(Value::as_bool) {
+    if let Some(preserve_upstream_identity) = source
+        .get("preserveUpstreamIdentity")
+        .and_then(Value::as_bool)
+    {
         out.insert(
             "preserveUpstreamIdentity".to_string(),
             Value::Bool(preserve_upstream_identity),
         );
     }
-    if let Some(tool_emulation_strict) = source.get("toolEmulationStrict").and_then(Value::as_bool) {
-        out.insert("toolEmulationStrict".to_string(), Value::Bool(tool_emulation_strict));
+    if let Some(tool_emulation_strict) = source.get("toolEmulationStrict").and_then(Value::as_bool)
+    {
+        out.insert(
+            "toolEmulationStrict".to_string(),
+            Value::Bool(tool_emulation_strict),
+        );
     }
-    if let Some(poll_interval_ms) = source.get("pollIntervalMs").and_then(Value::as_i64).filter(|value| *value > 0) {
-        out.insert("pollIntervalMs".to_string(), Value::Number(poll_interval_ms.into()));
+    if let Some(poll_interval_ms) = source
+        .get("pollIntervalMs")
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+    {
+        out.insert(
+            "pollIntervalMs".to_string(),
+            Value::Number(poll_interval_ms.into()),
+        );
     }
-    if let Some(poll_max_wait_ms) = source.get("pollMaxWaitMs").and_then(Value::as_i64).filter(|value| *value > 0) {
-        out.insert("pollMaxWaitMs".to_string(), Value::Number(poll_max_wait_ms.into()));
+    if let Some(poll_max_wait_ms) = source
+        .get("pollMaxWaitMs")
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+    {
+        out.insert(
+            "pollMaxWaitMs".to_string(),
+            Value::Number(poll_max_wait_ms.into()),
+        );
     }
-    if let Some(ls_port) = source.get("lsPort").and_then(Value::as_i64).filter(|value| *value > 0) {
+    if let Some(ls_port) = source
+        .get("lsPort")
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+    {
         out.insert("lsPort".to_string(), Value::Number(ls_port.into()));
     }
     if let Some(csrf_token) = source
@@ -1874,7 +1911,10 @@ fn normalize_windsurf_options(provider: &Map<String, Value>) -> Option<Value> {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
     {
-        out.insert("csrfToken".to_string(), Value::String(csrf_token.to_string()));
+        out.insert(
+            "csrfToken".to_string(),
+            Value::String(csrf_token.to_string()),
+        );
     }
     if let Some(session_id) = source
         .get("sessionId")
@@ -1882,7 +1922,10 @@ fn normalize_windsurf_options(provider: &Map<String, Value>) -> Option<Value> {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
     {
-        out.insert("sessionId".to_string(), Value::String(session_id.to_string()));
+        out.insert(
+            "sessionId".to_string(),
+            Value::String(session_id.to_string()),
+        );
     }
     if let Some(workspace_path) = source
         .get("workspacePath")
@@ -1890,7 +1933,10 @@ fn normalize_windsurf_options(provider: &Map<String, Value>) -> Option<Value> {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
     {
-        out.insert("workspacePath".to_string(), Value::String(workspace_path.to_string()));
+        out.insert(
+            "workspacePath".to_string(),
+            Value::String(workspace_path.to_string()),
+        );
     }
     if let Some(workspace_uri) = source
         .get("workspaceUri")
@@ -1898,7 +1944,10 @@ fn normalize_windsurf_options(provider: &Map<String, Value>) -> Option<Value> {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
     {
-        out.insert("workspaceUri".to_string(), Value::String(workspace_uri.to_string()));
+        out.insert(
+            "workspaceUri".to_string(),
+            Value::String(workspace_uri.to_string()),
+        );
     }
     if let Some(api_base_url) = source
         .get("apiBaseUrl")
@@ -1906,7 +1955,10 @@ fn normalize_windsurf_options(provider: &Map<String, Value>) -> Option<Value> {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
     {
-        out.insert("apiBaseUrl".to_string(), Value::String(api_base_url.to_string()));
+        out.insert(
+            "apiBaseUrl".to_string(),
+            Value::String(api_base_url.to_string()),
+        );
     }
     if let Some(api_base_url_fallback) = source
         .get("apiBaseUrlFallback")
@@ -1914,7 +1966,10 @@ fn normalize_windsurf_options(provider: &Map<String, Value>) -> Option<Value> {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
     {
-        out.insert("apiBaseUrlFallback".to_string(), Value::String(api_base_url_fallback.to_string()));
+        out.insert(
+            "apiBaseUrlFallback".to_string(),
+            Value::String(api_base_url_fallback.to_string()),
+        );
     }
     if out.is_empty() {
         None
@@ -1928,12 +1983,11 @@ fn normalize_deepseek_options(provider: &Map<String, Value>) -> Option<Value> {
         .get("id")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    let compatibility_profile =
-        resolve_compatibility_profile(provider_id, provider)
-            .ok()
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase();
+    let compatibility_profile = resolve_compatibility_profile(provider_id, provider)
+        .ok()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
     let direct = as_object(provider.get("deepseek"));
     let ext = as_object(as_object(provider.get("extensions")).and_then(|ext| ext.get("deepseek")));
     let source = if direct.map(|value| !value.is_empty()).unwrap_or(false) {
@@ -2415,7 +2469,10 @@ fn normalize_model_capabilities(
     }
 }
 
-fn resolve_model_by_id<'a>(provider: &'a Map<String, Value>, target_id: &str) -> Option<&'a Map<String, Value>> {
+fn resolve_model_by_id<'a>(
+    provider: &'a Map<String, Value>,
+    target_id: &str,
+) -> Option<&'a Map<String, Value>> {
     let models = provider.get("models")?;
     match models {
         Value::Array(items) => {

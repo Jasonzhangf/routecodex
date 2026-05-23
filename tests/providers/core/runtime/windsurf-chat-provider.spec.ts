@@ -1151,7 +1151,7 @@ describe('WindsurfChatProvider', () => {
         2,
         'https://windsurf.com/_backend/exa.seat_management_pb.SeatManagementService/WindsurfPostAuth',
         expect.any(Object),
-        30000,
+        300000,
       );
       const checkInit = fetchMock.mock.calls[0][1];
       expect(checkInit.method).toBe('POST');
@@ -1173,6 +1173,52 @@ describe('WindsurfChatProvider', () => {
       expect(init.headers['Referer']).toBe('https://windsurf.com/account/login');
     } finally {
       global.fetch = originalFetch;
+    }
+  });
+
+  test('uses configurable five-minute default timeout for Windsurf cascade fetches', async () => {
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'windsurf-auth-timeout-'));
+    const tokenFile = path.join(tmp, 'ws-session.json');
+    const originalTimeout = process.env.ROUTECODEX_WINDSURF_CASCADE_TIMEOUT_MS;
+    process.env.ROUTECODEX_WINDSURF_CASCADE_TIMEOUT_MS = '420000';
+    try {
+      const provider = new WindsurfChatProvider({
+        type: 'openai-standard',
+        config: {
+          providerType: 'openai',
+          baseUrl: 'http://localhost:3003',
+          model: 'gpt-5.4-medium',
+          auth: { type: 'apikey', apiKey: '', rawType: 'windsurf-account', account: 'timeout@example.com', password: 'secret', tokenFile },
+        },
+      } as any, deps);
+
+      jest.spyOn((provider as any).httpClient, 'post').mockResolvedValueOnce({ data: { token: 'auth1-token-timeout' } } as any);
+      const fetchWithTimeoutSpy = jest.spyOn(provider as any, 'fetchWithTimeout');
+      const originalFetch = global.fetch;
+      const fetchMock = jest.fn()
+        .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ userExists: true, hasPassword: true }) } as any)
+        .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ sessionToken: 'devin-session-token$timeout-ok' }) } as any);
+      global.fetch = fetchMock as any;
+      try {
+        await (provider as any).ensureWindsurfSessionCredential();
+      } finally {
+        global.fetch = originalFetch;
+      }
+      expect(fetchWithTimeoutSpy).toHaveBeenNthCalledWith(
+        2,
+        'https://windsurf.com/_backend/exa.seat_management_pb.SeatManagementService/WindsurfPostAuth',
+        expect.any(Object),
+        420000,
+      );
+    } finally {
+      if (typeof originalTimeout === 'string') {
+        process.env.ROUTECODEX_WINDSURF_CASCADE_TIMEOUT_MS = originalTimeout;
+      } else {
+        delete process.env.ROUTECODEX_WINDSURF_CASCADE_TIMEOUT_MS;
+      }
     }
   });
 
@@ -1272,13 +1318,13 @@ describe('WindsurfChatProvider', () => {
       2,
       'https://windsurf.com/_backend/exa.seat_management_pb.SeatManagementService/WindsurfPostAuth',
       expect.any(Object),
-      30000,
+      300000,
     );
     expect(fetchSpy).toHaveBeenNthCalledWith(
       3,
       'https://server.self-serve.windsurf.com/exa.seat_management_pb.SeatManagementService/WindsurfPostAuth',
       expect.any(Object),
-      30000,
+      300000,
     );
   });
 
@@ -2222,6 +2268,55 @@ describe('WindsurfChatProvider', () => {
       startSpy.mockRestore();
       fetchSpy.mockRestore();
     }
+  });
+
+  test('RED: retryable cascade transport reset must dispose managed LS instead of reusing half-bad session', async () => {
+    const provider = new WindsurfChatProvider({
+      type: 'openai-standard',
+      config: {
+        providerType: 'openai',
+        baseUrl: 'http://localhost:3003',
+        model: 'gpt-5.3-codex',
+        auth: { type: 'apikey', apiKey: 'devin-session-token$transport-reset', rawType: 'windsurf-devin-token' },
+      },
+    } as any, deps);
+
+    const disposed: string[] = [];
+    jest.spyOn(provider as any, 'closeLocalGrpcSession').mockImplementation(() => undefined);
+    jest.spyOn(provider as any, 'disposeManagedLocalGrpcRuntime').mockImplementation((reason: string) => {
+      disposed.push(reason);
+    });
+
+    (provider as any).resetWindsurfCascadeTransportState('retryable-transport-1');
+
+    expect(disposed).toEqual(['retryable-transport-1']);
+  });
+
+  test('RED: managed runtime should adopt latest live scoped LS after RouteCodex restart instead of spawning another port', async () => {
+    const provider = new WindsurfChatProvider({
+      type: 'openai-standard',
+      config: {
+        providerType: 'openai',
+        baseUrl: 'http://localhost:3003',
+        model: 'gpt-5.3-codex',
+        auth: { type: 'apikey', apiKey: 'devin-session-token$adopt-ls', rawType: 'windsurf-devin-token', accountAlias: 'ws-pro-adopt' },
+      },
+    } as any, deps);
+
+    const expectedDir = `${process.env.HOME}/.rcc/windsurf-ls/ws-pro-adopt`;
+    jest.spyOn(provider as any, 'findPreferredRoutecodexWindsurfRuntime').mockReturnValue({
+      lsPort: 42177,
+      csrfToken: 'windsurf-api-csrf-fixed-token',
+      command: `/Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/bin/language_server_macos_arm --server_port=42177 --csrf_token=windsurf-api-csrf-fixed-token --codeium_dir=${expectedDir}`,
+    });
+    jest.spyOn(provider as any, 'isTcpPortListening').mockReturnValue(true);
+    const spawnSpy = jest.spyOn(provider as any, 'waitManagedLsPortReady');
+
+    const runtime = await (provider as any).ensureManagedLocalGrpcRuntime();
+
+    expect(runtime.port).toBe(42177);
+    expect(runtime.ready).toBe(true);
+    expect(spawnSpy).not.toHaveBeenCalled();
   });
 
   test('RED: checkHealth performs real cascade auth probe for direct devin token', async () => {
@@ -5374,7 +5469,128 @@ print(__import__('json').dumps(checks))
     expect(prompt).toContain('Do not repeat the same RCC invocation');
     expect(prompt).toContain('<|RCC|tool_result id="call_patch" name="apply_patch">');
     expect(prompt).toContain('patch applied');
+    const latestHuman = prompt.slice(prompt.lastIndexOf('<human>'));
+    expect(latestHuman).toContain('<|RCC|tool_result id="call_patch" name="apply_patch">');
+    expect(latestHuman).toContain('patch applied');
     expect(prompt).not.toContain('<|RCC|tool_result id="call_shell"');
+  });
+
+  test('RED: RCC terminal tool result markers must remain in latest human turn', async () => {
+    const provider = createProvider();
+    const longOutput = [
+      'BEGIN_Rcc_Long_Output',
+      ...Array.from({ length: 80 }, (_, index) => `line_${String(index + 1).padStart(3, '0')}: body`),
+      'MIDDLE_Rcc_Long_Output',
+      ...Array.from({ length: 80 }, (_, index) => `line_${String(index + 81).padStart(3, '0')}: body`),
+      'END_Rcc_Long_Output',
+    ].join('\n');
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'call apply_patch then report markers' },
+          { role: 'assistant', content: '', tool_calls: [
+            { id: 'call_patch_long', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ patch: '+ hello' }) } },
+          ] },
+          { role: 'tool', tool_call_id: 'call_patch_long', content: longOutput },
+        ],
+        tools: [
+          { type: 'function', function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object' } } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    const latestHuman = prompt.includes('<human>') ? prompt.slice(prompt.lastIndexOf('<human>')) : prompt;
+    expect(latestHuman).toContain('BEGIN_Rcc_Long_Output');
+    expect(latestHuman).toContain('MIDDLE_Rcc_Long_Output');
+    expect(latestHuman).toContain('END_Rcc_Long_Output');
+    expect(latestHuman).toContain('Do not repeat the same RCC invocation');
+    expect(latestHuman).toContain('Verified marker lines observed inside the RCC tool_result body: BEGIN_Rcc_Long_Output, MIDDLE_Rcc_Long_Output, END_Rcc_Long_Output.');
+    expect(latestHuman).toContain('Required marker evidence to include verbatim in the final answer: BEGIN_Rcc_Long_Output, MIDDLE_Rcc_Long_Output, END_Rcc_Long_Output.');
+    expect(latestHuman.lastIndexOf('Verified marker lines observed inside')).toBeGreaterThan(latestHuman.lastIndexOf('</|RCC|tool_result>'));
+    expect(latestHuman.lastIndexOf('Required marker evidence to include verbatim')).toBeGreaterThan(latestHuman.lastIndexOf('</|RCC|tool_result>'));
+  });
+
+  test('RED: Responses submit function_call_output without name still resolves prior unsupported tool name', async () => {
+    const provider = createProvider();
+    const longOutput = [
+      'BEGIN_Rcc_Long_Output',
+      'line_001: body',
+      'MIDDLE_Rcc_Long_Output',
+      'line_002: body',
+      'END_Rcc_Long_Output',
+    ].join('\n');
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: [{ type: 'input_text', text: 'call apply_patch then report markers' }] },
+          { role: 'assistant', content: '', tool_calls: [
+            { id: 'fc_call_patch_submit', call_id: 'call_patch_submit', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ patch: '+ hello' }) } },
+          ] },
+          { role: 'tool', tool_call_id: 'call_patch_submit', content: [{ type: 'function_call_output', id: 'fco_call_patch_submit', call_id: 'call_patch_submit', output: longOutput }] },
+          { role: 'user', content: [{ type: 'input_text', text: 'continue' }] },
+        ],
+        tools: [
+          { type: 'function', function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object' } } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+
+    expect(prompt).toContain('<|RCC|tool_result id="call_patch_submit" name="apply_patch">');
+    expect(prompt).toContain('BEGIN_Rcc_Long_Output');
+    expect(prompt).toContain('MIDDLE_Rcc_Long_Output');
+    expect(prompt).toContain('END_Rcc_Long_Output');
+    expect(prompt).toContain('Verified marker lines observed inside the RCC tool_result body: BEGIN_Rcc_Long_Output, MIDDLE_Rcc_Long_Output, END_Rcc_Long_Output.');
+    expect(prompt).toContain('Required marker evidence to include verbatim in the final answer: BEGIN_Rcc_Long_Output, MIDDLE_Rcc_Long_Output, END_Rcc_Long_Output.');
+    expect(prompt.lastIndexOf('Verified marker lines observed inside')).toBeGreaterThan(prompt.lastIndexOf('</|RCC|tool_result>'));
+    expect(prompt.lastIndexOf('Required marker evidence to include verbatim')).toBeGreaterThan(prompt.lastIndexOf('</|RCC|tool_result>'));
+  });
+
+  test('RED: RCC marker contract must fail fast if projected tool_result lost a marker before send', async () => {
+    const provider = createProvider();
+    const longOutput = [
+      'BEGIN_Rcc_Long_Output',
+      'line_001: body',
+      'END_Rcc_Long_Output',
+    ].join('\n');
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'call apply_patch then report markers' },
+          { role: 'assistant', content: '', tool_calls: [
+            { id: 'call_patch_missing_middle', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ patch: '+ hello' }) } },
+          ] },
+          { role: 'tool', tool_call_id: 'call_patch_missing_middle', content: longOutput },
+          { role: 'user', content: 'continue and include BEGIN_Rcc_Long_Output, MIDDLE_Rcc_Long_Output, END_Rcc_Long_Output' },
+        ],
+        tools: [
+          { type: 'function', function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object' } } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+
+    expect(() => (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    )).toThrow('[windsurf] RCC tool_result marker contract violated');
   });
 
   test('RED: Cascade request schema has no structured custom tool-definition input slot; unsupported Codex/MCP tools use RCC text protocol', async () => {
@@ -7048,6 +7264,48 @@ print('{"ok":true}')
     } finally {
       closeSpy.mockRestore();
       grpcSpy.mockRestore();
+    }
+  });
+
+  test('RED: cascade timeout must invalidate local session + warmup state like WindsurfAPI dead trajectory handling', async () => {
+    const provider = new WindsurfChatProvider({
+      type: 'openai-standard',
+      config: {
+        providerType: 'openai',
+        baseUrl: 'http://localhost:3003',
+        model: 'gpt-5.3-codex',
+        auth: { type: 'apikey', apiKey: 'devin-session-token$timeout-reset', rawType: 'windsurf-devin-token' },
+        extensions: {
+          windsurf: {
+            lsPort: 42101,
+            csrfToken: 'windsurf-api-csrf-fixed-token',
+            sessionId: 'session-1',
+            workspacePath: '/tmp/ws-1',
+            workspaceUri: 'file:///tmp/ws-1',
+          },
+        },
+      },
+    } as any, deps);
+
+    (provider as any).windsurfCascadeWarmupPromise = Promise.resolve();
+    const closeSpy = jest.spyOn(provider as any, 'closeLocalGrpcSession').mockImplementation(() => {});
+    const timeoutError = Object.assign(new Error('windsurf local grpc timeout: /exa.language_server_pb.LanguageServerService/GetCascadeTrajectorySteps'), {
+      code: 'WINDSURF_FETCH_TIMEOUT',
+      status: 504,
+      retryable: true,
+    });
+
+    try {
+      const classified = (provider as any).handleWindsurfCascadeTransportFailure(timeoutError);
+      expect(classified).toMatchObject({
+        code: 'WINDSURF_FETCH_TIMEOUT',
+        status: 504,
+        retryable: true,
+      });
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      expect((provider as any).windsurfCascadeWarmupPromise).toBeNull();
+    } finally {
+      closeSpy.mockRestore();
     }
   });
 

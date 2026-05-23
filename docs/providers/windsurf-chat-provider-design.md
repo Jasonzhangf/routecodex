@@ -176,6 +176,18 @@ Provider behavior target:
 
 ## Verification
 
+## apply_patch RCC 文本收割（当前事实）
+
+`apply_patch` 对 Windsurf 不是已确认可等价的 native tool。Windsurf.app 只能确认 `write_to_file` / `propose_code` 是 Cascade trajectory/proto step，不能确认它们是可控本地 executor；其字段也不能表达 Codex `apply_patch` 的 multi-file patch、失败/aborted 等完整语义。因此禁止把 `apply_patch` native-map 到 `write_to_file` / `propose_code`。
+
+当前规则：
+
+1. `apply_patch` 走 RCC 文本引导/收割，或未来作为显式配置打开的 RouteCodex servertool 由 RCC 执行。
+2. 不完全兼容工具不得伪装 native；否则执行结果不可控，错误会被模型误解。
+3. `exec_command` / `shell_command` 仍可 bridge 到 Cascade `run_command`，但只限 one-shot blocking shell 子集；不能外推到 PTY/session/stdin，也不能用 `run_command` 代替 `apply_patch` 文件编辑。
+
+当前测试锚点必须覆盖：`apply_patch` 被分入 unsupported/RCC text tools；native allowlist 不包含 `write_to_file`；RCC guidance 可以引导 `apply_patch` 文本收割；Cascade native 轨迹只对已等价工具做回译。
+
 执行顺序固定：
 
 1. 更新本文和 `docs/design/windsurf-cascade-tool-protocol.md`。

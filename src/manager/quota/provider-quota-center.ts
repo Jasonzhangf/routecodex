@@ -267,7 +267,10 @@ function shouldKeepProviderInPoolDuringCooldown(series: ErrorSeries, consecutive
   if (consecutive <= 0) {
     return false;
   }
-  return series === 'E429' || series === 'ENET' || series === 'E5XX' || series === 'EOTHER';
+  if (series === 'E5XX') {
+    return consecutive <= 2;
+  }
+  return series === 'E429' || series === 'ENET' || series === 'EOTHER';
 }
 
 function computeTransientKeepPoolCooldownMs(series: ErrorSeries, consecutive: number): number | null {
@@ -484,6 +487,19 @@ export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState
       };
     }
     return next;
+  }
+
+  if (
+    next.lastErrorSeries === 'E5XX' &&
+    typeof next.consecutiveErrorCount === 'number' &&
+    next.consecutiveErrorCount >= 3
+  ) {
+    return {
+      ...next,
+      inPool: false,
+      reason: 'cooldown',
+      cooldownKeepsPool: undefined
+    };
   }
 
   // 冷却与黑名单窗口到期处理。

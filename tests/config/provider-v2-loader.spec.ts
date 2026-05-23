@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { loadProviderConfigsV2 } from '../../src/config/provider-v2-loader.js';
 import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-builder.js';
+import { materializeRouteCodexConfig } from '../../src/config/user-config-loader.js';
 import type { UnknownRecord } from '../../src/config/virtual-router-types.js';
 
 async function createTempDir(prefix: string): Promise<string> {
@@ -178,6 +179,66 @@ describe('buildVirtualRouterInputV2', () => {
     expect(input.providers.demo.type).toBe('mock-provider');
     expect(input.routing.default).toHaveLength(1);
     expect(input.routing.default[0].targets).toEqual(['demo.mock-1']);
+  });
+
+
+  it('carries top-level servertool.apply_patch mode into virtual router input', async () => {
+    const root = await createTempDir('provider-v2-');
+    const providerDir = path.join(root, 'demo');
+    await fs.mkdir(providerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.json'),
+      `${JSON.stringify({
+        version: '2.0.0',
+        providerId: 'demo',
+        provider: { type: 'mock-provider', baseURL: 'https://demo.example.com' }
+      }, null, 2)}
+`,
+      'utf8'
+    );
+
+    const input = await buildVirtualRouterInputV2({
+      servertool: { apply_patch: { mode: 'servertool' } },
+      virtualrouter: {
+        routingPolicyGroups: {
+          default: { routing: { default: [{ id: 'primary', targets: ['demo.mock-1'] }] } }
+        }
+      }
+    }, root);
+
+    expect(input.applyPatch).toEqual({ mode: 'servertool' });
+  });
+
+
+
+  it('materializes servertool.apply_patch mode into userConfig.virtualrouter for runtime bootstrap', async () => {
+    const root = await createTempDir('provider-v2-');
+    const providerDir = path.join(root, 'demo');
+    await fs.mkdir(providerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.json'),
+      `${JSON.stringify({
+        version: '2.0.0',
+        providerId: 'demo',
+        provider: { type: 'mock-provider', baseURL: 'https://demo.example.com' }
+      }, null, 2)}
+`,
+      'utf8'
+    );
+
+    const materialized = await materializeRouteCodexConfig({
+      version: '2.0.0',
+      virtualrouterMode: 'v2',
+      servertool: { apply_patch: { mode: 'servertool' } },
+      httpserver: { port: 10000, host: '127.0.0.1' },
+      virtualrouter: {
+        routingPolicyGroups: {
+          default: { routing: { default: [{ id: 'primary', targets: ['demo.mock-1'] }] } }
+        }
+      }
+    }, root);
+
+    expect((materialized.userConfig.virtualrouter as any).applyPatch).toEqual({ mode: 'servertool' });
   });
 
   it('does not auto-synthesize capability routes when route pools are absent', async () => {

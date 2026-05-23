@@ -492,10 +492,14 @@ export async function handleProviderQuotaErrorEvent(
     typeof routePoolSizeRaw === 'number' && Number.isFinite(routePoolSizeRaw)
       ? Math.max(0, Math.floor(routePoolSizeRaw))
       : 0;
+  const isRepeated5xxOutOfPool =
+    appliedState.lastErrorSeries === 'E5XX'
+    && appliedState.inPool === false
+    && appliedState.consecutiveErrorCount >= 3;
   const shouldEvictFromPool =
-    errorClassification === 'unrecoverable'
+    (errorClassification === 'unrecoverable' || isRepeated5xxOutOfPool)
     && appliedState.consecutiveErrorCount >= 3
-    && routePoolSize > 1;
+    && (routePoolSize > 1 || isRepeated5xxOutOfPool);
   const nextState: QuotaState =
     shouldEvictFromPool
       ? {

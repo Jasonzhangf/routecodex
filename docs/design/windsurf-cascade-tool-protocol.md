@@ -251,7 +251,7 @@ Known mapped families and semantic status:
 | `Write` / `write` / `write_to_file` | `write_to_file` | partial; single-file only | Do not map multi-file patch semantics here. |
 | `WebSearch` / `ToolSearch` / `web_search` | `search_web` | partial; provider-dependent result shape | Only enable when request allowlist and result projection are tested. |
 | `WebFetch` / `read_url_content` | `read_url_content` | partial/direct URL fetch | Only enable when result projection is tested. |
-| `apply_patch` | none | unsupported by native semantic equivalence | Must fail-fast unless an explicit non-native mode is designed. |
+| `apply_patch` | none | unsupported native; RCC text harvest or explicit servertool only | Windsurf.app exposes `write_to_file` / `propose_code` as Cascade trajectory/proto steps, not as a controllable executor equivalent to Codex `apply_patch`. Do not native-map `apply_patch` to `write_to_file` / `propose_code`; multi-file patch and failure/aborted semantics are not equivalent. |
 | `write_stdin` / PTY/session continuation | none | unsupported by `run_command` equivalence | Must fail-fast; `run_command` is one-shot blocking, not an interactive session. |
 | `update_plan` / `request_user_input` / `spawn_agent` / `send_input` / `wait_agent` / `close_agent` | none | unsupported by current native map | Candidate only for future MCP registration blackbox, not direct translation. |
 | `mcp__*` caller tools | no per-request input slot proven | MCP candidate, not supported yet | Requires separate MCP registration/request blackbox; cannot be injected through `SendUserCascadeMessageRequest`. |
@@ -295,6 +295,8 @@ Current RouteCodex decision: unsupported tools use the explicit RCC text-tool pr
 native-equivalent tool -> Cascade native structured protocol
 unsupported tool       -> RCC text-tool protocol
 ```
+
+`apply_patch` is an unsupported native tool for Windsurf. It must use RCC text-tool harvest, or a future explicitly enabled RouteCodex servertool; it must not be translated to Cascade `write_to_file` / `propose_code` native steps.
 
 ## RouteCodex Provider Requirements
 

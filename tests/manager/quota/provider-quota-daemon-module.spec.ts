@@ -462,6 +462,62 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
+  it('recoverable 5xx 3x evicts when alternate routes exist instead of keeping a hot 502 provider in pool', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-23T18:55:00.000Z'));
+    const baseNow = Date.now();
+    const providerKey = 'windsurf.ws-pro-3.gpt-5.4-none';
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    for (let i = 0; i < 3; i += 1) {
+      const ts = baseNow + i * 1_000;
+      await emitProviderError(mod, {
+        code: 'WINDSURF_UPSTREAM_TRANSIENT',
+        message: 'The pending stream has been canceled',
+        stage: 'provider.send',
+        status: 502,
+        recoverable: true,
+        affectsHealth: true,
+        timestamp: ts,
+        runtime: {
+          requestId: `req_ws_502_${i}`,
+          providerKey,
+          providerId: 'windsurf'
+        },
+        details: {
+          errorClassification: 'recoverable',
+          errorCode: 'WINDSURF_UPSTREAM_TRANSIENT',
+          upstreamCode: 'WINDSURF_UPSTREAM_TRANSIENT',
+          reason: 'pending_stream_canceled',
+          attempt: i + 1,
+          routePoolSize: 3
+        }
+      } as any);
+      await jest.advanceTimersByTimeAsync(5);
+    }
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey]).toBeDefined();
+    expect(snapshot[providerKey].reason).toBe('cooldown');
+    expect(snapshot[providerKey].inPool).toBe(false);
+    expect(snapshot[providerKey].cooldownKeepsPool).not.toBe(true);
+    expect(snapshot[providerKey].consecutiveErrorCount).toBe(3);
+
+    const cooldownUntil = snapshot[providerKey].cooldownUntil as number;
+    jest.setSystemTime(cooldownUntil + 1);
+    const quotaView = mod.getQuotaView();
+    const entryAfterExpiry = quotaView(providerKey);
+    expect(entryAfterExpiry?.inPool).toBe(false);
+    expect(entryAfterExpiry?.reason).toBe('cooldown');
+    expect(entryAfterExpiry?.cooldownUntil).toBeNull();
+    expect(entryAfterExpiry?.consecutiveErrorCount).toBe(3);
+
+    await mod.stop();
+  });
+
   it('keeps antigravity oauth providers available by default and preserves availability on quota recovery signal', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
@@ -854,7 +910,8 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(snapshotBeforeStop[providerKey]).toBeDefined();
     expect(snapshotBeforeStop[providerKey].inPool).toBe(false);
     expect(snapshotBeforeStop[providerKey].reason).toBe('blacklist');
-    expect(snapshotBeforeStop[providerKey].blacklistUntil).toBe(Date.parse('2026-05-22T00:00:00.000Z'));
+    const expectedLocalMidnight = new Date(2026, 4, 22, 0, 0, 0, 0).getTime();
+    expect(snapshotBeforeStop[providerKey].blacklistUntil).toBe(expectedLocalMidnight);
 
     await mod1.stop();
 
@@ -866,7 +923,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(snapshotAfterRestart[providerKey]).toBeDefined();
     expect(snapshotAfterRestart[providerKey].inPool).toBe(false);
     expect(snapshotAfterRestart[providerKey].reason).toBe('blacklist');
-    expect(snapshotAfterRestart[providerKey].blacklistUntil).toBe(Date.parse('2026-05-22T00:00:00.000Z'));
+    expect(snapshotAfterRestart[providerKey].blacklistUntil).toBe(expectedLocalMidnight);
 
     const quotaView = mod2.getQuotaView();
     expect(quotaView).not.toBeNull();

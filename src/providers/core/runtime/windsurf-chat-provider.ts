@@ -33,6 +33,7 @@ const WINDSURF_GET_CHAT_COMPLETIONS_URL = 'https://server.self-serve.windsurf.co
 const WINDSURF_LS_SERVICE = '/exa.language_server_pb.LanguageServerService';
 const WINDSURF_CASCADE_COMMUNICATION_NO_TOOLS = 'You are accessed via API. When asked about your identity, describe your actual underlying model name and provider accurately. Answer directly. STRICTLY respond in the exact same language the user used in their latest message (Chinese → Chinese, English → English, Japanese → Japanese; never switch mid-conversation).';
 const WINDSURF_CASCADE_COMMUNICATION_WITH_TOOLS = 'You are accessed via API. When asked about your identity, describe your actual underlying model name and provider accurately. STRICTLY respond in the exact same language the user used in their latest message (Chinese → Chinese, English → English, Japanese → Japanese; never switch mid-conversation). Use the functions above when relevant.';
+const WINDSURF_CASCADE_TIMEOUT_MS = 300_000;
 
 type WindsurfCascadeRuntimeScope = {
   pinnedRuntime: WindsurfProviderRuntimeOptions | null;
@@ -61,6 +62,20 @@ type WindsurfManagedAuthConfig = {
   tokenFile?: string;
   accountAlias?: string;
 };
+
+function readPositiveIntEnv(names: string[], defaultValue: number): number {
+  for (const name of names) {
+    const raw = process.env[name];
+    if (typeof raw !== 'string' || !raw.trim()) {
+      continue;
+    }
+    const parsed = Number(raw.trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
+  return defaultValue;
+}
 
 function decodeProtoVarint(bytes: Uint8Array, start: number): { value: number; consumed: number } | null {
   let result = 0;
@@ -1149,6 +1164,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   private windsurfForceRefreshLogin = false;
   private windsurfCascadeWarmupPromise: Promise<void> | null = null;
   private windsurfCascadeSessionIdOverride: string | null = null;
+  private readonly windsurfCascadeTimeoutMs: number;
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     const cfg: OpenAIStandardConfig = {
@@ -1165,6 +1181,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const nested = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).windsurf : undefined;
     this.windsurfRuntime = normalizeWindsurfProviderRuntimeOptions(
       nested && typeof nested === 'object' ? (nested as UnknownObject) : raw
+    );
+    this.windsurfCascadeTimeoutMs = readPositiveIntEnv(
+      ['ROUTECODEX_WINDSURF_CASCADE_TIMEOUT_MS', 'RCC_WINDSURF_CASCADE_TIMEOUT_MS'],
+      WINDSURF_CASCADE_TIMEOUT_MS
     );
   }
 
@@ -1795,7 +1815,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       for (const endpoint of postAuthEndpoints) {
         this.logWindsurfStage('sessionCredential.postAuth.begin', { endpoint, loginEmail });
         try {
-          response = await this.fetchWithTimeout(endpoint, postAuthRequest, 30000);
+          response = await this.fetchWithTimeout(endpoint, postAuthRequest, this.windsurfCascadeTimeoutMs);
           postAuthEndpoint = endpoint;
           break;
         } catch (error) {
@@ -2240,17 +2260,70 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       }
     }
     const blocks: string[] = [];
+    const markerLines = new Set<string>();
     for (const turn of semanticConversation) {
       if (turn.type !== 'function_call_output') continue;
       const name = nameById.get(turn.call_id) || turn.name || '';
       if (!name || (!allowed.has(name) && !allowed.has(windsurfToolLookupName(name)))) continue;
+      for (const line of String(turn.output || '').split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (/^(?:BEGIN|MIDDLE|END)_[A-Za-z0-9_:-]+$/.test(trimmed)) markerLines.add(trimmed);
+      }
       blocks.push(`<|RCC|tool_result id="${turn.call_id}" name="${name}">\n<![CDATA[\n${this.escapeRccCdata(turn.output)}\n]]>\n</|RCC|tool_result>`);
     }
     if (blocks.length === 0) return '';
+    const markerEvidence = markerLines.size > 0
+      ? `Verified marker lines observed inside the RCC tool_result body: ${Array.from(markerLines).join(', ')}.`
+      : '';
+    const markerInstruction = markerLines.size > 0
+      ? `Required marker evidence to include verbatim in the final answer: ${Array.from(markerLines).join(', ')}.`
+      : 'If a tool result contains explicit marker/sentinel lines such as BEGIN_*, MIDDLE_*, or END_*, mention each marker line exactly in the final answer so the caller can verify that the full tool result was preserved.';
     return [
       'RCC tool results already returned. Use these results to answer or continue. Do not repeat the same RCC invocation unless a genuinely new tool call with new arguments is required.',
+      markerInstruction,
       ...blocks,
-    ].join('\n\n');
+      markerEvidence,
+      markerInstruction,
+    ].filter((part) => typeof part === 'string' && part.trim()).join('\n\n');
+  }
+
+  private assertWindsurfRccToolResultMarkerContract(semanticConversation: WindsurfSemanticTurn[], unsupportedTools: Array<Record<string, unknown>>): void {
+    if (!Array.isArray(unsupportedTools) || unsupportedTools.length === 0) return;
+    const allowed = windsurfToolNameSet(unsupportedTools);
+    const unsupportedCallIds = new Set<string>();
+    for (const turn of semanticConversation) {
+      if (turn.type !== 'assistant' || !Array.isArray(turn.tool_calls)) continue;
+      for (const call of turn.tool_calls) {
+        if (allowed.has(call.name) || allowed.has(windsurfToolLookupName(call.name))) {
+          unsupportedCallIds.add(call.call_id);
+        }
+      }
+    }
+    if (unsupportedCallIds.size === 0) return;
+
+    const latestUserText = [...semanticConversation].reverse().find((turn) => turn.type === 'user')?.text || '';
+    const requiredMarkers = new Set<string>();
+    for (const match of latestUserText.matchAll(/\b(?:BEGIN|MIDDLE|END)_[A-Za-z0-9_:-]+\b/g)) {
+      requiredMarkers.add(match[0]);
+    }
+    if (requiredMarkers.size === 0) return;
+
+    const observedMarkers = new Set<string>();
+    for (const turn of semanticConversation) {
+      if (turn.type !== 'function_call_output' || !unsupportedCallIds.has(turn.call_id)) continue;
+      for (const line of String(turn.output || '').split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (/^(?:BEGIN|MIDDLE|END)_[A-Za-z0-9_:-]+$/.test(trimmed)) observedMarkers.add(trimmed);
+      }
+    }
+    const missing = Array.from(requiredMarkers).filter((marker) => !observedMarkers.has(marker));
+    if (missing.length > 0) {
+      throw createWindsurfProviderError(`[windsurf] RCC tool_result marker contract violated: missing ${missing.join(', ')}`, {
+        code: 'WINDSURF_RCC_TOOL_RESULT_MARKER_CONTRACT_VIOLATED',
+        status: 500,
+        retryable: false,
+      });
+    }
   }
 
   private buildWindsurfRccPendingToolReminder(semanticConversation: WindsurfSemanticTurn[], unsupportedTools: Array<Record<string, unknown>>): string {
@@ -2628,6 +2701,25 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     this.windsurfCascadeWarmupPromise = null;
     this.windsurfCascadeSessionIdOverride = null;
     this.clearPinnedGrpcRuntime();
+    if (/transport|timeout|warmup|panel|send|cascade/i.test(reason)) {
+      this.disposeManagedLocalGrpcRuntime(reason);
+    }
+  }
+
+  private disposeManagedLocalGrpcRuntime(reason: string): void {
+    const key = this.resolveWindsurfManagedLsKey();
+    const runtime = WINDSURF_MANAGED_LS_POOL.get(key);
+    WINDSURF_MANAGED_LS_PENDING.delete(key);
+    if (!runtime) return;
+    WINDSURF_MANAGED_LS_POOL.delete(key);
+    this.closeLocalGrpcSessionForPort(runtime.port);
+    runtime.ready = false;
+    runtime.sessionId = null;
+    runtime.workspaceInit = null;
+    this.logWindsurfStage('managedLs.dispose', { key, port: runtime.port, reason });
+    if (runtime.process.exitCode == null && runtime.process.signalCode == null) {
+      try { runtime.process.kill('SIGTERM'); } catch {}
+    }
   }
 
   private getPinnedGrpcRuntime(): WindsurfProviderRuntimeOptions | null {
@@ -2721,11 +2813,15 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const convo = semanticConversation.filter((turn) => turn.type === 'user' || turn.type === 'assistant' || turn.type === 'function_call_output');
     let sysText = systemMsgs.map((msg) => contentToString(msg.content)).join('\n').trim();
     if (sysText) sysText = compactSystemPromptForCascade(sysText);
+    this.assertWindsurfRccToolResultMarkerContract(semanticConversation, unsupportedTextTools);
     const rccResults = this.buildWindsurfRccToolResultContext(semanticConversation, unsupportedTextTools);
     const rccGuidance = this.buildWindsurfRccToolGuidance(unsupportedTextTools);
     const rccPendingReminder = this.buildWindsurfRccPendingToolReminder(semanticConversation, unsupportedTextTools);
-    const tailParts = rccPendingReminder ? [rccGuidance, rccPendingReminder].filter((part) => typeof part === 'string' && part.trim()) : [];
-    const prefixParts = [sysText, rccResults, rccGuidance, rccPendingReminder].filter((part) => typeof part === 'string' && part.trim());
+    const tailParts = [
+      rccResults,
+      ...(rccPendingReminder ? [rccGuidance, rccPendingReminder] : []),
+    ].filter((part) => typeof part === 'string' && part.trim());
+    const prefixParts = [sysText, rccGuidance, rccPendingReminder].filter((part) => typeof part === 'string' && part.trim());
 
     if (convo.length <= 1) {
       const latest = this.extractLatestCascadeUserText(semanticConversation, tailParts);
@@ -2786,7 +2882,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
 
   private handleWindsurfCascadeTransportFailure(error: unknown): Error {
     const classified = this.classifyWindsurfCascadeError(error) as Error & Record<string, unknown>;
-    if (classified.code === 'WINDSURF_UPSTREAM_TRANSIENT') {
+    if (classified.code === 'WINDSURF_UPSTREAM_TRANSIENT' || classified.code === 'WINDSURF_FETCH_TIMEOUT') {
       this.resetWindsurfCascadeTransportState('transport-failure');
     }
     return classified;
@@ -3231,6 +3327,25 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     if (existing && existing.ready && existing.process.exitCode == null && existing.process.signalCode == null && this.isTcpPortListening(existing.port)) {
       return existing;
     }
+    const live = this.findPreferredRoutecodexWindsurfRuntime(this.windsurfRuntime.lsPort);
+    const expectedDir = path.join(os.homedir(), '.rcc', 'windsurf-ls', key.replace(/[^a-zA-Z0-9._-]/g, '_'));
+    if (live?.lsPort && live.command?.includes(`--codeium_dir=${expectedDir}`) && this.isTcpPortListening(live.lsPort)) {
+      const adopted: WindsurfManagedLocalGrpcRuntime = {
+        port: live.lsPort,
+        csrfToken: live.csrfToken || this.windsurfRuntime.csrfToken || WINDSURF_MANAGED_LS_CSRF,
+        process: {
+          exitCode: null,
+          signalCode: null,
+          kill: () => false,
+        } as unknown as childProcess.ChildProcess,
+        ready: true,
+        sessionId: null,
+        workspaceInit: null,
+      };
+      this.logWindsurfStage('managedLs.adopt', { key, port: adopted.port });
+      WINDSURF_MANAGED_LS_POOL.set(key, adopted);
+      return adopted;
+    }
     const pending = WINDSURF_MANAGED_LS_PENDING.get(key);
     if (pending) return pending;
     const promise = (async () => {
@@ -3422,7 +3537,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     };
   }
 
-  private async grpcUnaryLocal(pathName: string, payload: Buffer, timeout = 30_000): Promise<Buffer> {
+  private async grpcUnaryLocal(pathName: string, payload: Buffer, timeout = this.windsurfCascadeTimeoutMs): Promise<Buffer> {
     const runtime = this.getPinnedGrpcRuntime() || this.resolveLiveLocalGrpcRuntime();
     const csrfToken = typeof runtime.csrfToken === 'string' ? runtime.csrfToken.trim() : '';
     if (!csrfToken) {
@@ -4526,7 +4641,7 @@ ${stderr}` : '');
           }
           const row = entry as Record<string, unknown>;
           const fn = row.function && typeof row.function === 'object' ? row.function as Record<string, unknown> : {};
-          const callId = typeof row.id === 'string' ? row.id.trim() : typeof row.call_id === 'string' ? String(row.call_id).trim() : '';
+          const callId = typeof row.call_id === 'string' ? row.call_id.trim() : typeof row.id === 'string' ? String(row.id).trim() : '';
           const name = typeof fn.name === 'string' ? fn.name.trim() : typeof row.name === 'string' ? String(row.name).trim() : '';
           const rawArgs = typeof fn.arguments === 'string'
             ? fn.arguments
