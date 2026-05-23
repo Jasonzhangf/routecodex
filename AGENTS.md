@@ -19,6 +19,7 @@
 4. servertool / stopMessage / heartbeat / clock：`docs/agent-routing/30-servertool-lifecycle-routing.md`
 5. 任务跟踪与记忆：`docs/agent-routing/40-task-memory-routing.md`
 6. 权威细节文档：
+   - Windsurf 当前事实入口：`.agents/skills/rcc-dev-skills/SKILL.md` 的 Windsurf 章节 + `docs/providers/windsurf-chat-provider-design.md`
    - `docs/ARCHITECTURE.md`
    - `docs/error-handling-v2.md`
    - `docs/routing-instructions.md`

@@ -51,6 +51,7 @@ type ResponsesConversationStoreLike = {
 };
 
 type ResponsesConversationModule = {
+  captureResponsesRequestContext?: (args: { requestId: string; payload: AnyRecord; context: AnyRecord; sessionId?: string; conversationId?: string; routeHint?: string }) => void;
   recordResponsesResponse?: (args: { requestId: string; response: AnyRecord; routeHint?: string }) => void;
   resumeResponsesConversation?: (
     responseId: string,
@@ -85,6 +86,24 @@ async function getResponsesConversationModule(): Promise<ResponsesConversationMo
   return cachedResponsesConversationModule;
 }
 
+
+
+
+export async function captureResponsesRequestContextForRequest(args: {
+  requestId: string;
+  payload: AnyRecord;
+  context: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
+  routeHint?: string;
+}): Promise<void> {
+  const mod = await getResponsesConversationModule();
+  const fn = mod.captureResponsesRequestContext;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] captureResponsesRequestContext not available');
+  }
+  fn(args);
+}
 
 export async function recordResponsesResponseForRequest(args: {
   requestId: string;

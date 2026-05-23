@@ -47,6 +47,7 @@ export { createCoreQuotaManager } from './bridge/quota-manager.js';
 export {
   writeSnapshotViaHooks,
   preloadCriticalBridgeRuntimeModules,
+  captureResponsesRequestContextForRequest,
   recordResponsesResponseForRequest,
   resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,

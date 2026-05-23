@@ -573,3 +573,41 @@ pub fn build_gemini_tools_from_bridge_json(
     let output = build_gemini_tools_from_bridge(&defs, mode.as_deref());
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn gemini_does_not_own_apply_patch_contract_anymore() {
+        let defs = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "apply_patch",
+                    "description": "Edit files by patch",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "filePath": { "type": "string" }
+                        }
+                    }
+                }
+            }
+        ]);
+
+        let out = build_gemini_tools_from_bridge(&defs, None);
+        let families = out.as_array().unwrap();
+        let declarations = families[0]["functionDeclarations"].as_array().unwrap();
+        let properties = declarations[0]["parameters"]["properties"].as_object().unwrap();
+        assert_eq!(
+            declarations[0]["description"].as_str().unwrap_or(""),
+            "Edit files by patch"
+        );
+        assert!(properties.get("patch").is_none());
+        assert!(properties.get("input").is_none());
+        assert!(properties.get("fileContent").is_none());
+        assert!(properties.get("file_content").is_none());
+    }
+}

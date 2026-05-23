@@ -7,7 +7,6 @@ import {
   resolveActiveProcessModeAndAudit,
   sanitizeStandardizedRequestMessages,
 } from "./hub-pipeline-chat-process-request-utils.js";
-import { propagateApplyPatchToolModeToRequestMetadata } from "./hub-pipeline-request-metadata-blocks.js";
 import type { AdapterContext } from "../types/chat-envelope.js";
 import type { HubPolicyConfig } from "../policy/policy-engine.js";
 import { runInboundSemanticPipeline } from "./hub-pipeline-execute-request-stage-inbound-semantic-blocks.js";
@@ -43,10 +42,6 @@ export async function executeInboundSemanticStages<TContext = Record<string, unk
 
   const standardizedRequest = sanitizeStandardizedRequestMessages(
     standardizedRequestBase as unknown as StandardizedRequest,
-  );
-  propagateApplyPatchToolModeToRequestMetadata(
-    args.normalized.metadata as Record<string, unknown> | undefined,
-    standardizedRequest,
   );
 
   const { activeProcessMode, passthroughAudit } =

@@ -9,16 +9,6 @@ use crate::shared_metadata_semantics::ensure_protocol_state_mut;
 use crate::shared_openai_message_normalize::normalize_openai_chat_messages;
 use crate::shared_tool_mapping::flatten_chat_tools_for_function_calling;
 
-const APPLY_PATCH_HINT: &str = "\n\n[RouteCodex apply_patch] Canonical contract: use exactly one patch body in `patch`, keep paths workspace-relative, and build Update File hunks from the latest real file content. If apply_patch fails with context/expected-lines errors, the next required action is to read the file first, then rebuild a smaller patch.";
-const APPLY_PATCH_MISSING_INPUT: &str = "\n\n[RouteCodex precheck][APPLY_PATCH_ARGUMENTS_MISSING_PATCH] apply_patch 参数解析失败：缺少可用 patch 文本。规范形状是 {\"patch\":\"*** Begin Patch\\n...\\n*** End Patch\"}；`input` 只允许作为同一 patch 文本的兼容镜像。";
-const APPLY_PATCH_MAP_TYPE: &str = "\n\n[RouteCodex precheck][APPLY_PATCH_ARGUMENTS_NOT_STRING] apply_patch 参数类型错误：检测到 JSON 对象（map），但 arguments 需要字符串化后的 patch 文本。请先对参数做 JSON.stringify，或直接提供 { patch: \"<canonical patch>\" }。";
-const APPLY_PATCH_SANDBOX_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_SANDBOX_OUTSIDE_WORKSPACE] apply_patch 被 sandbox 终止 (Signal 9)。常见原因是补丁涉及 workspace 之外的路径。下一步：改用当前 workspace 内相对路径，或将目标仓加入 workspaces/workdir 后再调用 apply_patch。";
-const APPLY_PATCH_PATH_MISSING_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_PATH_NOT_FOUND] apply_patch 读取目标文件失败：路径不存在或不在当前 workspace。下一步：确认路径真实存在且使用 workspace 相对路径（如 src/...），不要以 / 或盘符开头。";
-const APPLY_PATCH_CONFLICT_MARKER_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_CONFLICT_MARKERS] apply_patch 检测到 merge/conflict 标记被直接塞进了 Update File hunk。下一步：先读取目标文件最新内容，再只保留真正的 `@@` patch hunk；不要发送 `<<<<<<<` / `=======` / `>>>>>>>`。";
-const APPLY_PATCH_CONTEXT_MISMATCH_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_CONTEXT_MISMATCH] apply_patch 的 hunk 上下文与当前文件不匹配。下一步：必须先重新读取目标文件最新内容，再用更小且唯一的上下文重建 patch；不要继续猜 `@@ -x,y +x,y @@` 行号范围。";
-const APPLY_PATCH_MIXED_SYNTAX_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_MIXED_SYNTAX] apply_patch 只能使用单一 canonical patch grammar；不要混入 hashline 前缀、GNU/git diff 头，或把多种格式揉在同一 patch 里。";
-const APPLY_PATCH_EXPECTED_LINES_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_EXPECTED_LINES_MISMATCH] apply_patch 没找到待替换原文，通常说明文件已经变化或上下文过大。下一步：先重读目标文件最新内容，再用更小、唯一的上下文重试；必要时把大 patch 拆成多次小 patch。";
-const APPLY_PATCH_HUNK_SHAPE_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_HUNK_SHAPE_INVALID] apply_patch 的 Update File hunk 形状不对：`@@` 之后的每一行都必须以前缀开头——空格=上下文，`-`=删除，`+`=新增；不要把原文件正文直接贴进 hunk。下一步：先用 `nl -ba <file>` 读取最新文件（保留空行编号），再基于真实内容重建一个更小、更唯一的 hunk。";
 
 const CHAT_PARAMETER_KEYS: [&str; 19] = [
     "model",
@@ -179,105 +169,6 @@ fn normalize_tool_content(content: &Value) -> String {
             .filter(|text| !text.trim().is_empty())
             .unwrap_or_default(),
     }
-}
-
-fn maybe_augment_routecodex_apply_patch_precheck(content: &str) -> String {
-    if content.is_empty() {
-        return content.to_string();
-    }
-    if content.contains("[RouteCodex precheck]") {
-        return content.to_string();
-    }
-    let lower = content.to_ascii_lowercase();
-    if !lower.contains("failed to parse function arguments") {
-        return content.to_string();
-    }
-    if content.contains("missing field `input`") {
-        return format!("{content}{APPLY_PATCH_MISSING_INPUT}");
-    }
-    if content.contains("invalid type: map, expected a string") {
-        return format!("{content}{APPLY_PATCH_MAP_TYPE}");
-    }
-    content.to_string()
-}
-
-fn maybe_augment_apply_patch_error_content(content: &str, tool_name: Option<&str>) -> String {
-    if content.is_empty() {
-        return content.to_string();
-    }
-    if content.contains("[apply_patch hint]") || content.contains("[RouteCodex hint] apply_patch") {
-        return content.to_string();
-    }
-    let lower = content.to_ascii_lowercase();
-    let is_apply_patch = tool_name
-        .map(|name| name.trim().eq_ignore_ascii_case("apply_patch"))
-        .unwrap_or(false)
-        || lower.contains("apply_patch verification failed")
-        || lower.contains("failed to apply patch")
-        || lower.contains("apply_patch")
-        || lower.contains("apply patch");
-    if !is_apply_patch {
-        return content.to_string();
-    }
-    let sandbox_signal = lower.contains("sandbox(signal(9))")
-        || (lower.contains("sandbox") && lower.contains("signal(9)"));
-    if sandbox_signal {
-        return format!("{content}{APPLY_PATCH_SANDBOX_HINT}");
-    }
-    let missing_path = lower.contains("failed to read file to update")
-        || lower.contains("no such file or directory");
-    if missing_path {
-        return format!("{content}{APPLY_PATCH_PATH_MISSING_HINT}");
-    }
-    if lower.contains("expected update hunk to start with a @@ context marker, got: '======='")
-        || lower.contains("expected update hunk to start with a @@ context marker, got: '<<<<<<<")
-        || lower.contains("expected update hunk to start with a @@ context marker, got: '>>>>>>>")
-    {
-        return format!("{content}{APPLY_PATCH_CONFLICT_MARKER_HINT}");
-    }
-    if lower.contains("failed to find context") && lower.contains("@@") {
-        return format!("{content}{APPLY_PATCH_CONTEXT_MISMATCH_HINT}");
-    }
-    if lower.contains("is not a valid hunk header")
-        && (lower.contains("'--- a/")
-            || lower.contains("'--- /dev/null")
-            || lower.contains("'+++ b/"))
-    {
-        return format!("{content}{APPLY_PATCH_MIXED_SYNTAX_HINT}");
-    }
-    if lower.contains("expected update hunk to start with a @@ context marker") && lower.contains("@@")
-    {
-        return format!("{content}{APPLY_PATCH_CONTEXT_MISMATCH_HINT}");
-    }
-    if lower.contains("failed to find expected lines in ") {
-        return format!("{content}{APPLY_PATCH_EXPECTED_LINES_HINT}");
-    }
-    if lower.contains("unexpected line found in update hunk")
-        || lower.contains("update file hunk for path")
-        || lower.contains("every line should start with ' ' (context line), '+' (added line), or '-' (removed line)")
-    {
-        return format!("{content}{APPLY_PATCH_HUNK_SHAPE_HINT}");
-    }
-    format!("{content}{APPLY_PATCH_HINT}")
-}
-
-#[napi]
-pub fn augment_apply_patch_error_content_json(
-    content: String,
-    tool_name: String,
-) -> NapiResult<String> {
-    let tool_name_opt = {
-        let trimmed = tool_name.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        }
-    };
-    Ok(maybe_augment_apply_patch_error_content(
-        content.as_str(),
-        tool_name_opt,
-    ))
 }
 
 fn push_missing_field(
@@ -483,20 +374,6 @@ fn normalize_chat_messages(raw: Option<&Value>) -> NormalizedMessages {
                     .cloned()
                     .unwrap_or(Value::Null);
                 let normalized_content = normalize_tool_content(&raw_content);
-                let prechecked = maybe_augment_routecodex_apply_patch_precheck(&normalized_content);
-                if prechecked != normalized_content {
-                    if entry_obj.get("content").and_then(Value::as_str).is_some()
-                        || !entry_obj.contains_key("content")
-                        || entry_obj
-                            .get("content")
-                            .map(Value::is_null)
-                            .unwrap_or(false)
-                    {
-                        entry_obj.insert("content".to_string(), Value::String(prechecked.clone()));
-                    } else if entry_obj.get("output").and_then(Value::as_str).is_some() {
-                        entry_obj.insert("output".to_string(), Value::String(prechecked.clone()));
-                    }
-                }
                 let mut output_entry = Map::new();
                 output_entry.insert(
                     "tool_call_id".to_string(),
@@ -504,10 +381,7 @@ fn normalize_chat_messages(raw: Option<&Value>) -> NormalizedMessages {
                 );
                 output_entry.insert(
                     "content".to_string(),
-                    Value::String(maybe_augment_apply_patch_error_content(
-                        prechecked.as_str(),
-                        name_value.as_deref(),
-                    )),
+                    Value::String(normalized_content.clone()),
                 );
                 if let Some(name) = name_value.clone() {
                     output_entry.insert("name".to_string(), Value::String(name));
@@ -568,14 +442,12 @@ fn normalize_standalone_tool_outputs(raw: Option<&Value>, missing: &mut Vec<Valu
             .cloned()
             .unwrap_or(Value::Null);
         let normalized = normalize_tool_content(&raw_content);
-        let content =
-            maybe_augment_apply_patch_error_content(normalized.as_str(), name_value.as_deref());
         let mut output_entry = Map::new();
         output_entry.insert(
             "tool_call_id".to_string(),
             Value::String(tool_call_id.unwrap()),
         );
-        output_entry.insert("content".to_string(), Value::String(content));
+        output_entry.insert("content".to_string(), Value::String(normalized));
         if let Some(name) = name_value {
             output_entry.insert("name".to_string(), Value::String(name));
         }
@@ -908,37 +780,8 @@ pub fn map_openai_chat_from_chat_json(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        map_openai_chat_to_chat, maybe_augment_apply_patch_error_content, normalize_tool_content,
-    };
+    use super::{map_openai_chat_to_chat, normalize_tool_content};
     use serde_json::{json, Value};
-
-    #[test]
-    fn apply_patch_hint_mixed_syntax_keeps_specific_guidance() {
-        let content =
-            "apply_patch verification failed: invalid hunk at line 2, '--- a/src/server/index.ts' is not a valid hunk header.";
-        let augmented = maybe_augment_apply_patch_error_content(content, Some("apply_patch"));
-        assert!(augmented.contains("块内不要再写 `--- a/...` / `+++ b/...`"));
-        assert!(augmented.contains("[APPLY_PATCH_MIXED_SYNTAX]"));
-    }
-
-    #[test]
-    fn apply_patch_hint_context_mismatch_keeps_specific_guidance() {
-        let content =
-            "apply_patch verification failed: Failed to find context '-50,6 +50,8 @@' in src/server/index.ts";
-        let augmented = maybe_augment_apply_patch_error_content(content, Some("apply_patch"));
-        assert!(augmented.contains("更小且唯一的上下文"));
-        assert!(augmented.contains("不要继续猜 `@@ -x,y +x,y @@` 行号范围"));
-    }
-
-    #[test]
-    fn apply_patch_hint_hunk_shape_keeps_specific_guidance() {
-        let content = "apply_patch verification failed: Unexpected line found in update hunk: console.log('raw body'); Every line should start with ' ' (context line), '+' (added line), or '-' (removed line)";
-        let augmented = maybe_augment_apply_patch_error_content(content, Some("apply_patch"));
-        assert!(augmented.contains("每一行都必须以前缀开头"));
-        assert!(augmented.contains("先用 `nl -ba <file>` 读取最新文件"));
-        assert!(augmented.contains("不要把原文件正文直接贴进 hunk"));
-    }
 
     #[test]
     fn normalize_tool_content_preserves_empty_as_empty_string() {

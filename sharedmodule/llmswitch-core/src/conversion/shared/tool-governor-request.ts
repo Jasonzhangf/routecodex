@@ -23,61 +23,7 @@ function isSchemaObject(value: unknown): value is Record<string, unknown> {
 }
 
 function ensureChatProcessApplyPatchToolContract(tool: Record<string, unknown>): void {
-  const fn = isSchemaObject(tool.function) ? (tool.function as Record<string, unknown>) : null;
-  if (!fn) return;
-  const name = typeof fn.name === 'string' ? fn.name.trim().toLowerCase() : '';
-  if (name !== 'apply_patch') return;
-
-  const parameters = isSchemaObject(fn.parameters) ? { ...(fn.parameters as Record<string, unknown>) } : {};
-  const properties = isSchemaObject(parameters.properties) ? { ...(parameters.properties as Record<string, unknown>) } : {};
-  const hasHashlineFilePath = isSchemaObject(properties.filePath) || isSchemaObject(properties.file_path);
-
-  if (!hasHashlineFilePath) {
-    delete properties.filePath;
-    delete properties.file_path;
-    delete properties.fileContent;
-    delete properties.file_content;
-  } else {
-    const filePathSchema = isSchemaObject(properties.filePath)
-      ? properties.filePath
-      : isSchemaObject(properties.file_path)
-        ? properties.file_path
-        : { type: 'string', description: 'Required for hashline patch syntax. Provide the target file path when `patch` uses hashline op headers.' };
-    const fileContentSchema = isSchemaObject(properties.fileContent)
-      ? properties.fileContent
-      : isSchemaObject(properties.file_content)
-        ? properties.file_content
-        : { type: 'string', description: 'Required for hashline patch syntax current file content.' };
-    properties.filePath = filePathSchema;
-    properties.file_path = filePathSchema;
-    properties.fileContent = fileContentSchema;
-    properties.file_content = fileContentSchema;
-  }
-
-  properties.patch = {
-    type: 'string',
-    description: hasHashlineFilePath
-      ? 'Hashline patch text only. In this schema, upstream authoring mode is hashline-first: provide `filePath`/`file_path`, provide current file content in `fileContent`/`file_content`, and write the edit in hashline syntax. Do not author canonical apply_patch blocks in this mode. Rust will transparently bridge hashline back into canonical apply_patch for the client.'
-      : 'Raw patch text only. Author exactly one canonical patch body in `patch`. Use only the internal `*** Begin Patch` / `*** End Patch` grammar with `*** Add File:`, `*** Update File:`, or `*** Delete File:` headers. `*** Update File:` hunks must use `@@`, `*** Add File:` content lines must start with `+`, and GNU diff headers (`---`, `+++`, `diff --git`) are not valid. Do not add `filePath`/`file_path` unless the schema explicitly declares it.'
-  };
-  properties.input = {
-    type: 'string',
-    description: 'Compatibility alias of patch. Prefer patch. Do not use input to switch syntax families.'
-  };
-
-  const required = Array.isArray(parameters.required) ? [...parameters.required] : [];
-  if (!required.includes('patch')) {
-    required.push('patch');
-  }
-
-  fn.parameters = {
-    ...parameters,
-    type: 'object',
-    properties,
-    required,
-    additionalProperties: false
-  };
-  fn.strict = false;
+  void tool;
 }
 
 export function processChatRequestTools(request: Unknown, opts?: ToolGovernanceOptions): Unknown {

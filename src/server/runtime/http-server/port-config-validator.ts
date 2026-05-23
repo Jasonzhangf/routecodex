@@ -30,9 +30,33 @@ const VALID_MODES: ReadonlySet<string> = new Set(['router', 'provider']);
 const VALID_BEHAVIORS: ReadonlySet<string> = new Set(['direct', 'relay', 'auto']);
 const VALID_SAME_PROTOCOL_BEHAVIORS: ReadonlySet<string> = new Set(['direct', 'relay']);
 
+function validateStopMessageConfig(config: PortConfig, errors: PortValidationError[]): void {
+  const stopMessage = config.stopMessage;
+  if (stopMessage === undefined || stopMessage === null) {
+    return;
+  }
+  if (typeof stopMessage !== 'object' || Array.isArray(stopMessage)) {
+    errors.push({ port: config.port ?? 0, field: 'stopMessage', message: 'stopMessage must be an object when provided' });
+    return;
+  }
+  const enabled = (stopMessage as { enabled?: unknown }).enabled;
+  if (enabled !== undefined && typeof enabled !== 'boolean') {
+    errors.push({ port: config.port ?? 0, field: 'stopMessage.enabled', message: 'stopMessage.enabled must be boolean when provided' });
+  }
+}
+
+function readStopMessageConfig(value: unknown): PortConfig['stopMessage'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const enabled = (value as { enabled?: unknown }).enabled;
+  return typeof enabled === 'boolean' ? { enabled } : undefined;
+}
+
 function validatePortConfig(config: PortConfig): PortValidationError[] {
   const errors: PortValidationError[] = [];
   const { port, host, mode, protocolBehavior, providerBinding, routingPolicyGroup } = config;
+  validateStopMessageConfig(config, errors);
 
   // Port range
   if (typeof port !== 'number' || !Number.isInteger(port) || port < VALID_PORT_MIN || port > VALID_PORT_MAX) {
@@ -146,7 +170,10 @@ export function resolveActualBehavior(
 
 export function normalizePortsConfig(rawHttpserver: Record<string, unknown>): PortConfig[] {
   if (Array.isArray(rawHttpserver.ports) && rawHttpserver.ports.length > 0) {
-    return rawHttpserver.ports as PortConfig[];
+    return (rawHttpserver.ports as PortConfig[]).map((entry) => {
+      const stopMessage = readStopMessageConfig((entry as unknown as Record<string, unknown>).stopMessage);
+      return stopMessage ? { ...entry, stopMessage } : entry;
+    });
   }
   const port =
     typeof rawHttpserver.port === 'number'
@@ -159,10 +186,14 @@ export function normalizePortsConfig(rawHttpserver: Record<string, unknown>): Po
       ? rawHttpserver.host.trim()
       : '0.0.0.0';
   const sameProtocolBehavior = rawHttpserver.sameProtocolBehavior;
+  const stopMessage = readStopMessageConfig(rawHttpserver.stopMessage);
   // Fallback to router with default group (legacy compat for old configs without ports[])
   const portConfig: PortConfig = { port, host, mode: 'router', routingPolicyGroup: 'default' };
   if (typeof sameProtocolBehavior === 'string' && VALID_SAME_PROTOCOL_BEHAVIORS.has(sameProtocolBehavior)) {
     portConfig.sameProtocolBehavior = sameProtocolBehavior as SameProtocolBehavior;
+  }
+  if (stopMessage) {
+    portConfig.stopMessage = stopMessage;
   }
   return [portConfig];
 }

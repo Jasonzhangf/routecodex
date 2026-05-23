@@ -116,50 +116,36 @@ fn ensure_apply_patch_chat_process_contract(request: &mut Map<String, Value>) {
             continue;
         };
 
-        let has_hashline_filepath =
-            properties.contains_key("filePath") || properties.contains_key("file_path");
-
-        if !has_hashline_filepath {
-            properties.remove("filePath");
-            properties.remove("file_path");
-            properties.remove("fileContent");
-            properties.remove("file_content");
-        } else {
-            let file_path_schema = properties
-                .get("filePath")
-                .cloned()
-                .or_else(|| properties.get("file_path").cloned())
-                .unwrap_or_else(|| {
-                    json!({
-                        "type": "string",
-                        "description": "Required for hashline patch syntax. Provide the target file path when `patch` uses hashline op headers."
-                    })
-                });
-            let file_content_schema = properties
-                .get("fileContent")
-                .cloned()
-                .or_else(|| properties.get("file_content").cloned())
-                .unwrap_or_else(|| {
-                    json!({
-                        "type": "string",
-                        "description": "Required for hashline patch syntax current file content."
-                    })
-                });
-            properties.insert("filePath".to_string(), file_path_schema.clone());
-            properties.insert("file_path".to_string(), file_path_schema);
-            properties.insert("fileContent".to_string(), file_content_schema.clone());
-            properties.insert("file_content".to_string(), file_content_schema);
-        }
+        let file_path_schema = properties
+            .get("filePath")
+            .cloned()
+            .or_else(|| properties.get("file_path").cloned())
+            .unwrap_or_else(|| {
+                json!({
+                    "type": "string",
+                    "description": "Required for hashline patch syntax. Provide the target file path for the edit."
+                })
+            });
+        let file_content_schema = properties
+            .get("fileContent")
+            .cloned()
+            .or_else(|| properties.get("file_content").cloned())
+            .unwrap_or_else(|| {
+                json!({
+                    "type": "string",
+                    "description": "Required for hashline patch syntax. Provide the current file content; use empty string for a new file."
+                })
+            });
+        properties.insert("filePath".to_string(), file_path_schema.clone());
+        properties.insert("file_path".to_string(), file_path_schema);
+        properties.insert("fileContent".to_string(), file_content_schema.clone());
+        properties.insert("file_content".to_string(), file_content_schema);
 
         properties.insert(
             "patch".to_string(),
             json!({
                 "type": "string",
-                "description": if has_hashline_filepath {
-                    "Hashline patch text only. In this schema, upstream authoring mode is hashline-first: provide `filePath`/`file_path`, provide current file content in `fileContent`/`file_content`, and write the edit in hashline syntax. Do not author canonical apply_patch blocks in this mode. Rust will transparently bridge hashline back into canonical apply_patch for the client."
-                } else {
-                    "Raw patch text only. Author exactly one canonical patch body in `patch`. Use only the internal `*** Begin Patch` / `*** End Patch` grammar with `*** Add File:`, `*** Update File:`, or `*** Delete File:` headers. `*** Update File:` hunks must use `@@`, `*** Add File:` content lines must start with `+`, and GNU diff headers (`---`, `+++`, `diff --git`) are not valid. Do not add `filePath`/`file_path` unless the schema explicitly declares it."
-                }
+                "description": "Hashline patch text only. Upstream authoring mode is always hashline-first: provide `filePath`/`file_path`, provide current file content in `fileContent`/`file_content`, and write the edit in hashline syntax. Do not author canonical apply_patch blocks in this mode. Rust will transparently bridge hashline back into canonical apply_patch for the client."
             }),
         );
         properties.insert(
@@ -188,7 +174,7 @@ fn ensure_apply_patch_chat_process_contract(request: &mut Map<String, Value>) {
         function_obj.insert(
             "description".to_string(),
             Value::String(
-                "Edit files through apply_patch. The upstream authoring contract is selected by schema: canonical `*** Begin Patch` only when no hashline file contract is declared, and hashline-first when `filePath`/`file_path` plus `fileContent`/`file_content` are declared. Rust transparently bridges hashline back into canonical apply_patch for the client.".to_string(),
+                "Edit files through apply_patch. The upstream authoring contract is hashline-first: provide `filePath`/`file_path`, provide `fileContent`/`file_content`, and write `patch` in hashline syntax. Rust transparently bridges hashline back into canonical apply_patch for the client.".to_string(),
             ),
         );
     }
@@ -1486,7 +1472,7 @@ mod tests {
     }
 
     #[test]
-    fn test_chat_process_apply_patch_without_hashline_fields_stays_canonical_contract() {
+    fn test_chat_process_apply_patch_without_hashline_fields_upgrades_to_hashline_contract() {
         let input = ToolGovernanceInput {
             request: serde_json::json!({
               "model": "MiniMax-M2.7",
@@ -1517,18 +1503,18 @@ mod tests {
 
         let result = apply_req_process_tool_governance(input).unwrap();
         let tool = result.processed_request["tools"][0]["function"].as_object().unwrap();
+        let description = tool["description"].as_str().unwrap_or("");
+        assert!(description.contains("hashline-first"));
         let properties = tool["parameters"]["properties"].as_object().unwrap();
         let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
-        assert!(patch_desc.contains("*** Begin Patch"));
-        assert!(patch_desc.contains("*** End Patch"));
-        assert!(patch_desc.contains("*** Add File:"));
-        assert!(patch_desc.contains("*** Update File:"));
-        assert!(patch_desc.contains("GNU diff headers"));
-        assert!(patch_desc.contains("Do not add `filePath`/`file_path` unless the schema explicitly declares it."));
-        assert!(!properties.contains_key("filePath"));
-        assert!(!properties.contains_key("file_path"));
-        assert!(!properties.contains_key("fileContent"));
-        assert!(!properties.contains_key("file_content"));
+        assert!(patch_desc.contains("Hashline patch text only."));
+        assert!(patch_desc.contains("provide `filePath`/`file_path`"));
+        assert!(patch_desc.contains("current file content in `fileContent`/`file_content`"));
+        assert!(patch_desc.contains("Do not author canonical apply_patch blocks in this mode."));
+        assert!(properties.contains_key("filePath"));
+        assert!(properties.contains_key("file_path"));
+        assert!(properties.contains_key("fileContent"));
+        assert!(properties.contains_key("file_content"));
     }
 
     #[test]
@@ -1581,6 +1567,7 @@ mod tests {
         let tool = result.processed_request["tools"][0].as_object().unwrap();
         let description = tool["description"].as_str().unwrap_or("");
         assert!(description.contains("hashline-first"));
+        assert!(!description.contains("selected by schema"));
         let properties = tool["parameters"]["properties"].as_object().unwrap();
         let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
         assert!(patch_desc.contains("Hashline patch text only."));

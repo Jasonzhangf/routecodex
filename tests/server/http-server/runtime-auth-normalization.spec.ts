@@ -149,3 +149,27 @@ describe('resolveRuntimeAuth deepseek-account tokenFile compatibility', () => {
     expect(resolved.tokenFile).toBe(rccTokenFile);
   });
 });
+
+
+describe('resolveRuntimeAuth windsurf-account alias isolation', () => {
+  it('derives accountAlias from runtimeKey when auth omits explicit alias', async () => {
+    const runtime = {
+      runtimeKey: 'windsurf.ws-pro-4',
+      providerId: 'windsurf',
+      providerType: 'openai',
+      endpoint: 'https://server.codeium.com',
+      auth: {
+        type: 'apikey',
+        rawType: 'windsurf-account',
+        mobile: 'masked@example.com',
+        password: 'secret'
+      }
+    } as unknown as ProviderRuntimeProfile;
+
+    const resolved = await resolveRuntimeAuth(createServerStub(), runtime);
+
+    expect(resolved.type).toBe('apikey');
+    expect(resolved.rawType).toBe('windsurf-account');
+    expect(resolved.accountAlias).toBe('ws-pro-4');
+  });
+});

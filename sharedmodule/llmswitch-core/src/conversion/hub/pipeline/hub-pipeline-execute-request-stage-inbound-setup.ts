@@ -5,17 +5,21 @@ import {
   createChatProcessSnapshotRecorder,
   prepareChatProcessRuntimeMetadata,
 } from "./hub-pipeline-chat-process-entry-blocks.js";
-import {
-  applyApplyPatchToolModeRuntimeHint,
-  applyCompactionRuntimeHint,
-} from "./hub-pipeline-execute-request-stage-inbound-runtime-hints-blocks.js";
+import { isCompactionRequest } from "../../compaction-detect.js";
+import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 
 export function applyInboundRuntimeHints(
   normalized: NormalizedRequest,
   rawRequest: JsonObject,
 ): void {
-  applyApplyPatchToolModeRuntimeHint(normalized, rawRequest);
-  applyCompactionRuntimeHint(normalized, rawRequest);
+  if (!isCompactionRequest(rawRequest)) {
+    return;
+  }
+  normalized.metadata = normalized.metadata || {};
+  const rt = ensureRuntimeMetadata(
+    normalized.metadata as Record<string, unknown>,
+  );
+  (rt as Record<string, unknown>).compactionRequest = true;
 }
 
 export function prepareInboundExecutionContext(args: {

@@ -71,6 +71,21 @@ describe('port-config-validator: sameProtocolBehavior', () => {
       expect(configs[0].sameProtocolBehavior).toBeUndefined();
     });
 
+    it('preserves per-port stopMessage disable in ports array', () => {
+      const configs = normalizePortsConfig({
+        ports: [{ port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', stopMessage: { enabled: false } }],
+      } as any);
+      expect(configs).toHaveLength(1);
+      expect(configs[0].stopMessage).toEqual({ enabled: false });
+      const result = validatePortConfigs(configs);
+      expect(result.valid).toBe(true);
+    });
+
+    it('preserves top-level stopMessage disable for legacy single port config', () => {
+      const configs = normalizePortsConfig({ port: 5520, host: '0.0.0.0', stopMessage: { enabled: false } });
+      expect(configs[0].stopMessage).toEqual({ enabled: false });
+    });
+
     it('defaults router mode for legacy configs without ports array', () => {
       const configs = normalizePortsConfig({ port: 8080, host: '0.0.0.0' });
       expect(configs).toHaveLength(1);

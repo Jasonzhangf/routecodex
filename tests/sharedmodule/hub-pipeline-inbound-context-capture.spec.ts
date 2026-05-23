@@ -54,7 +54,6 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js',
   () => ({
-    resolveApplyPatchToolModeFromToolsWithNative: jest.fn(() => undefined),
     buildReqInboundNodeResultWithNative: jest.fn(() => ({ stage: 'req_inbound' })),
     annotatePassthroughGovernanceSkipWithNative: jest.fn((audit: unknown) => audit ?? {}),
     buildPassthroughGovernanceSkippedNodeWithNative: jest.fn(() => ({ stage: 'req_process_skipped' })),
@@ -270,6 +269,60 @@ describe('hub inbound context capture', () => {
     });
 
     expect(mockCaptureResponsesRequestContext).not.toHaveBeenCalled();
+  });
+
+  it('captures submit_tool_outputs resume shape for responses without requiring chat messages', () => {
+    mockCaptureReqInboundResponsesContextSnapshotWithNative.mockReturnValue({
+      requestId: 'req_submit_tool_outputs_resume',
+      isChatPayload: false,
+      isResponsesPayload: false,
+      __captured_tool_results: [
+        {
+          tool_call_id: 'call_apply_patch_1',
+          call_id: 'call_apply_patch_1',
+          output: 'Patch applied successfully',
+        },
+      ],
+    });
+
+    const captured = captureResponsesContextSnapshot({
+      rawRequest: {
+        model: 'gpt-5.4',
+        previous_response_id: 'resp_prev_1',
+        tool_outputs: [
+          {
+            tool_call_id: 'call_apply_patch_1',
+            output: 'Patch applied successfully',
+          },
+        ],
+        stream: false,
+      } as any,
+      adapterContext: {
+        requestId: 'req_submit_tool_outputs_resume',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+      } as any,
+      stageRecorder: undefined,
+    });
+
+    expect(mockCaptureReqInboundResponsesContextSnapshotWithNative).toHaveBeenCalledTimes(1);
+    expect(mockCaptureReqInboundResponsesContextSnapshotWithNative.mock.calls[0]?.[0]).toMatchObject({
+      requestId: 'req_submit_tool_outputs_resume',
+      rawRequest: {
+        previous_response_id: 'resp_prev_1',
+        tool_outputs: [
+          {
+            tool_call_id: 'call_apply_patch_1',
+            output: 'Patch applied successfully',
+          },
+        ],
+      },
+    });
+    expect(captured).toMatchObject({
+      requestId: 'req_submit_tool_outputs_resume',
+      isChatPayload: false,
+      isResponsesPayload: false,
+    });
   });
 
   it('persists responses conversation context from fallback hook path exactly once', async () => {

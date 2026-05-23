@@ -115,8 +115,18 @@ fn responses_payload_requires_submit_tool_outputs(payload: &Value) -> bool {
                 .and_then(|r| r.get("type"))
                 .and_then(|v| v.as_str())
             {
-                if kind == "function_calling" || kind == "function_call" {
+                if kind == "function_calling" {
                     return true;
+                }
+                if kind == "function_call" {
+                    let status = entry
+                        .as_object()
+                        .and_then(|row| row.get("status"))
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("");
+                    if status != "completed" {
+                        return true;
+                    }
                 }
             }
         }
@@ -151,4 +161,28 @@ pub fn responses_payload_requires_submit_tool_outputs_json(payload_json: String)
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     serde_json::to_string(&responses_payload_requires_submit_tool_outputs(&payload))
         .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn responses_payload_requires_submit_tool_outputs_ignores_completed_function_call_items() {
+        let payload = json!({
+            "status": "completed",
+            "output": [
+                {
+                    "type": "function_call",
+                    "status": "completed",
+                    "call_id": "native:run_command:3",
+                    "name": "run_command",
+                    "arguments": "{}"
+                }
+            ]
+        });
+        assert!(!responses_payload_requires_submit_tool_outputs(&payload));
+    }
 }

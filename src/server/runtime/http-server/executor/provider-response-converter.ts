@@ -86,6 +86,10 @@ type NativeRespSemanticsModule = {
     responsesPayload: unknown,
     toolsRaw: unknown[]
   ) => Record<string, unknown>;
+  buildResponsesPayloadFromChatWithNative?: (
+    payload: unknown,
+    context: Record<string, unknown>
+  ) => Record<string, unknown>;
 };
 
 function normalizeResponsesToolCallArgumentsForClientWithNative(
@@ -100,6 +104,21 @@ function normalizeResponsesToolCallArgumentsForClientWithNative(
     throw new Error('[llmswitch-bridge] normalizeResponsesToolCallArgumentsForClientWithNative not available');
   }
   return fn(responsesPayload, toolsRaw);
+}
+
+
+function buildResponsesPayloadFromChatWithNative(
+  payload: unknown,
+  context: Record<string, unknown>
+): Record<string, unknown> {
+  const mod = requireCoreDist<NativeRespSemanticsModule>(
+    'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics'
+  );
+  const fn = mod.buildResponsesPayloadFromChatWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] buildResponsesPayloadFromChatWithNative not available');
+  }
+  return fn(payload, context);
 }
 
 function readNonEmptyString(value: unknown): string | undefined {
@@ -307,6 +326,7 @@ function hasGoalPersistenceScope(adapterContext: Record<string, unknown>): boole
 function readClientToolsRawForResponsesNormalization(args: {
   adapterContext?: Record<string, unknown>;
   requestSemantics?: Record<string, unknown>;
+  originalRequest?: Record<string, unknown>;
 }): unknown[] {
   const adapterCapturedRequest = asFlatRecord(args.adapterContext?.capturedChatRequest);
   const adapterTools = Array.isArray(adapterCapturedRequest?.tools) ? adapterCapturedRequest.tools : undefined;
@@ -319,13 +339,18 @@ function readClientToolsRawForResponsesNormalization(args: {
     return clientToolsRaw;
   }
   const rootTools = Array.isArray(args.requestSemantics?.tools) ? args.requestSemantics.tools : undefined;
-  return rootTools?.length ? rootTools : [];
+  if (rootTools?.length) {
+    return rootTools;
+  }
+  const originalTools = Array.isArray(args.originalRequest?.tools) ? args.originalRequest.tools : undefined;
+  return originalTools?.length ? originalTools : [];
 }
 
 function normalizeResponsesToolCallsViaRustSsot(args: {
   payload: Record<string, unknown>;
   adapterContext?: Record<string, unknown>;
   requestSemantics?: Record<string, unknown>;
+  originalRequest?: Record<string, unknown>;
   entryEndpoint?: string;
 }): Record<string, unknown> {
   const entry = String(args.entryEndpoint || '').toLowerCase();
@@ -334,12 +359,35 @@ function normalizeResponsesToolCallsViaRustSsot(args: {
   }
   const toolsRaw = readClientToolsRawForResponsesNormalization({
     adapterContext: args.adapterContext,
-    requestSemantics: args.requestSemantics
+    requestSemantics: args.requestSemantics,
+    originalRequest: args.originalRequest
   });
   if (!Array.isArray(toolsRaw) || toolsRaw.length === 0) {
     return args.payload;
   }
   return normalizeResponsesToolCallArgumentsForClientWithNative(args.payload, toolsRaw);
+}
+
+
+function hasChatToolCalls(payload: unknown): boolean {
+  const body = asFlatRecord(payload);
+  const choices = Array.isArray(body?.choices) ? body.choices : [];
+  return choices.some((choice) => {
+    const choiceRecord = asFlatRecord(choice);
+    const message = asFlatRecord(choiceRecord?.message);
+    return Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
+  });
+}
+
+function hasResponsesFunctionCalls(payload: unknown): boolean {
+  const body = asFlatRecord(payload);
+  const output = Array.isArray(body?.output) ? body.output : [];
+  if (output.some((item) => asFlatRecord(item)?.type === 'function_call')) {
+    return true;
+  }
+  const requiredAction = asFlatRecord(body?.required_action);
+  const submitToolOutputs = asFlatRecord(requiredAction?.submit_tool_outputs);
+  return Array.isArray(submitToolOutputs?.tool_calls) && submitToolOutputs.tool_calls.length > 0;
 }
 
 function persistGoalValidationLedger(args: {
@@ -535,6 +583,7 @@ export type ConvertProviderResponseOptions = {
   entryEndpoint?: string;
   providerProtocol: string;
   providerType?: string;
+  providerFamily?: string;
   providerKey?: string;
   requestId: string;
   serverToolsEnabled?: boolean;
@@ -650,8 +699,12 @@ export async function convertProviderResponseIfNeeded(
   let adapterContext: Record<string, unknown> | undefined;
   try {
     const metadataBag = asRecord(options.pipelineMetadata);
+    const responseMetadataBag =
+      options.providerFamily && options.providerFamily.trim()
+        ? { ...metadataBag, providerFamily: options.providerFamily.trim() }
+        : metadataBag;
     const baseContext = buildServerToolAdapterContext({
-      metadata: metadataBag,
+      metadata: responseMetadataBag,
       originalRequest: options.originalRequest,
       requestSemantics: options.requestSemantics,
       requestId: options.requestId,
@@ -851,13 +904,55 @@ export async function convertProviderResponseIfNeeded(
     const bridgeProviderResponse =
       extractBridgeProviderResponsePayload(body as Record<string, unknown>)
       ?? (body as Record<string, unknown>);
+    const effectiveRequestSemantics = (() => {
+      const existing = asFlatRecord(options.requestSemantics);
+      const existingTools = asFlatRecord(existing?.tools);
+      const existingClientToolsRaw = Array.isArray(existingTools?.clientToolsRaw)
+        ? existingTools.clientToolsRaw
+        : Array.isArray(existing?.tools)
+          ? existing.tools
+          : undefined;
+      if (existingClientToolsRaw?.length || !Array.isArray(options.originalRequest?.tools) || options.originalRequest.tools.length === 0) {
+        return options.requestSemantics;
+      }
+      return {
+        ...(existing ?? {}),
+        tools: {
+          ...(existingTools ?? {}),
+          clientToolsRaw: options.originalRequest.tools
+        }
+      };
+    })();
+    if (
+      (options.entryEndpoint || entry).toLowerCase().includes('/v1/responses')
+      && options.providerFamily === 'windsurf'
+      && hasChatToolCalls(bridgeProviderResponse)
+    ) {
+      const directBody = buildResponsesPayloadFromChatWithNative(bridgeProviderResponse, {
+        requestId: options.requestId,
+        toolsRaw: readClientToolsRawForResponsesNormalization({
+          adapterContext,
+          requestSemantics: effectiveRequestSemantics,
+          originalRequest: options.originalRequest
+        })
+      });
+      logPipelineStage('convert.bridge.windsurf_native_chat_direct', options.requestId, {
+        entryEndpoint: options.entryEndpoint || entry,
+        providerProtocol: options.providerProtocol
+      });
+      return attachTimingBreakdown({
+        ...options.response,
+        body: directBody
+      });
+    }
+
     const converted = await bridgeConvertProviderResponse({
       providerProtocol: options.providerProtocol,
       providerResponse: bridgeProviderResponse,
       context: adapterContext,
       entryEndpoint: options.entryEndpoint || entry,
       wantsStream: options.wantsStream,
-      requestSemantics: options.requestSemantics,
+      requestSemantics: effectiveRequestSemantics,
       providerInvoker: serverToolsEnabled ? providerInvoker : undefined,
       stageRecorder,
       reenterPipeline: serverToolsEnabled ? reenterPipeline : undefined,
@@ -878,9 +973,24 @@ export async function convertProviderResponseIfNeeded(
       converted.body = normalizeResponsesToolCallsViaRustSsot({
         payload: converted.body as Record<string, unknown>,
         adapterContext,
-        requestSemantics: options.requestSemantics,
+        requestSemantics: effectiveRequestSemantics,
+        originalRequest: options.originalRequest,
         entryEndpoint: options.entryEndpoint || entry
       });
+      if (
+        (options.entryEndpoint || entry).toLowerCase().includes('/v1/responses')
+        && hasChatToolCalls(bridgeProviderResponse)
+        && !hasResponsesFunctionCalls(converted.body)
+      ) {
+        converted.body = buildResponsesPayloadFromChatWithNative(bridgeProviderResponse, {
+          requestId: options.requestId,
+          toolsRaw: readClientToolsRawForResponsesNormalization({
+            adapterContext,
+            requestSemantics: effectiveRequestSemantics,
+            originalRequest: options.originalRequest
+          })
+        });
+      }
     }
     if (converted.__sse_responses) {
       const usage = converted.body

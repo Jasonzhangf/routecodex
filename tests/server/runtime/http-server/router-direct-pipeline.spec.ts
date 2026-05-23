@@ -184,7 +184,7 @@ describe('router-direct-pipeline', () => {
   });
 
   describe('openai-responses protocol', () => {
-    it('applies direct for matching protocol', async () => {
+    it('RED: skips responses same-protocol direct because Responses requires conversation and outbound conversion', async () => {
       const handle = createMockProviderHandle('openai-responses');
       const input = {
         portConfig: createRouterPortConfig(),
@@ -197,9 +197,9 @@ describe('router-direct-pipeline', () => {
         resolveProviderByRuntimeKey: () => handle,
       };
       const result = await executeRouterDirectPipeline(input);
-      expect(result.used).toBe(true);
-      expect(handle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
-      expect(handle.instance.processIncomingDirect).toHaveBeenCalledWith(input.requestPayload);
+      expect(result.used).toBe(false);
+      expect((result as any).reason).toContain('full executor conversion');
+      expect(handle.instance.processIncomingDirect).not.toHaveBeenCalled();
     });
 
     it('skips when chat inbound targets responses provider', async () => {
@@ -220,28 +220,29 @@ describe('router-direct-pipeline', () => {
     });
 
 
-    it('returns provider response exactly as-is (response passthrough)', async () => {
-      const handle = createMockProviderHandle('openai-responses');
+    it('skips Windsurf responses even when protocols match because full executor response conversion is required', async () => {
+      const handle = {
+        ...createMockProviderHandle('openai-responses'),
+        providerId: 'windsurf',
+        providerFamily: 'windsurf',
+      } as ProviderHandle;
       const input = {
         portConfig: createRouterPortConfig(),
-        providerPayload: { model: 'gpt-5', reasoning: { effort: 'high' } },
-        requestPayload: { model: 'gpt-5.4', input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }] },
-        target: { providerKey: 'tab.gpt-5', providerType: 'responses', runtimeKey: handle.runtimeKey },
-        routingDecision: { routeName: 'default' },
-        processMode: 'chat',
+        providerPayload: { model: 'gpt-5.4-medium' },
+        requestPayload: { model: 'gpt-5.4-medium', input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }] },
+        target: { providerKey: 'windsurf.ws-pro-4.gpt-5.4-medium', providerType: 'openai', runtimeKey: handle.runtimeKey },
+        routingDecision: { routeName: 'thinking' },
+        processMode: 'standard',
         requestInfo: { path: '/v1/responses', headers: {} },
         resolveProviderByRuntimeKey: () => handle,
       };
       const result = await executeRouterDirectPipeline(input);
-      expect(result.used).toBe(true);
-      expect(result.response).toBeDefined();
-      expect(result.response.status).toBe(200);
-    expect(result.response.body).toEqual({
-      model: 'gpt-5.4',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
-      _routed: true,
-      _direct: true,
+      expect(result.used).toBe(false);
+      expect((result as any).reason).toContain('full executor conversion');
+      expect(handle.instance.processIncomingDirect).not.toHaveBeenCalled();
+      expect(handle.instance.processIncoming).not.toHaveBeenCalled();
     });
-    });
+
+
   });
 });

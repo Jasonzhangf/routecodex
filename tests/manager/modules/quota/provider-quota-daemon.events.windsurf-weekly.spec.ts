@@ -5,12 +5,12 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
     jest.resetModules();
   });
 
-  it('blacklists windsurf weekly quota exhausted key for 24h instead of keep-pool cooldown', async () => {
+  it('blacklists windsurf weekly quota exhausted key until next local 00:00 when upstream omits cooldown override', async () => {
     const { handleProviderQuotaErrorEvent } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.events.js');
     const { createInitialQuotaState } = await import('../../../../src/manager/quota/provider-quota-center.js');
     const { ProviderModelBackoffTracker } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.model-backoff.js');
 
-    const nowMs = 1_700_000_000_000;
+    const nowMs = new Date('2026-05-23T10:30:00+08:00').getTime();
     const providerKey = 'windsurf.ws-pro-1.gpt-5.4-medium';
     const quotaStates = new Map<string, any>();
     quotaStates.set(providerKey, createInitialQuotaState(providerKey, { authType: 'apikey' }, nowMs));
@@ -43,7 +43,6 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
         errorClassification: 'unrecoverable',
         routePoolSize: 3,
         rateLimitKind: 'daily_limit',
-        cooldownOverrideMs: 24 * 60 * 60_000,
         quotaScope: 'weekly',
         quotaReason: 'windsurf_weekly_exhausted'
       }
@@ -55,7 +54,7 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
     expect(state.cooldownKeepsPool).not.toBe(true);
     expect(state.reason).toBe('blacklist');
     expect(state.cooldownUntil).toBeNull();
-    expect(state.blacklistUntil).toBe(nowMs + 24 * 60 * 60_000);
+    expect(state.blacklistUntil).toBe(new Date('2026-05-24T00:00:00+08:00').getTime());
   });
 
 
@@ -64,7 +63,7 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
     const { createInitialQuotaState } = await import('../../../../src/manager/quota/provider-quota-center.js');
     const { ProviderModelBackoffTracker } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.model-backoff.js');
 
-    const nowMs = 1_700_000_000_000;
+    const nowMs = new Date('2026-05-23T10:30:00+08:00').getTime();
     const hitKey = 'windsurf.ws-pro-4.gpt-5.4-medium';
     const siblingKey = 'windsurf.ws-pro-4.gpt-5.4-high';
     const aliasKey = 'windsurf.ws-pro-4';
@@ -123,12 +122,12 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
     expect(aliasState.reason).toBe('ok');
   });
 
-  it('blacklists entire windsurf account alias family for 24h when one model hits weekly exhausted', async () => {
+  it('blacklists entire windsurf account alias family until next local 00:00 when one model hits weekly exhausted', async () => {
     const { handleProviderQuotaErrorEvent } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.events.js');
     const { createInitialQuotaState } = await import('../../../../src/manager/quota/provider-quota-center.js');
     const { ProviderModelBackoffTracker } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.model-backoff.js');
 
-    const nowMs = 1_700_000_000_000;
+    const nowMs = new Date('2026-05-23T10:30:00+08:00').getTime();
     const hitKey = 'windsurf.ws-pro-1.gpt-5.4-medium';
     const siblingKey = 'windsurf.ws-pro-1.gpt-5.3-codex-low';
     const otherAliasKey = 'windsurf.ws-pro-2.gpt-5.4-medium';
@@ -169,7 +168,6 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
         routeName: 'thinking'
       },
       details: {
-        cooldownOverrideMs: 24 * 60 * 60_000,
         quotaScope: 'weekly',
         quotaReason: 'windsurf_weekly_exhausted'
       }
@@ -183,8 +181,9 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
     expect(siblingState.reason).toBe('blacklist');
     expect(rootAliasState.reason).toBe('blacklist');
     expect(otherAliasState.reason).toBe('ok');
-    expect(siblingState.blacklistUntil).toBe(nowMs + 24 * 60 * 60_000);
-    expect(rootAliasState.blacklistUntil).toBe(nowMs + 24 * 60 * 60_000);
+    const nextMidnight = new Date('2026-05-24T00:00:00+08:00').getTime();
+    expect(siblingState.blacklistUntil).toBe(nextMidnight);
+    expect(rootAliasState.blacklistUntil).toBe(nextMidnight);
   });
 
   it('RED: detects windsurf IP-level rate-limit burst after 3 same-model 429s and cools down sibling accounts too', async () => {

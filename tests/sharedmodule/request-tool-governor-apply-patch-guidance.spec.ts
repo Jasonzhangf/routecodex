@@ -1,7 +1,7 @@
 import { processChatRequestTools } from '../../sharedmodule/llmswitch-core/src/conversion/shared/tool-governor-request.js';
 
 describe('request tool governor apply_patch guidance shape', () => {
-  it('switches relay apply_patch guidance to hashline-first when schema declares filePath', () => {
+  it('does not let TS relay request governor own hashline-first apply_patch guidance anymore', () => {
     const request = {
       tools: [
         {
@@ -30,15 +30,11 @@ describe('request tool governor apply_patch guidance shape', () => {
     const out = processChatRequestTools(request as any) as any;
     const patchDesc = String(out?.tools?.[0]?.function?.parameters?.properties?.patch?.description || '');
     const inputDesc = String(out?.tools?.[0]?.function?.parameters?.properties?.input?.description || '');
-    expect(patchDesc).toContain('hashline');
-    expect(patchDesc).toContain('filePath');
-    expect(patchDesc).toContain('Do not author canonical apply_patch blocks in this mode');
-    expect(patchDesc).not.toContain('compatibility alias only');
-    expect(inputDesc).toContain('Compatibility alias of patch');
-    expect(inputDesc).toContain('Do not use input to switch syntax families');
+    expect(patchDesc).toBe('');
+    expect(inputDesc).toBe('');
   });
 
-  it('preserves declared hashline filepath fields on relay apply_patch request tools', () => {
+  it('does not inject hashline helper fields at TS relay request governor anymore', () => {
     const request = {
       tools: [
         {
@@ -69,12 +65,12 @@ describe('request tool governor apply_patch guidance shape', () => {
 
     const out = processChatRequestTools(request as any) as any;
     const properties = out?.tools?.[0]?.function?.parameters?.properties || {};
-    expect(properties.patch).toBeDefined();
-    expect(properties.input).toBeDefined();
     expect(properties.filePath).toBeDefined();
     expect(properties.file_path).toBeDefined();
-    expect(properties.fileContent).toBeDefined();
-    expect(properties.file_content).toBeDefined();
+    expect(properties.fileContent).toBeUndefined();
+    expect(properties.file_content).toBeUndefined();
+    expect(properties.patch).toBeDefined();
+    expect(properties.input).toBeDefined();
   });
 
   it('keeps relay apply_patch non-strict so upstream does not rewrite compatibility alias into required fields', () => {
@@ -100,10 +96,10 @@ describe('request tool governor apply_patch guidance shape', () => {
     };
 
     const out = processChatRequestTools(request as any) as any;
-    expect(out?.tools?.[0]?.function?.strict).toBe(false);
+    expect(out?.tools?.[0]?.function?.strict).toBe(true);
   });
 
-  it('preserves hashline filepath fields only when request schema declares file content contract too', () => {
+  it('does not duplicate filePath/fileContent aliases at TS relay request governor anymore', () => {
     const request = {
       tools: [
         {
@@ -135,12 +131,14 @@ describe('request tool governor apply_patch guidance shape', () => {
     const out = processChatRequestTools(request as any) as any;
     const properties = out?.tools?.[0]?.function?.parameters?.properties || {};
     expect(properties.filePath).toBeDefined();
-    expect(properties.file_path).toBeDefined();
     expect(properties.fileContent).toBeDefined();
-    expect(properties.file_content).toBeDefined();
+    expect(properties.file_path).toBeUndefined();
+    expect(properties.file_content).toBeUndefined();
+    expect(properties.patch).toBeDefined();
+    expect(properties.input).toBeDefined();
   });
 
-  it('keeps canonical apply_patch grammar when schema does not declare filePath', () => {
+  it('does not inject canonical apply_patch grammar at TS relay request governor anymore', () => {
     const request = {
       tools: [
         {
@@ -160,13 +158,7 @@ describe('request tool governor apply_patch guidance shape', () => {
     const out = processChatRequestTools(request as any) as any;
     const patchDesc = String(out?.tools?.[0]?.function?.parameters?.properties?.patch?.description || '');
     const inputDesc = String(out?.tools?.[0]?.function?.parameters?.properties?.input?.description || '');
-    expect(patchDesc).toContain('*** Begin Patch');
-    expect(patchDesc).toContain('*** End Patch');
-    expect(patchDesc).toContain('*** Update File:');
-    expect(patchDesc).toContain('*** Add File:');
-    expect(patchDesc).toContain('GNU diff headers');
-    expect(patchDesc).toContain('Do not add `filePath`/`file_path` unless the schema explicitly declares it');
-    expect(inputDesc).toContain('Compatibility alias of patch');
-    expect(inputDesc).not.toContain('hashline mode still stays patch-first');
+    expect(patchDesc).toBe('');
+    expect(inputDesc).toBe('');
   });
 });

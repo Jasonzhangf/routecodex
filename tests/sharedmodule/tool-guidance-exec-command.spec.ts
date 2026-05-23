@@ -21,17 +21,39 @@ describe('tool guidance for nested apply_patch prevention', () => {
     const out = augmentOpenAITools(tools) as any[];
     const desc = String(out?.[0]?.function?.description || '');
     expect(desc).toContain('[Codex ExecCommand Guidance]');
-    expect(desc).toContain('NEVER call apply_patch through exec_command');
-    expect(desc).toContain('apply_patch <<PATCH');
-    expect(desc).toContain('ONLY valid path is a direct apply_patch tool call');
+    expect(desc).toContain('Use exec_command only for shell execution');
+    expect(desc).toContain('bash -lc');
+    expect(desc).not.toContain('apply_patch');
   });
 
-  it('includes system-level prohibition for nested apply_patch in guidance text', () => {
+  it('generic system guidance no longer owns apply_patch policy text', () => {
     const guidance = buildSystemToolGuidance();
-    expect(guidance).toContain('NEVER wrap apply_patch inside exec_command/shell');
-    expect(guidance).toContain('apply_patch <<PATCH');
+    expect(guidance).not.toContain('apply_patch');
     expect(guidance).not.toContain('Failed to find expected lines');
     expect(guidance).not.toContain('GNU line-number ranges');
+  });
+
+  it('generic shell guidance no longer owns apply_patch routing text', () => {
+    const tools: any[] = [
+      {
+        type: 'function',
+        function: {
+          name: 'shell',
+          description: 'Run shell command',
+          parameters: {
+            type: 'object',
+            properties: {
+              command: { type: 'array', items: { type: 'string' } }
+            }
+          }
+        }
+      }
+    ];
+
+    const out = augmentOpenAITools(tools) as any[];
+    const desc = String(out?.[0]?.function?.description || '');
+    expect(desc).not.toContain('apply_patch');
+    expect(desc).not.toContain('File writes are FORBIDDEN via shell');
   });
 
   it('does not let generic guidance own apply_patch schema or authoring contract anymore', () => {

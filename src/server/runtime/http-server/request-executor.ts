@@ -990,7 +990,22 @@ export class HubRequestExecutor implements RequestExecutor {
             processMode: pipelineResult.processMode,
             attempt
           }));
-          const converted = shouldBypassProviderResponseConversion(normalized)
+          const responseMetadata = normalized.metadata && typeof normalized.metadata === 'object' && !Array.isArray(normalized.metadata)
+            ? (normalized.metadata as Record<string, unknown>)
+            : undefined;
+          const responseSemantics = responseMetadata?.responseSemantics && typeof responseMetadata.responseSemantics === 'object' && !Array.isArray(responseMetadata.responseSemantics)
+            ? (responseMetadata.responseSemantics as Record<string, unknown>)
+            : undefined;
+          const conversionPipelineMetadata = responseSemantics
+            ? {
+                ...mergedMetadata,
+                responseSemantics,
+              }
+            : mergedMetadata;
+          const converted = shouldBypassProviderResponseConversion(normalized, {
+            entryEndpoint: input.entryEndpoint,
+            providerProtocol: handle.providerProtocol || providerProtocol
+          })
             ? (() => {
               logStage('provider.response_convert.skipped', input.requestId, {
                 providerKey: target.providerKey,
@@ -1002,8 +1017,9 @@ export class HubRequestExecutor implements RequestExecutor {
             })()
             : await this.convertProviderResponseIfNeeded({
               entryEndpoint: input.entryEndpoint,
-              providerProtocol,
+              providerProtocol: handle.providerProtocol || providerProtocol,
               providerType: handle.providerType,
+              providerFamily: handle.providerFamily,
               requestId: input.requestId,
               serverToolsEnabled,
               wantsStream: wantsStreamBase,
@@ -1011,7 +1027,7 @@ export class HubRequestExecutor implements RequestExecutor {
               requestSemantics,
               processMode: pipelineResult.processMode,
               response: normalized,
-              pipelineMetadata: mergedMetadata
+              pipelineMetadata: conversionPipelineMetadata
             });
           const clientInjectWaitMsRaw = converted.timingBreakdown?.hubResponseExcludedMs;
           const clientInjectWaitMs =
@@ -1249,6 +1265,7 @@ export class HubRequestExecutor implements RequestExecutor {
     entryEndpoint?: string;
     providerProtocol: string;
     providerType?: string;
+    providerFamily?: string;
     requestId: string;
     serverToolsEnabled?: boolean;
     wantsStream: boolean;

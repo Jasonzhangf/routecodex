@@ -1,6 +1,7 @@
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 
 const mockRunClientInjectionFlowBeforeReenter = jest.fn();
+const mockGetDefaultServertoolSkeletonDocumentWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../../../../src/server/runtime/http-server/executor/client-injection-flow.js',
@@ -9,10 +10,88 @@ jest.unstable_mockModule(
   })
 );
 
+jest.unstable_mockModule(
+  '../../../../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js',
+  () => ({
+    getDefaultServertoolSkeletonDocumentWithNative: mockGetDefaultServertoolSkeletonDocumentWithNative,
+    detectEmptyAssistantPayloadContractSignalWithNative: jest.fn(() => false),
+    planServertoolToolCallDispatchWithNative: jest.fn(() => ({
+      executableServerToolCalls: [],
+      deferredClientToolCalls: [],
+      skippedToolCalls: []
+    })),
+    runServertoolResponseStageWithNative: jest.fn((payload: any) => ({
+      normalizedPayload: payload,
+      toolCalls: []
+    })),
+    planStopMessagePersistedLookupWithNative: jest.fn(() => ({
+      shouldLoad: false
+    })),
+    resolveStopMessageSessionScopeWithNative: jest.fn(() => null),
+    resolveServertoolStickyKeyWithNative: jest.fn(() => null),
+    planServertoolOutcomeWithNative: jest.fn(() => ({
+      mode: 'passthrough'
+    })),
+    planServertoolAutoHookQueuesWithNative: jest.fn(() => ({
+      optionalPrimaryOrder: [],
+      mandatoryOrder: []
+    })),
+    planServertoolFollowupRuntimeWithNative: jest.fn(() => null)
+  })
+);
+
 describe('servertool followup dispatch helper', () => {
   beforeEach(() => {
     jest.resetModules();
     mockRunClientInjectionFlowBeforeReenter.mockReset();
+    mockGetDefaultServertoolSkeletonDocumentWithNative.mockReset();
+    mockGetDefaultServertoolSkeletonDocumentWithNative.mockReturnValue({
+      version: 1,
+      servertool: {
+        enabled: true,
+        internalTools: {
+          clock: {
+            name: 'clock',
+            enabled: true,
+            kind: 'internal',
+            trigger: { type: 'tool_call', canonicalName: 'clock' },
+            execution: { mode: 'guarded', stripAfterExecute: true }
+          },
+          exec_command: {
+            name: 'exec_command',
+            enabled: true,
+            kind: 'internal',
+            trigger: { type: 'tool_call', canonicalName: 'exec_command' },
+            execution: { mode: 'guarded', stripAfterExecute: true }
+          }
+        },
+        skeleton: {
+          requestPrepare: { enabled: true },
+          internalDispatch: { enabled: true },
+          finalizeStrip: { enabled: true },
+          autoHooks: { optionalPrimaryOrder: [], mandatoryOrder: [] },
+          pendingInjection: { messageKinds: [] },
+          progress: { toolNameByFlowId: {}, goldHighlightFlowIds: [] },
+          followup: {
+            genericInjectionOps: [],
+            nativeSupportedOps: [],
+            flowPolicy: { profilesByFlowId: {} }
+          }
+        },
+        state: {
+          scopePriority: [],
+          pendingInjection: { enabled: true, strictContract: true }
+        }
+      }
+    });
+  });
+
+  it('servertool bootstrap no longer registers apply_patch followup guard', async () => {
+    const { listRegisteredServerToolHandlerNames } = await import(
+      '../../../../../sharedmodule/llmswitch-core/src/servertool/registry.js'
+    );
+    await import('../../../../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
+    expect(listRegisteredServerToolHandlerNames()).not.toContain('apply_patch');
   });
 
   it('reenter path reuses normalized nested metadata and executes nested request once', async () => {
@@ -117,6 +196,8 @@ describe('servertool followup dispatch helper', () => {
     expect(injectArgs?.nestedMetadata?.clientDaemonId).toBe('daemon_1');
     expect(injectArgs?.nestedMetadata?.clientTmuxSessionId).toBe('tmux_1');
   });
+
+
 
   it('reenter path preserves full client headers for normal request metadata rebuild', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });

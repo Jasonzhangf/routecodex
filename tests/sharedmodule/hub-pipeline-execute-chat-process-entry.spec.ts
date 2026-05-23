@@ -23,7 +23,9 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-stage-hooks.js',
   () => ({
     REQUEST_STAGE_HOOKS: {
-      openai: {},
+      openai: {
+        createSemanticMapper: jest.fn(() => ({})),
+      },
     },
   }),
 );
@@ -50,7 +52,6 @@ jest.unstable_mockModule(
     prepareRuntimeMetadataForServertoolsWithNative: jest.fn(
       ({ metadata }: { metadata?: Record<string, unknown> }) => ({ ...(metadata || {}) }),
     ),
-    resolveApplyPatchToolModeFromToolsWithNative: jest.fn(() => undefined),
     resolveActiveProcessModeWithNative: jest.fn(() => 'chat'),
     readResponsesResumeFromMetadataWithNative: jest.fn(() => undefined),
     resolveHubClientProtocolWithNative: jest.fn(() => 'openai-chat'),
@@ -73,7 +74,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-chat-process-shared.js',
+  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-chat-process-request-utils.js',
   () => ({
     attachHubStageTopSummary: jest.fn(),
     resolveActiveProcessModeAndAudit: jest.fn(() => ({
@@ -149,5 +150,58 @@ describe('executeChatProcessEntryPipeline', () => {
     );
 
     expect(runReqProcessStage1ToolGovernance).not.toHaveBeenCalled();
+  });
+
+  it('does not propagate applyPatchToolMode metadata into chat process request metadata', async () => {
+    const executeRouteAndBuildOutbound = (await import(
+      '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-route-and-outbound.js'
+    )).executeRouteAndBuildOutbound as jest.Mock;
+    const liftResponsesResumeIntoSemanticsWithNative = (await import(
+      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js'
+    )).liftResponsesResumeIntoSemanticsWithNative as jest.Mock;
+
+    runReqProcessStage1ToolGovernance.mockReset();
+    runReqProcessStage1ToolGovernance.mockResolvedValue({
+      processedRequest: {
+        model: 'test-model',
+        messages: [],
+        metadata: {},
+        parameters: {},
+        processed: {},
+        processingMetadata: {},
+      },
+      nodeResult: { success: true, metadata: {} },
+    });
+    liftResponsesResumeIntoSemanticsWithNative.mockReset();
+    liftResponsesResumeIntoSemanticsWithNative.mockImplementation((request: any, metadata: any) => ({
+      request,
+      metadata,
+    }));
+    executeRouteAndBuildOutbound.mockReset();
+    executeRouteAndBuildOutbound.mockResolvedValue({
+      providerPayload: {},
+      metadata: {},
+    });
+
+    const result = await executeChatProcessEntryPipeline({
+      normalized: {
+        id: 'req_no_apply_patch_mode_propagation',
+        providerProtocol: 'openai',
+        payload: {
+          model: 'mimo-v2.5-pro',
+          messages: [],
+        },
+        metadata: { __rt: { applyPatchToolMode: 'hashline' } },
+        entryEndpoint: '/v1/responses',
+        stream: false,
+        processMode: 'chat',
+        routeHint: null,
+      } as any,
+      routerEngine: {} as any,
+      config: {} as any,
+    });
+
+    expect((result.standardizedRequest?.metadata as any)?.applyPatchToolMode).toBeUndefined();
+    expect((result.processedRequest?.metadata as any)?.applyPatchToolMode).toBeUndefined();
   });
 });

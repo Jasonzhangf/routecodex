@@ -19,7 +19,18 @@ const ANTHROPIC_STABLE_TOOL_SCHEMA_NAMES = new Set<string>([
 const ANTHROPIC_STABLE_TOOL_SCHEMA_KEYS = new Map<string, Set<string>>([
   ['exec_command', new Set(['cmd', 'command', 'workdir', 'justification', 'login', 'max_output_tokens', 'sandbox_permissions', 'shell', 'yield_time_ms', 'tty', 'prefix_rule'])],
   ['write_stdin', new Set(['session_id', 'chars', 'text', 'yield_time_ms', 'max_output_tokens'])],
-  ['apply_patch', new Set(['patch', 'input', 'instructions', 'text', 'file', 'changes'])],
+  ['apply_patch', new Set([
+    'patch',
+    'input',
+    'instructions',
+    'text',
+    'file',
+    'changes',
+    'filePath',
+    'file_path',
+    'fileContent',
+    'file_content'
+  ])],
   ['request_user_input', new Set(['questions'])],
   ['update_plan', new Set(['explanation', 'plan'])],
   ['view_image', new Set(['path'])],

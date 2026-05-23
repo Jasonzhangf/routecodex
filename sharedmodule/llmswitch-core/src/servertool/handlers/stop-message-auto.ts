@@ -226,6 +226,52 @@ function enforceStopMessageExecutionFollowupText(text: string): string {
   return sanitizeFollowupText(rawBase) || STOP_MESSAGE_EXECUTION_APPEND;
 }
 
+function hasResponsesSubmitToolOutputsResume(adapterContext: unknown): boolean {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return false;
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const runtime = readRuntimeMetadata(record) ?? {};
+  const metadata =
+    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+      ? (record.metadata as Record<string, unknown>)
+      : {};
+  const candidates = [record.responsesResume, metadata.responsesResume, runtime.responsesResume];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      continue;
+    }
+    const resume = candidate as Record<string, unknown>;
+    if (Array.isArray(resume.toolOutputsDetailed) && resume.toolOutputsDetailed.length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
+function isStopMessageDisabledByPort(adapterContext: unknown): boolean {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return false;
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const runtime = readRuntimeMetadata(record) ?? {};
+  const metadata =
+    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+      ? (record.metadata as Record<string, unknown>)
+      : {};
+  const candidates = [
+    record.stopMessageEnabled,
+    record.routecodexPortStopMessageEnabled,
+    metadata.stopMessageEnabled,
+    metadata.routecodexPortStopMessageEnabled,
+    runtime.stopMessagePortEnabled,
+    runtime.stopMessageEnabled,
+    runtime.routecodexPortStopMessageEnabled
+  ];
+  return candidates.some((value) => value === false);
+}
+
 function readPinnedTargetFromAdapterContext(adapterContext: unknown): {
   providerKey?: string;
   modelId?: string;
@@ -395,10 +441,18 @@ const handler: ServerToolHandler = async (
   };
 
   try {
+    if (isStopMessageDisabledByPort(ctx.adapterContext)) {
+      return markSkip('skip_port_stopmessage_disabled');
+    }
+
     const followupFlowId = readServerToolFollowupFlowId(rt);
     if (followupFlowId) {
       debugLog('followup_request_allowed', { followupFlowId } as JsonObject);
       return markSkip('skip_servertool_followup_hop');
+    }
+
+    if (hasResponsesSubmitToolOutputsResume(ctx.adapterContext)) {
+      return markSkip('skip_responses_submit_tool_outputs_resume');
     }
 
     const persistedLookupPlan = planStopMessagePersistedLookup(record, rt, {

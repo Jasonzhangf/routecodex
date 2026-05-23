@@ -18,7 +18,7 @@ function createStubSpinner() {
 }
 
 describe('cli start command', () => {
-  it('managed restart retries early-exit child without exiting parent process', async () => {
+  it('managed restart succeeds when the restarted child becomes healthy', async () => {
     const program = new Command();
     const infoLogs: string[] = [];
     let spawnCount = 0;
@@ -116,13 +116,11 @@ describe('cli start command', () => {
         const proc = new FakeChildProc(1000 + spawnCount);
         if (spawnCount === 1) {
           setTimeout(() => proc.emitExit(75, null), 15);
-        } else if (spawnCount === 2) {
-          setTimeout(() => proc.emitExit(1, null), 15);
         }
         return proc as any;
       },
       fetch: (async () => {
-        if (activeGeneration >= 3) {
+        if (activeGeneration >= 2) {
           return {
             ok: true,
             status: 200,
@@ -141,8 +139,122 @@ describe('cli start command', () => {
     });
 
     await expect(program.parseAsync(['node', 'routecodex', 'start'], { from: 'node' })).resolves.toBe(program);
-    expect(spawnCount).toBeGreaterThanOrEqual(3);
+    expect(spawnCount).toBe(2);
     expect(infoLogs.some((line) => line.includes('[client-restart] RouteCodex child restarted on port 5520'))).toBe(true);
+  });
+
+  it('managed restart stops after first failed restarted child bootstrap', async () => {
+    const program = new Command();
+    const infoLogs: string[] = [];
+    const errorLogs: string[] = [];
+    let spawnCount = 0;
+    let exitCode: number | null = null;
+
+    type ExitHandler = (code: number | null, signal: NodeJS.Signals | null) => void;
+
+    class FakeChildProc {
+      pid: number;
+      exitCode: number | null = null;
+      signalCode: NodeJS.Signals | null = null;
+      stdout: null = null;
+      stderr: null = null;
+      private readonly handlers = new Map<string, ExitHandler[]>();
+
+      constructor(pid: number) {
+        this.pid = pid;
+      }
+
+      on(event: string, handler: ExitHandler): this {
+        const list = this.handlers.get(event) ?? [];
+        list.push(handler);
+        this.handlers.set(event, list);
+        return this;
+      }
+
+      once(event: string, handler: ExitHandler): this {
+        const wrapped: ExitHandler = (code, signal) => {
+          this.off(event, wrapped);
+          handler(code, signal);
+        };
+        return this.on(event, wrapped);
+      }
+
+      off(event: string, handler: ExitHandler): this {
+        const list = this.handlers.get(event) ?? [];
+        this.handlers.set(event, list.filter((item) => item !== handler));
+        return this;
+      }
+
+      emitExit(code: number | null, signal: NodeJS.Signals | null): void {
+        this.exitCode = code;
+        this.signalCode = signal;
+        const listeners = [...(this.handlers.get('exit') ?? [])];
+        for (const listener of listeners) {
+          listener(code, signal);
+        }
+      }
+    }
+
+    createStartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: {
+        info: (msg) => infoLogs.push(String(msg)),
+        warning: () => {},
+        success: () => {},
+        error: (msg) => errorLogs.push(String(msg))
+      },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {},
+        createWriteStream: () => ({ write: () => true, end: () => {} } as any)
+      } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/')
+      } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async (ms) => { await new Promise((resolve) => setTimeout(resolve, Math.min(ms, 20))); },
+      ensureLocalTokenPortalEnv: async () => {},
+      ensureTokenDaemonAutoStart: async () => {},
+      ensurePortAvailable: async () => {},
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: () => {
+        spawnCount += 1;
+        const proc = new FakeChildProc(3000 + spawnCount);
+        setTimeout(() => {
+          proc.emitExit(spawnCount === 1 ? 75 : 1, null);
+        }, 15);
+        return proc as any;
+      },
+      fetch: (async () => ({ ok: false, status: 503, json: async () => ({}) })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      },
+      exit: (code) => {
+        exitCode = code;
+      }
+    });
+
+    await expect(program.parseAsync(['node', 'routecodex', 'start'], { from: 'node' })).resolves.toBe(program);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(spawnCount).toBe(2);
+    expect(exitCode).toBe(1);
+    expect(infoLogs.some((line) => line.includes('[client-restart] RouteCodex requested managed restart on port 5520'))).toBe(true);
+    expect(errorLogs.some((line) => line.includes('attempt=1 child exited early'))).toBe(true);
   });
 
   it('managed restart re-resolves current install entry instead of reusing stale absolute release path', async () => {

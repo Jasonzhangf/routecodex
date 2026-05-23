@@ -29,7 +29,6 @@ import {
   createChatProcessSnapshotRecorder,
   prepareChatProcessRuntimeMetadata,
 } from "./hub-pipeline-chat-process-entry-blocks.js";
-import { propagateApplyPatchToolModeToRequestMetadata } from "./hub-pipeline-request-metadata-blocks.js";
 import { createHubSnapshotStageRecorder } from "./hub-pipeline-snapshot-recorder-blocks.js";
 
 function mergeRuntimeMetadataPatch(base: Record<string, unknown>, patch: Record<string, unknown>): void { Object.assign(base, patch); }
@@ -49,7 +48,6 @@ function prepareChatProcessEntryExecutionContext(args: { normalized: NormalizedR
     const reason = error instanceof Error ? error.message : String(error ?? "unknown");
     throw new Error(`[HubPipeline][semantic_gate] Failed to lift protocol semantics into request.semantics before chat_process (requestId=${args.normalized.id || "unknown"}): ${reason}`);
   }
-  propagateApplyPatchToolModeToRequestMetadata(metaBase, standardizedRequest);
   const adapterContext = buildAdapterContextFromNormalized(args.normalized);
   const stageRecorder = createChatProcessSnapshotRecorder({ normalized: args.normalized, adapterContext, warningLabel: "Snapshot recorder creation" });
   return { metaBase, standardizedRequest, activeProcessMode, passthroughAudit, stageRecorder };

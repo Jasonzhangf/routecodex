@@ -697,6 +697,16 @@ fn has_responses_input_chat_messages(input: &[Value]) -> bool {
     false
 }
 
+fn has_responses_submit_tool_outputs(raw_request_row: &Map<String, Value>) -> bool {
+    let has_previous_response_id = read_trimmed_string(raw_request_row.get("previous_response_id")).is_some();
+    let has_tool_outputs = raw_request_row
+        .get("tool_outputs")
+        .and_then(Value::as_array)
+        .map(|items| !items.is_empty())
+        .unwrap_or(false);
+    has_previous_response_id && has_tool_outputs
+}
+
 fn capture_req_inbound_responses_context_snapshot(
     input: ResponsesContextCaptureInput,
 ) -> Result<Value, String> {
@@ -715,7 +725,8 @@ fn capture_req_inbound_responses_context_snapshot(
         .as_deref()
         .map(has_responses_input_chat_messages)
         .unwrap_or(false);
-    if !has_messages && !has_input_chat_messages {
+    let is_submit_tool_outputs_resume = has_responses_submit_tool_outputs(&raw_request_row);
+    if !has_messages && !has_input_chat_messages && !is_submit_tool_outputs_resume {
         return Err("Responses payload produced no chat messages".to_string());
     }
 
@@ -1362,5 +1373,44 @@ mod tests {
         assert!(!properties.contains_key("input"));
         assert!(!properties.contains_key("filePath"));
         assert!(!properties.contains_key("file_path"));
+    }
+
+    #[test]
+    fn capture_responses_context_allows_submit_tool_outputs_without_chat_messages() {
+        let input = ResponsesContextCaptureInput {
+            raw_request: json!({
+                "model": "gpt-5.4",
+                "previous_response_id": "resp_prev_1",
+                "tool_outputs": [
+                    {
+                        "tool_call_id": "call_apply_patch_1",
+                        "output": "Patch applied successfully"
+                    }
+                ],
+                "stream": false
+            }),
+            request_id: Some("req_submit_outputs_1".to_string()),
+            tool_call_id_style: None,
+        };
+
+        let captured =
+            capture_req_inbound_responses_context_snapshot(input).expect("submit tool outputs capture");
+        let row = captured.as_object().expect("captured object");
+
+        assert_eq!(row.get("requestId"), Some(&Value::String("req_submit_outputs_1".to_string())));
+        assert_eq!(
+            row.get("__captured_tool_results")
+                .and_then(Value::as_array)
+                .map(|items| items.len()),
+            Some(1)
+        );
+        assert_eq!(
+            row.get("isResponsesPayload"),
+            Some(&Value::Bool(false))
+        );
+        assert_eq!(
+            row.get("isChatPayload"),
+            Some(&Value::Bool(false))
+        );
     }
 }

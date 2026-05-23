@@ -164,10 +164,16 @@ export async function handleProviderQuotaErrorEvent(
 
   if (weeklyQuotaExhausted) {
     const rawCooldownMs = detailsRecord.cooldownOverrideMs;
+    const resetUntil = computeDailyResetUntilMs({
+      nowMs,
+      resetTime: '00:00',
+      defaultLocalHour: 0,
+      defaultLocalMinute: 0
+    });
     const cooldownMs =
       typeof rawCooldownMs === 'number' && Number.isFinite(rawCooldownMs) && rawCooldownMs > 0
         ? rawCooldownMs
-        : 24 * 60 * 60_000;
+        : (resetUntil && resetUntil > nowMs ? resetUntil - nowMs : 24 * 60 * 60_000);
     const nextState: QuotaState = {
       ...previous,
       inPool: false,

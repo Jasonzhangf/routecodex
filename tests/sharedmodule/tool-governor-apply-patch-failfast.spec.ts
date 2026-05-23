@@ -82,6 +82,36 @@ describe('tool governor apply_patch fail-fast', () => {
     );
   });
 
+  it('does not let TS relay request governor rewrite apply_patch tool schema anymore', () => {
+    const request = {
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'apply_patch',
+            description: 'Edit files by patch',
+            parameters: {
+              type: 'object',
+              properties: {
+                filePath: { type: 'string', description: 'target file path' },
+                fileContent: { type: 'string', description: 'current file content' }
+              }
+            }
+          }
+        }
+      ]
+    };
+
+    const out = requestModule.processChatRequestTools(request as any) as any;
+    const properties = out?.tools?.[0]?.function?.parameters?.properties || {};
+    expect(properties.filePath).toBeDefined();
+    expect(properties.fileContent).toBeDefined();
+    expect(properties.file_path).toBeUndefined();
+    expect(properties.file_content).toBeUndefined();
+    expect(properties.patch).toBeUndefined();
+    expect(properties.input).toBeUndefined();
+  });
+
   it('does not expose response-side apply_patch TS normalizer helper anymore', () => {
     expect((responseModule as any).normalizeResponseToolCalls).toBeUndefined();
   });

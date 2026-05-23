@@ -209,206 +209,11 @@ describe('WindsurfChatProvider', () => {
   // Auth / token priority / postAuth proto contract / auth-context headers
   // anchor:
   // - windsurf-login.js
-  test('RED: preprocessRequest in chat-only provider must keep full tool inventory in tools_preamble and must not emit dead native bridge shadow fields', async () => {
-    const provider = createProvider();
-
-    const processed = await (provider as any).preprocessRequest({
-      body: {
-        model: 'gpt-5.4-medium',
-        messages: [{ role: 'user', content: 'hi' }],
-        tools: [
-          { type: 'function', function: { name: 'Read', description: 'read file', parameters: { type: 'object' } } },
-          { type: 'function', function: { name: 'shell_command', description: 'run shell', parameters: { type: 'object' } } },
-          { type: 'function', function: { name: 'apply_patch', description: 'patch files', parameters: { type: 'object' } } },
-          { type: 'function', function: { name: 'spawn_agent', description: 'delegate', parameters: { type: 'object' } } },
-        ],
-      },
-    });
-
-    expect(processed.body.tools).toBeUndefined();
-    expect(processed.body.windsurf_native_mode).toBeUndefined();
-    expect(processed.body.windsurf_native_allowlist).toBeUndefined();
-    expect(processed.body.windsurf_native_caller_lookup).toBeUndefined();
-    expect(processed.body.tools_preamble).toContain('apply_patch');
-    expect(processed.body.tools_preamble).toContain('spawn_agent');
-    expect(processed.body.tools_preamble).toContain('Read');
-    expect(processed.body.tools_preamble).toContain('shell_command');
-  });
-
-  test('RED: preprocessRequest in chat-only provider keeps mapped tools in tools_preamble because there is no native bridge send path', async () => {
-    const provider = new WindsurfChatProvider({
-      type: 'openai-standard',
-      config: {
-        providerType: 'openai',
-        baseUrl: 'http://localhost:3003',
-        model: 'gpt-5.4-high',
-        auth: { type: 'apikey', apiKey: 'test-key' },
-      },
-    } as any, deps);
-
-    const processed = await (provider as any).preprocessRequest({
-      body: {
-        model: 'gpt-5.4-high',
-        messages: [{ role: 'user', content: 'hi' }],
-        tools: [
-          {
-            type: 'function',
-            function: {
-              name: 'exec_command',
-              description: 'run shell',
-              parameters: { type: 'object', properties: { cmd: { type: 'string' } } },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'apply_patch',
-              description: 'patch files',
-              parameters: { type: 'object', properties: { patch: { type: 'string' } } },
-            },
-          },
-        ],
-      },
-    });
-
-    expect(processed.body.tools).toBeUndefined();
-    expect(processed.body.windsurf_native_mode).toBeUndefined();
-    expect(processed.body.windsurf_native_allowlist).toBeUndefined();
-    expect(processed.body.windsurf_native_caller_lookup).toBeUndefined();
-    expect(processed.body.tools_preamble).toContain('You have access to the following functions.');
-    expect(processed.body.tools_preamble).toContain('Available functions:');
-    expect(processed.body.tools_preamble).toContain('apply_patch');
-    expect(processed.body.tools_preamble).toContain('exec_command');
-  });
 
 
-  test('RED: blackbox compare tools_preamble semantic anchors against WindsurfAPI buildToolPreambleForProto', async () => {
-    const provider = createProvider();
-    const tools = [
-      {
-        type: 'function',
-        function: {
-          name: 'shell_command',
-          description: 'run shell',
-          parameters: {
-            type: 'object',
-            properties: { command: { type: 'string' } },
-            required: ['command'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'Read',
-          description: 'read file',
-          parameters: {
-            type: 'object',
-            properties: { file_path: { type: 'string' } },
-            required: ['file_path'],
-          },
-        },
-      },
-    ];
-    const toolChoice = { type: 'function', function: { name: 'shell_command' } };
 
-    const reference = runWindsurfApiReference(`
-      import { buildToolPreambleForProto } from '/Volumes/extension/code/WindsurfAPI/src/handlers/tool-emulation.js';
-      const tools = ${JSON.stringify(tools)};
-      const toolChoice = ${JSON.stringify(toolChoice)};
-      process.stdout.write(JSON.stringify({
-        preamble: buildToolPreambleForProto(tools, toolChoice, '', 'gpt-5.4-medium', 'openai', 'responses')
-      }));
-    `);
 
-    const processed = await (provider as any).preprocessRequest({
-      body: {
-        model: 'gpt-5.4-medium',
-        messages: [{ role: 'user', content: 'run pwd' }],
-        tools,
-        tool_choice: toolChoice,
-      },
-    });
 
-    const preamble = String(processed.body.tools_preamble || '');
-    expect(reference.preamble).toContain('You have access to the following functions.');
-    expect(reference.preamble).toContain('Available functions:');
-    expect(reference.preamble).toContain('You MUST call the function "shell_command"');
-    expect(reference.preamble).toContain('### shell_command');
-    expect(reference.preamble).toContain('### Read');
-    expect(reference.preamble).toContain('```json');
-
-    expect(preamble).toContain('You have access to the following functions.');
-    expect(preamble).toContain('Available functions:');
-    expect(preamble).toContain('You MUST call the function "shell_command"');
-    expect(preamble).toContain('### shell_command');
-    expect(preamble).toContain('### Read');
-    expect(preamble).toContain('```json');
-  });
-
-  test('RED: preprocessRequest tools_preamble must carry function-call anti-fabrication rules from reference proto preamble', async () => {
-    const provider = createProvider();
-    const processed = await (provider as any).preprocessRequest({
-      body: {
-        model: 'gpt-5.4-medium',
-        messages: [{ role: 'user', content: 'what is pwd?' }],
-        tools: [
-          {
-            type: 'function',
-            function: {
-              name: 'shell_command',
-              description: 'run shell',
-              parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] },
-            },
-          },
-        ],
-      },
-    });
-
-    const preamble = String(processed.body.tools_preamble || '');
-    expect(preamble).toContain('NEVER FABRICATE OUTPUT');
-    expect(preamble).toContain('The functions ARE available.');
-    expect(preamble).toContain('output ONE valid JSON object on a single line');
-  });
-
-  test('RED: preprocessRequest should downshift tools_preamble tier to names-only under tiny soft budget like WindsurfAPI applyToolPreambleBudget', async () => {
-    const provider = createProvider();
-    const tools = Array.from({ length: 8 }, (_, index) => ({
-      type: 'function',
-      function: {
-        name: `tool_${index}`,
-        description: `tool ${index} long description `.repeat(20),
-        parameters: {
-          type: 'object',
-          properties: {
-            command: { type: 'string', description: 'x'.repeat(200) },
-            path: { type: 'string', description: 'y'.repeat(200) },
-          },
-          required: ['command', 'path'],
-        },
-      },
-    }));
-    const reference = runWindsurfApiReference(`
-      import { applyToolPreambleBudget } from '/Volumes/extension/code/WindsurfAPI/src/handlers/chat.js';
-      const tools = ${JSON.stringify(tools)};
-      process.stdout.write(JSON.stringify(
-        applyToolPreambleBudget(tools, 'auto', '', {
-          modelKey: 'gpt-5.4-medium',
-          provider: 'openai',
-          route: 'responses',
-          softBytes: 400,
-          hardBytes: 100000
-        })
-      ));
-    `);
-
-    const local = await import('../../../../src/providers/core/runtime/windsurf-chat-provider.ts') as any;
-    const localBudget = local.applyWindsurfToolPreambleBudget(tools, 'auto', '', { softBytes: 400, hardBytes: 100000 });
-
-    expect(reference.tier).toBe('names-only');
-    expect(localBudget.tier).toBe('names-only');
-    expect(String(localBudget.preamble || '')).toContain('Parameter schemas are omitted in this preamble due to total tool-list size.');
-  });
 
   test('RED: parseGetChatMessageResponse must classify resource_exhausted + internal error as upstream transient, not rate limit', async () => {
     const provider = createProvider();
@@ -435,6 +240,27 @@ describe('WindsurfChatProvider', () => {
       code: 'WINDSURF_POLICY_BLOCKED',
       status: 451,
       retryable: false,
+    }));
+  });
+
+  test('RED: classifyWindsurfCascadeError must preserve weekly quota as non-retryable quota error even when grpc path pre-structures it', async () => {
+    const provider = createProvider();
+    const upstream = new Error('Your weekly usage quota has been exhausted. Please ensure Windsurf is up to date for the best experience, or visit windsurf.com to manage your plan.');
+    Object.assign(upstream, {
+      code: 'WINDSURF_UPSTREAM_TRANSIENT',
+      status: 502,
+      retryable: true,
+      upstreamCode: 'WINDSURF_UPSTREAM_TRANSIENT',
+    });
+
+    const classified = (provider as any).classifyWindsurfCascadeError(upstream);
+    expect(classified).toEqual(expect.objectContaining({
+      code: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+      status: 429,
+      retryable: false,
+      rateLimitKind: 'daily_limit',
+      quotaScope: 'weekly',
+      quotaReason: 'windsurf_weekly_exhausted',
     }));
   });
 
@@ -779,234 +605,8 @@ describe('WindsurfChatProvider', () => {
     });
   });
 
-  test('RED: preprocessRequest tools_preamble should inject environment facts block from request messages when cwd is present', async () => {
-    const provider = createProvider();
-    const processed = await (provider as any).preprocessRequest({
-      body: {
-        model: 'gpt-5.4-medium',
-        messages: [
-          {
-            role: 'user',
-            content: '<env>\nWorking directory: /Users/fanzhang/Documents/github/routecodex\nPlatform: macOS\n</env>\nplease inspect repo',
-          },
-        ],
-        tools: [
-          {
-            type: 'function',
-            function: {
-              name: 'shell_command',
-              description: 'run shell',
-              parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] },
-            },
-          },
-        ],
-      },
-    });
 
-    const preamble = String(processed.body.tools_preamble || '');
-    expect(preamble).toContain('## Environment facts');
-    expect(preamble).toContain('The facts below are provided by the calling agent');
-    expect(preamble).toContain('- Working directory: /Users/fanzhang/Documents/github/routecodex');
-    expect(preamble).toContain('Tool calls operate on these paths.');
-  });
 
-  test('RED: preprocessRequest tools_preamble should append reinforcement guidance after tool protocol block', async () => {
-    const provider = createProvider();
-    const processed = await (provider as any).preprocessRequest({
-      body: {
-        model: 'gpt-5.4-medium',
-        messages: [{ role: 'user', content: 'run pwd' }],
-        tools: [
-          {
-            type: 'function',
-            function: {
-              name: 'shell_command',
-              description: 'run shell',
-              parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] },
-            },
-          },
-        ],
-      },
-    });
-
-    const preamble = String(processed.body.tools_preamble || '');
-    expect(preamble).toContain('The functions listed above are available and callable.');
-    expect(preamble).toContain('Use this exact format:');
-  });
-  test('RED: preprocessRequest preserves declared tools and tool_choice for later cloud chat outbound build while keeping full tool inventory in preamble for chat-only cascade', async () => {
-    const provider = createProvider();
-    const processed = await (provider as any).preprocessRequest({
-      body: {
-        model: 'gpt-5.4-medium',
-        messages: [{ role: 'user', content: 'hi' }],
-        tool_choice: {
-          type: 'function',
-          function: { name: 'exec_command' },
-        },
-        tools: [
-          {
-            type: 'function',
-            function: {
-              name: 'exec_command',
-              description: 'run shell',
-              parameters: { type: 'object', properties: { cmd: { type: 'string' } } },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'apply_patch',
-              description: 'patch files',
-              parameters: { type: 'object', properties: { patch: { type: 'string' } } },
-            },
-          },
-        ],
-      },
-    });
-
-    expect(processed.body.tools).toBeUndefined();
-    expect(processed.body.windsurf_declared_tools).toHaveLength(2);
-    expect(processed.body.windsurf_tool_choice).toEqual({
-      type: 'function',
-      function: { name: 'exec_command' },
-    });
-    expect(processed.body.tool_choice).toBeUndefined();
-    expect(processed.body.tools_preamble).toContain('apply_patch');
-    expect(processed.body.tools_preamble).toContain('exec_command');
-  });
-
-  test('RED: blackbox compare preprocess tool partition against WindsurfAPI reference partitionTools while preserving full preamble in chat-only provider', async () => {
-    const provider = createProvider();
-
-    const tools = [
-      {
-        type: 'function',
-        function: {
-          name: 'Read',
-          description: 'read file',
-          parameters: { type: 'object', properties: { file_path: { type: 'string' } } },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'shell_command',
-          description: 'run shell',
-          parameters: { type: 'object', properties: { command: { type: 'string' } } },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'apply_patch',
-          description: 'patch files',
-          parameters: { type: 'object', properties: { patch: { type: 'string' } } },
-        },
-      },
-    ];
-
-    const reference = runWindsurfApiReference(`
-      import { partitionTools } from '/Volumes/extension/code/WindsurfAPI/src/cascade-native-bridge.js';
-      const tools = ${JSON.stringify(tools)};
-      process.stdout.write(JSON.stringify(partitionTools(tools)));
-    `);
-    const processed = await (provider as any).preprocessRequest({
-      body: {
-        model: 'gpt-5.4-medium',
-        messages: [{ role: 'user', content: 'hi' }],
-        tools,
-        tool_choice: { type: 'function', function: { name: 'shell_command' } },
-      },
-    });
-
-    expect(reference.mapped.map((tool: any) => tool.function.name)).toEqual(['Read', 'shell_command']);
-    expect(reference.unmapped.map((tool: any) => tool.function.name)).toEqual(['apply_patch']);
-    expect(processed.body.windsurf_declared_tools.map((tool: any) => tool.function.name)).toEqual([
-      'Read',
-      'shell_command',
-      'apply_patch',
-    ]);
-    expect(processed.body.tools_preamble).toContain('apply_patch');
-    expect(processed.body.tools_preamble).toContain('Read');
-    expect(processed.body.tools_preamble).toContain('shell_command');
-    expect(processed.body.windsurf_tool_choice).toEqual({
-      type: 'function',
-      function: { name: 'shell_command' },
-    });
-  });
-
-  test('RED: blackbox compare history projection semantics against WindsurfAPI normalizeMessagesForCascade', async () => {
-    const provider = createProvider();
-
-    const messages = [
-      { role: 'user', content: 'inspect repo' },
-      {
-        role: 'assistant',
-        content: '',
-        tool_calls: [
-          {
-            id: 'call_1',
-            function: {
-              name: 'shell_command',
-              arguments: '{"command":"pwd"}',
-            },
-          },
-        ],
-      },
-      { role: 'tool', tool_call_id: 'call_1', content: '/tmp/project' },
-      { role: 'user', content: 'continue' },
-    ];
-    const tools = [
-      {
-        type: 'function',
-        function: {
-          name: 'shell_command',
-          description: 'run shell',
-          parameters: { type: 'object', properties: { command: { type: 'string' } } },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'apply_patch',
-          description: 'patch files',
-          parameters: { type: 'object', properties: { patch: { type: 'string' } } },
-        },
-      },
-    ];
-
-    const reference = runWindsurfApiReference(`
-      import { normalizeMessagesForCascade } from '/Volumes/extension/code/WindsurfAPI/src/handlers/tool-emulation.js';
-      const messages = ${JSON.stringify(messages)};
-      const tools = ${JSON.stringify(tools)};
-      process.stdout.write(JSON.stringify(normalizeMessagesForCascade(messages, tools, {})));
-    `);
-    const semanticConversation = (provider as any).parseCascadeSemanticRoundtripSync(messages);
-
-    expect(reference).toEqual([
-      { role: 'user', content: 'inspect repo' },
-      { role: 'assistant', content: '<tool_call>{"name":"shell_command","arguments":{"command":"pwd"}}</tool_call>' },
-      { role: 'user', content: '<tool_result tool_call_id="call_1">\n/tmp/project\n</tool_result>' },
-      expect.objectContaining({ role: 'user' }),
-    ]);
-    expect(semanticConversation).toEqual([
-      { type: 'user', text: 'inspect repo' },
-      {
-        type: 'assistant',
-        text: '',
-        tool_calls: [
-          { call_id: 'call_1', name: 'shell_command', arguments: { command: 'pwd' } },
-        ],
-      },
-      {
-        type: 'function_call_output',
-        call_id: 'call_1',
-        name: 'shell_command',
-        output: '/tmp/project',
-      },
-      { type: 'user', text: 'continue' },
-    ]);
-  });
 
   test('RED: blackbox compare reasoning merge against WindsurfAPI mergeReasoningEffortIntoModel', async () => {
     const provider = createProvider();
@@ -2521,7 +2121,7 @@ describe('WindsurfChatProvider', () => {
     }));
   });
 
-  test('RED: sendRequestInternal must fail fast instead of sending removed GetChatCompletions cloud path', async () => {
+  test('RED: sendRequestInternal without local cascade runtime must fail before removed GetChatCompletions cloud path', async () => {
     const provider = new WindsurfChatProvider({
       type: 'openai-standard',
       config: {
@@ -2533,6 +2133,11 @@ describe('WindsurfChatProvider', () => {
     } as any, deps);
 
     const fetchSpy = jest.spyOn(provider as any, 'fetchWithTimeout');
+    jest.spyOn(provider as any, 'ensureManagedLocalGrpcRuntime').mockRejectedValue(
+      Object.assign(new Error('[windsurf] no managed LS runtime in test'), {
+        code: 'WINDSURF_SERVICE_UNREACHABLE', status: 502, retryable: true,
+      }),
+    );
 
     await expect((provider as any).sendRequestInternal({
       body: {
@@ -2540,9 +2145,9 @@ describe('WindsurfChatProvider', () => {
         messages: [{ role: 'user', content: 'say hi' }],
       },
     })).rejects.toMatchObject({
-      code: 'WINDSURF_REQUEST_BUILD_FAILED',
-      status: 501,
-      retryable: false,
+      code: 'WINDSURF_SERVICE_UNREACHABLE',
+      status: 502,
+      retryable: true,
     });
 
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -2569,6 +2174,13 @@ describe('WindsurfChatProvider', () => {
     } as any, deps);
 
     const fetchSpy = jest.spyOn(provider as any, 'fetchWithTimeout');
+    const runtimeSpy = jest.spyOn(provider as any, 'resolveManagedRuntimeOptions').mockResolvedValue({
+      lsPort: 42101,
+      csrfToken: 'windsurf-api-csrf-fixed-token',
+      sessionId: 'session-1',
+      workspacePath: '/tmp/ws-1',
+      workspaceUri: 'file:///tmp/ws-1',
+    });
     const startSpy = jest.spyOn(provider as any, 'sendStartCascade')
       .mockRejectedValue(Object.assign(new Error('local cascade transport not reachable in test'), {
         code: 'WINDSURF_UPSTREAM_TRANSIENT',
@@ -2590,7 +2202,9 @@ describe('WindsurfChatProvider', () => {
       expect(startSpy).toHaveBeenCalled();
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
+      runtimeSpy.mockRestore();
       startSpy.mockRestore();
+      fetchSpy.mockRestore();
     }
   });
 
@@ -2639,48 +2253,8 @@ describe('WindsurfChatProvider', () => {
 
 
 
-  test('RED: parseCascadeAssistantTurnSync extracts json function_call text emitted by Cascade tool emulation', () => {
-    const provider = createProvider();
-    const parsed = (provider as any).parseCascadeAssistantTurnSync({
-      role: 'assistant',
-      content: '{"function_call":{"name":"echo","arguments":{"text":"ping"}}}',
-    });
-    expect(parsed).toMatchObject({
-      role: 'assistant',
-      content: '',
-      tool_calls: [{ type: 'function', function: { name: 'echo', arguments: '{"text":"ping"}' } }],
-    });
-  });
 
-  test('RED: parseCascadeAssistantTurnSync extracts XML tool_call markup emitted by WindsurfAPI emulation path', () => {
-    const provider = createProvider();
-    const parsed = (provider as any).parseCascadeAssistantTurnSync({
-      role: 'assistant',
-      content: '<tool_call>{"name":"echo","arguments":{"text":"ping"}}</tool_call>',
-    });
-    expect(parsed).toMatchObject({
-      role: 'assistant',
-      content: '',
-      tool_calls: [{
-        type: 'function',
-        function: { name: 'echo', arguments: '{"text":"ping"}' },
-      }],
-    });
-    expect(String(parsed.tool_calls[0].id)).toMatch(/^call_/);
-  });
 
-  test('RED: parseCascadeAssistantTurnSync salvages WindsurfAPI json function_call with trailing text', () => {
-    const provider = createProvider();
-    const parsed = (provider as any).parseCascadeAssistantTurnSync({
-      role: 'assistant',
-      content: '{"function_call":{"name":"echo","arguments":{"text":"ping"}}}\nextra trailing prose',
-    });
-    expect(parsed).toMatchObject({
-      role: 'assistant',
-      content: '',
-      tool_calls: [{ type: 'function', function: { name: 'echo', arguments: '{"text":"ping"}' } }],
-    });
-  });
 
   test('RED: parseCascadeAssistantTurnSync parses assistant tool call candidate into openai tool_calls', async () => {
     const provider = new WindsurfChatProvider({
@@ -4519,6 +4093,25 @@ describe('WindsurfChatProvider', () => {
   });
 
 
+  test('RED: buildCascadeCompletionFromOutput carries executed function_call_output rows so Responses remap can mark native continuation completed', async () => {
+    const provider = createProvider();
+    const out = (provider as any).buildCascadeCompletionFromOutput({
+      model: 'gpt-5.4-medium',
+      candidate: {
+        role: 'assistant',
+        content: 'done',
+        tool_outputs: [
+          { type: 'function_call_output', call_id: 'native:run_command:3', output: '/Users/fanzhang/Documents/github/routecodex\n' },
+        ],
+      },
+    });
+
+    expect(out.tool_outputs).toEqual([
+      { tool_call_id: 'native:run_command:3', output: '/Users/fanzhang/Documents/github/routecodex\n' },
+    ]);
+  });
+
+
   test('RED: buildCascadeCompletionFromOutput preserves reasoning content on assistant response parsing', async () => {
     const provider = createProvider();
     const out = (provider as any).buildCascadeCompletionFromOutput({
@@ -5104,7 +4697,7 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
     const reference = runWindsurfApiReference(`
       import { buildSendCascadeMessageRequest } from '/Volumes/extension/code/WindsurfAPI/src/windsurf.js';
       import { parseFields, getField, getAllFields } from '/Volumes/extension/code/WindsurfAPI/src/proto.js';
-      const buf = buildSendCascadeMessageRequest('devin-session-token$cascade', 'cid-1', 'hello', 12345, 'MODEL_TEST', 'sess-1', { toolPreamble: 'TOOLS' });
+      const buf = buildSendCascadeMessageRequest('devin-session-token$cascade', 'cid-1', 'hello', 12345, 'MODEL_TEST', 'sess-1', { nativeMode: true, nativeAllowlist: ['run_command'] });
       const top = parseFields(buf);
       const cfg = parseFields(getField(top, 5, 2).value);
       const planner = parseFields(getField(cfg, 1, 2).value);
@@ -5126,7 +4719,8 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
       sessionId: 'sess-1',
       modelEnum: 12345,
       modelUid: 'MODEL_TEST',
-      toolPreamble: 'TOOLS',
+      nativeMode: true,
+      nativeAllowlist: ['run_command'],
     });
     expect(actual).toBeDefined();
     const top = (provider as any).parseProtoFields(actual);
@@ -5144,16 +4738,9 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
   });
 
 
-  test('RED: unique cascade blackbox must match WindsurfAPI SendUserCascadeMessage full protobuf bytes for deterministic args', async () => {
+  test('RED: text tool preamble path is removed and fails fast instead of encoding deprecated protocol', async () => {
     const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$cascade', rawType: 'windsurf-devin-token' });
-    const reference = runWindsurfApiReference(`
-      Math.random = () => 0;
-      import { buildSendCascadeMessageRequest } from '/Volumes/extension/code/WindsurfAPI/src/windsurf.js';
-      const buf = buildSendCascadeMessageRequest('api-key-1', 'cid-1', 'hello world', 123, 'gpt-5-3-codex-medium', 'session-1', { toolPreamble: 'TOOLS' });
-      process.stdout.write(JSON.stringify({ hex: buf.toString('hex'), length: buf.length }));
-    `);
-    const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
-    const actual = (provider as any).buildSendCascadeMessageRequest({
+    expect(() => (provider as any).buildSendCascadeMessageRequest({
       apiKey: 'api-key-1',
       cascadeId: 'cid-1',
       text: 'hello world',
@@ -5161,12 +4748,7 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
       modelEnum: 123,
       modelUid: 'gpt-5-3-codex-medium',
       toolPreamble: 'TOOLS',
-    });
-    try {
-      expect({ hex: actual.toString('hex'), length: actual.length }).toEqual(reference);
-    } finally {
-      randomSpy.mockRestore();
-    }
+    })).toThrow(/text tool preamble is deprecated/i);
   });
 
   test('RED: unique cascade blackbox must match WindsurfAPI SendUserCascadeMessage full protobuf bytes for no-tool deterministic args', async () => {
@@ -5256,130 +4838,566 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
   });
 
 
-  test('RED: unique cascade blackbox must match WindsurfAPI field 10/13 section payload strings', async () => {
+  test('RED: unique cascade blackbox must encode native tool mode as WindsurfAPI DEFAULT planner + tool_allowlist, without text tool protocol', async () => {
     const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$cascade', rawType: 'windsurf-devin-token' });
     const reference = runWindsurfApiReference(`
+      Math.random = () => 0;
       import { buildSendCascadeMessageRequest } from '/Volumes/extension/code/WindsurfAPI/src/windsurf.js';
-      import { parseFields, getField } from '/Volumes/extension/code/WindsurfAPI/src/proto.js';
-      const readSection = (fields, no) => {
-        const f = getField(fields, no, 2);
-        if (!f) return null;
-        const inner = parseFields(f.value);
-        return { mode: getField(inner, 1, 0)?.value ?? null, text: getField(inner, 2, 2)?.value?.toString('utf8') ?? '' };
-      };
-      const noToolBuf = buildSendCascadeMessageRequest('api-key-1', 'cid-1', 'hello world', 0, 'gpt-5-3-codex-medium', 'session-1', {});
-      const noToolTop = parseFields(noToolBuf);
-      const noToolCfg = parseFields(getField(noToolTop, 5, 2).value);
-      const noToolPlanner = parseFields(getField(noToolCfg, 1, 2).value);
-      const noToolConv = parseFields(getField(noToolPlanner, 2, 2).value);
-      const toolBuf = buildSendCascadeMessageRequest('api-key-1', 'cid-1', 'hello world', 123, 'gpt-5-3-codex-medium', 'session-1', { toolPreamble: 'TOOLS' });
-      const toolTop = parseFields(toolBuf);
-      const toolCfg = parseFields(getField(toolTop, 5, 2).value);
-      const toolPlanner = parseFields(getField(toolCfg, 1, 2).value);
-      const toolConv = parseFields(getField(toolPlanner, 2, 2).value);
+      import { parseFields, getField, getAllFields } from '/Volumes/extension/code/WindsurfAPI/src/proto.js';
+      const buf = buildSendCascadeMessageRequest('api-key-1', 'cid-1', 'run pwd', 0, 'gpt-5-3-codex-medium', 'session-1', {
+        nativeMode: true,
+        nativeAllowlist: ['run_command', 'view_file'],
+      });
+      const top = parseFields(buf);
+      const cfg = parseFields(getField(top, 5, 2).value);
+      const planner = parseFields(getField(cfg, 1, 2).value);
+      const conversational = parseFields(getField(planner, 2, 2).value);
+      const toolConfig = parseFields(getField(planner, 13, 2).value);
       process.stdout.write(JSON.stringify({
-        noTool10: readSection(noToolConv, 10),
-        noTool13: readSection(noToolConv, 13),
-        tool10: readSection(toolConv, 10),
-        tool13: readSection(toolConv, 13),
-        tool12: readSection(toolConv, 12),
+        fieldNos: top.map(f => f.field),
+        plannerFields: planner.map(f => f.field),
+        plannerMode: getField(conversational, 4, 0)?.value ?? null,
+        hasToolConfig: !!getField(planner, 13, 2),
+        toolConfigFields: toolConfig.map(f => f.field),
+        allowlist: getAllFields(toolConfig, 32).map(f => f.value.toString('utf8')),
+        hasAdditionalInstructions: !!getField(conversational, 12, 2),
+        hasToolCallingSection: !!getField(conversational, 10, 2),
       }));
     `);
-
-    const readSection = (fields: any[], no: number) => {
-      const f = (provider as any).getProtoField(fields, no, 2);
-      if (!f) return null;
-      const inner = (provider as any).parseProtoFields(f.value);
-      return {
-        mode: (provider as any).readProtoNumber(inner, 1) ?? null,
-        text: (provider as any).readProtoString(inner, 2),
-      };
-    };
-    const buildConv = (toolPreamble?: string) => {
+    const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+    try {
       const actual = (provider as any).buildSendCascadeMessageRequest({
-        apiKey: 'api-key-1', cascadeId: 'cid-1', text: 'hello world', sessionId: 'session-1',
-        modelEnum: toolPreamble ? 123 : 0, modelUid: 'gpt-5-3-codex-medium', ...(toolPreamble ? { toolPreamble } : {}),
+        apiKey: 'api-key-1',
+        cascadeId: 'cid-1',
+        text: 'run pwd',
+        sessionId: 'session-1',
+        modelEnum: 0,
+        modelUid: 'gpt-5-3-codex-medium',
+        nativeMode: true,
+        nativeAllowlist: ['run_command', 'view_file'],
       });
       const top = (provider as any).parseProtoFields(actual);
       const cfg = (provider as any).parseProtoFields((provider as any).getProtoField(top, 5, 2).value);
       const planner = (provider as any).parseProtoFields((provider as any).getProtoField(cfg, 1, 2).value);
-      return (provider as any).parseProtoFields((provider as any).getProtoField(planner, 2, 2).value);
-    };
-    const noToolConv = buildConv();
-    const toolConv = buildConv('TOOLS');
-    expect({
-      noTool10: readSection(noToolConv, 10),
-      noTool13: readSection(noToolConv, 13),
-      tool10: readSection(toolConv, 10),
-      tool13: readSection(toolConv, 13),
-      tool12: readSection(toolConv, 12),
-    }).toEqual(reference);
+      const conversational = (provider as any).parseProtoFields((provider as any).getProtoField(planner, 2, 2).value);
+      const toolConfig = (provider as any).parseProtoFields((provider as any).getProtoField(planner, 13, 2).value);
+      expect(reference).toMatchObject({
+        plannerMode: 1,
+        hasToolConfig: true,
+        allowlist: ['run_command', 'view_file'],
+      });
+      expect({
+        fieldNos: top.map((f: any) => f.fieldNo),
+        plannerFields: planner.map((f: any) => f.fieldNo),
+        plannerMode: (provider as any).readProtoNumber(conversational, 4) ?? null,
+        hasToolConfig: !!(provider as any).getProtoField(planner, 13, 2),
+        toolConfigFields: toolConfig.map((f: any) => f.fieldNo),
+        allowlist: (provider as any).getAllProtoFields(toolConfig, 32).map((f: any) => Buffer.from(f.value).toString('utf8')),
+        hasAdditionalInstructions: !!(provider as any).getProtoField(conversational, 12, 2),
+        hasToolCallingSection: !!(provider as any).getProtoField(conversational, 10, 2),
+      }).toEqual({
+        fieldNos: reference.fieldNos,
+        plannerFields: reference.plannerFields,
+        plannerMode: 1,
+        hasToolConfig: true,
+        toolConfigFields: reference.toolConfigFields,
+        allowlist: ['run_command', 'view_file'],
+        hasAdditionalInstructions: false,
+        hasToolCallingSection: false,
+      });
+      expect(actual.toString('utf8')).not.toContain('function_call');
+      expect(actual.toString('utf8')).not.toContain('<tool_call>');
+      expect(actual.toString('utf8')).not.toContain('You have access to the following functions.');
+    } finally {
+      randomSpy.mockRestore();
+    }
   });
 
-  test('RED: unique cascade blackbox must match WindsurfAPI SendUserCascadeMessage cascade_config field family for toolPreamble chat path', async () => {
-    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$cascade', rawType: 'windsurf-devin-token' });
+  test('RED: exec_command/shell_command direct semantic translation must match WindsurfAPI run_command subset and reject stdin/session semantics', async () => {
+    const provider = createProvider();
     const reference = runWindsurfApiReference(`
-      import { buildSendCascadeMessageRequest } from '/Volumes/extension/code/WindsurfAPI/src/windsurf.js';
-      import { parseFields, getField } from '/Volumes/extension/code/WindsurfAPI/src/proto.js';
-      const buf = buildSendCascadeMessageRequest(
-        'api-key-1',
-        'cid-1',
-        'hello world',
-        123,
-        'gpt-5-3-codex-medium',
-        'session-1',
-        { toolPreamble: 'TOOLS' }
-      );
-      const top = parseFields(buf);
-      const cfg5 = getField(top, 5, 2);
-      const cfg = parseFields(cfg5.value);
-      const planner = parseFields(getField(cfg, 1, 2).value);
-      const conversational = parseFields(getField(planner, 2, 2).value);
-      process.stdout.write(JSON.stringify({
-        cfgFields: cfg.map(f => f.field),
-        plannerFields: planner.map(f => f.field),
-        conversationalFields: conversational.map(f => f.field),
-        plannerMode: getField(conversational, 4, 0)?.value ?? null,
-        hasAdditionalInstructions: !!getField(conversational, 12, 2),
-        hasCommunicationSection: !!getField(conversational, 13, 2),
-        hasToolCallingSection: !!getField(conversational, 10, 2),
-        hasCodeChangesSection: !!getField(planner, 11, 2),
-        hasBrainConfig: !!getField(cfg, 7, 2),
-        requestedEnumDeprecated: !!getField(planner, 15, 2),
-        planModelDeprecated: getField(planner, 1, 0)?.value ?? null,
-      }));
+      import { buildAdditionalStep, TOOL_MAP } from '/Volumes/extension/code/WindsurfAPI/src/cascade-native-bridge.js';
+      const shell = TOOL_MAP.shell_command.forward({ command: 'pwd', workdir: '/tmp/project', timeout_ms: 1234 });
+      const run = TOOL_MAP.run_command.forward({ command: 'pwd', cwd: '/tmp/project' });
+      const step = buildAdditionalStep('run_command', { ...shell, stdout: '/tmp/project\\n', full_output: '/tmp/project\\n', exit_code: 0 });
+      process.stdout.write(JSON.stringify({ shell, run, stepHex: step.toString('hex') }));
     `);
+    expect(reference.shell).toEqual({ command_line: 'pwd', cwd: '/tmp/project', blocking: true });
+    expect(reference.run).toEqual({ command_line: 'pwd', cwd: '/tmp/project', blocking: true });
 
-    const actual = (provider as any).buildSendCascadeMessageRequest?.({
-      apiKey: 'api-key-1',
-      cascadeId: 'cid-1',
-      text: 'hello world',
-      sessionId: 'session-1',
-      modelEnum: 123,
-      modelUid: 'gpt-5-3-codex-medium',
-      toolPreamble: 'TOOLS',
+    const ourShellStep = (provider as any).buildCascadeAdditionalStep('run_command', {
+      command_line: 'pwd', cwd: '/tmp/project', blocking: true,
+      stdout: '/tmp/project\n', full_output: '/tmp/project\n', exit_code: 0,
     });
-    expect(actual).toBeDefined();
-    const top = (provider as any).parseProtoFields(actual);
-    const cfg = (provider as any).parseProtoFields((provider as any).getProtoField(top, 5, 2).value);
-    const planner = (provider as any).parseProtoFields((provider as any).getProtoField(cfg, 1, 2).value);
-    const conversational = (provider as any).parseProtoFields((provider as any).getProtoField(planner, 2, 2).value);
-    expect({
-      cfgFields: cfg.map((f: any) => f.fieldNo),
-      plannerFields: planner.map((f: any) => f.fieldNo),
-      conversationalFields: conversational.map((f: any) => f.fieldNo),
-      plannerMode: (provider as any).readProtoNumber(conversational, 4) ?? null,
-      hasAdditionalInstructions: !!(provider as any).getProtoField(conversational, 12, 2),
-      hasCommunicationSection: !!(provider as any).getProtoField(conversational, 13, 2),
-      hasToolCallingSection: !!(provider as any).getProtoField(conversational, 10, 2),
-      hasCodeChangesSection: !!(provider as any).getProtoField(planner, 11, 2),
-      hasBrainConfig: !!(provider as any).getProtoField(cfg, 7, 2),
-      requestedEnumDeprecated: !!(provider as any).getProtoField(planner, 15, 2),
-      planModelDeprecated: (provider as any).readProtoNumber(planner, 1) ?? null,
-    }).toEqual(reference);
+    expect(ourShellStep.toString('hex')).toBe(reference.stepHex);
+
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync([
+      { role: 'user', content: 'run pwd' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'call_exec', type: 'function', function: { name: 'exec_command', arguments: '{"cmd":"pwd","workdir":"/tmp/project"}' } }] },
+      { role: 'tool', tool_call_id: 'call_exec', content: '/tmp/project\n' },
+      { role: 'user', content: 'continue' },
+    ]);
+    const execSteps = (provider as any).buildCascadeAdditionalStepsFromSemanticConversation(semantic);
+    expect(execSteps).toHaveLength(1);
+    expect(execSteps[0].toString('hex')).toBe(reference.stepHex);
+
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'run pwd' }],
+        tools: [
+          { type: 'function', function: { name: 'exec_command', description: 'one-shot shell', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'shell_command', description: 'one-shot shell', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'run_command', description: 'one-shot shell', parameters: { type: 'object' } } },
+        ],
+      },
+    });
+    expect(mapped.body.windsurf_native_allowlist).toEqual(['run_command']);
+
+    const stdinMapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'write stdin' }],
+        tools: [{ type: 'function', function: { name: 'write_stdin', description: 'interactive stdin', parameters: { type: 'object' } } }],
+      },
+    });
+    expect(stdinMapped.body.windsurf_text_tool_protocol).toBe('rcc');
+    expect(stdinMapped.body.windsurf_unsupported_text_tools.map((t: any) => t.function.name)).toEqual(['write_stdin']);
+  });
+
+  test('RED: preprocessRequest must route mapped tools through standard cascade native fields and fail-fast on unmapped tools', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'run pwd' }],
+        tools: [
+          { type: 'function', function: { name: 'shell_command', description: 'run shell', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'read_file', description: 'read file', parameters: { type: 'object' } } },
+        ],
+      },
+    });
+    expect(mapped.body.tools).toBeUndefined();
+    expect(mapped.body.tools_preamble).toBeUndefined();
+    expect(mapped.body.windsurf_native_mode).toBe(true);
+    expect(mapped.body.windsurf_native_allowlist).toEqual(['run_command', 'view_file']);
+    expect(mapped.body.windsurf_declared_native_tools.map((t: any) => t.function.name)).toEqual(['shell_command', 'read_file']);
+
+    const unsupportedOnly = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'echo ping' }],
+        tools: [{ type: 'function', function: { name: 'echo', description: 'echo', parameters: { type: 'object' } } }],
+      },
+    });
+    expect(unsupportedOnly.body.windsurf_text_tool_protocol).toBe('rcc');
+    expect(unsupportedOnly.body.windsurf_unsupported_text_tools.map((t: any) => t.function.name)).toEqual(['echo']);
+  });
+
+  test('RED: MCP can only be considered through LS registration blackbox, not SendUserCascadeMessage per-request injection', async () => {
+    const appSchema = execFileSync('python3', ['-c', `
+from pathlib import Path
+s=Path('/Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/dist/extension.js').read_text(errors='ignore')
+checks={
+  'has_mcp_rpc_symbols': all(x in s for x in ['MCP_LIST_SERVERS_METHOD','MCP_LIST_TOOLS_METHOD','MCP_CONNECT_SERVER_METHOD']),
+  'has_mcp_server_state': 'McpServerState' in s,
+  'has_mcp_trajectory_step': 'name:"mcp_tool"' in s,
+  'has_system_prompt_tools_response': 'GetSystemPromptAndToolsResponse' in s and 'name:"tool_definitions"' in s,
+}
+needle='typeName="exa.language_server_pb.SendUserCascadeMessageRequest"'
+i=s.find(needle)
+if i < 0:
+    raise SystemExit('SendUserCascadeMessageRequest not found')
+start=s.rfind('static fields=', 0, i)
+end=s.find(']);', i)
+chunk=s[start:end+3]
+for forbidden in ['name:"mcp_servers"','name:"mcp_server_state"','name:"tool_definitions"','name:"custom_tools"','name:"tools"']:
+    if forbidden in chunk:
+        raise SystemExit('unexpected per-request MCP/tool injection field: '+forbidden)
+print(__import__('json').dumps(checks))
+`], { encoding: 'utf8' });
+    expect(JSON.parse(appSchema)).toEqual({
+      has_mcp_rpc_symbols: true,
+      has_mcp_server_state: true,
+      has_mcp_trajectory_step: true,
+      has_system_prompt_tools_response: true,
+    });
+  });
+
+  test('RED: response-style request with tool_choice must preserve tool metadata through preprocess for native bridge smoke', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: '请执行 pwd' }] }],
+        tools: [
+          { type: 'function', function: { name: 'exec_command', description: 'run shell', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } },
+        ],
+        tool_choice: { type: 'function', function: { name: 'exec_command' } },
+      },
+    });
+    expect(mapped.body.input).toEqual([{ role: 'user', content: [{ type: 'input_text', text: '请执行 pwd' }] }]);
+    expect(mapped.body.tools).toBeUndefined();
+    expect(mapped.body.windsurf_native_mode).toBe(true);
+    expect(mapped.body.windsurf_native_allowlist).toEqual(['run_command']);
+    expect(mapped.body.windsurf_tool_choice).toEqual({ type: 'function', function: { name: 'exec_command' } });
+  });
+
+  test('RED: hybrid preprocess partitions native tools to Cascade allowlist and unsupported tools to RCC text protocol', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'run and patch' }],
+        tools: [
+          { type: 'function', function: { name: 'shell_command', description: 'shell', parameters: { type: 'object', properties: { cmd: { type: 'string' } } } } },
+          { type: 'function', function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object', properties: { patch: { type: 'string' } } } } },
+          { type: 'function', function: { name: 'update_plan', description: 'plan', parameters: { type: 'object', properties: { plan: { type: 'array' } } } } },
+        ],
+        tool_choice: 'auto',
+      },
+    });
+    expect(mapped.body.tools).toBeUndefined();
+    expect(mapped.body.tools_preamble).toBeUndefined();
+    expect(mapped.body.windsurf_text_tool_protocol).toBe('rcc');
+    expect(mapped.body.windsurf_native_mode).toBe(true);
+    expect(mapped.body.windsurf_native_allowlist).toEqual(['run_command']);
+    expect(mapped.body.windsurf_declared_native_tools.map((t: any) => t.function.name)).toEqual(['shell_command']);
+    expect(mapped.body.windsurf_unsupported_text_tools.map((t: any) => t.function.name)).toEqual(['apply_patch', 'update_plan']);
+    expect(mapped.body.windsurf_declared_tools).toBeUndefined();
+    expect(mapped.body.windsurf_tool_choice).toBe('auto');
+  });
+
+  test('RED: buildCascadePromptText injects RCC guidance only for unsupported tools and never lists native tool names', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'patch file' }],
+        tools: [
+          { type: 'function', function: { name: 'shell_command', description: 'shell', parameters: { type: 'object', properties: { cmd: { type: 'string' } } } } },
+          { type: 'function', function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object', properties: { patch: { type: 'string' } } } } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    expect(prompt).toContain('Tool-call output contract (STRICT)');
+    expect(prompt).toContain('<|RCC|tool_calls>');
+    expect(prompt).toContain('<|RCC|invoke name="apply_patch">');
+    expect(prompt).toContain('<|RCC|parameter name="patch">');
+    expect(prompt).not.toContain('shell_command');
+    expect(prompt).not.toContain('run_command');
+    expect(prompt).not.toContain('<tool_call>');
+    expect(prompt).not.toContain('function_call');
+    expect(prompt).not.toContain('tools_preamble');
+    const legacyFenceName = ['D', 'S', 'M', 'L'].join('');
+    expect(prompt).not.toContain(legacyFenceName);
+  });
+
+  test('RED: RCC harvest converts unsupported text tool block into OpenAI tool_calls and strips visible RCC text', async () => {
+    const provider = createProvider();
+    const parsed = (provider as any).parseCascadeAssistantTurnSync({
+      role: 'assistant',
+      content: '<|RCC|tool_calls>\n<|RCC|invoke name="apply_patch">\n<|RCC|parameter name="patch"><![CDATA[*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch]]></|RCC|parameter>\n</|RCC|invoke>\n</|RCC|tool_calls>',
+    }, [{ type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } }]);
+    expect(parsed.content).toBe('');
+    expect(parsed.tool_calls).toHaveLength(1);
+    expect(parsed.tool_calls[0].type).toBe('function');
+    expect(parsed.tool_calls[0].function.name).toBe('apply_patch');
+    expect(JSON.parse(parsed.tool_calls[0].function.arguments)).toEqual({
+      patch: expect.stringContaining('*** Begin Patch'),
+    });
+    expect(String(parsed.tool_calls[0].id)).toMatch(/^call_/);
+  });
+
+  test('RED: duplicate RCC text tool blocks from repeated upstream text are deduped within RCC source only', async () => {
+    const provider = createProvider();
+    const rccBlock = '<|RCC|tool_calls>\n<|RCC|invoke name="echo_tool">\n<|RCC|parameter name="text"><![CDATA[hello-rcc]]></|RCC|parameter>\n</|RCC|invoke>\n</|RCC|tool_calls>';
+    const parsed = (provider as any).parseCascadeAssistantTurnSync({
+      role: 'assistant',
+      content: `${rccBlock}\n${rccBlock}`,
+    }, [{ type: 'function', function: { name: 'echo_tool', parameters: { type: 'object' } } }]);
+    expect(parsed.content).toBe('');
+    expect(parsed.tool_calls).toHaveLength(1);
+    expect(parsed.tool_calls[0].function.name).toBe('echo_tool');
+    expect(JSON.parse(parsed.tool_calls[0].function.arguments)).toEqual({ text: 'hello-rcc' });
+  });
+
+  test('RED: native trajectory tool call plus RCC text tool call conflicts fail-fast', () => {
+    const provider = createProvider();
+    expect(() => (provider as any).parseCascadeAssistantTurnSync({
+      role: 'assistant',
+      content: '<|RCC|tool_calls><|RCC|invoke name="apply_patch"><|RCC|parameter name="patch"><![CDATA[p]]></|RCC|parameter></|RCC|invoke></|RCC|tool_calls>',
+      tool_calls: [{ id: 'call_native', type: 'function', function: { name: 'shell_command', arguments: '{"cmd":"pwd"}' } }],
+    }, [{ type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } }])).toThrow(expect.objectContaining({
+      code: 'WINDSURF_TOOL_PROTOCOL_CONFLICT',
+      status: 502,
+      retryable: false,
+    }));
+  });
+
+  test('RED: hybrid preprocessing must preserve tools across submit continuation when request already contains chat messages', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'run and patch' },
+          { role: 'assistant', content: '', tool_calls: [
+            { id: 'native:run_command:3', type: 'function', function: { name: 'run_command', arguments: '{"command_line":"pwd","cwd":"/Users/fanzhang/Documents/github/routecodex"}' } },
+          ] },
+          { role: 'tool', tool_call_id: 'native:run_command:3', content: '/Users/fanzhang/Documents/github/routecodex\n' },
+        ],
+        tools: [
+          { type: 'function', function: { name: 'shell_command', description: 'shell', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object' } } },
+        ],
+      },
+    });
+    expect(mapped.body.tools).toBeUndefined();
+    expect(mapped.body.windsurf_native_mode).toBe(true);
+    expect(mapped.body.windsurf_native_allowlist).toEqual(['run_command']);
+    expect(mapped.body.windsurf_declared_native_tools.map((t: any) => t.function.name)).toEqual(['shell_command']);
+    expect(mapped.body.windsurf_text_tool_protocol).toBe('rcc');
+    expect(mapped.body.windsurf_unsupported_text_tools.map((t: any) => t.function.name)).toEqual(['apply_patch']);
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const nativeSteps = (provider as any).buildCascadeAdditionalStepsFromSemanticConversation(
+      semantic,
+      mapped.body.windsurf_declared_native_tools,
+    );
+    expect(nativeSteps).toHaveLength(1);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    expect(prompt).toContain('<|RCC|invoke name="apply_patch">');
+    expect(prompt).not.toContain('<|RCC|invoke name="shell_command">');
+    expect(prompt).not.toContain('<|RCC|invoke name="run_command">');
+  });
+
+  test('RED: hybrid continuation prompt must include pending RCC reminder in the latest human turn after native result', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'First run pwd with shell_command, then call echo_tool with text mixed-rcc.' },
+          { role: 'assistant', content: 'I will run pwd first.', tool_calls: [
+            { id: 'native:run_command:3', type: 'function', function: { name: 'run_command', arguments: '{"command_line":"pwd","cwd":"/Users/fanzhang/Documents/github/routecodex"}' } },
+          ] },
+          { role: 'tool', tool_call_id: 'native:run_command:3', content: '/Users/fanzhang/Documents/github/routecodex\n' },
+        ],
+        tools: [
+          { type: 'function', function: { name: 'shell_command', description: 'shell', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'echo_tool', description: 'echo', parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    expect(prompt).toContain('You have not yet called these required unsupported tools: echo_tool');
+    const latestHuman = prompt.slice(prompt.lastIndexOf('<human>'));
+    expect(latestHuman).toContain('You have not yet called these required unsupported tools: echo_tool');
+    expect(latestHuman).toContain('<|RCC|tool_calls>');
+    expect(latestHuman).toContain('<|RCC|invoke name="echo_tool">');
+    expect(latestHuman).toContain('Tool result for run_command');
+    expect(latestHuman).toContain('/Users/fanzhang/Documents/github/routecodex');
+  });
+
+  test('RED: hybrid continuation with pending unsupported tools must ask Cascade for remaining RCC tools after native result', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'Use shell_command to run pwd and apply_patch to create /tmp/rcc_mixed_smoke.txt.' },
+          { role: 'assistant', content: '', tool_calls: [
+            { id: 'native:run_command:3', type: 'function', function: { name: 'run_command', arguments: '{"command_line":"pwd","cwd":"/Users/fanzhang/Documents/github/routecodex"}' } },
+          ] },
+          { role: 'tool', tool_call_id: 'native:run_command:3', content: '/Users/fanzhang/Documents/github/routecodex\n' },
+        ],
+        tools: [
+          { type: 'function', function: { name: 'shell_command', description: 'shell', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object', properties: { patch: { type: 'string' } }, required: ['patch'] } } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    expect(prompt).toContain('<|RCC|invoke name="apply_patch">');
+    expect(prompt).toContain('You have not yet called these required unsupported tools: apply_patch');
+    expect(prompt).toContain('output the RCC block now');
+  });
+
+  test('RED: mixed final continuation prompt must preserve prior native tool result after RCC tool result', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'First run pwd with shell_command, then call echo_tool with text mixed-rcc.' },
+          { role: 'assistant', content: 'I will run pwd first.', tool_calls: [
+            { id: 'native:run_command:3', type: 'function', function: { name: 'shell_command', arguments: '{"cmd":"pwd"}' } },
+          ] },
+          { role: 'tool', tool_call_id: 'native:run_command:3', content: '/Users/fanzhang/Documents/github/routecodex\n' },
+          { role: 'assistant', content: '', tool_calls: [
+            { id: 'call_echo_mixed', type: 'function', function: { name: 'echo_tool', arguments: '{"text":"mixed-rcc"}' } },
+          ] },
+          { role: 'tool', tool_call_id: 'call_echo_mixed', content: 'mixed-rcc' },
+        ],
+        tools: [
+          { type: 'function', function: { name: 'shell_command', description: 'shell', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'echo_tool', description: 'echo', parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    expect(prompt).toContain('Tool result for shell_command:');
+    expect(prompt).toContain('/Users/fanzhang/Documents/github/routecodex');
+    expect(prompt).toContain('<|RCC|tool_result id="call_echo_mixed" name="echo_tool">');
+    expect(prompt).toContain('mixed-rcc');
+  });
+
+  test('RED: unsupported tool results become RCC tool_result context while native results remain additional_steps', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'run and patch' },
+          { role: 'assistant', content: '', tool_calls: [
+            { id: 'call_shell', type: 'function', function: { name: 'shell_command', arguments: '{"cmd":"pwd"}' } },
+            { id: 'call_patch', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ patch: '*** Begin Patch\n*** End Patch' }) } },
+          ] },
+          { role: 'tool', tool_call_id: 'call_shell', content: '/tmp/project\n' },
+          { role: 'tool', tool_call_id: 'call_patch', content: 'patch applied' },
+          { role: 'user', content: 'continue' },
+        ],
+        tools: [
+          { type: 'function', function: { name: 'shell_command', description: 'shell', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object' } } },
+        ],
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const nativeSteps = (provider as any).buildCascadeAdditionalStepsFromSemanticConversation(
+      semantic,
+      mapped.body.windsurf_declared_native_tools,
+    );
+    expect(nativeSteps).toHaveLength(1);
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    expect(prompt).toContain('RCC tool results already returned');
+    expect(prompt).toContain('Do not repeat the same RCC invocation');
+    expect(prompt).toContain('<|RCC|tool_result id="call_patch" name="apply_patch">');
+    expect(prompt).toContain('patch applied');
+    expect(prompt).not.toContain('<|RCC|tool_result id="call_shell"');
+  });
+
+  test('RED: Cascade request schema has no structured custom tool-definition input slot; unsupported Codex/MCP tools use RCC text protocol', async () => {
+    const provider = createProvider();
+    const appSchema = execFileSync('python3', ['-c', `
+from pathlib import Path
+s=Path('/Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/dist/extension.js').read_text(errors='ignore')
+needle='typeName="exa.language_server_pb.SendUserCascadeMessageRequest"'
+i=s.find(needle)
+if i < 0:
+    raise SystemExit('SendUserCascadeMessageRequest not found')
+start=s.rfind('static fields=', 0, i)
+end=s.find(']);', i)
+chunk=s[start:end+3]
+for token in ['name:"tool_definitions"','name:"custom_tools"','name:"tool_definition"','name:"mcp_servers"','name:"tools"']:
+    if token in chunk:
+        raise SystemExit('unexpected request tool input slot: '+token)
+required=['name:"cascade_id"','name:"items"','name:"metadata"','name:"cascade_config"','name:"additional_steps"']
+missing=[x for x in required if x not in chunk]
+if missing:
+    raise SystemExit('missing expected request field(s): '+','.join(missing))
+print('{"ok":true,"hasCustomToolSpec":%s,"hasChatToolDefinition":%s}' % (str('CustomToolSpec' in s).lower(), str('ChatToolDefinition' in s).lower()))
+`], { encoding: 'utf8' });
+    expect(JSON.parse(appSchema)).toEqual({ ok: true, hasCustomToolSpec: true, hasChatToolDefinition: true });
+
+    const windsurfApiEvidence = execFileSync('python3', ['-c', `
+from pathlib import Path
+p=Path('/Volumes/extension/code/WindsurfAPI/src/handlers/tool-emulation.js')
+s=p.read_text(errors='ignore')
+needles=['no per-request slot for client-defined function', 'fields 1-9, none accept tool defs', 'CustomToolSpec exists only as a trajectory']
+missing=[n for n in needles if n not in s]
+if missing:
+    raise SystemExit('missing WindsurfAPI evidence: '+repr(missing))
+print('{"ok":true}')
+`], { encoding: 'utf8' });
+    expect(JSON.parse(windsurfApiEvidence)).toEqual({ ok: true });
+
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'use custom tools' }],
+        tools: [
+          { type: 'function', function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'update_plan', description: 'plan', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'mcp__computer_use__click', description: 'click', parameters: { type: 'object' } } },
+        ],
+      },
+    });
+    expect(mapped.body.windsurf_native_mode).toBe(false);
+    expect(mapped.body.windsurf_text_tool_protocol).toBe('rcc');
+    expect(mapped.body.windsurf_unsupported_text_tools.map((t: any) => t.function.name)).toEqual([
+      'apply_patch',
+      'update_plan',
+      'mcp__computer_use__click',
+    ]);
   });
 
 
+  test('RED: native run_command response tool name must still build additional_steps when caller declared shell_command', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$cascade', rawType: 'windsurf-devin-token' });
+    const semantic = [
+      { type: 'user', text: 'run pwd' },
+      {
+        type: 'assistant',
+        text: '',
+        tool_calls: [{ call_id: 'native:run_command:3', name: 'run_command', arguments: { command_line: 'pwd', cwd: '/Users/fanzhang/Documents/github/routecodex' } }],
+      },
+      { type: 'function_call_output', call_id: 'native:run_command:3', name: 'run_command', output: '/Users/fanzhang/Documents/github/routecodex\n' },
+      { type: 'user', text: 'continue' },
+    ];
+    const steps = (provider as any).buildCascadeAdditionalStepsFromSemanticConversation(semantic, [
+      { type: 'function', function: { name: 'shell_command', parameters: { type: 'object' } } },
+    ]);
+    expect(steps).toHaveLength(1);
+    expect(steps[0].length).toBeGreaterThan(0);
+    const parsedFields = (provider as any).parseProtoFields(steps[0]);
+    expect(parsedFields.map((f: any) => f.fieldNo)).toContain(28);
+  });
 
   test('RED: unique cascade blackbox must encode additional_steps like WindsurfAPI native bridge history', async () => {
     const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$cascade', rawType: 'windsurf-devin-token' });
@@ -5397,6 +5415,45 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
     });
     expect({ hex: actual.toString('hex'), length: actual.length }).toEqual(reference);
   });
+
+  test('RED: native Cascade request prompt override shape must match WindsurfAPI blackbox and must not inject no-tool suppression text', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$cascade', rawType: 'windsurf-devin-token' });
+    const reference = runWindsurfApiReference(`
+      import { buildSendCascadeMessageRequest } from '/Volumes/extension/code/WindsurfAPI/src/windsurf.js';
+      const buf = buildSendCascadeMessageRequest('api-key-1', 'cid-native-tools', 'run pwd', 0, 'gpt-5-4-medium', 'session-1', { nativeMode: true, nativeAllowlist: ['run_command'] });
+      const text = buf.toString('utf8');
+      process.stdout.write(JSON.stringify({
+        containsUseFunctions: text.includes('Use the functions above when relevant.'),
+        containsNoTools: text.includes('No tools are available.'),
+        containsNoShell: text.includes('NO shell'),
+        containsRunCommand: text.includes('run_command'),
+      }));
+    `);
+    const request = (provider as any).buildSendCascadeMessageRequest({
+      apiKey: 'api-key-1',
+      cascadeId: 'cid-native-tools',
+      text: 'run pwd',
+      sessionId: 'session-1',
+      modelEnum: 0,
+      modelUid: 'gpt-5-4-medium',
+      nativeMode: true,
+      nativeAllowlist: ['run_command'],
+    });
+    const text = request.toString('utf8');
+    expect(reference).toMatchObject({ containsUseFunctions: false, containsRunCommand: true });
+    expect({
+      containsUseFunctions: text.includes('Use the functions above when relevant.'),
+      containsNoTools: text.includes('No tools are available.'),
+      containsNoShell: text.includes('NO shell'),
+      containsRunCommand: text.includes('run_command'),
+    }).toEqual({
+      containsUseFunctions: false,
+      containsNoTools: false,
+      containsNoShell: false,
+      containsRunCommand: true,
+    });
+  });
+
 
   test('RED: unique cascade blackbox must include SendUserCascadeMessage additional_steps field 9 like WindsurfAPI', async () => {
     const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$cascade', rawType: 'windsurf-devin-token' });
@@ -5428,6 +5485,36 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
     } finally {
       randomSpy.mockRestore();
     }
+  });
+
+
+  test('RED: native trajectory oneof IDE steps must parse into tool_calls like WindsurfAPI parseTrajectorySteps', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$cascade', rawType: 'windsurf-devin-token' });
+    const reference = runWindsurfApiReference(`
+      import { buildAdditionalStep } from '/Volumes/extension/code/WindsurfAPI/src/cascade-native-bridge.js';
+      import { parseTrajectorySteps } from '/Volumes/extension/code/WindsurfAPI/src/windsurf.js';
+      function writeVarint(n) {
+        const out = [];
+        let value = BigInt(n);
+        while (value >= 0x80n) { out.push(Number((value & 0x7fn) | 0x80n)); value >>= 7n; }
+        out.push(Number(value));
+        return Buffer.from(out);
+      }
+      function writeMessageField(field, body) {
+        return Buffer.concat([writeVarint((field << 3) | 2), writeVarint(body.length), body]);
+      }
+      const step = buildAdditionalStep('run_command', { command_line: 'pwd', cwd: '/tmp/ws', blocking: true, stdout: 'out\\n', full_output: 'out\\n', exit_code: 0 });
+      const response = writeMessageField(1, step);
+      const parsed = parseTrajectorySteps(response)[0];
+      process.stdout.write(JSON.stringify(parsed.toolCalls));
+    `);
+    const step = (provider as any).buildCascadeAdditionalStep('run_command', {
+      command_line: 'pwd', cwd: '/tmp/ws', blocking: true,
+      stdout: 'out\n', full_output: 'out\n', exit_code: 0,
+    });
+    const response = Buffer.concat([Buffer.from([0x0a, step.length]), step]);
+    const parsed = (provider as any).parseTrajectorySteps(response)[0];
+    expect(parsed.toolCalls).toEqual(reference);
   });
 
   test('RED: unique cascade blackbox must match WindsurfAPI GetCascadeTrajectorySteps request family', async () => {
@@ -5727,6 +5814,19 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
 
 
 
+  test('RED: native submit continuation with only function_call + function_call_output must send tool result as latest cascade text, not empty prompt', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$native-submit-text', rawType: 'windsurf-devin-token' });
+    const messages = [
+      { role: 'user', content: [{ type: 'input_text', text: 'Use the shell_command tool to run exactly: pwd.' }] },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'native:run_command:3', type: 'function', function: { name: 'run_command', arguments: '{"command_line":"pwd","cwd":"/Users/fanzhang/Documents/github/routecodex"}' } }] },
+      { role: 'tool', tool_call_id: 'native:run_command:3', content: '/Users/fanzhang/Documents/github/routecodex\n' },
+    ];
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(messages);
+    const text = (provider as any).buildCascadePromptText(messages, semantic, 'gpt-5-4-medium');
+    expect(text.trim()).toContain('/Users/fanzhang/Documents/github/routecodex');
+    expect(text.trim()).not.toBe('Use the shell_command tool to run exactly: pwd.');
+  });
+
   test('RED: history projection must preserve assistant tool_calls and tool_result for next cascade turn', async () => {
     const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$history-tools', rawType: 'windsurf-devin-token' });
     const semantic = (provider as any).parseCascadeSemanticRoundtripSync([
@@ -5741,9 +5841,17 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
       { role: 'tool', tool_call_id: 'call_pwd', content: '/Users/fanzhang/Documents/github/routecodex\n' },
       { role: 'user', content: 'continue from that result' },
     ], semantic, 'gpt-5-3-codex-medium');
-    expect(text).toContain('<tool_call>{"name":"exec_command","arguments":{"cmd":"pwd"},"id":"call_pwd"}</tool_call>');
-    expect(text).toContain('<tool_result tool_call_id="call_pwd">\n/Users/fanzhang/Documents/github/routecodex\n\n</tool_result>');
+    expect(text).not.toContain('<tool_call>');
+    expect(text).not.toContain('<tool_result');
+    expect(text).not.toContain('function_call');
     expect(text).toContain('<human>\ncontinue from that result\n</human>');
+    const steps = (provider as any).buildCascadeAdditionalStepsFromSemanticConversation(semantic);
+    expect(steps).toHaveLength(1);
+    const request = (provider as any).buildSendCascadeMessageRequest({
+      apiKey: 'api-key-1', cascadeId: 'cid-1', text, sessionId: 'session-1', modelEnum: 0, modelUid: 'gpt-5-3-codex-medium', additionalSteps: steps,
+    });
+    const top = (provider as any).parseProtoFields(request);
+    expect((provider as any).getAllProtoFields(top, 9)).toHaveLength(1);
   });
 
   test('RED: startup/request blackbox must project system + history into cascade text like WindsurfAPI cascadeChat instead of only last user message', async () => {
@@ -6106,6 +6214,275 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
 
 
 
+
+  test('RED: pollCascadeTrajectorySteps must ignore native repeated prior tool call when completed additional step already has result', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    const completedNativeStep = (provider as any).buildCascadeAdditionalStep('run_command', {
+      command_line: 'pwd', cwd: '/tmp/ws', blocking: true,
+      stdout: '/tmp/ws\n', full_output: '/tmp/ws\n', exit_code: 0,
+    });
+    const repeatedNativeCall = (provider as any).buildCascadeAdditionalStep('run_command', {
+      command_line: 'pwd', cwd: '/tmp/ws', blocking: true,
+    });
+    const finalTextStep = encodeTrajectoryStepEnvelope({ type: 2, status: 3, responseText: 'DONE' });
+    const trajectoryStatus = Buffer.from([0x10, 0x01]);
+    let stepsCalls = 0;
+    (provider as any).grpcUnaryLocal = jest.fn(async (_method: string, _body: Buffer) => {
+      if (String(_method).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        if (stepsCalls < 5) {
+          return Buffer.concat([
+            encodeProtoFieldMessage(1, completedNativeStep),
+            encodeProtoFieldMessage(1, repeatedNativeCall),
+          ]);
+        }
+        return finalTextStep;
+      }
+      if (String(_method).includes('GetCascadeTrajectory')) return trajectoryStatus;
+      return Buffer.alloc(0);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({
+      cascadeId: 'cid-native-repeat',
+      model: 'gpt-5.4-medium',
+      completedNativeToolCallIds: ['native:run_command:1'],
+      completedNativeToolSignatures: ['run_command:{"command_line":"pwd","cwd":"/tmp/ws"}'],
+    });
+    let settled = false;
+    promise.finally(() => { settled = true; });
+    for (let i = 0; i < 20 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+    }
+    const result = await promise;
+    expect(result.candidate.content).toBe('DONE');
+    expect(result.candidate.tool_calls).toBeUndefined();
+    jest.useRealTimers();
+  });
+
+  test('RED: pollCascadeTrajectorySteps must ignore completed native-only steps and wait for RCC unsupported tool call', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    const completedNativeStep = (provider as any).buildCascadeAdditionalStep('run_command', {
+      command_line: 'pwd', cwd: '/tmp/ws', blocking: true,
+      stdout: '/tmp/ws\n', full_output: '/tmp/ws\n', exit_code: 0,
+    });
+    const rccTextStep = encodeTrajectoryStepEnvelope({
+      type: 2,
+      status: 3,
+      responseText: [
+        '<|RCC|tool_calls>',
+        '<|RCC|invoke name="apply_patch">',
+        '<|RCC|parameter name="patch"><![CDATA[*** Begin Patch\n*** Add File: /tmp/rcc_mixed_smoke.txt\n+mixed\n*** End Patch]]></|RCC|parameter>',
+        '</|RCC|invoke>',
+        '</|RCC|tool_calls>',
+      ].join('\n'),
+    });
+    const trajectoryStatus = Buffer.from([0x10, 0x01]);
+    let stepsCalls = 0;
+    (provider as any).grpcUnaryLocal = jest.fn(async (_method: string, _body: Buffer) => {
+      if (String(_method).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        return stepsCalls < 5 ? Buffer.concat([encodeProtoFieldMessage(1, completedNativeStep)]) : rccTextStep;
+      }
+      if (String(_method).includes('GetCascadeTrajectory')) return trajectoryStatus;
+      return Buffer.alloc(0);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({
+      cascadeId: 'cid-native-then-rcc',
+      model: 'gpt-5.4-medium',
+      unsupportedTextTools: [{ type: 'function', function: { name: 'apply_patch', parameters: { type: 'object', properties: { patch: { type: 'string' } }, required: ['patch'] } } }],
+      completedNativeToolCallIds: ['native:run_command:3'],
+      completedNativeToolSignatures: ['run_command:{"command_line":"pwd","cwd":"/tmp/ws"}'],
+    });
+    let settled = false;
+    promise.finally(() => { settled = true; });
+    for (let i = 0; i < 20 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+    }
+    const result = await promise;
+    expect(result.candidate.content).toBe('');
+    expect(result.candidate.tool_calls).toHaveLength(1);
+    expect(result.candidate.tool_calls[0].function.name).toBe('apply_patch');
+    jest.useRealTimers();
+  });
+
+  test('RED: pollCascadeTrajectorySteps must not finalize empty assistant while only completed native result steps are visible', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    const nativeResultStep = (provider as any).buildCascadeAdditionalStep('run_command', {
+      command_line: 'pwd', cwd: '/tmp/ws', blocking: true,
+      stdout: '/tmp/ws\n', full_output: '/tmp/ws\n', exit_code: 0,
+    });
+    const finalTextStep = encodeTrajectoryStepEnvelope({ type: 2, status: 3, responseText: '/tmp/ws' });
+    const trajectoryStatus = Buffer.from([0x10, 0x01]);
+    let stepsCalls = 0;
+    (provider as any).grpcUnaryLocal = jest.fn(async (_method: string, _body: Buffer) => {
+      if (String(_method).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        return stepsCalls < 9 ? Buffer.concat([encodeProtoFieldMessage(1, nativeResultStep)]) : finalTextStep;
+      }
+      if (String(_method).includes('GetCascadeTrajectory')) return trajectoryStatus;
+      return Buffer.alloc(0);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({ cascadeId: 'cid-native-result-delayed-text', model: 'gpt-5.4-medium' });
+    let settled = false;
+    promise.finally(() => { settled = true; });
+    for (let i = 0; i < 30 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+    }
+    const result = await promise;
+    expect(result.candidate.content).toBe('/tmp/ws');
+    expect(result.candidate.tool_calls).toBeUndefined();
+    expect(stepsCalls).toBeGreaterThanOrEqual(9);
+    jest.useRealTimers();
+  });
+
+
+
+  test('RED: pollCascadeTrajectorySteps must keep polling when completed native result is visible but final assistant text is empty', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    const nativeResultStep = (provider as any).buildCascadeAdditionalStep('run_command', {
+      command_line: 'pwd', cwd: '/Users/fanzhang/Documents/github/routecodex', blocking: true,
+      stdout: '/Users/fanzhang/Documents/github/routecodex\n', full_output: '/Users/fanzhang/Documents/github/routecodex\n', exit_code: 0,
+    });
+    const finalTextStep = encodeTrajectoryStepEnvelope({ type: 2, status: 3, responseText: '/Users/fanzhang/Documents/github/routecodex' });
+    let stepsCalls = 0;
+    (provider as any).grpcUnaryLocal = jest.fn(async (_method: string) => {
+      if (String(_method).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        return stepsCalls < 8 ? Buffer.concat([encodeProtoFieldMessage(1, nativeResultStep)]) : finalTextStep;
+      }
+      if (String(_method).includes('GetCascadeTrajectory')) return Buffer.from([0x10, 0x01]);
+      return Buffer.alloc(0);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({
+      cascadeId: 'cid-completed-native-result-empty-until-final-text',
+      model: 'gpt-5.4-medium',
+      completedNativeToolCallIds: ['native:run_command:3'],
+    });
+    let settled = false;
+    promise.finally(() => { settled = true; });
+    for (let i = 0; i < 30 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+    }
+    const result = await promise;
+    expect(result.candidate.content).toBe('/Users/fanzhang/Documents/github/routecodex');
+    expect(result.candidate.tool_calls).toBeUndefined();
+    expect(stepsCalls).toBeGreaterThanOrEqual(8);
+    jest.useRealTimers();
+  });
+
+  test('RED: pollCascadeTrajectorySteps must keep waiting when final snapshot is empty after native submit continuation produced completed result without id set', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    const finalTextStep = encodeTrajectoryStepEnvelope({ type: 2, status: 3, responseText: '/Users/fanzhang/Documents/github/routecodex' });
+    let stepsCalls = 0;
+    let statusCalls = 0;
+    (provider as any).grpcUnaryLocal = jest.fn(async (_method: string) => {
+      if (String(_method).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        return stepsCalls < 8 ? Buffer.alloc(0) : finalTextStep;
+      }
+      if (String(_method).includes('GetCascadeTrajectory')) {
+        statusCalls += 1;
+        return Buffer.from([0x10, 0x01]);
+      }
+      return Buffer.alloc(0);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({
+      cascadeId: 'cid-empty-then-final-text-after-native-submit',
+      model: 'gpt-5.4-medium',
+      completedNativeToolCallIds: ['native:run_command:3'],
+    });
+    let settled = false;
+    promise.finally(() => { settled = true; });
+    for (let i = 0; i < 30 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+    }
+    const result = await promise;
+    expect(result.candidate.content).toBe('/Users/fanzhang/Documents/github/routecodex');
+    expect(result.candidate.tool_calls).toBeUndefined();
+    expect(statusCalls).toBeGreaterThanOrEqual(4);
+    jest.useRealTimers();
+  });
+
+  test('RED: pollCascadeTrajectorySteps must keep waiting when idle final snapshot has only completed native result and no assistant text', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    const nativeResultStep = (provider as any).buildCascadeAdditionalStep('run_command', {
+      command_line: 'pwd', cwd: '/tmp/ws', blocking: true,
+      stdout: '/tmp/ws\n', full_output: '/tmp/ws\n', exit_code: 0,
+    });
+    const finalTextStep = encodeTrajectoryStepEnvelope({ type: 2, status: 3, responseText: '/tmp/ws' });
+    let stepsCalls = 0;
+    let statusCalls = 0;
+    (provider as any).grpcUnaryLocal = jest.fn(async (_method: string) => {
+      if (String(_method).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        return stepsCalls < 8 ? Buffer.concat([encodeProtoFieldMessage(1, nativeResultStep)]) : finalTextStep;
+      }
+      if (String(_method).includes('GetCascadeTrajectory')) {
+        statusCalls += 1;
+        return Buffer.from([0x10, 0x01]);
+      }
+      return Buffer.alloc(0);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({
+      cascadeId: 'cid-idle-completed-native-only',
+      model: 'gpt-5.4-medium',
+      completedNativeToolCallIds: ['native:run_command:3'],
+      completedNativeToolSignatures: ['run_command:{"command_line":"pwd","cwd":"/tmp/ws"}'],
+    });
+    let settled = false;
+    promise.finally(() => { settled = true; });
+    for (let i = 0; i < 30 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+    }
+    const result = await promise;
+    expect(result.candidate.content).toBe('/tmp/ws');
+    expect(result.candidate.tool_calls).toBeUndefined();
+    expect(statusCalls).toBeGreaterThanOrEqual(4);
+    jest.useRealTimers();
+  });
+
+  test('RED: pollCascadeTrajectorySteps must return final text even when current trajectory has only completed native result step', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    const nativeResultStep = (provider as any).buildCascadeAdditionalStep('run_command', {
+      command_line: 'pwd', cwd: '/tmp/ws', blocking: true,
+      stdout: '/tmp/ws\n', full_output: '/tmp/ws\n', exit_code: 0,
+    });
+    const finalTextStep = encodeTrajectoryStepEnvelope({ type: 2, status: 3, responseText: '/tmp/ws' });
+    const trajectoryStatus = Buffer.from([0x10, 0x01]);
+    let stepsCalls = 0;
+    (provider as any).grpcUnaryLocal = jest.fn(async (_method: string, _body: Buffer) => {
+      if (String(_method).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        return stepsCalls < 5 ? Buffer.concat([encodeProtoFieldMessage(1, nativeResultStep)]) : finalTextStep;
+      }
+      if (String(_method).includes('GetCascadeTrajectory')) return trajectoryStatus;
+      return Buffer.alloc(0);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({ cascadeId: 'cid-native-result', model: 'gpt-5.4-medium' });
+    let settled = false;
+    promise.finally(() => { settled = true; });
+    for (let i = 0; i < 20 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+    }
+    const result = await promise;
+    expect(result.candidate.content).toBe('/tmp/ws');
+    expect(result.candidate.tool_calls).toBeUndefined();
+    jest.useRealTimers();
+  });
+
   test('RED: pollCascadeTrajectorySteps must rebuild latest trajectory from offset 0 so partial ACTIVE text is not treated as final', async () => {
     const provider = createProvider();
     const calls: Array<{ path: string; offset?: number }> = [];
@@ -6119,8 +6496,8 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
         const fields = (provider as any).parseProtoFields(payload);
         calls.push({ path: 'steps', offset: (provider as any).readProtoNumber(fields, 2) ?? 0 });
         return calls.filter((c) => c.path === 'steps').length === 1
-          ? encodeSteps('<tool_call>{"name":"echo","arguments":{"text":"')
-          : encodeSteps('<tool_call>{"name":"echo","arguments":{"text":"ping"}}</tool_call>');
+          ? encodeSteps('partial active text')
+          : encodeSteps('complete answer, not truncated');
       }
       if (String(pathName).includes('GetCascadeTrajectory')) {
         calls.push({ path: 'status' });
@@ -6129,8 +6506,8 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
       throw new Error(`unexpected ${pathName}`);
     });
     const result = await (provider as any).pollCascadeTrajectorySteps({ cascadeId: 'cid-1', model: 'gpt-5.4-medium' });
-    expect(calls.filter((c) => c.path === 'steps').map((c) => c.offset)).toEqual([0, 0]);
-    expect(result.candidate.tool_calls).toEqual([{ id: 'call_8f4d89e9d5cd8733', type: 'function', function: { name: 'echo', arguments: '{"text":"ping"}' } }]);
+    expect(calls.filter((c) => c.path === 'steps').map((c) => c.offset).slice(0, 2)).toEqual([0, 0]);
+    expect(result.candidate.content).toBe('complete answer, not truncated');
   });
 
   test('RED: pollCascadeTrajectorySteps must not finish on first IDLE before cascade had active progress', async () => {
@@ -6509,7 +6886,6 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
         sessionId: 'session-1',
         modelEnum: 0,
         modelUid: 'gpt-5-3-codex-medium',
-        toolPreamble: '',
       })).rejects.toMatchObject({
         code: 'WINDSURF_UPSTREAM_TRANSIENT',
         status: 502,
@@ -6610,8 +6986,7 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
         choices: [{ message: { role: 'assistant', content: 'OK' } }],
       });
       expect(startSpy).toHaveBeenCalledTimes(2);
-      expect(warmupSpy).toHaveBeenCalledTimes(1);
-      expect(warmupSpy).toHaveBeenCalledWith('devin-session-token$panel-retry', 'session-2', true);
+      expect(warmupSpy).not.toHaveBeenCalled();
       expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-2', cascadeId: 'cid-2' }));
       expect(pollSpy).toHaveBeenCalledWith(expect.objectContaining({ cascadeId: 'cid-2' }));
       expect(sessionSpy).toHaveBeenCalledTimes(2);
@@ -6670,8 +7045,7 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
       });
       expect(sendSpy).toHaveBeenCalledTimes(2);
       expect(startSpy).toHaveBeenCalledTimes(2);
-      expect(warmupSpy).toHaveBeenCalledTimes(1);
-      expect(warmupSpy).toHaveBeenCalledWith('devin-session-token$untrusted-retry', 'session-2', true);
+      expect(warmupSpy).not.toHaveBeenCalled();
       expect(sendSpy.mock.calls[1][0]).toMatchObject({ sessionId: 'session-2', cascadeId: 'cid-2' });
       expect(pollSpy).toHaveBeenCalledWith(expect.objectContaining({ cascadeId: 'cid-2' }));
       expect(sessionSpy).toHaveBeenCalledTimes(2);
@@ -6730,8 +7104,7 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
       });
       expect(sendSpy).toHaveBeenCalledTimes(2);
       expect(startSpy).toHaveBeenCalledTimes(2);
-      expect(warmupSpy).toHaveBeenCalledTimes(1);
-      expect(warmupSpy).toHaveBeenCalledWith('devin-session-token$expired-retry', 'session-2', true);
+      expect(warmupSpy).not.toHaveBeenCalled();
       expect(sendSpy.mock.calls[1][0]).toMatchObject({ sessionId: 'session-2', cascadeId: 'cid-2' });
       expect(pollSpy).toHaveBeenCalledWith(expect.objectContaining({ cascadeId: 'cid-2' }));
       expect(sessionSpy).toHaveBeenCalledTimes(2);
@@ -6794,7 +7167,6 @@ test('RED: buildChatMessageHeaders injects devin auth headers for cascade json s
       sessionId: 'routecodex-windsurf-session-1',
       modelEnum: 3,
       modelUid: 'gpt-5.3-codex',
-      toolPreamble: '',
     };
 
     const ours = (provider as any).buildSendCascadeMessageRequest(args);

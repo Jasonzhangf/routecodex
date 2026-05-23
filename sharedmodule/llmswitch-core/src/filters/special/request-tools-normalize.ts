@@ -1,10 +1,7 @@
 import type { Filter, FilterContext, FilterResult, JsonObject } from '../types.js';
 import {
-  appendApplyPatchReminder,
   buildShellDescription,
-  hasApplyPatchToolDeclared,
   isShellToolName,
-  normalizeToolName
 } from '../../tools/tool-description-utils.js';
 import { formatUnknownError, isObject } from '../../shared/common-utils.js';
 
@@ -35,7 +32,6 @@ export class RequestOpenAIToolsNormalizeFilter implements Filter<JsonObject> {
   async apply(input: JsonObject): Promise<FilterResult<JsonObject>> {
       const out: JsonObject = JSON.parse(JSON.stringify(input || {}));
       const tools = Array.isArray((out as any).tools) ? ((out as any).tools as any[]) : [];
-      const hasApplyPatchTool = hasApplyPatchToolDeclared(tools);
       if (!tools.length) {
         // No tools present: drop tool_choice to avoid provider-side validation errors
         try {
@@ -98,7 +94,7 @@ export class RequestOpenAIToolsNormalizeFilter implements Filter<JsonObject> {
                 additionalProperties: false
               };
               const label = rawToolName && rawToolName.trim().length > 0 ? rawToolName.trim() : 'exec_command';
-              (dst as any).function.description = buildShellDescription(label, hasApplyPatchTool);
+              (dst as any).function.description = buildShellDescription(label);
             }
           } catch (error) {
             logRequestToolsNormalizeNonBlocking('shell_schema_rewrite', error, {

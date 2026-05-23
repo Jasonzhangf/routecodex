@@ -1351,16 +1351,26 @@ fn repair_tool_args_by_schema_keys(
             }
         }
     }
-    if tool_name == "exec_command" {
+    if matches!(tool_name, "exec_command" | "shell_command") {
         let wants_cmd = wants.contains("cmd");
         let wants_command = wants.contains("command");
         if wants_cmd && !wants_command && out.get("cmd").is_none() {
-            if let Some(value) = out.get("command").cloned() {
+            if let Some(value) = out
+                .get("command")
+                .or_else(|| out.get("command_line"))
+                .or_else(|| out.get("proposed_command_line"))
+                .cloned()
+            {
                 out.insert("cmd".to_string(), value);
             }
         }
         if wants_command && !wants_cmd && out.get("command").is_none() {
-            if let Some(value) = out.get("cmd").cloned() {
+            if let Some(value) = out
+                .get("cmd")
+                .or_else(|| out.get("command_line"))
+                .or_else(|| out.get("proposed_command_line"))
+                .cloned()
+            {
                 out.insert("command".to_string(), value);
             }
         }
@@ -1595,6 +1605,86 @@ fn resolve_client_tool_name(
     let normalized = normalize_tool_name_for_match(trimmed);
     if normalized.is_empty() {
         return None;
+    }
+
+    let canonical_for_family = trimmed
+        .trim()
+        .trim_start_matches("functions.")
+        .chars()
+        .map(|ch| if ch == '_' || ch == '-' || ch == ' ' { '.' } else { ch.to_ascii_lowercase() })
+        .collect::<String>()
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<&str>>()
+        .join(".");
+    if matches!(
+        canonical_for_family.replace('.', "_").as_str(),
+        "bash"
+            | "shell"
+            | "cmd"
+            | "cmd_exe"
+            | "shell_cmd"
+            | "bash_cmd"
+            | "exec"
+            | "run"
+            | "command"
+            | "system"
+            | "run_command"
+            | "execute"
+            | "exec_command"
+            | "bash_command"
+            | "shell_command"
+            | "run_shell"
+            | "bash_shell"
+            | "system_command"
+            | "shell_exec"
+            | "run_cmd"
+            | "bash_exec"
+            | "terminal"
+    ) {
+        let mut keys = tool_index.by_name.keys().cloned().collect::<Vec<String>>();
+        keys.sort();
+        for key in &keys {
+            let key_canonical = key
+                .trim()
+                .trim_start_matches("functions.")
+                .chars()
+                .map(|ch| if ch == '_' || ch == '-' || ch == ' ' { '.' } else { ch.to_ascii_lowercase() })
+                .collect::<String>()
+                .split('.')
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<&str>>()
+                .join(".");
+            if matches!(
+                key_canonical.replace('.', "_").as_str(),
+                "bash"
+                    | "shell"
+                    | "cmd"
+                    | "cmd_exe"
+                    | "shell_cmd"
+                    | "bash_cmd"
+                    | "exec"
+                    | "run"
+                    | "command"
+                    | "system"
+                    | "run_command"
+                    | "execute"
+                    | "exec_command"
+                    | "bash_command"
+                    | "shell_command"
+                    | "run_shell"
+                    | "bash_shell"
+                    | "system_command"
+                    | "shell_exec"
+                    | "run_cmd"
+                    | "bash_exec"
+                    | "terminal"
+            ) {
+                if let Some(value) = tool_index.by_name.get(key.as_str()) {
+                    return Some(value.clone());
+                }
+            }
+        }
     }
 
     let mut keys = tool_index.by_name.keys().cloned().collect::<Vec<String>>();
@@ -1900,6 +1990,19 @@ fn now_unix_seconds() -> i64 {
     (now_unix_millis() / 1000) as i64
 }
 
+fn is_chat_completion_id(value: &str) -> bool {
+    value.trim().to_ascii_lowercase().starts_with("chatcmpl")
+}
+
+fn allocate_responses_id(response: &Map<String, Value>) -> String {
+    if let Some(existing) = read_object_string(response, "id") {
+        if !is_chat_completion_id(existing.as_str()) {
+            return existing;
+        }
+    }
+    format!("resp_{}", now_unix_millis())
+}
+
 fn unwrap_responses_data_node(payload: &Value) -> Value {
     let mut current = payload.clone();
     let mut depth = 0usize;
@@ -1992,8 +2095,7 @@ fn build_failed_responses_payload(
     response: &Map<String, Value>,
     request_id_hint: Option<&str>,
 ) -> Value {
-    let id =
-        read_object_string(response, "id").unwrap_or_else(|| format!("resp-{}", now_unix_millis()));
+    let id = allocate_responses_id(response);
     let message = read_failed_message(response);
     let mut out = Map::new();
     out.insert("id".to_string(), Value::String(id));
@@ -2181,6 +2283,11 @@ fn collect_executed_tool_call_ids(response: &Map<String, Value>) -> HashSet<Stri
         if let Some(raw_id) = raw_id {
             ids.insert(raw_id.clone());
             ids.insert(format!("fc_{}", raw_id));
+            if let Some(stripped) = raw_id.strip_prefix("fc_") {
+                if !stripped.is_empty() {
+                    ids.insert(stripped.to_string());
+                }
+            }
         }
     }
     ids
@@ -2708,8 +2815,7 @@ fn build_responses_payload_from_chat_core(
     // Only emit message if has real content OR visible text reasoning; not for tool-call-only or empty reasoning
     let should_emit_message = !content_parts.is_empty() || has_text_reasoning;
 
-    let response_id = read_object_string(response_row, "id")
-        .unwrap_or_else(|| format!("resp-{}", now_unix_millis()));
+    let response_id = allocate_responses_id(response_row);
     let request_id_value = read_request_id(response_row, request_id_hint);
     let request_seed = request_id_value
         .clone()
@@ -2849,9 +2955,23 @@ fn build_responses_payload_from_chat_core(
         let raw_name = fn_row
             .and_then(|v| v.get("name").and_then(|vv| vv.as_str()))
             .or_else(|| call_row.get("name").and_then(|vv| vv.as_str()));
-        let Some(name) = normalize_responses_function_name(raw_name) else {
+        let Some(mut name) = normalize_responses_function_name(raw_name) else {
             continue;
         };
+
+        let client_tools_raw = context
+            .as_object()
+            .and_then(|v| v.get("toolsRaw"))
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let tool_index = build_client_tool_index(&client_tools_raw);
+        let client_spec = if tool_index.by_name.is_empty() && tool_index.by_namespace_name.is_empty() {
+            None
+        } else {
+            resolve_client_tool_name(&tool_index, None, name.as_str())
+        };
+        let client_declared_name = client_spec.as_ref().map(|spec| spec.declared_name.clone());
+
         let call_id = require_explicit_tool_call_id(
             read_object_string(call_row, "id").or_else(|| read_object_string(call_row, "call_id")),
             format!(
@@ -2865,11 +2985,21 @@ fn build_responses_payload_from_chat_core(
             .or_else(|| call_row.get("arguments"))
             .cloned()
             .unwrap_or(Value::Object(Map::new()));
-        let arguments = if let Some(raw) = args_raw.as_str() {
+        let arguments = if let Some(spec) = client_spec.as_ref() {
+            let normalized = normalize_call_args(spec.declared_name.as_str(), &args_raw, spec);
+            if let Some(raw) = normalized.as_str() {
+                raw.to_string()
+            } else {
+                serde_json::to_string(&normalized).unwrap_or_else(|_| "{}".to_string())
+            }
+        } else if let Some(raw) = args_raw.as_str() {
             raw.to_string()
         } else {
             serde_json::to_string(&args_raw).unwrap_or_else(|_| "{}".to_string())
         };
+        if let Some(declared_name) = client_declared_name {
+            name = declared_name;
+        }
 
         let item_index = output_items.len();
         output_items.push(Value::Object(Map::from_iter([
@@ -3369,6 +3499,54 @@ mod tests {
     }
 
     #[test]
+    fn build_responses_payload_from_chat_filters_native_tool_output_id_alias_from_required_action() {
+        let payload = serde_json::json!({
+            "id": "resp_native_completed",
+            "model": "gpt-5.4-medium",
+            "tool_outputs": [
+                { "tool_call_id": "fc_native:run_command:3", "output": "/tmp/ws\n" }
+            ],
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "native:run_command:3",
+                                "type": "function",
+                                "function": { "name": "run_command", "arguments": "{\"command_line\":\"pwd\"}" }
+                            }
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let output = build_responses_payload_from_chat_core(
+            &payload,
+            Some("req_native_completed"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("build responses payload");
+        assert_eq!(
+            output["status"],
+            Value::String("completed".to_string())
+        );
+        assert!(output.get("required_action").is_none());
+        let output_items = output["output"].as_array().cloned().expect("output array");
+        let function_items: Vec<&Value> = output_items
+            .iter()
+            .filter(|item| item["type"] == Value::String("function_call".to_string()))
+            .collect();
+        assert_eq!(function_items.len(), 1);
+        assert_eq!(
+            function_items[0]["status"],
+            Value::String("completed".to_string())
+        );
+    }
+
+    #[test]
     fn build_responses_payload_from_chat_rejects_missing_tool_call_id() {
         let payload = serde_json::json!({
             "id": "resp_missing_tool_call_id",
@@ -3526,6 +3704,61 @@ mod tests {
         );
         assert_eq!(infer_provider_type_from_protocol(Some("unknown")), None);
         assert_eq!(infer_provider_type_from_protocol(None), None);
+    }
+
+    #[test]
+    fn build_responses_payload_from_chat_does_not_leak_completed_native_call_through_choices() {
+        let payload = serde_json::json!({
+            "id": "resp_native_completed",
+            "model": "gpt-5.4-medium",
+            "tool_outputs": [
+                { "tool_call_id": "native:run_command:3", "output": "/tmp/ws\n" }
+            ],
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": "Running `pwd` now.",
+                        "tool_calls": [
+                            {
+                                "id": "native:run_command:3",
+                                "type": "function",
+                                "function": {
+                                    "name": "run_command",
+                                    "arguments": "{\"command_line\":\"pwd\",\"cwd\":\"/tmp/ws\"}"
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let output = build_responses_payload_from_chat_core(
+            &payload,
+            Some("req_native_completed"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("build responses payload");
+
+        assert_eq!(output["status"], Value::String("completed".to_string()));
+        assert!(output.get("required_action").is_none());
+        assert!(
+            output.get("choices").is_none(),
+            "responses client payload must not retain chat choices with repeated completed tool_calls"
+        );
+        let function_calls = output["output"]
+            .as_array()
+            .expect("output array")
+            .iter()
+            .filter(|item| item["type"] == Value::String("function_call".to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(function_calls.len(), 1);
+        assert_eq!(
+            function_calls[0]["status"],
+            Value::String("completed".to_string())
+        );
     }
 
     #[test]

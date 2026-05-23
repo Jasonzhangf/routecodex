@@ -1,19 +1,41 @@
-import { maybeAugmentApplyPatchErrorContent } from '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/chat-mapper.js';
+import { describe, expect, it, jest, beforeEach } from '@jest/globals';
+
+const mockAugmentApplyPatchErrorContentWithNative = jest.fn();
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js',
+  () => ({
+    augmentApplyPatchErrorContentWithNative: mockAugmentApplyPatchErrorContentWithNative,
+    mapOpenaiChatToChatWithNative: jest.fn(),
+    mapOpenaiChatFromChatWithNative: jest.fn()
+  })
+);
 
 describe('apply_patch error hints', () => {
-  it('adds a mixed-syntax hint for Begin Patch payloads that still include GNU diff headers', () => {
+  beforeEach(() => {
+    jest.resetModules();
+    mockAugmentApplyPatchErrorContentWithNative.mockReset();
+  });
+
+  it('chat semantic mapper no longer owns apply_patch-specific error hinting', async () => {
+    mockAugmentApplyPatchErrorContentWithNative.mockImplementation((content: string) => content);
+    const { maybeAugmentApplyPatchErrorContent } = await import(
+      '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/chat-mapper.js'
+    );
     const content =
       "apply_patch verification failed: invalid hunk at line 2, '--- a/src/server/index.ts' is not a valid hunk header.";
     const augmented = maybeAugmentApplyPatchErrorContent(content, 'apply_patch');
-    expect(augmented).toContain('块内不要再写 `--- a/...` / `+++ b/...`');
-    expect(augmented).toContain('[APPLY_PATCH_MIXED_SYNTAX]');
+    expect(augmented).toBe(content);
   });
 
-  it('adds a context-mismatch hint for guessed GNU line-number hunks', () => {
+  it('does not inject mixed-syntax guidance text at chat mapper layer anymore', async () => {
     const content =
-      "apply_patch verification failed: Failed to find context '-50,6 +50,8 @@' in src/server/index.ts";
+      "apply_patch verification failed: invalid hunk at line 2, '--- a/src/server/index.ts' is not a valid hunk header.";
+    mockAugmentApplyPatchErrorContentWithNative.mockImplementation(() => `${content}\n[APPLY_PATCH_MIXED_SYNTAX]`);
+    const { maybeAugmentApplyPatchErrorContent } = await import(
+      '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/chat-mapper.js'
+    );
     const augmented = maybeAugmentApplyPatchErrorContent(content, 'apply_patch');
-    expect(augmented).toContain('更小且唯一的上下文');
-    expect(augmented).toContain('不要继续猜 `@@ -x,y +x,y @@` 行号范围');
+    expect(augmented).toBe(content);
   });
 });

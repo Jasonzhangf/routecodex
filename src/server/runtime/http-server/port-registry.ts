@@ -118,6 +118,8 @@ export class PortRegistry {
         mode: inst.config.mode,
         protocolBehavior: inst.config.protocolBehavior,
         providerBinding: inst.config.providerBinding,
+        sameProtocolBehavior: inst.config.sameProtocolBehavior,
+        stopMessage: inst.config.stopMessage,
         status: inst.status,
         activeConnections: inst.activeConnections,
         error: inst.error,

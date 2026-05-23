@@ -343,20 +343,7 @@ fn is_shell_tool_name(name: &str) -> bool {
     matches!(name, "shell" | "shell_command" | "exec_command")
 }
 
-fn has_apply_patch_tool_declared(tools: &[Value]) -> bool {
-    for entry in tools {
-        let Some(row) = entry.as_object() else {
-            continue;
-        };
-        let name = extract_tool_function_name(row);
-        if normalize_tool_name(Some(&Value::String(name))) == "apply_patch" {
-            return true;
-        }
-    }
-    false
-}
-
-fn build_shell_description(tool_display_name: &str, has_apply_patch: bool) -> String {
+fn build_shell_description(tool_display_name: &str) -> String {
     let label = if tool_display_name.trim().is_empty() {
         "shell"
     } else {
@@ -367,13 +354,7 @@ fn build_shell_description(tool_display_name: &str, has_apply_patch: bool) -> St
         "- Always set the `workdir` param when using the {} function. Avoid using `cd` unless absolutely necessary.",
         label
     );
-    let apply_patch_line =
-        "- Prefer apply_patch for editing files instead of shell redirection or here-doc usage.";
-    if has_apply_patch {
-        format!("{}\n{}\n{}", base, workdir_line, apply_patch_line)
-    } else {
-        format!("{}\n{}", base, workdir_line)
-    }
+    format!("{}\n{}", base, workdir_line)
 }
 
 fn ensure_shell_schema(params: &Value) -> Value {
@@ -453,7 +434,6 @@ fn normalize_tools(tools: &Value) -> Vec<Value> {
     let Some(rows) = tools.as_array() else {
         return Vec::new();
     };
-    let has_apply_patch = has_apply_patch_tool_declared(rows);
     let mut out: Vec<Value> = Vec::new();
     for tool in rows {
         let Some(tool_row) = tool.as_object() else {
@@ -529,7 +509,7 @@ fn normalize_tools(tools: &Value) -> Vec<Value> {
             };
             function_node.insert(
                 "description".to_string(),
-                Value::String(build_shell_description(display.as_str(), has_apply_patch)),
+                Value::String(build_shell_description(display.as_str())),
             );
         }
         function_node.insert("parameters".to_string(), final_params);
@@ -549,4 +529,17 @@ pub fn normalize_tools_json(tools_json: String) -> NapiResult<String> {
     let output = normalize_tools(&tools);
     serde_json::to_string(&Value::Array(output))
         .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_description_no_longer_owns_apply_patch_policy() {
+        let desc = build_shell_description("shell");
+        assert!(desc.contains("Runs a shell command and returns its output."));
+        assert!(!desc.contains("apply_patch"));
+        assert!(!desc.contains("here-doc usage"));
+    }
 }

@@ -133,6 +133,51 @@ describe('request continuation semantics', () => {
     expect((stage2.chatEnvelope as any).toolOutputs).toBeUndefined();
   });
 
+
+  it('RED: submit_tool_outputs resume must not mark serverToolRequired and trigger stop_message client injection', async () => {
+    const normalized = {
+      id: 'req-inbound-submit-no-servertool',
+      endpoint: '/v1/responses',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.4-medium',
+        previous_response_id: 'resp_submit_no_servertool',
+        input: [
+          { type: 'function_call', call_id: 'native:run_command:3', name: 'shell_command', arguments: '{"cmd":"pwd"}' },
+          { type: 'function_call_output', call_id: 'native:run_command:3', output: '/Users/fanzhang/Documents/github/routecodex\n' }
+        ],
+        tools: [
+          { type: 'function', name: 'shell_command', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } }
+        ]
+      },
+      metadata: {
+        responsesResume: {
+          previousRequestId: 'req_submit_no_servertool_root',
+          restoredFromResponseId: 'resp_submit_no_servertool',
+          toolOutputsDetailed: [{ callId: 'native:run_command:3', outputText: '/Users/fanzhang/Documents/github/routecodex\n' }]
+        }
+      },
+      processMode: 'passthrough',
+      direction: 'request',
+      stage: 'inbound',
+      stream: false
+    } as any;
+
+    const result = await executeRequestStageInbound({
+      normalized,
+      hooks: REQUEST_STAGE_HOOKS['openai-responses'],
+      config: { virtualRouter: {} as any }
+    });
+
+    expect(result.serverToolRequired).toBe(false);
+    expect((result.workingRequest as any).metadata?.serverToolRequired).not.toBe(true);
+    expect((result.workingRequest as any).semantics?.continuation?.toolContinuation).toMatchObject({
+      mode: 'submit_tool_outputs',
+      submittedToolCallIds: ['native:run_command:3']
+    });
+  });
+
   it('cleans metadata.responsesResume after inbound semantic lift and keeps continuation on working request', async () => {
     const normalized = {
       id: 'req-inbound-continuation-cleanup',

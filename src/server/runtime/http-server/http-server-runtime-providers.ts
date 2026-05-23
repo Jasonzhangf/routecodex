@@ -413,13 +413,24 @@ export async function createProviderHandle(
   runtime: ProviderRuntimeProfile
 ): Promise<ProviderHandle> {
   const protocolType = normalizeProviderType(runtime.providerType);
-  const providerFamily = runtime.providerFamily || protocolType;
+  const rawProviderFamily = runtime.providerFamily || protocolType;
+  const providerFamily =
+    String(runtimeKey || '').startsWith('windsurf.')
+    || runtime.providerId === 'windsurf'
+    || rawProviderFamily === 'windsurf'
+      ? 'windsurf'
+      : rawProviderFamily;
   const providerProtocol =
-    (typeof runtime.outboundProfile === 'string' && runtime.outboundProfile.trim()
-      ? (runtime.outboundProfile.trim() as ProviderProtocol)
-      : undefined) ?? mapProviderProtocol(protocolType);
+    providerFamily === 'windsurf'
+      ? mapProviderProtocol(protocolType, providerFamily)
+      : ((typeof runtime.outboundProfile === 'string' && runtime.outboundProfile.trim()
+        ? (runtime.outboundProfile.trim() as ProviderProtocol)
+        : undefined) ?? mapProviderProtocol(protocolType, providerFamily));
   const instance = ProviderFactory.createProviderFromRuntime(runtime, server.getModuleDependencies());
   await instance.initialize();
+  if (providerFamily === 'windsurf' && process.env.ROUTECODEX_WINDSURF_STARTUP_PROBE !== '0') {
+    await instance.checkHealth();
+  }
   const providerId = runtime.providerId || runtimeKey.split('.')[0];
   return {
     runtimeKey,
@@ -455,6 +466,21 @@ export function normalizeRuntimeBaseUrl(_server: any, runtime: ProviderRuntimePr
   return undefined;
 }
 
+
+function deriveRuntimeAccountAlias(runtime: ProviderRuntimeProfile): string | undefined {
+  const read = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  };
+  const explicit = read((runtime as unknown as { keyAlias?: unknown }).keyAlias);
+  if (explicit) return explicit;
+  const runtimeKey = read(runtime.runtimeKey);
+  if (!runtimeKey) return undefined;
+  const parts = runtimeKey.split('.').map((part) => part.trim()).filter(Boolean);
+  return parts.length >= 2 ? parts[1] : undefined;
+}
+
 export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimeProfile): Promise<ProviderRuntimeProfile['auth']> {
   const auth = runtime.auth || { type: 'apikey' };
   const authRecord = auth as LegacyAuthFields;
@@ -471,6 +497,7 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
     }
     return undefined;
   };
+  const runtimeAccountAlias = deriveRuntimeAccountAlias(runtime);
   const pickStringArray = (value: unknown): string[] | undefined => {
     if (!value) {
       return undefined;
@@ -495,7 +522,7 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
       const tokenFile = tokenFileRaw
         ? await normalizeDeepSeekLegacyTokenFilePath(tokenFileRaw)
         : undefined;
-      const accountAlias = pickString(authRecord.accountAlias, authRecord.account_alias, runtime.keyAlias);
+      const accountAlias = pickString(authRecord.accountAlias, authRecord.account_alias, runtimeAccountAlias);
       return {
         type: 'apikey',
         rawType: auth.rawType ?? 'deepseek-account',
@@ -513,7 +540,7 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
         mobile: pickString(authRecord.mobile, authRecord.account, authRecord.username),
         password: pickString(authRecord.password),
         accountFile: pickString(authRecord.accountFile, authRecord.account_file),
-        accountAlias: pickString(authRecord.accountAlias, authRecord.account_alias, runtime.keyAlias),
+        accountAlias: pickString(authRecord.accountAlias, authRecord.account_alias, runtimeAccountAlias),
         tokenFile: pickString(authRecord.tokenFile, authRecord.token_file),
       };
     }

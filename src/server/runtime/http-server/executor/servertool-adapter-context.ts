@@ -199,12 +199,19 @@ export function buildServerToolAdapterContext(args: {
 
   applyClientConnectionStateToContext(metadataBag, baseContext);
 
+  const stopMessagePortEnabled = typeof metadataBag.stopMessageEnabled === 'boolean'
+    ? metadataBag.stopMessageEnabled
+    : typeof metadataBag.routecodexPortStopMessageEnabled === 'boolean'
+      ? metadataBag.routecodexPortStopMessageEnabled
+      : undefined;
+
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
   const rt = asFlatRecord(baseContext.__rt) ?? {};
   const followupFlag =
     metadataBag.isServerToolFollowup === true
     || metadataBag.serverToolFollowup === true
     || rt.serverToolFollowup === true;
+  const providerFamily = readNonEmptyString(metadataBag.providerFamily)?.toLowerCase();
   const clientProtocol = readNonEmptyString(metadataBag.clientProtocol)
     ?? readNonEmptyString(rt.clientProtocol)
     ?? (args.entryEndpoint.includes('/v1/responses') ? 'openai-responses' : undefined);
@@ -212,6 +219,8 @@ export function buildServerToolAdapterContext(args: {
     ...rt,
     ...(followupFlag ? { serverToolFollowup: true } : {}),
     ...(clientProtocol ? { clientProtocol } : {}),
+    ...(providerFamily ? { providerFamily } : {}),
+    ...(typeof stopMessagePortEnabled === 'boolean' ? { stopMessagePortEnabled } : {}),
     stopMessageClientInjectReady: stopMessageInjectReadiness.ready,
     stopMessageClientInjectReason: stopMessageInjectReadiness.reason,
     ...(stopMessageInjectReadiness.sessionScope

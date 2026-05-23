@@ -37,11 +37,9 @@ function augmentExecCommand(fn: Unknown): void {
   const marker = '[Codex ExecCommand Guidance]';
   const guidance = [
     marker,
-    'FORBIDDEN FIRST: NEVER call apply_patch through exec_command, shell, bash -lc, command substitution, or any heredoc wrapper (`apply_patch <<PATCH`, `bash -lc \'... apply_patch <<\\\'PATCH\\\' ...\'`).',
-    'If the task edits files, the ONLY valid path is a direct apply_patch tool call.',
-    'If you need to edit files, call apply_patch with patch text only.',
-    'exec_command is only for shell commands that are NOT apply_patch.',
-    '禁止通过 exec_command/shell/bash -lc/heredoc 嵌套调用 apply_patch；修改文件必须直接调用 apply_patch 工具。'
+    'Use exec_command only for shell execution.',
+    'Keep shell intent inside exec_command arguments; do not mix shell planning prose into tool arguments.',
+    'When shell features are needed, prefer a single `bash -lc` command string.'
   ].join('\n');
   (fn as any).description = appendOnce(((fn as any).description as string | undefined), guidance, marker);
 }
@@ -54,7 +52,7 @@ function augmentShell(fn: Unknown): void {
     '  1) argv tokens: ["ls","-la"]',
     '  2) bash -lc with a single string: ["bash","-lc","<single command string>"] (required for complex/multi-line/pipe/&&/||/here-doc to interpreter).',
     'The 3rd arg of bash -lc MUST be exactly one string. Do not split meta-operators (|, >, &&, ||) into separate elements.',
-    'Do not invent extra keys. File writes are FORBIDDEN via shell (no redirection, here-doc to files, sed -i, ed -s, tee). Use apply_patch to edit files.',
+    'Do not invent extra keys.',
     'Examples: ["ls","-la","Obsidian"]; ["bash","-lc","cd Obsidian && ls -la"]; ["bash","-lc","python3 - <<\'PY\'\\nprint(\\"ok\\")\\nPY"]',
     'If arguments are invalid (e.g., bash -lc without a single string), return a structured error as the tool result (role=tool, same tool_call_id) and continue the conversation.',
     'Prefer ripgrep (rg) when available. Keep explanations in assistant text; do not mix narration into tool arguments.'
@@ -202,8 +200,6 @@ export function buildSystemToolGuidance(): string {
   lines.push('Tool usage guidance (OpenAI tool_calls) / 工具使用指引（OpenAI 标准）');
   lines.push(bullet('Always use assistant.tool_calls[].function.{name,arguments}; never embed tool calls in plain text. / 一律通过 tool_calls 调用工具，不要把工具调用写进普通文本。'));
   lines.push(bullet('function.arguments must be a single JSON string. / arguments 必须是单个 JSON 字符串。'));
-  lines.push(bullet('File writes are FORBIDDEN via shell (no redirection, no here-doc, no sed -i, no ed -s, no tee). Use apply_patch ONLY. / 通过 shell 写文件一律禁止（不得使用重定向、heredoc、sed -i、ed -s、tee）；必须使用 apply_patch。'));
-  lines.push(bullet('NEVER wrap apply_patch inside exec_command/shell/bash -lc/command substitution/heredoc (`apply_patch <<PATCH`). Direct apply_patch tool call only. / 严禁在 exec_command/shell/bash -lc/命令替换/heredoc（如 `apply_patch <<PATCH`）中嵌套 apply_patch，必须直接调用 apply_patch。'));
   lines.push(bullet('update_plan: Keep exactly one step in_progress; others pending/completed. / 仅一个 in_progress 步骤。'));
   lines.push(bullet('view_image: Path must be an image file (.png .jpg .jpeg .gif .webp .bmp .svg). / 仅图片路径。'));
   lines.push(bullet('Do NOT use view_image for text files (.md/.ts/.js/.json). Use shell: {"command":["cat","<path>"]}. / 文本文件请用 shell: cat。'));

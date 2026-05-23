@@ -102,16 +102,6 @@ export function mapOpenaiChatFromChatWithNative(
   return invokeRecordCapability('mapOpenaiChatFromChatJson', [chatEnvelope ?? {}, adapterContext ?? {}]);
 }
 
-export function augmentApplyPatchErrorContentWithNative(
-  content: string,
-  toolName?: string
-): string {
-  return invokeStringCapability('augmentApplyPatchErrorContentJson', [
-    content ?? '',
-    typeof toolName === 'string' ? toolName : ''
-  ]);
-}
-
 export function buildSubmitToolOutputsPayloadWithNative(input: {
   chatEnvelope: Record<string, unknown>;
   adapterContext: Record<string, unknown>;

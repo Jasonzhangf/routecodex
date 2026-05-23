@@ -1,4 +1,5 @@
 use super::*;
+use crate::req_outbound_stage3_compat::shared_tool_text_guidance::build_tool_text_instruction;
 
 #[test]
 fn test_req_profile_without_request_stage_native_passthrough() {
@@ -2979,6 +2980,25 @@ fn test_req_profile_chat_qwen_only_normalizes_tool_definitions_and_keeps_message
     assert!(!patch_desc.contains("hashline-first"));
     assert!(!patch_desc.contains("filePath"));
     assert!(!patch_desc.contains("fileContent"));
+}
+
+#[test]
+fn test_tool_text_instruction_does_not_own_apply_patch_contract_anymore() {
+    let tools = json!([
+        { "type": "function", "function": { "name": "exec_command" } },
+        { "type": "function", "function": { "name": "apply_patch" } }
+    ]);
+
+    let instruction = build_tool_text_instruction(Some(&tools), false);
+    assert!(instruction.contains("exec_command"));
+    assert!(instruction.contains("apply_patch"));
+    assert!(!instruction.contains("direct `apply_patch` tool call"));
+    assert!(!instruction.contains("Author exactly one canonical patch body in `patch`"));
+    assert!(!instruction.contains("*** Begin Patch"));
+    assert!(!instruction.contains("*** End Patch"));
+    assert!(!instruction.contains("hashline-first"));
+    assert!(!instruction.contains("filePath"));
+    assert!(!instruction.contains("fileContent"));
 }
 
 #[test]

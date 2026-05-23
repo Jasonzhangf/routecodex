@@ -27,11 +27,10 @@ const VALID_EFFORTS = new Set(['minimal', 'none', 'low', 'medium', 'high', 'xhig
 const WINDSURF_AUTH1_PASSWORD_LOGIN_URL = 'https://windsurf.com/_devin-auth/password/login';
 const WINDSURF_CHECK_LOGIN_METHOD_URL = 'https://windsurf.com/_backend/exa.seat_management_pb.SeatManagementService/CheckUserLoginMethod';
 const WINDSURF_POST_AUTH_URL = 'https://windsurf.com/_backend/exa.seat_management_pb.SeatManagementService/WindsurfPostAuth';
-const WINDSURF_POST_AUTH_URL_LEGACY = 'https://server.self-serve.windsurf.com/exa.seat_management_pb.SeatManagementService/WindsurfPostAuth';
+const WINDSURF_POST_AUTH_LEGACY_URL = 'https://server.self-serve.windsurf.com/exa.seat_management_pb.SeatManagementService/WindsurfPostAuth';
 const WINDSURF_CASCADE_MODEL_CONFIGS_URL = 'https://server.codeium.com/exa.api_server_pb.ApiServerService/GetCascadeModelConfigs';
 const WINDSURF_GET_CHAT_COMPLETIONS_URL = 'https://server.self-serve.windsurf.com/exa.api_server_pb.ApiServerService/GetChatCompletions';
 const WINDSURF_LS_SERVICE = '/exa.language_server_pb.LanguageServerService';
-const WINDSURF_CASCADE_TOOL_REINFORCEMENT = 'The functions listed above are available and callable. When the user\'s request can be answered by calling a function, emit a <tool_call> block as described. Use this exact format: <tool_call>{"name":"...","arguments":{...}}</tool_call>';
 const WINDSURF_CASCADE_COMMUNICATION_NO_TOOLS = 'You are accessed via API. When asked about your identity, describe your actual underlying model name and provider accurately. Answer directly. STRICTLY respond in the exact same language the user used in their latest message (Chinese → Chinese, English → English, Japanese → Japanese; never switch mid-conversation).';
 const WINDSURF_CASCADE_COMMUNICATION_WITH_TOOLS = 'You are accessed via API. When asked about your identity, describe your actual underlying model name and provider accurately. STRICTLY respond in the exact same language the user used in their latest message (Chinese → Chinese, English → English, Japanese → Japanese; never switch mid-conversation). Use the functions above when relevant.';
 
@@ -229,6 +228,14 @@ const WINDSURF_SOURCE_USER = 1;
 const WINDSURF_SOURCE_ASSISTANT = 3;
 const WINDSURF_SOURCE_TOOL = 4;
 
+const WINDSURF_CASCADE_TOOL_CONFIG_FIELDS: Record<string, number> = {
+  find: 5,
+  run_command: 8,
+  view_file: 10,
+  list_directory: 19,
+  grep_search_v2: 33,
+};
+
 type WindsurfCascadeToolStepKind =
   | 'view_file'
   | 'run_command'
@@ -236,6 +243,7 @@ type WindsurfCascadeToolStepKind =
   | 'grep_search_v2'
   | 'list_directory'
   | 'write_to_file'
+  | 'grep_search'
   | 'read_url_content'
   | 'search_web';
 
@@ -276,12 +284,13 @@ const WINDSURF_TOOL_MAP: Record<string, WindsurfCascadeMappedTool> = {
   exec_command: {
     kind: 'run_command',
     forward: (args) => ({
-      command_line: String(args.cmd ?? args.command ?? args.input ?? ''),
-      ...(typeof args.cwd === 'string' && args.cwd ? { cwd: args.cwd } : {}),
+      command_line: String(args.cmd ?? args.command ?? args.command_line ?? args.input ?? ''),
+      ...(typeof args.workdir === 'string' && args.workdir ? { cwd: args.workdir } : {}),
+      ...(typeof args.cwd === 'string' && args.cwd && typeof args.workdir !== 'string' ? { cwd: args.cwd } : {}),
       blocking: true,
     }),
     applyObservation: (payload, observation) => {
-      payload.combined_output = observation;
+      payload.full_output = observation;
       payload.stdout = observation;
       payload.exit_code = 0;
     },
@@ -289,12 +298,13 @@ const WINDSURF_TOOL_MAP: Record<string, WindsurfCascadeMappedTool> = {
   run_command: {
     kind: 'run_command',
     forward: (args) => ({
-      command_line: String(args.cmd ?? args.command ?? args.input ?? ''),
+      command_line: String(args.cmd ?? args.command ?? args.command_line ?? args.proposed_command_line ?? args.input ?? ''),
+      ...(typeof args.workdir === 'string' && args.workdir ? { cwd: args.workdir } : {}),
       ...(typeof args.cwd === 'string' && args.cwd ? { cwd: args.cwd } : {}),
       blocking: true,
     }),
     applyObservation: (payload, observation) => {
-      payload.combined_output = observation;
+      payload.full_output = observation;
       payload.stdout = observation;
       payload.exit_code = 0;
     },
@@ -307,7 +317,7 @@ const WINDSURF_TOOL_MAP: Record<string, WindsurfCascadeMappedTool> = {
       blocking: true,
     }),
     applyObservation: (payload, observation) => {
-      payload.combined_output = observation;
+      payload.full_output = observation;
       payload.stdout = observation;
       payload.exit_code = 0;
     },
@@ -320,7 +330,7 @@ const WINDSURF_TOOL_MAP: Record<string, WindsurfCascadeMappedTool> = {
       blocking: true,
     }),
     applyObservation: (payload, observation) => {
-      payload.combined_output = observation;
+      payload.full_output = observation;
       payload.stdout = observation;
       payload.exit_code = 0;
     },
@@ -334,7 +344,7 @@ const WINDSURF_TOOL_MAP: Record<string, WindsurfCascadeMappedTool> = {
       blocking: true,
     }),
     applyObservation: (payload, observation) => {
-      payload.combined_output = observation;
+      payload.full_output = observation;
       payload.stdout = observation;
       payload.exit_code = 0;
     },
@@ -478,6 +488,62 @@ const WINDSURF_TOOL_MAP: Record<string, WindsurfCascadeMappedTool> = {
     applyObservation: (payload, observation) => { payload.summary = observation; },
   },
 };
+
+function windsurfToolLookupName(name: unknown): string {
+  return String(name || '').trim().toLowerCase();
+}
+
+function collectWindsurfMappedTools(tools: Array<Record<string, unknown>>): Array<{ name: string; kind: WindsurfCascadeToolStepKind }> {
+  const out: Array<{ name: string; kind: WindsurfCascadeToolStepKind }> = [];
+  for (const tool of tools) {
+    const fn = tool && typeof tool === 'object' && !Array.isArray(tool) ? (tool.function as Record<string, unknown> | undefined) : undefined;
+    const name = typeof fn?.name === 'string' ? fn.name : '';
+    const mapped = WINDSURF_TOOL_MAP[windsurfToolLookupName(name)];
+    if (mapped) out.push({ name, kind: mapped.kind });
+  }
+  return out;
+}
+
+function partitionWindsurfTools(tools: Array<Record<string, unknown>>): {
+  nativeTools: Array<Record<string, unknown>>;
+  unsupportedTools: Array<Record<string, unknown>>;
+  mappedNativeTools: Array<{ name: string; kind: WindsurfCascadeToolStepKind }>;
+} {
+  const nativeTools: Array<Record<string, unknown>> = [];
+  const unsupportedTools: Array<Record<string, unknown>> = [];
+  const mappedNativeTools: Array<{ name: string; kind: WindsurfCascadeToolStepKind }> = [];
+  for (const tool of tools) {
+    const fn = tool && typeof tool === 'object' && !Array.isArray(tool) ? (tool.function as Record<string, unknown> | undefined) : undefined;
+    const name = typeof fn?.name === 'string' ? fn.name : '';
+    const mapped = WINDSURF_TOOL_MAP[windsurfToolLookupName(name)];
+    if (mapped) {
+      nativeTools.push(tool);
+      mappedNativeTools.push({ name, kind: mapped.kind });
+    } else if (name) {
+      unsupportedTools.push(tool);
+    }
+  }
+  return { nativeTools, unsupportedTools, mappedNativeTools };
+}
+
+function windsurfToolNameSet(tools: unknown): Set<string> {
+  const out = new Set<string>();
+  if (!Array.isArray(tools)) return out;
+  for (const tool of tools) {
+    const row = tool && typeof tool === 'object' && !Array.isArray(tool) ? tool as Record<string, unknown> : null;
+    const fn = row?.function && typeof row.function === 'object' && !Array.isArray(row.function) ? row.function as Record<string, unknown> : null;
+    const name = typeof fn?.name === 'string' ? fn.name.trim() : typeof row?.name === 'string' ? row.name.trim() : '';
+    if (name) {
+      out.add(name);
+      out.add(windsurfToolLookupName(name));
+    }
+  }
+  return out;
+}
+
+function uniqueWindsurfToolKinds(mapped: Array<{ kind: WindsurfCascadeToolStepKind }>): WindsurfCascadeToolStepKind[] {
+  return Array.from(new Set(mapped.map((item) => item.kind)));
+}
 
 /**
  * Transforms Windsurf Connect binary frames into SSE text lines.
@@ -633,451 +699,6 @@ function stableStringify(value: unknown): string {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, val]) => `${JSON.stringify(key)}:${stableStringify(val)}`);
   return `{${entries.join(',')}}`;
-}
-
-type WindsurfResolvedToolChoice = {
-  mode: 'auto' | 'required' | 'none';
-  forceName: string | null;
-};
-
-function resolveWindsurfToolChoice(toolChoice: unknown): WindsurfResolvedToolChoice {
-  if (toolChoice == null || toolChoice === 'auto') {
-    return { mode: 'auto', forceName: null };
-  }
-  if (toolChoice === 'required') {
-    return { mode: 'required', forceName: null };
-  }
-  if (toolChoice === 'none') {
-    return { mode: 'none', forceName: null };
-  }
-  if (toolChoice && typeof toolChoice === 'object' && !Array.isArray(toolChoice)) {
-    const row = toolChoice as Record<string, unknown>;
-    if (row.type === 'function' && row.function && typeof row.function === 'object') {
-      const fn = row.function as Record<string, unknown>;
-      const name = typeof fn.name === 'string' ? fn.name.trim() : '';
-      if (name) {
-        return { mode: 'required', forceName: name };
-      }
-    }
-  }
-  return { mode: 'auto', forceName: null };
-}
-
-function buildWindsurfToolProtocolHeader(choice: WindsurfResolvedToolChoice): string {
-  const lines = [
-    'You have access to the following functions. They are REAL callable tools — the caller (a separate process on the user\'s actual machine) will execute them and return results in the next turn.',
-    '',
-    'To call a function, output ONE valid JSON object on a single line — starting with "{" and ending with "}". NO markdown code fence. NO prose before or after. NO leading commentary.',
-    '',
-    'Use this exact shape:',
-    '{"function_call":{"name":"<function_name>","arguments":{<param>:<value>,...}}}',
-    '',
-    'Rules:',
-    '1. Output ONLY the JSON object. NO ```json fence. NO "Here you go:" prefix. NO trailing explanation.',
-    '2. "arguments" must be a JSON object whose keys match the function\'s parameter schema.',
-    '3. The functions ARE available. DO NOT respond with "I cannot read files", "I don\'t have direct access", "please paste the file", or any similar refusal — those phrases are forbidden. Call the function instead.',
-    '4. **NEVER FABRICATE OUTPUT.** Do NOT guess the result of a function call. Do NOT invent timestamps, file contents, command outputs, search results, or any other data that a function would have produced. If the user asks for the output of `echo $(date +%s)`, `ls`, `cat README.md`, or anything similar, you have NO way to know the answer — you MUST call the function. Hallucinated outputs are worse than refusing; the only correct response is the function_call JSON.',
-    '5. If the user\'s request describes ANY action a function could perform — running a shell command, reading a file, searching the web, applying a patch — call that function. Do not "answer from memory" for these requests; memory cannot produce live data.',
-    '6. After emitting one function_call JSON object, STOP generating immediately. The caller will run the function and feed the result back as a "tool" message.',
-    '7. To call MULTIPLE functions in parallel, emit MULTIPLE JSON objects, one per line. Each line stands on its own.',
-    '8. If — and only if — the user is plainly chatting (e.g. "hello", "thanks", "explain X concept") and no function is relevant, respond with plain text. Never mix plain text with JSON in the same response.',
-    '9. The function-call result will arrive as a normal user/tool turn; you can call additional functions on subsequent turns until the task is done.',
-    '',
-  ];
-
-  if (choice.mode === 'required' && choice.forceName) {
-    lines.push('6. You MUST call at least one function for every request. Do NOT answer directly in plain text — always use a <tool_call>.');
-    lines.push(`7. You MUST call the function "${choice.forceName}". No other function and no direct answer.`);
-  } else if (choice.mode === 'required') {
-    lines.push('6. You MUST call at least one function for every request. Do NOT answer directly in plain text — always use a <tool_call>.');
-  } else if (choice.mode === 'none') {
-    lines.push('6. Do NOT call any functions. Answer the user\'s question directly in plain text.');
-  } else {
-    lines.push('6. When a function is relevant to the user\'s request, you SHOULD call it rather than answering from memory. Prefer using a tool over guessing.');
-  }
-
-  return lines.join('\n');
-}
-
-function buildWindsurfToolSpecificRules(tools: Array<Record<string, unknown>>): string[] {
-  const names = new Set(
-    tools
-      .map((tool) => {
-        const fn = tool.function && typeof tool.function === 'object' ? tool.function as Record<string, unknown> : {};
-        return typeof fn.name === 'string' ? fn.name.trim().toLowerCase() : '';
-      })
-      .filter(Boolean),
-  );
-  const lines: string[] = [];
-  if (names.has('read')) {
-    lines.push('- Read: use "file_path" exactly for the path argument. If the user gives a concrete path, copy that path exactly instead of substituting a workspace guess.');
-  }
-  if (names.has('shell_command')) {
-    lines.push('- shell_command: put the complete shell command in "command" exactly as it should run.');
-  }
-  return lines;
-}
-
-function stripWindsurfSchemaDocs(schema: unknown, root: unknown = schema, refStack: string[] = []): unknown {
-  if (Array.isArray(schema)) {
-    return schema.map((item) => stripWindsurfSchemaDocs(item, root, refStack));
-  }
-  if (!schema || typeof schema !== 'object') {
-    return schema;
-  }
-  const row = schema as Record<string, unknown>;
-  if (typeof row.$ref === 'string') {
-    const ref = row.$ref;
-    if (refStack.includes(ref)) {
-      return { type: 'object' };
-    }
-    const resolved = resolveWindsurfLocalSchemaRef(ref, root);
-    if (!resolved) {
-      return { type: 'object' };
-    }
-    const siblings = Object.fromEntries(Object.entries(row).filter(([key]) => key !== '$ref'));
-    return stripWindsurfSchemaDocs({ ...resolved, ...siblings }, root, [...refStack, ref]);
-  }
-  const keep = new Set(['type', 'enum', 'properties', 'items', 'required', 'oneOf', 'anyOf', 'allOf', 'const', 'format', 'additionalProperties']);
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(row)) {
-    if (!keep.has(key)) continue;
-    if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
-      const props: Record<string, unknown> = {};
-      for (const [propKey, propValue] of Object.entries(value as Record<string, unknown>)) {
-        props[propKey] = stripWindsurfSchemaDocs(propValue, root, refStack);
-      }
-      out[key] = props;
-    } else if ((key === 'items' || key === 'oneOf' || key === 'anyOf' || key === 'allOf') && value !== undefined) {
-      out[key] = stripWindsurfSchemaDocs(value, root, refStack);
-    } else if (key === 'additionalProperties') {
-      if (value === false) out[key] = false;
-      else if (value && typeof value === 'object') out[key] = stripWindsurfSchemaDocs(value, root, refStack);
-    } else {
-      out[key] = value;
-    }
-  }
-  return out;
-}
-
-function resolveWindsurfLocalSchemaRef(ref: string, root: unknown): unknown {
-  if (!ref.startsWith('#/')) {
-    return null;
-  }
-  const parts = ref.slice(2).split('/').map((part) => part.replace(/~1/g, '/').replace(/~0/g, '~'));
-  let current: unknown = root;
-  for (const part of parts) {
-    if (!current || typeof current !== 'object' || Array.isArray(current) || !(part in (current as Record<string, unknown>))) {
-      return null;
-    }
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
-}
-
-function firstWindsurfSentence(text: string): string {
-  if (typeof text !== 'string' || !text) return '';
-  const trimmed = text.trim().split(/\n\s*\n/)[0].replace(/\s+/g, ' ').trim();
-  const matched = trimmed.match(/^.{1,160}?[.!?](?=\s|$)/);
-  return (matched ? matched[0] : trimmed.slice(0, 160)).trim();
-}
-
-function buildWindsurfParamSignature(parameters: unknown): string {
-  if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return '';
-  const row = parameters as Record<string, unknown>;
-  const properties = row.properties;
-  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return '';
-  const required = new Set(Array.isArray(row.required) ? row.required.filter((item): item is string => typeof item === 'string') : []);
-  const parts: string[] = [];
-  for (const [name, schema] of Object.entries(properties as Record<string, unknown>)) {
-    const optional = required.has(name) ? '' : '?';
-    let type = 'any';
-    if (schema && typeof schema === 'object' && !Array.isArray(schema)) {
-      const schemaRow = schema as Record<string, unknown>;
-      if (typeof schemaRow.type === 'string') type = schemaRow.type;
-      else if (Array.isArray(schemaRow.type)) type = schemaRow.type.map((item) => String(item)).join('|');
-      if (Array.isArray(schemaRow.enum) && schemaRow.enum.length <= 6) {
-        type = schemaRow.enum.map((item) => JSON.stringify(item)).join('|');
-      }
-    }
-    parts.push(`${name}${optional}: ${type}`);
-  }
-  return parts.join(', ');
-}
-
-const WINDSURF_WORKSPACE_STUB_OVERRIDE = 'Workspace path hidden; "<workspace>" is a redaction marker, NOT a path — never pass it to shell tools (shell reads "<" as redirection). Use "." for cwd or relative paths. If asked for cwd, say unavailable.';
-const WINDSURF_TOOL_REINFORCEMENT = 'The functions listed above are available and callable. When the user\'s request can be answered by calling a function, emit a <tool_call> block as described. Use this exact format: <tool_call>{"name":"...","arguments":{...}}</tool_call>';
-
-function extractWindsurfCallerEnvironment(messages: unknown): string {
-  if (!Array.isArray(messages)) {
-    return '';
-  }
-  const seen = new Set<string>();
-  const out: string[] = [];
-  const cwdPatterns = [
-    /(?:^|\n)\s*(?:[-*]\s+)?(?:Primary|Current|Initial|Default|Active|Project|My\s+)?Working\s+directory\s*[:=]\s*`?([^`\n]+?)`?(?=\n|$)/i,
-    /(?:^|\n)\s*(?:[-*]\s+)?cwd\s*[:=]\s*`?([^`\n]+?)`?(?=\n|$)/i,
-    /<cwd>\s*([^<\n]+)\s*<\/cwd>/i,
-  ];
-  const patterns: Array<[string, RegExp, (value: string) => string]> = [
-    ['cwd', cwdPatterns[0], (v) => `- Working directory: ${v}`],
-    ['cwd', cwdPatterns[1], (v) => `- Working directory: ${v}`],
-    ['cwd', cwdPatterns[2], (v) => `- Working directory: ${v}`],
-    ['git', /(?:^|\n)\s*(?:[-*]\s+)?Is(?:\s+(?:directory\s+)?(?:a\s+)?)git\s+repo(?:sitory)?\s*[:=]\s*([^\n<]+)/i, (v) => `- Is the directory a git repo: ${v}`],
-    ['platform', /(?:^|\n)\s*(?:[-*]\s+)?Platform\s*[:=]\s*([^\n<]+)/i, (v) => `- Platform: ${v}`],
-    ['os', /(?:^|\n)\s*(?:[-*]\s+)?OS\s+[Vv]ersion\s*[:=]\s*([^\n<]+)/i, (v) => `- OS version: ${v}`],
-  ];
-
-  for (const item of messages) {
-    if (!item || typeof item !== 'object') continue;
-    const msg = item as Record<string, unknown>;
-    let content = '';
-    if (typeof msg.content === 'string') {
-      content = msg.content;
-    } else if (Array.isArray(msg.content)) {
-      content = msg.content
-        .filter((part) => part && typeof part === 'object' && ['text', 'input_text', 'output_text'].includes(String((part as Record<string, unknown>).type || '').trim().toLowerCase()))
-        .map((part) => typeof (part as Record<string, unknown>).text === 'string' ? String((part as Record<string, unknown>).text) : '')
-        .join('\n');
-    }
-    if (!content) continue;
-    for (const [key, regex, formatter] of patterns) {
-      if (seen.has(key)) continue;
-      const match = content.match(regex);
-      if (!match) continue;
-      const value = String(match[1] || '').trim();
-      if (!value || value === '<workspace>') continue;
-      seen.add(key);
-      out.push(formatter(value));
-    }
-  }
-
-  return seen.has('cwd') ? out.join('\n') : '';
-}
-
-function buildWindsurfToolsPreamble(tools: Array<Record<string, unknown>>, toolChoice: unknown, environment?: string): string {
-  if (!Array.isArray(tools) || tools.length === 0) {
-    return '';
-  }
-  const lines: string[] = [];
-  if (typeof environment === 'string' && environment.trim()) {
-    lines.push('## Environment facts');
-    lines.push('The facts below are provided by the calling agent and describe the active execution context. Tool calls operate on these paths.');
-    lines.push('');
-    lines.push(environment.trim());
-    lines.push('');
-    lines.push(WINDSURF_WORKSPACE_STUB_OVERRIDE);
-    lines.push('');
-  } else {
-    lines.push(WINDSURF_WORKSPACE_STUB_OVERRIDE);
-    lines.push('');
-  }
-  lines.push(buildWindsurfToolProtocolHeader(resolveWindsurfToolChoice(toolChoice)));
-  lines.push('');
-  lines.push(WINDSURF_TOOL_REINFORCEMENT);
-
-  const specificRules = buildWindsurfToolSpecificRules(tools);
-  if (specificRules.length > 0) {
-    lines.push('');
-    lines.push('Tool argument fidelity rules:');
-    lines.push(...specificRules);
-  }
-
-  lines.push('');
-  lines.push('Available functions:');
-  for (const tool of tools) {
-    if (!tool || typeof tool !== 'object') {
-      continue;
-    }
-    const fn = tool.function && typeof tool.function === 'object' ? tool.function as Record<string, unknown> : {};
-    const name = typeof fn.name === 'string' ? fn.name.trim() : '';
-    if (!name) {
-      continue;
-    }
-    lines.push('');
-    lines.push(`### ${name}`);
-    if (typeof fn.description === 'string' && fn.description.trim()) {
-      lines.push(fn.description.trim());
-    }
-    if (fn.parameters !== undefined) {
-      lines.push('Parameters:');
-      lines.push('```json');
-      lines.push(JSON.stringify(fn.parameters, null, 2));
-      lines.push('```');
-    }
-  }
-  return lines.join('\n');
-}
-
-function buildWindsurfSchemaCompactToolsPreamble(tools: Array<Record<string, unknown>>, toolChoice: unknown, environment?: string): string {
-  if (!Array.isArray(tools) || tools.length === 0) {
-    return '';
-  }
-  const lines: string[] = [];
-  if (typeof environment === 'string' && environment.trim()) {
-    lines.push('## Environment facts');
-    lines.push('The facts below are provided by the calling agent and describe the active execution context. Tool calls operate on these paths.');
-    lines.push('');
-    lines.push(environment.trim());
-    lines.push('');
-    lines.push(WINDSURF_WORKSPACE_STUB_OVERRIDE);
-    lines.push('');
-  } else {
-    lines.push(WINDSURF_WORKSPACE_STUB_OVERRIDE);
-    lines.push('');
-  }
-  lines.push(buildWindsurfToolProtocolHeader(resolveWindsurfToolChoice(toolChoice)));
-  const specificRules = buildWindsurfToolSpecificRules(tools);
-  if (specificRules.length > 0) {
-    lines.push('');
-    lines.push('Tool argument fidelity rules:');
-    lines.push(...specificRules);
-  }
-  lines.push('');
-  lines.push('Available functions:');
-  for (const tool of tools) {
-    if (!tool || typeof tool !== 'object') continue;
-    const fn = tool.function && typeof tool.function === 'object' ? tool.function as Record<string, unknown> : {};
-    const name = typeof fn.name === 'string' ? fn.name.trim() : '';
-    if (!name) continue;
-    lines.push('');
-    lines.push(`### ${name}`);
-    if (typeof fn.description === 'string' && fn.description.trim()) {
-      lines.push(firstWindsurfSentence(fn.description.trim()));
-    }
-    if (fn.parameters !== undefined) {
-      lines.push(`Params: ${JSON.stringify(stripWindsurfSchemaDocs(fn.parameters))}`);
-    }
-  }
-  return lines.join('\n');
-}
-
-function buildWindsurfSkinnyToolsPreamble(tools: Array<Record<string, unknown>>, toolChoice: unknown, environment?: string): string {
-  if (!Array.isArray(tools) || tools.length === 0) {
-    return '';
-  }
-  const lines: string[] = [];
-  if (typeof environment === 'string' && environment.trim()) {
-    lines.push('## Environment facts');
-    lines.push(environment.trim());
-    lines.push('');
-    lines.push(WINDSURF_WORKSPACE_STUB_OVERRIDE);
-    lines.push('');
-  } else {
-    lines.push(WINDSURF_WORKSPACE_STUB_OVERRIDE);
-    lines.push('');
-  }
-  lines.push(buildWindsurfToolProtocolHeader(resolveWindsurfToolChoice(toolChoice)));
-  const specificRules = buildWindsurfToolSpecificRules(tools);
-  if (specificRules.length > 0) {
-    lines.push('');
-    lines.push('Tool argument fidelity rules:');
-    lines.push(...specificRules);
-  }
-  lines.push('');
-  lines.push('Available functions (signature shown; full JSON schemas omitted to fit upstream payload budget):');
-  for (const tool of tools) {
-    if (!tool || typeof tool !== 'object') continue;
-    const fn = tool.function && typeof tool.function === 'object' ? tool.function as Record<string, unknown> : {};
-    const name = typeof fn.name === 'string' ? fn.name.trim() : '';
-    if (!name) continue;
-    const sig = buildWindsurfParamSignature(fn.parameters);
-    const desc = typeof fn.description === 'string' && fn.description.trim()
-      ? firstWindsurfSentence(fn.description.trim())
-      : '';
-    if (sig && desc) lines.push(`- ${name}(${sig}) — ${desc}`);
-    else if (sig) lines.push(`- ${name}(${sig})`);
-    else if (desc) lines.push(`- ${name}() — ${desc}`);
-    else lines.push(`- ${name}()`);
-  }
-  return lines.join('\n');
-}
-
-function buildWindsurfCompactToolsPreamble(tools: Array<Record<string, unknown>>, toolChoice: unknown, environment?: string): string {
-  if (!Array.isArray(tools) || tools.length === 0) {
-    return '';
-  }
-  const names = tools
-    .map((tool) => {
-      const fn = tool?.function && typeof tool.function === 'object' ? tool.function as Record<string, unknown> : {};
-      return typeof fn.name === 'string' ? fn.name.trim() : '';
-    })
-    .filter(Boolean);
-  if (names.length === 0) {
-    return '';
-  }
-  const lines: string[] = [];
-  if (typeof environment === 'string' && environment.trim()) {
-    lines.push('## Environment facts');
-    lines.push('The facts below are provided by the calling agent and describe the active execution context. Tool calls operate on these paths.');
-    lines.push('');
-    lines.push(environment.trim());
-    lines.push('');
-    lines.push(WINDSURF_WORKSPACE_STUB_OVERRIDE);
-    lines.push('');
-  } else {
-    lines.push(WINDSURF_WORKSPACE_STUB_OVERRIDE);
-    lines.push('');
-  }
-  lines.push(buildWindsurfToolProtocolHeader(resolveWindsurfToolChoice(toolChoice)));
-  const specificRules = buildWindsurfToolSpecificRules(tools);
-  if (specificRules.length > 0) {
-    lines.push('');
-    lines.push('Tool argument fidelity rules:');
-    lines.push(...specificRules);
-  }
-  lines.push('');
-  lines.push(`Available functions: ${names.join(', ')}.`);
-  lines.push('Parameter schemas are omitted in this preamble due to total tool-list size. Match each <tool_call> to the function name; the calling agent will validate argument shapes when it executes the call.');
-  return lines.join('\n');
-}
-
-type WindsurfToolPreambleBudgetResult = {
-  ok: boolean;
-  preamble: string;
-  fullBytes: number;
-  finalBytes: number;
-  compacted: boolean;
-  tier: 'empty' | 'full' | 'schema-compact' | 'skinny' | 'names-only';
-  softBytes: number;
-  hardBytes: number;
-};
-
-export function applyWindsurfToolPreambleBudget(
-  tools: Array<Record<string, unknown>>,
-  toolChoice: unknown,
-  environment = '',
-  options?: { softBytes?: number; hardBytes?: number },
-): WindsurfToolPreambleBudgetResult {
-  const softBytes = options?.softBytes ?? 24000;
-  const hardBytes = options?.hardBytes ?? 48000;
-  const tiers = [
-    { tier: 'full' as const, build: buildWindsurfToolsPreamble },
-    { tier: 'schema-compact' as const, build: buildWindsurfSchemaCompactToolsPreamble },
-    { tier: 'skinny' as const, build: buildWindsurfSkinnyToolsPreamble },
-    { tier: 'names-only' as const, build: buildWindsurfCompactToolsPreamble },
-  ];
-  const full = tiers[0].build(tools, toolChoice, environment);
-  if (!full) {
-    return { ok: true, preamble: '', fullBytes: 0, finalBytes: 0, compacted: false, tier: 'empty', softBytes, hardBytes };
-  }
-  const fullBytes = Buffer.byteLength(full, 'utf8');
-  let chosen: { tier: 'full' | 'schema-compact' | 'skinny' | 'names-only'; preamble: string; bytes: number } = {
-    tier: 'full',
-    preamble: full,
-    bytes: fullBytes,
-  };
-  for (const tier of tiers) {
-    const text = tier.tier === 'full' ? full : tier.build(tools, toolChoice, environment);
-    const bytes = Buffer.byteLength(text, 'utf8');
-    chosen = { tier: tier.tier, preamble: text, bytes };
-    if (bytes <= softBytes) break;
-  }
-  const compacted = chosen.tier !== 'full';
-  if (chosen.bytes > hardBytes) {
-    return { ok: false, preamble: chosen.preamble, fullBytes, finalBytes: chosen.bytes, compacted, tier: chosen.tier, softBytes, hardBytes };
-  }
-  return { ok: true, preamble: chosen.preamble, fullBytes, finalBytes: chosen.bytes, compacted, tier: chosen.tier, softBytes, hardBytes };
 }
 
 function buildFileUri(value: string): string {
@@ -1457,6 +1078,15 @@ function cascadeHistoryBudget(modelUid: string): number {
   return 48_000;
 }
 
+
+function computeWindsurfQuotaCooldownUntilNextMidnightMs(nowMs = Date.now()): number {
+  const now = Number.isFinite(nowMs) && nowMs > 0 ? nowMs : Date.now();
+  const d = new Date(now);
+  const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0).getTime();
+  const ttl = next - now;
+  return Number.isFinite(ttl) && ttl > 0 ? Math.floor(ttl) : 24 * 60 * 60_000;
+}
+
 function mergeReasoningEffortIntoModel(model: string, body: Record<string, unknown>): string {
   const effort = String((body.reasoning_effort as string) || (((body.reasoning as Record<string, unknown>)?.effort) as string) || '').toLowerCase().trim();
   if (!effort || !VALID_EFFORTS.has(effort)) return model;
@@ -1538,26 +1168,20 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     if (Array.isArray(body.tools as unknown[])) {
       const tools = body.tools as Array<Record<string, unknown>>;
       if (tools.length > 0) {
-        const environment = extractWindsurfCallerEnvironment(body.messages);
-        const preambleBudget = applyWindsurfToolPreambleBudget(tools, body.tool_choice, environment);
-        if (!preambleBudget.ok) {
-          throw createWindsurfProviderError(
-            `windsurf tools preamble exceeds hard budget (${preambleBudget.finalBytes} > ${preambleBudget.hardBytes})`,
-            {
-              code: 'WINDSURF_TOOL_PREAMBLE_TOO_LARGE',
-              status: 400,
-              retryable: false,
-            },
-          );
-        }
-        if (preambleBudget.preamble) {
-          body.tools_preamble = preambleBudget.preamble;
-          body.windsurf_tools_preamble_tier = preambleBudget.tier;
+        const partition = partitionWindsurfTools(tools);
+        body.windsurf_native_mode = partition.nativeTools.length > 0;
+        body.windsurf_native_allowlist = uniqueWindsurfToolKinds(partition.mappedNativeTools);
+        body.windsurf_declared_native_tools = partition.nativeTools;
+        if (partition.unsupportedTools.length > 0) {
+          body.windsurf_text_tool_protocol = 'rcc';
+          body.windsurf_unsupported_text_tools = partition.unsupportedTools;
         } else {
-          delete body.tools_preamble;
-          delete body.windsurf_tools_preamble_tier;
+          delete body.windsurf_text_tool_protocol;
+          body.windsurf_unsupported_text_tools = [];
         }
-        body.windsurf_declared_tools = tools;
+        delete body.windsurf_declared_tools;
+        delete body.tools_preamble;
+        delete body.windsurf_tools_preamble_tier;
         if (body.tool_choice !== undefined) {
           body.windsurf_tool_choice = body.tool_choice;
           delete body.tool_choice;
@@ -1592,7 +1216,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     this.logWindsurfStage('sendRequestInternal.begin', {
       requestModel: model,
       messageCount: Array.isArray(body.messages) ? body.messages.length : 0,
-      hasToolsPreamble: typeof body.tools_preamble === 'string' && body.tools_preamble.length > 0,
       wantsSse,
     });
     const apiKey = await this.resolveCascadeApiKey();
@@ -1602,17 +1225,25 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     for (let attempt = 1; attempt <= maxCascadeAttempts; attempt += 1) {
       try {
         const semanticConversation = this.parseCascadeSemanticRoundtripSync(body.messages);
-        const resumeMeta = body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
-          ? (body.metadata as Record<string, unknown>).responsesResume
-          : undefined;
-        const isSubmitContinuation = resumeMeta && typeof resumeMeta === 'object' && !Array.isArray(resumeMeta);
         void wantsSse;
         if (!this.getPinnedGrpcRuntime()) {
           this.setPinnedGrpcRuntime(await this.resolveManagedRuntimeOptions());
         }
         const resolvedModel = resolveWindsurfChatCompletionsModel(model);
-        const toolPreamble = typeof body.tools_preamble === 'string' ? body.tools_preamble : '';
-        const text = this.buildCascadePromptText(body.messages, semanticConversation, resolvedModel.modelTag, toolPreamble);
+        const nativeMode = body.windsurf_native_mode === true;
+        const nativeAllowlist = Array.isArray(body.windsurf_native_allowlist) ? body.windsurf_native_allowlist.filter((item): item is WindsurfCascadeToolStepKind => typeof item === 'string' && item in WINDSURF_CASCADE_TOOL_CONFIG_FIELDS) : [];
+        const unsupportedTextTools = Array.isArray(body.windsurf_unsupported_text_tools) ? body.windsurf_unsupported_text_tools as Array<Record<string, unknown>> : [];
+        const nativeDeclaredTools = Array.isArray(body.windsurf_declared_native_tools) ? body.windsurf_declared_native_tools as Array<Record<string, unknown>> : [];
+        if (typeof body.tools_preamble === 'string' && body.tools_preamble.length > 0) {
+          throw createWindsurfProviderError('[windsurf] text tools_preamble is deprecated for Cascade protocol', {
+            code: 'WINDSURF_TEXT_TOOL_PROTOCOL_REMOVED',
+            status: 400,
+            retryable: false,
+          });
+        }
+        const text = this.buildCascadePromptText(body.messages, semanticConversation, resolvedModel.modelTag, unsupportedTextTools);
+        const completedNativeToolCallIds = this.buildCompletedNativeToolCallIds(semanticConversation);
+        const completedNativeToolSignatures = this.buildCompletedNativeToolSignatures(semanticConversation, nativeDeclaredTools);
         const isPanelMissing = (error: unknown): boolean => /panel state not found|not_found.*panel/i.test(String(error instanceof Error ? error.message : error || ''));
         const isExpiredCascade = (error: unknown): boolean => /not_found.*(cascade|trajectory)|(?:cascade|trajectory).*not[ _-]?found|expired.*cascade|unknown.*cascade/i.test(String(error instanceof Error ? error.message : error || ''));
         const isUntrustedWorkspace = (error: unknown): boolean => /untrusted workspace|workspace.*not.*trusted/i.test(String(error instanceof Error ? error.message : error || ''));
@@ -1642,8 +1273,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             sessionId,
             modelEnum: resolvedModel.enumValue,
             modelUid: resolvedModel.modelTag,
-            toolPreamble,
-            additionalSteps: isSubmitContinuation ? [] : this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation),
+            nativeMode,
+            nativeAllowlist,
+            additionalSteps: this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools),
           });
         } catch (error) {
           if (!isPanelMissing(error) && !isExpiredCascade(error) && !isUntrustedWorkspace(error)) {
@@ -1661,13 +1293,17 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             sessionId,
             modelEnum: resolvedModel.enumValue,
             modelUid: resolvedModel.modelTag,
-            toolPreamble,
-            additionalSteps: isSubmitContinuation ? [] : this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation),
+            nativeMode,
+            nativeAllowlist,
+            additionalSteps: this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools),
           });
         }
         const output = await this.pollCascadeTrajectorySteps({
           cascadeId,
           model,
+          unsupportedTextTools,
+          completedNativeToolCallIds,
+          completedNativeToolSignatures,
         });
         return this.buildCascadeCompletionFromOutput({
           model,
@@ -2125,67 +1761,48 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         'X-Devin-Auth1-Token': auth1Token,
       };
       const postAuthBody = Buffer.alloc(0);
-      let parsed = {
-        sessionToken: '',
-        accountId: undefined as string | undefined,
-        primaryOrgId: undefined as string | undefined,
-        error: undefined as string | undefined,
-      };
-      let lastErr: Error | null = null;
       const postAuthRequest = {
         method: 'POST',
         headers: postAuthHeaders,
         body: postAuthBody as unknown,
       } as RequestInit;
-      for (const endpoint of [WINDSURF_POST_AUTH_URL, WINDSURF_POST_AUTH_URL_LEGACY]) {
+      const postAuthEndpoints = [WINDSURF_POST_AUTH_URL, WINDSURF_POST_AUTH_LEGACY_URL];
+      let response: Response | null = null;
+      let postAuthEndpoint = WINDSURF_POST_AUTH_URL;
+      let lastPostAuthError: unknown = null;
+      for (const endpoint of postAuthEndpoints) {
+        this.logWindsurfStage('sessionCredential.postAuth.begin', { endpoint, loginEmail });
         try {
-          this.logWindsurfStage('sessionCredential.postAuth.begin', { endpoint, loginEmail });
-          const response = await this.fetchWithTimeout(endpoint, postAuthRequest, 30000);
-          const raw = await response.text();
-          const maybeJson = (() => { try { return JSON.parse(raw); } catch { return raw; } })();
-          const result = this.parseWindsurfPostAuthPayload(maybeJson);
-          if (response.ok && result.sessionToken) {
-            this.logWindsurfStage('sessionCredential.postAuth.done', {
-              endpoint,
-              loginEmail,
-              accountId: result.accountId || null,
-            });
-            parsed = {
-              sessionToken: result.sessionToken,
-              accountId: result.accountId,
-              primaryOrgId: result.primaryOrgId,
-              error: undefined,
-            };
-            lastErr = null;
-            break;
-          }
-          lastErr = createWindsurfProviderError(result.error || `windsurf post auth failed: ${response.status}`, {
-            code: 'WINDSURF_POSTAUTH_FAILED',
-            status: response.status || 502,
-            retryable: response.status >= 500,
-          });
+          response = await this.fetchWithTimeout(endpoint, postAuthRequest, 30000);
+          postAuthEndpoint = endpoint;
+          break;
         } catch (error) {
+          lastPostAuthError = error;
           this.logWindsurfStage('sessionCredential.postAuth.error', {
             endpoint,
             loginEmail,
             error: error instanceof Error ? error.message : String(error),
           });
-          lastErr = error instanceof Error
-            ? error
-            : createWindsurfProviderError(String(error), {
-                code: 'WINDSURF_POSTAUTH_FAILED',
-                status: 502,
-                retryable: true,
-              });
         }
       }
-      if (!parsed.sessionToken) {
-        throw lastErr ?? createWindsurfProviderError('windsurf session token missing', {
-          code: 'WINDSURF_SESSION_TOKEN_MISSING',
-          status: 401,
-          retryable: false,
+      if (!response) {
+        throw lastPostAuthError instanceof Error ? lastPostAuthError : new Error(String(lastPostAuthError ?? 'windsurf post auth failed'));
+      }
+      const raw = await response.text();
+      const maybeJson = (() => { try { return JSON.parse(raw); } catch { return raw; } })();
+      const parsed = this.parseWindsurfPostAuthPayload(maybeJson);
+      if (!response.ok || !parsed.sessionToken) {
+        throw createWindsurfProviderError(parsed.error || `windsurf post auth failed: ${response.status}`, {
+          code: 'WINDSURF_POSTAUTH_FAILED',
+          status: response.status || 502,
+          retryable: response.status >= 500,
         });
       }
+      this.logWindsurfStage('sessionCredential.postAuth.done', {
+        endpoint: postAuthEndpoint,
+        loginEmail,
+        accountId: parsed.accountId || null,
+      });
       this.windsurfSessionCredential = {
         apiKey: parsed.sessionToken,
         sessionToken: parsed.sessionToken,
@@ -2546,7 +2163,154 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   }
 
 
-  private buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation: WindsurfSemanticTurn[]): Buffer[] {
+  private isWindsurfNativeToolName(name: string, nativeTools?: unknown): boolean {
+    const normalized = windsurfToolLookupName(name);
+    const mapped = WINDSURF_TOOL_MAP[normalized];
+    if (!normalized || !mapped) return false;
+    const declared = collectWindsurfMappedTools(Array.isArray(nativeTools) ? nativeTools as Array<Record<string, unknown>> : []);
+    if (declared.length === 0) return true;
+    return declared.some((tool) => tool.kind === mapped.kind);
+  }
+
+  private buildWindsurfRccToolGuidance(unsupportedTools: Array<Record<string, unknown>>): string {
+    const tools = unsupportedTools.filter((tool) => {
+      const fn = tool && typeof tool === 'object' && !Array.isArray(tool) ? tool.function as Record<string, unknown> | undefined : undefined;
+      return typeof fn?.name === 'string' && fn.name.trim();
+    });
+    if (tools.length === 0) return '';
+    const lines: string[] = ['Tool-call output contract (STRICT)', 'Allowed unsupported tool names this turn:'];
+    for (const tool of tools) {
+      const fn = tool.function as Record<string, unknown>;
+      const name = String(fn.name).trim();
+      const description = typeof fn.description === 'string' && fn.description.trim() ? ` - ${fn.description.trim()}` : '';
+      lines.push(`- ${name}${description}`);
+      const params = fn.parameters && typeof fn.parameters === 'object' && !Array.isArray(fn.parameters) ? fn.parameters as Record<string, unknown> : {};
+      const props = params.properties && typeof params.properties === 'object' && !Array.isArray(params.properties) ? Object.keys(params.properties as Record<string, unknown>) : [];
+      if (props.length > 0) lines.push(`  parameters: ${props.join(', ')}`);
+    }
+    const first = tools[0]!.function as Record<string, unknown>;
+    const firstName = String(first.name).trim();
+    const params = first.parameters && typeof first.parameters === 'object' && !Array.isArray(first.parameters) ? first.parameters as Record<string, unknown> : {};
+    const props = params.properties && typeof params.properties === 'object' && !Array.isArray(params.properties) ? Object.keys(params.properties as Record<string, unknown>) : [];
+    const paramName = props[0] || 'input';
+    lines.push('If you need one of these unsupported tools, output only this RCC block and no prose:');
+    lines.push('<|RCC|tool_calls>');
+    lines.push(`<|RCC|invoke name="${firstName}">`);
+    lines.push(`<|RCC|parameter name="${paramName}"><![CDATA[value]]></|RCC|parameter>`);
+    lines.push('</|RCC|invoke>');
+    lines.push('</|RCC|tool_calls>');
+    lines.push('Do not use markdown fences, narrative tool intent, JSON-only tool payloads, invented tool names, MCP pseudo wrappers, or legacy tool protocols.');
+    return lines.join('\n');
+  }
+
+  private escapeRccCdata(value: string): string {
+    return String(value || '').replaceAll(']]>', ']]]]><![CDATA[>');
+  }
+
+  private buildWindsurfRccToolResultContext(semanticConversation: WindsurfSemanticTurn[], unsupportedTools: Array<Record<string, unknown>>): string {
+    if (!Array.isArray(unsupportedTools) || unsupportedTools.length === 0) return '';
+    const allowed = windsurfToolNameSet(unsupportedTools);
+    const nameById = new Map<string, string>();
+    for (const turn of semanticConversation) {
+      if (turn.type !== 'assistant' || !Array.isArray(turn.tool_calls)) continue;
+      for (const call of turn.tool_calls) {
+        if (allowed.has(call.name) || allowed.has(windsurfToolLookupName(call.name))) nameById.set(call.call_id, call.name);
+      }
+    }
+    const blocks: string[] = [];
+    for (const turn of semanticConversation) {
+      if (turn.type !== 'function_call_output') continue;
+      const name = nameById.get(turn.call_id) || turn.name || '';
+      if (!name || (!allowed.has(name) && !allowed.has(windsurfToolLookupName(name)))) continue;
+      blocks.push(`<|RCC|tool_result id="${turn.call_id}" name="${name}">\n<![CDATA[\n${this.escapeRccCdata(turn.output)}\n]]>\n</|RCC|tool_result>`);
+    }
+    if (blocks.length === 0) return '';
+    return [
+      'RCC tool results already returned. Use these results to answer or continue. Do not repeat the same RCC invocation unless a genuinely new tool call with new arguments is required.',
+      ...blocks,
+    ].join('\n\n');
+  }
+
+  private buildWindsurfRccPendingToolReminder(semanticConversation: WindsurfSemanticTurn[], unsupportedTools: Array<Record<string, unknown>>): string {
+    if (!Array.isArray(unsupportedTools) || unsupportedTools.length === 0) return '';
+    const declared = unsupportedTools
+      .map((tool) => {
+        const fn = tool && typeof tool === 'object' && !Array.isArray(tool) ? tool.function as Record<string, unknown> | undefined : undefined;
+        return typeof fn?.name === 'string' ? fn.name.trim() : '';
+      })
+      .filter((name) => name.length > 0);
+    if (declared.length === 0) return '';
+    const called = new Set<string>();
+    for (const turn of semanticConversation) {
+      if (turn.type !== 'assistant' || !Array.isArray(turn.tool_calls)) continue;
+      for (const call of turn.tool_calls) {
+        if (call && typeof call.name === 'string') called.add(windsurfToolLookupName(call.name));
+      }
+    }
+    const pending = declared.filter((name) => !called.has(windsurfToolLookupName(name)));
+    if (pending.length === 0) return '';
+    const hasCompletedNativeStep = semanticConversation.some((turn) => {
+      if (turn.type !== 'function_call_output') return false;
+      const name = windsurfToolLookupName(turn.name || '');
+      return Boolean(name && WINDSURF_TOOL_MAP[name]);
+    });
+    if (!hasCompletedNativeStep) return '';
+    return [
+      `You have not yet called these required unsupported tools: ${pending.join(', ')}.`,
+      'If the user request still requires them, output the RCC block now and no prose.',
+    ].join('\n');
+  }
+
+  private buildWindsurfNativeToolSignature(kind: string, payload: Record<string, unknown>): string {
+    const normalizedKind = windsurfToolLookupName(kind);
+    if (normalizedKind === 'run_command') {
+      return `${normalizedKind}:${stableStringify({
+        command_line: String(payload.command_line ?? payload.command ?? payload.cmd ?? payload.proposed_command_line ?? ''),
+        cwd: String(payload.cwd ?? payload.workdir ?? ''),
+      })}`;
+    }
+    return `${normalizedKind}:${stableStringify(payload || {})}`;
+  }
+
+  private buildCompletedNativeToolCallIds(semanticConversation: WindsurfSemanticTurn[]): string[] {
+    const out = new Set<string>();
+    for (const turn of semanticConversation) {
+      if (turn.type !== 'function_call_output') continue;
+      const id = typeof turn.call_id === 'string' ? turn.call_id.trim() : '';
+      if (!id) continue;
+      out.add(id);
+      out.add(`fc_${id}`);
+      if (id.startsWith('fc_')) {
+        const stripped = id.slice(3);
+        if (stripped) out.add(stripped);
+      }
+    }
+    return Array.from(out);
+  }
+
+  private buildCompletedNativeToolSignatures(semanticConversation: WindsurfSemanticTurn[], nativeTools?: Array<Record<string, unknown>>): string[] {
+    const out = new Set<string>();
+    const toolResultById = new Map<string, string>();
+    for (const turn of semanticConversation) {
+      if (turn.type === 'function_call_output') {
+        toolResultById.set(turn.call_id, turn.output);
+      }
+    }
+    for (const turn of semanticConversation) {
+      if (turn.type !== 'assistant' || !Array.isArray(turn.tool_calls)) continue;
+      for (const toolCall of turn.tool_calls) {
+        if (!toolResultById.has(toolCall.call_id)) continue;
+        if (!this.isWindsurfNativeToolName(toolCall.name, nativeTools)) continue;
+        const mapped = WINDSURF_TOOL_MAP[String(toolCall.name || '').toLowerCase()];
+        if (!mapped) continue;
+        const payload = mapped.forward(toolCall.arguments || {});
+        out.add(this.buildWindsurfNativeToolSignature(mapped.kind, payload));
+      }
+    }
+    return Array.from(out);
+  }
+
+  private buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation: WindsurfSemanticTurn[], nativeTools?: Array<Record<string, unknown>>): Buffer[] {
     const out: Buffer[] = [];
     const toolResultById = new Map<string, string>();
     for (const turn of semanticConversation) {
@@ -2557,6 +2321,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     for (const turn of semanticConversation) {
       if (turn.type !== 'assistant' || !Array.isArray(turn.tool_calls)) continue;
       for (const toolCall of turn.tool_calls) {
+        if (!this.isWindsurfNativeToolName(toolCall.name, nativeTools)) continue;
         const mapped = WINDSURF_TOOL_MAP[String(toolCall.name || '').toLowerCase()];
         if (!mapped) continue;
         const payload = mapped.forward(toolCall.arguments || {});
@@ -2578,6 +2343,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       write_to_file: { typeEnum: 23, oneofField: 23 },
       run_command: { typeEnum: 28, oneofField: 28 },
       find: { typeEnum: 34, oneofField: 34 },
+      grep_search: { typeEnum: 13, oneofField: 13 },
       read_url_content: { typeEnum: 40, oneofField: 40 },
       search_web: { typeEnum: 42, oneofField: 42 },
       grep_search_v2: { typeEnum: 105, oneofField: 105 },
@@ -2690,6 +2456,19 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     ]);
   }
 
+  private buildNativeCascadeToolConfig(allowlist: WindsurfCascadeToolStepKind[]): Buffer {
+    const list = allowlist.length > 0 ? allowlist : ['view_file', 'run_command', 'grep_search_v2', 'find', 'list_directory'];
+    const parts: Buffer[] = [];
+    const includesKind = (kind: string) => list.includes(kind as WindsurfCascadeToolStepKind);
+    if (includesKind('run_command')) parts.push(writeProtoMessageField(8, Buffer.alloc(0)));
+    if (includesKind('view_file')) parts.push(writeProtoMessageField(10, Buffer.alloc(0)));
+    if (includesKind('list_directory')) parts.push(writeProtoMessageField(19, Buffer.alloc(0)));
+    if (includesKind('grep_search_v2')) parts.push(writeProtoMessageField(33, Buffer.alloc(0)));
+    if (includesKind('find')) parts.push(writeProtoMessageField(5, Buffer.alloc(0)));
+    for (const name of list) parts.push(writeProtoStringField(32, name));
+    return Buffer.concat(parts);
+  }
+
   private buildSendCascadeMessageRequest(args: {
     apiKey: string;
     cascadeId: string;
@@ -2697,22 +2476,21 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     sessionId: string;
     modelEnum: number;
     modelUid: string;
-    toolPreamble?: string;
+    nativeMode?: boolean;
+    nativeAllowlist?: WindsurfCascadeToolStepKind[];
     additionalSteps?: Buffer[];
   }): Buffer {
     const conversationalParts: Buffer[] = [
-      writeProtoVarintField(4, 3),
+      writeProtoVarintField(4, args.nativeMode ? 1 : 3),
     ];
-    if (args.toolPreamble) {
-      conversationalParts.push(writeProtoMessageField(12, Buffer.concat([
-        writeProtoVarintField(1, 1),
-        writeProtoStringField(2, `${args.toolPreamble}\n\n${WINDSURF_CASCADE_TOOL_REINFORCEMENT}`),
-      ])));
-      conversationalParts.push(writeProtoMessageField(13, Buffer.concat([
-        writeProtoVarintField(1, 1),
-        writeProtoStringField(2, WINDSURF_CASCADE_COMMUNICATION_WITH_TOOLS),
-      ])));
-    } else {
+    if (typeof (args as Record<string, unknown>).toolPreamble === 'string' && ((args as Record<string, unknown>).toolPreamble as string).length > 0) {
+      throw createWindsurfProviderError('[windsurf] text tool preamble is deprecated for Cascade protocol', {
+        code: 'WINDSURF_TEXT_TOOL_PROTOCOL_REMOVED',
+        status: 500,
+        retryable: false,
+      });
+    }
+    if (!args.nativeMode) {
       conversationalParts.push(writeProtoMessageField(10, Buffer.concat([
         writeProtoVarintField(1, 1),
         writeProtoStringField(2, 'No tools are available.'),
@@ -2748,11 +2526,12 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       plannerParts.push(writeProtoVarintField(1, args.modelEnum));
     }
     plannerParts.push(writeProtoVarintField(6, 32768));
-    if (!args.toolPreamble) {
-      plannerParts.push(writeProtoMessageField(11, Buffer.concat([
-        writeProtoVarintField(1, 1),
-        writeProtoStringField(2, ''),
-      ])));
+    plannerParts.push(writeProtoMessageField(11, Buffer.concat([
+      writeProtoVarintField(1, 1),
+      writeProtoStringField(2, ''),
+    ])));
+    if (args.nativeMode) {
+      plannerParts.push(writeProtoMessageField(13, this.buildNativeCascadeToolConfig(args.nativeAllowlist || [])));
     }
     const cascadeConfig = Buffer.concat([
       writeProtoMessageField(1, Buffer.concat(plannerParts)),
@@ -2868,12 +2647,32 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     }
   }
 
-  private extractLatestCascadeUserText(semanticConversation: WindsurfSemanticTurn[]): string {
+  private extractLatestCascadeUserText(semanticConversation: WindsurfSemanticTurn[], tailParts: string[] = []): string {
+    const normalizedTailParts = tailParts
+      .filter((part) => typeof part === 'string' && part.trim())
+      .map((part) => part.trim());
+    let latestUserText = '';
+    const terminalToolResults: string[] = [];
     for (let index = semanticConversation.length - 1; index >= 0; index -= 1) {
       const turn = semanticConversation[index];
-      if (turn?.type === 'user' && typeof turn.text === 'string' && turn.text.trim()) {
-        return turn.text;
+      if (turn?.type === 'function_call_output' && typeof turn.output === 'string' && turn.output.trim()) {
+        terminalToolResults.unshift(`Tool result for ${turn.name || turn.call_id}:\n${turn.output}`);
+        continue;
       }
+      if (turn?.type === 'assistant' && terminalToolResults.length > 0) {
+        continue;
+      }
+      if (turn?.type === 'user' && typeof turn.text === 'string' && turn.text.trim()) {
+        latestUserText = turn.text;
+        break;
+      }
+      if (terminalToolResults.length > 0) {
+        break;
+      }
+    }
+    const baseParts = [...(latestUserText ? [latestUserText] : []), ...terminalToolResults];
+    if (baseParts.length > 0) {
+      return [...baseParts, ...normalizedTailParts].join('\n\n');
     }
     throw createWindsurfProviderError('[windsurf] cascade semantic conversation missing terminal user text', {
       code: 'WINDSURF_REQUEST_BUILD_FAILED',
@@ -2882,55 +2681,42 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     });
   }
 
-  private formatCascadeHistoryToolCall(name: string, args: Record<string, unknown>, callId: string): string {
-    return `<tool_call>${JSON.stringify({ name, arguments: args, id: callId })}</tool_call>`;
-  }
-
-  private formatCascadeHistoryToolResult(callId: string, output: string): string {
-    return `<tool_result tool_call_id="${escapeHistoryTag(callId, 'tool_result')}">\n${escapeHistoryTag(output, 'tool_result')}\n</tool_result>`;
-  }
-
   private buildCascadeHistoryTurnText(turn: WindsurfSemanticTurn): string {
     if (turn.type === 'assistant') {
       const parts: string[] = [];
       if (turn.text) parts.push(turn.text);
-      if (Array.isArray(turn.tool_calls)) {
-        for (const call of turn.tool_calls) {
-          parts.push(this.formatCascadeHistoryToolCall(call.name, call.arguments, call.call_id));
-        }
-      }
       return parts.join('\n');
     }
     if (turn.type === 'function_call_output') {
-      return this.formatCascadeHistoryToolResult(turn.call_id, turn.output);
+      return '';
     }
     return turn.text;
   }
 
-  private buildCascadePromptText(messages: unknown, semanticConversation: WindsurfSemanticTurn[], modelUid: string, toolPreamble = ''): string {
+  private buildCascadePromptText(messages: unknown, semanticConversation: WindsurfSemanticTurn[], modelUid: string, unsupportedTextTools: Array<Record<string, unknown>> = []): string {
     const rawMessages = Array.isArray(messages) ? messages.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object') : [];
     const systemMsgs = rawMessages.filter((msg) => String(msg.role || '').trim().toLowerCase() === 'system');
     const convo = semanticConversation.filter((turn) => turn.type === 'user' || turn.type === 'assistant' || turn.type === 'function_call_output');
     let sysText = systemMsgs.map((msg) => contentToString(msg.content)).join('\n').trim();
     if (sysText) sysText = compactSystemPromptForCascade(sysText);
-
-    const applyUserToolPreamble = (text: string): string => {
-      const preamble = typeof toolPreamble === 'string' ? toolPreamble.trim() : '';
-      return preamble ? `${preamble}\n\n${text}` : text;
-    };
+    const rccResults = this.buildWindsurfRccToolResultContext(semanticConversation, unsupportedTextTools);
+    const rccGuidance = this.buildWindsurfRccToolGuidance(unsupportedTextTools);
+    const rccPendingReminder = this.buildWindsurfRccPendingToolReminder(semanticConversation, unsupportedTextTools);
+    const tailParts = rccPendingReminder ? [rccGuidance, rccPendingReminder].filter((part) => typeof part === 'string' && part.trim()) : [];
+    const prefixParts = [sysText, rccResults, rccGuidance, rccPendingReminder].filter((part) => typeof part === 'string' && part.trim());
 
     if (convo.length <= 1) {
-      const latest = applyUserToolPreamble(this.extractLatestCascadeUserText(semanticConversation));
-      return sysText ? `${sysText}\n\n${latest}` : latest;
+      const latest = this.extractLatestCascadeUserText(semanticConversation, tailParts);
+      return prefixParts.length > 0 ? `${prefixParts.join('\n\n')}\n\n${latest}` : latest;
     }
 
     const maxHistoryBytes = cascadeHistoryBudget(modelUid);
     const lines: string[] = [];
-    let historyBytes = sysText ? sysText.length : 0;
+    let historyBytes = prefixParts.join('\n\n').length;
     let firstIncluded = 0;
     for (let index = convo.length - 2; index >= 0; index -= 1) {
       const turn = convo[index]!;
-      const tag = turn.type === 'user' || turn.type === 'function_call_output' ? 'human' : 'assistant';
+      const tag = turn.type === 'user' ? 'human' : 'assistant';
       const line = `<${tag}>\n${escapeHistoryTag(this.buildCascadeHistoryTurnText(turn), tag)}\n</${tag}>`;
       if (historyBytes + line.length > maxHistoryBytes && lines.length > 0) {
         firstIncluded = index + 1;
@@ -2940,12 +2726,12 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       historyBytes += line.length;
       firstIncluded = index;
     }
-    const latest = applyUserToolPreamble(this.extractLatestCascadeUserText(semanticConversation));
+    const latest = this.extractLatestCascadeUserText(semanticConversation, tailParts);
     let text = `The following is a multi-turn conversation. You MUST remember and use all information from prior turns.\n\n${lines.join('\n\n')}\n\n<human>\n${latest}\n</human>`;
     if (firstIncluded > 0) {
       text = `<truncation_note>The conversation above is truncated — ${firstIncluded} earlier turns were dropped due to length limits. The user's original task and the most recent tool results are preserved. Do NOT ask the user to repeat their task; continue from the latest context.</truncation_note>\n\n${text}`;
     }
-    return sysText ? `${sysText}\n\n${text}` : text;
+    return prefixParts.length > 0 ? `${prefixParts.join('\n\n')}\n\n${text}` : text;
   }
 
   private async sendStartCascade(args: {
@@ -2987,7 +2773,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     sessionId: string;
     modelEnum: number;
     modelUid: string;
-    toolPreamble?: string;
+    nativeMode?: boolean;
+    nativeAllowlist?: WindsurfCascadeToolStepKind[];
     additionalSteps?: Buffer[];
   }): Promise<void> {
     try {
@@ -3003,6 +2790,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   private async pollCascadeTrajectorySteps(args: {
     cascadeId: string;
     model: string;
+    unsupportedTextTools?: Array<Record<string, unknown>>;
+    completedNativeToolCallIds?: string[];
+    completedNativeToolSignatures?: string[];
   }): Promise<{
     candidate: Record<string, unknown>;
     usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } | null;
@@ -3021,6 +2811,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       let idleCount = 0;
       let lastGrowthAt = startedAt;
       let lastStepCount = 0;
+      const completedNativeToolCallIds = new Set(Array.isArray(args.completedNativeToolCallIds) ? args.completedNativeToolCallIds : []);
+      const completedNativeToolSignatures = new Set(Array.isArray(args.completedNativeToolSignatures) ? args.completedNativeToolSignatures : []);
 
       while (Date.now() - startedAt < maxWaitMs) {
         const stepsResponse = await this.grpcUnaryLocal(
@@ -3061,15 +2853,31 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             }
             if (Array.isArray(row.toolCalls)) {
               for (const rawCall of row.toolCalls as Array<Record<string, unknown>>) {
-                const id = typeof rawCall.id === 'string' && rawCall.id ? rawCall.id : `${typeof rawCall.name === 'string' ? rawCall.name : 'tool'}:${typeof rawCall.argumentsJson === 'string' ? rawCall.argumentsJson : '{}'}:${toolCalls.length}`;
+                if (typeof rawCall.result === 'string' && rawCall.result.length > 0) continue;
+                const rawName = typeof rawCall.name === 'string' ? rawCall.name : '';
+                const rawArgsJson = typeof rawCall.argumentsJson === 'string' ? rawCall.argumentsJson : '{}';
+                const rawId = typeof rawCall.id === 'string' ? rawCall.id.trim() : '';
+                if (rawId && completedNativeToolCallIds.has(rawId)) continue;
+                if (rawName) {
+                  try {
+                    const parsedArgs = JSON.parse(rawArgsJson);
+                    if (parsedArgs && typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)) {
+                      const signature = this.buildWindsurfNativeToolSignature(rawName, parsedArgs as Record<string, unknown>);
+                      if (completedNativeToolSignatures.has(signature)) continue;
+                    }
+                  } catch {
+                    // malformed upstream arguments are preserved for the normal parser below
+                  }
+                }
+                const id = rawId || `${rawName || 'tool'}:${rawArgsJson}:${toolCalls.length}`;
                 if (seenToolCallIds.has(id)) continue;
                 seenToolCallIds.add(id);
                 toolCalls.push({
                   id,
                   type: 'function',
                   function: {
-                    name: typeof rawCall.name === 'string' ? rawCall.name : '',
-                    arguments: typeof rawCall.argumentsJson === 'string' ? rawCall.argumentsJson : '{}',
+                    name: rawName,
+                    arguments: rawArgsJson,
                   },
                 });
               }
@@ -3082,26 +2890,14 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         }
         if (accumulatedText) sawText = true;
 
-        const textualToolCalls = toolCalls.length > 0 ? [] : this.extractToolCallsFromText(accumulatedText);
-        const markupToolCalls = textualToolCalls.map((call) => ({
-          id: call.id || `call_${createHash('sha256').update(`${call.name}:${stableStringify(call.arguments)}`).digest('hex').slice(0, 16)}`,
-          type: 'function',
-          function: {
-            name: call.name,
-            arguments: stableStringify(call.arguments),
-          },
-        }));
-        if (toolCalls.length > 0 || markupToolCalls.length > 0) {
-          const finalToolCalls = toolCalls.length > 0 ? toolCalls : markupToolCalls;
-          return {
-            candidate: {
-              role: 'assistant',
-              content: markupToolCalls.length > 0 ? this.stripToolCallMarkup(accumulatedText) : accumulatedText,
-              ...(accumulatedThinking ? { reasoning_content: accumulatedThinking } : {}),
-              tool_calls: finalToolCalls,
-            },
-            usage,
-          };
+        if (toolCalls.length > 0) {
+          const candidate = this.parseCascadeAssistantTurnSync({
+            role: 'assistant',
+            content: accumulatedText,
+            ...(accumulatedThinking ? { reasoning_content: accumulatedThinking } : {}),
+            tool_calls: toolCalls,
+          }, args.unsupportedTextTools || []);
+          return { candidate, usage };
         }
 
         lastText = accumulatedText || lastText;
@@ -3124,7 +2920,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
           idleCount += 1;
           const growthSettled = Date.now() - lastGrowthAt > pollIntervalMs * 2;
           const canBreak = sawText ? idleCount >= 2 && growthSettled : idleCount >= 4;
-          if (canBreak && (lastText || lastThinking)) {
+          if (canBreak) {
             const finalStepsResponse = await this.grpcUnaryLocal(
               `${WINDSURF_LS_SERVICE}/GetCascadeTrajectorySteps`,
               this.buildGetTrajectoryStepsRequest(args.cascadeId, 0),
@@ -3138,14 +2934,28 @@ export class WindsurfChatProvider extends HttpTransportProvider {
               finalText += typeof row.responseText === 'string' && row.responseText ? row.responseText : typeof row.text === 'string' ? row.text : '';
               finalThinking += typeof row.thinking === 'string' ? row.thinking : '';
             }
-            return {
-              candidate: {
-                role: 'assistant',
-                content: finalText || lastText || '',
-                ...((finalThinking || lastThinking) ? { reasoning_content: finalThinking || lastThinking } : {}),
-              },
-              usage,
-            };
+            const finalContent = finalText || lastText || '';
+            const finalReasoning = finalThinking || lastThinking || '';
+            if (!finalContent.trim() && !finalReasoning.trim() && (completedNativeToolCallIds.size > 0 || completedNativeToolSignatures.size > 0)) {
+              this.logWindsurfStage('poll.emptyAfterNativeResult', {
+                cascadeId: args.cascadeId,
+                steps: finalSteps.length,
+                completedNativeToolCallIds: Array.from(completedNativeToolCallIds),
+                completedNativeToolSignatures: Array.from(completedNativeToolSignatures),
+                unsupportedTextTools: (args.unsupportedTextTools || []).map((tool) => {
+                  const fn = tool && typeof tool === 'object' && !Array.isArray(tool) ? tool.function as Record<string, unknown> | undefined : undefined;
+                  return typeof fn?.name === 'string' ? fn.name : '';
+                }).filter(Boolean),
+              });
+              await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+              continue;
+            }
+            const candidate = this.parseCascadeAssistantTurnSync({
+              role: 'assistant',
+              content: finalContent,
+              ...(finalReasoning ? { reasoning_content: finalReasoning } : {}),
+            }, args.unsupportedTextTools || []);
+            return { candidate, usage };
           }
         }
 
@@ -3552,19 +3362,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       this.closeLocalGrpcSession();
       try {
         const sessionId = this.resolveWindsurfCascadeSessionId(true);
-        await this.ensureWindsurfCascadeWarmup(apiKey, sessionId);
-        const response = await this.grpcUnaryLocal(
-          `${WINDSURF_LS_SERVICE}/StartCascade`,
-          this.buildStartCascadeRequest(apiKey, sessionId),
-        );
-        const cascadeId = this.parseStartCascadeResponse(response);
-        if (!cascadeId) {
-          throw createWindsurfProviderError('[windsurf] StartCascade returned empty cascade_id', {
-            code: 'WINDSURF_RESPONSE_PARSE_FAILED',
-            status: 502,
-            retryable: false,
-          });
-        }
+        const cascadeId = await this.sendStartCascade({ apiKey, sessionId });
         return { sessionId, cascadeId };
       } catch (error) {
         lastError = error;
@@ -3769,6 +3567,99 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         }
       }
 
+      const nativeStepFields: Array<[number, WindsurfCascadeToolStepKind]> = [
+        [14, 'view_file'],
+        [15, 'list_directory'],
+        [23, 'write_to_file'],
+        [28, 'run_command'],
+        [13, 'grep_search'],
+        [34, 'find'],
+        [105, 'grep_search_v2'],
+        [40, 'read_url_content'],
+        [42, 'search_web'],
+      ];
+      for (const [fieldNo, kind] of nativeStepFields) {
+        const nativeField = this.getProtoField(sf, fieldNo, 2);
+        if (!nativeField) continue;
+        const body = this.parseProtoFields(nativeField.value as Uint8Array);
+        let argumentsJson = '';
+        let result = '';
+        try {
+          if (kind === 'view_file') {
+            argumentsJson = stableStringify({
+              absolute_path_uri: this.readProtoString(body, 1),
+              offset: this.readProtoNumber(body, 11) ?? 0,
+              limit: this.readProtoNumber(body, 12) ?? 0,
+              start_line: this.readProtoNumber(body, 2) ?? 0,
+              end_line: this.readProtoNumber(body, 3) ?? 0,
+            });
+            result = this.readProtoString(body, 4);
+          } else if (kind === 'run_command') {
+            argumentsJson = stableStringify({
+              command_line: this.readProtoString(body, 23) || this.readProtoString(body, 1),
+              cwd: this.readProtoString(body, 2),
+            });
+            const combined = this.getProtoField(body, 21, 2);
+            if (combined) {
+              result = this.readProtoString(this.parseProtoFields(combined.value as Uint8Array), 1);
+            }
+            if (!result) {
+              const stdout = this.readProtoString(body, 4);
+              const stderr = this.readProtoString(body, 5);
+              result = stdout + (stderr ? `
+[stderr]
+${stderr}` : '');
+            }
+          } else if (kind === 'grep_search_v2') {
+            argumentsJson = stableStringify({
+              pattern: this.readProtoString(body, 2),
+              path: this.readProtoString(body, 3),
+              glob: this.readProtoString(body, 4),
+              output_mode: this.readProtoString(body, 5),
+              head_limit: this.readProtoNumber(body, 12) ?? 0,
+            });
+            result = this.readProtoString(body, 15);
+          } else if (kind === 'grep_search') {
+            argumentsJson = stableStringify({
+              query: this.readProtoString(body, 1),
+              search_path_uri: this.readProtoString(body, 11),
+            });
+            result = this.readProtoString(body, 3);
+          } else if (kind === 'find') {
+            argumentsJson = stableStringify({
+              pattern: this.readProtoString(body, 1),
+              search_directory: this.readProtoString(body, 10),
+            });
+            result = this.readProtoString(body, 11);
+          } else if (kind === 'list_directory') {
+            argumentsJson = stableStringify({ directory_path_uri: this.readProtoString(body, 1) });
+            result = this.getAllProtoFields(body, 2, 2)
+              .map((field) => Buffer.from(field.value as Uint8Array).toString('utf8'))
+              .join('\n');
+          } else if (kind === 'write_to_file') {
+            argumentsJson = stableStringify({
+              target_file_uri: this.readProtoString(body, 1),
+              code_content: this.getAllProtoFields(body, 2, 2).map((field) => Buffer.from(field.value as Uint8Array).toString('utf8')),
+            });
+          } else if (kind === 'search_web') {
+            argumentsJson = stableStringify({ query: this.readProtoString(body, 1) });
+            result = this.readProtoString(body, 5);
+          } else if (kind === 'read_url_content') {
+            argumentsJson = stableStringify({ url: this.readProtoString(body, 1) });
+            result = this.readProtoString(body, 5);
+          }
+        } catch {
+          argumentsJson = argumentsJson || '{}';
+        }
+        (row.toolCalls as Array<Record<string, unknown>>).push({
+          id: `native:${kind}:${out.length}`,
+          name: kind,
+          argumentsJson,
+          result,
+          cascade_native: true,
+        });
+      }
+
       if (plannerField) {
         const pf = this.parseProtoFields(plannerField.value as Uint8Array);
         const responseText = this.readProtoString(pf, 1);
@@ -3826,7 +3717,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     apiKey: string;
     semanticConversation: WindsurfSemanticTurn[];
     model: string;
-    toolPreamble?: string;
     tools?: Array<Record<string, unknown>>;
     toolChoice?: unknown;
   }): Record<string, unknown> {
@@ -3835,9 +3725,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const request: Record<string, unknown> = {
       metadata: buildWindsurfCascadeModelConfigsMetadata(args.apiKey),
       chatMessagePrompts: prompts,
-      ...(typeof args.toolPreamble === 'string' && args.toolPreamble.length > 0
-        ? { systemPrompt: args.toolPreamble }
-        : {}),
       completionsRequest: {
         model: resolvedModel.enumValue,
         modelTag: resolvedModel.modelTag,
@@ -4263,124 +4150,88 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   }
 
 
-  private safeParseJsonValue(raw: string): unknown {
-    if (typeof raw !== 'string') return null;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      // WindsurfAPI salvage behavior: tolerate one complete balanced JSON
-      // object embedded in extra text/trailing braces.
+  private harvestWindsurfRccToolCalls(text: string, unsupportedTextTools: Array<Record<string, unknown>>): { text: string; toolCalls: Array<Record<string, unknown>> } {
+    const raw = String(text || '');
+    if (!raw.includes('<|RCC|tool_calls>')) return { text: raw, toolCalls: [] };
+    if (!Array.isArray(unsupportedTextTools) || unsupportedTextTools.length === 0) {
+      throw createWindsurfProviderError('[windsurf] RCC tool call emitted but no unsupported tools were declared', {
+        code: 'WINDSURF_RCC_UNDECLARED_TOOL',
+        status: 502,
+        retryable: false,
+      });
     }
-    const text = raw.trim();
-    const start = text.search(/[\[{]/);
-    if (start < 0) return null;
-    const open = text[start]!;
-    const close = open === '{' ? '}' : ']';
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let index = start; index < text.length; index += 1) {
-      const ch = text[index]!;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === '\\' && inString) {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = !inString;
-        continue;
-      }
-      if (inString) continue;
-      if (ch === open) depth += 1;
-      else if (ch === close) {
-        depth -= 1;
-        if (depth === 0) {
-          try {
-            return JSON.parse(text.slice(start, index + 1));
-          } catch {
-            return null;
-          }
+    const rootRe = /<\|RCC\|tool_calls>\s*([\s\S]*?)\s*<\/\|RCC\|tool_calls>/g;
+    const allowed = windsurfToolNameSet(unsupportedTextTools);
+    const toolCalls: Array<Record<string, unknown>> = [];
+    const seenRccCallIds = new Set<string>();
+    const seenRccCallSignatures = new Set<string>();
+    let sawRoot = false;
+    let cleaned = raw;
+    for (const match of raw.matchAll(rootRe)) {
+      sawRoot = true;
+      const full = match[0];
+      const inner = match[1] || '';
+      const invokeRe = /<\|RCC\|invoke\s+name="([^"]+)">\s*([\s\S]*?)\s*<\/\|RCC\|invoke>/g;
+      let sawInvoke = false;
+      for (const invoke of inner.matchAll(invokeRe)) {
+        sawInvoke = true;
+        const name = String(invoke[1] || '').trim();
+        if (!allowed.has(name) && !allowed.has(windsurfToolLookupName(name))) {
+          throw createWindsurfProviderError(`[windsurf] RCC undeclared tool: ${name}`, {
+            code: 'WINDSURF_RCC_UNDECLARED_TOOL',
+            status: 502,
+            retryable: false,
+          });
         }
+        const body = invoke[2] || '';
+        const params: Record<string, unknown> = {};
+        const paramRe = /<\|RCC\|parameter\s+name="([^"]+)">\s*([\s\S]*?)\s*<\/\|RCC\|parameter>/g;
+        let sawParam = false;
+        for (const param of body.matchAll(paramRe)) {
+          sawParam = true;
+          const paramName = String(param[1] || '').trim();
+          let value = String(param[2] || '');
+          const cdata = value.match(/^<!\[CDATA\[([\s\S]*?)\]\]>$/);
+          if (cdata) value = cdata[1] || '';
+          params[paramName] = value;
+        }
+        if (!sawParam) {
+          throw createWindsurfProviderError('[windsurf] malformed RCC tool call: missing parameter', {
+            code: 'WINDSURF_RCC_MALFORMED',
+            status: 502,
+            retryable: false,
+          });
+        }
+        const argsJson = stableStringify(params);
+        const id = `call_${createHash('sha256').update(`${name}:${argsJson}`).digest('hex').slice(0, 16)}`;
+        const signature = `${name}:${argsJson}`;
+        if (seenRccCallIds.has(id) || seenRccCallSignatures.has(signature)) {
+          continue;
+        }
+        seenRccCallIds.add(id);
+        seenRccCallSignatures.add(signature);
+        toolCalls.push({ id, type: 'function', function: { name, arguments: argsJson } });
       }
-    }
-    return null;
-  }
-
-  private extractToolCallsFromParsedValue(parsed: unknown): Array<{ name: string; arguments: Record<string, unknown>; id?: string }> {
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
-    const record = parsed as Record<string, unknown>;
-    const rows: unknown[] = Array.isArray(record.tool_calls) ? record.tool_calls : [record];
-    const out: Array<{ name: string; arguments: Record<string, unknown>; id?: string }> = [];
-    for (const row of rows) {
-      if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
-      const item = row as Record<string, unknown>;
-      const inner = item.function_call && typeof item.function_call === 'object' && !Array.isArray(item.function_call)
-        ? item.function_call as Record<string, unknown>
-        : item.function && typeof item.function === 'object' && !Array.isArray(item.function)
-          ? item.function as Record<string, unknown>
-          : item.tool_call && typeof item.tool_call === 'object' && !Array.isArray(item.tool_call)
-            ? item.tool_call as Record<string, unknown>
-            : item;
-      const name = typeof inner.name === 'string' ? inner.name.trim() : '';
-      if (!name || !('arguments' in inner)) continue;
-      const rawArgs = inner.arguments;
-      const parsedArgs = typeof rawArgs === 'string'
-        ? this.safeParseJsonValue(rawArgs)
-        : rawArgs;
-      const args = parsedArgs && typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)
-        ? parsedArgs as Record<string, unknown>
-        : {};
-      const id = typeof item.id === 'string' && item.id.trim()
-        ? item.id.trim()
-        : typeof inner.id === 'string' && inner.id.trim()
-          ? inner.id.trim()
-          : undefined;
-      out.push({ name, arguments: args, ...(id ? { id } : {}) });
-    }
-    return out;
-  }
-
-  private extractToolCallsFromMarkup(text: string): Array<{ name: string; arguments: Record<string, unknown>; id?: string }> {
-    const out: Array<{ name: string; arguments: Record<string, unknown>; id?: string }> = [];
-    const re = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(text)) !== null) {
-      const raw = (match[1] || '').trim();
-      if (!raw) continue;
-      const parsed = this.safeParseJsonValue(raw);
-      const calls = this.extractToolCallsFromParsedValue(parsed);
-      if (calls.length === 0) {
-        throw new Error('[windsurf] assistant tool_call markup must contain a valid tool call json object');
+      if (!sawInvoke) {
+        throw createWindsurfProviderError('[windsurf] malformed RCC tool call: missing invoke', {
+          code: 'WINDSURF_RCC_MALFORMED',
+          status: 502,
+          retryable: false,
+        });
       }
-      out.push(...calls);
+      cleaned = cleaned.replace(full, '');
     }
-    return out;
-  }
-
-  private extractToolCallsFromJsonText(text: string): Array<{ name: string; arguments: Record<string, unknown>; id?: string }> {
-    const trimmed = text.trim();
-    if (!trimmed) return [];
-    const parsed = this.safeParseJsonValue(trimmed);
-    if (!parsed) return [];
-    if (Array.isArray(parsed)) {
-      return parsed.flatMap((item) => this.extractToolCallsFromParsedValue(item));
+    if (!sawRoot) {
+      throw createWindsurfProviderError('[windsurf] malformed RCC tool call wrapper', {
+        code: 'WINDSURF_RCC_MALFORMED',
+        status: 502,
+        retryable: false,
+      });
     }
-    return this.extractToolCallsFromParsedValue(parsed);
+    return { text: cleaned.trim(), toolCalls };
   }
 
-  private extractToolCallsFromText(text: string): Array<{ name: string; arguments: Record<string, unknown>; id?: string }> {
-    const markup = this.extractToolCallsFromMarkup(text);
-    return markup.length > 0 ? markup : this.extractToolCallsFromJsonText(text);
-  }
-
-  private stripToolCallMarkup(text: string): string {
-    return text.replace(/<tool_call>\s*[\s\S]*?\s*<\/tool_call>/gi, '').trim();
-  }
-
-  private parseCascadeAssistantTurnSync(candidate: unknown): Record<string, unknown> {
+  private parseCascadeAssistantTurnSync(candidate: unknown, unsupportedTextTools: Array<Record<string, unknown>> = []): Record<string, unknown> {
     const record = candidate && typeof candidate === 'object' ? candidate as Record<string, unknown> : {};
     const rawContent = Array.isArray(record.content) ? record.content : [];
     const rawTopLevelToolCalls = Array.isArray(record.tool_calls) ? record.tool_calls : [];
@@ -4449,21 +4300,22 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       if (!callId) {
         throw new Error('[windsurf] assistant tool call missing call_id');
       }
+      const argsJson = stableStringify(args);
+      const signature = `${name}:${argsJson}`;
       if (seenToolCallIds.has(callId)) {
         throw new Error('[windsurf] duplicate assistant tool call id in assistant candidate');
       }
-      seenToolCallIds.add(callId);
-      const signature = `${name}:${stableStringify(args)}`;
       if (seenToolCallSignatures.has(signature)) {
         throw new Error('[windsurf] duplicate assistant tool call signature in assistant candidate');
       }
+      seenToolCallIds.add(callId);
       seenToolCallSignatures.add(signature);
       toolCalls.push({
         id: callId,
         type: 'function',
         function: {
           name,
-          arguments: stableStringify(args),
+          arguments: argsJson,
         },
       });
     }
@@ -4504,10 +4356,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       if (!callId) {
         throw new Error('[windsurf] assistant tool call missing call_id');
       }
-      if (seenToolCallIds.has(callId)) {
-        throw new Error('[windsurf] duplicate assistant tool call id in assistant candidate');
-      }
-      seenToolCallIds.add(callId);
       let args: Record<string, unknown>;
       if (type === 'custom_tool_call') {
         if (typeof block.input === 'string') {
@@ -4532,48 +4380,40 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       } else {
         throw new Error('[windsurf] assistant tool call arguments must be object');
       }
+      const argsJson = stableStringify(args);
+      const signature = `${name}:${argsJson}`;
+      if (seenToolCallIds.has(callId)) {
+        throw new Error('[windsurf] duplicate assistant tool call id in assistant candidate');
+      }
+      if (seenToolCallSignatures.has(signature)) {
+        throw new Error('[windsurf] duplicate assistant tool call signature in assistant candidate');
+      }
+      seenToolCallIds.add(callId);
+      seenToolCallSignatures.add(signature);
       toolCalls.push({
         id: callId,
         type: 'function',
         function: {
           name,
-          arguments: stableStringify(args),
+          arguments: argsJson,
         },
       });
-      const signature = `${name}:${stableStringify(args)}`;
-      if (seenToolCallSignatures.has(signature)) {
-        throw new Error('[windsurf] duplicate assistant tool call signature in assistant candidate');
-      }
-      seenToolCallSignatures.add(signature);
     }
 
-    const rawText = textParts.join('');
-    const markupToolCalls = hasTopLevelToolCalls ? [] : this.extractToolCallsFromMarkup(rawText);
-    const jsonTextToolCalls = hasTopLevelToolCalls || markupToolCalls.length > 0 ? [] : this.extractToolCallsFromJsonText(rawText);
-    const textualToolCalls = markupToolCalls.length > 0 ? markupToolCalls : jsonTextToolCalls;
-    if (textualToolCalls.length > 0) {
-      for (const call of textualToolCalls) {
-        const callId = call.id || `call_${createHash('sha256').update(`${call.name}:${stableStringify(call.arguments)}`).digest('hex').slice(0, 16)}`;
-        if (seenToolCallIds.has(callId)) {
-          throw new Error('[windsurf] duplicate assistant tool call id in assistant candidate');
-        }
-        seenToolCallIds.add(callId);
-        const signature = `${call.name}:${stableStringify(call.arguments)}`;
-        if (seenToolCallSignatures.has(signature)) {
-          throw new Error('[windsurf] duplicate assistant tool call signature in assistant candidate');
-        }
-        seenToolCallSignatures.add(signature);
-        toolCalls.push({
-          id: callId,
-          type: 'function',
-          function: {
-            name: call.name,
-            arguments: stableStringify(call.arguments),
-          },
+    let rawText = textParts.join('');
+    const rccHarvest = this.harvestWindsurfRccToolCalls(rawText, unsupportedTextTools);
+    if (rccHarvest.toolCalls.length > 0) {
+      if (toolCalls.length > 0) {
+        throw createWindsurfProviderError('[windsurf] native trajectory tool call conflicts with RCC text tool call', {
+          code: 'WINDSURF_TOOL_PROTOCOL_CONFLICT',
+          status: 502,
+          retryable: false,
         });
       }
+      for (const call of rccHarvest.toolCalls) toolCalls.push(call);
+      rawText = rccHarvest.text;
     }
-    const text = textualToolCalls.length > 0 ? (markupToolCalls.length > 0 ? this.stripToolCallMarkup(rawText) : '') : rawText;
+    const text = rawText;
     const reasoning_content = reasoningParts.join('');
     if (!text && toolCalls.length === 0 && !reasoning_content) {
       throw new Error('[windsurf] empty assistant completion');
@@ -4965,7 +4805,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const promptTokens = inputTokens + cacheReadTokens;
     const totalTokens = promptTokens + outputTokens + cacheWriteTokens;
 
-    return {
+    const chatPayload: Record<string, unknown> = {
       id: `chatcmpl-${randomUUID()}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
@@ -4977,6 +4817,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
           finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
         },
       ],
+      ...(toolCalls.length === 0 ? { tool_outputs: this.extractFunctionCallOutputRows(candidate) } : {}),
       ...(usage ? {
         usage: {
           prompt_tokens: promptTokens,
@@ -5001,6 +4842,42 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         },
       } : {}),
     };
+    return chatPayload;
+  }
+
+  private extractFunctionCallOutputRows(candidate: unknown): Array<Record<string, unknown>> {
+    const out: Array<Record<string, unknown>> = [];
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item);
+        return;
+      }
+      if (!value || typeof value !== 'object') return;
+      const row = value as Record<string, unknown>;
+      const type = typeof row.type === 'string' ? row.type.trim() : '';
+      if (type === 'function_call_output' || type === 'tool_result' || type === 'custom_tool_call_output' || type === 'tool_message') {
+        const callId = typeof row.call_id === 'string' && row.call_id.trim()
+          ? row.call_id.trim()
+          : typeof row.tool_call_id === 'string' && row.tool_call_id.trim()
+            ? row.tool_call_id.trim()
+            : typeof row.id === 'string' && row.id.trim()
+              ? row.id.trim()
+              : '';
+        if (callId) {
+          const output = typeof row.output === 'string'
+            ? row.output
+            : typeof row.content === 'string'
+              ? row.content
+              : row.output == null
+                ? ''
+                : JSON.stringify(row.output);
+          out.push({ tool_call_id: callId, output });
+        }
+      }
+      for (const value of Object.values(row)) visit(value);
+    };
+    visit(candidate);
+    return out;
   }
 
   private classifyWindsurfCascadeError(error: unknown): Error {
@@ -5011,7 +4888,24 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       && typeof structured.status === 'number'
       && typeof structured.retryable === 'boolean'
     );
-    if (isAlreadyStructured) {
+    const normalizedSourceMessage = source.message.toLowerCase();
+    const isStructuredWeeklyQuota =
+      normalizedSourceMessage.includes('weekly usage quota has been exhausted')
+      || normalizedSourceMessage.includes('weekly quota has been exhausted')
+      || normalizedSourceMessage.includes('weekly usage quota exhausted');
+    if (isAlreadyStructured && !isStructuredWeeklyQuota) {
+      return structured;
+    }
+    if (isAlreadyStructured && isStructuredWeeklyQuota) {
+      attachWindsurfErrorFields(structured, {
+        code: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+        status: 429,
+        retryable: false,
+        rateLimitKind: 'daily_limit',
+        cooldownOverrideMs: computeWindsurfQuotaCooldownUntilNextMidnightMs(),
+        quotaScope: 'weekly',
+        quotaReason: 'windsurf_weekly_exhausted',
+      });
       return structured;
     }
     const classified = new Error(source.message) as Error & Record<string, unknown>;
@@ -5031,7 +4925,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             ? nestedError.code
             : null;
     const statusText = typeof nestedError?.status === 'string' ? nestedError.status.toLowerCase() : '';
-    const message = source.message.toLowerCase();
+    const message = normalizedSourceMessage;
     const isWeeklyQuota =
       message.includes('weekly usage quota has been exhausted')
       || message.includes('weekly quota has been exhausted')
@@ -5084,7 +4978,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       retryable: isWeeklyQuota || isResourceExhausted || isPolicyBlocked ? false : isAuth ? false : isParseFailure ? false : true,
       status: isWeeklyQuota || isResourceExhausted ? 429 : isPolicyBlocked ? 451 : isAuth ? 401 : 502,
       rateLimitKind: isWeeklyQuota || isResourceExhausted ? 'daily_limit' : undefined,
-      cooldownOverrideMs: isWeeklyQuota || isResourceExhausted ? 24 * 60 * 60_000 : undefined,
+      cooldownOverrideMs: isWeeklyQuota ? computeWindsurfQuotaCooldownUntilNextMidnightMs() : isResourceExhausted ? 24 * 60 * 60_000 : undefined,
       quotaScope: isWeeklyQuota ? 'weekly' : isResourceExhausted ? 'model' : undefined,
       quotaReason: isWeeklyQuota ? 'windsurf_weekly_exhausted' : isResourceExhausted ? 'windsurf_model_rate_limited' : undefined,
     });

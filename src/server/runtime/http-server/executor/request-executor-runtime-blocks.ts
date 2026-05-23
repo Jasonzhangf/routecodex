@@ -191,9 +191,25 @@ function isAlreadyClientFinalResponseBody(body: unknown): boolean {
   return false;
 }
 
-export function shouldBypassProviderResponseConversion(normalized: PipelineExecutionResult): boolean {
+export function shouldBypassProviderResponseConversion(
+  normalized: PipelineExecutionResult,
+  options?: { entryEndpoint?: string; providerProtocol?: string }
+): boolean {
   if (typeof normalized.status === 'number' && normalized.status >= 400) {
     return true;
+  }
+  const entry = typeof options?.entryEndpoint === 'string' ? options.entryEndpoint.toLowerCase() : '';
+  const protocol = typeof options?.providerProtocol === 'string' ? options.providerProtocol.trim().toLowerCase() : '';
+  if (entry.includes('/v1/responses') && protocol === 'openai-responses') {
+    const body = normalized.body;
+    if (body && typeof body === 'object' && !Array.isArray(body)) {
+      const object = typeof (body as Record<string, unknown>).object === 'string'
+        ? String((body as Record<string, unknown>).object).trim()
+        : '';
+      if (object === 'chat.completion' || object === 'chat.completion.chunk') {
+        return false;
+      }
+    }
   }
   return isAlreadyClientFinalResponseBody(normalized.body);
 }

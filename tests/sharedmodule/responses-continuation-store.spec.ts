@@ -5,6 +5,7 @@ import {
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
   releaseResponsesConversationRequestPayload,
+  resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,
   responsesConversationStore
 } from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
@@ -587,5 +588,91 @@ describe('responses conversation store plain continuation restore', () => {
         }
       })
     ).not.toThrow();
+
+    const resumed = resumeResponsesConversation(
+      'resp-store-pending-call',
+      { tool_outputs: [{ tool_call_id: 'call_pending_call_1', output: '/tmp/project\n' }], stream: false },
+      { requestId: 'req-resp-store-pending-call-submit' }
+    );
+    expect(resumed.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'run pwd' }]
+      },
+      expect.objectContaining({
+        type: 'function_call',
+        call_id: 'call_pending_call_1',
+        name: 'exec_command',
+        arguments: '{"cmd":"pwd"}'
+      }),
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'call_pending_call_1',
+        output: '/tmp/project\n'
+      })
+    ]);
+  });
+
+  it('keeps native Cascade run_command function_call arguments during submit_tool_outputs resume', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-resp-store-native-run-command',
+      sessionId: 'sess-native-run-command',
+      payload: {
+        model: 'gpt-5.4-medium'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'run pwd' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: 'req-resp-store-native-run-command',
+      response: {
+        id: 'resp-store-native-run-command',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_native_run_command_1',
+            call_id: 'native:run_command:3',
+            name: 'run_command',
+            arguments: '{"command":"pwd","workdir":"/Users/fanzhang/Documents/github/routecodex"}',
+            status: 'in_progress'
+          }
+        ]
+      }
+    });
+
+    const resumed = resumeResponsesConversation(
+      'resp-store-native-run-command',
+      { tool_outputs: [{ tool_call_id: 'native:run_command:3', output: '/Users/fanzhang/Documents/github/routecodex\n' }], stream: false },
+      { requestId: 'req-resp-store-native-run-command-submit' }
+    );
+    expect(resumed.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'run pwd' }]
+      },
+      expect.objectContaining({
+        type: 'function_call',
+        call_id: 'native:run_command:3',
+        name: 'run_command',
+        arguments: '{"command":"pwd","workdir":"/Users/fanzhang/Documents/github/routecodex"}'
+      }),
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'native:run_command:3',
+        output: '/Users/fanzhang/Documents/github/routecodex\n'
+      })
+    ]);
   });
 });

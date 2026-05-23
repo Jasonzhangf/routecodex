@@ -8,7 +8,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
         "servertool": {
             "enabled": true,
             "internalTools": {
-                
+
                 "clock": {
                     "name": "clock",
                     "enabled": true,
@@ -65,8 +65,8 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "trigger": { "type": "auto", "canonicalName": "vision_auto", "phase": "post", "priority": 60 },
                     "execution": { "mode": "auto_hook", "stripAfterExecute": true }
                 },
-                
-                
+
+
                 "exec_command": {
                     "name": "exec_command",
                     "enabled": true,
@@ -74,13 +74,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "trigger": { "type": "tool_call", "canonicalName": "exec_command" },
                     "execution": { "mode": "guarded", "stripAfterExecute": true }
                 },
-                "apply_patch": {
-                    "name": "apply_patch",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "tool_call", "canonicalName": "apply_patch" },
-                    "execution": { "mode": "guarded", "stripAfterExecute": true }
-                }
+
             },
             "skeleton": {
                 "requestPrepare": { "enabled": true },
@@ -97,7 +91,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "toolNameByFlowId": {
                         "continue_execution_flow": "continue_execution",
                         "stop_message_flow": "stop_message_auto",
-                        "apply_patch_guard": "apply_patch_guard",
                         "exec_command_guard": "exec_command_guard",
                         "web_search_flow": "web_search",
                         "vision_flow": "vision_auto",
@@ -130,15 +123,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "flowPolicy": {
                         "profilesByFlowId": {
 
-                            "apply_patch_guard": {
-                                "autoLimit": true,
-                                "flowOnlyLoopLimit": true
-                            },
-                            "apply_patch_read_before_retry_guard": {
-                                "autoLimit": true,
-                                "flowOnlyLoopLimit": true,
-                                "stickyProvider": true
-                            },
                             "exec_command_guard": {
                                 "autoLimit": true,
                                 "flowOnlyLoopLimit": true
@@ -273,8 +257,40 @@ mod tests {
         assert!(parsed
             .get("servertool")
             .and_then(|v| v.get("internalTools"))
-            
+
             .is_some());
+    }
+
+    #[test]
+    fn skeleton_no_longer_registers_apply_patch_servertool() {
+        let raw = get_default_servertool_skeleton_document_json().expect("skeleton json");
+        let parsed: Value = serde_json::from_str(&raw).expect("parse skeleton");
+        let internal_tools = parsed
+            .get("servertool")
+            .and_then(|v| v.get("internalTools"))
+            .and_then(|v| v.as_object())
+            .expect("internal tools object");
+        assert!(!internal_tools.contains_key("apply_patch"));
+
+        let progress = parsed
+            .get("servertool")
+            .and_then(|v| v.get("skeleton"))
+            .and_then(|v| v.get("progress"))
+            .and_then(|v| v.get("toolNameByFlowId"))
+            .and_then(|v| v.as_object())
+            .expect("toolNameByFlowId object");
+        assert!(!progress.contains_key("apply_patch_guard"));
+
+        let profiles = parsed
+            .get("servertool")
+            .and_then(|v| v.get("skeleton"))
+            .and_then(|v| v.get("followup"))
+            .and_then(|v| v.get("flowPolicy"))
+            .and_then(|v| v.get("profilesByFlowId"))
+            .and_then(|v| v.as_object())
+            .expect("profilesByFlowId object");
+        assert!(!profiles.contains_key("apply_patch_guard"));
+        assert!(!profiles.contains_key("apply_patch_read_before_retry_guard"));
     }
 
     #[test]
@@ -310,23 +326,11 @@ mod tests {
     }
 
     #[test]
-    fn resolves_apply_patch_read_before_retry_guard_as_sticky_provider_followup() {
-        let raw = plan_servertool_followup_runtime_json(
+    fn apply_patch_followup_profile_is_gone() {
+        let raw = resolve_servertool_followup_flow_profile_json(
             "apply_patch_read_before_retry_guard".to_string(),
         )
-        .expect("runtime plan json");
-        let parsed: Value = serde_json::from_str(&raw).expect("parse runtime plan");
-        assert_eq!(
-            parsed.get("outcomeMode").and_then(|v| v.as_str()),
-            Some("reenter")
-        );
-        assert_eq!(
-            parsed.get("stickyProvider").and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        assert_eq!(
-            parsed.get("autoLimit").and_then(|v| v.as_bool()),
-            Some(true)
-        );
+        .expect("profile json");
+        assert_eq!(raw, "null");
     }
 }

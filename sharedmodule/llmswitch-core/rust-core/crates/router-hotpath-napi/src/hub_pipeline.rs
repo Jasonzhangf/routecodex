@@ -1399,50 +1399,6 @@ fn resolve_hub_shadow_compare_config(metadata: &Value) -> Option<Value> {
     Some(Value::Object(out))
 }
 
-fn resolve_apply_patch_tool_mode_from_tools(tools_raw: &Value) -> Option<String> {
-    let tools = tools_raw.as_array()?;
-    if tools.is_empty() {
-        return None;
-    }
-    for entry in tools {
-        let record = match entry.as_object() {
-            Some(v) => v,
-            None => continue,
-        };
-        let tool_type = record
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if !tool_type.is_empty() && tool_type != "function" {
-            continue;
-        }
-        let fn_obj = record.get("function").and_then(|v| v.as_object());
-        let name = fn_obj
-            .and_then(|obj| obj.get("name"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if name != "apply_patch" {
-            continue;
-        }
-        let has_hashline_filepath = fn_obj
-            .and_then(|obj| obj.get("parameters"))
-            .and_then(|v| v.as_object())
-            .and_then(|row| row.get("properties"))
-            .and_then(|v| v.as_object())
-            .map(|properties| properties.contains_key("filePath") || properties.contains_key("file_path"))
-            .unwrap_or(false);
-        if has_hashline_filepath {
-            return Some("hashline".to_string());
-        }
-        return Some("schema".to_string());
-    }
-    None
-}
-
 fn read_responses_resume_from_metadata(metadata: &Value) -> Option<Value> {
     let metadata_obj = metadata.as_object()?;
     let resume = metadata_obj.get("responsesResume")?;
@@ -2454,26 +2410,6 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
         }
     }
 
-    let apply_patch_tool_mode = payload
-        .as_object()
-        .and_then(|row| row.get("tools"))
-        .and_then(resolve_apply_patch_tool_mode_from_tools);
-    if let Some(mode) = apply_patch_tool_mode {
-        if !output_metadata
-            .get("runtime")
-            .and_then(|v| v.as_object())
-            .is_some()
-        {
-            output_metadata.insert("runtime".to_string(), Value::Object(Map::new()));
-        }
-        if let Some(runtime) = output_metadata
-            .get_mut("runtime")
-            .and_then(|v| v.as_object_mut())
-        {
-            runtime.insert("applyPatchToolMode".to_string(), Value::String(mode));
-        }
-    }
-
     output_metadata.insert(
         "processedAt".to_string(),
         Value::String(chrono::Utc::now().to_rfc3339()),
@@ -2941,19 +2877,6 @@ pub fn resolve_hub_shadow_compare_config_json(metadata_json: String) -> napi::Re
 }
 
 #[napi_derive::napi]
-pub fn resolve_apply_patch_tool_mode_from_tools_json(tools_json: String) -> napi::Result<String> {
-    let tools_raw: Value = serde_json::from_str(&tools_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse tools JSON: {}", e)))?;
-    let output = resolve_apply_patch_tool_mode_from_tools(&tools_raw);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize apply patch tool mode from tools: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
 pub fn is_search_route_id_json(route_id_json: String) -> napi::Result<String> {
     let route_id: Value = serde_json::from_str(&route_id_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse routeId JSON: {}", e)))?;
@@ -3354,17 +3277,16 @@ mod tests {
         };
         let result = run_hub_pipeline(input).expect("hub pipeline");
         let metadata = result.metadata.expect("metadata value");
-        assert_eq!(
+        assert!(
             metadata
                 .get("runtime")
                 .and_then(|v| v.get("applyPatchToolMode"))
-                .and_then(|v| v.as_str()),
-            Some("schema")
+                .is_none()
         );
     }
 
     #[test]
-    fn test_run_hub_pipeline_extracts_hashline_mode_when_filepath_declared() {
+    fn test_run_hub_pipeline_does_not_extract_hashline_mode_when_filepath_declared() {
         let input = HubPipelineInput {
             request_id: "req_apply_patch_hashline".to_string(),
             endpoint: "/v1/chat/completions".to_string(),
@@ -3395,12 +3317,11 @@ mod tests {
         };
         let result = run_hub_pipeline(input).expect("hub pipeline");
         let metadata = result.metadata.expect("metadata value");
-        assert_eq!(
+        assert!(
             metadata
                 .get("runtime")
                 .and_then(|v| v.get("applyPatchToolMode"))
-                .and_then(|v| v.as_str()),
-            Some("hashline")
+                .is_none()
         );
     }
 
@@ -5036,64 +4957,6 @@ mod tests {
         });
         let output = resolve_hub_shadow_compare_config(&metadata);
         assert!(output.is_none());
-    }
-
-    #[test]
-    fn test_resolve_apply_patch_tool_mode_from_tools_schema() {
-        let tools = json!([
-            {
-                "type": "function",
-                "function": { "name": "apply_patch", "parameters": { "type": "object", "properties": { "patch": { "type": "string" } }, "required": ["patch"] } }
-            }
-        ]);
-        let mode = resolve_apply_patch_tool_mode_from_tools(&tools);
-        assert_eq!(mode.as_deref(), Some("schema"));
-    }
-
-    #[test]
-    fn test_resolve_apply_patch_tool_mode_from_tools_declared_filepath_prefers_hashline() {
-        let tools = json!([
-            {
-                "type": "function",
-                "function": {
-                    "name": "apply_patch",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "patch": { "type": "string" },
-                            "filePath": { "type": "string" }
-                        },
-                        "required": ["patch"]
-                    }
-                }
-            }
-        ]);
-        let mode = resolve_apply_patch_tool_mode_from_tools(&tools);
-        assert_eq!(mode.as_deref(), Some("hashline"));
-    }
-
-    #[test]
-    fn test_resolve_apply_patch_tool_mode_from_tools_defaults_to_schema() {
-        let tools = json!([
-            {
-                "type": "function",
-                "function": { "name": "apply_patch" }
-            }
-        ]);
-        let mode = resolve_apply_patch_tool_mode_from_tools(&tools);
-        assert_eq!(mode.as_deref(), Some("schema"));
-    }
-
-    #[test]
-    fn test_resolve_apply_patch_tool_mode_from_tools_non_matching_returns_none() {
-        let tools = json!([
-            {
-                "type": "function",
-                "function": { "name": "exec_command" }
-            }
-        ]);
-        let mode = resolve_apply_patch_tool_mode_from_tools(&tools);
-        assert!(mode.is_none());
     }
 
     #[test]

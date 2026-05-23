@@ -6,6 +6,10 @@ export type PortMode = 'router' | 'provider';
 export type ProtocolBehavior = 'direct' | 'relay' | 'auto';
 export type SameProtocolBehavior = 'direct' | 'relay';
 
+export interface PortStopMessageConfig {
+  enabled?: boolean;
+}
+
 export interface PortConfig {
   port: number;
   host: string;
@@ -21,6 +25,8 @@ export interface PortConfig {
   bodyLimit?: string;
   // router mode: same-protocol direct bypass behavior (default: 'direct')
   sameProtocolBehavior?: SameProtocolBehavior;
+  // per-port stopMessage gate; when enabled=false, stopMessage auto followup is disabled for requests entering this port.
+  stopMessage?: PortStopMessageConfig;
 }
 
 export type PortStatus = 'starting' | 'running' | 'error' | 'stopped';
@@ -35,6 +41,7 @@ export interface PortRuntimeState {
   status: PortStatus;
   // router mode: same-protocol behavior
   sameProtocolBehavior?: SameProtocolBehavior;
+  stopMessage?: PortStopMessageConfig;
   activeConnections: number;
   error?: string;
   serverId?: string;
@@ -51,6 +58,7 @@ export interface PortCreateOrUpdateRequest {
   apikey?: string;
   timeout?: number;
   bodyLimit?: string;
+  stopMessage?: PortStopMessageConfig;
 }
 
 export interface PortView {
@@ -62,6 +70,7 @@ export interface PortView {
   providerBinding?: string;
   // router mode: same-protocol behavior
   sameProtocolBehavior?: SameProtocolBehavior;
+  stopMessage?: PortStopMessageConfig;
   status: PortStatus;
   activeConnections: number;
   error?: string;

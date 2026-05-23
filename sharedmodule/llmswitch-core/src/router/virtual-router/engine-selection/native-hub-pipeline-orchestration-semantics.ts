@@ -64,8 +64,6 @@ export interface NativeAdapterContextObjectCarriersOutput {
   clientDisconnected?: boolean;
 }
 
-export type NativeApplyPatchToolMode = 'schema';
-
 export interface NativeLiftResponsesResumeIntoSemanticsOutput {
   request: Record<string, unknown>;
   metadata: Record<string, unknown>;
@@ -202,8 +200,6 @@ export {
   resolveStopMessageRouterMetadataWithNative,
   extractAdapterContextMetadataFieldsWithNative
 } from './native-hub-pipeline-orchestration-semantics-metadata-policy.js';
-
-export { resolveApplyPatchToolModeFromToolsWithNative } from './native-hub-pipeline-orchestration-semantics-applypatch-policy.js';
 
 export {
   applyHasImageAttachmentFlagWithNative,

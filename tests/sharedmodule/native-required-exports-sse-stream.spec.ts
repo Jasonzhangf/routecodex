@@ -28,4 +28,8 @@ describe('native required exports for sse stream helpers', () => {
     const missing = REQUIRED_NATIVE_HOTPATH_EXPORTS.filter((key) => typeof binding[key] !== 'function');
     expect(missing).toEqual([]);
   });
+
+  test('does not require removed apply_patch legacy export', () => {
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('augmentApplyPatchErrorContentJson');
+  });
 });

@@ -130,4 +130,45 @@ describe('anthropic tool schema stability (root regression)', () => {
     expect(questions.items.properties.options.items.required).toEqual(['label', 'description']);
     expect(Object.keys(questions.items.properties.options.items.properties).sort()).toEqual(['description', 'label']);
   });
+
+  test('preserves apply_patch hashline fields from chat process contract for anthropic outbound', () => {
+    const tools: any[] = [
+      {
+        type: 'function',
+        function: {
+          name: 'apply_patch',
+          description:
+            'Edit files through apply_patch. The upstream authoring contract is hashline-first: provide `filePath`/`file_path`, provide `fileContent`/`file_content`, and write `patch` in hashline syntax.',
+          parameters: {
+            type: 'object',
+            properties: {
+              patch: { type: 'string', description: 'hashline patch text' },
+              input: { type: 'string', description: 'compat alias' },
+              filePath: { type: 'string', description: 'target file path' },
+              file_path: { type: 'string', description: 'target file path snake' },
+              fileContent: { type: 'string', description: 'current file content' },
+              file_content: { type: 'string', description: 'current file content snake' }
+            },
+            required: ['patch'],
+            additionalProperties: false
+          }
+        }
+      }
+    ];
+
+    const anthropicTools = mapChatToolsToAnthropicTools(tools) as any[];
+    expect(anthropicTools).toHaveLength(1);
+
+    const schema = anthropicTools[0].input_schema as Record<string, unknown>;
+    const properties = (schema.properties ?? {}) as Record<string, unknown>;
+    expect(Object.keys(properties).sort()).toEqual([
+      'fileContent',
+      'filePath',
+      'file_content',
+      'file_path',
+      'input',
+      'patch'
+    ]);
+    expect(schema.required).toEqual(['patch']);
+  });
 });

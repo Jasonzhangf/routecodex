@@ -843,7 +843,6 @@ describe('ProviderQuotaDaemonModule', () => {
         errorClassification: 'unrecoverable',
         routePoolSize: 3,
         rateLimitKind: 'daily_limit',
-        cooldownOverrideMs: 24 * 60 * 60_000,
         quotaScope: 'weekly',
         quotaReason: 'windsurf_weekly_exhausted'
       }
@@ -855,7 +854,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(snapshotBeforeStop[providerKey]).toBeDefined();
     expect(snapshotBeforeStop[providerKey].inPool).toBe(false);
     expect(snapshotBeforeStop[providerKey].reason).toBe('blacklist');
-    expect(snapshotBeforeStop[providerKey].blacklistUntil).toBe(now + 24 * 60 * 60_000);
+    expect(snapshotBeforeStop[providerKey].blacklistUntil).toBe(Date.parse('2026-05-22T00:00:00.000Z'));
 
     await mod1.stop();
 
@@ -867,7 +866,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(snapshotAfterRestart[providerKey]).toBeDefined();
     expect(snapshotAfterRestart[providerKey].inPool).toBe(false);
     expect(snapshotAfterRestart[providerKey].reason).toBe('blacklist');
-    expect(snapshotAfterRestart[providerKey].blacklistUntil).toBe(now + 24 * 60 * 60_000);
+    expect(snapshotAfterRestart[providerKey].blacklistUntil).toBe(Date.parse('2026-05-22T00:00:00.000Z'));
 
     const quotaView = mod2.getQuotaView();
     expect(quotaView).not.toBeNull();

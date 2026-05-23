@@ -782,7 +782,12 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         const waitForChildHealthyOrExit = async (
           proc: ReturnType<typeof ctx.spawn>,
           deadlineMs: number
-        ): Promise<{ healthy: boolean; exitCode?: number | null; signal?: NodeJS.Signals | null }> => {
+        ): Promise<{
+          healthy: boolean;
+          exitCode?: number | null;
+          signal?: NodeJS.Signals | null;
+          startupExitState?: { kind?: string; message?: string } | null;
+        }> => {
           while (Date.now() < deadlineMs) {
             if (await isChildHealthy()) {
               return { healthy: true };
@@ -795,10 +800,15 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               typeof procRecord.exitCode === 'number'
               || Boolean(procRecord.signalCode);
             if (exited) {
+              const startupExitState = readChildStartupExitState({
+                port: resolvedPort,
+                routeCodexHomeDir: routeCodexHome
+              });
               return {
                 healthy: false,
                 exitCode: procRecord.exitCode,
-                signal: procRecord.signalCode
+                signal: procRecord.signalCode,
+                startupExitState
               };
             }
             await ctx.sleep(150);
@@ -834,43 +844,43 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                     }
                     await ctx.sleep(150);
                   }
-                  let attempt = 0;
-                  let lastFailure = 'unknown';
-                  while (Date.now() < restartDeadline) {
-                    attempt += 1;
-                    const spawnPlan = resolveLiveServerSpawnPlan();
-                    const entryReady = await waitForServerEntryReady(spawnPlan.entry, restartDeadline);
-                    if (!entryReady) {
-                      lastFailure = `server entry not ready: ${spawnPlan.entry}`;
-                      break;
-                    }
-                    const nextChild = ctx.spawn(nodeBin, spawnPlan.args, {
-                      ...spawnOptions,
-                      env: spawnPlan.env,
-                      cwd: spawnPlan.cwd
-                    });
-                    activeChildProc = nextChild;
-                    writePidFile(nextChild.pid);
-                    forwardToConsoleAndLog((nextChild as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
-                    forwardToConsoleAndLog((nextChild as unknown as { stderr?: NodeJS.ReadableStream | null }).stderr, process.stderr);
-                    attachChildExitHandler(nextChild);
-                    const probe = await waitForChildHealthyOrExit(nextChild, restartDeadline);
-                    if (probe.healthy) {
-                      ctx.logger.info(`[client-restart] RouteCodex child restarted on port ${resolvedPort} (pid=${nextChild.pid ?? 'unknown'}, attempt=${attempt})`);
-                      restartInFlight = false;
-                      return;
-                    }
-                    const exited =
-                      typeof probe.exitCode === 'number'
-                      || Boolean(probe.signal);
-                    if (!exited) {
-                      lastFailure = `attempt=${attempt} did not become healthy before timeout`;
-                      break;
-                    }
-                    lastFailure = `attempt=${attempt} child exited early (code=${probe.exitCode ?? 'n/a'}, signal=${probe.signal ?? 'none'})`;
-                    await ctx.sleep(200);
+                  const attempt = 1;
+                  const spawnPlan = resolveLiveServerSpawnPlan();
+                  const entryReady = await waitForServerEntryReady(spawnPlan.entry, restartDeadline);
+                  if (!entryReady) {
+                    throw new Error(
+                      `Timed out waiting for restarted child on port ${resolvedPort}: server entry not ready: ${spawnPlan.entry}`
+                    );
                   }
-                  throw new Error(`Timed out waiting for restarted child on port ${resolvedPort}: ${lastFailure}`);
+                  const nextChild = ctx.spawn(nodeBin, spawnPlan.args, {
+                    ...spawnOptions,
+                    env: spawnPlan.env,
+                    cwd: spawnPlan.cwd
+                  });
+                  activeChildProc = nextChild;
+                  writePidFile(nextChild.pid);
+                  forwardToConsoleAndLog((nextChild as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
+                  forwardToConsoleAndLog((nextChild as unknown as { stderr?: NodeJS.ReadableStream | null }).stderr, process.stderr);
+                  attachChildExitHandler(nextChild);
+                  const probe = await waitForChildHealthyOrExit(nextChild, restartDeadline);
+                  if (probe.healthy) {
+                    ctx.logger.info(`[client-restart] RouteCodex child restarted on port ${resolvedPort} (pid=${nextChild.pid ?? 'unknown'}, attempt=${attempt})`);
+                    restartInFlight = false;
+                    return;
+                  }
+                  const exited =
+                    typeof probe.exitCode === 'number'
+                    || Boolean(probe.signal);
+                  if (!exited) {
+                    throw new Error(
+                      `Timed out waiting for restarted child on port ${resolvedPort}: attempt=${attempt} did not become healthy before timeout`
+                    );
+                  }
+                  throw new Error(
+                    probe.startupExitState?.kind === 'startupError'
+                      ? `RouteCodex startup failed on port ${resolvedPort}; managed restart stopped: ${probe.startupExitState.message || 'startupError'}`
+                      : `Timed out waiting for restarted child on port ${resolvedPort}: attempt=${attempt} child exited early (code=${probe.exitCode ?? 'n/a'}, signal=${probe.signal ?? 'none'})`
+                  );
                 } catch (error) {
                   closeServerLogStream();
                   try {
@@ -879,6 +889,13 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                     logStartNonBlocking(ctx, 'cleanup_keypress.after_restart_failure', cleanupError, {
                       port: resolvedPort
                     });
+                  }
+                  const startupExitState = readChildStartupExitState({
+                    port: resolvedPort,
+                    routeCodexHomeDir: routeCodexHome
+                  });
+                  if (startupExitState?.kind === 'startupError' && startupExitState.message) {
+                    ctx.logger.error(`[client-exit] startupError=${startupExitState.message}`);
                   }
                   ctx.logger.error(error instanceof Error ? error.message : String(error));
                   ctx.exit(1);

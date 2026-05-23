@@ -7704,9 +7704,252 @@ note 2026-05-21 hashline schema followup
 
 - 已正确链路：RouteCodex Windsurf provider 只走本地 managed LS gRPC + Cascade：warmup -> StartCascade -> SendUserCascadeMessage -> GetCascadeTrajectorySteps/GetCascadeTrajectory；不再把 cloud GetChatCompletions 当聊天主链。
 - 已验证普通返回：安装态 `0.90.2140` `/v1/responses` 可通过 `windsurf.ws-pro-4.gpt-5.4-medium` 返回 200。
-- 已验证工具首轮：`/tmp/windsurf-tool-smoke.json`（echo 工具，强制 tool_choice）返回 `status=requires_action`，包含 `required_action.submit_tool_outputs.tool_calls[0].name=echo` 和 `arguments={"text":"ping"}`，证明工具列表/协议至少能让 Cascade 产出 function_call。
+- 已验证工具首轮：`/tmp/windsurf-tool-smoke.json`（echo 工具，强制 tool_choice）返回 `status=requires_action`，包含 `required_action.submit_tool_outputs.tool_calls[0].name=echo` 和 `arguments={"text":"ping"}`，证明工具列表/协议至少能让 Cascade 产出 structured tool call。
 - 已修 Responses conversation store：最终 client JSON 边界补 record，Rust `responses_payload_requires_submit_tool_outputs` 同时识别 `required_action.submit_tool_outputs.tool_calls`，避免首轮 `requires_action` 后 `responseIndex=0` 导致 submit 报 `Responses conversation expired or not found`。
-- 当前剩余问题：submit tool_outputs 后 HTTP 已能进入 Windsurf provider，但模型仍可能重复首轮 function_call；初步怀疑不是“工具列表没提供”，而是 submit continuation 的 cascade prompt 仍把原始 user request 当 latest user，导致模型再次执行同一工具。下一步检查 tool_preamble/field 12 是否在首轮真实请求存在，以及 submit continuation prompt 是否应以 `<tool_result>` 作为最新 human turn。
+- 当前剩余问题：submit tool_outputs 后 HTTP 已能进入 Windsurf provider，但模型仍可能重复首轮 structured tool call；初步怀疑不是“工具列表没提供”，而是 submit/history additional_steps 或 latest user 边界未对齐。下一步应按 `docs/design/windsurf-cascade-tool-protocol.md` 检查 `additional_steps field9`，不得回到文本 tool_preamble 或 `<tool_result>` 方案。
 - Review found build/verification failures in uncommitted apply_patch migration: trailing whitespace, stale apply-patch regression validator path, TS compile break from dynamic await in handler-response-utils, and native structured/shell-wrapper reason mismatches.
 - Fixed the only validation truth path by routing apply_patch object/string shapes through native validator, preserving shell-wrapped patch extraction, restoring structured reason classification in Rust, and making regression verification load built llmswitch-core dist instead of nonexistent TS .js source.
 - Validation passed: npm run build:min; npm run verify:apply-patch-regressions; npm run verify:apply-patch; npm run verify:servertool-rust-only; cargo test -p router-hotpath-napi validate_apply_patch_arguments --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml.
+
+## 2026-05-22 Windsurf 工具协议顺序纠偏
+
+- Jason 明确纠正：Windsurf 工具调用改造必须先把 App/WindsurfAPI 的标准 Cascade 工具协议写成本地设计文档，再补黑盒锚点测试，最后才改 provider 实现。
+- 已新增设计锚点文档：`docs/design/windsurf-cascade-tool-protocol.md`。
+- 文档结论：标准路径是 `SendUserCascadeMessage.cascade_config.planner_config.conversational.planner_mode=DEFAULT(1)` + `planner_config.field13 CascadeToolConfig.field32 tool_allowlist`；工具调用来自 trajectory structured fields 45/47/49/50；工具结果通过 `additional_steps field9` 回灌。
+- 明确禁止把文本 `function_call` / `<tool_call>` prompt 注入与 harvest 作为最终方案；unmapped arbitrary OpenAI function 在未证明 custom/MCP request-side 入口前必须 fail-fast。
+
+## 2026-05-22 Windsurf 文档事实收敛
+
+- Jason 要求先清理所有文档和事实，避免多轮编辑后 Wind/Windsurf 事实不统一。
+- 已将当前唯一事实入口收敛为：
+  - `docs/providers/windsurf-chat-provider-design.md`
+  - `docs/design/windsurf-cascade-tool-protocol.md`
+- 已重写历史审计文档，明确它们只保留取证价值，不再作为实现依据：
+  - `docs/audit/windsurf-request-shape-audit.md`
+  - `docs/audit/windsurf-response-audit.md`
+- 已在 `MEMORY.md` 追加当前唯一事实：本地 managed LS gRPC + Cascade；工具协议为 planner DEFAULT + tool_allowlist + trajectory structured fields + additional_steps；文本 function_call / `<tool_call>` harvest 废弃。
+
+[2026-05-22] startup incident: native required exports still listed augmentApplyPatchErrorContentJson after physical deletion; loader completeness rejected fresh dist/release .node and server fell into bootstrap failure. Also managed restart loop in start.ts keeps respawning after child early-exit during restart bootstrap; user要求启动失败即停。
+
+## 2026-05-22 Windsurf 事实清理继续
+- Jason 要求：先清理所有 Windsurf 文档和事实，保留唯一事实，再继续设计/skills/测试/实现。
+- 已将 `docs/goals/windsurf-cascade-single-path-rebuild-plan.md` 从旧长计划重写为“历史计划，已收敛”，只保留当前唯一主链、执行顺序、清理规则和 DoD。
+- 已在 provider design 增加 Fact Hygiene：当前事实只进 provider design + cascade tool protocol；audit/goal 只能存历史取证；错误路径必须改成 `~/.rcc` 与 local managed LS gRPC + Cascade。
+- 已在 cascade tool protocol 增加 Documentation Hygiene：协议字段写入必须有 WindsurfAPI/App/LS/`~/.rcc` 证据，且必须标明 request/trajectory/submit 方向。
+- 已更新 rcc-dev-skills：Windsurf 文档事实清理、旧文本工具协议 skipped/helper 不能长期保留，确认覆盖后必须物理删除。
+
+## 2026-05-22 Windsurf note 事实覆盖声明
+- 本 `note.md` 是探索工作台，前文保留了多轮错误假设和已废弃路径，包括 GetChatCompletions、tools_preamble、文本 tool call harvest 等；这些条目只代表历史探索过程，不是当前实现事实。
+- 当前唯一事实以 `docs/providers/windsurf-chat-provider-design.md` 与 `docs/design/windsurf-cascade-tool-protocol.md` 为准：local managed LS gRPC + Cascade；planner DEFAULT + tool_allowlist；trajectory structured fields；tool result additional_steps field9。
+[2026-05-22] apply_patch 主线继续：红测证明 TS request governor 仍在重写 apply_patch schema/description/filePath aliases，属于 chat process 外第二 owner，需物理删除，保留 Rust req_process 为唯一 schema/guidance owner。
+
+## 2026-05-22 Windsurf structured tool blackbox cleanup progress
+- 物理删除 `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 中 12 个 skipped 旧文本工具协议测试块：LEGACY TEXT EMULATION / DEPRECATED TEXT TOOL PROTOCOL。
+- provider 行为更新：`buildCascadePromptText()` 不再把 assistant `tool_calls` / tool result 编进 `<tool_call>` / `<tool_result>` 文本；history 工具结果通过 `buildCascadeAdditionalStepsFromSemanticConversation()` -> `SendUserCascadeMessage.field9 additional_steps` 进入 Cascade。
+- `buildSendCascadeMessageRequest()` 对 legacy `toolPreamble` 显式 fail-fast；`preprocessRequest()` mapped tools 继续进入 native allowlist，unmapped fail-fast。
+- 验证：定向 structured 黑盒 8/8 通过；`npx tsc --noEmit --pretty false` 通过；全量 `npx jest tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` 181/181 通过。
+- 剩余清理：文件中仍有 GetChatCompletions / streamWindsurfSseResponse / parseGetChatMessageResponse / buildChatMessagePromptsFromSemanticConversation 历史响应链测试与实现残留；下一步需要按唯一 Cascade 主链判断是否物理删除或改为历史取证测试。
+
+## 2026-05-22 startup fail-fast on managed restart
+- 用户现场日志暴露：child 启动失败时，start 命令虽然不再无限重启 child，但 managed restart 分支仍会继续按 health timeout 等待，表面看像“反复重启/长时间卡住”。
+- 红测：`tests/cli/start-command.startup-error.spec.ts` 锁定“restarted child 已落 lifecycle startupError 时，必须立刻停止并显式报 startupError，不得继续等 health timeout”。
+- 唯一正确修改点：`src/cli/commands/start.ts` 的 managed restart wait 分支。这里本来只看 health/exit，没有把 runtime lifecycle 的 startupError 作为更高优先级证据读取，所以会误走 timeout/early-exit 文案。
+- 已修：`waitForChildHealthyOrExit()` 返回 startupExitState；managed restart catch 前显式读取并优先报 `startupError=...`，从而 fail-fast 停止。
+
+## 2026-05-23 Windsurf custom tools request-side evidence check
+
+User constraint: do not implement capability routing/gating; only check whether Cascade custom tools can be found; if not found, report and stop.
+
+Read-only evidence:
+- WindsurfAPI `src/handlers/tool-emulation.js` states Cascade has no per-request slot for client-defined function schemas; `SendUserCascadeMessageRequest` fields 1-9 do not accept tool definitions; `CustomToolSpec` is a trajectory event type, not an input.
+- WindsurfAPI `src/cascade-native-bridge.js` maps only known built-in Cascade tool kinds via `TOOL_MAP`; unmapped tools intentionally route to `toolPreamble` emulation.
+- Windsurf App bundle schema shows `SendUserCascadeMessageRequest` fields only: metadata(3), cascade_id(1), items(2), images(6), cascade_config(5), experiment_config(4), recipe_ids(7), blocking(8), additional_steps(9). No arbitrary custom tool definition field.
+- App bundle has `CustomToolSpec` and `ChatToolDefinition`, but observed usage is `GetSystemPromptAndToolsResponse.tool_definitions` and trajectory step `custom_tool`, not a `SendUserCascadeMessageRequest` input slot.
+
+Current conclusion: no request-side structured custom tool injection path found in WindsurfAPI or App schema. Native Cascade path supports allowlisted built-in tools; arbitrary Codex/MCP tools are not proven supported except via WindsurfAPI's old text emulation path, which user has not authorized to reintroduce.
+
+## 2026-05-23 Windsurf custom tool boundary anchored in tests/docs
+
+Actions:
+- Updated `docs/design/windsurf-cascade-tool-protocol.md` and `docs/providers/windsurf-chat-provider-design.md` with the request-side custom tool boundary: App `SendUserCascadeMessageRequest` has fields 1-9 only, no arbitrary tool-definition input; WindsurfAPI unmapped tools are old `toolPreamble` emulation, not structured custom tool request.
+- Added `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` blackbox anchor: app schema has no tool definition input slot; WindsurfAPI `tool-emulation.js` records the same; `apply_patch` / `update_plan` / MCP tool names fail-fast as `WINDSURF_UNMAPPED_TOOL`.
+- Updated local rcc-dev skill with the no-gating/no-text-emulation boundary.
+
+Verification:
+- `npx jest tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand -t "custom tool-definition input slot|preprocessRequest must route mapped tools"` => passed, 2/2 selected.
+- `npx tsc --noEmit --pretty false` => passed.
+- `npx jest tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` => passed, 182/182.
+
+Remaining:
+- Installed/live `/v1/responses` smoke for mapped native tools and tool-result submit path still required before declaring end-to-end integration complete.
+
+## 2026-05-23 Windsurf tool semantic equivalence + MCP candidate blackbox
+
+User direction:
+1. Do semantic comparison first; directly translate tools that are semantically equivalent and test them.
+2. For unsupported tools, try MCP-style guidance/registration path and translate back if possible.
+3. Whether possible or not, add tests as proof.
+
+Actions:
+- Updated `docs/design/windsurf-cascade-tool-protocol.md` with a tool semantic matrix:
+  - direct equivalent: `exec_command` / `shell_command` / `run_command` / `bash` -> Cascade `run_command` for one-shot blocking shell execution only.
+  - unsupported native equivalence: `write_stdin`, PTY/session continuation, `apply_patch`, `update_plan`, `request_user_input`, agent orchestration tools.
+  - MCP candidate: `mcp__*` and unsupported orchestration tools, but only through an LS MCP registration blackbox; not through `SendUserCascadeMessageRequest` per-request injection.
+- Updated `docs/providers/windsurf-chat-provider-design.md` with the `run_command` equivalence boundary.
+- Added direct semantic red test in `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` comparing RouteCodex `exec_command` history/additional_steps encoding to WindsurfAPI `TOOL_MAP.shell_command.forward()` + `buildAdditionalStep()`.
+- Added MCP blackbox anchor proving App has MCP RPC symbols/state/trajectory support but `SendUserCascadeMessageRequest` has no per-request MCP/tool injection field.
+- Fixed `src/providers/core/runtime/windsurf-chat-provider.ts` direct mapping:
+  - `exec_command.forward` now accepts `workdir` as Cascade `cwd` and `command_line` as alias.
+  - shell/run/bash observation now writes `full_output` (WindsurfAPI field21 body) + stdout + exit_code, not non-encoded `combined_output`.
+
+Verification:
+- `npx jest tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand -t "exec_command/shell_command direct semantic translation|preprocessRequest must route mapped tools"` => passed.
+- `npx jest tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand -t "MCP can only be considered|custom tool-definition input slot"` => passed.
+- `npx tsc --noEmit --pretty false` => passed.
+- First full suite without explicit timeout hit Jest default 5s on a known long orchestrate blackbox after assertions took ~6.5s; reran with explicit timeout:
+  `npx jest tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit --testTimeout=30000` => 184/184 passed.
+
+Remaining:
+- Need actual LS MCP registration blackbox before implementing MCP translation for unsupported tools.
+- Need rebuild/install/restart/live `/v1/responses` smoke after code changes.
+
+## 2026-05-23 Windsurf hybrid tool protocol plan
+
+User decision:
+- Supported tools should be transparently translated to Cascade native structured protocol.
+- Unsupported tools should use a single text container, but not weak markdown fences.
+- Reuse DeepSeek Web's stronger structured text pattern shape, but Windsurf protocol name/tags are RCC only.
+- Harvest must distinguish native trajectory tool calls from RCC text tool calls.
+
+Artifacts:
+- Added `docs/goals/windsurf-tool-hybrid-protocol-plan.md` with complete implementation plan, blackbox test path, risks, DoD.
+- Cross-linked from `docs/design/windsurf-cascade-tool-protocol.md` and `docs/providers/windsurf-chat-provider-design.md`.
+
+Protocol target:
+- Native: `planner_mode=DEFAULT(1)` + `tool_config.field32 tool_allowlist` + trajectory fields + `additional_steps`.
+- Unsupported text protocol:
+  `<|RCC|tool_calls><|RCC|invoke name="tool"><|RCC|parameter name="arg"><![CDATA[value]]></|RCC|parameter></|RCC|invoke></|RCC|tool_calls>`.
+- Unsupported result context:
+  `<|RCC|tool_result id="..." name="..."><![CDATA[output]]></|RCC|tool_result>`.
+
+## 2026-05-23 Windsurf RCC fence naming correction
+- User correction: Windsurf unsupported-tool text protocol fence must use RCC naming only; all Windsurf fence/protocol labels use RCC.
+- Updated `docs/goals/windsurf-tool-hybrid-protocol-plan.md`: `windsurf_text_tool_protocol="rcc"`. DeepSeek Web history remains separate and is not the Windsurf protocol.
+
+## 2026-05-23 Windsurf hybrid tool protocol implementation checkpoint
+- Added red tests then implementation for request-time tool partition: native-equivalent tools -> Cascade structured allowlist; unsupported tools -> `windsurf_text_tool_protocol="rcc"` + `windsurf_unsupported_text_tools`.
+- RCC prompt guidance now uses `<|RCC|tool_calls>` only for unsupported tools and excludes native tool names / legacy `<tool_call>` / `function_call` markers.
+- RCC harvest parses declared unsupported `<|RCC|tool_calls>` into standard OpenAI `tool_calls`, strips visible RCC text, and fail-fast errors on native/RCC conflict, malformed RCC, or undeclared tool names.
+- Result feedback split: native tool results remain Cascade `additional_steps`; unsupported tool results are prompt-visible `<|RCC|tool_result>` context.
+- Source verification passed: `npx tsc --noEmit --pretty false`; `npx jest tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit --testTimeout=30000 --no-cache` => 189/189 passed.
+
+## 2026-05-23 Windsurf fence naming
+- User要求：Windsurf hybrid unsupported tool fence 统一使用 RCC 字样。
+- 执行策略：先 grep 历史协议名残留，限定修改 Windsurf 文档/测试/实现中的协议命名，不恢复旧协议、不加 fallback。
+
+## 2026-05-23 Windsurf native trajectory parser fix
+- 红测发现 RouteCodex 只解析 ChatToolCall wrapper/custom/mcp/proposal/choice，未解析 Cascade IDE oneof steps（如 field 28 run_command）；WindsurfAPI `parseTrajectorySteps` 会把这些 oneof step 转成 `native:*` toolCalls。
+- 已补 blackbox 对齐测试：用 WindsurfAPI `buildAdditionalStep(run_command)` 包成 GetCascadeTrajectorySteps 响应，断言 RouteCodex `parseTrajectorySteps` toolCalls 与 WindsurfAPI 完全一致。
+- 已修 provider：`parseTrajectorySteps` 解析 run_command/view_file/list_directory/write_to_file/grep_search/find/grep_search_v2/search_web/read_url_content oneof steps，输出 `cascade_native: true`。这不是 fallback，是 Cascade structured native harvest 缺失字段补齐。
+
+## 2026-05-23 Windsurf native submit continuation fix
+- Live native-only first turn now returns `requires_action` with native Cascade `run_command` tool_call; submit_tool_outputs exposed a second issue: conversation resume treated `run_command` as non-shell-like, so native `command_line` arguments could be lost from resumed history and Cascade re-proposed the same native tool.
+- Added response conversation store regression for native Cascade `run_command` preserving `{command_line,cwd}` through submit resume.
+- Fixed Rust `shared_responses_conversation_utils`: `run_command` is shell-like for response-history conversion and command extraction reads `command_line` / `proposed_command_line`.
+
+## 2026-05-23 Windsurf responses continuation fix
+- live native smoke verified: first turn returns `requires_action`; submit_tool_outputs now returns a completed chat response instead of re-emitting the same native tool_call.
+- Fix path was dual:
+  1) provider parse of native Cascade trajectory now harvests oneof steps and preserves tool history with `tool_outputs` for the Responses bridge,
+  2) native shared responses conversation store now treats `run_command` as shell-like and preserves `command_line`/`proposed_command_line` semantics on resume.
+- This directly targets the only observed live bug after tool-call success; no fallback or RCC shadow path added.
+
+## 2026-05-23 Windsurf fence naming correction
+- Windsurf unsupported-tool fence 当前唯一命名是 RCC；其他平台的历史协议命名不再写入 Windsurf 文档、测试或实现。
+- 这次只做命名/事实收敛，不改请求链路。
+
+
+## 2026-05-23 Windsurf native gate correction
+- 纠正上一轮误判：本目标要求 native-supported tools 默认透明进入 Cascade structured protocol，不做能力路由 gating；已物理删除 `shouldUseWindsurfNativeBridge` default-off gate。
+- 回归：`tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 193/193 passed。
+
+## 2026-05-23 Windsurf RCC naming correction self-test
+- User correction: Windsurf unsupported-tool fence must use RCC naming only; do not reuse other providers’ historical protocol names for Windsurf.
+- Updated current Windsurf docs/memory/note wording so current Windsurf protocol names remain RCC-only; DeepSeek historical protocol references remain only in DeepSeek historical notes/code.
+- Verification: rg over current Windsurf docs/provider/tests/skill found zero historical protocol-name matches; targeted Jest RCC/hybrid/unsupported provider tests passed (7 selected, suite pass).
+
+## 2026-05-23 Windsurf native result continuation mapping fix
+- Red test first: `native run_command response tool name must still build additional_steps when caller declared shell_command` failed because returned native trajectory name `run_command` was rejected against declared caller tool `shell_command`.
+- Fix: `isWindsurfNativeToolName` now authorizes by Cascade native kind equivalence from `collectWindsurfMappedTools(nativeTools)`, not literal caller name. This keeps native-supported tools on Cascade structured path and does not fallback to RCC.
+- Verification: targeted native red test passed; hybrid/RCC/native selected tests passed (8 selected); `npx tsc --noEmit --pretty false` passed; full `windsurf-chat-provider.spec.ts` passed 194/194.
+
+## 2026-05-23 Windsurf hybrid live smoke checkpoint
+- 已补 provider 红测：mixed continuation 中 native result 已完成但 unsupported tool 尚未调用时，Cascade prompt 必须显式提醒 pending RCC unsupported tool，防止模型把 native 完成误当最终状态。
+- 已补 provider 红测：poll trajectory 时若 upstream 重复吐出已完成 native run_command，应按 completed native call id/signature 跳过，不再把旧 native call 当新 tool_call 返回。
+- 验证：`npx tsc --noEmit --pretty false` passed；`npx jest tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit --testTimeout=30000 --no-cache` 198/198 passed；`npm run build:min && npm run install:global && routecodex restart --port 5520` 到 0.90.2165，health OK。
+- live 仍未完成：native-only first turn returns requires_action(run_command)，但 submit 后当前出现两类不稳定结果：1) 空 assistant completion 502；2) chat choices.message.tool_calls 中重复 native run_command。unsupported-only first/submit 曾通过，但最新一次 first turn 因上游/provider 502 未完成验证。mixed first returns native run_command，turn2 仍可能在 chat choices 中重复 native run_command，未进入 RCC apply_patch。
+- 下一步唯一方向：继续定位 `/v1/responses/{id}/submit_tool_outputs` 的 outbound remap/retention 与 provider poll 交界；不能宣称完成，不能让用户测。
+
+## 2026-05-23 Windsurf fence naming correction
+- Jason 明确纠正：Windsurf unsupported-tool fence 统一替换/命名为 RCC。
+- 当前执行规则：Windsurf 文档、实现、测试、skills 中只允许 `<|RCC|tool_calls>` / `<|RCC|tool_result>`；其他 provider 的历史协议名不能作为 Windsurf 当前事实。
+
+## 2026-05-23 Windsurf hybrid continuation follow-up
+- 继续目标：native-supported -> Cascade structured；unsupported -> RCC text-tool protocol；先查 ~/.rcc 样本再补红测。
+- 已确认 ~/.rcc/codex-samples/openai-responses/windsurf.* 目前只看到 provider-request-contract/response-contract，最新 contract 样本仍是旧 openai-chat tools 形状；真实 native submit 样本不在该 contract 目录，需继续从 server logs / provider debug / tests 定位。
+
+## 2026-05-23 Windsurf native submit response-id fix
+- ~/.rcc/logs/server-10000.log 失败样本显示 native first turn client id 是 `chatcmpl-b884...`，submit URL 也用 `/v1/responses/chatcmpl-.../submit_tool_outputs`，说明 Responses conversation store 未拿到真正 `resp_*` id；这比 poll 空快照更接近 live 根因。
+- 新增 `tests/sharedmodule/responses-completed-native-remap.spec.ts` 红测：Windsurf/native chat.completion tool_calls 转 Responses first turn 时 id 不得保留 chatcmpl，必须分配 `resp_*`，否则后续 submit 无法恢复历史。
+- 唯一修点：Rust `hub_resp_outbound_client_semantics.rs` Responses outbound client remap，新增 `allocate_responses_id()`：源 `id` 为 `chatcmpl*` 时生成 `resp_*`；非 chatcmpl 已有 Responses id 保留。
+- 已验证：native build hotpath 通过；`npx tsc --noEmit --pretty false` 通过；Windsurf 定向 Jest 4 suites / 207 tests 通过。
+
+## 2026-05-23 Windsurf fence naming recheck
+- Jason correction: Windsurf fence must use RCC wording only; do not mention or reuse other providers’ historical fence names. Rechecking current worktree before editing.
+
+## 2026-05-23 live native submit still leaks chat.completion
+- Self-smoke after build/install/restart: `/tmp/windsurf-native-smoke.mjs` first turn OK (`resp_*`, native run_command), submit failed exit 13 because client body is `chat.completion` with `choices` instead of Responses object. Need inspect real executor/converter path; unit mock passed but live not covered enough.
+
+## 2026-05-23 router-direct removed for Responses; new live failure
+- Fix slice: router-direct same-protocol bypass was root of live submit `chat.completion` leak; now `/v1/responses` must use full executor conversion. Targeted tests pass for router-direct skip and Windsurf conversion path.
+- After build/install/restart 0.90.2175, native smoke no longer leaks chat.completion; new first-turn failure is `MISSING_REQUIRED_TOOL_CALL`: upstream completed with declared request tools but no function_call output. Need inspect request/tool_choice/native allowlist shape and enforce tool call behavior.
+
+## 2026-05-23 Windsurf RCC fence naming cleanup
+- Jason correction: Windsurf unsupported-tool fence must use `RCC` only. Verified current Windsurf design/goal/provider docs and rcc-dev-skills contain no non-RCC Windsurf fence protocol reference; added explicit RCC-only statements to `docs/design/windsurf-cascade-tool-protocol.md` and `docs/providers/windsurf-chat-provider-design.md`.
+## 2026-05-23 Windsurf RCC-only fence naming hardening
+- Jason correction: Windsurf unsupported-tool fence naming must be RCC-only; avoid spelling or importing other providers’ fence protocol names in Windsurf docs/skills/current facts.
+- Verification target: current Windsurf docs/provider/tests/skill must have zero non-RCC fence protocol references; historical DeepSeek notes/tests may retain their provider-specific facts.
+
+## 2026-05-23 Windsurf RCC fence naming verification
+- Jason corrected again: Windsurf unsupported-tool fence must use RCC naming only; do not write other provider fence names into Windsurf facts.
+- Verification command: scanned current Windsurf docs/src/tests/skills for non-RCC fence naming; result below.
+- Result: no non-RCC fence naming in Windsurf-scoped files. Remaining other-provider fence references are provider-specific docs/tests/fixtures and must not be globally replaced.
+
+## 2026-05-23 Windsurf hybrid live smoke checkpoint
+- Fixed current blockers:
+  - RCC duplicate text blocks are deduped only within RCC source; native structured + RCC text same assistant candidate still fail-fast as `WINDSURF_TOOL_PROTOCOL_CONFLICT`.
+  - Mixed continuation prompt now preserves terminal contiguous tool results, so after native result + RCC result it includes both `shell_command` output and `<|RCC|tool_result>`.
+  - Responses submit path now rebuilds raw request metadata with `previous_response_id` and materializes response-id conversation context for resumed requires_action, preventing second submit from losing history.
+- Verification:
+  - `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts tests/sharedmodule/windsurf-submit-stopmessage.spec.ts tests/sharedmodule/request-continuation-semantics.spec.ts tests/server/runtime/http-server/executor/provider-response-converter-windsurf-tools.spec.ts tests/server/handlers/handler-response-utils.responses-conversation.spec.ts --runInBand --forceExit --testTimeout=90000 --no-cache` => 5 suites / 221 tests passed.
+  - `npx tsc --noEmit --pretty false` passed.
+  - `npm run build:min && npm run install:global && routecodex restart --port 5520` installed 0.90.2188 and health returned ready/ok.
+  - `/tmp/windsurf-native-smoke.mjs` passed after reinstall: native first `shell_command` requires_action, submit completed with `/Users/fanzhang/Documents/github/routecodex`.
+  - `/tmp/windsurf-unsupported-smoke.mjs` passed on rerun: RCC `echo_tool` requires_action, submit completed with `hello-rcc`.
+  - `/tmp/windsurf-mixed-smoke.mjs` passed: first native `shell_command`, second RCC `echo_tool`, third completed with both pwd and mixed-rcc results.
+- Caveat: one unsupported smoke immediately after native had transient `empty assistant completion`, rerun passed; keep watching stability but current evidence has all three smoke categories passing.
+
+## 2026-05-23 Windsurf weekly quota 502 correction
+- Jason reported live still returns 502. Checked `~/.rcc/logs/server-5520.log`; latest Windsurf failure is not request-shape/tool protocol, but upstream message: `Your weekly usage quota has been exhausted...` surfaced as `status=502 code=WINDSURF_UPSTREAM_TRANSIENT`.
+- Root cause: gRPC error path pre-structured the error as `WINDSURF_UPSTREAM_TRANSIENT`; `classifyWindsurfCascadeError` returned structured errors before checking weekly quota text, so weekly quota was retried/reported as transient 502.
+- Fix: weekly quota text now overrides pre-structured transient errors to `WINDSURF_WEEKLY_QUOTA_EXHAUSTED`, status 429, retryable=false, quotaScope=weekly.
+- Verification: added red test for pre-structured weekly quota; targeted test passed; full `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` passed 208/208; `npx tsc --noEmit --pretty false` passed.
+- Installed verification: `npm run build:min && npm run install:global && routecodex restart --port 5520 && curl -sS http://127.0.0.1:5520/health` passed; installed `/health` version is 0.90.2189.
+
+## 2026-05-23 Windsurf multi-account/stopMessage/quota implementation checkpoint
+- Implemented port-scoped stopMessage gate: `[[httpserver.ports]].stopMessage.enabled=false` is preserved by port config, injected as request metadata, and `stop-message-auto` skips with `skip_port_stopmessage_disabled`; this avoids plain 5520 HTTP smoke being converted into tmux followup.
+- Implemented Windsurf auth alias isolation: `resolveRuntimeAuth` derives `accountAlias` from runtime key (`windsurf.ws-pro-N`) when auth omits explicit alias, so token/session files remain per account instead of default alias collision.
+- Startup probe design: Provider init now probes Windsurf via `instance.checkHealth()` once per runtime unless `ROUTECODEX_WINDSURF_STARTUP_PROBE=0`; probe failure fails that runtime init and existing provider-init error/quota path removes that key from startup pool.
+- Weekly quota recycle: quota daemon now blacklists Windsurf alias family until next local 00:00 when upstream omits explicit cooldown, while explicit cooldownOverrideMs still wins. This matches current “0 点恢复” rule.
+- PostAuth dual path preserved/fixed: backend `_backend` post auth timeout retries legacy `server.self-serve.windsurf.com` endpoint.
+- Verification: targeted Jest `windsurf-chat-provider.spec.ts`, `provider-quota-daemon.events.windsurf-weekly.spec.ts`, `port-config-validator-sameprotocol.spec.ts` passed (223 tests); `npx tsc --noEmit --pretty false` passed.

@@ -100,9 +100,11 @@ describe('WindsurfStaticRequestHarness', () => {
         },
       },
     });
-    expect(Array.isArray((result.preprocess as any).body.windsurf_declared_tools)).toBe(true);
-    expect((result.preprocess as any).body.windsurf_declared_tools).toHaveLength(2);
-    expect(typeof (result.preprocess as any).body.tools_preamble).toBe('string');
+    expect((result.preprocess as any).body.tools).toBeUndefined();
+    expect((result.preprocess as any).body.tools_preamble).toBeUndefined();
+    expect((result.preprocess as any).body.windsurf_text_tool_protocol).toBe('rcc');
+    expect((result.preprocess as any).body.windsurf_declared_native_tools.map((t: any) => t.function.name)).toEqual(['shell_command']);
+    expect((result.preprocess as any).body.windsurf_unsupported_text_tools.map((t: any) => t.function.name)).toEqual(['apply_patch']);
     expect(result.semanticConversation).toEqual([
       { type: 'user', text: 'inspect repo' },
       {

@@ -9,14 +9,13 @@ import { shouldRecordSnapshots } from "../../snapshot-utils.js";
 import { createSnapshotRecorder } from "../snapshot-recorder.js";
 import type { AdapterContext } from "../types/chat-envelope.js";
 import { isCompactionRequest } from "../../compaction-detect.js";
-import { resolveApplyPatchToolModeFromToolsWithNative, findMappableSemanticsKeysWithNative, prepareRuntimeMetadataForServertoolsWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
+import { findMappableSemanticsKeysWithNative, prepareRuntimeMetadataForServertoolsWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import { requireJsonObjectPayload } from "./hub-pipeline-shared-guards.js";
 import {
   resolveActiveProcessModeAndAudit,
   sanitizeStandardizedRequestMessages,
 } from "./hub-pipeline-chat-process-request-utils.js";
-import { propagateApplyPatchToolModeToRequestMetadata } from "./hub-pipeline-request-metadata-blocks.js";
 import { runReqInboundStage1FormatParse } from "./stages/req_inbound/req_inbound_stage1_format_parse/index.js";
 import { runReqInboundStage2SemanticMap } from "./stages/req_inbound/req_inbound_stage2_semantic_map/index.js";
 import type { JsonValue } from "../types/json.js";
@@ -144,7 +143,6 @@ async function executeInboundSemanticStages<TContext = Record<string, unknown>>(
   clearResponsesResumeMetadata(args.normalized.metadata as Record<string, unknown> | undefined, responsesResumeFromMetadata);
   const contextSnapshot = await measureHubStage(args.normalized.id, "req_inbound.stage3_context_capture", () => captureInboundContextSnapshot({ inboundStage2ResponsesContext: inboundStage2.responsesContext as Record<string, unknown> | undefined, rawRequest: args.rawRequest, inboundAdapterContext: args.inboundAdapterContext, hooks: args.hooks, inboundRecorder: args.inboundRecorder }));
   const standardizedRequest = sanitizeStandardizedRequestMessages(inboundStage2.standardizedRequest as unknown as StandardizedRequest);
-  propagateApplyPatchToolModeToRequestMetadata(args.normalized.metadata as Record<string, unknown> | undefined, standardizedRequest);
   const { activeProcessMode, passthroughAudit } = resolveActiveProcessModeAndAudit({ normalized: args.normalized, requestMessages: standardizedRequest.messages, rawPayload: args.rawRequest });
   return { contextSnapshot: contextSnapshot as Record<string, unknown> | undefined, standardizedRequest, activeProcessMode, passthroughAudit };
 }
@@ -202,13 +200,6 @@ export function finalizeWorkingRequestForOutbound(args: {
 
 export async function executeRequestStageInbound<TContext = Record<string, unknown>>(args: { normalized: NormalizedRequest; hooks: RequestStageHooks<TContext>; config: HubPipelineConfig; }): Promise<RequestStageInboundResult<TContext>> {
   const { normalized, hooks, config } = args; const rawRequest = requireJsonObjectPayload(normalized);
-  const toolsRaw = Array.isArray((rawRequest as any)?.tools) ? (rawRequest as any).tools : null;
-  const applyPatchToolMode = resolveApplyPatchToolModeFromToolsWithNative(toolsRaw) as string | undefined;
-  if (applyPatchToolMode) {
-    normalized.metadata = normalized.metadata || {};
-    const rt = ensureRuntimeMetadata(normalized.metadata as Record<string, unknown>);
-    (rt as Record<string, unknown>).applyPatchToolMode = applyPatchToolMode;
-  }
   if (isCompactionRequest(rawRequest)) {
     normalized.metadata = normalized.metadata || {};
     const rt = ensureRuntimeMetadata(normalized.metadata as Record<string, unknown>);

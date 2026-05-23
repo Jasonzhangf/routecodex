@@ -71,6 +71,27 @@ function logResponseNonBlockingError(operation: string, error: unknown): void {
   console.warn(`[handler-response] ${operation} failed (non-blocking): ${reason}`);
 }
 
+function resolveResponsesConversationRecordRequestIds(
+  requestLabel: string,
+  timingRequestIds: string[] | undefined,
+  responseId?: unknown
+): string[] {
+  const responseIds: string[] = [];
+  const requestIds: string[] = [];
+  const add = (target: string[], value: unknown): void => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed || target.includes(trimmed)) return;
+    target.push(trimmed);
+  };
+  add(responseIds, responseId);
+  add(requestIds, requestLabel);
+  if (Array.isArray(timingRequestIds)) {
+    for (const id of timingRequestIds) add(requestIds, id);
+  }
+  return [...responseIds, ...requestIds];
+}
+
 function logSseClientCloseDiagnosis(
   requestLabel: string,
   details: Record<string, unknown>
@@ -1134,19 +1155,26 @@ export function sendPipelineResponse(
   const sanitized = stripInternalKeysDeep(clientBody);
   const jsonFinishReason = deriveFinishReason(clientBody);
   if (
-    entryEndpoint === '/v1/responses'
+    (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
     && sanitized
     && typeof sanitized === 'object'
     && !Array.isArray(sanitized)
     && jsonFinishReason === 'tool_calls'
   ) {
-    void recordResponsesResponseForRequest({
-      requestId: requestLabel,
-      response: sanitized as Record<string, unknown>,
-      routeHint: result.usageLogInfo?.routeName,
-    }).catch((error) => {
-      logResponseNonBlockingError(`responses-conversation-record:${requestLabel}`, error);
-    });
+    const sanitizedRecord = sanitized as Record<string, unknown>;
+    for (const recordRequestId of resolveResponsesConversationRecordRequestIds(
+      requestLabel,
+      result.usageLogInfo?.timingRequestIds,
+      sanitizedRecord.id
+    )) {
+      void recordResponsesResponseForRequest({
+        requestId: recordRequestId,
+        response: sanitizedRecord,
+        routeHint: result.usageLogInfo?.routeName,
+      }).catch((error) => {
+        logResponseNonBlockingError(`responses-conversation-record:${recordRequestId}`, error);
+      });
+    }
   }
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
   if (captureClientResponse) {

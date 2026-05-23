@@ -1,7 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 const buildAdapterContextFromNormalized = jest.fn(() => ({}));
-const resolveApplyPatchToolModeFromToolsWithNative = jest.fn(() => 'schema');
 const ensureRuntimeMetadata = jest.fn((metadata: Record<string, unknown>) => {
   if (!metadata.__rt || typeof metadata.__rt !== 'object') {
     metadata.__rt = {};
@@ -35,7 +34,6 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js',
   () => ({
-    resolveApplyPatchToolModeFromToolsWithNative,
     annotatePassthroughGovernanceSkipWithNative: jest.fn((audit: unknown) => audit ?? {}),
     buildPassthroughGovernanceSkippedNodeWithNative: jest.fn(() => ({ stage: 'req_process_skipped' })),
     buildPassthroughAuditWithNative: jest.fn(() => ({ mode: 'passthrough' })),
@@ -271,7 +269,7 @@ describe('hub pipeline inbound runtime hints', () => {
       reason: 'rough_estimate',
     });
   });
-  it('derives applyPatchToolMode from top-level tools on payload object', async () => {
+  it('does not let inbound runtime hints own applyPatchToolMode', async () => {
     const payload = {
       tools: [{ type: 'function', function: { name: 'apply_patch' } }],
       messages: [{ role: 'user', content: 'hi' }],
@@ -296,10 +294,11 @@ describe('hub pipeline inbound runtime hints', () => {
       config: {} as any,
     });
 
-    expect(resolveApplyPatchToolModeFromToolsWithNative).toHaveBeenCalledWith(payload.tools);
+    const rt = ((normalized.metadata as Record<string, unknown>).__rt ?? {}) as Record<string, unknown>;
+    expect(rt.applyPatchToolMode).toBeUndefined();
   });
 
-  it('derives applyPatchToolMode from top-level tools', async () => {
+  it('does not derive applyPatchToolMode from top-level tools in inbound stage', async () => {
     const normalized = {
       id: 'req_hint_tools',
       payload: {
@@ -323,11 +322,11 @@ describe('hub pipeline inbound runtime hints', () => {
       config: {} as any,
     });
 
-    expect(resolveApplyPatchToolModeFromToolsWithNative).toHaveBeenCalled();
+    const rt = ((normalized.metadata as Record<string, unknown>).__rt ?? {}) as Record<string, unknown>;
+    expect(rt.applyPatchToolMode).toBeUndefined();
   });
 
   it('does not set applyPatchToolMode when tools are absent at top-level payload', async () => {
-    resolveApplyPatchToolModeFromToolsWithNative.mockReturnValueOnce(undefined);
     const normalized = {
       id: 'req_hint_no_top_tools',
       payload: {

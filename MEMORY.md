@@ -1,6 +1,23 @@
 # RouteCodex Memory
 
 
+- 2026-05-23: Windsurf hybrid tool protocol 的当前目标真源是：native-supported tools 默认透明转译到 Cascade structured protocol（`windsurf_native_mode=true` + `tool_allowlist`），unsupported tools 走 RCC text-tool protocol；禁止引入 native bridge 默认 off / env-gated 这类能力路由 gating。
+
+Tags: windsurf, hybrid-tools, native-default-on, rcc-unsupported, no-gating, 2026-05-23
+
+
+- 2026-05-23: Windsurf unsupported-tool fence 命名已统一为 RCC；Windsurf 相关文档、实现和测试中不得使用其他平台历史协议名作为当前协议名；其他平台的历史协议命名不得回写到 Windsurf 事实。
+
+Tags: windsurf, RCC, protocol-naming, fact-hygiene, 2026-05-23
+
+- 2026-05-22: Windsurf provider 当前唯一事实已重收敛：设计入口为 `docs/providers/windsurf-chat-provider-design.md`，工具协议细节为 `docs/design/windsurf-cascade-tool-protocol.md`。聊天主链唯一允许 `local managed LS gRPC -> StartCascade -> SendUserCascadeMessage -> GetCascadeTrajectorySteps/GetCascadeTrajectory poll`；工具调用唯一目标为 Cascade structured protocol：`planner_mode=DEFAULT(1)` + `CascadeToolConfig.tool_allowlist(field32)` + trajectory fields `45/47/49/50` + tool result `additional_steps(field9)`。`GetChatCompletions` / `GetChatMessage` cloud JSON、`tools_preamble` / `function_call` / `<tool_call>` 文本注入与 harvest 都是废弃事实，不能再作为实现或测试依据；unmapped arbitrary tool 在未证明 custom/MCP request-side 入口前必须 fail-fast。
+
+Tags: windsurf, cascade-tool-protocol, tool-allowlist, additional-steps, no-text-harvest, no-getchatcompletions, 2026-05-22
+
+- 2026-05-22: Windsurf 文档事实清理规则已固定：当前事实只允许落在 `docs/providers/windsurf-chat-provider-design.md` 与 `docs/design/windsurf-cascade-tool-protocol.md`；audit/goal/note 只能保留历史取证并必须标注 superseded。若发现 `GetChatCompletions`、cloud JSON baseurl、`tools_preamble`、文本 harvest、`~/.routecodex` 被写成当前事实，必须立即改为废弃事实或删除；后续实现前必须先补黑盒锚点，改完由 agent 自己测试/构建/安装/重启/smoke。
+
+Tags: windsurf, docs-ssot, fact-hygiene, no-text-protocol, self-smoke-before-user, 2026-05-22
+
 - 2026-05-21: Windsurf provider 真源边界已收口。固定参考只允许：`/Volumes/extension/code/WindsurfAPI`。已验证稳定真相：
   1. `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 已扩展到 108/108 全绿；
   2. auth/token persistence、PostAuth header-only empty proto body、auth-context headers、assistant/tool_result/history/responses parse 全部已由测试锚定；
@@ -8,13 +25,12 @@
      - 直接 `devin-session-token$...` 可作为最终认证真源；
      - 账号密码 -> `auth1` -> `WindsurfPostAuth` -> `devin-session-token$...`；
      - persisted stale token 命中 401 后，会清理旧 token、重新登录、持久化 refreshed token，并完成下一次推理；
-     - 认证成功后可返回 assistant text、assistant tool_calls；
-     - 多轮 history 会正确序列化为上游 `conversation`；
-     - 已有 `tool_call + tool_result` 历史后，下一轮既可继续返回新的 tool call，也可直接返回最终 assistant text；
+     - 认证成功后可返回 assistant text；
+     - 旧记录中“assistant tool_calls / tool_result / conversation 上游序列化已完成”的说法属于 2026-05-21 旧路径语境，已被 2026-05-22 Cascade structured tool protocol 事实覆盖；
   4. 认证最终真源统一收敛为 `devin-session-token$...`；测试样本、probe 样本都应优先使用该形状，不再把 generic `session-token-*` 当 Windsurf 最终凭证真相；
   5. 后续若再看到任何“旧 send 主线已恢复/真主链已接回”叙事，均视为错误旧叙事，应直接删除，不得据此恢复 send path。
 
-Tags: windsurf, cascade, auth, postauth, token-persistence, responses-parse, continuity, fail-fast, no-send-mainline, reference-boundary, 2026-05-21
+Tags: windsurf, cascade, auth, postauth, token-persistence, historical-note, superseded-by-2026-05-22-tool-protocol, 2026-05-21
 
 ## Skills 与调试工作流
 
@@ -1558,8 +1574,11 @@ Tags: windsurf, auth, postauth, web-backend, protobuf, no-mock, live-verified, 2
 - 2026-05-22: Windsurf `chat -> provider -> cascade` 的真实无 mock 鉴权链已再次以 live probe 固化进仓库测试。`tests/providers/core/runtime/windsurf-chat-provider.live-probe-api.spec.ts` 现包含真实账号密码登录 -> `WindsurfPostAuth` -> `devin-session-token$...` 持久化 -> `checkHealth()` 直打 `GetCascadeModelConfigsForSite` 的无 mock 测试，并已在本机通过。`scripts/windsurf-auth-probe.ts` 也已改成同一真链：`ensureWindsurfSessionCredential()` + `checkHealth()`；禁止再调用旧的 cloud/status 假接口。
 Tags: windsurf, cascade, auth, no-mock, live-probe, checkHealth, postauth, 2026-05-22
 
-- 2026-05-22: Windsurf 请求主链真相已用“最黑盒”方式再次钉死：对同一份带 tools/history 的输入，同时实跑 RouteCodex 当前链与 WindsurfAPI 参考链，结果显示 RouteCodex 当前最终出站仍是 `GetChatCompletions` JSON 族（`metadata/chatMessagePrompts/systemPrompt/completionsRequest`），而 WindsurfAPI 真源最终出站是 `StartCascade -> SendUserCascadeMessage` protobuf/gRPC 族（`normalizeMessagesForCascade -> history replay text + toolPreamble -> poll`）。因此当前 Windsurf live 问题优先判定为**路径问题，不是字段小形状问题**；`GetChatCompletions` 旧主链已被证伪，后续必须从文档、记忆、测试与实现中物理移除，只保留 `chat -> provider -> StartCascade -> SendUserCascadeMessage -> GetCascadeTrajectorySteps/poll` 单一路径。
+- 2026-05-22: Windsurf 请求主链真相已用“最黑盒”方式再次钉死：对同一份带 tools/history 的输入，同时实跑 RouteCodex 当前链与 WindsurfAPI 参考链，结果显示 RouteCodex 当前最终出站仍是 `GetChatCompletions` JSON 族（`metadata/chatMessagePrompts/systemPrompt/completionsRequest`），而 WindsurfAPI 真源最终出站是 `StartCascade -> SendUserCascadeMessage` protobuf/gRPC 族（local managed LS gRPC + Cascade）。因此当前 Windsurf live 问题优先判定为**路径问题，不是字段小形状问题**；`GetChatCompletions` 旧主链已被证伪，后续必须从文档、记忆、测试与实现中物理移除，只保留 `chat -> provider -> local managed LS gRPC -> StartCascade -> SendUserCascadeMessage -> GetCascadeTrajectorySteps/poll` 单一路径。
 Tags: windsurf, cascade, request-path, blackbox-verified, getchatcompletions-invalid, single-path, remove-wrong-mainline, 2026-05-22
 
-- 2026-05-22: Windsurf 运行时唯一真相是 `chat -> provider -> cascade`；仓内不允许 gRPC/LS 或任何第二套本地实现回流。
+- 2026-05-22: Windsurf 运行时唯一真相是 `chat -> provider -> local managed LS gRPC -> Cascade`；仓内不允许 cloud JSON chat path 或任何第二套本地实现回流。
 - 2026-05-22: 做 Windsurf / request-shape / live sample 排查时，样本与 snapshot 的当前真源目录应先看 `~/.rcc/codex-samples/`；把它写成 `~/.routecodex/codex-samples/` 属于错误旧路径。注意：这条只约束当前运行时样本/快照真源；仓内仍有一部分 legacy 迁移文档需要保留 `~/.routecodex` 作为旧目录叙事，不能机械全量替换所有 `.routecodex` 字符串。
+
+- 2026-05-23: Windsurf 多账号/回收当前真相：多账号必须表现为多 runtime（`windsurf.ws-pro-N`）+ 多 provider target（`windsurf.ws-pro-N.<model>`），token/session alias 以 runtime key 派生，禁止共享 default。启动时每个 Windsurf runtime 默认 `checkHealth()` probe 一次；失败 runtime 直接不入池。weekly quota 按 account alias family 黑名单回收到本地 00:00 自动恢复；`[[httpserver.ports]].stopMessage.enabled=false` 是端口级 stopMessage 关闭入口，用于 5520 smoke 避免 tmux followup 污染。
+Tags: windsurf, multi-account, runtime, quota, stopMessage, startup-probe, 2026-05-23

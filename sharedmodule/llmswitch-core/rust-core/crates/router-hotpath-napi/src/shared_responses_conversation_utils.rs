@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 fn is_shell_like_function_name(name: &str) -> bool {
     matches!(
         name.trim().to_ascii_lowercase().as_str(),
-        "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
+        "exec_command" | "shell_command" | "shell" | "bash" | "terminal" | "run_command"
     )
 }
 
@@ -59,7 +59,10 @@ fn read_command_from_args_map(args: &Map<String, Value>) -> Option<String> {
         read_trimmed_text(value).or_else(|| read_string_array_command(value))
     };
 
-    let direct = read_value(args.get("cmd")).or_else(|| read_value(args.get("command")));
+    let direct = read_value(args.get("cmd"))
+        .or_else(|| read_value(args.get("command")))
+        .or_else(|| read_value(args.get("command_line")))
+        .or_else(|| read_value(args.get("proposed_command_line")));
     if direct.is_some() {
         return direct;
     }
@@ -101,7 +104,9 @@ fn build_shell_like_output_arguments(
 ) -> Option<String> {
     let cmd = read_command_from_args_map(args)?;
     let has_cmd = args_contain_direct_or_nested_key(args, "cmd");
-    let has_command = args_contain_direct_or_nested_key(args, "command");
+    let has_command = args_contain_direct_or_nested_key(args, "command")
+        || args_contain_direct_or_nested_key(args, "command_line")
+        || args_contain_direct_or_nested_key(args, "proposed_command_line");
     let source_is_shell_alias = raw_name
         .map(|name| {
             let lowered = name.trim().to_ascii_lowercase();

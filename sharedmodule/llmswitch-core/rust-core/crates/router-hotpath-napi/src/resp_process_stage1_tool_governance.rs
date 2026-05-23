@@ -2212,6 +2212,72 @@ fn read_hashline_file_content_from_apply_patch_args(args: &Map<String, Value>) -
         })
 }
 
+fn read_apply_patch_string_preserve_empty(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(raw)) => Some(raw.replace("\r\n", "\n").replace('\r', "\n")),
+        _ => None,
+    }
+}
+
+fn read_hashline_file_content_preserve_empty_from_apply_patch_args(
+    args: &Map<String, Value>,
+) -> Option<String> {
+    read_apply_patch_string_preserve_empty(args.get("fileContent"))
+        .or_else(|| read_apply_patch_string_preserve_empty(args.get("file_content")))
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(|row| read_apply_patch_string_preserve_empty(row.get("fileContent")))
+        })
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(|row| read_apply_patch_string_preserve_empty(row.get("file_content")))
+        })
+}
+
+fn build_add_file_apply_patch_from_plain_text(file_path: &str, patch_text: &str) -> String {
+    let mut out = vec![
+        "*** Begin Patch".to_string(),
+        format!("*** Add File: {}", file_path),
+    ];
+    for line in split_apply_patch_text_lines(patch_text) {
+        out.push(format!("+{}", line));
+    }
+    out.push("*** End Patch".to_string());
+    out.join("\n")
+}
+
+fn normalize_plain_text_new_file_apply_patch_schema_args(
+    args: &Map<String, Value>,
+) -> Option<(String, bool)> {
+    let file_path = read_hashline_file_path_from_apply_patch_args(args)?;
+    let file_content = read_hashline_file_content_preserve_empty_from_apply_patch_args(args)?;
+    if !file_content.is_empty() {
+        return None;
+    }
+    let patch_source = args
+        .get("patch")
+        .or_else(|| args.get("input"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    if looks_like_hashline_patch(patch_source)
+        || looks_like_patch_instructions(args.get("patch"))
+        || looks_like_patch_instructions(args.get("input"))
+    {
+        return None;
+    }
+    let canonical_patch = build_add_file_apply_patch_from_plain_text(file_path.as_str(), patch_source);
+    let mut out = Map::new();
+    out.insert("patch".to_string(), Value::String(canonical_patch.clone()));
+    out.insert("input".to_string(), Value::String(canonical_patch));
+    Some((
+        serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
+        true,
+    ))
+}
+
 enum HashlineApplyPatchNormalization {
     NotHashline,
     Normalized((String, bool)),
@@ -2737,6 +2803,9 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
         HashlineApplyPatchNormalization::Normalized(normalized) => return normalized,
         HashlineApplyPatchNormalization::Guarded { normalized, .. } => return normalized,
         HashlineApplyPatchNormalization::NotHashline => {}
+    }
+    if let Some(normalized) = normalize_plain_text_new_file_apply_patch_schema_args(&args) {
+        return normalized;
     }
     if let Some((structured_patch, structured_repaired)) =
         build_structured_apply_patch_from_record(&args)

@@ -964,6 +964,9 @@ export class RouteCodexHttpServer {
       routecodexPortMode: portConfig?.mode ?? 'router',
       routecodexPortBinding: portConfig?.providerBinding,
       routecodexRoutingPolicyGroup: portConfig?.routingPolicyGroup,
+      ...(typeof portConfig?.stopMessage?.enabled === 'boolean'
+        ? { stopMessageEnabled: portConfig.stopMessage.enabled, routecodexPortStopMessageEnabled: portConfig.stopMessage.enabled }
+        : {}),
       ...(allowedProviders ? { allowedProviders } : {}),
     };
     const nextInput: PipelineExecutionInput = {

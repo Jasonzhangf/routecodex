@@ -14,7 +14,7 @@ import {
   mergePipelineMetadata,
   readRequestBodyMetadata
 } from './handler-utils.js';
-import { resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
+import { captureResponsesRequestContextForRequest, recordResponsesResponseForRequest, resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
@@ -45,6 +45,54 @@ function isResponsesSubmitToolOutputsPayload(payload: ResponsesPayload | undefin
     return false;
   }
   return Array.isArray(payload.tool_outputs);
+}
+
+
+function buildResponsesResumeRawRequestBody(originalPayload: ResponsesPayload, responseId?: string): Record<string, unknown> {
+  const raw = originalPayload && typeof originalPayload === 'object' && !Array.isArray(originalPayload)
+    ? { ...(originalPayload as Record<string, unknown>) }
+    : {};
+  if (typeof responseId === 'string' && responseId.trim() && typeof raw.previous_response_id !== 'string') {
+    raw.previous_response_id = responseId.trim();
+  }
+  return raw;
+}
+
+async function recordResumedResponsesContextForResponseId(args: {
+  responseId: string;
+  payload: ResponsesPayload;
+  routeHint?: string;
+}): Promise<void> {
+  const responseId = args.responseId.trim();
+  if (!responseId) return;
+  const input = Array.isArray(args.payload.input) ? args.payload.input : [];
+  const output = input.filter((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+    const type = typeof (item as Record<string, unknown>).type === 'string'
+      ? String((item as Record<string, unknown>).type).trim()
+      : '';
+    return type === 'function_call';
+  });
+  if (output.length === 0) return;
+  await captureResponsesRequestContextForRequest({
+    requestId: responseId,
+    payload: args.payload as Record<string, unknown>,
+    context: {
+      input: [],
+      toolsRaw: Array.isArray(args.payload.tools) ? args.payload.tools : undefined,
+    },
+    routeHint: args.routeHint,
+  });
+  await recordResponsesResponseForRequest({
+    requestId: responseId,
+    response: {
+      id: responseId,
+      object: 'response',
+      status: 'requires_action',
+      output,
+    },
+    routeHint: args.routeHint,
+  });
 }
 
 function logResponsesHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
@@ -179,6 +227,15 @@ export async function handleResponses(
         const resumeResult = await resumeResponsesConversation(responseId, payload, { requestId });
         payload = (resumeResult.payload ?? {}) as ResponsesPayload;
         resumeMeta = resumeResult.meta;
+        try {
+          await recordResumedResponsesContextForResponseId({
+            responseId,
+            payload,
+            routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined,
+          });
+        } catch (recordError) {
+          logResponsesHandlerNonBlockingError('submit_tool_outputs.record_resumed_context', recordError, { requestId, responseId });
+        }
         // After resuming, the outbound request becomes a normal `/v1/responses` create request.
         // Keeping the synthetic entrypoint would cause the outbound mapper to rebuild an upstream
         // submit_tool_outputs payload (which many OpenAI-compatible upstreams do not implement).
@@ -263,7 +320,9 @@ export async function handleResponses(
           ? { routeHint: resumeMeta.routeHint.trim() }
           : {}),
         providerProtocol: 'openai-responses',
-        __raw_request_body: originalPayload,
+        __raw_request_body: isSubmitToolOutputs
+          ? buildResponsesResumeRawRequestBody(originalPayload, typeof payload.previous_response_id === 'string' ? payload.previous_response_id : options.responseIdFromPath)
+          : originalPayload,
         clientHeaders,
         clientConnectionState,
 	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),

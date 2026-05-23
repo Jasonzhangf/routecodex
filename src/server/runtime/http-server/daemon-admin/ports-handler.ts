@@ -34,6 +34,8 @@ export function registerPortsRoutes(app: Application, options: PortsHandlerOptio
         routingPolicyGroup: config.routingPolicyGroup,
         protocolBehavior: config.protocolBehavior,
         providerBinding: config.providerBinding,
+        sameProtocolBehavior: config.sameProtocolBehavior,
+        stopMessage: config.stopMessage,
         status: runtimeState?.status ?? 'stopped',
         activeConnections: runtimeState?.activeConnections ?? 0,
         error: runtimeState?.error,
@@ -68,6 +70,7 @@ export function registerPortsRoutes(app: Application, options: PortsHandlerOptio
       apikey: body.apikey,
       timeout: body.timeout,
       bodyLimit: body.bodyLimit,
+      stopMessage: body.stopMessage,
     };
 
     const validation = validatePortConfigs([newConfig]);
@@ -92,6 +95,8 @@ export function registerPortsRoutes(app: Application, options: PortsHandlerOptio
         routingPolicyGroup: newConfig.routingPolicyGroup,
         protocolBehavior: newConfig.protocolBehavior,
         providerBinding: newConfig.providerBinding,
+        sameProtocolBehavior: newConfig.sameProtocolBehavior,
+        stopMessage: newConfig.stopMessage,
         status: runtimeState?.status ?? 'starting',
         activeConnections: runtimeState?.activeConnections ?? 0,
         error: runtimeState?.error,

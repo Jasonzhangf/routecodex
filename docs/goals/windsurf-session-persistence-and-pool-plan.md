@@ -6,9 +6,9 @@
 为 Windsurf provider 建立可持久化的 session 认证层、批量账号池与失效感知调度层；provider 不再把账号/session 状态保存在实例临时变量里，而是改为接入独立的持久化真源与账号池状态机。
 
 ### 1.2 验收标准
-1. 进程重启后，若 `sessionToken` 仍有效，provider 不再重新走账号密码登录链，而是直接复用持久化 session。
+1. 进程重启后，若 `devinSessionToken` 仍有效，provider 不再重新走账号密码登录链，而是直接复用持久化 session。
 2. 当某账号出现 `weekly quota exhausted` / `daily quota exhausted` 时，系统将该账号标记为 cooldown，并在 cooldown 期内不再选中；cooldown 至少按 24h 粒度检查恢复。
-3. 当某账号出现 auth 失效（401、invalid email/password、invalid session token 等）时，系统将其标记为 auth-invalid，并触发单账号 refresh/login；refresh 失败时短时退避。
+3. 当某账号出现 auth 失效（401、invalid email/password、invalid devin session token 等）时，系统将其标记为 auth-invalid，并触发单账号 refresh/login；refresh 失败时短时退避。
 4. 当某账号只出现 runtime 故障（如 empty completion、ECONNRESET、pending stream canceled、上游连接取消）时，只重置 runtime/live state，不清空持久化 auth。
 5. 同一 runtimeKey 下多个 Windsurf 账号能够形成候选池，支持轮转、sticky、cooldown、失效跳过。
 6. 错误归一后，quota 类错误必须进入统一错误处理，不得直接把“原始 provider 失败”立刻回给客户端导致池切换失效。
@@ -37,21 +37,20 @@
 - 非 Windsurf provider 的账号池复用抽象
 - servertool 历史失败修复
 - llmswitch-core router-wide 通用 quota manager 替换
-- 新增 fallback/降级链路
+- 新增 fallback / 降级 / 兜底链路
 
 ## 3. 设计原则
 1. **单一真源**：账号/session/quota 状态真源独立于 provider 实例，不能继续堆在 `windsurf-chat-provider.ts` 的临时字段里。
 2. **状态分层**：严格区分 auth、quota、runtime 三类状态，禁止混用一个“坏了就重登”的粗暴流程。
-3. **无 fallback**：失败必须显式分类；不能在 provider 内偷偷降级、吞错、双路径补偿。
+3. **No fallback**：失败必须显式分类；不能在 provider 内偷偷降级、吞错、双路径补偿。
 4. **最小接入**：provider 只负责 request transform、send、response parse、error classify；账号池负责选号与状态迁移。
 5. **先红后绿**：先补 store/pool/session-manager 的红测，再接 provider。
 6. **持久化优先**：可持久化的只有认证态与账号健康态；live runtime 只做进程内状态。
 
 ## 4. 参考真源与已知事实
-1. 参考实现：`windsurfapi`
-   - 登录链：`CheckUserLoginMethod -> password/login -> WindsurfPostAuth -> sessionToken`
-   - `sessionToken` 可作为长期认证凭据持久化复用
-  - `sessionToken` 才是长期持久化真源；临时会话态不得当成 provider 真源
+1. 参考实现：`/Volumes/extension/code/WindsurfAPI`
+   - 登录链：`CheckUserLoginMethod -> password/login -> WindsurfPostAuth -> devin-session-token$...`
+   - `devin-session-token$...` 才是长期持久化真源；临时会话态不得当成 provider 真源
 2. RouteCodex 当前现状：
    - `src/providers/core/runtime/windsurf-chat-provider.ts`
    - 只有进程内：`windsurfSessionCredential` / `windsurfSessionCredentialPromise`
@@ -59,7 +58,7 @@
 3. 已验证现象：
    - 鉴权真相已收敛到：`token 优先 -> token 失败再账号密码登录 -> 成功后持久化 devin-session-token$...`
   - tool / history / continuity 的参考锚点来自 `WindsurfAPI` 的 cascade 语义转换层
-   - 该计划只允许建立在 `chat -> provider -> cascade` 单一路径上
+   - 该计划只允许建立在 `chat -> provider -> local managed LS gRPC -> Cascade` 单一路径上
    - 禁止把账号池/持久化设计接成第二套实现
 
 ## 5. 总体方案
@@ -104,7 +103,7 @@ provider 仅接入上述三层，不再自己成为状态真源。
       "email": "user@example.com",
       "accountId": "account-xxx",
       "passwordRef": "config:windsurf.ws-pro-1.password",
-      "sessionToken": "...",
+      "devinSessionToken": "...",
       "auth": {
         "status": "ready",
         "lastLoginAt": "2026-05-21T10:00:00.000Z",
@@ -156,11 +155,11 @@ provider 仅接入上述三层，不再自己成为状态真源。
 - `backoff`
 
 触发：
-- 401 / invalid email or password / invalid session token
+- 401 / invalid email or password / invalid devin session token
 - postAuth hard auth failure
 
 动作：
-- 清理持久化 `sessionToken`
+- 清理持久化 `devinSessionToken`
 - 走一次受锁保护的登录刷新
 - 成功后回写新 token
 - 失败则短时 backoff（建议 10min）
@@ -194,7 +193,7 @@ provider 仅接入上述三层，不再自己成为状态真源。
 
 动作：
 - 仅重置 live runtime：当前请求相关的 cascade/runtime 临时态
-- 不删持久化 `sessionToken`
+- 不删持久化 `devinSessionToken`
 - 短 backoff（30s~2min）后允许再试
 
 ## 6. Provider 接入策略
@@ -221,7 +220,7 @@ provider 仅接入上述三层，不再自己成为状态真源。
 3. 优先 sticky 账号
 4. 否则按最近成功/失败数/轮询选号
 5. 获取该账号的 session credential：
-   - 有效 `sessionToken` 先复用
+   - 有效 `devinSessionToken` 先复用
    - 无 token 或 token 失效再 refresh/login
 
 ### 6.3 请求后流程
@@ -259,7 +258,7 @@ provider 仅接入上述三层，不再自己成为状态真源。
 ### 7.2 auth 类
 - 401
 - `Invalid email or password`
-- `session token not initialized`
+- `devin session token not initialized`
 - 明确 token invalid
 
 ### 7.3 runtime 类
@@ -319,7 +318,7 @@ provider 仅接入上述三层，不再自己成为状态真源。
 1. 准备 3 个 ws-pro 账号
 2. 验证：
    - 首次登录后生成持久化 state
-   - 重启进程后复用 sessionToken
+   - 重启进程后复用 devinSessionToken
    - 手工注入 quota exhausted 状态后跳过账号 1，切到账号 2/3
    - auth invalid 时重新登录并恢复
 

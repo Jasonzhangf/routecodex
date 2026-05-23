@@ -139,7 +139,6 @@ pub fn build_tool_text_instruction(tools: Option<&Value>, _require_tool_call: bo
     ];
 
     if has_exec_command {
-        rule_lines.push("- FORBIDDEN FIRST: never call `apply_patch` through `exec_command`, `shell`, `bash -lc`, command substitution, or heredoc wrappers like `apply_patch <<PATCH`; file edits must use a direct `apply_patch` tool call.".to_string());
         rule_lines.push("- For `exec_command`, use only `input.cmd` as one string; prefer a direct single-line command like `pwd`. Use `bash -lc '...'` only when shell features are truly required, and then the final single quote must be present.".to_string());
         rule_lines.push("- For `exec_command`, keep normal shell commands on one physical line unless an actual heredoc is required; do not insert raw newlines inside operators or redirects like `|`, `&&`, `||`, `;`, `2>/dev/null`, or `-exec ... \\;`".to_string());
     }
