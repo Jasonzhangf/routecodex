@@ -885,6 +885,8 @@ function createWindsurfProviderError(message: string, fields: Partial<WindsurfFa
     code: fields.code || 'WINDSURF_SERVICE_UNREACHABLE',
     retryable: fields.retryable ?? false,
     status: fields.status ?? 502,
+    upstreamCode: fields.upstreamCode,
+    upstreamStatus: fields.upstreamStatus,
     rateLimitKind: fields.rateLimitKind,
     cooldownOverrideMs: fields.cooldownOverrideMs,
     quotaScope: fields.quotaScope,
@@ -984,6 +986,15 @@ function resolveWindsurfChatCompletionsModel(model: string): { enumValue: number
 }
 
 function classifyWindsurfUpstreamPayloadError(payloadError: Record<string, unknown>): Partial<WindsurfFailureClass> {
+  const rawUpstreamCode = payloadError.code;
+  const upstreamCode = typeof rawUpstreamCode === 'string'
+    ? rawUpstreamCode.trim()
+    : typeof rawUpstreamCode === 'number' && Number.isFinite(rawUpstreamCode)
+      ? String(rawUpstreamCode)
+      : undefined;
+  const upstreamStatus = typeof rawUpstreamCode === 'number' && Number.isFinite(rawUpstreamCode)
+    ? rawUpstreamCode
+    : undefined;
   const errorCodeText = typeof payloadError.code === 'string'
     ? payloadError.code.trim().toLowerCase()
     : '';
@@ -1011,6 +1022,8 @@ function classifyWindsurfUpstreamPayloadError(payloadError: Record<string, unkno
       code: 'WINDSURF_POLICY_BLOCKED',
       status: 451,
       retryable: false,
+      upstreamCode,
+      upstreamStatus,
     };
   }
   if (looksLikeInternalError || looksLikeTransportTransient) {
@@ -1018,12 +1031,16 @@ function classifyWindsurfUpstreamPayloadError(payloadError: Record<string, unkno
       code: 'WINDSURF_UPSTREAM_TRANSIENT',
       status: 502,
       retryable: true,
+      upstreamCode,
+      upstreamStatus,
     };
   }
   return {
     code: isTrueRateLimit ? 'WINDSURF_RATE_LIMITED' : 'WINDSURF_SERVICE_UNREACHABLE',
     status: isTrueRateLimit ? 429 : 502,
     retryable: isTrueRateLimit ? false : true,
+    upstreamCode,
+    upstreamStatus,
     rateLimitKind: isTrueRateLimit ? 'daily_limit' : undefined,
     cooldownOverrideMs: isTrueRateLimit ? 24 * 60 * 60_000 : undefined,
     quotaScope: isTrueRateLimit ? 'model' : undefined,
@@ -1035,6 +1052,8 @@ type WindsurfFailureClass = {
   code: string;
   retryable: boolean;
   status: number;
+  upstreamCode?: string;
+  upstreamStatus?: number;
   rateLimitKind?: 'daily_limit' | 'short_lived';
   cooldownOverrideMs?: number;
   quotaScope?: 'weekly' | 'model';
@@ -1099,7 +1118,10 @@ function attachWindsurfErrorFields(target: Error & Record<string, unknown>, c: W
   target.code = c.code;
   target.status = c.status;
   target.retryable = c.retryable;
-  target.upstreamCode = c.code;
+  target.upstreamCode = c.upstreamCode || c.code;
+  if (typeof c.upstreamStatus === 'number' && Number.isFinite(c.upstreamStatus)) {
+    target.upstreamStatus = c.upstreamStatus;
+  }
   target.providerFamily = 'windsurf';
   target.type = 'windsurf_upstream_error';
   if (c.rateLimitKind) {

@@ -8,7 +8,7 @@
 import { describeRetryReason } from './retry-engine.js';
 import { readString } from './request-executor-error-shared.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
-import { extractStatusCodeFromError } from './utils.js';
+import { extractStatusCodeFromError, firstFiniteNumber } from './utils.js';
 import { estimateRetryPayloadBytes } from './retry-payload-bytes-estimator.js';
 
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
@@ -222,6 +222,12 @@ export function extractRetryErrorSnapshot(error: unknown): RetryErrorSnapshot {
     readString(record.upstreamCode)
     ?? readString(detailsRecord?.upstreamCode)
     ?? readString(detailsRecord?.upstream_code);
+  const upstreamStatus = firstFiniteNumber([
+    record.upstreamStatus,
+    record.upstream_status,
+    detailsRecord?.upstreamStatus,
+    detailsRecord?.upstream_status,
+  ]);
   const textDerived = [
     readString(record.rawErrorSnippet),
     readString(record.rawError),
@@ -248,6 +254,7 @@ export function extractRetryErrorSnapshot(error: unknown): RetryErrorSnapshot {
       : (typeof mergedTextDerived.statusCode === 'number' ? { statusCode: mergedTextDerived.statusCode } : {})),
     ...(errorCode ? { errorCode } : (mergedTextDerived.errorCode ? { errorCode: mergedTextDerived.errorCode } : {})),
     ...(upstreamCode ? { upstreamCode } : (mergedTextDerived.upstreamCode ? { upstreamCode: mergedTextDerived.upstreamCode } : {})),
+    ...(typeof upstreamStatus === 'number' ? { upstreamStatus } : {}),
     reason
   };
 }

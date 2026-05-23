@@ -7989,3 +7989,9 @@ Protocol target:
 - 红测: `handler-response-utils.responses-conversation.spec.ts` 新增 `records streamed /v1/responses tool_calls so continuation restores tools after tool execution`，修复前 `recordResponsesResponseForRequest` 调用为空，修复后记录 response id + router id + provider timing id。
 - 唯一修复点: `streamResponsesJsonAsSse()` 在把 Responses JSON 转 SSE 前，复用 JSON 写回同一记录 helper；否则 JSON path 能续接，SSE path 丢 store。
 - 验证: targeted handler spec 4/4 passed；route-aware continuation spec 6/6 passed；`npx tsc --noEmit --pretty false` passed。
+
+## [2026-05-23] Windsurf upstream error identity exposure
+- 用户现象: provider-switch 日志只有 `status=502 code=WINDSURF_UPSTREAM_TRANSIENT upstreamCode=WINDSURF_UPSTREAM_TRANSIENT`，真实 Windsurf payload error code 被泛化，排障只能看到 502。
+- 红测: `parseGetChatMessageResponse must expose numeric upstream error code instead of collapsing to 502 only` 修复前缺 `upstreamCode=13/upstreamStatus=13`；`request-executor-runtime-blocks` 日志红测修复前缺 `upstreamStatus=13`。
+- 唯一修复点: Windsurf provider classifier 保留 raw payload `error.code` 为 `upstreamCode/upstreamStatus`；request-executor retry snapshot/telemetry/log 透传该字段，不改变 HTTP status/retry 分类。
+- 验证: Windsurf provider spec 213/213 passed；runtime-blocks spec 4/4 passed；`npx tsc --noEmit --pretty false` passed。

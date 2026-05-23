@@ -1603,3 +1603,6 @@ Tags: windsurf, multi-account, routing, round-robin, startup-probe, quota, 2026-
 
 - 2026-05-23: Responses streamed `/v1/responses` tool_calls 必须在 `streamResponsesJsonAsSse()` 转 SSE 前写入 Responses conversation store；否则日志会出现 `finish_reason=tool_calls` 但 `responseIndex=0 scopeIndex=0 pendingNoResponseId>0`，下一轮无法靠 response id / scope 恢复工具状态。回归锚点：`tests/server/handlers/handler-response-utils.responses-conversation.spec.ts` 的 streamed Windsurf 10:03 样本，必须断言 response id、router request id、provider timing id 都调用 `recordResponsesResponseForRequest`。
 Tags: responses, sse, windsurf, tool_calls, continuation-store, previous_response_id, red-green, 2026-05-23
+
+- 2026-05-23: Windsurf upstream payload error 的原始 `error.code` 不得被 `WINDSURF_UPSTREAM_TRANSIENT` 覆盖；HTTP `status=502` 只表示代理分类，真实 upstream identity 必须透传为 `upstreamCode`（字符串）和 numeric `upstreamStatus`，并在 provider-switch 日志中同时显示。回归锚点：`tests/providers/core/runtime/windsurf-chat-provider.spec.ts` numeric upstream error code；`tests/server/runtime/http-server/request-executor-runtime-blocks.spec.ts` upstreamStatus log。
+Tags: windsurf, upstream-error, provider-switch, retry-telemetry, no-502-collapse, 2026-05-23

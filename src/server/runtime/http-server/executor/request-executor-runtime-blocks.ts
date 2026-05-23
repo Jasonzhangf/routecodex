@@ -265,6 +265,7 @@ export function logProviderRetrySwitchCompact(args: {
   statusCode?: number;
   errorCode?: string;
   upstreamCode?: string;
+  upstreamStatus?: number;
   switchAction: 'exclude_and_reroute' | 'retry_same_provider';
   backoffScope?: 'provider' | 'recoverable' | 'attempt';
   decisionLabel?: string;
@@ -277,13 +278,15 @@ export function logProviderRetrySwitchCompact(args: {
   const hasStructuredErrorIdentity =
     typeof args.statusCode === 'number'
     || Boolean(args.errorCode)
-    || Boolean(args.upstreamCode);
+    || Boolean(args.upstreamCode)
+    || typeof args.upstreamStatus === 'number';
   const dedupeKey = [
     providerLabel,
     args.switchAction,
     typeof args.statusCode === 'number' ? String(args.statusCode) : 'none',
     args.errorCode || 'none',
     args.upstreamCode || 'none',
+    typeof args.upstreamStatus === 'number' ? String(args.upstreamStatus) : 'none',
     hasStructuredErrorIdentity ? 'structured' : compactReason
   ].join('|');
   const prior = args.providerSwitchLogState.get(dedupeKey);
@@ -300,6 +303,7 @@ export function logProviderRetrySwitchCompact(args: {
       ...(typeof args.statusCode === 'number' ? [`status=${args.statusCode}`] : []),
       ...(args.errorCode ? [`code=${args.errorCode}`] : []),
       ...(args.upstreamCode ? [`upstreamCode=${args.upstreamCode}`] : []),
+      ...(typeof args.upstreamStatus === 'number' ? [`upstreamStatus=${args.upstreamStatus}`] : []),
       `suppressed=${prior.suppressed}`,
       `windowMs=${args.throttleMs}`
     ];
@@ -320,6 +324,7 @@ export function logProviderRetrySwitchCompact(args: {
     ...(typeof args.statusCode === 'number' ? [`status=${args.statusCode}`] : []),
     ...(args.errorCode ? [`code=${args.errorCode}`] : []),
     ...(args.upstreamCode ? [`upstreamCode=${args.upstreamCode}`] : []),
+    ...(typeof args.upstreamStatus === 'number' ? [`upstreamStatus=${args.upstreamStatus}`] : []),
     ...(typeof args.backoffMs === 'number' ? [`backoff=${Math.max(0, Math.round(args.backoffMs))}ms`] : []),
     ...(typeof args.runtimeScopeExcludedCount === 'number' && args.runtimeScopeExcludedCount > 0
       ? [`runtimeScopeExcluded=${args.runtimeScopeExcludedCount}`]

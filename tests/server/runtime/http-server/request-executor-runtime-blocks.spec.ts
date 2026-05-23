@@ -36,6 +36,38 @@ describe('request-executor-runtime-blocks', () => {
     }
   });
 
+  test('logs upstreamStatus separately from HTTP status in provider-switch line', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      logProviderRetrySwitchCompact({
+        requestId: 'req-windsurf-upstream-code',
+        attempt: 1,
+        maxAttempts: 6,
+        nextAttempt: 2,
+        providerKey: 'windsurf.ws-pro-3.gpt-5.4-none',
+        reason: 'An internal error occurred (error ID: upstream-13)',
+        switchAction: 'retry_same_provider',
+        backoffScope: 'recoverable',
+        decisionLabel: 'recoverable_backoff_same_provider',
+        stage: 'provider.send',
+        statusCode: 502,
+        errorCode: 'WINDSURF_UPSTREAM_TRANSIENT',
+        upstreamCode: '13',
+        upstreamStatus: 13,
+        backoffMs: 2000,
+        providerSwitchLogState: new Map(),
+        throttleMs: 5000
+      });
+
+      const line = warnSpy.mock.calls.map((call) => String(call[0] ?? '')).find((value) => value.includes('[provider-switch]'));
+      expect(line).toContain('status=502');
+      expect(line).toContain('upstreamCode=13');
+      expect(line).toContain('upstreamStatus=13');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   test('does not bypass provider response conversion for chat.completion business-error bodies', () => {
     expect(shouldBypassProviderResponseConversion({
       status: 200,

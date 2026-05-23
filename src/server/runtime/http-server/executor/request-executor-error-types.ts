@@ -5,6 +5,7 @@ export type RetryErrorSnapshot = {
   statusCode?: number;
   errorCode?: string;
   upstreamCode?: string;
+  upstreamStatus?: number;
   reason: string;
 };
 
@@ -68,6 +69,7 @@ export type ProviderRetryTelemetryPlan = {
     statusCode?: number;
     errorCode?: string;
     upstreamCode?: string;
+    upstreamStatus?: number;
     switchAction: ProviderRetrySwitchAction;
     backoffScope?: ProviderRetryBackoffScope;
     decisionLabel?: string;
@@ -86,6 +88,7 @@ export type ExcludedProviderReselectionPlan = {
 export type RequestExecutorProviderErrorReportPlan = {
   errorCode?: string;
   upstreamCode?: string;
+  upstreamStatus?: number;
   statusCode?: number;
   stageHint: RequestExecutorProviderErrorStage;
 };

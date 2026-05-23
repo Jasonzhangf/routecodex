@@ -229,6 +229,22 @@ describe('WindsurfChatProvider', () => {
     }));
   });
 
+  test('RED: parseGetChatMessageResponse must expose numeric upstream error code instead of collapsing to 502 only', async () => {
+    const provider = createProvider();
+    expect(() => (provider as any).parseGetChatMessageResponse(JSON.stringify({
+      error: {
+        code: 13,
+        message: 'An internal error occurred (error ID: upstream-13)',
+      },
+    }))).toThrow(expect.objectContaining({
+      code: 'WINDSURF_UPSTREAM_TRANSIENT',
+      upstreamCode: '13',
+      upstreamStatus: 13,
+      status: 502,
+      retryable: true,
+    }));
+  });
+
   test('RED: parseGetChatMessageResponse must classify policy blocked payload like winsurfapi instead of service unreachable', async () => {
     const provider = createProvider();
     expect(() => (provider as any).parseGetChatMessageResponse(JSON.stringify({
