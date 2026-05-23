@@ -7967,3 +7967,7 @@ Protocol target:
 - Added a side-effect-light probe helper `windsurf-startup-probe.ts` and regression test.
 - Added quota maintenance recovery for expired Windsurf weekly blacklist: after local 00:00, expired weekly alias-family blacklist states are reset to initial ok state, so next maintenance tick/startup can re-probe/re-admit.
 - Verification: targeted startup/quota tests passed; tsc passed; build/install/restart to 0.90.2192 passed; 5520 live smoke x3 all HTTP 200 on `windsurf.ws-pro-2.gpt-5.4-none` with no retries.
+## 2026-05-23 Windsurf 5520 multi-account runtime routing correction
+- Runtime/code side: startup probe now hard-fails `checkHealth() === false`, so unusable Windsurf account runtimes are not registered; expired weekly blacklist is reset by quota maintenance/reload after local 00:00.
+- Config side found a separate blocker: 5520 route pools were still `mode = "priority"`, which intentionally locks to the first available target and cannot prove multi-account simultaneous use. Updated `/Volumes/extension/.rcc/config.toml` gateway_priority_5520 pools to `mode = "round-robin"` while keeping `maxInFlight = 1` per runtime.
+- Cleaned `/Volumes/extension/.rcc/provider/windsurf/config.v2.toml` duplicate `ws-pro-4` auth entry; final aliases are ws-pro-1..ws-pro-5.

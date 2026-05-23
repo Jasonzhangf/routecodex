@@ -1158,3 +1158,4 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - If Windsurf output appears truncated, first inspect `~/.rcc/codex-samples/**/provider-response-contract.json` for visible legacy `<tool_call>` / `<function_call>` fragments.
 - Legacy tool markers in Cascade assistant text are not a fallback protocol; they are malformed/truncated output and must fail-fast as `WINDSURF_TOOL_PROTOCOL_CONFLICT`. Only RCC text protocol is valid for unsupported text tools.
 - Windsurf 启动探测铁律补充（2026-05-23）：`checkHealth()` 返回 `false` 等同 startup probe 失败，必须抛 `WINDSURF_STARTUP_PROBE_FAILED` 并阻止 runtime handle 注册；不能把 false 当“非阻塞健康差”。weekly quota 到本地 00:00 后，quota maintenance/reload 必须清掉 expired weekly blacklist，随后由启动 probe 重新确认账号可用再入池。
+- Windsurf 5520 多账号配置铁律（2026-05-23）：多账号同时工作不是 `mode="priority"`，priority 会固定首个可用 target；5520 这种多账号池必须使用 `mode="round-robin"` 或明确 weighted，同时保持 provider `maxInFlight=1` 实现“单账号不并发、多账号并行”。账号配置必须去重 alias，重复 alias 会造成认证/状态语义混淆。

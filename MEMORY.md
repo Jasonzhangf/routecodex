@@ -1590,3 +1590,5 @@ Tags: windsurf, multi-account, runtime, quota, stopMessage, startup-probe, 2026-
 
 - 2026-05-23: Windsurf startup probe hardening: `checkHealth() === false` must fail runtime init with `WINDSURF_STARTUP_PROBE_FAILED`; false is not a soft pass. Expired weekly quota blacklists are reset on quota maintenance/reload after local 00:00, then startup probe can re-admit usable accounts. Verified with targeted tests + live 5520 smoke on `gpt-5.4-none`.
 Tags: windsurf, startup-probe, weekly-quota, runtime-init, 2026-05-23
+- 2026-05-23: Windsurf 5520 multi-account requires both code and config truth: code must reject unusable runtimes at startup probe (`checkHealth() === false` => no handle), and routing pools must use round-robin/weighted multi-target selection; `mode="priority"` intentionally sticks to first available account and is not a multi-account concurrency configuration. Current 5520 config uses ws-pro-1..ws-pro-5 `gpt-5.4-none`, per-runtime `maxInFlight=1`, and no duplicate auth aliases.
+Tags: windsurf, multi-account, routing, round-robin, startup-probe, quota, 2026-05-23

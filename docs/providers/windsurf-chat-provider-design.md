@@ -166,9 +166,12 @@ Provider behavior target:
 - 一个 Windsurf 账号 alias 必须对应一个 runtime：`windsurf.ws-pro-N`。
 - 一个 model target 必须写成：`windsurf.ws-pro-N.<model>`。
 - runtime auth 如果没有显式 `accountAlias`，必须从 runtime key 的第二段派生，例如 `windsurf.ws-pro-4` -> `ws-pro-4`，避免所有账号共享 `windsurf-default` token/session。
-- 服务器启动时，每个 Windsurf runtime 默认自动 `checkHealth()` probe 一次（auth + `GetCascadeModelConfigs`）；probe 失败即该 runtime 初始化失败并走 provider-init error/quota 回收路径，不允许伪装在池内。
+- 服务器启动时，每个 Windsurf runtime 默认自动 `checkHealth()` probe 一次（auth + `GetCascadeModelConfigs`）；probe 抛错或返回 `false` 都是启动失败，该 runtime 不注册 handle、不入池，不允许伪装可用。
+- 多账号同时工作要求 route pool 使用 `mode = "round-robin"` 或明确 weighted；`mode = "priority"` 只表示首个可用 target 优先，会锁定单账号，不能作为 5520 多账号池配置。
+- 单 runtime 仍保持 `maxInFlight = 1`，通过多个 alias runtime 横向并行；不要把单账号并发调大来模拟多账号。
+- auth entries 必须 alias 去重；重复 `ws-pro-N` 会造成认证/session/quota 状态混淆。
 - `WINDSURF_WEEKLY_QUOTA_EXHAUSTED` 是 account alias family 级别，不是单 model：命中一个 target 后，同 alias 下所有 `windsurf.ws-pro-N.*` 与 root alias 都从池里回收。
-- weekly quota 默认冷却到本地 00:00 自动恢复；上游显式 `cooldownOverrideMs` 仍可覆盖。
+- weekly quota 默认冷却到本地 00:00 自动恢复；上游显式 `cooldownOverrideMs` 仍可覆盖；本地 00:00 后 quota maintenance/reload 清理 expired weekly blacklist，下一次启动 probe 再确认账号可用后入池。
 - 端口级 `[[httpserver.ports]].stopMessage.enabled=false` 是 5520 smoke 的 stopMessage 关闭真源；关闭后不得触发 tmux/client followup。
 
 ## Verification
