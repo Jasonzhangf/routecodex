@@ -7983,3 +7983,9 @@ Protocol target:
 - Root cause: Responses conversation retention released large base payload and also cleared `entry.tools`; `resumeLatestResponsesContinuationByScope()` then restored `previous_response_id` + delta input without `tools`, so downstream Windsurf prompt/tool governance saw no callable tools.
 - Red→green evidence: added assertion to `releasing request payload preserves scope-based continuation lookup`; before fix `restored.payload.tools` was `undefined`, after fix the original tool definitions are preserved.
 - Fix: keep slim retained tool definitions while releasing bulky input/base payload; this preserves tool capability without retaining full historical payload.
+
+## [2026-05-23] streamed Responses tool_calls continuation store gap
+- Jason 新样本: `/v1/responses stream=true` 连续 Windsurf tool_calls 后 mem-observer 仍 `responseIndex=0 scopeIndex=0 pendingNoResponseId=6`，说明 streamed tool_calls client payload 没进入 Responses conversation store。
+- 红测: `handler-response-utils.responses-conversation.spec.ts` 新增 `records streamed /v1/responses tool_calls so continuation restores tools after tool execution`，修复前 `recordResponsesResponseForRequest` 调用为空，修复后记录 response id + router id + provider timing id。
+- 唯一修复点: `streamResponsesJsonAsSse()` 在把 Responses JSON 转 SSE 前，复用 JSON 写回同一记录 helper；否则 JSON path 能续接，SSE path 丢 store。
+- 验证: targeted handler spec 4/4 passed；route-aware continuation spec 6/6 passed；`npx tsc --noEmit --pretty false` passed。

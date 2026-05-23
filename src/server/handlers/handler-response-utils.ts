@@ -92,6 +92,41 @@ function resolveResponsesConversationRecordRequestIds(
   return [...responseIds, ...requestIds];
 }
 
+function recordResponsesConversationToolCallResponse(args: {
+  entryEndpoint?: string;
+  requestLabel: string;
+  timingRequestIds?: string[];
+  routeHint?: string;
+  body: unknown;
+}): void {
+  if (
+    args.entryEndpoint !== '/v1/responses'
+    && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
+  ) {
+    return;
+  }
+  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
+    return;
+  }
+  if (deriveFinishReason(args.body) !== 'tool_calls') {
+    return;
+  }
+  const recordBody = args.body as Record<string, unknown>;
+  for (const recordRequestId of resolveResponsesConversationRecordRequestIds(
+    args.requestLabel,
+    args.timingRequestIds,
+    recordBody.id
+  )) {
+    void recordResponsesResponseForRequest({
+      requestId: recordRequestId,
+      response: recordBody,
+      routeHint: args.routeHint,
+    }).catch((error) => {
+      logResponseNonBlockingError(`responses-conversation-record:${recordRequestId}`, error);
+    });
+  }
+}
+
 function logSseClientCloseDiagnosis(
   requestLabel: string,
   details: Record<string, unknown>
@@ -605,6 +640,14 @@ function streamResponsesJsonAsSse(args: {
             requestId: args.requestLabel
           }) as Record<string, unknown>;
         })();
+      const sanitizedResponsesPayload = stripInternalKeysDeep(responsesPayload);
+      recordResponsesConversationToolCallResponse({
+        entryEndpoint: args.entryEndpoint,
+        requestLabel: args.requestLabel,
+        timingRequestIds: args.result.usageLogInfo?.timingRequestIds,
+        routeHint: args.result.usageLogInfo?.routeName,
+        body: sanitizedResponsesPayload
+      });
       const sse = await converter.convertResponseToJsonToSse(responsesPayload, {
         requestId: args.requestLabel
       });
@@ -1154,28 +1197,13 @@ export function sendPipelineResponse(
   const clientBody = usageNormalized.payload;
   const sanitized = stripInternalKeysDeep(clientBody);
   const jsonFinishReason = deriveFinishReason(clientBody);
-  if (
-    (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
-    && sanitized
-    && typeof sanitized === 'object'
-    && !Array.isArray(sanitized)
-    && jsonFinishReason === 'tool_calls'
-  ) {
-    const sanitizedRecord = sanitized as Record<string, unknown>;
-    for (const recordRequestId of resolveResponsesConversationRecordRequestIds(
-      requestLabel,
-      result.usageLogInfo?.timingRequestIds,
-      sanitizedRecord.id
-    )) {
-      void recordResponsesResponseForRequest({
-        requestId: recordRequestId,
-        response: sanitizedRecord,
-        routeHint: result.usageLogInfo?.routeName,
-      }).catch((error) => {
-        logResponseNonBlockingError(`responses-conversation-record:${recordRequestId}`, error);
-      });
-    }
-  }
+  recordResponsesConversationToolCallResponse({
+    entryEndpoint,
+    requestLabel,
+    timingRequestIds: result.usageLogInfo?.timingRequestIds,
+    routeHint: result.usageLogInfo?.routeName,
+    body: sanitized
+  });
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
   if (captureClientResponse) {
     void writeServerSnapshot({

@@ -1,10 +1,14 @@
 import { PassThrough } from 'node:stream';
+import { Readable } from 'node:stream';
 import { describe, expect, it, jest } from '@jest/globals';
 
 const recordResponsesResponseForRequestMock = jest.fn(async () => undefined);
+const convertResponseToJsonToSseMock = jest.fn(async () => Readable.from(['event: response.completed\n', 'data: {}\n\n']));
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-  createResponsesJsonToSseConverter: jest.fn(),
+  createResponsesJsonToSseConverter: jest.fn(async () => ({
+    convertResponseToJsonToSse: convertResponseToJsonToSseMock
+  })),
   importCoreDist: jest.fn(),
   requireCoreDist: jest.fn(),
   recordResponsesResponseForRequest: recordResponsesResponseForRequestMock
@@ -34,6 +38,14 @@ class MockResponse extends PassThrough {
     this.end(JSON.stringify(body));
     return this;
   }
+}
+
+async function waitForEnd(stream: PassThrough): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    stream.once('end', resolve);
+    stream.once('error', reject);
+    stream.resume();
+  });
 }
 
 describe('sendPipelineResponse responses conversation recording', () => {
@@ -182,6 +194,66 @@ describe('sendPipelineResponse responses conversation recording', () => {
 
     expect(res.statusCode).toBe(200);
     expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toContain('resp_windsurf_mixed_second');
+  });
+
+  it('RED: records streamed /v1/responses tool_calls so continuation restores tools after tool execution', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    recordResponsesResponseForRequestMock.mockClear();
+    convertResponseToJsonToSseMock.mockClear();
+
+    const res = new MockResponse();
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          id: 'resp_windsurf_streamed_tool_100318513',
+          object: 'response',
+          status: 'requires_action',
+          output: [
+            {
+              type: 'function_call',
+              name: 'exec_command',
+              arguments: '{"cmd":"pwd"}',
+              call_id: 'call_windsurf_streamed_tool'
+            }
+          ],
+          required_action: {
+            type: 'submit_tool_outputs',
+            submit_tool_outputs: {
+              tool_calls: [
+                {
+                  id: 'call_windsurf_streamed_tool',
+                  type: 'function',
+                  name: 'exec_command',
+                  arguments: '{"cmd":"pwd"}',
+                  tool_call_id: 'call_windsurf_streamed_tool'
+                }
+              ]
+            }
+          }
+        },
+        usageLogInfo: {
+          finishReason: 'tool_calls',
+          routeName: 'default/gateway-priority-5520-default',
+          timingRequestIds: [
+            'openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T100318513-222172-856',
+            'openai-responses-router-gpt-5.3-codex-20260523T100318513-222172-856'
+          ]
+        }
+      } as any,
+      'openai-responses-router-gpt-5.3-codex-20260523T100318513-222172-856',
+      { entryEndpoint: '/v1/responses', forceSSE: true }
+    );
+    await waitForEnd(res);
+
+    expect(res.statusCode).toBe(200);
+    expect(convertResponseToJsonToSseMock).toHaveBeenCalledTimes(1);
+    expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toEqual([
+      'resp_windsurf_streamed_tool_100318513',
+      'openai-responses-router-gpt-5.3-codex-20260523T100318513-222172-856',
+      'openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T100318513-222172-856'
+    ]);
   });
 
 });

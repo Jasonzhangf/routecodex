@@ -1600,3 +1600,6 @@ Tags: windsurf, cascade, history, native-bridge, WindsurfAPI, 2026-05-23
 Tags: responses, continuation, tools, memory-retention, windsurf, 2026-05-23
 - 2026-05-23: Windsurf 5520 multi-account requires both code and config truth: code must reject unusable runtimes at startup probe (`checkHealth() === false` => no handle), and routing pools must use round-robin/weighted multi-target selection; `mode="priority"` intentionally sticks to first available account and is not a multi-account concurrency configuration. Current 5520 config uses ws-pro-1..ws-pro-5 `gpt-5.4-none`, per-runtime `maxInFlight=1`, and no duplicate auth aliases.
 Tags: windsurf, multi-account, routing, round-robin, startup-probe, quota, 2026-05-23
+
+- 2026-05-23: Responses streamed `/v1/responses` tool_calls 必须在 `streamResponsesJsonAsSse()` 转 SSE 前写入 Responses conversation store；否则日志会出现 `finish_reason=tool_calls` 但 `responseIndex=0 scopeIndex=0 pendingNoResponseId>0`，下一轮无法靠 response id / scope 恢复工具状态。回归锚点：`tests/server/handlers/handler-response-utils.responses-conversation.spec.ts` 的 streamed Windsurf 10:03 样本，必须断言 response id、router request id、provider timing id 都调用 `recordResponsesResponseForRequest`。
+Tags: responses, sse, windsurf, tool_calls, continuation-store, previous_response_id, red-green, 2026-05-23
