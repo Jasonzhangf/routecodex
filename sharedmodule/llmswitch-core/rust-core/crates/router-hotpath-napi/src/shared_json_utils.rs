@@ -1015,6 +1015,82 @@ mod tests {
     }
 
     #[test]
+    fn shared_read_trimmed_string_deletion_gate_removed_gemini_and_virtual_router_local_clones() {
+        let gemini_path = crate_src_path("gemini_openai_codec.rs");
+        let gemini_source = fs::read_to_string(&gemini_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", gemini_path.display(), error));
+        assert!(
+            !gemini_source.contains("fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {"),
+            "gemini_openai_codec.rs still owns local coerce_thought_signature clone"
+        );
+        assert!(
+            gemini_source.contains("read_trimmed_string(part_row.get(\"thoughtSignature\"))")
+                || gemini_source.contains("read_trimmed_string(\n        row.get(\"thought_signature\")"),
+            "gemini_openai_codec.rs must route thought-signature trimming through shared read_trimmed_string truth"
+        );
+
+        let provider_bootstrap_path = crate_src_path("virtual_router_engine/provider_bootstrap.rs");
+        let provider_bootstrap_source = fs::read_to_string(&provider_bootstrap_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {}", provider_bootstrap_path.display(), error)
+        });
+        assert!(
+            !provider_bootstrap_source.contains("fn read_optional_string(value: Option<&Value>) -> Option<String> {"),
+            "virtual_router_engine/provider_bootstrap.rs still owns local read_optional_string clone"
+        );
+        assert!(
+            provider_bootstrap_source
+                .contains("use crate::shared_json_utils::read_trimmed_string as read_optional_string;")
+                || provider_bootstrap_source.contains("read_trimmed_string(provider.get(\"type\"))")
+                || provider_bootstrap_source.contains("read_trimmed_string(auth.get(\"value\"))"),
+            "virtual_router_engine/provider_bootstrap.rs must route optional-string trimming through shared read_trimmed_string truth or direct alias"
+        );
+
+        let routing_bootstrap_path = crate_src_path("virtual_router_engine/routing/bootstrap.rs");
+        let routing_bootstrap_source = fs::read_to_string(&routing_bootstrap_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {}", routing_bootstrap_path.display(), error)
+        });
+        assert!(
+            !routing_bootstrap_source.contains("fn read_optional_string(value: Option<&Value>) -> Option<String> {"),
+            "virtual_router_engine/routing/bootstrap.rs still owns local read_optional_string clone"
+        );
+        assert!(
+            routing_bootstrap_source
+                .contains("use crate::shared_json_utils::read_trimmed_string as read_optional_string;")
+                || routing_bootstrap_source.contains("read_trimmed_string(record.get(\"id\"))")
+                || routing_bootstrap_source.contains("read_trimmed_string(record.get(\"poolId\"))"),
+            "virtual_router_engine/routing/bootstrap.rs must route optional-string trimming through shared read_trimmed_string truth or direct alias"
+        );
+    }
+
+    #[test]
+    fn shared_read_trimmed_string_deletion_gate_removed_hub_pipeline_block_local_clones() {
+        let resume_path = crate_src_path("hub_pipeline_blocks/responses_resume.rs");
+        let resume_source = fs::read_to_string(&resume_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", resume_path.display(), error));
+        assert!(
+            !resume_source.contains("fn read_trimmed_optional_string(value: Option<&Value>) -> Option<String> {"),
+            "hub_pipeline_blocks/responses_resume.rs still owns local read_trimmed_optional_string clone"
+        );
+        assert!(
+            resume_source.contains("read_trimmed_string(resume_obj.get(\"previousRequestId\"))")
+                || resume_source.contains("read_trimmed_string(next_metadata.get(\"routeHint\"))"),
+            "hub_pipeline_blocks/responses_resume.rs must route optional string trimming through shared read_trimmed_string truth"
+        );
+
+        let metadata_path = crate_src_path("hub_pipeline_blocks/metadata.rs");
+        let metadata_source = fs::read_to_string(&metadata_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", metadata_path.display(), error));
+        assert!(
+            !metadata_source.contains("fn read_trimmed_string_token(metadata: &Map<String, Value>, keys: &[&str]) -> Option<String> {\n    for key in keys {"),
+            "hub_pipeline_blocks/metadata.rs still owns local multi-key trim scan clone"
+        );
+        assert!(
+            metadata_source.contains("read_first_object_trimmed_string(metadata, keys)"),
+            "hub_pipeline_blocks/metadata.rs must route multi-key trim scan through shared read_first_object_trimmed_string truth"
+        );
+    }
+
+    #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_tool_call_id_manager_local_clone() {
         let path = crate_src_path("shared_tool_call_id_manager.rs");
         let source = fs::read_to_string(&path)

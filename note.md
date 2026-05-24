@@ -12,6 +12,52 @@
   - `src/servertool/handlers/` 下当前不存在 `review.ts`，所以 `review` tool_call 根本没有 active handler，导致 orchestration 全部落成 `skipped_passthrough / flow=none`。
 - 这不是 req_process 问题，也不是 followup-mainline 的问题；唯一正确修改点是 **servertool runtime active handler registration + review handler 本体**。先补这层，才能继续谈 response-side Rust/TS closeout。
 
+## 2026-05-24 windsurf run_command 结果回注缺口（5520 实证）
+
+- 当前 `run_command` native mapping 本身已在线：`src/providers/core/runtime/windsurf-chat-provider.ts` 明确把 `shell_command/exec_command/run_command/bash` 映射到 Cascade `run_command`，`history-tool-projection-block.ts` 也能把已配对的 `function_call_output` 投影成 `additional_steps`。
+- 但 5520 最新 samples 显示回注链路**并不稳定**，且当前更像是“进 provider 前丢历史”，不是 native transport 本身坏：
+  - `~/.rcc/codex-samples/openai-responses/windsurf.ws-pro-2.gpt-5.4-low/openai-responses-windsurf.ws-pro-2-gpt-5.4-low-20260524T114307496-223421-1202/provider-request.json`（version `0.90.2217`）里 `additionalStepsCount=0`
+  - 同批最新样本也没有 `function_call_output` / `<|RCC|tool_result` 痕迹
+  - 但较早样本 `...223388-1169/provider-request_1.json`（version `0.90.2213`）里 `nativeAllowlist=["run_command"]` 且 `additionalStepsCount=103`
+- 这说明 provider 具备发送 tool result 的能力；真正缺口是**某些 followup 请求到达 provider 时，没有把 tool call + tool result 成对重建进 semantic history**。
+- 当前最可疑真源：
+  - `src/providers/core/runtime/windsurf-chat-provider.ts::sendRequestInternal()` 只用 `body.messages` 做 `parseCascadeSemanticRoundtripSync(body.messages)`
+  - 而 `/v1/responses` followup 在 `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts` 会被归一到 `input`
+  - 若 bridge/store 没把 `input` 中的 `function_call_output` 重新投回 `messages` 或 `toolHistory.pairs`，provider 侧就会看到 `additionalStepsCount=0`
+- 额外已确认问题：provider prompt 仍把巨量 text tool contract 直接塞进 `text`，包括 `apply_patch contract`；这会污染模型行为与上下文预算，但它是“提示词污染”问题，不是 `run_command` 结果丢失的真源。
+
+## 2026-05-24 windsurf auth typed-result 收口（本轮）
+
+- 本轮继续推进 P0 auth parse 收口：
+  - `src/providers/core/runtime/windsurf/auth-block.ts` 物理删除未使用的旧 `parseInlineWindsurfAccount(...): null` 包装出口，只保留 `parseInlineWindsurfAccountDetailed(...)` 作为唯一真源。
+  - `src/providers/core/runtime/windsurf-chat-provider.ts::resolveWindsurfLoginMethodProbe(...)` 不再把 `fetchWindsurfCheckLoginMethod()` 的 typed 失败压成一个泛化 `WINDSURF_CHECK_LOGIN_METHOD_FAILED`。
+- 已收口的 typed 出口：
+  - `payload_invalid` -> `WINDSURF_CHECK_LOGIN_METHOD_PAYLOAD_INVALID`
+  - `http_non_ok` -> `WINDSURF_CHECK_LOGIN_METHOD_HTTP_NON_OK`
+  - `transport_error` -> `WINDSURF_CHECK_LOGIN_METHOD_TRANSPORT_ERROR`
+- 定向测试已绿：
+  - `persisted token file parser returns typed malformed result in auth block`
+  - `inline windsurf account parser returns typed failure instead of null for non account shape`
+  - `persisted credential loader returns typed missing result instead of bare null`
+  - `resolveWindsurfLoginMethodProbe must surface typed parse failure instead of opaque generic error`
+  - `resolveWindsurfLoginMethodProbe must surface typed http_non_ok status instead of collapsing to generic 502`
+  - `resolveWindsurfLoginMethodProbe must surface typed transport error detail instead of opaque generic error`
+- 当前阻塞不是本轮 auth 改动，而是仓内现存 Rust 文件 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/windsurf_tool_history_projection.rs` 自身大量 `Option<String>` / `String` 类型错，导致 `npm run build:min` 全局失败；需单独收口该 Rust 文件后，才能恢复构建门禁。
+
+## 2026-05-24 windsurf apply_patch 回注与 stale terminate 红测真源
+
+- `RCC text tool results become RCC tool_result context...` 与 `paired assistant/tool injection...` 的真根因不在 HTTP/router，也不在 TS prompt 拼接，而在 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/windsurf_tool_history_projection.rs::build_context`：
+  - RCC `apply_patch` 的 `tool_result` 之前只是原样塞回 CDATA；
+  - 导致 plain `patch applied` 不会升级成“下一步推理反馈”；
+  - JSON success 也不会投影出 `status=... / filePath=... / message=...` 这些可供下一步推理直接使用的字段。
+- 唯一正确修复点就是在 `windsurf_tool_history_projection.rs` 内对 `apply_patch` 的 tool_result 做 shared-truth 归一；
+  - 不能只改 TS 测试；
+  - 不能只改 inbound normalization，因为这条 Windsurf history path 会直接消费 semanticConversation。
+- `stale managed runtime termination must surface typed tcp port inspection failure...` 的真根因在 `src/providers/core/runtime/windsurf/runtime-lifecycle-block.ts::confirmManagedRuntimeExited`：
+  - 之前 `isManagedRuntimeProcessAlive(pid, 0)` 为真时，`&&` 短路导致 `isTcpPortListening(port)` 根本不执行；
+  - 所以 `lsof` 失败被伪装成“未退出但也不报端口探测失败”；
+  - 唯一正确修复点是 `confirmManagedRuntimeExited` 必须在有 `port` 时显式执行端口探测，让 `WINDSURF_RUNTIME_PORT_INSPECTION_FAILED` 真实冒泡。
+
 ## 2026-05-18 responses conversation store 持续涨真源
 
 - 线上证据：`mem-observer` 中 `scopeIndex` 基本稳定（如 4），但 `requestMap/responseIndex` 随同一 session 连续请求单调上升（如 19/18）。这说明不是“新 scope 正常增加”，而是**旧 scoped entry 被新的 scoped entry 覆盖后，仍残留在 requestMap/responseIndex**。
@@ -9302,6 +9348,24 @@ Protocol target:
 - 新增 resource block 单测覆盖：保留 keepPort、不终止缺 pid runtime、终止 stale pid 并产出 `managedLs.staleTerm` 事件。
 - 验证：`npx tsc --noEmit --pretty false` 通过；`npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` 248/248 通过；`node scripts/build-core.mjs` 通过（仅既有 Rust warnings）。
 
+## 2026-05-24 Windsurf P0 typed-result 收口（登录探测主链）
+- 已确认 `auth-block.ts` 本身已有 typed result：
+  - `parsePersistedWindsurfSessionCredential()`：`ok:false reason=malformed/read_failed`
+  - `parseWindsurfCheckUserLoginMethodPayload()`：`ok:false reason=empty_body|invalid_json|unexpected_shape`
+- 本轮真缺口在 provider 主链，不在 block：
+  - `resolveWindsurfLoginMethodProbe()` 之前把 `fetchWindsurfCheckLoginMethod()` 的 typed `payload_invalid` 统一糊成 `WINDSURF_CHECK_LOGIN_METHOD_FAILED`，丢失 parse reason，属于“typed block 已有、provider 又吞回 generic error”的 P0 违例。
+- 已补红测并转绿：
+  - `RED: resolveWindsurfLoginMethodProbe must surface typed parse failure instead of opaque generic error`
+- 唯一正确修改点：
+  - `src/providers/core/runtime/windsurf-chat-provider.ts`
+  - `src/providers/core/runtime/windsurf/response-parse-block.ts`
+- 实现结果：
+  - provider 遇到 `payload_invalid` 时，显式抛 `WINDSURF_CHECK_LOGIN_METHOD_PAYLOAD_INVALID`
+  - 错误对象保留 `parseReason=invalid_json`
+- 验证：
+  - 定向 Jest 3/3 通过（malformed token / login-method invalid_json / provider typed parse propagation）
+  - `npx tsc --noEmit --pretty false --incremental false` 运行中继续用于本轮收口
+
 ## 2026-05-24 HubPipeline Rust closeout - web_search servertool shadow/deletion gate
 - `tests/servertool/server-side-web-search.spec.ts` 剩余 2 红点已做真因拆分：
   1) `/v1/responses` followup case 不是业务实现错，而是 **stale test**。实际 followup 经 `src/servertool/followup-shape-guard.ts` 规范化后必须是 `input[]`，不是 `messages[]`。证据：手工复现 `runServerToolOrchestration()` 输出的 `sawFollowup.body` 为 `{ input:[user,function_call,function_call_output], stream:false }`；同仓已有 contract `tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts:942-986` 断言 responses reenter 必须转成 `function_call_output` input。
@@ -9353,3 +9417,1178 @@ Protocol target:
   - `node sharedmodule/llmswitch-core/scripts/tests/coverage-native-hub-pipeline-resp-semantics.mjs` 通过。
   - `node sharedmodule/llmswitch-core/scripts/tests/coverage-native-chat-process-governance-semantics.mjs` 通过。
 - 当前结论：`responsesResume` 在 HubPipeline chat_process re-entry 的 metadata 污染 blocker 已被 Rust 真源收口；剩余工作转回总目标 completion audit，而不是继续追这条链路。
+
+## 2026-05-24 retainedInputItems 持续增长第二层收口
+- 第一层 scoped pending supersede 泄露已修；本轮继续收口第二层：responses store 在 router-direct / handler 路径的实例一致性与收尾语义。
+- 唯一真因 1：`src/modules/llmswitch/bridge/runtime-integrations.ts` 的 `captureResponsesRequestContextForRequest` / `recordResponsesResponseForRequest` 之前只走 dist module，不优先命中 `globalThis.__rccResponsesConversationStore`，会形成 “capture 在源码 store，record 在 dist store” 的分裂实例，表现为 `Responses conversation request context missing for response capture`，以及 continuation state 像丢上下文。
+- 唯一真因 2：`tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` 旧断言假设 router/provider 两个同 scope pending entry 会并存；但 scoped supersede 真修复后，正确语义是同 scope 只保留最新 entry，所以 `before.requestEntriesWithoutLastResponseId` 应从 `2` 变为 `1`。
+- 新增 5520 回归目标：`tools/gateway-priority-5520-tools` 的 `tool_calls -> stop` 连续样本必须保持 `requestEntriesWithoutLastResponseId=0`，且 `retainedInputItems` 不得在后续 stop 请求再次堆高。
+
+## 2026-05-24 resp_process 11 reds cleanup audit
+- 已按用户要求先红测复现：`cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml resp_process_stage1_tool_governance::resp_process_stage1_tool_governance_tests -- --nocapture` 仍有 11 红点。
+- 当前共因确认：
+  1) `extract_rcc_tool_call_fence_segments()` 只匹配独立 closing line，漏掉 glued closer + outer prose crop；这同时阻断 malformed RCC wrapper（无 name 但 args 可唯一推断为 exec_command）收割。
+  2) `strip_orphan_tool_markup_lines()` 未清 `tool_calls_endl`，导致 Qwen orphan marker 残留。
+  3) `strip_text_tool_wrapper_noise()` 无差别剥掉 `<｜end▁of▁thinking｜>` / ChunkingError；但无 tool_calls 时测试要求保留，有 tool_calls 时才应清掉。
+  4) structured tool_calls 已存在时，`sanitize_content_field_after_tool_markup()` 当前把 wrapper-only content 清成 `Null`；测试要求 content 为 `""`，且 thinking 也必须被移除。
+  5) deepseek-web transcript 4 红点不是恢复失败，而是 `harvest_text_tool_calls_from_payload()` 返回值 contract 漂移：当前返回 recovered count=1，而测试要求 wrapper harvest helper 返回 0，仅通过副作用写入 tool_calls。
+
+[2026-05-24 10:08:03] chunking preserve guard added in text_harvest_strict
+
+[2026-05-24 10:13:48] skip orphan-function-calls sanitize for no-tool ChunkingError preserve path
+
+## 2026-05-24 review/web_search 高风险审计续做
+
+- 当前先按“先红测，再改”处理两个高风险：
+  1. `chat_servertool_orchestration.rs::build_review_tool_definition()` 的 `required` 与 description/现有 followup 调用形状冲突。
+  2. `websearch -> web_search` 只在 Rust 真源确认兼容闭环，不先扩散到 TS。
+- 已确认：`tests/servertool/review-followup.spec.ts` 的 `buildReviewToolCallPayload()` 默认只传 `goal/focus`，不默认传 `cwd/workdir`；因此 Rust 当前把 `cwd/workdir` 列为 required 会把现有调用路径变成严格 schema 失败。
+- 下一步：
+  - 先看 review followup 实际参数消费，确定真必填字段；
+  - 然后在 Rust req-process / orchestration 测试里补最小红测；
+  - 只改 Rust 唯一真源。
+
+## 2026-05-24 hubpipeline Rust 结构审计（shared 函数库 + blocks + 纯编排）
+
+- `hub_pipeline.rs` 当前主体已经很薄，`run_hub_pipeline/run_req_inbound_pipeline/run_req_process_pipeline/run_resp_outbound_pipeline` 主要是编排；证据见 `hub_pipeline.rs:100-241`。
+- 当前最明显、最值得收口的不是 `hub_pipeline.rs` 本体，而是 **Hub 侧两份大型文本/工具归一模块的重复 helper**：
+  - `hub_reasoning_tool_normalizer.rs`
+  - `hub_text_markup_normalizer.rs`
+- 已确认的重复 helper（可抽 shared Rust 库）包括：
+  - XML/CDATA：`unwrap_xml_cdata_sections`、`decode_basic_xml_entities`
+  - JSON 扫描：`extract_balanced_json_object_at`
+  - RCC fence：`extract_rcc_tool_call_fence_segments`
+  - tool 名/提示：`is_structured_tool_name`、`read_tool_name_hint_from_args`
+  - 文本值：`value_to_string`
+  - 媒体判断：`is_image_path`
+- 这些重复说明当前仍有“shared 逻辑散落在两个语义模块里”的问题，优先级高于继续拆 `hub_pipeline.rs` 壳本身。
+- 第二层可收口点是 tool canonicalization：
+  - `hub_bridge_actions/history.rs` 里本地写了一份 `normalize_tool_key`，继续手写 `websearch/web-search -> web_search`
+  - `shared_tool_mapping.rs`、`shared_args_mapping.rs`、`hub_reasoning_tool_normalizer.rs` 也各有 tool 名归一职责
+  - 这类 canonicalization 应继续收成单点 shared helper，避免多处轻微漂移。
+- 结论：HubPipeline Rust 当前“纯编排”方向已经建立，但还没彻底完成；剩余高价值收口点主要在 **shared helper 抽取**，不是再造新的 orchestrator。
+
+- 已落盘主文件收口清单：`docs/goals/hubpipeline-rust-shared-helper-closeout-plan.md`
+- 该文档给出了：
+  - 为什么当前先不拆 `hub_pipeline.rs` 本体
+  - 哪些 helper 先收进 `shared_tooling.rs` / `shared_json_utils.rs` / `shared_tool_mapping.rs` / `shared_args_mapping.rs`
+  - 推荐迁移顺序与验证矩阵
+
+[2026-05-24 10:49:09] shared_json_utils cutover caused reasoning reds to persist; inspecting callsites before further shrink
+
+[2026-05-24 10:53:09] next target is bindings canonicalization dedupe into shared_tool_mapping
+
+[2026-05-24 10:55:07] shared_tool_mapping missed shell-command alias; added exact alias before continuing canonical cutover
+
+[2026-05-24 11:12:00] shared helper cutover visibility regression fixed by restoring hub_bridge_actions::utils::read_trimmed_string as pub(crate) forwarding shell; shared_json_utils remains sole logic source
+[2026-05-24 11:13:00] removed stale shared_json_utils balanced-json imports from hub_reasoning_tool_normalizer after confirming no safe reasoning-shared merge this round
+[2026-05-24 11:15:00] audited next bridge helper candidates; normalize_tool_key is only a thin local wrapper over shared_tool_mapping and collect_text/flatten_content are not shape-equivalent across modules, so no further safe dedupe without semantic risk
+[2026-05-24 11:28:00] moved duplicated collapse_extra_newlines_and_trim helper into shared_tooling and deleted physical copies from chat_clock_clear_directive/chat_clock_reminder_directives/hub_heartbeat_directives
+[2026-05-24 11:29:00] verification: shared_tooling::tests 14 passed; hub_heartbeat_directives filtered tests 2 passed; cargo test -p router-hotpath-napi --no-run compiled successfully after shared cutover
+[2026-05-24 11:41:00] moved duplicated last-user-message-index scan into shared_tooling; kept module-local return-shape wrappers for Option<usize> vs i64 to avoid semantic drift
+[2026-05-24 11:42:00] verification: shared_tooling::tests 16 passed; hub_heartbeat_directives filtered tests 2 passed; chat_clock_reminder_semantics filter matched no local tests but compiled clean in lib test run
+
+## 2026-05-24 windsurf runtime discovery/selection typed-result closeout
+
+- provider 层仍残留一层本地 `null/[]` 语义包装：
+  - `listLiveLocalGrpcRuntimes()` 在 `ps` 失败时直接返回空数组；这会把 runtime discovery 失败伪装成“没有 live runtime”。
+  - `findPreferredRoutecodexWindsurfRuntime()` / `findPreferredManagedWindsurfRuntimeForKey()` 又把 block 层 typed result 压回 `selected | null`。
+- 唯一正确修复点仍在 `src/providers/core/runtime/windsurf-chat-provider.ts`：这里是 block typed result 被 provider 重新抹平的入口。
+- 已改成：
+  - `ps` 失败显式抛 `WINDSURF_RUNTIME_DISCOVERY_FAILED`
+  - provider 内部保留 runtime selection result，不再回落成 provider-local `null`
+  - managed runtime adopt 分支直接消费 selection result
+
+- [2026-05-24 23:16:00] moved read_string_array_command and read_workdir_from_args into shared_json_utils as same-shape Rust shared helpers; deleted duplicate local implementations from hub_req_inbound_tool_call_normalization and resp_process_stage1_tool_governance_blocks/exec_command_args, with shared red tests added before cutover
+
+## 2026-05-24 windsurf tcp port inspection fail-fast
+
+- 继续审 provider 剩余静默点后，锁到 `src/providers/core/runtime/windsurf-chat-provider.ts::isTcpPortListening()`：
+  - 之前 `lsof` 失败直接 `return false`，会把“端口探测失败”伪装成“端口空闲/进程已退出”。
+  - 这会误伤两条 P0 资源链路：
+    1. `findFreeManagedLsPort()` 可能错误复用其实不可判定的端口。
+    2. `terminateManagedRuntimeProcess()/terminateStaleManagedLocalGrpcRuntimes()` 可能把未确认的 runtime 误判为已退出。
+- 唯一正确修复点仍在 provider orchestration 本层，因为 runtime/resource block 依赖的 `isTcpPortListening` 真相来自这里。
+- 已改成显式抛 `WINDSURF_RUNTIME_PORT_INSPECTION_FAILED`，并补红测覆盖 free-port / stale-runtime 两个路径。
+
+- [2026-05-24 23:31:00] moved same-shape transcript normalization helpers into shared_tooling: standard chunked transcript and ran-tree transcript paths now shared by shared_tool_result_text_normalizer/text_harvest_shape/universal_shape_filter/hub_semantic_mapper_chat; kept deepseek-specific prompt-boundary logic local because it is not shape-equivalent
+- [2026-05-24 23:33:00] red test caught a boundary mismatch: unwrap_ran_transcript_shape itself does not remove right-gutter noise; gutter stripping remains outer normalize responsibility, so shared test was narrowed back to the true helper contract
+## 2026-05-24 - hubpipeline rust shared helper closeout
+
+- 红测先锁定纯 ID core helper 合同：`sanitize/short_hash/clamp/extract/normalize_with_fallback`。
+- 本轮仅收“完全同形”重复：`shared_responses_tool_utils.rs` 与 `hub_bridge_actions/utils.rs` 共用一份 `shared_tool_call_id_core.rs`；不碰 reasoning / deepseek / lmstudio 的近似但非同形语义。
+- 验证通过：`shared_tool_call_id_core::tests`、`shared_responses_tool_utils::tests`、`cargo test --no-run`。
+- 第二批继续收“完全同形” ID helper：`shared_response_compat.rs` 与 `req_outbound_stage3_compat/lmstudio/request/core_utils.rs` 的 `sanitize_basic/collapse/extract_collapsed` 已迁入 `shared_tool_call_id_core.rs`，旧复制实现已物理删除。
+- 这批不碰 `shared_responses_response_utils.rs`，因为它只做简化 `fc_/call_` 归一，不是同一合同。
+- 第三批继续收“完全同形” helper：`clamp_responses_input_item_id` 已迁入 `shared_tool_call_id_core.rs`，`hub_reasoning_tool_normalizer.rs` 与 `hub_bridge_actions/history.rs` 的重复实现已物理删除。
+- 边界确认：`hub_reasoning_tool_normalizer.rs::normalize_with_fallback` 不能并入现有 shared ID core，因为它无输入时使用稳定 seed `routecodex_fallback`，而现有 shared 走随机回退；这不是同一合同。
+- 验证：`shared_tool_call_id_core::tests` 绿；`cargo test --no-run` 绿；`hub_reasoning_tool_normalizer` 全量定向目前存在既有红点，至少包含 harvested id / quote-wrapped / sentinel / malformed content 等，不适合在本轮 helper 收口里混修。
+## 2026-05-24 Rust shared helper closeout
+
+- 用户要求本轮先删死代码，再做重复 helper 收口。
+- 已确认 `servertool_skeleton` 中 `request_prepare/internal_dispatch/response_detect/outcome_resolve/registry` 仅剩 Patch1 stub，无 runtime 接线；配置里 `requestPrepare/internalDispatch` 也是残影，可直接物理删除。
+- 已确认可直接删除的私有死函数：`shared_args_mapping.rs::{normalize_tool_name, extract_tool_function_name}`、`shared_responses_tool_utils.rs::normalize_responses_call_id`、`shared_tooling.rs::read_string_value`。
+- `resp_process_stage1_tool_governance_blocks/tool_call_entry.rs::{extract_balanced_json_object_at, extract_balanced_json_array_at}` 已证实与 `shared_json_utils` 同形，已接线 shared。
+- `tool_harvester.rs::normalize_tool_name` 不可并 shared：它把 `execute` 归一到 `shell`，不是 shared 的 `exec_command` 合同。
+
+
+## 2026-05-24 windsurf native prompt leakage / usage typed-result 收口
+
+- `src/providers/core/runtime/windsurf/response-parse-block.ts::parseGeneratorMetadataDetailed()` 的 usage 汇总曾错误读取 `usage.inputTokens` 等顶层字段；但 typed-result 形状已变为 `{ ok, usage }`，导致 malformed/valid usage 路径都可能被错误访问。
+- 唯一正确修改点仍在 `parseGeneratorMetadataDetailed()`：把累计逻辑改成读取 `usage.usage.*`，不能在 provider/日志层补救，否则会继续保留第二语义面。
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/windsurf_tool_history_projection.rs::extract_latest_cascade_user_text()` 之前把 native terminal result 全部降成 `Tool result for ...` 普通文本；这是 shared-truth prompt 投影泄漏，不是 provider 层问题。
+- 现已改成：
+  - 不再注入 `Tool result for ...` 包装文本；
+  - 若 latest user 之后存在 native `function_call_output`，则把原始 output 作为 latest human 的后续执行反馈拼入；
+  - 若没有 user turn（submit continuation 只有 assistant/tool），则直接用 native output 作为 latest human 输入。
+- 这保证了：native history 仍以 additional_steps 为真源，但 prompt 侧只保留“原始执行反馈”，不再额外解释，不再污染成第二种工具结果语义。
+
+- 2026-05-24：确认 shared_responses_conversation_utils::read_string_array_command 与 shared_json_utils::read_string_array_command 完全同形；已补定向测试后切到 shared 真源。
+
+
+## 2026-05-24 windsurf auth/runtime wrapper residue closeout
+
+- `src/providers/core/runtime/windsurf/auth-block.ts::parseWindsurfCheckUserLoginMethodResponse()` 只是把 typed-result `parseWindsurfCheckUserLoginMethodPayload()` 再包回 `value | null`；这会继续保留旧 null 语义面。
+- `src/providers/core/runtime/windsurf/runtime-lifecycle-block.ts::selectPreferredRoutecodexWindsurfRuntime()` / `selectPreferredManagedWindsurfRuntime()` 同样只是把 typed-result selector 再包回 `selected | null`。
+- 这三处 wrapper 都不是独立真源，只会把 P0 typed-result closeout 重新退回 null/continue 时代，因此唯一正确做法是物理删除。
+- 删除后同时清理 `src/providers/core/runtime/windsurf-chat-provider.ts` 的残留导入，并把测试切到 `*Result()` typed-result API，确认：
+  - auth parse bad json 不再存在旧 null 路径；
+  - routecodex/managed runtime preference 只以 named strategy result 为真源。
+
+- 2026-05-24：shared_responses_conversation_utils 删除本地 read_trimmed_string / clone_object，改用 shared_json_utils::read_trimmed_string / value_as_object_or_empty；补测试覆盖 string-array command 保持不变。
+- 2026-05-24：resp_process exec_command_args 删除 read_workdir_from_args 透传包装，调用点改为直连 shared_json_utils::read_workdir_from_args；补定向测试锁住 nested cwd 与 toon alias。
+- [2026-05-24 23:59:00] continued Rust shared-helper closeout with same-shape-only rule: removed four identical local `read_trimmed_string` clones from shared_responses_response_utils/hub_req_outbound_context_merge/hub_req_inbound_tool_output_snapshot/virtual_router_stop_message_state_codec; all now point to shared_json_utils, with a deletion-gate test plus targeted cargo test and crate-level cargo check green
+
+## 2026-05-25 windsurf proto wrapper typed-result closeout
+
+- `response-parse-block.ts` 里 `parseStartCascadeResponse` / `parseTrajectoryStatus` / `parseGeneratorMetadata` 之前仍有 wrapper 把 proto 解析失败吞成 `` / `0` / `null`，属于 P0 级静默坏状态。
+- 本轮唯一正确修改点是 `src/providers/core/runtime/windsurf/response-parse-block.ts` + `cascade-transport-block.ts` + provider wrapper：
+  - `parseStartCascadeResponseDetailed()` 返回 `{ ok, cascadeId | reason }`
+  - `parseTrajectoryStatusDetailed()` 返回 `{ ok, status | reason }`
+  - provider/transport 不再消费空字符串/0/null，而是把 parseReason 显式抛成 `WINDSURF_RESPONSE_PARSE_FAILED`。
+- 新增红测锁定三条语义：StartCascade malformed proto、trajectory missing status、generator metadata malformed proto。
+- [2026-05-25 00:08:00] continued Rust shared-helper closeout with same-shape-only rule: removed three more identical local `read_trimmed_string` clones from virtual_router_engine/routing/metadata, hub_pipeline_target_utils, chat_governance_context, and removed the identical `(map,key)` clone from req_process_stage2_route_select; all now point to shared_json_utils via read_trimmed_string/read_object_trimmed_string, with two deletion-gate tests and crate-level cargo check green
+
+- [2026-05-25 00:12:00] continued windsurf P0 proto typed-result closeout: trajectory step usage proto no longer degrades to null; parseTrajectorySteps now fails fast on malformed step usage, matching StartCascade/Trajectory/GeneratorMetadata explicit parse policy
+
+- [2026-05-25 00:18:00] dispose/resource closeout: dispose path no longer re-enters live runtime selection during cleanup; closeLocalGrpcSession now uses pinned/configured port only, so broken runtime selection cannot prevent pool teardown or stale-runtime cleanup
+- [2026-05-25 00:26:00] added reset-specific guard test for `resetWindsurfCascadeTransportState()`: reset path now has direct evidence that it closes the pinned/configured grpc pool entry, clears warmup/session override, and triggers managed-runtime dispose without re-entering live runtime discovery; targeted Jest reset/dispose group green
+- [2026-05-25 11:57:00] aborted low-value read_trimmed_string sweep after user correction: stop treating tiny trimmed helpers as worthwhile closeout targets; only collect full helper copies or zero-logic whole-function wrappers.
+- [2026-05-25 12:03:00] continued Rust shared-helper closeout with same-shape-only rule: removed zero-logic balanced-JSON wrappers from `resp_process_stage1_tool_governance_blocks/tool_call_entry.rs`; callers now use `shared_json_utils::{extract_balanced_json_object_at, extract_balanced_json_array_at}` directly, with deletion-gate red test first and crate-level cargo check green.
+## 2026-05-24
+
+- 红测：2056 不再包装为 MALFORMED_RESPONSE，改为独立 code `HTTP_429_2056`，并抑制 `convert.bridge.error` 重复日志。
+- 红测：/v1/responses 原始 SSE 在 `response.required_action` + `finish_reason=tool_calls` 时必须视为终态，不能报 `stream closed before response.completed`。
+
+[2026-05-25 12:18:00] 5520 context-loss true root pinned: released submit_tool_outputs continuation for non-responses outbound was still losing paired assistant/tool history in Jest-loaded src JS mirror, not in native algorithm.
+- Native/shared truth already materialized releasedInputPrefix correctly after Rust + TS source changes.
+- Failing red test `tests/sharedmodule/route-aware-responses-continuation.spec.ts::released submit_tool_outputs continuation must still materialize paired assistant/tool history for non-responses outbound` stayed red because Jest loaded stale `src/conversion/shared/*.js` files that did not forward `releasedInputPrefix` and did not snapshot it in `releaseRequestPayload()`.
+- Unique correct fix point for the observed red was the src JS mirror used by tests/runtime import path:
+  - `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js`
+  - `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.js`
+- Evidence:
+  - direct dist repro materialized assistant/tool/user chain correctly with `materializedMode=local_full_input`.
+  - after JS mirror fix, targeted route-aware red turned green, plus `request-continuation-semantics` and `responses-continuation-store` suites stayed green.
+- [2026-05-25 12:20:00] continued HubPipeline Rust shared-helper closeout with same-shape-only rule: removed local tool canonicalization implementation from `resp_process_stage1_tool_governance_blocks/tool_names.rs`; the block now delegates to `shared_tool_mapping::normalize_routecodex_tool_name`, with two targeted red tests first (`functions.websearch` -> `web_search`, `execute-command/shell_command` -> `exec_command`, plus unknown-name shape contract), then targeted cargo tests and crate-level cargo check green.
+- [2026-05-25 12:27:00] continued HubPipeline Rust shared-helper closeout with same-shape-only rule: removed local XML entity/CDATA helper implementations from `resp_process_stage1_tool_governance_blocks/xml_text_utils.rs`; now delegates to `shared_tooling::{decode_basic_xml_entities, unwrap_xml_cdata_sections}` with a deletion-gate test and crate-level cargo check green.
+
+[2026-05-25 12:42:00] windsurf P0 response-parse closeout continued: trajectory-steps path no longer silently degrades malformed top-level proto into [] or malformed step usage into weak null-ish state.
+- True root was `src/providers/core/runtime/windsurf/response-parse-block.ts` trajectory step parser still depending on legacy `parseProtoFields()` empty-array wrapper, which erased malformed top-level step payloads before provider/cascade transport could classify them.
+- Unique correct fix point was response parse shared truth + provider parser boundary:
+  - `src/providers/core/runtime/windsurf/response-parse-block.ts`
+  - `src/providers/core/runtime/windsurf-chat-provider.ts`
+- Changes:
+  - added `WindsurfTrajectoryStepsParseResult`
+  - introduced `parseTrajectoryStepsDetailed()` with explicit reasons for malformed top-level/step/meta/tool/native/planner/error-wrapper cases
+  - kept `parseTrajectorySteps()` as fail-fast wrapper that now throws instead of returning silently degraded shapes
+  - provider `parseTrajectorySteps()` now rethrows as structured `WINDSURF_RESPONSE_PARSE_FAILED` with `parseReason`
+  - normalized legacy usage parse union so TypeScript no longer preserves a hidden false-only branch
+- Evidence:
+  - targeted Jest green for start-cascade/trajectory-status/trajectory-steps typed failures
+  - `npx tsc --noEmit --pretty false --incremental false` green
+  - `node scripts/build-core.mjs` green
+
+[2026-05-24 12:35:00] fixed HTTP_429_2056 and SSE finish_reason log presentation at the only host-side truth points; no protocol semantics changed.
+- True root for 2056 client-visible misclassification was `src/server/utils/http-error-mapper.ts`: it only keyed 429 on numeric status and missed explicit protocol code `HTTP_429_2056`, so quota-like provider business errors still surfaced as 502 at host HTTP mapping.
+- True root for the bad white finish_reason rendering was the shared log-format emitters, not endpoint handlers:
+  - `src/server/utils/request-log-color.ts`
+  - `src/server/utils/stage-logger.ts`
+  - `src/server/runtime/http-server/executor/log-rollup.ts`
+- Changes:
+  - map `HTTP_429_2056` and `HTTP_429` codes directly to HTTP 429 in `mapErrorToHttp()`
+  - remove white finish_reason highlight from request-complete logs, SSE completion logs, stage summary logs, and realtime session rollup logs; keep plain `finish_reason=...` text only
+- Evidence:
+  - targeted Jest green:
+    - `tests/server/utils/http-error-mapper-malformed-request.spec.ts`
+    - `tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts`
+    - `tests/server/handlers/request-complete-log.spec.ts`
+    - `tests/server/utils/request-log-color.spec.ts`
+    - `tests/server/utils/stage-logger.release-summary.spec.ts`
+    - `tests/server/runtime/http-server/executor/log-rollup.spec.ts`
+
+[2026-05-25 12:58:00] windsurf P0 dispose/resource closeout continued: provider orchestration no longer swallows typed grpc session teardown failures.
+- True root was not `resource-lifecycle-block.ts`; that block already returned typed close/destroy results. The swallow lived in provider orchestration:
+  - `src/providers/core/runtime/windsurf-chat-provider.ts::closeLocalGrpcSessionPoolEntry`
+  - `src/providers/core/runtime/windsurf-chat-provider.ts::disposeWindsurfProviderResources`
+- Before this fix, provider dispose ignored `closeSucceeded/destroySucceeded` and continued cleanup, so broken http2 teardown looked like successful dispose.
+- Unique correct fix point was provider orchestration, because only provider owns the policy decision of whether a typed block failure should abort resource disposal.
+- Changes:
+  - `closeLocalGrpcSessionPoolEntry()` now consumes `closeGrpcSessionPoolEntry()` typed result and throws `WINDSURF_RESOURCE_DISPOSE_FAILED` on real close/destroy failure.
+  - `disposeWindsurfProviderResources()` now inspects `closeAllGrpcSessionPoolEntries()` results and fails fast on any pooled session teardown failure instead of silently continuing.
+- Evidence:
+  - targeted Jest green for provider dispose success, broken-runtime no-live-resolution path, and new fail-fast close/destroy failure case.
+  - `npx tsc --noEmit --pretty false --incremental false` green.
+  - `node scripts/build-core.mjs` green.
+
+[2026-05-25 13:18:00] windsurf auth P0 continued: provider auth-config/token-file selection no longer has to hide state behind raw nulls; added typed selection/load helpers so red tests can lock the remaining orchestration truth point.
+- true remaining gap was provider-local wrappers `readManagedWindsurfAuthConfig()` and `loadPersistedWindsurfSessionCredential()`; blocks already exposed typed parse results but provider still collapsed selection/load state to `null`.
+- changes: added `readManagedWindsurfAuthConfigDetailed()` and `loadPersistedWindsurfSessionCredentialDetailed()` while keeping compatibility wrappers for existing call sites.
+- next evidence target: targeted Jest for new auth typed-result red tests plus existing malformed token flow.
+
+[2026-05-25 13:24:00] windsurf auth orchestration now consumes typed managed-auth/persisted-token helpers directly; provider no longer reintroduces raw null swallowing inside clear/session ensure flow.
+- unique correct fix point remained provider orchestration because blocks already emitted typed results and only provider was collapsing them back into null semantics.
+
+[2026-05-25 13:41:00] windsurf runtime discovery P0 continued: provider no longer hides rejected live-LS rows behind raw continue-only behavior.
+- true remaining gap was `listLiveLocalGrpcRuntimes()`; parse block already emitted typed reject reasons, but provider discarded them except a debug log for missing port.
+- changes: added `listLiveLocalGrpcRuntimesDetailed()` typed result with `rejected[]`, kept compatibility wrapper, and appended rejected-line diagnostics into runtime candidate plan.
+
+[2026-05-25 14:02:00] windsurf managed runtime resolution now exposes named provider strategy instead of implicit adopt/spawn branches.
+- true remaining gap was provider `ensureManagedLocalGrpcRuntime()`: behavior was right, but strategy lived only in hidden branch structure.
+- changes: added `ensureManagedLocalGrpcRuntimeDetailed()` with explicit `reuse_pooled_managed_runtime | adopt_live_managed_runtime | spawn_managed_runtime`; provider wrappers now consume the typed result.
+
+## 2026-05-24 cache hit 命中率减半真源修复
+
+- 用户纠正正确：问题不在展示公式，而在 `input` 来源错了。
+- 真源确认在 `src/providers/core/runtime/windsurf/response-parse-block.ts::normalizeWindsurfUsageRecord()`：此前把 `input_tokens` 错写成了含 cache 的 `prompt_tokens` 口径，导致 `cache.hit` 分母翻倍接近 `prompt_tokens`，线上会把约 `99%` 打成 `49.8%`。
+- 唯一正确修复点先落 provider 真源：`input_tokens` 改回 fresh input (`inputTokens`)；随后把 HTTP 统计链路改为直接消费 `usage.input_tokens`，不再保留 `cache_hit_base_tokens` 这种补偿层。
+- 物理删除的重复设计：
+  - `src/server/runtime/http-server/stats-manager.ts` / `stats-manager-internals.ts` / `usage-aggregator.ts` / `usage-logger.ts` / `log-rollup.ts` 中的 `cache_hit_base_tokens` / `cacheHitBaseTokens`
+- 红转绿验证：
+  - `tests/providers/core/runtime/windsurf-chat-provider.spec.ts --testNamePattern='usage|terminal frame emits usage|buildCascadeCompletionFromOutput|normalize'`
+  - `tests/server/runtime/http-server/executor/usage-aggregator.spec.ts`
+  - `tests/server/runtime/http-server/executor/usage-logger.spec.ts`
+  - `tests/server/runtime/http-server/executor/log-rollup.spec.ts`
+
+[2026-05-25 14:23:00] windsurf prompt cache-layout fix started: stable RCC guidance moved into prefix, variable tool-result/reminder content stays in latest human turn.
+- true root was Rust `build_cascade_prompt()`: it mixed guidance and tool-result feedback inside the same latest-human tail, destroying cache locality for every tool-result delta.
+- unique correct fix point is `windsurf_tool_history_projection.rs`, because TS only forwards the projection input and is not the prompt-layout truth.
+[2026-05-25 14:39:00] windsurf prompt cache-layout closeout continued: stable guidance/reminder wording and example block now stay in Rust shared truth.
+- true red was no longer prompt section ordering itself; remaining gaps were prompt content contracts:
+  1. apply_patch stable guidance still said `workspace-relative;` instead of stronger `workspace-relative, not absolute`, so cache-layout red was asserting the stricter invariant the prompt had not yet emitted.
+  2. pending RCC reminder after native result only emitted prose and omitted the structured `<|RCC|tool_calls>` example block, so continuation reminder did not fully guide the next reasoning step/tool invocation.
+- unique correct fix point remained `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/windsurf_tool_history_projection.rs` because both the stable guidance text and pending reminder block are projection truth there; TS provider only forwards the strings.
+- changes:
+  - extracted shared `build_rcc_tool_call_example_lines()` so stable guidance and pending reminder use the same canonical block layout.
+  - strengthened apply_patch contract wording to `filePath must be workspace-relative, not absolute; patch must be a strict line-edit patch.`
+  - pending reminder now appends the structured RCC tool-call example block for the first remaining text tool instead of prose-only reminder.
+
+## 2026-05-24 HubPipeline Rust shared helper closeout / Step 1-2 进展
+
+- 本轮按 closeout plan 先收 `shared_tool_mapping.rs` 与 `shared_tooling.rs`，保持 `hub_pipeline.rs` 不动，继续纯编排壳定位。
+- 已完成的 shared 真源收口：
+  - `shared_tool_mapping.rs`
+    - 新增 `read_routecodex_tool_name_hint_from_args(...)`
+    - `tool_harvester.rs` 删除本地 `normalize_tool_name` clone
+    - `tool_harvester.rs` 删除本地 `read_tool_name_hint_from_args` clone
+    - `resp_process_stage1_tool_governance_blocks/tool_call_entry.rs` 删除本地 `read_tool_name_hint_from_args` clone
+  - `shared_tooling.rs`
+    - 新增 `is_structured_apply_patch_payload(...)`
+    - 新增 `extract_structured_apply_patch_payloads_with(...)`
+    - 新增 `chunk_string_by_bytes(...)`
+    - `tool_harvester.rs` 删除本地 `chunk_string` clone
+    - `tool_harvester.rs` 删除本地 structured apply_patch detector clone
+    - `streaming_tool_extractor.rs` 删除本地 structured apply_patch detector clone
+- 红测/删除门禁已补并转绿：
+  - `shared_tool_mapping::tests::shared_tool_mapping_deletion_gate_removed_tool_harvester_local_canonical_clone`
+  - `shared_tool_mapping::tests::shared_tool_mapping_deletion_gate_removed_duplicate_tool_name_hint_scanners`
+  - `shared_tooling::tests::shared_tooling_deletion_gate_removed_structured_apply_patch_local_clones`
+  - `shared_tooling::tests::shared_tooling_deletion_gate_removed_harvester_local_chunk_clone`
+- 定向验证证据：
+  - `cargo test -p router-hotpath-napi shared_tool_mapping -- --nocapture` 绿
+  - `cargo test -p router-hotpath-napi shared_tooling -- --nocapture` 绿
+  - `cargo test -p router-hotpath-napi --no-run` 通过（crate 级最小编译证据）
+- 当前仍未完成的 closeout：
+  - `hub_text_markup_normalizer.rs` 仍保留本地 structured apply_patch extractor clone（但它目前依赖 lenient parse，需继续判定后收 shared）
+  - `hub_reasoning_tool_normalizer.rs` 仍保留本地 `normalize_tool_name` 变体；需区分其中 embedded `tool:` / `function:` 提取是否应拆成 shared helper + module-specific wrapper
+[2026-05-25 14:58:00] windsurf P0 response-parse closeout continued: trajectory-step nested helper parsing no longer hides malformed embedded tool/error payloads behind local null returns.
+- true remaining gap was inside `parseTrajectoryStepsDetailed()` in `src/providers/core/runtime/windsurf/response-parse-block.ts`: outer parser already returned typed failures, but two inner helpers (`parseChatToolCall`, `readErrorDetails`) still collapsed malformed embedded protos to `null`, which meant step-level bad state was being represented as helper absence instead of explicit typed parse failure.
+- unique correct fix point stayed the response-parse shared truth file because provider/transport already consumed typed parse results correctly; only the parse block still reintroduced null swallowing locally.
+- changes:
+  - `parseChatToolCall()` now returns typed `{ok, toolCall|reason}` instead of `null`.
+  - `readErrorDetails()` now returns typed `{ok, text|reason}` instead of `string|null`.
+  - proposal/mcp/choice/error-wrapper branches now fail with `malformed_tool_call` / `malformed_error_details` from the shared parser instead of local null helper semantics.
+- evidence target: new red tests for malformed embedded proposal tool-call and malformed embedded error details now green, alongside existing malformed usage/top-level connect-frame typed tests.
+
+## 2026-05-24 cache.hit 输入来源修复
+- 红测：`tests/server/runtime/http-server/executor/usage-aggregator.spec.ts` 新增 inclusive `input_tokens` 场景，修复前命中率分母错误为带 cache 总输入。
+- 真源：`src/server/runtime/http-server/executor/usage-aggregator.ts`。当 `prompt_tokens` 与 `input_tokens` 相等且存在 `cached_tokens` 时，判定该 `input_tokens` 为 inclusive shape，回退为 non-cached input。
+- 验证：`usage-aggregator.spec.ts`、`log-rollup.spec.ts`、`usage-logger.spec.ts` 全绿。
+[2026-05-25 15:09:00] windsurf auth P0 closeout continued: inline managed-account parsing no longer uses raw null semantics at the auth shared truth boundary.
+- remaining gap was `src/providers/core/runtime/windsurf/auth-block.ts`: `parseInlineWindsurfAccount()` still returned bare `null` for non-string / missing-separator cases, and provider login/session orchestration reintroduced boolean/null control flow on top of that.
+- unique correct fix point was auth shared truth + provider callsites only:
+  - `src/providers/core/runtime/windsurf/auth-block.ts`
+  - `src/providers/core/runtime/windsurf-chat-provider.ts`
+- changes:
+  - added `WindsurfInlineAccountParseResult`
+  - introduced `parseInlineWindsurfAccountDetailed()` with explicit reasons `not_string | missing_separator`
+  - kept legacy wrapper only as compatibility shell
+  - provider inline token/session and login-email derivation now consume the typed helper directly instead of raw null checks
+  - auth strategy calculation now also consumes the typed helper directly
+- evidence: new red test `inline windsurf account parser returns typed failure instead of null for non account shape` green together with existing malformed token-file / managed-auth selector / persisted-credential typed tests.
+[2026-05-24 13:40:00] responses continuation direct-path regression fixed at unique http-server truth point.
+- true root was `src/server/runtime/http-server/index.ts::buildRouterDirectResult()`: it was calling `recordResponsesResponseForRequest()` / clear / finalize before `sendPipelineResponse()` had a chance to run the existing capture→record pairing path, so internal followup requests like `:apply_patch_followup` could hit `recordResponse()` with no request context and throw `Responses conversation request context missing for response capture`.
+- unique correct fix point was this direct-result builder only; the outer `responses-handler.ts -> sendPipelineResponse()` path already owns request-context injection plus capture/record ordering, so fixing any other layer would duplicate history semantics.
+- changes: removed router-direct continuation store mutation from `buildRouterDirectResult()`; direct results now only preserve metadata and leave all continuation retention to `sendPipelineResponse()`.
+- evidence target: `tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts` updated to assert no premature store mutation before client response handling.
+[2026-05-25 15:44:00] windsurf P0 response-parse closeout continued: usage normalization no longer uses bare null semantics at the shared truth boundary.
+- remaining gap was `src/providers/core/runtime/windsurf/response-parse-block.ts::normalizeWindsurfUsageRecord()`: usage omission was being represented only as raw `null`, which kept a P0 typed-result hole even though nearby parse paths had already been upgraded to explicit result shapes.
+- unique correct fix point was the response-parse shared truth file only; provider/runtime callers were already consuming normalized usage as optional projection, so the missing explicit state existed solely at the normalization boundary.
+- changes:
+  - added `WindsurfUsageNormalizationResult`
+  - introduced `normalizeWindsurfUsageRecordDetailed()` returning `{ ok: true, usage } | { ok: false, reason: 'missing_usage_object' }`
+  - `buildCascadeCompletionFromOutput()` now consumes the typed helper directly
+  - kept `normalizeWindsurfUsageRecord()` only as a compatibility shell around the typed helper
+- evidence:
+  - `tests/providers/core/runtime/windsurf-chat-provider.spec.ts --testNamePattern='normalizeWindsurfUsageRecordDetailed|buildCascadeCompletionFromOutput builds final chat completion|terminal frame emits usage|generator metadata has no usage entries|generator metadata proto is malformed'` green
+[2026-05-25 15:51:00] windsurf P0 response-parse closeout continued: proto varint decoding no longer exposes raw null semantics at the shared truth boundary.
+- remaining gap was `src/providers/core/runtime/windsurf/response-parse-block.ts::decodeProtoVarint()`: malformed protobuf varints were still represented as bare `null`, even though `parseProtoFieldsDetailed()` had already become the typed parse gate.
+- unique correct fix point stayed the same shared truth file because only this helper still reintroduced null semantics beneath the typed parser; provider/runtime layers were not the source of the ambiguity.
+- changes:
+  - added `WindsurfProtoVarintDecodeResult`
+  - introduced `decodeProtoVarintDetailed()` returning `{ ok: true, value, consumed } | { ok: false, reason: 'malformed_proto_varint' }`
+  - `parseProtoFieldsDetailed()` now consumes the typed varint decoder directly
+  - kept legacy `decodeProtoVarint()` only as a compatibility shell
+- evidence:
+  - `tests/providers/core/runtime/windsurf-chat-provider.spec.ts --testNamePattern='decodeProtoVarintDetailed|normalizeWindsurfUsageRecordDetailed|buildCascadeCompletionFromOutput builds final chat completion|generator metadata has no usage entries|generator metadata proto is malformed|terminal frame emits usage'` green
+
+## 2026-05-24 windsurf trim 上下文丢失红测定位
+
+- 新红测已从“测试引用错误”修正为真实业务断言，当前失败证据明确：`<truncation_note>` 仍未包含 `Original task anchor`，prompt 只剩尾部 turn，符合用户线上“上下文被 trimmed 后循环重复”的现象。
+- Rust 真源 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/windsurf_tool_history_projection.rs` 已存在：
+  - `find_first_non_empty_user_text()`
+  - `build_cascade_prompt()` 内在 truncation note 追加 `Original task anchor:` 逻辑
+- 因此当前最高概率不是逻辑没写，而是 **native core 产物未更新**；需先重编 `llmswitch-core` 再跑同一红测，确认 5520 所用 shared truth 已生效。
+
+## 2026-05-24 windsurf usage parse regression
+
+- 5520 实证：provider 仍走标准主链 `req -> hubpipeline -> provider -> cascade -> provider -> response`，但 `pollCascadeTrajectorySteps()` 把 `GetCascadeTrajectoryGeneratorMetadata` 的 `missing_usage_entries` 误判成致命 502，导致 provider 全挂。
+- 样本：`~/.rcc/codex-samples/openai-responses/windsurf.ws-pro-5.gpt-5.4-low/openai-responses-windsurf.ws-pro-5-gpt-5.4-low-20260524T131118977-223494-68/provider-request_1.json`，版本 `0.90.2219`。
+- 真源判断：usage 属于可选观测数据，不应阻断主响应；只有 malformed metadata 才应 fail-fast。
+- 唯一正确修改点：`src/providers/core/runtime/windsurf/cascade-transport-block.ts` 的 generator metadata parse handling；配套红测在 `tests/providers/core/runtime/windsurf-chat-provider.spec.ts`。
+
+## 2026-05-24 5520 active failures follow-up
+
+- 新证据：5520 当前主故障已从旧 `missing_usage_entries` 扩展为两条 active 真源：
+  1. `sendRequestInternal()` / `selectUsablePinnedGrpcRuntime()` 仍过早强制走 managed runtime，触发 `WINDSURF_RUNTIME_PORT_INSPECTION_FAILED`。
+  2. `pollCascadeTrajectorySteps()` active path 仍把 `empty_meta_entries` 当 fatal 502；13:18:40 新日志已证明。
+- same-shape 5520 样本：`~/.rcc/codex-samples/openai-responses/windsurf.ws-pro-{1,2,4,5}.gpt-5.4-low/openai-responses-windsurf.ws-pro-*-20260524T131815221-223498-72/provider-request.json`，正文仅 `<human>只回复 OK</human>`，说明 502/504 不是 prompt 污染，而是 runtime/poll 真链路问题。
+- 下一唯一修改点：`src/providers/core/runtime/windsurf-chat-provider.ts` 的 runtime candidate 选择主线，以及 `src/providers/core/runtime/windsurf/cascade-transport-block.ts` 的 `empty_meta_entries` 处理。
+[2026-05-24 13:55:00] followup reentry priority/pin regression fixed at routing-mode truth point.
+- user-corrected requirement: stop/followup recursion itself is allowed; real bug is reentry must respect pinned provider/priority and must not let allowedProviders/router pool override the exact pin.
+- true root found in TS routing-state mode resolver: `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/metadata.ts::resolveRoutingMode()` returned `sticky` when `allowedProviders` existed before checking `force`, which diverged from native selection precedence and could steer followup back into pool semantics instead of exact provider pin.
+- unique correct fix point was this mode resolver only; followup dispatch already injects `__shadowCompareForcedProviderKey`, and Rust selection already checks forced_target before pool selection.
+- changes:
+  - reordered resolveRoutingMode precedence to `clear -> force -> allow -> prefer -> sticky`.
+  - added red/green coverage proving force wins over allowedProviders.
+  - added CRS followup regression test proving router pool hints + allowedProviders do not erase exact followup pin.
+- evidence:
+  - `npm run jest:run -- --runInBand tests/servertool/routing-instructions.spec.ts --testNamePattern='force mode wins over allowedProviders so reentry pin stays exact|force:provider.model instructions are parsed as force target'`
+  - `npm run jest:run -- --runInBand tests/server/runtime/http-server/executor/servertool-followup-model-pin-regression.spec.ts`
+[2026-05-24 14:12:00] 5555 active failure root continued: shared provider-response no longer mutates Responses continuation store before host response dispatch.
+- evidence from 5555 logs showed `Responses conversation request context missing for response capture (code=MALFORMED_RESPONSE)` on CRS and MiniMax servertool followup chains.
+- true remaining duplicate writer was `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`: it still called `recordResponsesResponse()` during shared conversion for `openai-responses`, which bypassed the host `sendPipelineResponse()` capture->record ordering and could record under requestId before host-side response-id capture completed.
+- unique correct fix point was this shared duplicate write only; host `src/server/handlers/handler-response-utils.ts` already owns client-visible `/v1/responses` capture+record semantics.
+- changes:
+  - removed shared `recordResponsesResponse()` call from provider-response conversion.
+  - kept retention finalize there, but left actual response recording to host dispatch only.
+
+[2026-05-24] cache-hit >100 investigation
+- 证据: src/log-rollup.ts 已改为优先 inputTokens 作为 non-cached denominator，并对 denominator 做 >= cacheRead 下限；定向 jest 已绿，旧症状 2133.3[2026-05-24] cache-hit >100 investigation
+- 证据: `src/server/runtime/http-server/executor/log-rollup.ts` 已改为优先 `inputTokens` 作为 non-cached denominator，并对 denominator 做 `>= cacheRead` 下限；定向 `jest` 已绿。
+- 结论: 旧症状 `cache.hit=2133.3%` 只可能来自服务仍运行旧安装包，非当前源码逻辑。
+- 处理: 执行 build + global install + `routecodex restart --port 5555`，再看运行态日志是否消失。
+[2026-05-24] stop_followup requestId runaway
+- 线上真因: stopless followup 每轮把 `requestId` 再次追加 `:stop_followup`，形成无限增长链；副作用是 stop budget 以新 request 视角反复归零，且 codex-samples snapshot 目录名触发 `File name too long`。
+- 唯一修复点: `sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts` 与 `sharedmodule/llmswitch-core/src/servertool/bootstrap-followup-replay-block.ts` 的 `buildFollowupRequestId` 改为 suffix 幂等，已有同 suffix 时直接复用原 requestId。
+- 回归: `tests/servertool/stop-message-flow-followup-reentry.spec.ts` 新增 stable requestId case，验证不会生成 `:stop_followup:stop_followup`。
+[2026-05-24 14:32:00] 5555 stop_followup recursion root fixed at servertool followup state propagation and disconnect gate.
+- true root was split across two stop-message followup truth points:
+  1. `sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts` did not carry `sessionId` / `conversationId` / `tmuxSessionId` / `workdir` into followup metadata, so nested reentry could lose session scope and reload stopMessage state as fresh `used=0`.
+  2. `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts` still armed stop followup even when `clientConnectionState.disconnected === true`, which allowed infinite server-side recursion after the client had already gone away.
+- unique correct fix points were these two files only: they own stop followup emission semantics and session/disconnect propagation before the request reenters the standard pipeline.
+- changes:
+  - `followup-mainline-block.ts` now copies session/conversation/tmux/workdir scope from adapterContext into followup metadata when absent.
+  - `stop-message-auto.ts` now fail-fast skips stop followup when the client is already disconnected.
+  - corrected stop-message tests so disconnected clients no longer arm followup.
+- evidence:
+  - `tests/servertool/stop-message-auto.spec.ts --testNamePattern='does not arm stopMessage followup when client is already disconnected|stops waiting followup when client disconnects during reenter'` green
+  - `tests/servertool/stop-message-flow-followup-reentry.spec.ts --testNamePattern='stop_message followup reentry keeps session scope so usage counter continues|stop_message followup requestId does not append repeated stop_followup suffix'` green
+[2026-05-24 16:20:00] stopless budget rule continued: unique reset truth was `sharedmodule/llmswitch-core/src/servertool/stop-message-counter.ts`.
+- red test proved current bug: non-tool `finish_reason=length` wrongly reset `stopMessageUsed` from 2 -> 0 because `!eligible` branch unconditionally persisted `used:0`.
+- user rule tightened: stop + error share one consecutive budget; only tool turn (`tool_calls` / tool-like output via `hasToolCalls`) may reset.
+- fix direction kept single truth:
+  1. `applyStopMessageFinishReasonBudget()` now resets only when `hasToolCalls === true`; other non-stop finish reasons preserve current used count.
+  2. request-executor provider outer catch no longer imports sharedmodule source directly; it now calls bridge `incrementStopMessageErrorBudget()` so provider errors consume the same persisted budget without creating a second truth path.
+[2026-05-24 16:26:00] 5555 final stop/error budget contract is now encoded as red tests + truth-point edits.
+- added red coverage for `stop + error` shared consecutive budget and `tool_calls` immediate reset in `tests/sharedmodule/windsurf-submit-stopmessage.spec.ts`.
+- added direct orchestration coverage for `tool_calls` budget reset in `tests/servertool/stop-message-auto.spec.ts`.
+- true-source edits are limited to `stop-gateway-context.ts` (error/tool reset classification), `stop-message-counter.ts` (shared persisted budget update), and `stop-message-auto.ts` (`used >= maxRepeats` so the 4th consecutive stop/error really halts when max is 3).
+
+## 2026-05-24 hub pipeline rust shared helper closeout（reasoning tool-name explicit candidate 收口）
+
+- 先补 deletion gate 红测，再实现：
+  - `shared_tool_mapping_deletion_gate_removed_reasoning_local_tool_name_clone`
+  - 新增断言：`hub_reasoning_tool_normalizer.rs` 不得再保留本地 `fn is_explicit_tool_name_candidate(`，且必须改用 `is_routecodex_explicit_tool_name_candidate(` 与 `read_routecodex_tool_name_hint_from_args(`。
+- 红测先红证据：本地 clone 仍活着，且 reasoning 模块尚未接入 shared hint scanner；测试失败点明确报在 `hub_reasoning_tool_normalizer.rs must use shared tool-name hint scanner truth`。
+- 唯一正确修复点仍在 Rust shared 真源：
+  - `shared_tool_mapping.rs` 新增 `is_routecodex_explicit_tool_name_candidate(raw)`，把 embedded `tool:` / `function:` / bracket call 的 explicit candidate 判定下沉为共享 helper；
+  - `hub_reasoning_tool_normalizer.rs` 物理删除本地 `is_explicit_tool_name_candidate`，并改为直连：
+    - `is_routecodex_explicit_tool_name_candidate`
+    - `read_routecodex_tool_name_hint_from_args`
+- 这次修改遵守“不猜语义、只收形状重复 helper”：
+  - 没改 reasoning 提取语义；
+  - 只把重复的 tool-name candidate / hint 识别逻辑收口到 shared truth。
+- 已验证：
+  - `cargo test -p router-hotpath-napi shared_tool_mapping_deletion_gate_removed_reasoning_local_tool_name_clone -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi --no-run` 绿；
+  - `shared_tool_mapping` 定向测试已重新编译通过，本轮未新增新的失败证据。
+
+## 2026-05-24 hub pipeline rust shared helper closeout（text markup alias/hint wrapper 收口）
+
+- 先补 deletion gate 红测，再实现：
+  - `shared_tool_mapping_deletion_gate_removed_text_markup_local_tool_name_clone`
+  - 新增要求：`hub_text_markup_normalizer.rs` 不得再保留本地：
+    - `fn resolve_json_tool_name_aliases(`
+    - `fn read_tool_name_hint_from_args(`
+  - 且必须改用 shared：
+    - `resolve_routecodex_json_tool_name_aliases(`
+    - `read_routecodex_json_tool_name_hint_from_args(`
+- 红测先红证据：明确报出 `local resolve_json_tool_name_aliases clone still present`，证明 text-markup 仍保留本地 alias wrapper。
+- 唯一正确修复点仍在 Rust shared 真源：
+  - `shared_tool_mapping.rs` 新增：
+    - `resolve_routecodex_json_tool_name_aliases(overrides)`
+    - `read_routecodex_json_tool_name_hint_from_args(raw_args, alias_map)`
+  - `hub_text_markup_normalizer.rs` 物理删除本地 alias merge / alias-aware hint scan wrapper，仅保留本模块特有的 text harvest 编排。
+- 过程中抓到一个 shared 真源回归，不是外围问题：
+  - `read_routecodex_tool_name_hint_from_args_uses_shared_canonicalization` 先红，原因是默认 hint scanner 没带默认 alias map，`functions.shell-command` 被错误归一成 `shell.command`；
+  - 唯一正确修复点仍在 `shared_tool_mapping.rs`：
+    - alias map key 统一按 `to_canonical_tool_name` 归一；
+    - 默认 `read_routecodex_tool_name_hint_from_args()` 直连 default alias map。
+- 已验证：
+  - `cargo test -p router-hotpath-napi shared_tool_mapping_deletion_gate_removed_text_markup_local_tool_name_clone -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi shared_tool_mapping -- --nocapture` 绿（23/23）；
+  - `cargo test -p router-hotpath-napi --no-run` 绿。
+
+## 2026-05-24 stop_message_auto 第三次 stop 真停止修复
+
+- 用户新规则确认：连续预算由 `stop + error` 共用；只有 `tool_calls` / responses `function_call` 才允许清零；非 tool 的 stop 或 error 交织累计到 3 次后必须真停止。
+- 先补红测，不猜语义：
+  - `tests/servertool/stop-message-auto.goal-default.spec.ts`
+    - `非 /goal 场景默认最多续三次，第 3 次 stop 后真停止`
+    - `非 /goal 场景出现 tool call 后默认续杯预算重置为三次`
+    - `/v1/responses function_call 后默认续杯预算重置为三次`
+  - 红测失败证据明确：第 3 次 stop 仍触发 `stop_message_flow`，日志中 `used=3 left=0` 但仍 `decision=trigger`。
+- 唯一正确修改点：`sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
+  - 原因：真正决定“本轮 stop 是否继续续杯”的全局唯一闸门在 handler 内，而不是计数器；计数器负责累计，handler 负责是否触发 followup。
+  - 修复：`if (used > maxRepeats)` 改为 `if (used >= maxRepeats)`。
+- 该改动是唯一正确修改处：
+  - 不改 `stop-message-counter.ts`，因为那会破坏“第 3 次需要先被计入 used=3，再本轮真停止”的事实记录；
+  - 不改 followup/reentry/TS 其他路径，因为症状发生在 handler 触发条件判断，其他位置都只是消费这个决策结果。
+- 已验证：
+  - `npm run jest:run -- --runInBand tests/servertool/stop-message-auto.goal-default.spec.ts --testNamePattern='默认最多续三次|tool call 后默认续杯预算重置为三次|/v1/responses function_call 后默认续杯预算重置为三次|非 /goal 场景出现非 tool_calls finish_reason 后不重置默认续杯预算'` 绿
+  - `npm run jest:run -- --runInBand tests/sharedmodule/windsurf-submit-stopmessage.spec.ts --testNamePattern='stop and error share one consecutive budget while tool_calls resets it'` 绿
+  - `npm run jest:run -- --runInBand tests/servertool/stop-message-auto.spec.ts --testNamePattern='does not arm stopMessage followup when client is already disconnected|stops waiting followup when client disconnects during reenter'` 绿
+
+## 2026-05-24 hub pipeline rust shared helper closeout（tool_harvester split_command 收口）
+
+- 新命中的纯 helper 重复：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/tool_harvester.rs`
+  - 本地 `fn split_command(input: &str) -> Vec<String>`
+  - 现有 shared 真源已在 `shared_json_utils.rs::split_command_string`
+- 先补 deletion gate 红测：
+  - `shared_json_utils::tests::shared_split_command_deletion_gate_removed_tool_harvester_local_clone`
+- 红测证据：
+  - `cargo test -p router-hotpath-napi shared_split_command_deletion_gate_removed_tool_harvester_local_clone -- --nocapture`
+  - 失败点明确：`local split_command clone still present in .../tool_harvester.rs`
+- 唯一正确修复点：
+  - `tool_harvester.rs` 物理删除本地 `split_command`
+  - 三处调用改为 shared `split_command_string`
+- 为什么这是唯一正确修改处：
+  - 目标是删除重复 helper 真源，不改 tool_harvester 之外模块；
+  - `shared_json_utils.rs` 已有命令拆分真源，不需要新造 shared 模块；
+  - 改 shared 真源本身会扩大行为面，本轮只需删除本地复制实现。
+- 已验证：
+  - `cargo test -p router-hotpath-napi shared_split_command_deletion_gate_removed_tool_harvester_local_clone -- --nocapture` 绿
+- 扩展验证现状：
+  - `cargo test -p router-hotpath-napi tool_harvester -- --nocapture` 暴露两条现存语义失败：
+    - `harvest_tools_json_delta_shell` 期望 `shell`，实际 `exec_command`
+    - `harvest_tools_json_final_extracts_rcc_fence_tool_calls_with_nested_input_name` 期望 `exec_command`，实际 `exec.command`
+  - 这两条失败集中在 tool-name canonicalization / alias 语义，不在本轮 `split_command` helper 的变更面（本轮只改 command token array 构造）。若继续处理，需单独按“先红测，再修 tool-name 真源”循环推进。
+[2026-05-24 23:xx:xx] hub pipeline rust shared helper closeout（shared_tool_mapping exec_command shape pollution fix）
+- 红测先证明确认为 shared 真源 bug：
+  - `cargo test -p router-hotpath-napi normalize_json_tool_name_with_aliases_preserves_exact_exec_command_shape -- --nocapture`
+  - `cargo test -p router-hotpath-napi read_routecodex_tool_name_hint_from_args_preserves_nested_exec_command_shape -- --nocapture`
+  - 失败现象一致：`exec_command` 被错误点号化成 `exec.command`。
+- 唯一真源根因：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_mapping.rs`
+  - `normalize_json_tool_name_with_aliases()` 先对原始 structured name 做 `to_canonical_tool_name()`，把 exact `exec_command` 变成了 `exec.command`，随后直接沿用污染后的 name 继续返回。
+- 唯一正确修改点仍是 `shared_tool_mapping.rs`：
+  - 在 alias lookup 前，先走 `normalize_routecodex_tool_name(Some(trimmed))`。
+  - 这样 exact structured name 直接保留为 routecodex canonical shape；只有未命中 exact structured truth 时，才继续走 dotted canonical key 做 alias lookup。
+- 为什么这是唯一正确修改处：
+  - 症状发生在 shared alias normalizer 出口；
+  - 不应在 `tool_harvester.rs`、reasoning、text-markup 等消费侧加补丁，否则会重新制造第二真源；
+  - alias lookup 仍保留 dotted key 行为，修的只是“lookup key”和“最终输出 shape”被混用的错误。
+- 已验证：
+  - 两条新红测转绿；
+  - `cargo test -p router-hotpath-napi shared_tool_mapping -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi tool_harvester -- --nocapture` 绿。
+[2026-05-24 23:xx:xx] hub pipeline rust shared helper closeout（structured apply_patch payload wrapper 收口）
+- 新命中的重复 helper 不是语义分叉，而是 shared 真源外面又包了一层本地 wrapper：
+  - `tool_harvester.rs::extract_structured_apply_patch_payloads`
+  - `hub_text_markup_normalizer.rs::extract_structured_apply_patch_payloads`
+- shared 真源已存在：
+  - `shared_tooling.rs::extract_structured_apply_patch_payloads_with`
+- 先补 deletion gate 红测：
+  - `shared_tooling_deletion_gate_removed_structured_apply_patch_local_clones`
+- 红测先红证据：
+  - `cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_structured_apply_patch_local_clones -- --nocapture`
+  - 失败点明确：`tool_harvester.rs` 仍保留 `fn extract_structured_apply_patch_payloads(text: &str) -> Vec<Value>` 本地 wrapper。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/tool_harvester.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_text_markup_normalizer.rs`
+- 修改方式：
+  - 物理删除两处本地 wrapper；
+  - 调用点改为直连 `extract_structured_apply_patch_payloads_with(...)`。
+- 为什么这是唯一正确修改处：
+  - 目标是删除 shared 真源外的重复包装，不是改 apply_patch 识别语义；
+  - shared 真源已经存在且调用签名足够表达两处差异（严格 JSON parse / lenient JSON parse）；
+  - 若保留 wrapper，只会继续制造“shared 外再包一层”的第二真源。
+- 已验证：
+  - `cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_structured_apply_patch_local_clones -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi tool_harvester -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi hub_text_markup_normalizer -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi --no-run` 绿。
+[2026-05-24 23:xx:xx] hub pipeline rust shared helper closeout（hub_bridge_actions/history 零语义 JSON helper 收口）
+- 本轮先否掉一个看似重复但并不安全的点：
+  - `hub_reasoning_tool_normalizer.rs::read_string_array_command`
+  - 与 `shared_json_utils.rs::read_string_array_command` 现状不完全等价；reasoning 版本只接收 string/number，shared 版本还接受更泛的 `other.to_string()`。
+  - 按“不猜语义，只收重复实现”，本轮没有强行并这个点。
+- 新锁定的纯 helper 重复点在 `hub_bridge_actions/history.rs`：
+  - `read_trimmed_non_empty_string`
+  - `clone_non_empty_object`
+  - `read_optional_bool`
+  - `clone_plain_object`
+- 这些 helper 都是零语义 JSON 读取/clone，可安全收口到 `shared_json_utils.rs`。
+- 先补红测：
+  - `shared_object_helpers_deletion_gate_removed_history_local_clones`
+- 红测先红证据：
+  - `cargo test -p router-hotpath-napi shared_object_helpers_deletion_gate_removed_history_local_clones -- --nocapture`
+  - 失败点明确：`hub_bridge_actions/history.rs` 仍保留本地 `read_trimmed_non_empty_string` 等 clone。
+- 唯一正确修改点：
+  - shared 真源增加：
+    - `shared_json_utils.rs::clone_plain_object`
+    - `shared_json_utils.rs::clone_non_empty_object`
+    - `shared_json_utils.rs::read_optional_bool`
+  - 消费侧删除本地 clone：
+    - `hub_bridge_actions/history.rs`
+- 为什么这是唯一正确修改处：
+  - 这组 helper 没有模块特定 salvage/协议知识，只是 JSON object/bool 读取；
+  - 继续留在 `history.rs` 只会维持 shared 真源外的重复实现；
+  - 不需要新造 shared 模块，直接落到已存在的 `shared_json_utils.rs` 最小且单点。
+- 已验证：
+  - `cargo test -p router-hotpath-napi shared_object_helpers_deletion_gate_removed_history_local_clones -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi hub_bridge_actions::history -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi --no-run` 绿。
+[2026-05-24 23:xx:xx] hub pipeline rust shared helper closeout（hub_bridge_actions/history tool identity canonicalization 收口）
+- 新命中的不是普通 JSON helper，而是 `hub_bridge_actions/history.rs` 内部保留的一组 tool canonicalization 变体：
+  - `normalize_tool_key`
+  - `resolve_tool_identity`
+- 这两者本质上是在消费侧再次封装 `normalize_routecodex_tool_name(...)`，属于 tool canonicalization 第二真源风险。
+- 先补红测：
+  - `shared_tool_mapping_deletion_gate_removed_history_local_tool_identity_clones`
+- 红测先红证据：
+  - `cargo test -p router-hotpath-napi shared_tool_mapping_deletion_gate_removed_history_local_tool_identity_clones -- --nocapture`
+  - 失败点明确：`hub_bridge_actions/history.rs` 仍保留本地 `normalize_tool_key` clone。
+- 唯一正确修改点：
+  - `shared_tool_mapping.rs`：新增 shared truth
+    - `normalize_routecodex_tool_name_value(...)`
+    - `resolve_routecodex_tool_identity(...)`
+  - `hub_bridge_actions/history.rs`：物理删除本地
+    - `normalize_tool_key`
+    - `resolve_tool_identity`
+- 为什么这是唯一正确修改处：
+  - 目标要求 tool canonicalization 成为 shared 单点真源；
+  - `history.rs` 的这两处逻辑不是模块专属业务，只是对 canonical tool name / tool identity 的本地二次封装；
+  - 若继续留在消费侧，会持续形成 shared 外的 canonicalization 分叉。
+- 已验证：
+  - `cargo test -p router-hotpath-napi shared_tool_mapping_deletion_gate_removed_history_local_tool_identity_clones -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi shared_tool_mapping -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi hub_bridge_actions::history -- --nocapture` 绿；
+  - `cargo test -p router-hotpath-napi --no-run` 绿。
+
+[2026-05-24] added red gate candidate for virtual_router_stop_message_actions local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（virtual_router_stop_message_actions read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_virtual_router_stop_message_actions_local_clone`
+- 红测先红证据：
+  - `virtual_router_stop_message_actions.rs` 仍保留本地 `fn read_trimmed_string(value: Option<&Value>) -> Option<String>` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_actions.rs`
+  - 物理删除本地 clone，改为直连 `shared_json_utils.rs::read_trimmed_string`。
+- 为什么这是唯一正确修改处：
+  - 该 helper 是零语义字符串 trim/empty 读取；shared 真源已存在，不需要新造 helper；
+  - 症状就是消费侧重复实现，改 shared 真源或其他消费侧都会扩大变更面并制造第二真源。
+
+[2026-05-24] added red gate candidate for anthropic_openai_codec local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（anthropic_openai_codec read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_anthropic_codec_local_clone`
+- 红测先红证据：
+  - `anthropic_openai_codec.rs` 仍保留本地 `fn read_trimmed_string(value: Option<&Value>) -> Option<String>` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs`
+  - 物理删除本地 clone，改为直连 `shared_json_utils.rs::read_trimmed_string`。
+- 为什么这是唯一正确修改处：
+  - 该 helper 与 shared 真源完全等价，问题只在消费侧重复实现；
+  - 改 shared 语义或去别的 codec 侧补丁都会扩大变更面并制造第二真源。
+
+[2026-05-24] added red gate candidate for hub_req_inbound_context_capture local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（hub_req_inbound_context_capture read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_hub_req_inbound_context_capture_local_clone`
+- 红测先红证据：
+  - `hub_req_inbound_context_capture.rs` 仍保留本地 `fn read_trimmed_string(value: Option<&Value>) -> Option<String>` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs`
+  - 物理删除本地 clone，改为直连 `shared_json_utils.rs::read_trimmed_string`。
+- 为什么这是唯一正确修改处：
+  - 该 helper 与 shared 真源完全等价；
+  - 问题只在消费侧重复实现，改 shared 或别处都会扩大变更面并形成第二真源。
+[2026-05-24] Windsurf 429 直接回客户端排查
+- 用户症状：Windsurf 一次 429 直接返回客户端，没有进入换 key / provider 轮询。
+- 已定位真源候选：`src/providers/core/runtime/windsurf/response-parse-block.ts`
+- 证据：普通 `resource_exhausted` / `message limit` 被标成 `rateLimitKind: daily_limit`，而 `provider-failure-policy-impl.ts` 明确把 `daily_limit` 判为 `unrecoverable`。
+- 预期修复：仅保留 weekly exhausted 为 `daily_limit`；普通 model/message 限流改为 `short_lived`，让 executor 进入 recoverable/provider-switch。
+
+[2026-05-24] added red gate candidate for gemini_openai_codec local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（gemini_openai_codec read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_gemini_codec_local_clone`
+- 红测先红证据：
+  - `gemini_openai_codec.rs` 仍保留本地 `fn read_trimmed_string(value: Option<&Value>) -> Option<String>` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs`
+  - 物理删除本地 clone，改为直连 `shared_json_utils.rs::read_trimmed_string`。
+- 为什么这是唯一正确修改处：
+  - 该 helper 与 shared 真源完全等价；
+  - 问题只在消费侧重复实现，改 shared 或别处都会扩大变更面并形成第二真源。
+
+[2026-05-24] added red gate candidate for resp_process_stage2_finalize local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（resp_process_stage2_finalize read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_resp_process_stage2_finalize_local_clone`
+- 红测先红证据：
+  - `resp_process_stage2_finalize.rs` 仍保留本地 `fn read_trimmed_string(value: Option<&Value>) -> Option<String>` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage2_finalize.rs`
+  - 物理删除本地 clone，改为直连 `shared_json_utils.rs::read_trimmed_string`。
+- 为什么这是唯一正确修改处：
+  - 该 helper 与 shared 真源完全等价；
+  - 问题只在消费侧重复实现，改 shared 或别处都会扩大变更面并形成第二真源。
+
+[2026-05-24] added red gate candidate for hub_tool_session_compat local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] Windsurf closeout audit after 429 fix
+- 目标恢复：继续收 P0/P1，检查 typed result、resource lifecycle、provider orchestration 收口是否仍有旧 null/continue/ignore 语义残留。
+- 本轮先做只读审计，再命中唯一缺口补测试与实现。
+[2026-05-24] hub pipeline rust shared helper closeout（hub_tool_session_compat read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_hub_tool_session_compat_local_clone`
+- 红测先红证据：
+  - `hub_tool_session_compat.rs` 仍保留本地 `fn read_trimmed_string(value: Option<&Value>) -> Option<String>` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_tool_session_compat.rs`
+  - 物理删除本地 clone，改为直连 `shared_json_utils.rs::read_trimmed_string`。
+- 为什么这是唯一正确修改处：
+  - 该 helper 与 shared 真源完全等价；
+  - 问题只在消费侧重复实现，改 shared 或别处都会扩大变更面并形成第二真源。
+[2026-05-24] Windsurf weekly quota runtime regression
+- 用户热测证据：weekly exhausted 仍一次直返客户端。
+- 新检查点：1) weekly exhausted 是否应对同 alias 其余 key reroute；2) 本地 0 点恢复维护是否真的会清 weekly block 并重新 probe。
+[2026-05-24] added red gate candidate for hub_bridge_actions utils local read_trimmed_string wrapper; expecting failure before removing zero-logic wrapper.
+[2026-05-24] hub pipeline rust shared helper closeout（hub_bridge_actions utils read_trimmed_string wrapper 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_hub_bridge_actions_utils_local_wrapper`
+- 红测先红证据：
+  - `hub_bridge_actions/utils.rs` 仍保留零逻辑 wrapper：`pub(crate) fn read_trimmed_string(value: Option<&Value>) -> Option<String>`。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/utils.rs`
+  - 以及该模块唯一直接消费点：
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/tool_ids.rs`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/history.rs`
+- 为什么这是唯一正确修改处：
+  - 该 wrapper 不承载任何局部语义，只是把入参原样转发到 `shared_json_utils::read_trimmed_string`；
+  - 真源已经存在，问题仅是 `hub_bridge_actions` 内部残留第二入口；
+  - 直接物理删除 wrapper 并让本模块消费点直连 shared 真源，是最小且唯一不制造第二真源的修复。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_hub_bridge_actions_utils_local_wrapper -- --nocapture`
+  - `cargo test -p router-hotpath-napi normalize_bridge_tool_call_ids_does_not_invent_missing_ids -- --nocapture`
+  - `cargo test -p router-hotpath-napi --no-run`
+- 备注：
+  - `hub_bridge_actions` 整簇定向回归当前存在既有红点，与本次 wrapper 收口无关，未顺手修改。
+[2026-05-24] added red gate candidate for qwen tool_definitions local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（qwen tool_definitions read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_qwen_tool_definitions_local_clone`
+- 红测先红证据：
+  - `req_outbound_stage3_compat/qwen/tool_definitions.rs` 仍保留本地 `fn read_trimmed_string(value: Option<&Value>) -> Option<String>` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/qwen/tool_definitions.rs`
+  - 物理删除本地 clone，改为直连 `shared_json_utils.rs::read_trimmed_string`。
+- 为什么这是唯一正确修改处：
+  - 该 helper 与 shared 真源完全等价，仅做 `as_str + trim + empty->None`；
+  - 问题只在消费侧重复实现，改 shared 真源或其他模块都会扩大修改面并制造第二真源。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_qwen_tool_definitions_local_clone -- --nocapture`
+  - `cargo test -p router-hotpath-napi normalize_qwen_family_tool_definitions -- --nocapture`
+  - `cargo test -p router-hotpath-napi --no-run`
+[2026-05-24] added red gate candidate for tool_text_request_guidance local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（tool_text_request_guidance read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_tool_text_request_guidance_local_clone`
+- 红测先红证据：
+  - `req_outbound_stage3_compat/tool_text_request_guidance.rs` 仍保留本地 `fn read_trimmed_string(value: Option<&Value>) -> Option<String>` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tool_text_request_guidance.rs`
+  - 物理删除本地 clone，改为直连 `shared_json_utils.rs::read_trimmed_string`。
+- 为什么这是唯一正确修改处：
+  - 该 helper 与 shared 真源完全等价，仅做 `as_str + trim + empty->None`；
+  - 问题只在消费侧重复实现，改 shared 真源或别处都会扩大修改面并制造第二真源。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_tool_text_request_guidance_local_clone -- --nocapture`
+  - `cargo test -p router-hotpath-napi tool_text_request_guidance -- --nocapture`
+  - `cargo test -p router-hotpath-napi --no-run`
+[2026-05-24] added red gate candidate for glm request local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（glm request read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_glm_request_local_clone`
+- 红测先红证据：
+  - `req_outbound_stage3_compat/glm/request.rs` 仍保留本地 `fn read_trimmed_string(value: Option<&Value>) -> Option<String>` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/glm/request.rs`
+  - 物理删除本地 clone，改为直连 `shared_json_utils.rs::read_trimmed_string`。
+- 为什么这是唯一正确修改处：
+  - 该 helper 与 shared 真源完全等价，仅做 `as_str + trim + empty->None`；
+  - 问题只在消费侧重复实现，改 shared 真源或别处都会扩大修改面并制造第二真源。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_glm_request_local_clone -- --nocapture`
+  - `cargo test -p router-hotpath-napi test_req_profile_chat_glm_ -- --nocapture`
+  - `cargo test -p router-hotpath-napi --no-run`
+[NOTE]
+[2026-05-24 15:28:02] MiniMax SSE disconnect + repeated tool_calls audit start on 5555. Symptoms: client sees stream closed before response.completed while server logs repeated tool_calls followups. Focus: SSE finalization path and repeated tool/result injection chain.
+[2026-05-24] added red gate candidate for deepseek_web root local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（deepseek_web root read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_deepseek_web_local_clone`
+- 红测先红证据：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_deepseek_web_local_clone -- --nocapture`
+  - 失败点：`req_outbound_stage3_compat/deepseek_web.rs` 仍保留本地 `read_trimmed_string` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web.rs`
+  - 以及该 root helper 的直接消费点：
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web/request.rs`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web/usage.rs`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web/markup.rs`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web/request/prompt/content.rs`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web/request/prompt/model.rs`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web/request/prompt/tool_guidance.rs`
+- 为什么这是唯一正确修改处：
+  - `deepseek_web.rs` 的 helper 与 `shared_json_utils::read_trimmed_string` 完全等价，仅做 `as_str + trim + empty->None`；
+  - root helper 本身不是独立语义，只是 deepseek_web 子模块残留第二真源入口；
+  - 直接物理删除 root clone，并让全部消费点直连 shared 真源，是最小且唯一不制造第二真源的修改。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_deepseek_web_local_clone -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi deepseek_web -- --nocapture` ⚠️ 发现既有 deepseek_web 红点，不在本次 helper 收口范围内：
+    - `test_resp_profile_chat_deepseek_web_does_not_harvest_compact_exec_command_json_outside_wrapper`
+    - `test_resp_profile_chat_deepseek_web_rejects_truncated_rcc_container_without_closing_boundary`
+    - `test_resp_profile_chat_deepseek_web_does_not_harvest_quote_wrapped_tool_calls_outside_wrapper`
+    - `test_resp_profile_chat_deepseek_web_coding_route_plain_text_final_requires_tool_call`
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24 15:32:28] User hot test shows Windsurf weekly 429 still returns directly at runtime. Pause MiniMax branch. Re-focus on Windsurf: first add red test for one-shot 429 direct-return on /v1/responses, then patch request-executor/runtime path.
+[2026-05-24] added red gate candidate for gemini request local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（gemini request read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_gemini_request_local_clone`
+- 红测先红证据：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_gemini_request_local_clone -- --nocapture`
+  - 失败点：`req_outbound_stage3_compat/gemini/request.rs` 仍保留本地 `read_trimmed_string` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/gemini/request.rs`
+- 为什么这是唯一正确修改处：
+  - 该 helper 与 `shared_json_utils::read_trimmed_string` 完全等价，仅做 `as_str + trim + empty->None`；
+  - `gemini/request.rs` 没有额外包装语义，问题仅是消费侧残留第二真源；
+  - 直接物理删除 clone 并改为直连 shared 真源，是最小且唯一不制造第二真源的修改。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_gemini_request_local_clone -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi gemini -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+[2026-05-24] added red gate candidate for qwenchat tool_definitions local read_trimmed_string clone; expecting failure before wiring shared_json_utils truth.
+[2026-05-24] hub pipeline rust shared helper closeout（qwenchat tool_definitions read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_qwenchat_tool_definitions_local_clone`
+- 红测先红证据：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_qwenchat_tool_definitions_local_clone -- --nocapture`
+  - 失败点：`req_outbound_stage3_compat/qwenchat/tool_definitions.rs` 仍保留本地 `read_trimmed_string` clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/qwenchat/tool_definitions.rs`
+- 为什么这是唯一正确修改处：
+  - 该 helper 与 `shared_json_utils::read_trimmed_string` 完全等价，仅做 `as_str + trim + empty->None`；
+  - `qwenchat/tool_definitions.rs` 中不存在额外包装语义，问题仅是消费侧残留第二真源；
+  - 直接物理删除 clone 并直连 shared 真源，是最小且唯一不制造第二真源的修改。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_qwenchat_tool_definitions_local_clone -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi qwenchat -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+- 备注：
+  - `req_outbound_stage3_compat/qwenchat/response.rs` 仍有独立 clone，未与本轮混改，保持逐个闭环。
+
+## 2026-05-24 stopless 错误计数与 tool_call 清零真相
+
+- 本轮按 Jason 最新要求核对 `stop + 错误混合计数，唯独 tool_call 清零`。
+- 唯一计数真源仍在 `sharedmodule/llmswitch-core/src/servertool/stop-message-counter.ts`，由 `sharedmodule/llmswitch-core/src/servertool/engine.ts` 与 `sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts` 调用。
+- 实测结论：当前实现已经满足“stop 与 followup error 都占预算；只有 tool_call / function_call 才把 `stopMessageUsed` 清零”。
+- 证据：新增回归 `tests/servertool/stop-message-auto.goal-default.spec.ts` 覆盖 `stop -> error -> stop(第3次停) -> tool_call(reset) -> stop(再次可续)`，最小 Jest 定向已通过。
+- 因此这一点当前不需要改实现；唯一需要保留的是回归门禁，防止后续再破坏。
+[2026-05-24] Windsurf weekly 429 runtime direct-return fix: added red test for provider.send direct weekly quota reroute; root cause was executor retry path only trusting routingDecision.pool and dropping full candidate pool when Hub returned narrowed decision pool. Fixed by propagating routingDiagnostics through HubPipelineExecutionResult and letting request-executor-pipeline-attempt prefer diagnostics/full pool for retry truth.
+
+## 2026-05-24 shared helper closeout：responses_openai_codec / hub_req_inbound_tool_call_normalization
+
+- 本轮继续只收 Rust `read_trimmed_string` 完全等价 clone。
+- 已补 deletion gates：
+  - `shared_read_trimmed_string_deletion_gate_removed_responses_openai_codec_local_clone`
+  - `shared_read_trimmed_string_deletion_gate_removed_hub_req_inbound_tool_call_normalization_local_clone`
+- 已删除本地 clone 并直连 `shared_json_utils::read_trimmed_string`：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs`
+- 验证证据：
+  - 两条 deletion gate 定向 cargo test 通过
+  - `cargo test -p router-hotpath-napi request_codec_maps_responses_input_into_chat_request_and_context -- --nocapture` 通过
+  - `cargo test -p router-hotpath-napi --no-run` 通过
+- 额外观察：`responses_openai_codec` 现有定向族里仍有既有红点 `request_codec_harvests_malformed_assistant_tool_markup_from_history`，不是本轮 helper 收口引入，不顺手修。
+[2026-05-24] stop_message_auto mixed-budget rule re-verified.
+- Jason 最新约束：stop 与 followup error 共用三次预算；唯独 tool_call / function_call 清零，随后再次可续三次。
+- 代码真源仍是 `sharedmodule/llmswitch-core/src/servertool/stop-message-counter.ts`。
+- 定向验证已通过：
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/servertool/stop-message-auto.goal-default.spec.ts -t '非 /goal 场景 error 也计入三次预算，只有 tool_call 才清零|/v1/responses function_call 后默认续杯预算重置为三次|非 /goal 场景默认最多续三次，第 3 次 stop 后真停止'`
+- 结论：当前实现已满足该规则，本轮无需改实现；唯一需要保留的是该回归门禁，防止后续再被破坏。
+[2026-05-24] hub pipeline rust shared helper closeout（virtual_router config_bootstrap read_trimmed_string 收口）
+- 先补 deletion gate 红测：
+  - `shared_read_trimmed_string_deletion_gate_removed_virtual_router_config_bootstrap_local_wrapper`
+- 红测先红证据：
+  - `virtual_router_engine/config_bootstrap.rs` 仍保留本地 `fn read_trimmed_string(value: &Value) -> Option<String>` wrapper。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs`
+  - 物理删除本地 wrapper，全部调用点改为直连 `shared_json_utils::read_trimmed_string`。
+- 为什么这是唯一正确修改处：
+  - 该 wrapper 与 shared 真源完全等价，仅做 `as_str + trim + empty->None`；
+  - 问题只在消费侧残留第二真源；改 shared 真源或别处都会扩大修改面并保留重复 helper。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_virtual_router_config_bootstrap_local_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+[2026-05-24] hub pipeline rust shared helper closeout（shared_tool_result_text_normalizer 收口进 shared_tooling）
+- 先补 deletion gate 红测：
+  - `shared_tooling_deletion_gate_removed_shared_tool_result_text_normalizer_module`
+- 红测先红证据：
+  - `shared_tooling/tests.rs` 无法导入 `normalize_tool_result_value`，说明 shared 真源尚未建立。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tooling.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_result_text_normalizer.rs`
+  - 以及所有直接消费旧模块的 Rust 调用点。
+- 为什么这是唯一正确修改处：
+  - `shared_tool_result_text_normalizer.rs` 中 `normalize_tool_result_text` 只是 `normalize_ran_tree_or_chunked_tool_text` 的零逻辑透传；
+  - `normalize_tool_result_value` 也是同一类 tool text 归一语义，和 `shared_tooling.rs` 已有文本/tool helper 同属一层；
+  - 若保留旧模块，只是继续保留第二真源；改调用但不删模块也不满足物理删除要求。
+- 执行：
+  - 将 `normalize_tool_result_text` 与 `normalize_tool_result_value` 迁入 `shared_tooling.rs`
+  - 调用方全部改用 `crate::shared_tooling::*`
+  - 物理删除 `shared_tool_result_text_normalizer.rs`
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_shared_tool_result_text_normalizer_module -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+
+## 2026-05-24 15:53:06 5520 relay weekly429 + native bootstrap audit
+- 检查未提交改动、5520 运行日志、native bootstrap 导出、weekly 429 reroute 在线阻塞。
+[2026-05-24] hub pipeline rust shared helper closeout（hub_standardized_bridge runtime metadata clone 收口）
+- 先补 deletion gate 红测：
+  - `shared_clone_plain_object_deletion_gate_removed_hub_standardized_bridge_local_clone`
+- 红测先红证据：
+  - `hub_standardized_bridge.rs` 仍保留本地 `fn clone_runtime_metadata(carrier: Option<&Value>) -> Option<Map<String, Value>>` clone。
+- 真源复核结论：
+  - 这份 clone 不是 `shared_json_utils::clone_plain_object`；它真正等价的是 `shared_metadata_semantics::read_runtime_metadata` 对 `__rt` 节点的读取结果。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_metadata_semantics.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_standardized_bridge.rs`
+- 为什么这是唯一正确修改处：
+  - `hub_standardized_bridge.rs` 的本地 helper 专门读取 carrier 下的 `__rt` 对象并 clone；
+  - 现有 shared 真源里，只有 `shared_metadata_semantics::read_runtime_metadata` 具有同一语义边界；
+  - 如果硬接 `clone_plain_object`，会丢失 `__rt` 路径语义，属于错接真源；
+  - 因此唯一正确做法是把 `read_runtime_metadata` 提升为可复用 shared 真源，并删除本地 clone。
+- 执行：
+  - `shared_metadata_semantics.rs` 中 `read_runtime_metadata` 改为 `pub(crate)`
+  - `hub_standardized_bridge.rs` 调用点改为 `read_runtime_metadata(...).as_object().cloned()`
+  - 删除本地 `clone_runtime_metadata` clone
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_clone_plain_object_deletion_gate_removed_hub_standardized_bridge_local_clone -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+[2026-05-24] hub pipeline rust shared helper closeout（shared_metadata_semantics 自身零逻辑 wrapper 删除）
+- 先补 deletion gate 红测：
+  - `shared_read_runtime_metadata_deletion_gate_removed_shared_metadata_local_wrapper`
+- 红测先红证据：
+  - `shared_metadata_semantics.rs` 仍保留 `fn clone_runtime_metadata(carrier: &Value) -> Value`，其实现仅为 `read_runtime_metadata(carrier)`。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_metadata_semantics.rs`
+- 为什么这是唯一正确修改处：
+  - 该 wrapper 与同文件真源 `read_runtime_metadata` 完全等价，没有任何附加语义；
+  - 问题不在调用方，而在 shared 模块内部仍保留第二入口；
+  - 直接删除 wrapper 并让 `clone_runtime_metadata_json` 直连真源，是最小且唯一不保留冗余 helper 的修复。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_runtime_metadata_deletion_gate_removed_shared_metadata_local_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+
+## 2026-05-24 hub pipeline rust closeout / 新增 shared helper 收口
+
+- `chat_clock_reminder_directives.rs` 的本地 `find_last_user_message_index(messages: &[Value]) -> Option<usize>` 已确认只是 `shared_tooling::find_last_user_message_index` 的零逻辑直传 wrapper。
+- 已先补 deletion gate，再物理删除本地 wrapper，并把调用点直连 shared 真源；这是唯一正确修改点，因为问题本质是“第二 helper 真源仍物理存在”，不删就没有收口。
+- `hub_tool_governance_semantics.rs` 的本地 `read_string_field(obj, key)` 已确认只是 `shared_json_utils::read_object_trimmed_string(obj, key)` 的零逻辑 wrapper。
+- 已先补 deletion gate，再物理删除本地 wrapper，并把 rule 解析调用点直连 shared 真源；改其他地方都只是继续保留第二真源。
+NOTE
+- 2026-05-24: 5520 weekly 429 在线样本无 provider-switch，结合 index.ts router-direct 默认 direct 与 router-direct-pipeline 对 Windsurf 同协议放行，先补红测验证 Windsurf 不得走 router-direct。
+- 历史日志另有 Windsurf runtime missing baseUrl -> runtime not found 旧问题，和本次 5/24 秒失败样本并行存在；当前先修本次直返 429 真源。
+
+- 2026-05-24: 5520 weekly 429 在线样本无 provider-switch，结合 `index.ts` router-direct 默认 direct 与 `router-direct-pipeline.ts` 对 Windsurf 同协议放行，先补红测验证 Windsurf 不得走 router-direct。
+- 历史日志另有 Windsurf runtime missing baseUrl -> runtime not found 旧问题，和本次 5/24 秒失败样本并行存在；当前先修本次直返 429 真源。
+
+- `hub_snapshot_hooks.rs` 的本地 `read_string_field(value, key)` 已确认只是 `shared_json_utils::read_trimmed_string(value.get(key))` 的零逻辑 wrapper。
+- 已先补 deletion gate，再物理删除本地 wrapper，并把 nested provider/group/entry/protocol 读取直连 shared trimmed-string 真源；改其他地方都只是继续保留第二真源。
+- `req_outbound_stage3_compat/claude_code/user_id.rs` 的本地 `read_string_field(map, key)` 已确认只是 map->shared trimmed-string 的零逻辑 wrapper。
+- 已先补 deletion gate，再物理删除本地 wrapper，并把 metadata 读取直连 `read_object_trimmed_string` 真源。
+
+- `hub_bridge_actions/metadata.rs` 的本地 `read_instruction_value(source, field)` 已确认只是 `shared_json_utils::read_object_trimmed_string(source, field)` 的零逻辑 wrapper。
+- 已先补 deletion gate，再物理删除本地 wrapper，并让系统指令注入路径直连 shared 真源；改别处都只是保留第二真源。
+- `shared_tool_call_id_manager.rs` 的本地 `read_string(value)` 已确认只是 shared trimmed-string clone。
+- 已先补 deletion gate，再物理删除本地 clone，并把 `extract_tool_call_id` 直连 `read_trimmed_string` 真源。
+
+- `chat_node_result_semantics.rs` 的本地 `read_object_string(row, key)` 已确认只是 `shared_json_utils::read_object_trimmed_string(row, key)` 的零逻辑 wrapper。
+- 已先补 deletion gate，再物理删除本地 wrapper，并把 continuation restore 读取直连 shared 真源。
+- `chat_web_search_tool_schema.rs` 的本地 `read_engine_id(entry)` 已确认只是 object->`read_object_trimmed_string(..., \"id\")` 的零逻辑 wrapper。
+- 已先补 deletion gate，再物理删除本地 wrapper，并把 engine id 读取直连 shared 真源。
+
+## 2026-05-24 stop counter reset rule
+- User clarified: only `tool_call` resets stop/error auto-followup counter; stop+error mixed count toward same max-3 budget.
+- Need red test first, Rust-only, no TS semantics changes.
+
+## 2026-05-24 hubpipeline shared helper closeout resume
+- Resume Rust-only shared helper closeout.
+- Ignore stopless/provider topics for this turn.
+- Next targets from handoff: responses_payload local read_object_string; universal_shape_filter local read_string.
+
+2026-05-24 stop budget rule verified: shared stop+error budget stops on hit 3; only later tool_call turn resets to 0; updated stale followup reentry expectations in tests/servertool/stop-message-flow-followup-reentry.spec.ts
+
+## 2026-05-24 5520 relay live 验证
+- 在线请求 `POST /v1/responses`（stream=false）已实测通过，返回 200，usage 含 input/output/cache。
+- 5520 当前真实路由为 `gateway_priority_5520`，`mode=round-robin`，目标展开自 `windsurf.gpt-5.4-medium`。
+- 实测命中顺序出现 `ws-pro-2 -> ws-pro-4 -> ws-pro-1 -> ws-pro-3`，说明 5520 当前会跨账号轮询，不是固定单号。
+- `ws-pro-3` 出现一次 `WINDSURF_UPSTREAM_TRANSIENT 502` 后，同请求在 attempt=2 切到 `ws-pro-1` 成功，说明 recoverable retry 仍在线。
+- quota 快照显示 `ws-pro-1/2` 仍处 weekly cooldown，`ws-pro-3/4/5` 为 `reason=ok`。
+- 结论：当前 5520 上“Windsurf 一次 429 就直返、不轮询”在 live 上未复现；若再出现，需要抓当次 requestId + provider-switch + quota snapshot 联合证据。
+[2026-05-24] hub pipeline rust shared helper closeout（xml_text_utils 零逻辑 XML helper wrapper 删除）
+- 先补 deletion gate：`shared_xml_helper_deletion_gate_removed_xml_text_utils_local_wrappers`
+- 红测命中证据：`xml_text_utils.rs` 仍物理存在本地
+  - `pub(crate) fn decode_basic_xml_entities(raw: &str) -> String`
+  - `pub(crate) fn unwrap_xml_cdata_sections(raw: &str) -> String`
+- 真源确认：两者都只是 `shared_tooling::{decode_basic_xml_entities, unwrap_xml_cdata_sections}` 的零逻辑直传 wrapper。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/xml_text_utils.rs`
+- 为什么这是唯一正确修改处：
+  - 问题本质不是调用方错误，而是该模块仍保留第二 helper 真源；
+  - 直接删除本地 wrapper 并改为 `use crate::shared_tooling::{...};` 才能完成物理收口；
+  - 去改其他调用方只会继续保留重复 helper，不满足 closeout 目标。
+[2026-05-24] hub pipeline rust shared helper closeout（windsurf_tool_history_projection 本地 trimmed-string clone 删除）
+- 先补 deletion gate：`shared_read_trimmed_string_deletion_gate_removed_windsurf_tool_history_projection_local_clone`
+- 红测命中证据：`windsurf_tool_history_projection.rs` 仍保留本地 `fn read_trimmed_string(value: Option<&Value>) -> String`
+- 真源确认：该实现与 `shared_json_utils::read_trimmed_string` 完全等价，零逻辑 clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/windsurf_tool_history_projection.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是调用方缺陷，而是该模块内部仍物理保留第二 trimmed-string 真源；
+  - 直接删本地 clone，并改为 `use crate::shared_json_utils::read_trimmed_string;` 才能完成 shared 收口；
+  - 去改其他位置只会继续保留重复 helper。
+
+## 2026-05-24 build/install/live 验证（本轮）
+- build:min 已通过；当前阻塞从 Rust 真源切到 TS 类型字段缺口，已在 response-parse-block.ts 补齐 upstreamMessage 并恢复门禁。
+- 定向测试通过：windsurf auth typed-result 6 条；responses non-tool-call request retention 1 条。
+- 下一步：install:global -> routecodex restart --port 5520 -> 5520 /health + /v1/responses live。
+
+## 2026-05-24 stopless 预算规则复核（用户要求的唯一规则）
+- 用户确认的规则：`stop + error` 共用三次预算；只有 `tool_call` / `/v1/responses function_call` 才清零；清零后重新获得三次预算。
+- 已先补红测并验证通过：
+  - `tests/servertool/stop-message-auto.goal-default.spec.ts`
+  - 新增用例：`非 /goal 场景 stop/error 混合计数，遇到 tool_call 后清零并重新获得三次预算`
+- 证据：
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/servertool/stop-message-auto.goal-default.spec.ts` ✅
+  - 结果显示 11/11 通过，其中包括：
+    - `非 /goal 场景 error 也计入三次预算，只有 tool_call 才清零`
+    - `非 /goal 场景 stop/error 混合计数，遇到 tool_call 后清零并重新获得三次预算`
+    - `/v1/responses function_call 后默认续杯预算重置为三次`
+- 结论：这条规则当前不是缺实现，而是已满足；如果线上仍出现“不是 tool_call 也被清零/继续执行”的现象，真源不在 stop budget 规则本身，而在上游 stop 触发条件、followup 注入来源、或把普通用户输入误判成 stopless continue 的别处链路。
+
+[2026-05-24] hub pipeline rust shared helper closeout（finalize_strip 本地 read_string wrapper 删除）
+- 先补 deletion gate：`shared_read_object_trimmed_string_deletion_gate_removed_finalize_strip_local_wrapper`
+- 红测命中证据：`servertool_skeleton/finalize_strip.rs` 仍保留本地 `fn read_string(record: &Map<String, Value>, key: &str) -> String`
+- 真源确认：该实现只是 `shared_json_utils::read_object_trimmed_string(...).unwrap_or_default()` 的零逻辑 clone。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton/finalize_strip.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是调用方错误，而是该模块内部仍物理保留第二 trimmed-string/object-string 真源；
+  - 直接删除本地 wrapper 并改成 shared 真源调用，才能完成 shared helper 物理收口；
+  - 去改其他文件只会继续保留重复 helper，不能满足 closeout 目标。
+
+[2026-05-24] hub pipeline rust shared helper closeout（deepseek response 本地 exec alias family 删除）
+- 先补 deletion gate：`shared_tool_mapping_deletion_gate_removed_deepseek_response_local_exec_family`
+- 红测命中证据：`req_outbound_stage3_compat/deepseek_web/response.rs` 仍保留本地 `fn is_exec_command_family(name: &str) -> bool`
+- 真源确认：该 helper 只是对 `shared_tool_mapping::normalize_routecodex_tool_name(...)=exec_command` 的局部重复判断。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web/response.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不在调用方，而在该模块仍物理保留 exec family alias 第二真源；
+  - 直接删除本地 family 判断并改成 shared tool mapping 真源，才能让 exec alias 规则单点化；
+  - 去改其他模块只会继续保留重复 alias 语义，不能完成 shared 收口。
+
+[2026-05-24] 5520 submit_tool_outputs orphan_tool_result live broken
+- 已确认 step1 tool_call 在线成功；step2 submit_tool_outputs 在 Rust continuation/bridge 链断，目标先补红测复现真实 shape，再只改 shared_responses_conversation_utils / bridge_input 真源。
+
+[2026-05-24] submit_tool_outputs orphan root cause fixed
+- 唯一真因：released prefix 保留态下 resumeConversation 没把 releasedInputPrefix/releasedPendingToolCallIds 带回 native resume，导致 tool_output 无前置 function_call，bridge 报 orphan_tool_result。
+- 真源修复：responses-conversation-store-native.ts 传齐 released fields；shared_responses_conversation_utils.rs 在 input 为空时回退到 releasedInputPrefix。
+- 红测：released-prefix submit_tool_outputs -> bridge pairing 现已转绿。
+
+[2026-05-24] submit_tool_outputs second root cause fixed
+- 释放保留态不能清空 basePayload；否则 submit_tool_outputs 第二步会丢 model，报 Chat envelope parameters.model must be a string。
+- 真源修复：responses-conversation-store.ts::releaseRequestPayload 仅释放 input，不再重写 basePayload。
+[2026-05-24] 5520 submit_tool_outputs /v1/responses auto-detect 真因
+- live 证据：step1 `resp_1779614228690` 成功返回 apply_patch tool_call；step2 以 `/v1/responses` + `previous_response_id` + `tool_outputs` 提交时返回 `Responses payload produced no chat messages`。
+- 唯一真因：`src/server/handlers/responses-handler.ts` 的 auto-detect 与 resume responseId 读取只认 `response_id` / path param，不认 `previous_response_id`，导致 `/v1/responses` submit_tool_outputs 续接未走 resume 真链。
+- 唯一正确修改点：`isResponsesSubmitToolOutputsPayload()` 与 submit 分支 `responseId` 解析，同时接受 `previous_response_id`。
+- 非本次真因：Jest handler E2E 当前还有既有 `ERR_REQUIRE_ESM` 噪音，阻塞该测试文件全绿；但不影响 5520 live 真链修复定位。
+
+
+## 2026-05-24 hubpipeline shared helper closeout（本轮续做）
+- 目标：继续只收 Rust crate 内完全同形/同语义重复 helper，优先 shared_tooling/shared_json_utils/shared_tool_mapping，保持 hub_pipeline.rs 不回流语义。
+- 先做：全仓 grep 当前重复 helper，先补红测锁定，再迁 shared 真源并物理删除旧实现。
+- 验证要求：定向 cargo test 红转绿 + cargo test -p router-hotpath-napi --no-run。
+- 本轮新增收口1：`hub_semantic_mapper_chat.rs` 与 `req_outbound_stage3_compat/universal_shape_filter.rs` 的 `normalize_tool_content_text`/chunked transcript 本地 helper 已物理删除，统一直连 `shared_tooling::normalize_standard_chunked_tool_text`。
+- 本轮新增收口2：`shared_tool_mapping.rs` 内部 `normalize_tool_name(raw, mode)` 第二入口已删除，responses/default 路径统一直连 `normalize_routecodex_tool_name`；anthropic 专属仅保留必要分支，不再保留通用 wrapper。
+- 保留理由：`responses_payload.rs::read_raw_object_string` 会保留原始空白，不等价于 trimmed shared helper，本轮不并，避免语义漂移。
+[2026-05-24] hub pipeline rust shared helper closeout（续做验证与下一批候选扫描）
+- 先验证上一轮已删除的 resp_process tool_names.rs：需要更新回归入口，不能再跑已删除测试名。
+- 本轮先跑 deletion gate + 现存 resp_process canonicalization 回归 + crate --no-run；通过后再继续扫下一批零逻辑 wrapper。
+- 新候选：hub_bridge_actions/history.rs::serialize_tool_result_payload 只是 normalize_tool_result_value 的零逻辑 wrapper；若调用面仅直传 shared，则可先补 deletion gate 再物理删除。
+- 已确认 history.rs 真实调用点改为 .map(normalize_tool_result_value)；先前 deletion gate 断言过窄，已改为检查 shared 真源调用形态。
+- 新命中：hub_reasoning_tool_normalizer.rs::read_string_array_command 与 shared_json_utils.rs 同名 helper 并存，需先核对是否完全同形；若等价，则先补 deletion gate 再物理删除本地副本。
+- 新收口点确认：reasoning 的 normalize_markup_scalar_text 与 text_markup 内联的 decode_basic_xml_entities(unwrap_xml_cdata_sections(...).trim()) 为同形重复，适合下沉 shared_tooling.rs。
+- 结论更新：tool_harvester::to_json_string 不是最终真源问题；真正应收口的是 hub_reasoning_tool_normalizer::repair_arguments_to_string，它已被 harvester/bridge_input/streaming extractor 等多处复用，适合迁入 shared_tooling.rs 后再删除包装。
+
+## 2026-05-24 orphan_tool_result inspect
+- 5520 latest error: bridge tool_result references unknown or already-consumed native run_command call_id.
+- Next: inspect Rust bridge pairing/consumption and add red regression before patch.
+[2026-05-24] hub pipeline rust shared helper closeout（argument string wrappers 删除）
+- 先补 red gate：`shared_tooling_deletion_gate_removed_argument_string_wrappers`
+- 红测命中证据：
+  - `tool_harvester.rs` 仍保留本地 `fn to_json_string(value: &Value) -> String`
+  - `hub_bridge_actions/utils.rs` 仍保留本地 `pub(crate) fn serialize_tool_arguments(value: Option<&Value>) -> String`
+- 真源确认：两者都只是 `shared_tooling::repair_arguments_to_string` 的零逻辑 wrapper。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/tool_harvester.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/utils.rs`
+  - 以及其直接调用点 `hub_bridge_actions/{bindings,history,bridge_input}.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是参数序列化语义错误，而是 crate 内仍保留第二 helper 真源；
+  - 必须直接删 wrapper 并让调用点直连 `repair_arguments_to_string`，才能完成 shared 收口；
+  - 去改 shared 真源或保留 wrapper 只会继续保留重复 helper，不满足 closeout 目标。
+[2026-05-24] hub pipeline rust shared helper closeout（qwen/qwenchat append_description clone 删除）
+- 先补 red gate：`shared_read_trimmed_string_deletion_gate_removed_qwenchat_append_description_clone`
+- 红测命中证据：`req_outbound_stage3_compat/qwenchat/tool_definitions.rs` 仍保留本地 `fn append_description(existing: Option<&Value>, extra: &str) -> Value`
+- 真源确认：该实现与 `req_outbound_stage3_compat/qwen/tool_definitions.rs::append_description` 完全同形，属于同一 qwen family tool definition 语义域下的重复 helper。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/qwen/tool_definitions.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/qwenchat/tool_definitions.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是描述合并策略错误，而是 qwen/qwenchat family 内部出现第二 helper 真源；
+  - 将 qwen 版提升为 family 单点真源，并删除 qwenchat clone，才能完成物理收口；
+  - 去改调用方而保留 clone，只会继续保留第二真源，不满足 closeout 目标。
+
+## 2026-05-24 17:50:55 router-direct orphan_tool_result 排查
+- 观察：responses-openai-pipeline 会从 input.function_call_output 再抽一份 __captured_tool_results，疑似与原始 input 重复消费。
+- 下一步：补 router-direct/hub pipeline 红测，验证仅有 function_call + function_call_output 的 direct 请求是否被 __captured_tool_results 二次注入打爆。
+
+## 2026-05-24 17:53:12 router-direct orphan_tool_result 复盘
+- 红测结果：buildChatRequestFromResponses 仅生成 1 条 tool message，说明 provider bridge 这一层不是重复源。
+- 收窄：继续前移到 hub req inbound context capture / request_inbound action，检查 raw_request + captured snapshot 是否二次消费。
+[2026-05-24] hub pipeline rust shared helper closeout（thought_signature validator 本地 trim clone 删除）
+- 先补 red gate：`shared_read_trimmed_string_deletion_gate_removed_thought_signature_validator_local_clone`
+- 红测命中证据：`thought_signature_validator.rs` 仍保留本地 `fn coerce_thought_signature(value: Option<&Value>) -> Option<String>`
+- 真源确认：该实现与 `shared_json_utils::read_trimmed_string` 完全同形，都是 string-only + trim + empty->None。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/thought_signature_validator.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是 thought-signature 语义错误，而是 validator 模块内部仍保留第二份 trimmed-string clone；
+  - 直接删本地 clone 并统一回 `shared_json_utils::read_trimmed_string`，才能完成 shared helper 物理收口；
+  - 去改 gemini codec 或继续保留 wrapper，都只会继续保留第二真源，不满足 closeout 目标。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_thought_signature_validator_local_clone -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+[2026-05-24] hub pipeline rust shared helper closeout（gemini/virtual-router string clone 删除）
+- 先补 red gate：`shared_read_trimmed_string_deletion_gate_removed_gemini_and_virtual_router_local_clones`
+- 红测命中证据：
+  - `gemini_openai_codec.rs` 仍保留本地 `fn coerce_thought_signature(value: Option<&Value>) -> Option<String>`
+  - `virtual_router_engine/provider_bootstrap.rs` 与 `virtual_router_engine/routing/bootstrap.rs` 仍各自保留本地 `fn read_optional_string(value: Option<&Value>) -> Option<String>`
+- 真源确认：三者都与 `shared_json_utils::read_trimmed_string` 完全同形，都是 string-only + trim + empty->None。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/bootstrap.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs`
+- 中途踩坑：
+  - 直接物理删除两个 virtual-router 本地 `read_optional_string` 后，调用面太多，首次编译报 `cannot find function read_optional_string`；
+  - 正确收口方式不是把本地函数回滚，而是直接 `use crate::shared_json_utils::read_trimmed_string as read_optional_string;`，让调用面整体回 shared 真源且不保留第二实现。
+- 为什么这是唯一正确修改处：
+  - 问题不是 gemini/virtual-router 的业务语义错误，而是模块内部仍保留 trimmed-string 第二真源；
+  - 对 gemini 直接删 wrapper 并改直连 shared 真源；对 virtual-router 用 shared alias 替代本地 helper，才能既消除重复实现又不引入大面积无关改写；
+  - 保留本地 helper、或另造 shared wrapper、或去改别处调用语义，都会继续保留第二真源，不满足 closeout 目标。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_gemini_and_virtual_router_local_clones -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+
+
+[2026-05-24] hub pipeline rust shared helper closeout（hub_pipeline_blocks trimmed-string clones 删除）
+- 先补 red gate：`shared_read_trimmed_string_deletion_gate_removed_hub_pipeline_block_local_clones`
+- 红测命中证据：
+  - `hub_pipeline_blocks/responses_resume.rs` 仍保留本地 `fn read_trimmed_optional_string(value: Option<&Value>) -> Option<String>`
+  - `hub_pipeline_blocks/metadata.rs` 仍保留本地 `fn read_trimmed_string_token(metadata: &Map<String, Value>, keys: &[&str]) -> Option<String>`
+- 真源确认：
+  - 前者与 `shared_json_utils::read_trimmed_string` 完全同形，都是 string-only + trim + empty->None。
+  - 后者与 `shared_json_utils::read_first_object_trimmed_string` 完全同形，都是多 key 顺序扫描 + trim + empty-skip。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/metadata.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是 responses resume / metadata 语义错误，而是 hub_pipeline blocks 内部仍保留 trimmed-string 第二真源；
+  - 直接删本地 clone 并统一回 `shared_json_utils`，才能完成 shared helper 物理收口；
+  - 去改别处调用、保留 wrapper、或另造 shared 包装层，都会继续保留第二真源，不满足 closeout 目标。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_hub_pipeline_block_local_clones -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅

@@ -1,5 +1,7 @@
 use serde_json::{Map, Value};
 
+use crate::shared_json_utils::read_first_object_trimmed_string;
+
 pub(crate) fn resolve_stop_message_router_metadata(metadata: &Value) -> Value {
     let mut out = Map::<String, Value>::new();
     let metadata_obj = match metadata.as_object() {
@@ -189,16 +191,7 @@ pub(crate) fn build_hub_pipeline_result_metadata(input: &Value) -> Result<Value,
 }
 
 fn read_trimmed_string_token(metadata: &Map<String, Value>, keys: &[&str]) -> Option<String> {
-    for key in keys {
-        let raw = match metadata.get(*key).and_then(|v| v.as_str()) {
-            Some(v) => v.trim(),
-            None => continue,
-        };
-        if !raw.is_empty() {
-            return Some(raw.to_string());
-        }
-    }
-    None
+    read_first_object_trimmed_string(metadata, keys)
 }
 
 fn normalize_hub_policy_mode(raw: Option<&str>) -> String {

@@ -1,5 +1,7 @@
 use serde_json::{Map, Value};
 
+use crate::shared_json_utils::read_trimmed_string;
+
 pub(crate) fn read_responses_resume_from_metadata(metadata: &Value) -> Option<Value> {
     let metadata_obj = metadata.as_object()?;
     let resume = metadata_obj.get("responsesResume")?;
@@ -45,10 +47,9 @@ pub(crate) fn synthesize_continuation_from_responses_resume(
     resume: Option<&Value>,
 ) -> Option<Value> {
     let resume_obj = resume?.as_object()?;
-    let previous_request_id = read_trimmed_optional_string(resume_obj.get("previousRequestId"));
-    let restored_from_response_id =
-        read_trimmed_optional_string(resume_obj.get("restoredFromResponseId"));
-    let route_hint = read_trimmed_optional_string(resume_obj.get("routeHint"));
+    let previous_request_id = read_trimmed_string(resume_obj.get("previousRequestId"));
+    let restored_from_response_id = read_trimmed_string(resume_obj.get("restoredFromResponseId"));
+    let route_hint = read_trimmed_string(resume_obj.get("routeHint"));
 
     let mut continuation = Map::<String, Value>::new();
     if let Some(chain_id) = previous_request_id
@@ -161,7 +162,7 @@ pub(crate) fn lift_responses_resume_into_semantics(request: &Value, metadata: &V
             if let Some(resume_obj) = resume_value.as_object_mut() {
                 if !resume_obj.contains_key("routeHint") {
                     if let Some(route_hint) =
-                        read_trimmed_optional_string(next_metadata.get("routeHint"))
+                        read_trimmed_string(next_metadata.get("routeHint"))
                     {
                         resume_obj.insert("routeHint".to_string(), Value::String(route_hint));
                     }
@@ -177,18 +178,6 @@ pub(crate) fn lift_responses_resume_into_semantics(request: &Value, metadata: &V
     output.insert("request".to_string(), Value::Object(next_request));
     output.insert("metadata".to_string(), Value::Object(next_metadata));
     Value::Object(output)
-}
-
-fn read_trimmed_optional_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
 }
 
 fn normalize_resume_output_text(value: Option<&Value>) -> String {
@@ -216,8 +205,8 @@ fn read_resume_tool_outputs_detailed(resume_obj: &Map<String, Value>) -> Vec<(St
         let Some(row) = entry.as_object() else {
             continue;
         };
-        let call_id = read_trimmed_optional_string(row.get("callId"))
-            .or_else(|| read_trimmed_optional_string(row.get("originalId")))
+        let call_id = read_trimmed_string(row.get("callId"))
+            .or_else(|| read_trimmed_string(row.get("originalId")))
             .unwrap_or_else(|| format!("resume_tool_{}", index + 1));
         let output_text = normalize_resume_output_text(row.get("outputText"));
         mapped.push((call_id, output_text));
