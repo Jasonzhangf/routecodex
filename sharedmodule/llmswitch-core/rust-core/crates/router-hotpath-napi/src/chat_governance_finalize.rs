@@ -1,17 +1,7 @@
+use crate::shared_json_utils::{as_object, normalize_record};
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
-
-fn as_object(value: &Value) -> Option<&Map<String, Value>> {
-    value.as_object()
-}
-
-fn normalize_metadata(metadata: Value) -> Map<String, Value> {
-    match metadata {
-        Value::Object(row) => row,
-        _ => Map::new(),
-    }
-}
 
 fn read_summary_applied(summary: &Value) -> bool {
     summary
@@ -23,10 +13,10 @@ fn read_summary_applied(summary: &Value) -> bool {
 
 fn merge_governance_summary_into_metadata(metadata: Value, summary: Value) -> Value {
     if !read_summary_applied(&summary) {
-        return Value::Object(normalize_metadata(metadata));
+        return Value::Object(normalize_record(metadata));
     }
 
-    let mut metadata_obj = normalize_metadata(metadata);
+    let mut metadata_obj = normalize_record(metadata);
 
     let existing_tool_governance = metadata_obj
         .get("toolGovernance")

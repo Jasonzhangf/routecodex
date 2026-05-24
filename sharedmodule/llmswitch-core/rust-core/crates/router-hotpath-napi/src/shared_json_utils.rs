@@ -1497,6 +1497,24 @@ mod tests {
     }
 
     #[test]
+    fn shared_json_record_helpers_deletion_gate_removed_chat_governance_finalize_local_wrappers() {
+        let path = crate_src_path("chat_governance_finalize.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn as_object(value: &Value) -> Option<&Map<String, Value>> {")
+                && !source.contains("fn normalize_metadata(metadata: Value) -> Map<String, Value> {"),
+            "chat_governance_finalize.rs still owns local json wrapper helpers"
+        );
+        assert!(
+            source.contains("use crate::shared_json_utils::{as_object, normalize_record};")
+                || source.contains("use crate::shared_json_utils::normalize_record;")
+                || source.contains("shared_json_utils::normalize_record"),
+            "chat_governance_finalize.rs must use shared json helper truth directly"
+        );
+    }
+
+    #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_chat_servertool_orchestration_local_wrapper() {
         let path = crate_src_path("chat_servertool_orchestration.rs");
         let source = fs::read_to_string(&path)
