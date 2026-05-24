@@ -1,71 +1,7 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
-
-fn split_command_string(input: &str) -> Vec<String> {
-    let s = input.trim();
-    if s.is_empty() {
-        return Vec::new();
-    }
-    let mut out: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut in_single = false;
-    let mut in_double = false;
-    let chars: Vec<char> = s.chars().collect();
-    let mut i = 0usize;
-    while i < chars.len() {
-        let ch = chars[i];
-        if in_single {
-            if ch == '\'' {
-                in_single = false;
-            } else {
-                cur.push(ch);
-            }
-            i += 1;
-            continue;
-        }
-        if in_double {
-            if ch == '"' {
-                in_double = false;
-                i += 1;
-                continue;
-            }
-            if ch == '\\' && i + 1 < chars.len() {
-                i += 1;
-                cur.push(chars[i]);
-                i += 1;
-                continue;
-            }
-            cur.push(ch);
-            i += 1;
-            continue;
-        }
-        if ch == '\'' {
-            in_single = true;
-            i += 1;
-            continue;
-        }
-        if ch == '"' {
-            in_double = true;
-            i += 1;
-            continue;
-        }
-        if ch.is_ascii_whitespace() {
-            if !cur.is_empty() {
-                out.push(cur.clone());
-                cur.clear();
-            }
-            i += 1;
-            continue;
-        }
-        cur.push(ch);
-        i += 1;
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    out
-}
+use crate::shared_json_utils::split_command_string;
 
 fn value_to_non_empty_text(value: Option<&Value>) -> Option<String> {
     match value {
