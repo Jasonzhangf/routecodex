@@ -1,4 +1,5 @@
 use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
+use crate::shared_metadata_semantics::read_runtime_metadata;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
@@ -559,12 +560,6 @@ pub fn chat_envelope_to_standardized_json(
     serde_json::to_string(&standardized).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-fn clone_runtime_metadata(carrier: Option<&Value>) -> Option<Map<String, Value>> {
-    let carrier_row = carrier.and_then(|v| v.as_object())?;
-    let rt = carrier_row.get("__rt")?.as_object()?;
-    Some(rt.clone())
-}
-
 fn restore_message_content(content: Option<&Value>) -> Option<Value> {
     let Some(content) = content else {
         return None;
@@ -865,10 +860,14 @@ fn standardized_to_chat_envelope_impl(
     );
 
     let source_meta = request_row.get("metadata").and_then(|v| v.as_object());
-    let mut merged_runtime = clone_runtime_metadata(Some(adapter_context)).unwrap_or_default();
+    let mut merged_runtime = read_runtime_metadata(adapter_context)
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
     if let Some(source_meta_value) = source_meta {
-        if let Some(from_source) =
-            clone_runtime_metadata(Some(&Value::Object(source_meta_value.clone())))
+        if let Some(from_source) = read_runtime_metadata(&Value::Object(source_meta_value.clone()))
+            .as_object()
+            .cloned()
         {
             for (key, value) in from_source {
                 merged_runtime.insert(key, value);

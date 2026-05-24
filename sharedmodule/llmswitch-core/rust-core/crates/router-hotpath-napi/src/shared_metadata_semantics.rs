@@ -153,7 +153,7 @@ fn get_protocol_state(metadata: &Value, protocol: &str) -> Value {
         .unwrap_or(Value::Null)
 }
 
-fn read_runtime_metadata(carrier: &Value) -> Value {
+pub(crate) fn read_runtime_metadata(carrier: &Value) -> Value {
     carrier
         .as_object()
         .and_then(|row| row.get("__rt"))
@@ -174,10 +174,6 @@ fn ensure_runtime_metadata(carrier: &Value) -> Result<Value, String> {
         *ensure = Value::Object(Map::new());
     }
     Ok(Value::Object(carrier_obj))
-}
-
-fn clone_runtime_metadata(carrier: &Value) -> Value {
-    read_runtime_metadata(carrier)
 }
 
 #[napi_derive::napi]
@@ -248,6 +244,6 @@ pub fn ensure_runtime_metadata_json(carrier_json: String) -> NapiResult<String> 
 pub fn clone_runtime_metadata_json(carrier_json: String) -> NapiResult<String> {
     let carrier: Value =
         serde_json::from_str(&carrier_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = clone_runtime_metadata(&carrier);
+    let output = read_runtime_metadata(&carrier);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
