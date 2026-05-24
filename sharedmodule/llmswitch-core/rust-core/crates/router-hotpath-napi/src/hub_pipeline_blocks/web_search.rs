@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 
-use crate::shared_json_utils::parse_js_number_like;
+use crate::shared_json_utils::{parse_js_number_like, value_as_object_or_empty};
 use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 
 pub(crate) fn is_search_route_id(route_id: &Value) -> bool {
@@ -187,6 +187,3 @@ fn build_builtin_web_search_tool(max_uses: i64) -> Value {
     Value::Object(builtin_tool)
 }
 
-fn value_as_object_or_empty(value: &Value) -> Map<String, Value> {
-    value.as_object().cloned().unwrap_or_default()
-}
