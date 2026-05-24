@@ -10623,3 +10623,19 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi gemini_deletion_gate_removed_local_normalize_tool_name_wrapper -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+
+[2026-05-24] hub pipeline rust shared helper closeout（hub_bridge pipeline option-string wrapper 删除）
+- 先补 red gate：`shared_read_object_trimmed_string_deletion_gate_removed_hub_bridge_pipeline_local_wrapper`
+- 红测命中证据：`hub_bridge_actions/pipeline.rs` 仍保留本地 `fn pick_option_str(options: Option<&Map<String, Value>>, key: &str) -> Option<String>`
+- 真源确认：该实现只是 `Option<&Map>` 外层包装，内部读取逻辑与 `shared_json_utils::read_object_trimmed_string` 完全同形，属于零逻辑 wrapper。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/pipeline.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是 bridge pipeline 行为错误，而是本模块内仍保留 map-key trimmed-string 第二 helper 入口；
+  - 直接删本地 wrapper 并让调用点直连 `read_object_trimmed_string`，才能完成 shared helper 物理收口；
+  - 保留 wrapper 或改别处都还会保留第二真源，不满足 closeout 目标。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_object_trimmed_string_deletion_gate_removed_hub_bridge_pipeline_local_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅

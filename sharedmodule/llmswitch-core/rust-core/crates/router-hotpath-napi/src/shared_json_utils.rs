@@ -747,6 +747,22 @@ mod tests {
     }
 
     #[test]
+    fn shared_read_object_trimmed_string_deletion_gate_removed_hub_bridge_pipeline_local_wrapper() {
+        let path = crate_src_path("hub_bridge_actions/pipeline.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn pick_option_str(options: Option<&Map<String, Value>>, key: &str) -> Option<String> {"),
+            "hub_bridge_actions/pipeline.rs still owns local pick_option_str wrapper"
+        );
+        assert!(
+            source.contains("read_object_trimmed_string(row, \"idPrefix\")")
+                || source.contains("read_object_trimmed_string(row, key)"),
+            "hub_bridge_actions/pipeline.rs must route option string reads through shared read_object_trimmed_string truth"
+        );
+    }
+
+    #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_deepseek_web_local_clone() {
         let path = crate_src_path("req_outbound_stage3_compat/deepseek_web.rs");
         let source = fs::read_to_string(&path)

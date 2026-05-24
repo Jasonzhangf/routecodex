@@ -1,6 +1,8 @@
 use serde_json::{Map, Value};
 use std::mem;
 
+use crate::shared_json_utils::read_object_trimmed_string;
+
 use super::history::{
     apply_bridge_capture_tool_results, apply_bridge_ensure_tool_placeholders,
     apply_bridge_normalize_history, ensure_bridge_output_fields,
@@ -13,14 +15,6 @@ use super::reasoning::{apply_bridge_reasoning_extract, apply_bridge_responses_ou
 use super::tool_ids::apply_bridge_normalize_tool_identifiers;
 use super::types::*;
 
-fn pick_option_str(options: Option<&Map<String, Value>>, key: &str) -> Option<String> {
-    options
-        .and_then(|row| row.get(key))
-        .and_then(|value| value.as_str())
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty())
-}
-
 fn pick_option_bool(options: Option<&Map<String, Value>>, key: &str) -> Option<bool> {
     options
         .and_then(|row| row.get(key))
@@ -32,7 +26,7 @@ fn derive_tool_id_prefix(
     request_id: &Option<String>,
     protocol: &Option<String>,
 ) -> String {
-    if let Some(prefix) = pick_option_str(options, "idPrefix") {
+    if let Some(prefix) = options.and_then(|row| read_object_trimmed_string(row, "idPrefix")) {
         return prefix;
     }
     if let Some(req) = request_id
@@ -102,7 +96,7 @@ pub(crate) fn run_bridge_action_pipeline(
             "reasoning.extract" => {
                 let drop_from_content =
                     pick_option_bool(options_ref, "dropFromContent").unwrap_or(true);
-                let id_prefix_base = pick_option_str(options_ref, "idPrefix")
+                let id_prefix_base = options_ref.and_then(|row| read_object_trimmed_string(row, "idPrefix"))
                     .or_else(|| {
                         Some(format!(
                             "{}_{}",
@@ -168,9 +162,9 @@ pub(crate) fn run_bridge_action_pipeline(
             "messages.ensure-output-fields" => {
                 if stage == "request_outbound" {
                     let tool_fallback =
-                        pick_option_str(options_ref, "toolFallback").unwrap_or_default();
+                        options_ref.and_then(|row| read_object_trimmed_string(row, "toolFallback")).unwrap_or_default();
                     let assistant_fallback =
-                        pick_option_str(options_ref, "assistantFallback").unwrap_or_default();
+                        options_ref.and_then(|row| read_object_trimmed_string(row, "assistantFallback")).unwrap_or_default();
                     let output = ensure_bridge_output_fields(EnsureBridgeOutputFieldsInput {
                         messages: mem::take(&mut state.messages),
                         tool_fallback: Some(tool_fallback),
