@@ -1,7 +1,7 @@
 use regex::Regex;
 use serde_json::{json, Map, Value};
 
-use super::super::super::read_trimmed_string;
+use crate::shared_json_utils::{read_object_trimmed_string, read_trimmed_string};
 use super::tool_guidance::wrap_tool_calls_json;
 
 fn stringify_unknown(value: &Value) -> String {
@@ -185,13 +185,6 @@ fn format_tool_result_resume_text(
     lines.join("\n")
 }
 
-fn read_trimmed_string_from_map(map: &Map<String, Value>, key: &str) -> Option<String> {
-    map.get(key)
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
 fn canonicalize_tool_input_for_prompt(name: &str, input: Value) -> Value {
     let normalized_name = name.trim().to_ascii_lowercase();
     if normalized_name != "exec_command" {
@@ -202,12 +195,12 @@ fn canonicalize_tool_input_for_prompt(name: &str, input: Value) -> Value {
     };
 
     let mut next = Map::new();
-    if let Some(cmd) = read_trimmed_string_from_map(obj, "cmd")
-        .or_else(|| read_trimmed_string_from_map(obj, "command"))
+    if let Some(cmd) = read_object_trimmed_string(obj, "cmd")
+        .or_else(|| read_object_trimmed_string(obj, "command"))
     {
         next.insert("cmd".to_string(), Value::String(cmd));
     }
-    if let Some(justification) = read_trimmed_string_from_map(obj, "justification") {
+    if let Some(justification) = read_object_trimmed_string(obj, "justification") {
         next.insert("justification".to_string(), Value::String(justification));
     }
     if next.is_empty() {

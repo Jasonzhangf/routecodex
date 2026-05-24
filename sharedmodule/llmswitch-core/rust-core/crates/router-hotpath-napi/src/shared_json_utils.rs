@@ -728,6 +728,25 @@ mod tests {
     }
 
     #[test]
+    fn shared_read_object_trimmed_string_deletion_gate_removed_deepseek_prompt_content_local_clone() {
+        let path = crate_src_path("req_outbound_stage3_compat/deepseek_web/request/prompt/content.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("map.get(key)
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())"),
+            "deepseek_web/request/prompt/content.rs still owns local map-key trim clone"
+        );
+        assert!(
+            source.contains("read_object_trimmed_string(obj, \"cmd\")")
+                || source.contains("read_object_trimmed_string(obj, \"justification\")"),
+            "deepseek_web/request/prompt/content.rs must route map-key trim through shared read_object_trimmed_string truth"
+        );
+    }
+
+    #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_deepseek_web_local_clone() {
         let path = crate_src_path("req_outbound_stage3_compat/deepseek_web.rs");
         let source = fs::read_to_string(&path)

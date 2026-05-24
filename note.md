@@ -10592,3 +10592,19 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_hub_pipeline_block_local_clones -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+
+[2026-05-24] hub pipeline rust shared helper closeout（deepseek prompt map-key trim clone 删除）
+- 先补 red gate：`shared_read_object_trimmed_string_deletion_gate_removed_deepseek_prompt_content_local_clone`
+- 红测命中证据：`req_outbound_stage3_compat/deepseek_web/request/prompt/content.rs` 仍保留本地 `fn read_trimmed_string_from_map(map: &Map<String, Value>, key: &str) -> Option<String>`
+- 真源确认：该实现与 `shared_json_utils::read_object_trimmed_string` 完全同形，都是 object.get(key) + as_str + trim + empty->None。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web/request/prompt/content.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是 deepseek prompt canonicalization 语义错误，而是 prompt content 模块内部仍保留 map-key trimmed-string 第二真源；
+  - 直接删本地 clone 并让调用点直连 `read_object_trimmed_string`，才能完成 shared helper 物理收口；
+  - 保留本地 wrapper、另造包装层、或改别处调用，都还会保留第二真源，不满足 closeout 目标。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_object_trimmed_string_deletion_gate_removed_deepseek_prompt_content_local_clone -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
