@@ -1,8 +1,8 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
-use uuid::Uuid;
 
 use crate::shared_json_utils::pick_first_trimmed_string_value;
+use crate::shared_tool_call_id_core::normalize_prefixed_tool_call_id;
 
 fn is_record(value: &Value) -> bool {
     matches!(value, Value::Object(_))
@@ -1136,81 +1136,12 @@ pub fn sanitize_chat_process_messages_json(input_json: String) -> NapiResult<Str
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-fn sanitize_id_core(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('_')
-        .to_string()
-}
-
-fn collapse_underscores(value: &str) -> String {
-    let mut out = String::new();
-    let mut prev_underscore = false;
-    for ch in value.chars() {
-        if ch == '_' {
-            if prev_underscore {
-                continue;
-            }
-            prev_underscore = true;
-            out.push(ch);
-        } else {
-            prev_underscore = false;
-            out.push(ch);
-        }
-    }
-    out
-}
-
-fn extract_id_core(value: Option<&str>) -> Option<String> {
-    let raw = value?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    let mut sanitized = sanitize_id_core(raw);
-    if sanitized.is_empty() {
-        return None;
-    }
-    let lower = sanitized.to_ascii_lowercase();
-    if lower.starts_with("fc_") || lower.starts_with("fc-") {
-        sanitized = sanitized.chars().skip(3).collect::<String>();
-    } else if lower.starts_with("call_") || lower.starts_with("call-") {
-        sanitized = sanitized.chars().skip(5).collect::<String>();
-    }
-    let normalized = sanitize_id_core(&sanitized);
-    if normalized.is_empty() {
-        None
-    } else {
-        Some(collapse_underscores(&normalized))
-    }
-}
-
 fn normalize_responses_call_id(raw_call_id: Option<&str>, fallback: &str) -> String {
-    let core = extract_id_core(raw_call_id).or_else(|| extract_id_core(Some(fallback)));
-    let Some(core) = core else {
-        return format!("call_{}", fallback.trim_matches('_'));
-    };
-    format!("call_{}", core)
+    normalize_prefixed_tool_call_id(raw_call_id, Some(fallback), "call_")
 }
 
 fn normalize_prefixed_id(raw_id: Option<&str>, fallback: &str, prefix: &str) -> String {
-    if let Some(core) = extract_id_core(raw_id).or_else(|| extract_id_core(Some(fallback))) {
-        return format!("{}{}", prefix, core);
-    }
-    let random_core = Uuid::new_v4()
-        .to_string()
-        .replace('-', "")
-        .chars()
-        .take(8)
-        .collect::<String>();
-    format!("{}{}", prefix, random_core)
+    normalize_prefixed_tool_call_id(raw_id, Some(fallback), prefix)
 }
 
 fn normalize_function_call_id(raw_id: Option<&str>, fallback: &str) -> String {

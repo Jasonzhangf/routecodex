@@ -98,6 +98,7 @@ mod shared_response_compat;
 mod shared_responses_conversation_utils;
 mod shared_responses_response_utils;
 mod shared_responses_tool_utils;
+mod shared_tool_call_id_core;
 mod shared_tool_call_id_manager;
 mod shared_tool_mapping;
 mod shared_tooling;

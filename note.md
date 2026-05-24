@@ -10773,6 +10773,16 @@ Using skills: coding-principals + rcc-dev-skills
   - `cargo test -p router-hotpath-napi shared_json_utils_deletion_gate_removed_virtual_router_routing_metadata_wrappers -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
 
+## 2026-05-24 canonical responses tool-result followup orphan（5520 在线同形真红）
+
+- 在线错误形状继续稳定出现：`orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id: native:run_command:21`
+- 已确认更贴近线上的一组最小输入会在 bridge 侧直接炸：
+  - `previous_response_id: resp_prev_1`
+  - `input: [{ type: "function_call_output", call_id: "native:run_command:21", output: "/tmp/ws\\n" }]`
+- 这说明当前坏链不是 store/resume 全坏，而是 `/v1/responses` canonical followup 入站没有先归一成 `tool_outputs` 语义，结果 output-only batch 直接落进 `buildChatRequestFromResponses(...)` 被判成 orphan。
+- 当前最小唯一修复方向：`src/server/handlers/responses-handler.ts` 在 HTTP 入站检测 `previous_response_id + input(function_call_output/tool_result/tool_message)`，先合成 `tool_outputs` 再走现有 `resumeResponsesConversation(...)` 主链。
+- 这层修复必须先用红测锁住，再做 5520 真机 smoke；否则仍可能被旧 ESM 噪音掩盖。
+
 [2026-05-24] hub pipeline rust shared helper closeout（chat clock reminder semantics last-user-index wrapper 删除）
 - 红测：`cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_chat_clock_reminder_semantics_local_wrapper -- --nocapture` 初次失败，命中 `chat_clock_reminder_semantics.rs` 仍保留本地 `find_last_user_message_index(messages: &[Value]) -> i64` wrapper。
 - 真源确认：该函数并不承载 reminder semantics 专属判定，只是把 `shared_tooling::find_last_user_message_index(messages)` 的 `Option<usize>` 结果转成 `i64` / `-1` 哨兵；这属于零业务逻辑的第二 helper 入口。
@@ -10782,6 +10792,7 @@ Using skills: coding-principals + rcc-dev-skills
   - `cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_chat_clock_reminder_semantics_local_wrapper -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
 
+
 [2026-05-24] hub pipeline rust shared helper closeout（chat servertool orchestration canonicalization wrapper 删除）
 - 红测：`cargo test -p router-hotpath-napi shared_tool_mapping_deletion_gate_removed_chat_servertool_orchestration_local_websearch_wrapper -- --nocapture` 初次失败，命中 `chat_servertool_orchestration.rs` 仍保留本地 `normalize_servertool_call_name(name: &str) -> String` wrapper。
 - 真源确认：该本地函数只负责 `trim + lowercase + websearch/web-search -> web_search`，与 `shared_tool_mapping::normalize_routecodex_tool_name` 的 canonicalization 职责重叠；计划文档也要求 tool canonicalization 收口为 shared 单点真源。
@@ -10790,6 +10801,7 @@ Using skills: coding-principals + rcc-dev-skills
 - 验证：
   - `cargo test -p router-hotpath-napi shared_tool_mapping_deletion_gate_removed_chat_servertool_orchestration_local_websearch_wrapper -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
 
 [2026-05-24] hub pipeline rust shared helper closeout（tool result value wrappers 删除）
 - 红测：`cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_tool_result_value_wrappers -- --nocapture` 初次失败，命中 `hub_semantic_mapper_chat.rs` / `req_outbound_stage3_compat/universal_shape_filter.rs` 仍各自保留本地 `normalize_tool_content` wrapper。
@@ -10802,6 +10814,19 @@ Using skills: coding-principals + rcc-dev-skills
   - `cargo test -p router-hotpath-napi hub_semantic_mapper_chat::tests::normalize_tool_content_strips_terminal_right_gutter_noise -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
 
+[2026-05-24] 5520 online verify after orphan fix
+- `routecodex restart --port 5520` 后做真实 `/v1/responses` 两轮验证。
+- 最小 output-only followup 直打：`previous_response_id=resp_prev_1 + input[{type:function_call_output,call_id:native:run_command:21}]`，当前返回 `400 Responses conversation expired or not found`，说明请求已不再在 Hub bridge 侧被 `orphan_tool_result` 提前打爆。
+- 再用 `scripts/verification/samples/openai-responses-list-local-files.json` 真实打 5520：首轮 `200 requires_action + submit_tool_outputs`；第二轮 `POST /v1/responses/{id}/submit_tool_outputs` 不再报 orphan，而是进入 Windsurf 续轮后报 `502 WINDSURF_RESPONSE_PARSE_FAILED: empty assistant completion`。
+- 当前在线结论：Rust bridge 的 output-only resume orphan 真红已被打掉；5520 剩余在线红点已前移为 Windsurf 续轮解析失败，不再是 `native:run_command:*` tool_result 配对丢失。
+
+[2026-05-24] Windsurf P0 resource-dispose closeout progress
+- 现状审计：Windsurf block 已拆到 `src/providers/core/runtime/windsurf/{auth,runtime-lifecycle,resource-lifecycle,cascade-transport,response-parse}.ts`，但 provider dispose 仍漏掉当前 owned managed LS 的显式清理，只关 http2 pool + stale live runtimes。
+- 唯一正确修改点：`src/providers/core/runtime/windsurf-chat-provider.ts::disposeWindsurfProviderResources()`。因为 managed LS pool/pending 的 owner 仍是 provider 模块级真源，只有这里能保证 provider 退出时同步回收 current owned runtime，不需要也不应在其他 block 再造第二 teardown 入口。
+- 实现：`disposeWindsurfProviderResources()` 现在在清 global http2 pool 前先调用 `disposeManagedLocalGrpcRuntime('provider-dispose')`；同时给测试暴露只读静态桥接 `managedLocalGrpcRuntimePool/managedLocalGrpcRuntimePending`，便于校验模块级真源是否真的清空。
+- 验证：定向 Jest 通过：owned managed runtime dispose / stale runtime dispose / broken runtime dispose / close-destroy fail-fast。
+
+
 [2026-05-24] hub pipeline rust shared helper closeout（responses resume object wrapper 删除）
 - 红测：`cargo test -p router-hotpath-napi shared_value_as_object_or_empty_deletion_gate_removed_responses_resume_local_wrapper -- --nocapture` 初次失败，命中 `hub_pipeline_blocks/responses_resume.rs` 仍保留本地 `value_as_object_or_empty(value: &Value) -> Map<String, Value>` wrapper。
 - 真源确认：该函数与 `shared_json_utils::value_as_object_or_empty` 完全同形，只负责把非 object 值归一为空 `Map<String, Value>`；不承载 responses resume 专属语义。
@@ -10810,3 +10835,50 @@ Using skills: coding-principals + rcc-dev-skills
 - 验证：
   - `cargo test -p router-hotpath-napi shared_value_as_object_or_empty_deletion_gate_removed_responses_resume_local_wrapper -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] 开始只做红测：目标复现 native:run_command:21 orphan_tool_result，不改实现。
+
+## 2026-05-24 Windsurf stream=true truth check
+- 用户要求先对比 `/Volumes/extension/code/WindsurfAPI` 与本机 `Windsurf.app`，确认是否真实支持 `stream=true`，禁止先发明修复流程。
+- 参考仓初步证据：`src/handlers/chat.js::streamResponse(...)` 明确存在 OpenAI SSE 流式路径，包含 `stream: true`、`Content-Type: text/event-stream`、heartbeat、trajectory tool-call 流式分支。
+- 下一步：继续核对本机 `Windsurf.app` 是否有对应 cascade/stream 入口，以及 RouteCodex 当前 `stream=true` 分支与参考 shape 的差异。
+- 新证据：`/Volumes/extension/code/WindsurfAPI/src/handlers/chat.js::streamResponse(...)` 明确支持 `stream=true`，并在注释中说明 usage 只在可用时才追加到 stream tail；不是强制字段。
+- 本地真源嫌疑已收敛到 `src/providers/core/runtime/windsurf/cascade-transport-block.ts`：poll 阶段把 generator metadata 的 `missing_usage_entries/empty_meta_entries` 当错误路径推进，最终让 `stream=true` 请求在没有 usage 时失败。
+## 2026-05-24 stream support check
+- 用户要求：先对比 /Volumes/extension/code/WindsurfAPI 与 Windsurf.app，确认是否支持 stream=true；禁止自造流程。
+- 当前目标：只做只读核对，先看 codex samples 与参考仓，再看 app 包。
+
+[2026-05-24] 当前 5520 续轮真红收敛
+- 现象1：tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts 的 string input resume 仍报 orphan_tool_result。
+- 现象2：tests/sharedmodule/responses-submit-tool-outputs.spec.ts 的 reasoning-only assistant resume 仍丢失。
+- 已证伪：native resumeResponsesConversationPayload 单独调用可正确保留 releasedInputPrefix + pending function_call；问题不在 Rust resume 真源本身。
+- 已定位：真实 JS store 链在 sendPipelineResponse 场景产出的 resumed payload 只剩 function_call_output，说明 request context capture / record / release 这条真实链上有形状偏差或录入分叉。
+
+[2026-05-24 20:35:09] Investigating 5555 priority routing and why Windsurf can still be selected when CRS remains configured.
+
+[2026-05-24 20:36:43] Reviewed shared_args_mapping.rs: removed only two dead local helpers (unused normalize_tool_name / extract_tool_function_name); verified via rg no-callers and cargo test -p router-hotpath-napi --no-run.
+
+[2026-05-24 20:39:22] Reviewed shared trimmed-string/workdir helper cluster: bridge metadata/tool_ids, deepseek_web family, exec_command guard/args now use shared_json_utils truth; verified with deletion-gates + deepseek req profile + exec_command workdir test.
+
+[2026-05-24 20:40:51] Reviewed shared trimmed-string reader cluster: gemini/glm/qwenchat/responses_openai_codec/hub_snapshot_hooks now delete local readers and use shared_json_utils::read_trimmed_string; verified with deletion gates.
+
+## 2026-05-24 native run_command output-only resume 真因补充
+
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/tests.rs` 两条红测已实锤：
+  1. `convert_bridge_input_rejects_duplicate_native_run_command_output_after_output_only_resume_special_case` 当前错误放行，重复 `function_call_output(native:run_command:21)` 会生成两对 assistant/tool。
+  2. `convert_bridge_input_rejects_late_native_run_command_call_after_output_only_resume_special_case` 当前错误放行，output-first 后续 real `function_call` 会被同一 call_id 隐式吞并。
+- 唯一真因仍在 `hub_bridge_actions/bridge_input.rs`：`infer_resume_tool_name_from_call_id()` + `function_call_output` 分支里的 output-only implicit resume。
+- 这条分支直接违反单次消费约束：bridge 不应在没有显式 `function_call` 历史时，自行为 `native:run_command:*` 伪造 assistant tool_call。
+- 由于 continuation replay 去重真源已在 `shared_responses_conversation_utils.rs` 收口，这里的隐式恢复已成错误的第二语义源，应物理移除，而不是继续保留。
+
+
+## 2026-05-24 responses/tool-call-id helper 收口 review
+
+- 本轮独立簇边界确认：只收 `shared_tool_call_id_core.rs` + `shared_response_compat.rs` + `shared_responses_tool_utils.rs` + `req_outbound_stage3_compat/lmstudio/request/core_utils.rs` + `resp_process_stage2_finalize.rs` + `lib.rs` 的 `mod` 注册。
+- 明确排除：`tool_harvester/tests.rs`，因为那是行为预期改动（`shell` -> `exec_command`），不属于纯 helper 真源收口。
+- 结论：唯一正确修改点是新增 shared tool-call-id core 真源，并让 LMStudio / responses compat / responses tool utils / finalize 统一复用；不允许继续保留本地 id/helper 克隆。
+- 验证证据：
+  - `cargo test -p router-hotpath-napi normalize_prefixed_tool_call_id_prefers_call_id_then_fallback -- --nocapture`
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_resp_process_stage2_finalize_local_clone -- --nocapture`
+  - `cargo test -p router-hotpath-napi lmstudio_responses_fc_ids_normalizes_call_and_output_ids -- --nocapture`
+  - `cargo test -p router-hotpath-napi --no-run`

@@ -5,6 +5,7 @@ use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
 use crate::hub_bridge_actions::normalize_reasoning_in_chat_payload;
+use crate::shared_json_utils::read_trimmed_string;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,7 +88,7 @@ fn normalize_tool_call_arguments(tool_call: &mut Value) -> bool {
         .cloned()
         .unwrap_or_else(|| Value::Object(Map::new()));
     let normalized_args =
-        crate::resp_process_stage1_tool_governance::normalize_tool_args_preserving_raw_shape(
+        crate::resp_process_stage1_tool_governance_blocks::tool_args::normalize_tool_args_preserving_raw_shape(
             function_name.as_str(),
             Some(&args),
         )
@@ -175,18 +176,6 @@ fn normalize_choices(payload: &mut Value) {
             Value::String("stop".to_string()),
         );
     }
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
 }
 
 fn normalize_messages(payload: &mut Value) {
