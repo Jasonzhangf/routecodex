@@ -2,14 +2,7 @@ use serde_json::{json, Map, Value};
 
 use super::super::deepseek_web::apply_deepseek_web_response_compat;
 use super::super::AdapterContext;
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(Value::as_str)?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw.to_string())
-}
+use crate::shared_json_utils::read_trimmed_string;
 
 fn normalize_qwenchat_legacy_function_call(payload: &mut Value) {
     let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {

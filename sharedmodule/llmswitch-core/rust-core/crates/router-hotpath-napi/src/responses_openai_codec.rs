@@ -3,6 +3,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
+use crate::shared_json_utils::read_trimmed_string;
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -29,18 +30,6 @@ fn parse_value(raw: &str) -> NapiResult<Value> {
 
 fn stringify_value(value: &Value) -> NapiResult<String> {
     serde_json::to_string(value).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
 }
 
 fn extract_tool_call_id_style(payload: &Map<String, Value>) -> Option<Value> {

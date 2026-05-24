@@ -1,4 +1,5 @@
 use serde_json::{json, Map, Number, Value};
+use crate::shared_json_utils::read_trimmed_string;
 
 const AUTO_THINKING_MODEL_PREFIXES: [&str; 4] = ["glm-4.7", "glm-4.6", "glm-4.5", "glm-z1"];
 const AUTO_THINKING_EXCLUDE_PREFIXES: [&str; 1] = ["glm-4.6v"];
@@ -48,15 +49,6 @@ fn model_token(root: &Map<String, Value>) -> String {
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_ascii_lowercase())
         .unwrap_or_default()
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(|v| v.as_str())?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
 }
 
 fn normalize_image_part(part: &Map<String, Value>) -> Option<Value> {

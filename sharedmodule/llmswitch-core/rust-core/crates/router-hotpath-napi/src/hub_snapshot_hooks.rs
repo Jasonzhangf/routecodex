@@ -3,6 +3,7 @@ use napi_derive::napi;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use crate::shared_json_utils::read_trimmed_string;
 use std::collections::HashMap;
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -295,39 +296,29 @@ fn channel_suffix(channel: &Option<String>) -> String {
     String::new()
 }
 
-fn read_string_field(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
 fn extract_nested_provider_key(value: &Value) -> Option<String> {
     if let Value::Object(obj) = value {
-        if let Some(k) = read_string_field(value, "providerKey")
-            .or_else(|| read_string_field(value, "providerId"))
-            .or_else(|| read_string_field(value, "profileId"))
+        if let Some(k) = read_trimmed_string(obj.get("providerKey"))
+            .or_else(|| read_trimmed_string(obj.get("providerId")))
+            .or_else(|| read_trimmed_string(obj.get("profileId")))
         {
             return Some(k);
         }
         if let Some(Value::Object(target)) = obj.get("target") {
-            if let Some(k) = read_string_field(&Value::Object(target.clone()), "providerKey") {
+            if let Some(k) = read_trimmed_string(target.get("providerKey")) {
                 return Some(k);
             }
         }
         if let Some(Value::Object(meta)) = obj.get("meta") {
-            let meta_value = Value::Object(meta.clone());
-            if let Some(k) = read_string_field(&meta_value, "providerKey")
-                .or_else(|| read_string_field(&meta_value, "providerId"))
+            if let Some(k) = read_trimmed_string(meta.get("providerKey"))
+                .or_else(|| read_trimmed_string(meta.get("providerId")))
             {
                 return Some(k);
             }
             if let Some(Value::Object(ctx)) = meta.get("context") {
-                let ctx_value = Value::Object(ctx.clone());
-                if let Some(k) = read_string_field(&ctx_value, "providerKey")
-                    .or_else(|| read_string_field(&ctx_value, "providerId"))
-                    .or_else(|| read_string_field(&ctx_value, "profileId"))
+                if let Some(k) = read_trimmed_string(ctx.get("providerKey"))
+                    .or_else(|| read_trimmed_string(ctx.get("providerId")))
+                    .or_else(|| read_trimmed_string(ctx.get("profileId")))
                 {
                     return Some(k);
                 }
@@ -339,22 +330,20 @@ fn extract_nested_provider_key(value: &Value) -> Option<String> {
 
 fn extract_nested_group_request_id(value: &Value) -> Option<String> {
     if let Value::Object(obj) = value {
-        if let Some(k) = read_string_field(value, "clientRequestId")
-            .or_else(|| read_string_field(value, "groupRequestId"))
+        if let Some(k) = read_trimmed_string(obj.get("clientRequestId"))
+            .or_else(|| read_trimmed_string(obj.get("groupRequestId")))
         {
             return Some(k);
         }
         if let Some(Value::Object(meta)) = obj.get("meta") {
-            let meta_value = Value::Object(meta.clone());
-            if let Some(k) = read_string_field(&meta_value, "clientRequestId")
-                .or_else(|| read_string_field(&meta_value, "groupRequestId"))
+            if let Some(k) = read_trimmed_string(meta.get("clientRequestId"))
+                .or_else(|| read_trimmed_string(meta.get("groupRequestId")))
             {
                 return Some(k);
             }
             if let Some(Value::Object(ctx)) = meta.get("context") {
-                let ctx_value = Value::Object(ctx.clone());
-                if let Some(k) = read_string_field(&ctx_value, "clientRequestId")
-                    .or_else(|| read_string_field(&ctx_value, "groupRequestId"))
+                if let Some(k) = read_trimmed_string(ctx.get("clientRequestId"))
+                    .or_else(|| read_trimmed_string(ctx.get("groupRequestId")))
                 {
                     return Some(k);
                 }
@@ -366,39 +355,35 @@ fn extract_nested_group_request_id(value: &Value) -> Option<String> {
 
 fn extract_nested_entry_endpoint(value: &Value) -> Option<String> {
     if let Value::Object(obj) = value {
-        if let Some(k) = read_string_field(value, "entryEndpoint")
-            .or_else(|| read_string_field(value, "entry_endpoint"))
+        if let Some(k) = read_trimmed_string(obj.get("entryEndpoint"))
+            .or_else(|| read_trimmed_string(obj.get("entry_endpoint")))
         {
             return Some(k);
         }
         if let Some(Value::Object(meta)) = obj.get("meta") {
-            let meta_value = Value::Object(meta.clone());
-            if let Some(k) = read_string_field(&meta_value, "entryEndpoint")
-                .or_else(|| read_string_field(&meta_value, "entry_endpoint"))
+            if let Some(k) = read_trimmed_string(meta.get("entryEndpoint"))
+                .or_else(|| read_trimmed_string(meta.get("entry_endpoint")))
             {
                 return Some(k);
             }
             if let Some(Value::Object(ctx)) = meta.get("context") {
-                let ctx_value = Value::Object(ctx.clone());
-                if let Some(k) = read_string_field(&ctx_value, "entryEndpoint")
-                    .or_else(|| read_string_field(&ctx_value, "entry_endpoint"))
+                if let Some(k) = read_trimmed_string(ctx.get("entryEndpoint"))
+                    .or_else(|| read_trimmed_string(ctx.get("entry_endpoint")))
                 {
                     return Some(k);
                 }
             }
         }
         if let Some(Value::Object(metadata)) = obj.get("metadata") {
-            let md_value = Value::Object(metadata.clone());
-            if let Some(k) = read_string_field(&md_value, "entryEndpoint")
-                .or_else(|| read_string_field(&md_value, "entry_endpoint"))
+            if let Some(k) = read_trimmed_string(metadata.get("entryEndpoint"))
+                .or_else(|| read_trimmed_string(metadata.get("entry_endpoint")))
             {
                 return Some(k);
             }
         }
         if let Some(Value::Object(runtime)) = obj.get("runtime") {
-            let r_value = Value::Object(runtime.clone());
-            if let Some(k) = read_string_field(&r_value, "entryEndpoint")
-                .or_else(|| read_string_field(&r_value, "entry_endpoint"))
+            if let Some(k) = read_trimmed_string(runtime.get("entryEndpoint"))
+                .or_else(|| read_trimmed_string(runtime.get("entry_endpoint")))
             {
                 return Some(k);
             }
@@ -444,8 +429,8 @@ fn has_tool_surface_diff(value: &Value) -> bool {
                 return true;
             }
         }
-        let expected = read_string_field(value, "expectedProtocol");
-        let detected = read_string_field(value, "detectedProtocol");
+        let expected = read_trimmed_string(obj.get("expectedProtocol"));
+        let detected = read_trimmed_string(obj.get("detectedProtocol"));
         if let (Some(e), Some(d)) = (expected, detected) {
             if e != d {
                 return true;

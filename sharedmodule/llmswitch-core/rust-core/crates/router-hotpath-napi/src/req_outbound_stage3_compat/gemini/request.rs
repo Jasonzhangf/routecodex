@@ -3,6 +3,7 @@ use serde_json::{json, Map, Value};
 
 use super::super::AdapterContext;
 use super::tool_schema::apply_claude_thinking_tool_schema_compat;
+use crate::shared_json_utils::read_trimmed_string;
 
 const SEARCH_ROUTE_PREFIXES: [&str; 2] = ["web_search", "search"];
 const GEMINI_ALLOW_TOP_LEVEL: [&str; 12] = [
@@ -19,15 +20,6 @@ const GEMINI_ALLOW_TOP_LEVEL: [&str; 12] = [
     "safetySettings",
     "toolConfig",
 ];
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(|v| v.as_str())?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
 
 fn is_search_route(adapter_context: &AdapterContext) -> bool {
     let route_id = adapter_context
