@@ -10790,3 +10790,14 @@ Using skills: coding-principals + rcc-dev-skills
 - 验证：
   - `cargo test -p router-hotpath-napi shared_tool_mapping_deletion_gate_removed_chat_servertool_orchestration_local_websearch_wrapper -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] hub pipeline rust shared helper closeout（tool result value wrappers 删除）
+- 红测：`cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_tool_result_value_wrappers -- --nocapture` 初次失败，命中 `hub_semantic_mapper_chat.rs` / `req_outbound_stage3_compat/universal_shape_filter.rs` 仍各自保留本地 `normalize_tool_content` wrapper。
+- 真源确认：这两个 helper 都只是在 `Value/String/Null` 形态上包一层 tool-result 文本归一，并最终调用 shared 的 chunked transcript 清洗；该职责已经由 `shared_tooling::normalize_tool_result_value` 单点承载，不属于 chat mapper 或 universal shape filter 专属语义。
+- 唯一正确修改点：`hub_semantic_mapper_chat.rs` 与 `req_outbound_stage3_compat/universal_shape_filter.rs`。因为 shared 真源已经存在，问题只剩两个调用模块各自保留第二入口；只有物理删除本地 `normalize_tool_content`，并把调用点改为直连 `normalize_tool_result_value`，才能消除第二真源且不把语义灌回 `hub_pipeline.rs`。
+- 实现：删除两个本地 `normalize_tool_content` wrapper；`hub_semantic_mapper_chat.rs` 的 tool-output 归一与对应测试改直连 `normalize_tool_result_value(&raw_content)`；`universal_shape_filter.rs` 的 tool message content 改为 `row.get("content").map(normalize_tool_result_value).unwrap_or_default()`；在 `shared_tooling/tests.rs` 补 deletion gate。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_tool_result_value_wrappers -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi hub_semantic_mapper_chat::tests::normalize_tool_content_unwraps_chunked_exec_transcript_shape -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi hub_semantic_mapper_chat::tests::normalize_tool_content_strips_terminal_right_gutter_noise -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅

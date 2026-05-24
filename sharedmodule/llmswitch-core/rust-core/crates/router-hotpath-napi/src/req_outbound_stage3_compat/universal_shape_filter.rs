@@ -1,7 +1,7 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{json, Map, Value};
 use crate::shared_json_utils::read_trimmed_string;
-use crate::shared_tooling::normalize_standard_chunked_tool_text;
+use crate::shared_tooling::normalize_tool_result_value;
 
 fn parse_json_value(raw: &str) -> NapiResult<Value> {
     serde_json::from_str(raw).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -82,20 +82,6 @@ fn to_string_args(value: Option<&Value>) -> String {
         Some(Value::String(text)) => text.clone(),
         Some(other) => serde_json::to_string(other).unwrap_or_else(|_| "{}".to_string()),
         None => "{}".to_string(),
-    }
-}
-
-fn normalize_tool_content(value: Option<&Value>) -> String {
-    match value {
-        Some(Value::String(text)) if !text.trim().is_empty() => {
-            normalize_standard_chunked_tool_text(text)
-        }
-        Some(Value::String(_)) | None | Some(Value::Null) => String::new(),
-        Some(other) => serde_json::to_string(other)
-            .ok()
-            .map(|text| normalize_standard_chunked_tool_text(text.as_str()))
-            .filter(|text| !text.is_empty())
-            .unwrap_or_default(),
     }
 }
 
@@ -214,7 +200,7 @@ fn normalize_request_message(
     if role == "tool" {
         out.insert(
             "content".to_string(),
-            Value::String(normalize_tool_content(row.get("content"))),
+            Value::String(row.get("content").map(normalize_tool_result_value).unwrap_or_default()),
         );
         if let Some(name) = read_trimmed_string(row.get("name")) {
             out.insert("name".to_string(), Value::String(name));

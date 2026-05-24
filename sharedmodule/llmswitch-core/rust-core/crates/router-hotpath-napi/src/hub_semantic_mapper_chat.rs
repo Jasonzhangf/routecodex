@@ -6,7 +6,7 @@ use crate::hub_req_inbound_context_capture::map_bridge_tools_to_chat;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_metadata_semantics::ensure_protocol_state_mut;
 use crate::shared_openai_message_normalize::normalize_openai_chat_messages;
-use crate::shared_tooling::normalize_standard_chunked_tool_text;
+use crate::shared_tooling::normalize_tool_result_value;
 use crate::shared_tool_mapping::flatten_chat_tools_for_function_calling;
 
 const CHAT_PARAMETER_KEYS: [&str; 19] = [
@@ -92,24 +92,6 @@ fn flatten_system_content(content: &Value) -> String {
             String::new()
         }
         _ => String::new(),
-    }
-}
-
-fn normalize_tool_content(content: &Value) -> String {
-    match content {
-        Value::String(text) => {
-            if text.trim().is_empty() {
-                String::new()
-            } else {
-                normalize_standard_chunked_tool_text(text)
-            }
-        }
-        Value::Null => String::new(),
-        _ => serde_json::to_string(content)
-            .ok()
-            .map(|text| normalize_standard_chunked_tool_text(text.as_str()))
-            .filter(|text| !text.trim().is_empty())
-            .unwrap_or_default(),
     }
 }
 
@@ -315,7 +297,7 @@ fn normalize_chat_messages(raw: Option<&Value>) -> NormalizedMessages {
                     .or_else(|| entry_obj.get("output"))
                     .cloned()
                     .unwrap_or(Value::Null);
-                let normalized_content = normalize_tool_content(&raw_content);
+                let normalized_content = normalize_tool_result_value(&raw_content);
                 let mut output_entry = Map::new();
                 output_entry.insert(
                     "tool_call_id".to_string(),
@@ -383,7 +365,7 @@ fn normalize_standalone_tool_outputs(raw: Option<&Value>, missing: &mut Vec<Valu
             .or_else(|| entry_obj.get("output"))
             .cloned()
             .unwrap_or(Value::Null);
-        let normalized = normalize_tool_content(&raw_content);
+        let normalized = normalize_tool_result_value(&raw_content);
         let mut output_entry = Map::new();
         output_entry.insert(
             "tool_call_id".to_string(),
@@ -722,14 +704,15 @@ pub fn map_openai_chat_from_chat_json(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_openai_chat_to_chat, normalize_tool_content};
+    use super::map_openai_chat_to_chat;
+    use crate::shared_tooling::normalize_tool_result_value;
     use serde_json::{json, Value};
 
     #[test]
     fn normalize_tool_content_preserves_empty_as_empty_string() {
-        assert_eq!(normalize_tool_content(&Value::Null), "");
+        assert_eq!(normalize_tool_result_value(&Value::Null), "");
         assert_eq!(
-            normalize_tool_content(&Value::String("   ".to_string())),
+            normalize_tool_result_value(&Value::String("   ".to_string())),
             ""
         );
     }
@@ -741,7 +724,7 @@ mod tests {
                 .to_string(),
         );
         assert_eq!(
-            normalize_tool_content(&content),
+            normalize_tool_result_value(&content),
             "SyntaxError: invalid syntax"
         );
     }
@@ -752,7 +735,7 @@ mod tests {
             "Chunk ID: abc\nWall time: 0.1s\nProcess exited with code 1\nOriginal token count: 12\nOutput:\n  File \"<stdin>\", line 21                                                    │··········································\n    SyntaxError: invalid syntax                                               │··········································\n"
                 .to_string(),
         );
-        let normalized = normalize_tool_content(&content);
+        let normalized = normalize_tool_result_value(&content);
         assert!(normalized.contains("File \"<stdin>\", line 21"));
         assert!(normalized.contains("SyntaxError: invalid syntax"));
         assert!(!normalized.contains("│····"));

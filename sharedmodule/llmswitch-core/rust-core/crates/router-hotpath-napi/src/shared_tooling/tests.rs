@@ -517,3 +517,26 @@ fn shared_tooling_deletion_gate_removed_argument_string_wrappers() {
         );
     }
 }
+
+#[test]
+fn shared_tooling_deletion_gate_removed_tool_result_value_wrappers() {
+    for relative in [
+        "hub_semantic_mapper_chat.rs",
+        "req_outbound_stage3_compat/universal_shape_filter.rs",
+    ] {
+        let path = crate_src_path(relative);
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn normalize_tool_content(content: &Value) -> String {")
+                && !source.contains("fn normalize_tool_content(value: Option<&Value>) -> String {"),
+            "local normalize_tool_content wrapper still present in {}",
+            path.display()
+        );
+        assert!(
+            source.contains("normalize_tool_result_value"),
+            "{} must use shared normalize_tool_result_value truth directly",
+            path.display()
+        );
+    }
+}
