@@ -33,7 +33,7 @@ fn normalize_time_tag_line(time_tag_line: String) -> String {
     time_tag_line.trim().to_string()
 }
 
-fn inject_time_tag_into_messages(messages: Value, time_tag_line: String) -> Value {
+pub(crate) fn inject_time_tag_into_messages(messages: Value, time_tag_line: String) -> Value {
     let mut rows = match messages {
         Value::Array(values) => values,
         _ => Vec::new(),
@@ -82,7 +82,7 @@ fn inject_time_tag_into_messages(messages: Value, time_tag_line: String) -> Valu
     Value::Array(rows)
 }
 
-fn build_clock_marker_schedule_messages(
+pub(crate) fn build_clock_marker_schedule_messages(
     request_id: String,
     marker_index: i64,
     marker: Value,
@@ -158,7 +158,10 @@ fn build_clock_marker_schedule_messages(
     Value::Array(vec![Value::Object(assistant), Value::Object(tool)])
 }
 
-fn build_due_reminder_user_message(reservation: Value, due_inject_text: String) -> Value {
+pub(crate) fn build_due_reminder_user_message(
+    reservation: Value,
+    due_inject_text: String,
+) -> Value {
     if reservation.is_null() || due_inject_text.is_empty() {
         return Value::Null;
     }
@@ -178,7 +181,7 @@ fn build_due_reminder_user_message(reservation: Value, due_inject_text: String) 
     Value::Object(out)
 }
 
-fn build_clock_reminder_metadata(
+pub(crate) fn build_clock_reminder_metadata(
     next_request_metadata: Value,
     metadata: Value,
     has_due_user_message: bool,
@@ -208,7 +211,7 @@ fn build_clock_reminder_metadata(
     Value::Object(base)
 }
 
-fn build_clock_reminder_messages(
+pub(crate) fn build_clock_reminder_messages(
     base_messages: Value,
     marker_tool_messages: Value,
     due_user_message: Value,

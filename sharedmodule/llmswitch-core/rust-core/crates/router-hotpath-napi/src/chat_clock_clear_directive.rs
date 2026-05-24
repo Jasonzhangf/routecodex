@@ -1,4 +1,5 @@
 use serde::Serialize;
+use crate::shared_tooling::collapse_extra_newlines_and_trim;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,23 +15,6 @@ fn is_clock_clear_marker(raw: &str) -> bool {
         .collect::<String>()
         .to_ascii_lowercase();
     compact == "clock:clear"
-}
-
-fn collapse_extra_newlines_and_trim(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut newline_run = 0usize;
-    for ch in input.chars() {
-        if ch == '\n' {
-            newline_run += 1;
-            if newline_run <= 2 {
-                out.push(ch);
-            }
-            continue;
-        }
-        newline_run = 0;
-        out.push(ch);
-    }
-    out.trim().to_string()
 }
 
 pub fn strip_clock_clear_directive_text(text: String) -> ClockClearDirectiveOutput {

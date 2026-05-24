@@ -8,6 +8,9 @@ use crate::chat_clock_schedule_directive_candidate::ClockDirectiveCandidateOutpu
 use crate::chat_clock_schedule_directive_text_parts::{
     extract_clock_schedule_directive_text_parts, ClockDirectiveTextPartOutput,
 };
+use crate::shared_tooling::{
+    collapse_extra_newlines_and_trim, find_last_user_message_index as find_last_user_index_shared,
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,23 +18,6 @@ pub struct ClockReminderDirectiveExtractionOutput {
     pub had_clear: bool,
     pub directive_candidates: Vec<ClockDirectiveCandidateOutput>,
     pub base_messages: Value,
-}
-
-fn collapse_extra_newlines_and_trim(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut newline_run = 0usize;
-    for ch in input.chars() {
-        if ch == '\n' {
-            newline_run += 1;
-            if newline_run <= 2 {
-                out.push(ch);
-            }
-            continue;
-        }
-        newline_run = 0;
-        out.push(ch);
-    }
-    out.trim().to_string()
 }
 
 fn parse_text_and_extract_directives(
@@ -109,22 +95,9 @@ fn process_content(content: &Value) -> (bool, Vec<ClockDirectiveCandidateOutput>
     }
 }
 
-fn find_last_user_message_index(messages: &[Value]) -> Option<usize> {
-    messages
-        .iter()
-        .enumerate()
-        .rev()
-        .find_map(|(idx, message)| {
-            message
-                .as_object()
-                .and_then(|obj| obj.get("role"))
-                .and_then(|v| v.as_str())
-                .filter(|v| *v == "user")
-                .map(|_| idx)
-        })
-}
-
-fn extract_clock_reminder_directives(messages: Value) -> ClockReminderDirectiveExtractionOutput {
+pub(crate) fn extract_clock_reminder_directives(
+    messages: Value,
+) -> ClockReminderDirectiveExtractionOutput {
     let rows = match messages {
         Value::Array(values) => values,
         other => {
@@ -136,7 +109,7 @@ fn extract_clock_reminder_directives(messages: Value) -> ClockReminderDirectiveE
         }
     };
 
-    let Some(last_user_idx) = find_last_user_message_index(rows.as_slice()) else {
+    let Some(last_user_idx) = find_last_user_index_shared(rows.as_slice()) else {
         return ClockReminderDirectiveExtractionOutput {
             had_clear: false,
             directive_candidates: Vec::new(),

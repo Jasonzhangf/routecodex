@@ -3,16 +3,26 @@ use napi_derive::napi;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ClockReminderFlowPlanOutput {
+pub(crate) struct ClockReminderFlowPlanOutput {
     skip_for_server_tool_followup: bool,
     inject_per_request_time_tag: bool,
 }
 
-#[derive(Debug, Serialize)]
+impl ClockReminderFlowPlanOutput {
+    pub(crate) fn skip_for_server_tool_followup(&self) -> bool {
+        self.skip_for_server_tool_followup
+    }
+
+    pub(crate) fn inject_per_request_time_tag(&self) -> bool {
+        self.inject_per_request_time_tag
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ClockConfigOutput {
+pub(crate) struct ClockConfigOutput {
     enabled: bool,
     retention_ms: i64,
     due_window_ms: i64,
@@ -34,7 +44,9 @@ fn resolve_bool_field(row: Option<&serde_json::Map<String, Value>>, key: &str) -
         .unwrap_or(false)
 }
 
-fn resolve_clock_reminder_flow_plan(runtime_metadata: Value) -> ClockReminderFlowPlanOutput {
+pub(crate) fn resolve_clock_reminder_flow_plan(
+    runtime_metadata: Value,
+) -> ClockReminderFlowPlanOutput {
     let rt_obj = runtime_metadata.as_object();
     let server_tool_followup = resolve_bool_field(rt_obj, "serverToolFollowup");
     let allow_followup = resolve_bool_field(rt_obj, "clockFollowupInjectReminders");
@@ -78,7 +90,7 @@ fn read_record_token(record: Option<&Map<String, Value>>, keys: &[&str]) -> Stri
     String::new()
 }
 
-fn resolve_clock_session_scope(primary: &Value, fallback: &Value) -> Option<String> {
+pub(crate) fn resolve_clock_session_scope(primary: &Value, fallback: &Value) -> Option<String> {
     let primary_obj = primary.as_object();
     let fallback_obj = fallback.as_object();
 
@@ -187,7 +199,10 @@ fn normalize_clock_config(raw: &Value) -> Option<ClockConfigOutput> {
     })
 }
 
-fn resolve_clock_config(raw: &Value, raw_is_undefined: bool) -> Option<ClockConfigOutput> {
+pub(crate) fn resolve_clock_config(
+    raw: &Value,
+    raw_is_undefined: bool,
+) -> Option<ClockConfigOutput> {
     if let Some(normalized) = normalize_clock_config(raw) {
         return Some(normalized);
     }

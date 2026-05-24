@@ -3,9 +3,9 @@ use napi_derive::napi;
 use serde::Serialize;
 use serde_json::Value;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct GuardedClockScheduleItemOutput {
+pub(crate) struct GuardedClockScheduleItemOutput {
     due_at_ms: i64,
     set_by: String,
     task: String,
@@ -30,7 +30,7 @@ fn read_i64(value: Option<&Value>) -> Option<i64> {
     None
 }
 
-fn build_guarded_clock_schedule_item(
+pub(crate) fn build_guarded_clock_schedule_item(
     marker: Value,
     request_id: String,
     due_window_ms: f64,
@@ -68,11 +68,11 @@ fn build_guarded_clock_schedule_item(
     })
 }
 
-fn normalize_due_inject_text(value: Value) -> String {
+pub(crate) fn normalize_due_inject_text(value: Value) -> String {
     value.as_str().unwrap_or("").trim().to_string()
 }
 
-fn should_reserve_clock_due_reminder(had_clear: bool, session_id: String) -> bool {
+pub(crate) fn should_reserve_clock_due_reminder(had_clear: bool, session_id: String) -> bool {
     if had_clear {
         return false;
     }
