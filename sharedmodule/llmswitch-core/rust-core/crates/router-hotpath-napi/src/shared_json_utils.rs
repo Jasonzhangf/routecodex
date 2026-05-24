@@ -1356,6 +1356,26 @@ mod tests {
     }
 
     #[test]
+    fn shared_json_utils_deletion_gate_removed_virtual_router_routing_metadata_wrappers() {
+        let path = crate_src_path("virtual_router_engine/routing/metadata.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn read_request_id(metadata: &Value) -> Option<String> {"),
+            "virtual_router_engine/routing/metadata.rs still owns local read_request_id wrapper"
+        );
+        assert!(
+            !source.contains("fn read_continuation_sticky_scope(metadata: &Value) -> Option<String> {"),
+            "virtual_router_engine/routing/metadata.rs still owns local read_continuation_sticky_scope wrapper"
+        );
+        assert!(
+            source.contains(r#"read_trimmed_string(metadata.get("requestId"))"#)
+                && source.contains(r#"continuation.get("stickyScope")"#),
+            "virtual_router_engine/routing/metadata.rs must call shared read_trimmed_string truth directly"
+        );
+    }
+
+    #[test]
     fn shared_read_object_trimmed_string_deletion_gate_removed_chat_node_result_local_wrapper() {
         let path = crate_src_path("chat_node_result_semantics.rs");
         let source = fs::read_to_string(&path)

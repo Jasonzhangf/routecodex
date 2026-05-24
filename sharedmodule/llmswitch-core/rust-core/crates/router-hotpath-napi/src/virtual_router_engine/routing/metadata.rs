@@ -2,22 +2,9 @@ use serde_json::Value;
 
 use crate::shared_json_utils::read_trimmed_string;
 
-fn read_request_id(metadata: &Value) -> Option<String> {
-    read_trimmed_string(metadata.get("requestId"))
-}
-
 fn read_conversation_scope(metadata: &Value) -> Option<String> {
     read_trimmed_string(metadata.get("conversationId"))
         .map(|conversation_id| format!("conversation:{}", conversation_id))
-}
-
-fn read_continuation_sticky_scope(metadata: &Value) -> Option<String> {
-    read_trimmed_string(
-        metadata
-            .get("continuation")
-            .and_then(|v| v.as_object())
-            .and_then(|row| row.get("stickyScope")),
-    )
 }
 
 fn resolve_continuation_request_chain_key(metadata: &Value) -> Option<String> {
@@ -45,20 +32,28 @@ pub(crate) fn resolve_sticky_key(metadata: &Value) -> String {
         return request_chain_key;
     }
 
-    match read_continuation_sticky_scope(metadata).as_deref() {
+    match read_trimmed_string(
+        metadata
+            .get("continuation")
+            .and_then(|v| v.as_object())
+            .and_then(|continuation| continuation.get("stickyScope")),
+    )
+    .as_deref()
+    {
         Some("session") => {
             return resolve_session_scope(metadata)
-                .or_else(|| read_request_id(metadata))
+                .or_else(|| read_trimmed_string(metadata.get("requestId")))
                 .unwrap_or_else(|| "default".to_string())
         }
         Some("conversation") => {
             return read_conversation_scope(metadata)
                 .or_else(|| resolve_session_scope(metadata))
-                .or_else(|| read_request_id(metadata))
+                .or_else(|| read_trimmed_string(metadata.get("requestId")))
                 .unwrap_or_else(|| "default".to_string())
         }
         Some("request") => {
-            return read_request_id(metadata).unwrap_or_else(|| "default".to_string())
+            return read_trimmed_string(metadata.get("requestId"))
+                .unwrap_or_else(|| "default".to_string())
         }
         _ => {}
     }
@@ -69,13 +64,13 @@ pub(crate) fn resolve_sticky_key(metadata: &Value) -> String {
             {
                 return previous_request_id;
             }
-            if let Some(request_id) = read_request_id(metadata) {
+            if let Some(request_id) = read_trimmed_string(metadata.get("requestId")) {
                 return request_id;
             }
         }
     }
     resolve_session_scope(metadata)
-        .or_else(|| read_request_id(metadata))
+        .or_else(|| read_trimmed_string(metadata.get("requestId")))
         .unwrap_or_else(|| "default".to_string())
 }
 

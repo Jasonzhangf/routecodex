@@ -10733,3 +10733,42 @@ Using skills: coding-principals + rcc-dev-skills
 - 验证：
   - `cargo test -p router-hotpath-napi shared_read_first_object_trimmed_string_deletion_gate_removed_hub_pipeline_metadata_wrapper -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] hub pipeline rust shared helper closeout（shared_responses_conversation_utils trim/workdir wrapper 删除）
+- 红测：`cargo test -p router-hotpath-napi shared_json_utils_deletion_gate_removed_shared_responses_conversation_utils_wrappers -- --nocapture` 初次失败，命中 `shared_responses_conversation_utils.rs` 仍保留本地 `read_trimmed_text` wrapper。
+- 真源确认：`read_trimmed_text` 与 `shared_json_utils::read_trimmed_string` 完全同形；`read_workdir_from_args_map` 与 `shared_json_utils::read_workdir_from_args` 完全同形，都是零逻辑透传/复制，不承载 responses conversation 专属语义。
+- 唯一正确修改点：`shared_responses_conversation_utils.rs`。因为 shared 真源已经存在，问题只剩本模块保留第二 helper 入口；只有物理删除 wrapper 并让调用点直连 shared 真源，才能满足 closeout。
+- 实现：删除 `read_trimmed_text` 与 `read_workdir_from_args_map`，并把 command/workdir 读取调用点改直连 `read_trimmed_string` / `read_workdir_from_args`。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_json_utils_deletion_gate_removed_shared_responses_conversation_utils_wrappers -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+19:00 orphan still reproduces; switch to user sample-based red test
+
+
+[2026-05-24] hub pipeline rust shared helper closeout（hub heartbeat directives wrapper 删除）
+- 红测：`cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_hub_heartbeat_directives_local_wrapper -- --nocapture` 初次失败，命中 `hub_heartbeat_directives.rs` 仍保留本地 `find_last_user_message_index(messages: &Value) -> Option<usize>` wrapper。
+- 真源确认：`hub_heartbeat_directives.rs` 的 `find_last_user_message_index` 与 `shared_tooling::find_last_user_message_index` 完全同形；同时本地 `collapse_extra_newlines_and_trim` 也只是 shared 已存在真源的重复实现，不承载 heartbeat 专属语义。
+- 唯一正确修改点：`hub_heartbeat_directives.rs`。因为 shared 真源已经存在，问题只剩 heartbeat 模块保留第二 helper 入口；只有物理删除本地 wrapper 并直连 shared 真源，才能消除第二真源。
+- 实现：删除本地 `find_last_user_message_index` / `collapse_extra_newlines_and_trim`，改为直连 `shared_tooling::{find_last_user_message_index, collapse_extra_newlines_and_trim}`；补 shared_tooling deletion gate。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_hub_heartbeat_directives_local_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+
+
+[2026-05-24] hub pipeline rust shared helper closeout（thought signature validator trim wrapper 删除）
+- 红测：`cargo test -p router-hotpath-napi shared_json_utils_deletion_gate_removed_thought_signature_validator_wrapper -- --nocapture` 初次失败，命中 `thought_signature_validator.rs` 仍保留本地 `coerce_thought_signature` wrapper。
+- 真源确认：`coerce_thought_signature` 只是 `shared_json_utils::read_trimmed_string` 的零逻辑透传，不承载 thought signature validator 专属语义。
+- 唯一正确修改点：`thought_signature_validator.rs`。因为 shared 真源已经存在，问题只剩本模块保留第二 helper 入口；只有物理删除 wrapper 并让调用点直连 shared 真源，才能满足 closeout。
+- 实现：删除 `coerce_thought_signature`，并把 `read_thought_signature` 改为直连 `read_trimmed_string`；在 `shared_json_utils.rs` 补 deletion gate。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_json_utils_deletion_gate_removed_thought_signature_validator_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] hub pipeline rust shared helper closeout（virtual router routing metadata trim wrapper 删除）
+- 红测：`cargo test -p router-hotpath-napi shared_json_utils_deletion_gate_removed_virtual_router_routing_metadata_wrappers -- --nocapture` 初次失败，命中 `virtual_router_engine/routing/metadata.rs` 仍保留本地 `read_request_id` / `read_continuation_sticky_scope` wrapper。
+- 真源确认：这两个 helper 都只是 `shared_json_utils::read_trimmed_string` 的零逻辑透传；其中 `read_request_id` 仅包了一层 `metadata.get("requestId")`，`read_continuation_sticky_scope` 仅包了一层 continuation/stickyScope 路径读取，不承载 routing metadata 专属决策。
+- 唯一正确修改点：`virtual_router_engine/routing/metadata.rs`。因为 `shared_json_utils.rs` 已经具备唯一 trim 读取真源，问题只剩本模块保留第二 helper 入口；只有物理删除这两个 wrapper 并让调用点直连 shared 真源，才能消除第二真源并满足 closeout。
+- 实现：删除 `read_request_id` 与 `read_continuation_sticky_scope`，并把 `resolve_sticky_key` 内相关调用改为直连 `read_trimmed_string(...)`；保留 `read_conversation_scope` 不动，因为它仍承载 `conversation:{id}` 的模块专属组装语义。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_json_utils_deletion_gate_removed_virtual_router_routing_metadata_wrappers -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
