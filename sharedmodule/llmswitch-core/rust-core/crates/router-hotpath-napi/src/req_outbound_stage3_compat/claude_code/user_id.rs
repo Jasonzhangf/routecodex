@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::super::AdapterContext;
+use crate::shared_json_utils::read_object_trimmed_string;
 
 const DEFAULT_USER_ID_ENV: &str = "ROUTECODEX_CLAUDE_CODE_USER_ID";
 const DEFAULT_ACCOUNT_SEED_ENV: &str = "ROUTECODEX_CLAUDE_CODE_ACCOUNT_SEED";
@@ -103,15 +104,11 @@ fn normalize_session_uuid(candidate: Option<&str>) -> Option<String> {
     Some(uuid_from_seed(&trimmed))
 }
 
-fn read_string_field(map: &Map<String, Value>, key: &str) -> Option<String> {
-    read_non_empty_str(map.get(key))
-}
-
 pub(super) fn resolve_claude_code_user_id(
     metadata: &Map<String, Value>,
     adapter_context: &AdapterContext,
 ) -> Option<String> {
-    let existing = read_string_field(metadata, "user_id");
+    let existing = read_object_trimmed_string(metadata, "user_id");
     if is_claude_code_user_id(existing.as_deref()) {
         return existing;
     }
@@ -157,11 +154,11 @@ pub(super) fn resolve_claude_code_user_id(
                 .and_then(|value| normalize_session_uuid(Some(&value)))
         })
         .or_else(|| {
-            read_string_field(metadata, "sessionId")
+            read_object_trimmed_string(metadata, "sessionId")
                 .and_then(|value| normalize_session_uuid(Some(&value)))
         })
         .or_else(|| {
-            read_string_field(metadata, "conversationId")
+            read_object_trimmed_string(metadata, "conversationId")
                 .and_then(|value| normalize_session_uuid(Some(&value)))
         })
         .or_else(|| {

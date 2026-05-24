@@ -1,23 +1,15 @@
 use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
-use crate::hub_reasoning_tool_normalizer::repair_arguments_to_string;
+use crate::shared_tool_call_id_core::{
+    clamp_prefixed_tool_call_id, extract_tool_call_id_core, normalize_prefixed_tool_call_id,
+    sanitize_id_core,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct MediaBlock {
     pub(crate) kind: &'static str,
     pub(crate) url: String,
     pub(crate) detail: Option<String>,
-}
-
-pub(crate) fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(Value::as_str)?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
 }
 
 pub(crate) fn is_synthetic_routecodex_tool_call_id(call_id: &str) -> bool {
@@ -89,111 +81,13 @@ pub(crate) fn flatten_content_to_string(value: &Value) -> Option<String> {
     }
 }
 
-pub(crate) fn serialize_tool_arguments(value: Option<&Value>) -> String {
-    let raw = value.unwrap_or(&Value::Null);
-    repair_arguments_to_string(raw)
-}
-
-const MAX_RESPONSES_ITEM_ID_LENGTH: usize = 64;
-
-fn sanitize_core(value: &str) -> String {
-    let mut out = String::new();
-    let mut prev_underscore = false;
-    for ch in value.chars() {
-        let normalized = if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-            ch
-        } else {
-            '_'
-        };
-        if normalized == '_' {
-            if !prev_underscore {
-                out.push('_');
-            }
-            prev_underscore = true;
-        } else {
-            out.push(normalized);
-            prev_underscore = false;
-        }
-    }
-    out.trim_matches('_').to_string()
-}
 
 fn sanitize_servertool_name_token(value: &str) -> String {
-    sanitize_core(value.replace('.', "_").as_str())
-}
-
-fn short_hash(value: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(value.as_bytes());
-    let digest = hasher.finalize();
-    let mut out = String::new();
-    for byte in digest.iter().take(5) {
-        out.push_str(&format!("{:02x}", byte));
-    }
-    out
-}
-
-fn clamp_prefixed_id(prefix: &str, core: &str, hash_source: &str) -> String {
-    let sanitized = {
-        let raw = sanitize_core(core);
-        if raw.is_empty() {
-            Uuid::new_v4().simple().to_string()[..8].to_string()
-        } else {
-            raw
-        }
-    };
-    let direct = format!("{}{}", prefix, sanitized);
-    if direct.len() <= MAX_RESPONSES_ITEM_ID_LENGTH {
-        return direct;
-    }
-    let hash = short_hash(&format!("{}|{}|{}", prefix, hash_source, sanitized));
-    let room = std::cmp::max(
-        1,
-        MAX_RESPONSES_ITEM_ID_LENGTH.saturating_sub(prefix.len() + 1 + hash.len()),
-    );
-    let head = {
-        let raw = sanitize_core(&sanitized.chars().take(room).collect::<String>());
-        if raw.is_empty() {
-            "id".to_string()
-        } else {
-            raw
-        }
-    };
-    format!("{}{}_{}", prefix, head, hash)
-}
-
-fn extract_core(value: Option<&str>) -> Option<String> {
-    let raw = value?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let mut sanitized = sanitize_core(trimmed);
-    if sanitized.is_empty() {
-        return None;
-    }
-    let lower = sanitized.to_ascii_lowercase();
-    if lower.starts_with("fc_") || lower.starts_with("fc-") {
-        sanitized = sanitized[3..].to_string();
-    } else if lower.starts_with("call_") || lower.starts_with("call-") {
-        sanitized = sanitized[5..].to_string();
-    }
-    let normalized = sanitize_core(&sanitized);
-    if normalized.is_empty() {
-        return None;
-    }
-    Some(normalized)
+    sanitize_id_core(value.replace('.', "_").as_str())
 }
 
 fn normalize_with_fallback(call_id: Option<&str>, fallback: &str, prefix: &str) -> String {
-    if let Some(call_core) = extract_core(call_id) {
-        return clamp_prefixed_id(prefix, &call_core, call_id.unwrap_or_default());
-    }
-    if let Some(fallback_core) = extract_core(Some(fallback)) {
-        return clamp_prefixed_id(prefix, &fallback_core, fallback);
-    }
-    let random_core = Uuid::new_v4().simple().to_string()[..8].to_string();
-    clamp_prefixed_id(prefix, &random_core, &random_core)
+    normalize_prefixed_tool_call_id(call_id, Some(fallback), prefix)
 }
 
 pub(crate) fn can_servertool_own_tool_call_id(tool_name: &str) -> bool {
@@ -209,10 +103,10 @@ pub(crate) fn create_servertool_tool_call_id(
     sequence: usize,
 ) -> String {
     let tool_token = sanitize_servertool_name_token(tool_name);
-    let request_token = extract_core(request_id)
-        .or_else(|| extract_core(Some("req")))
+    let request_token = extract_tool_call_id_core(request_id)
+        .or_else(|| extract_tool_call_id_core(Some("req")))
         .unwrap_or_else(|| "req".to_string());
-    clamp_prefixed_id(
+    clamp_prefixed_tool_call_id(
         "call_servertool_",
         format!("{tool_token}_{request_token}_{sequence}").as_str(),
         format!("{tool_name}|{}|{sequence}", request_id.unwrap_or("")).as_str(),
@@ -220,10 +114,10 @@ pub(crate) fn create_servertool_tool_call_id(
 }
 
 pub(crate) fn create_harvested_tool_call_id(request_id: Option<&str>, sequence: usize) -> String {
-    let request_token = extract_core(request_id)
-        .or_else(|| extract_core(Some("req")))
+    let request_token = extract_tool_call_id_core(request_id)
+        .or_else(|| extract_tool_call_id_core(Some("req")))
         .unwrap_or_else(|| "req".to_string());
-    clamp_prefixed_id(
+    clamp_prefixed_tool_call_id(
         "call_harvested_",
         format!("{request_token}_{sequence}").as_str(),
         format!("{}|{sequence}", request_id.unwrap_or("")).as_str(),

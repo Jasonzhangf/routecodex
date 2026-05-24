@@ -1,12 +1,12 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
-use regex::Regex;
 use serde_json::{Map, Value};
 
 use crate::hub_req_inbound_context_capture::map_bridge_tools_to_chat;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_metadata_semantics::ensure_protocol_state_mut;
 use crate::shared_openai_message_normalize::normalize_openai_chat_messages;
+use crate::shared_tooling::normalize_standard_chunked_tool_text;
 use crate::shared_tool_mapping::flatten_chat_tools_for_function_calling;
 
 const CHAT_PARAMETER_KEYS: [&str; 19] = [
@@ -95,76 +95,19 @@ fn flatten_system_content(content: &Value) -> String {
     }
 }
 
-fn strip_terminal_right_gutter_noise(line: &str) -> String {
-    Regex::new(r"\s+[│┃]\s*[·.]{6,}\s*$")
-        .map(|re| re.replace(line, "").to_string())
-        .unwrap_or_else(|_| line.to_string())
-}
-
-fn is_chunked_exec_transcript_header_line(line: &str) -> bool {
-    Regex::new(
-        r"(?i)^(?:\[工具结果\]|Command:\s+.*|Chunk ID:\s+.*|Wall time:\s+.*|Process exited with code\s+.*|Process running with session ID\s+.*|Original token count:\s+.*)$",
-    )
-    .map(|re| re.is_match(line.trim()))
-    .unwrap_or(false)
-}
-
-fn unwrap_chunked_exec_transcript_shape(raw: &str) -> Option<String> {
-    let lines: Vec<&str> = raw.lines().collect();
-    if lines.is_empty() {
-        return None;
-    }
-    let output_idx = lines
-        .iter()
-        .position(|line| line.trim().eq_ignore_ascii_case("Output:"))?;
-    let header = &lines[..output_idx];
-    if header.is_empty()
-        || !header
-            .iter()
-            .all(|line| is_chunked_exec_transcript_header_line(line))
-    {
-        return None;
-    }
-    let output = lines
-        .iter()
-        .skip(output_idx + 1)
-        .copied()
-        .collect::<Vec<&str>>()
-        .join("\n")
-        .trim()
-        .to_string();
-    Some(output)
-}
-
-fn normalize_tool_content_text(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    let without_gutter = trimmed
-        .lines()
-        .map(strip_terminal_right_gutter_noise)
-        .collect::<Vec<String>>()
-        .join("\n");
-    if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(without_gutter.as_str()) {
-        return unwrapped;
-    }
-    without_gutter.trim().to_string()
-}
-
 fn normalize_tool_content(content: &Value) -> String {
     match content {
         Value::String(text) => {
             if text.trim().is_empty() {
                 String::new()
             } else {
-                normalize_tool_content_text(text)
+                normalize_standard_chunked_tool_text(text)
             }
         }
         Value::Null => String::new(),
         _ => serde_json::to_string(content)
             .ok()
-            .map(|text| normalize_tool_content_text(text.as_str()))
+            .map(|text| normalize_standard_chunked_tool_text(text.as_str()))
             .filter(|text| !text.trim().is_empty())
             .unwrap_or_default(),
     }

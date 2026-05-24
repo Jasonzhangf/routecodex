@@ -2,6 +2,8 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Number, Value};
 
+use crate::shared_json_utils::read_trimmed_string;
+
 const DEFAULT_STOP_MESSAGE_MAX_REPEATS: i64 = 10;
 const STOP_MESSAGE_AI_HISTORY_MAX: usize = 8;
 
@@ -10,15 +12,6 @@ fn read_finite_f64(value: Option<&Value>) -> Option<f64> {
         Some(Value::Number(num)) => num.as_f64().filter(|v| v.is_finite()),
         _ => None,
     }
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value?.as_str()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
 }
 
 fn read_bool(value: Option<&Value>) -> Option<bool> {

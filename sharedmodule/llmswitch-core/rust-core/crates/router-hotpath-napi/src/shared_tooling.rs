@@ -2,10 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-
-fn read_string_value(value: &Value) -> String {
-    value.as_str().unwrap_or("").to_string()
-}
+use std::collections::HashSet;
 
 fn parse_lenient_string(value: &str) -> Value {
     let s0 = value.trim();
@@ -214,6 +211,369 @@ fn escape_unescaped_parens(input: &str) -> String {
             out.push(ch);
         }
         prev_backslash = ch == '\\';
+    }
+    out
+}
+
+pub(crate) fn unwrap_xml_cdata_sections(raw: &str) -> String {
+    if !raw.contains("<![CDATA[") {
+        return raw.to_string();
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut remaining = raw;
+    loop {
+        let Some(start) = remaining.find("<![CDATA[") else {
+            out.push_str(remaining);
+            break;
+        };
+        out.push_str(&remaining[..start]);
+        let after_start = &remaining[start + "<![CDATA[".len()..];
+        let Some(end) = after_start.find("]]>") else {
+            out.push_str(remaining);
+            break;
+        };
+        out.push_str(&after_start[..end]);
+        remaining = &after_start[end + "]]>".len()..];
+    }
+    out
+}
+
+pub(crate) fn decode_basic_xml_entities(raw: &str) -> String {
+    raw.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+pub(crate) fn normalize_xml_scalar_text(raw: &str) -> String {
+    decode_basic_xml_entities(unwrap_xml_cdata_sections(raw).trim())
+}
+
+pub(crate) fn collapse_extra_newlines_and_trim(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut newline_run = 0usize;
+    for ch in input.chars() {
+        if ch == '\n' {
+            newline_run += 1;
+            if newline_run <= 2 {
+                out.push(ch);
+            }
+            continue;
+        }
+        newline_run = 0;
+        out.push(ch);
+    }
+    out.trim().to_string()
+}
+
+pub(crate) fn strip_terminal_right_gutter_noise(line: &str) -> String {
+    Regex::new(r"\s+[│┃]\s*[·.]{6,}\s*$")
+        .map(|re| re.replace(line, "").to_string())
+        .unwrap_or_else(|_| line.to_string())
+}
+
+fn strip_box_drawing_prefix(line: &str) -> String {
+    Regex::new(r"^[\s│└├─]+")
+        .map(|re| re.replace(line, "").to_string())
+        .unwrap_or_else(|_| line.trim_start().to_string())
+}
+
+fn is_transcript_collapsed_placeholder(line: &str) -> bool {
+    Regex::new(r"(?i)^\s*[│└├─\s]*[.…·]+\s*\+\d+\s+lines\s*$")
+        .map(|re| re.is_match(line))
+        .unwrap_or(false)
+}
+
+fn transcript_tree_marker(line: &str) -> Option<char> {
+    line.trim_start()
+        .chars()
+        .next()
+        .filter(|ch| matches!(ch, '│' | '└' | '├'))
+}
+
+pub(crate) fn is_chunked_exec_transcript_header_line(line: &str) -> bool {
+    Regex::new(
+        r"(?i)^(?:\[工具结果\]|Command:\s+.*|Chunk ID:\s+.*|Wall time:\s+.*|Process exited with code\s+.*|Process running with session ID\s+.*|Original token count:\s+.*)$",
+    )
+    .map(|re| re.is_match(line.trim()))
+    .unwrap_or(false)
+}
+
+pub(crate) fn unwrap_chunked_exec_transcript_shape(raw: &str) -> Option<String> {
+    let lines: Vec<&str> = raw.lines().collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let output_idx = lines
+        .iter()
+        .position(|line| line.trim().eq_ignore_ascii_case("Output:"))?;
+    let header = &lines[..output_idx];
+    if header.is_empty()
+        || !header
+            .iter()
+            .all(|line| is_chunked_exec_transcript_header_line(line))
+    {
+        return None;
+    }
+    Some(
+        lines
+            .iter()
+            .skip(output_idx + 1)
+            .copied()
+            .collect::<Vec<&str>>()
+            .join("\n")
+            .trim()
+            .to_string(),
+    )
+}
+
+pub(crate) fn unwrap_ran_transcript_shape(raw: &str) -> Option<String> {
+    let lines: Vec<&str> = raw.lines().collect();
+    let first = lines.first()?.trim_start();
+    if !first.starts_with("• Ran ") {
+        return None;
+    }
+    if lines.len() < 2 {
+        return None;
+    }
+    let has_tree_body = lines.iter().skip(1).any(|line| {
+        Regex::new(r"^[\s]*[│└├]")
+            .map(|re| re.is_match(line))
+            .unwrap_or(false)
+    });
+    if !has_tree_body {
+        return None;
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    for line in lines.iter().skip(1) {
+        if is_transcript_collapsed_placeholder(line) {
+            continue;
+        }
+        match transcript_tree_marker(line) {
+            Some('└') => {}
+            Some('│') | Some('├') => continue,
+            _ => {}
+        }
+        let stripped = strip_box_drawing_prefix(line).trim().to_string();
+        if stripped.is_empty() || stripped.eq_ignore_ascii_case("(ctrl + t to view transcript)") {
+            continue;
+        }
+        out.push(stripped);
+    }
+    let text = out.join("\n").trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+pub(crate) fn normalize_standard_chunked_tool_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let without_gutter = trimmed
+        .lines()
+        .map(strip_terminal_right_gutter_noise)
+        .collect::<Vec<String>>()
+        .join("\n");
+    if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(without_gutter.as_str()) {
+        return unwrapped;
+    }
+    without_gutter.trim().to_string()
+}
+
+pub(crate) fn normalize_ran_tree_or_chunked_tool_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let without_gutter = trimmed
+        .lines()
+        .map(strip_terminal_right_gutter_noise)
+        .collect::<Vec<String>>()
+        .join("\n");
+    if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(without_gutter.as_str()) {
+        return unwrapped;
+    }
+    if let Some(unwrapped) = unwrap_ran_transcript_shape(without_gutter.as_str()) {
+        return unwrapped;
+    }
+    without_gutter.trim().to_string()
+}
+
+pub(crate) fn normalize_tool_result_text(raw: &str) -> String {
+    normalize_ran_tree_or_chunked_tool_text(raw)
+}
+
+pub(crate) fn normalize_tool_result_value(value: &Value) -> String {
+    match value {
+        Value::String(text) => normalize_tool_result_text(text),
+        Value::Null => String::new(),
+        other => serde_json::to_string(other)
+            .ok()
+            .map(|text| normalize_tool_result_text(text.as_str()))
+            .unwrap_or_default(),
+    }
+}
+
+pub(crate) fn find_last_user_message_index(messages: &[Value]) -> Option<usize> {
+    messages
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(idx, message)| {
+            let role = message
+                .as_object()
+                .and_then(|obj| obj.get("role"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            if role == "user" { Some(idx) } else { None }
+        })
+}
+
+pub(crate) fn is_image_path(input: &str) -> bool {
+    let lowered = input.trim().to_ascii_lowercase();
+    if lowered.is_empty() {
+        return false;
+    }
+    let re = Regex::new(r"\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$")
+        .expect("valid image suffix pattern");
+    re.is_match(lowered.as_str())
+}
+
+pub(crate) fn value_to_string(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::String(text) => text.clone(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Number(number) => number.to_string(),
+        Value::Array(items) => items
+            .iter()
+            .map(value_to_string)
+            .collect::<Vec<String>>()
+            .join(" "),
+        Value::Object(_) => serde_json::to_string(value).unwrap_or_default(),
+    }
+}
+
+pub(crate) fn repair_arguments_to_string(value: &Value) -> String {
+    match value {
+        Value::Null => "{}".to_string(),
+        Value::Object(_) | Value::Array(_) => {
+            serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
+        }
+        Value::String(raw) => {
+            if raw.trim().is_empty() {
+                return "{}".to_string();
+            }
+            raw.to_string()
+        }
+        other => serde_json::to_string(&serde_json::json!({ "_raw": other.to_string() }))
+            .unwrap_or_else(|_| "{}".to_string()),
+    }
+}
+
+pub(crate) fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
+    fn find_open_marker(raw: &str, cursor: usize, open_marker: &str) -> Option<usize> {
+        let mut search_from = cursor;
+        while search_from < raw.len() {
+            let rel_start = raw[search_from..].find(open_marker)?;
+            let start = search_from + rel_start;
+            if open_marker == "<<RCC_TOOL_CALLS"
+                && raw[start + open_marker.len()..].starts_with("_JSON")
+            {
+                search_from = start + open_marker.len();
+                continue;
+            }
+            return Some(start);
+        }
+        None
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    let markers = [
+        ("<<RCC_TOOL_CALLS_JSON", "RCC_TOOL_CALLS_JSON"),
+        ("<<RCC_TOOL_CALLS", "RCC_TOOL_CALLS"),
+    ];
+
+    for (open_marker, close_marker) in markers {
+        let mut cursor = 0usize;
+        while cursor < raw.len() {
+            let Some(open_start) = find_open_marker(raw, cursor, open_marker) else {
+                break;
+            };
+            let start = open_start + open_marker.len();
+            let remainder = &raw[start..];
+            let inner = if let Some(rel_end) = remainder.find(close_marker) {
+                &remainder[..rel_end]
+            } else {
+                remainder
+            };
+            let candidate = inner.trim();
+            if !candidate.is_empty() && seen.insert(candidate.to_string()) {
+                out.push(candidate.to_string());
+            }
+            if let Some(rel_end) = remainder.find(close_marker) {
+                cursor = start + rel_end + close_marker.len();
+            } else {
+                break;
+            }
+        }
+    }
+
+    out
+}
+
+pub(crate) fn is_structured_apply_patch_payload(value: &Value) -> bool {
+    matches!(value.get("changes"), Some(Value::Array(_)))
+}
+
+pub(crate) fn extract_structured_apply_patch_payloads_with<F>(
+    text: &str,
+    mut parse_json: F,
+) -> Vec<Value>
+where
+    F: FnMut(&str) -> Option<Value>,
+{
+    let mut payloads = Vec::new();
+    let fence_re = Regex::new(r"```(?:json|apply_patch|toon)?\s*([\s\S]*?)\s*```")
+        .expect("valid structured apply_patch fence regex");
+    for caps in fence_re.captures_iter(text) {
+        if let Some(body) = caps.get(1) {
+            if let Some(parsed) = parse_json(body.as_str()) {
+                if is_structured_apply_patch_payload(&parsed) {
+                    payloads.push(parsed);
+                }
+            }
+        }
+    }
+    if payloads.is_empty() && text.contains("\"changes\"") {
+        if let Some(parsed) = parse_json(text) {
+            if is_structured_apply_patch_payload(&parsed) {
+                payloads.push(parsed);
+            }
+        }
+    }
+    payloads
+}
+
+pub(crate) fn chunk_string_by_bytes(input: &str, size: usize) -> Vec<String> {
+    if input.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut idx = 0usize;
+    while idx < input.len() {
+        let end = std::cmp::min(idx + size, input.len());
+        out.push(input[idx..end].to_string());
+        idx = end;
     }
     out
 }

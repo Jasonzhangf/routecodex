@@ -1,13 +1,12 @@
 use serde_json::{Map, Value};
 use std::collections::{HashMap, VecDeque};
 
-use crate::hub_reasoning_tool_normalizer::{
-    normalize_assistant_text_to_tool_calls_json, repair_arguments_to_string,
-};
+use crate::hub_reasoning_tool_normalizer::normalize_assistant_text_to_tool_calls_json;
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
-use crate::shared_tool_result_text_normalizer::{
-    normalize_tool_result_text, normalize_tool_result_value,
+use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_tooling::{
+    normalize_tool_result_text, normalize_tool_result_value, repair_arguments_to_string,
 };
 
 use super::history::can_allow_terminal_pending_tool_calls;
@@ -20,8 +19,7 @@ use super::types::{
     ValidateToolArgumentsOutput,
 };
 use super::utils::{
-    coerce_bridge_role, is_synthetic_routecodex_tool_call_id, read_trimmed_string,
-    serialize_tool_arguments, MediaBlock,
+    coerce_bridge_role, is_synthetic_routecodex_tool_call_id, MediaBlock,
 };
 
 #[derive(Clone)]
@@ -492,7 +490,7 @@ fn process_message_blocks(
                 call_id_candidate,
                 "missing_tool_call_id: bridge function_call block is missing call_id/id",
             )?;
-            let serialized = serialize_tool_arguments(Some(args)).trim().to_string();
+            let serialized = repair_arguments_to_string(args).trim().to_string();
             tool_name_by_id.insert(call_id.clone(), name.clone());
             register_pending_tool_call(pending_tool_call_ids, call_id.as_str());
             let mut fn_row = Map::new();
@@ -668,7 +666,7 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                         continue;
                     };
                     let args_val = func_obj.get("arguments").cloned().unwrap_or(Value::Null);
-                    let serialized = serialize_tool_arguments(Some(&args_val)).trim().to_string();
+                    let serialized = repair_arguments_to_string(&args_val).trim().to_string();
                     func_obj.insert("name".to_string(), Value::String(name.clone()));
                     func_obj.insert("arguments".to_string(), Value::String(serialized));
                     let call_id = require_explicit_tool_call_id(
@@ -767,7 +765,7 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 "missing_tool_call_id: bridge function_call item is missing call_id/id",
             )?;
             decrement_call_count(&mut future_tool_call_counts, call_id.as_str());
-            let serialized = serialize_tool_arguments(Some(args)).trim().to_string();
+            let serialized = repair_arguments_to_string(args).trim().to_string();
             tool_name_by_id.insert(call_id.clone(), name.clone());
             let mut fn_row = Map::new();
             fn_row.insert("name".to_string(), Value::String(name));

@@ -1,6 +1,7 @@
 use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
 use crate::hub_req_inbound_tool_output_diagnostics::inject_tool_parse_diagnostics;
-use crate::shared_tool_result_text_normalizer::normalize_tool_result_value;
+use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_tooling::normalize_tool_result_value;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::Serialize;
@@ -17,18 +18,6 @@ pub(crate) struct ToolOutputItem {
     output: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
 }
 
 fn normalize_tool_output_entry(entry: &Value) -> Option<ToolOutputItem> {

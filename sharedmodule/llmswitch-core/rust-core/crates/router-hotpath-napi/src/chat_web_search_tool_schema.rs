@@ -1,17 +1,9 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
+use crate::shared_json_utils::read_object_trimmed_string;
 
-const SERVERTOOL_WEB_SEARCH_TOOL_NAME: &str = "websearch";
-
-fn read_engine_id(entry: &Value) -> Option<String> {
-    let obj = entry.as_object()?;
-    let id = obj.get("id")?.as_str()?.trim().to_string();
-    if id.is_empty() {
-        return None;
-    }
-    Some(id)
-}
+const SERVERTOOL_WEB_SEARCH_TOOL_NAME: &str = "web_search";
 
 fn read_engine_description(entry: &Value) -> String {
     let obj = match entry.as_object() {
@@ -31,7 +23,10 @@ fn build_web_search_tool_append_operations(engines: &Value) -> Option<Value> {
     let mut engine_desc_parts: Vec<String> = Vec::new();
 
     for entry in rows {
-        let id = match read_engine_id(entry) {
+        let id = match entry
+            .as_object()
+            .and_then(|obj| read_object_trimmed_string(obj, "id"))
+        {
             Some(v) => v,
             None => continue,
         };
@@ -169,7 +164,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn builds_servertool_web_search_with_websearch_name() {
+    fn builds_servertool_web_search_with_canonical_name() {
         let ops = build_web_search_tool_append_operations(&json!([
             {
                 "id": "provider-search",
@@ -182,8 +177,8 @@ mod tests {
         let array = ops.as_array().expect("array");
         assert_eq!(array.len(), 2);
         assert_eq!(array[1]["op"], "append_tool_if_missing");
-        assert_eq!(array[1]["toolName"], "websearch");
-        assert_eq!(array[1]["tool"]["function"]["name"], "websearch");
+        assert_eq!(array[1]["toolName"], "web_search");
+        assert_eq!(array[1]["tool"]["function"]["name"], "web_search");
         assert_eq!(array[0]["fields"]["webSearchEnabled"], true);
     }
 }

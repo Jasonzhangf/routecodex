@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 
+use crate::shared_json_utils::read_trimmed_string;
+
 #[derive(Debug, Clone, Serialize)]
 struct MergedToolOutput {
     #[serde(rename = "tool_call_id")]
@@ -45,18 +47,6 @@ struct ReqOutboundContextSnapshotApplyOutput {
     tool_outputs: Option<Vec<MergedToolOutput>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<Value>>,
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
 }
 
 fn normalize_tool_output(entry: &Value) -> Option<MergedToolOutput> {

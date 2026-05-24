@@ -1,10 +1,14 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
+use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+#[cfg(test)]
+use std::{fs, path::PathBuf};
 
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
+use crate::shared_json_utils::read_trimmed_string;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,18 +44,6 @@ fn namespace_match_joiner(namespace: &str) -> &'static str {
     }
 }
 
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
-}
-
 fn denormalize_anthropic_tool_name(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -67,16 +59,262 @@ fn denormalize_anthropic_tool_name(value: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-fn normalize_tool_name(raw: Option<&str>, mode: &str) -> Option<String> {
+pub(crate) fn strip_function_namespace(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    if lowered.starts_with("functions.") {
+        return trimmed["functions.".len()..].trim().to_string();
+    }
+    if lowered.starts_with("function.") {
+        return trimmed["function.".len()..].trim().to_string();
+    }
+    trimmed.to_string()
+}
+
+pub(crate) fn to_canonical_tool_name(value: &str) -> String {
+    let stripped = strip_function_namespace(value);
+    let result: String = stripped
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if ch == ' ' || ch == '_' || ch == '-' {
+                '.'
+            } else {
+                ch
+            }
+        })
+        .collect();
+    let mut collapsed = String::new();
+    let mut prev_dot = false;
+    for ch in result.chars() {
+        if ch == '.' {
+            if !prev_dot {
+                collapsed.push('.');
+                prev_dot = true;
+            }
+        } else {
+            collapsed.push(ch);
+            prev_dot = false;
+        }
+    }
+    collapsed.trim_matches('.').to_string()
+}
+
+pub(crate) fn to_compact_tool_name(value: &str) -> String {
+    to_canonical_tool_name(value).replace('.', "")
+}
+
+pub(crate) fn normalize_routecodex_tool_name(raw: Option<&str>) -> Option<String> {
     let trimmed = raw.unwrap_or("").trim();
     if trimmed.is_empty() {
         return None;
     }
-    match mode {
-        "anthropic" => normalize_anthropic_tool_name(trimmed),
-        "anthropic_denormalize" => denormalize_anthropic_tool_name(trimmed),
-        "responses" | "default" | "" => normalize_responses_function_name(Some(trimmed)),
-        _ => normalize_responses_function_name(Some(trimmed)),
+    let stripped = strip_function_namespace(trimmed);
+    let without_prefix = stripped.trim();
+    if without_prefix.is_empty() {
+        return None;
+    }
+    let normalized =
+        normalize_responses_function_name(Some(without_prefix)).unwrap_or_else(|| without_prefix.to_string());
+    let lowered = normalized.to_ascii_lowercase();
+    if matches!(
+        lowered.as_str(),
+        "execute"
+            | "execute_command"
+            | "execute-command"
+            | "shell-command"
+            | "shell_command"
+            | "shell"
+            | "bash"
+            | "terminal"
+    ) {
+        return Some("exec_command".to_string());
+    }
+    Some(normalized)
+}
+
+pub(crate) fn normalize_routecodex_tool_name_value(value: Option<&Value>) -> Option<String> {
+    normalize_routecodex_tool_name(value.and_then(Value::as_str))
+        .map(|text| text.to_ascii_lowercase())
+}
+
+pub(crate) fn resolve_routecodex_tool_identity(tool: &Value) -> Option<String> {
+    let record = tool.as_object()?;
+    let function_name = record
+        .get("function")
+        .and_then(Value::as_object)
+        .and_then(|row| normalize_routecodex_tool_name_value(row.get("name")));
+    if function_name.is_some() {
+        return function_name;
+    }
+    let direct_name = normalize_routecodex_tool_name_value(record.get("name"));
+    if direct_name.is_some() {
+        return direct_name;
+    }
+    normalize_routecodex_tool_name_value(record.get("type"))
+}
+
+pub(crate) fn normalize_routecodex_tool_name_with_embedded_hint(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let extracted_embedded =
+        Regex::new(r#"(?i)(?:^|[\s(<])(?:tool:|function:)([A-Za-z_][A-Za-z0-9_.-]*)"#)
+            .expect("valid embedded tool name pattern")
+            .captures(trimmed)
+            .and_then(|caps| caps.get(1))
+            .map(|value| value.as_str().trim().to_string())
+            .filter(|value| !value.is_empty());
+    let normalized_input = extracted_embedded.unwrap_or_else(|| trimmed.to_string());
+    normalize_routecodex_tool_name(Some(normalized_input.as_str())).or_else(|| {
+        normalize_responses_function_name(Some(normalized_input.as_str()))
+    })
+}
+
+pub(crate) fn is_routecodex_explicit_tool_name_candidate(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if is_routecodex_structured_tool_name(trimmed) {
+        return true;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    if lowered.starts_with("functions.")
+        || lowered.contains("tool:")
+        || lowered.contains("function:")
+        || lowered.contains("[tool_call")
+        || lowered.contains("[function_call")
+    {
+        let normalized = normalize_routecodex_tool_name_with_embedded_hint(trimmed)
+            .unwrap_or_else(|| {
+                normalize_responses_function_name(Some(trimmed))
+                    .unwrap_or_else(|| trimmed.to_string())
+            });
+        return is_routecodex_structured_tool_name(normalized.as_str());
+    }
+    false
+}
+
+pub(crate) fn is_routecodex_structured_tool_name(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '-')
+    {
+        return false;
+    }
+    trimmed.chars().any(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+pub(crate) fn normalize_json_tool_name_with_aliases(
+    raw: &str,
+    alias_map: Option<&HashMap<String, String>>,
+) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(normalized) = normalize_routecodex_tool_name(Some(trimmed)) {
+        return Some(normalized);
+    }
+    let canonical = to_canonical_tool_name(trimmed);
+    let mapped = alias_map
+        .and_then(|aliases| aliases.get(canonical.as_str()).cloned())
+        .unwrap_or(canonical);
+    if let Some(normalized) = normalize_routecodex_tool_name(Some(mapped.as_str())) {
+        return Some(normalized);
+    }
+    if is_routecodex_structured_tool_name(mapped.as_str()) {
+        return Some(mapped);
+    }
+    None
+}
+
+pub(crate) fn resolve_routecodex_json_tool_name_aliases(
+    overrides: Option<&HashMap<String, String>>,
+) -> HashMap<String, String> {
+    let mut merged: HashMap<String, String> = HashMap::new();
+    for (src, dst) in [
+        ("shell_command".to_string(), "exec_command".to_string()),
+        ("execute".to_string(), "exec_command".to_string()),
+        ("execute_command".to_string(), "exec_command".to_string()),
+        ("execute-command".to_string(), "exec_command".to_string()),
+        ("shell".to_string(), "exec_command".to_string()),
+        ("bash".to_string(), "exec_command".to_string()),
+        ("terminal".to_string(), "exec_command".to_string()),
+    ] {
+        let canonical_src = to_canonical_tool_name(src.as_str());
+        let normalized_dst = normalize_routecodex_tool_name(Some(dst.as_str()))
+            .unwrap_or_else(|| dst.clone());
+        merged.insert(canonical_src.clone(), normalized_dst.clone());
+        let lowered_src = src.trim().to_ascii_lowercase();
+        if lowered_src != canonical_src {
+            merged.insert(lowered_src, normalized_dst);
+        }
+    }
+    if let Some(alias_map) = overrides {
+        for (k, v) in alias_map.iter() {
+            let src = to_canonical_tool_name(k.as_str());
+            let dst = normalize_routecodex_tool_name(Some(v.as_str()))
+                .unwrap_or_else(|| v.trim().to_ascii_lowercase());
+            if !src.is_empty() && !dst.is_empty() {
+                merged.insert(src, dst);
+            }
+        }
+    }
+    merged
+}
+
+pub(crate) fn read_routecodex_json_tool_name_hint_from_args(
+    raw_args: Option<&Value>,
+    alias_map: Option<&HashMap<String, String>>,
+) -> Option<String> {
+    fn scan(
+        value: &Value,
+        depth: usize,
+        alias_map: Option<&HashMap<String, String>>,
+    ) -> Option<String> {
+        if depth == 0 {
+            return None;
+        }
+        let obj = value.as_object()?;
+        if let Some(raw_name) = obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+        {
+            return normalize_json_tool_name_with_aliases(raw_name, alias_map);
+        }
+        for key in [
+            "function",
+            "input",
+            "args",
+            "payload",
+            "parameters",
+            "params",
+        ] {
+            if let Some(child) = obj.get(key) {
+                if let Some(found) = scan(child, depth - 1, alias_map) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    match raw_args {
+        Some(Value::Object(_)) => scan(raw_args?, 4, alias_map),
+        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 3, alias_map)),
+        _ => None,
     }
 }
 
@@ -155,18 +393,17 @@ pub(crate) fn enforce_builtin_tool_schema(name: &str, candidate: Option<&Value>)
     normalize_generic_tool_schema(candidate)
 }
 
-pub(crate) fn rewrite_builtin_tool_description(
-    name: &str,
-    existing: Option<&Value>,
-) -> Option<String> {
-    let _ = name;
-    read_trimmed_string(existing)
-}
-
 fn resolve_tool_name(candidates: &[Option<&Value>], sanitize_mode: &str) -> Option<String> {
     for candidate in candidates {
         let raw = candidate.and_then(|v| v.as_str());
-        let normalized = normalize_tool_name(raw, sanitize_mode);
+        let normalized = match sanitize_mode {
+            "anthropic" => normalize_anthropic_tool_name(raw.unwrap_or("").trim()),
+            "anthropic_denormalize" => denormalize_anthropic_tool_name(raw.unwrap_or("").trim()),
+            "responses" | "default" | "" => {
+                normalize_routecodex_tool_name(Some(raw.unwrap_or("").trim()))
+            }
+            _ => normalize_routecodex_tool_name(Some(raw.unwrap_or("").trim())),
+        };
         if let Some(name) = normalized {
             if !name.trim().is_empty() {
                 return Some(name.trim().to_string());
@@ -202,15 +439,20 @@ pub(crate) fn build_flattened_namespace_child_alias(
         namespace_match_joiner(namespace),
         child_name
     );
-    let base_alias = normalize_tool_name(Some(base_raw.as_str()), sanitize_mode)
-        .or_else(|| normalize_tool_name(Some(child_name), sanitize_mode))?;
+    let normalize_for_mode = |raw: &str| match sanitize_mode {
+        "anthropic" => normalize_anthropic_tool_name(raw.trim()),
+        "anthropic_denormalize" => denormalize_anthropic_tool_name(raw.trim()),
+        "responses" | "default" | "" => normalize_routecodex_tool_name(Some(raw.trim())),
+        _ => normalize_routecodex_tool_name(Some(raw.trim())),
+    };
+    let base_alias = normalize_for_mode(base_raw.as_str()).or_else(|| normalize_for_mode(child_name))?;
     if !used_aliases.contains(base_alias.as_str()) {
         return Some(base_alias);
     }
 
     for suffix in 2..=999 {
         let candidate_raw = format!("{base_raw}__{suffix}");
-        if let Some(candidate) = normalize_tool_name(Some(candidate_raw.as_str()), sanitize_mode) {
+        if let Some(candidate) = normalize_for_mode(candidate_raw.as_str()) {
             if !used_aliases.contains(candidate.as_str()) {
                 return Some(candidate);
             }
@@ -705,9 +947,119 @@ fn read_tool_name(entry: &Value) -> Option<String> {
     Some(raw)
 }
 
+pub(crate) fn read_routecodex_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String> {
+    let default_aliases = resolve_routecodex_json_tool_name_aliases(None);
+    read_routecodex_json_tool_name_hint_from_args(raw_args, Some(&default_aliases))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn crate_src_path(relative: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join(relative)
+    }
+
+    #[test]
+    fn normalize_tool_name_responses_mode_canonicalizes_routecodex_tool_aliases() {
+        assert_eq!(
+            normalize_routecodex_tool_name(Some("websearch")),
+            Some("web_search".to_string())
+        );
+        assert_eq!(
+            normalize_routecodex_tool_name(Some("web-search")),
+            Some("web_search".to_string())
+        );
+        assert_eq!(
+            normalize_routecodex_tool_name(Some("bash")),
+            Some("exec_command".to_string())
+        );
+        assert_eq!(
+            normalize_routecodex_tool_name(Some("shell_command")),
+            Some("exec_command".to_string())
+        );
+        assert_eq!(
+            normalize_routecodex_tool_name(Some("functions.execute_command")),
+            Some("exec_command".to_string())
+        );
+    }
+
+    #[test]
+    fn explicit_tool_name_candidate_uses_embedded_hint_truth() {
+        assert!(is_routecodex_explicit_tool_name_candidate("exec_command"));
+        assert!(is_routecodex_explicit_tool_name_candidate("function:websearch"));
+        assert!(is_routecodex_explicit_tool_name_candidate("tool:exec_command"));
+        assert!(!is_routecodex_explicit_tool_name_candidate("not a tool call"));
+    }
+
+    #[test]
+    fn resolve_routecodex_json_tool_name_aliases_merges_overrides() {
+        let overrides = HashMap::from([("websearch".to_string(), "web_search".to_string())]);
+        let aliases = resolve_routecodex_json_tool_name_aliases(Some(&overrides));
+        assert_eq!(aliases.get("bash"), Some(&"exec_command".to_string()));
+        assert_eq!(aliases.get("websearch"), Some(&"web_search".to_string()));
+    }
+
+    #[test]
+    fn read_routecodex_json_tool_name_hint_from_args_uses_alias_map() {
+        let args = serde_json::json!({
+            "payload": {
+                "name": "bash"
+            }
+        });
+        let alias_map = resolve_routecodex_json_tool_name_aliases(None);
+        assert_eq!(
+            read_routecodex_json_tool_name_hint_from_args(Some(&args), Some(&alias_map)),
+            Some("exec_command".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_json_tool_name_with_aliases_preserves_exact_exec_command_shape() {
+        let alias_map = resolve_routecodex_json_tool_name_aliases(None);
+        assert_eq!(
+            normalize_json_tool_name_with_aliases("exec_command", Some(&alias_map)),
+            Some("exec_command".to_string())
+        );
+    }
+
+    #[test]
+    fn read_routecodex_tool_name_hint_from_args_preserves_nested_exec_command_shape() {
+        let args = serde_json::json!({
+            "input": {
+                "cmd": "pwd",
+                "name": "exec_command"
+            }
+        });
+        assert_eq!(
+            read_routecodex_tool_name_hint_from_args(Some(&args)),
+            Some("exec_command".to_string())
+        );
+    }
+
+    #[test]
+    fn shared_tool_mapping_deletion_gate_removed_history_local_tool_identity_clones() {
+        let path = crate_src_path("hub_bridge_actions/history.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn normalize_tool_key(value: Option<&Value>) -> Option<String>"),
+            "local normalize_tool_key clone still present in {}",
+            path.display()
+        );
+        assert!(
+            !source.contains("fn resolve_tool_identity(tool: &Value) -> Option<String>"),
+            "local resolve_tool_identity clone still present in {}",
+            path.display()
+        );
+        assert!(
+            source.contains("normalize_routecodex_tool_name_value(")
+                && source.contains("resolve_routecodex_tool_identity("),
+            "hub_bridge_actions/history.rs must use shared tool identity truth"
+        );
+    }
 
     #[test]
     fn bridge_tool_to_chat_definition_web_search() {
@@ -926,5 +1278,270 @@ mod tests {
             arr[1]["function"]["name"],
             Value::String("mcp__computer_use__click".to_string())
         );
+    }
+
+    #[test]
+    fn strip_function_namespace_removes_known_prefixes() {
+        assert_eq!(strip_function_namespace("functions.exec_command"), "exec_command");
+        assert_eq!(strip_function_namespace("function.web-search"), "web-search");
+        assert_eq!(strip_function_namespace("exec_command"), "exec_command");
+    }
+
+    #[test]
+    fn canonical_and_compact_tool_names_use_shared_mapping_rules() {
+        assert_eq!(to_canonical_tool_name("functions.exec_command"), "exec.command");
+        assert_eq!(to_canonical_tool_name("web-search"), "web.search");
+        assert_eq!(to_compact_tool_name("functions.exec_command"), "execcommand");
+    }
+
+    #[test]
+    fn normalize_routecodex_tool_name_normalizes_legacy_web_search_and_exec_aliases() {
+        assert_eq!(
+            normalize_routecodex_tool_name(Some("functions.websearch")),
+            Some("web_search".to_string())
+        );
+        assert_eq!(
+            normalize_routecodex_tool_name(Some("shell-command")),
+            Some("exec_command".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_routecodex_tool_name_with_embedded_hint_extracts_tool_and_function_prefixes() {
+        assert_eq!(
+            normalize_routecodex_tool_name_with_embedded_hint("need retry tool:functions.shell-command now"),
+            Some("exec_command".to_string())
+        );
+        assert_eq!(
+            normalize_routecodex_tool_name_with_embedded_hint("(function:websearch)"),
+            Some("web_search".to_string())
+        );
+    }
+
+    #[test]
+    fn is_routecodex_structured_tool_name_accepts_shape_only_tool_identifiers() {
+        assert!(is_routecodex_structured_tool_name("exec_command"));
+        assert!(is_routecodex_structured_tool_name("mcp__computer_use.press_key"));
+        assert!(!is_routecodex_structured_tool_name("---"));
+        assert!(!is_routecodex_structured_tool_name("tool: exec_command"));
+        assert!(!is_routecodex_structured_tool_name("exec command"));
+    }
+
+    #[test]
+    fn read_routecodex_tool_name_hint_from_args_uses_shared_canonicalization() {
+        let args = serde_json::json!({
+            "input": {
+                "payload": {
+                    "name": "functions.shell-command"
+                }
+            }
+        });
+        assert_eq!(
+            read_routecodex_tool_name_hint_from_args(Some(&args)),
+            Some("exec_command".to_string())
+        );
+    }
+
+    #[test]
+    fn shared_tool_mapping_deletion_gate_removed_tool_harvester_local_canonical_clone() {
+        let path = crate_src_path("tool_harvester.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn normalize_tool_name(name: &str) -> String"),
+            "local normalize_tool_name clone still present in {}",
+            path.display()
+        );
+        assert!(
+            source.contains("normalize_routecodex_tool_name("),
+            "tool_harvester.rs must use shared tool canonicalization truth"
+        );
+    }
+
+    #[test]
+    fn shared_tool_mapping_deletion_gate_removed_duplicate_tool_name_hint_scanners() {
+        for relative in [
+            "tool_harvester.rs",
+            "resp_process_stage1_tool_governance_blocks/tool_call_entry.rs",
+        ] {
+            let path = crate_src_path(relative);
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+            assert!(
+                !source.contains("fn read_tool_name_hint_from_args(")
+                    && !source.contains("pub(crate) fn read_tool_name_hint_from_args("),
+                "local read_tool_name_hint_from_args clone still present in {}",
+                path.display()
+            );
+            assert!(
+                source.contains("read_routecodex_tool_name_hint_from_args("),
+                "{} must use shared tool-name hint scanner truth",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn shared_tool_mapping_deletion_gate_removed_reasoning_local_tool_name_clone() {
+        let path = crate_src_path("hub_reasoning_tool_normalizer.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn normalize_tool_name(raw: &str) -> String"),
+            "local normalize_tool_name clone still present in {}",
+            path.display()
+        );
+        assert!(
+            !source.contains("fn read_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String>"),
+            "local read_tool_name_hint_from_args clone still present in {}",
+            path.display()
+        );
+        assert!(
+            source.contains("normalize_routecodex_tool_name_with_embedded_hint("),
+            "hub_reasoning_tool_normalizer.rs must use shared embedded tool-name normalization truth"
+        );
+        assert!(
+            source.contains("read_routecodex_tool_name_hint_from_args("),
+            "hub_reasoning_tool_normalizer.rs must use shared tool-name hint scanner truth"
+        );
+        assert!(
+            !source.contains("fn is_explicit_tool_name_candidate("),
+            "local is_explicit_tool_name_candidate clone still present in {}",
+            path.display()
+        );
+        assert!(
+            source.contains("is_routecodex_explicit_tool_name_candidate("),
+            "hub_reasoning_tool_normalizer.rs must use shared explicit tool-name candidate truth"
+        );
+    }
+
+    #[test]
+    fn shared_tool_mapping_deletion_gate_removed_internal_normalize_tool_name_wrapper() {
+        let path = crate_src_path("shared_tool_mapping.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        let pre_tests_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(source.as_str());
+        assert!(
+            !pre_tests_source.contains("fn normalize_tool_name(raw: Option<&str>, mode: &str) -> Option<String> {"),
+            "internal normalize_tool_name wrapper still present in {}",
+            path.display()
+        );
+        assert!(
+            source.contains("normalize_routecodex_tool_name(Some(\"websearch\"))")
+                || source.contains("normalize_routecodex_tool_name(Some(raw.unwrap_or(\"\").trim()))"),
+            "shared_tool_mapping.rs must route canonicalization directly through normalize_routecodex_tool_name truth"
+        );
+    }
+
+    #[test]
+    fn shared_tool_mapping_deletion_gate_removed_text_markup_local_tool_name_clone() {
+        let path = crate_src_path("hub_text_markup_normalizer.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn canonicalize_json_tool_name("),
+            "local canonicalize_json_tool_name clone still present in {}",
+            path.display()
+        );
+        assert!(
+            !source.contains("fn known_tools()"),
+            "local known_tools clone still present in {}",
+            path.display()
+        );
+        assert!(
+            !source.contains("fn is_structured_tool_name("),
+            "local is_structured_tool_name clone still present in {}",
+            path.display()
+        );
+        assert!(
+            !source.contains("fn resolve_json_tool_name_aliases("),
+            "local resolve_json_tool_name_aliases clone still present in {}",
+            path.display()
+        );
+        assert!(
+            !source.contains("fn read_tool_name_hint_from_args("),
+            "local read_tool_name_hint_from_args clone still present in {}",
+            path.display()
+        );
+        assert!(
+            source.contains("normalize_json_tool_name_with_aliases("),
+            "hub_text_markup_normalizer.rs must use shared json tool-name canonicalization truth"
+        );
+        assert!(
+            source.contains("resolve_routecodex_json_tool_name_aliases("),
+            "hub_text_markup_normalizer.rs must use shared alias-map truth"
+        );
+        assert!(
+            source.contains("read_routecodex_json_tool_name_hint_from_args("),
+            "hub_text_markup_normalizer.rs must use shared alias-aware hint scanner truth"
+        );
+    }
+
+    #[test]
+    fn flattened_tool_mapping_trims_description_via_shared_helper() {
+        let input = serde_json::json!({
+            "tool": {
+                "type": "function",
+                "function": {
+                    "name": "demo_tool",
+                    "description": "  demo desc  "
+                }
+            },
+            "options": {
+                "sanitizeMode": "responses"
+            }
+        });
+        let raw = bridge_tool_to_chat_definition_json(input.to_string()).expect("mapped tool");
+        let parsed: Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["function"]["description"], "demo desc");
+    }
+
+    #[test]
+    fn shared_tool_mapping_deletion_gate_removed_deepseek_response_local_exec_family() {
+        let path = crate_src_path("req_outbound_stage3_compat/deepseek_web/response.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn is_exec_command_family(name: &str) -> bool {"),
+            "local exec_command family helper still present in {}",
+            path.display()
+        );
+        assert!(
+            source.contains("normalize_routecodex_tool_name(Some(raw_name))")
+                || source.contains("normalize_routecodex_tool_name(function.get(\"name\").and_then(Value::as_str))"),
+            "deepseek_web/response.rs must use shared tool mapping truth directly"
+        );
+    }
+
+    #[test]
+    fn shared_tool_mapping_deletion_gate_removed_resp_process_tool_names_wrapper() {
+        let path = crate_src_path("resp_process_stage1_tool_governance_blocks/tool_names.rs");
+        assert!(
+            !path.exists(),
+            "resp_process_stage1_tool_governance_blocks/tool_names.rs should be physically removed after routing callers to shared_tool_mapping.rs"
+        );
+        for relative in [
+            "resp_process_stage1_tool_governance_blocks/requested_tools.rs",
+            "resp_process_stage1_tool_governance_blocks/tool_args.rs",
+            "resp_process_stage1_tool_governance_blocks/tool_call_entry.rs",
+            "resp_process_stage1_tool_governance_blocks/xml_text_utils.rs",
+        ] {
+            let path = crate_src_path(relative);
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+            assert!(
+                source.contains("normalize_routecodex_tool_name("),
+                "{} must use shared tool canonicalization truth directly",
+                path.display()
+            );
+            assert!(
+                !source.contains("tool_names::normalize_tool_name"),
+                "local resp_process tool_names wrapper reference still present in {}",
+                path.display()
+            );
+        }
     }
 }

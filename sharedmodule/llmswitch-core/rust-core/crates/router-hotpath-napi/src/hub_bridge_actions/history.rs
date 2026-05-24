@@ -1,13 +1,19 @@
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::hub_reasoning_tool_normalizer::clamp_responses_input_item_id_json;
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
+use crate::shared_json_utils::{
+    clone_non_empty_object, clone_plain_object, read_optional_bool, read_trimmed_string,
+};
 use crate::hub_tool_session_compat::{normalize_tool_session_payload, ToolSessionCompatInput};
 use crate::shared_metadata_semantics::read_runtime_metadata_json;
 use crate::shared_responses_tool_utils::resolve_tool_call_id_style_json;
-use crate::shared_tool_result_text_normalizer::{
-    normalize_tool_result_text, normalize_tool_result_value,
+use crate::shared_tool_call_id_core::clamp_responses_input_item_id;
+use crate::shared_tool_mapping::{
+    normalize_routecodex_tool_name_value, resolve_routecodex_tool_identity,
+};
+use crate::shared_tooling::{
+    normalize_tool_result_text, normalize_tool_result_value, repair_arguments_to_string,
 };
 use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 
@@ -24,7 +30,7 @@ use super::types::{
 };
 use super::utils::{
     coerce_bridge_role, flatten_content_to_string, is_synthetic_routecodex_tool_call_id,
-    normalize_function_call_output_id, read_trimmed_string, serialize_tool_arguments, MediaBlock,
+    normalize_function_call_output_id, MediaBlock,
 };
 
 fn require_explicit_tool_call_id(call_id: Option<String>, reason: &str) -> Result<String, String> {
@@ -339,10 +345,6 @@ fn extract_user_text_from_entry(entry: &Value) -> String {
     String::new()
 }
 
-fn serialize_tool_result_payload(value: &Value) -> String {
-    normalize_tool_result_value(value)
-}
-
 fn strip_routing_tags_from_text(text: &str) -> String {
     text.to_string()
 }
@@ -430,14 +432,18 @@ fn normalize_bridge_tool_history_seed(value: Option<&Value>) -> Option<BridgeToo
             let name = read_trimmed_string(row.get("name"))?;
             let output = row
                 .get("output")
-                .map(serialize_tool_result_payload)
+                .map(normalize_tool_result_value)
                 .unwrap_or_default();
             Some(BridgeToolHistoryPair {
                 call_id,
                 name,
-                arguments: row.get("arguments").cloned().unwrap_or(Value::Object(Map::new())),
+                arguments: row
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(Value::Object(Map::new())),
                 output,
-                status: read_trimmed_string(row.get("status")).unwrap_or_else(|| "completed".to_string()),
+                status: read_trimmed_string(row.get("status"))
+                    .unwrap_or_else(|| "completed".to_string()),
             })
         })
         .collect::<Vec<_>>();
@@ -448,38 +454,11 @@ fn normalize_bridge_tool_history_seed(value: Option<&Value>) -> Option<BridgeToo
     }
 }
 
-fn normalize_tool_key(value: Option<&Value>) -> Option<String> {
-    let mut text = value?.as_str()?.trim().to_ascii_lowercase();
-    if text.is_empty() {
-        return None;
-    }
-    if text == "websearch" || text == "web-search" {
-        text = "web_search".to_string();
-    }
-    Some(text)
-}
-
-fn resolve_tool_identity(tool: &Value) -> Option<String> {
-    let record = tool.as_object()?;
-    let function_name = record
-        .get("function")
-        .and_then(Value::as_object)
-        .and_then(|row| normalize_tool_key(row.get("name")));
-    if function_name.is_some() {
-        return function_name;
-    }
-    let direct_name = normalize_tool_key(record.get("name"));
-    if direct_name.is_some() {
-        return direct_name;
-    }
-    normalize_tool_key(record.get("type"))
-}
-
 fn is_builtin_web_search_tool(tool: &Value) -> bool {
     let Some(record) = tool.as_object() else {
         return false;
     };
-    let type_name = normalize_tool_key(record.get("type")).unwrap_or_default();
+    let type_name = normalize_routecodex_tool_name_value(record.get("type")).unwrap_or_default();
     if type_name == "web_search" || type_name.starts_with("web_search") {
         return true;
     }
@@ -490,7 +469,7 @@ fn is_server_side_web_search_function(tool: &Value) -> bool {
     let Some(record) = tool.as_object() else {
         return false;
     };
-    resolve_tool_identity(&Value::Object(record.clone()))
+    resolve_routecodex_tool_identity(&Value::Object(record.clone()))
         .map(|key| key == "web_search")
         .unwrap_or(false)
 }
@@ -524,7 +503,7 @@ pub(crate) fn resolve_responses_bridge_tools(
         if !tool.is_object() {
             return;
         }
-        let Some(key) = resolve_tool_identity(tool) else {
+        let Some(key) = resolve_routecodex_tool_identity(tool) else {
             return;
         };
         if seen_keys.contains(key.as_str()) {
@@ -819,19 +798,6 @@ pub(crate) fn resolve_responses_request_bridge_decisions(
     }
 }
 
-fn clamp_responses_input_item_id(raw: Option<&str>) -> Option<String> {
-    let trimmed = raw.unwrap_or("").trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed.len() <= 64 {
-        return Some(trimmed.to_string());
-    }
-    let payload = serde_json::to_string(&Value::String(trimmed.to_string())).ok()?;
-    let raw = clamp_responses_input_item_id_json(payload).ok()?;
-    serde_json::from_str::<Option<String>>(&raw).ok().flatten()
-}
-
 pub(crate) fn filter_bridge_input_for_upstream(
     input: FilterBridgeInputForUpstreamInput,
 ) -> FilterBridgeInputForUpstreamOutput {
@@ -862,14 +828,6 @@ pub(crate) fn filter_bridge_input_for_upstream(
     FilterBridgeInputForUpstreamOutput { input: normalized }
 }
 
-fn read_trimmed_non_empty_string(value: Option<&Value>) -> Option<String> {
-    let text = value.and_then(Value::as_str)?.trim();
-    if text.is_empty() {
-        return None;
-    }
-    Some(text.to_string())
-}
-
 fn collect_reasoning_instruction_segments(value: Option<&Value>) -> Vec<String> {
     let Some(raw) = value else {
         return Vec::new();
@@ -887,14 +845,6 @@ fn collect_reasoning_instruction_segments(value: Option<&Value>) -> Vec<String> 
         })
         .filter(|entry| !entry.is_empty())
         .collect()
-}
-
-fn clone_non_empty_object(value: Option<&Value>) -> Option<Map<String, Value>> {
-    let record = value?.as_object()?.clone();
-    if record.is_empty() {
-        return None;
-    }
-    Some(record)
 }
 
 fn strip_tool_control_fields(mut record: Map<String, Value>) -> Option<Map<String, Value>> {
@@ -972,14 +922,6 @@ fn merge_parameters_into_request(request: &mut Map<String, Value>, source: &Map<
     }
 }
 
-fn read_optional_bool(value: Option<&Value>) -> Option<bool> {
-    value.and_then(Value::as_bool)
-}
-
-fn clone_plain_object(value: Option<&Value>) -> Option<Map<String, Value>> {
-    value?.as_object().cloned()
-}
-
 fn apply_direct_override(request: &mut Map<String, Value>, key: &str, value: Option<&Value>) {
     if request.contains_key(key) {
         return;
@@ -1001,10 +943,10 @@ pub(crate) fn prepare_responses_request_envelope(
     let mut request = input.request.as_object().cloned().unwrap_or_default();
 
     let instruction_candidates = [
-        read_trimmed_non_empty_string(input.context_system_instruction.as_ref()),
-        read_trimmed_non_empty_string(input.extra_system_instruction.as_ref()),
-        read_trimmed_non_empty_string(input.metadata_system_instruction.as_ref()),
-        read_trimmed_non_empty_string(input.combined_system_instruction.as_ref()),
+        read_trimmed_string(input.context_system_instruction.as_ref()),
+        read_trimmed_string(input.extra_system_instruction.as_ref()),
+        read_trimmed_string(input.metadata_system_instruction.as_ref()),
+        read_trimmed_string(input.combined_system_instruction.as_ref()),
     ];
     let resolved_instruction = instruction_candidates.into_iter().flatten().next();
     if let Some(instruction) = resolved_instruction {
@@ -1212,7 +1154,7 @@ pub(crate) fn build_bridge_history(
             );
             let output_payload = row
                 .get("content")
-                .map(serialize_tool_result_payload)
+                .map(normalize_tool_result_value)
                 .unwrap_or_else(|| text.clone());
             let (tool_name, tool_arguments) = tool_call_by_id
                 .get(resolved_call_id.as_str())
@@ -1260,7 +1202,7 @@ pub(crate) fn build_bridge_history(
                 let name = fn_row
                     .and_then(|v| read_trimmed_string(v.get("name")))
                     .unwrap_or_else(|| "tool".to_string());
-                let args = serialize_tool_arguments(fn_row.and_then(|v| v.get("arguments")));
+                let args = repair_arguments_to_string(fn_row.and_then(|v| v.get("arguments")).unwrap_or(&Value::Null));
                 let entry = serde_json::json!({
                     "type": "function_call",
                     "id": call_id,

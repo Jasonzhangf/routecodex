@@ -3,6 +3,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::hub_reasoning_tool_normalizer::sanitize_reasoning_tagged_text;
+use crate::shared_json_utils::read_trimmed_string;
 
 const DEFAULT_MIN_LENGTH: usize = 50;
 const DEFAULT_ALLOW_EMPTY_WITH_SIGNATURE: bool = true;
@@ -53,17 +54,7 @@ fn resolve_options(value: Option<&Value>) -> ThoughtSignatureValidationOptions {
 }
 
 fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {
-    match value {
-        Some(Value::String(raw)) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        }
-        _ => None,
-    }
+    read_trimmed_string(value)
 }
 
 fn is_thinking_block_type(block_type: &str) -> bool {

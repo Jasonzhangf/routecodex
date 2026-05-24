@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::hub_reasoning_tool_normalizer::normalize_function_call_id_json;
+use crate::shared_json_utils::read_trimmed_string;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,20 +38,6 @@ struct TransformToolCallIdInput {
 struct EnforceToolCallIdStyleInput {
     messages: Option<Vec<Value>>,
     state: Option<Value>,
-}
-
-fn read_string(value: Option<&Value>) -> Option<String> {
-    match value {
-        Some(Value::String(raw)) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        }
-        _ => None,
-    }
 }
 
 fn tool_call_id_style(value: Option<&str>) -> Option<String> {
@@ -102,10 +89,10 @@ fn normalize_id_with_style(style: &str, raw: Option<&str>, fallback: &str) -> St
 }
 
 fn extract_tool_call_id(obj: &Map<String, Value>) -> Option<String> {
-    read_string(obj.get("tool_call_id"))
-        .or_else(|| read_string(obj.get("call_id")))
-        .or_else(|| read_string(obj.get("id")))
-        .or_else(|| read_string(obj.get("tool_use_id")))
+    read_trimmed_string(obj.get("tool_call_id"))
+        .or_else(|| read_trimmed_string(obj.get("call_id")))
+        .or_else(|| read_trimmed_string(obj.get("id")))
+        .or_else(|| read_trimmed_string(obj.get("tool_use_id")))
 }
 
 #[napi_derive::napi]

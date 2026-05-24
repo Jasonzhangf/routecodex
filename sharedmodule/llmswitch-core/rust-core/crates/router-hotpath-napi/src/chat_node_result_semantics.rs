@@ -2,6 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::shared_json_utils::read_object_trimmed_string;
 
 fn read_i64(raw: f64) -> i64 {
     if raw.is_finite() {
@@ -208,13 +209,6 @@ fn map_tool_calls(message: Option<&Map<String, Value>>) -> Option<Value> {
     Some(Value::Array(mapped))
 }
 
-fn read_object_string(row: &Map<String, Value>, key: &str) -> Option<String> {
-    row.get(key)
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
 fn restore_response_continuation_semantics(
     chat_response: Value,
     request_semantics: Option<&Value>,
@@ -251,7 +245,7 @@ fn restore_response_continuation_semantics(
 
     let mut continuation = continuation_obj;
     if let Some(protocol) = provider_protocol.as_ref() {
-        if read_object_string(&continuation, "stateOrigin").is_none() {
+        if read_object_trimmed_string(&continuation, "stateOrigin").is_none() {
             continuation.insert(
                 "stateOrigin".to_string(),
                 Value::String(protocol.to_string()),
@@ -261,7 +255,7 @@ fn restore_response_continuation_semantics(
             .get_mut("resumeFrom")
             .and_then(Value::as_object_mut)
         {
-            if read_object_string(resume_from, "protocol").is_none() {
+            if read_object_trimmed_string(resume_from, "protocol").is_none() {
                 resume_from.insert("protocol".to_string(), Value::String(protocol.to_string()));
             }
         }

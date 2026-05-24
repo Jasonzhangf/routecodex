@@ -3,7 +3,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::hub_reasoning_tool_normalizer::repair_arguments_to_string;
+use crate::shared_json_utils::split_command_string;
+use crate::shared_tooling::{is_structured_apply_patch_payload, repair_arguments_to_string};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,13 +76,6 @@ fn gen_id(prefix: &str, id_counter: &mut u64, now_ms: i64) -> String {
     format!("{}_{}_{}", prefix, now_ms, base36(*id_counter))
 }
 
-fn is_structured_apply_patch_payload(value: &Value) -> bool {
-    match value {
-        Value::Object(obj) => obj.get("changes").map(|v| v.is_array()).unwrap_or(false),
-        _ => false,
-    }
-}
-
 fn to_tool_call(id: String, name: &str, args: &Value) -> Value {
     let args_str = repair_arguments_to_string(args);
     json!({
@@ -92,67 +86,6 @@ fn to_tool_call(id: String, name: &str, args: &Value) -> Value {
             "arguments": args_str
         }
     })
-}
-
-fn split_command_string(input: &str) -> Vec<String> {
-    let s = input.trim();
-    if s.is_empty() {
-        return Vec::new();
-    }
-    let mut out: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut in_single = false;
-    let mut in_double = false;
-    let chars: Vec<char> = s.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let ch = chars[i];
-        if in_single {
-            if ch == '\'' {
-                in_single = false;
-            } else {
-                cur.push(ch);
-            }
-            i += 1;
-            continue;
-        }
-        if in_double {
-            if ch == '"' {
-                in_double = false;
-            } else if ch == '\\' && i + 1 < chars.len() {
-                i += 1;
-                cur.push(chars[i]);
-            } else {
-                cur.push(ch);
-            }
-            i += 1;
-            continue;
-        }
-        if ch == '\'' {
-            in_single = true;
-            i += 1;
-            continue;
-        }
-        if ch == '"' {
-            in_double = true;
-            i += 1;
-            continue;
-        }
-        if ch.is_whitespace() {
-            if !cur.is_empty() {
-                out.push(cur.clone());
-                cur.clear();
-            }
-            i += 1;
-            continue;
-        }
-        cur.push(ch);
-        i += 1;
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    out
 }
 
 fn extract_structured_blocks(

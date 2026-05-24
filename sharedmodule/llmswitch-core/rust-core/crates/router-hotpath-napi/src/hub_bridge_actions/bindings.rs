@@ -1,5 +1,8 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::Value;
+use crate::shared_tool_mapping::{
+    strip_function_namespace, to_canonical_tool_name, to_compact_tool_name,
+};
 
 use super::bridge_input::{
     convert_bridge_input_to_chat_messages, extract_reasoning_segments_from_text, repair_tool_calls,
@@ -25,7 +28,8 @@ use super::reasoning::{
 };
 use super::tool_ids::{apply_bridge_normalize_tool_identifiers, normalize_bridge_tool_call_ids};
 use super::types::*;
-use super::utils::{coerce_bridge_role, serialize_tool_arguments};
+use super::utils::coerce_bridge_role;
+use crate::shared_tooling::repair_arguments_to_string;
 
 pub fn convert_bridge_input_to_chat_messages_json(input_json: String) -> NapiResult<String> {
     let input: BridgeInputToChatInput =
@@ -88,7 +92,7 @@ pub fn serialize_tool_arguments_json(input_json: String) -> NapiResult<String> {
     let value: Value =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let args_value = value.as_object().and_then(|row| row.get("args")).cloned();
-    let serialized = serialize_tool_arguments(args_value.as_ref());
+    let serialized = repair_arguments_to_string(args_value.as_ref().unwrap_or(&Value::Null));
     serde_json::to_string(&serialized).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -580,73 +584,15 @@ pub fn run_bridge_action_pipeline_json(input_json: String) -> NapiResult<String>
 }
 
 pub fn strip_function_namespace_json(input_json: String) -> NapiResult<String> {
-    let trimmed = input_json.trim();
-    if trimmed.is_empty() {
-        return Ok(String::new());
-    }
-    let lowered: String = trimmed.to_lowercase();
-    if lowered.starts_with("functions.") {
-        return Ok(trimmed["functions.".len()..].trim().to_string());
-    }
-    if lowered.starts_with("function.") {
-        return Ok(trimmed["function.".len()..].trim().to_string());
-    }
-    Ok(trimmed.to_string())
+    Ok(strip_function_namespace(&input_json))
 }
 
 pub fn to_canonical_tool_name_json(input_json: String) -> NapiResult<String> {
-    // First strip namespace
-    let stripped = {
-        let trimmed = input_json.trim();
-        if trimmed.is_empty() {
-            String::new()
-        } else {
-            let lowered: String = trimmed.to_lowercase();
-            if lowered.starts_with("functions.") {
-                trimmed["functions.".len()..].trim().to_string()
-            } else if lowered.starts_with("function.") {
-                trimmed["function.".len()..].trim().to_string()
-            } else {
-                trimmed.to_string()
-            }
-        }
-    };
-    // Then normalize separators
-    let result = stripped
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c == ' ' || c == '_' || c == '-' {
-                '.'
-            } else {
-                c
-            }
-        })
-        .collect::<String>();
-    // Collapse multiple dots
-    let mut collapsed = String::new();
-    let mut prev_dot = false;
-    for c in result.chars() {
-        if c == '.' {
-            if !prev_dot {
-                collapsed.push('.');
-                prev_dot = true;
-            }
-        } else {
-            collapsed.push(c);
-            prev_dot = false;
-        }
-    }
-    // Trim leading/trailing dots
-    let result = collapsed.trim_matches('.').to_string();
-    Ok(result)
+    Ok(to_canonical_tool_name(&input_json))
 }
 
 pub fn to_compact_tool_name_json(input_json: String) -> NapiResult<String> {
-    // Reuse canonical logic then remove ._- separators
-    let canonical = to_canonical_tool_name_json(input_json)?;
-    let compact = canonical.replace(|c: char| c == '.' || c == '_' || c == '-', "");
-    Ok(compact)
+    Ok(to_compact_tool_name(&input_json))
 }
 
 // Shell tool names - should match TS SHELL_TOOL_ALIASES
@@ -1009,9 +955,9 @@ pub fn extract_client_tool_index_json(input_json: String) -> NapiResult<String> 
                 }
 
                 // Use helper functions
-                let stripped = strip_function_namespace_impl(&child_name);
-                let canonical = to_canonical_tool_name_impl(&stripped);
-                let compact = canonical.replace(|c: char| c == '.' || c == '_' || c == '-', "");
+                let stripped = strip_function_namespace(&child_name);
+                let canonical = to_canonical_tool_name(&stripped);
+                let compact = to_compact_tool_name(&canonical);
                 let family = resolve_tool_family_impl(&canonical);
 
                 let exact_key = child_name.to_lowercase();
@@ -1062,9 +1008,9 @@ pub fn extract_client_tool_index_json(input_json: String) -> NapiResult<String> 
             "tool": &tool,
         });
 
-        let stripped = strip_function_namespace_impl(&normalized_name);
-        let canonical = to_canonical_tool_name_impl(&stripped);
-        let compact = canonical.replace(|c: char| c == '.' || c == '_' || c == '-', "");
+        let stripped = strip_function_namespace(&normalized_name);
+        let canonical = to_canonical_tool_name(&stripped);
+        let compact = to_compact_tool_name(&canonical);
         let family = resolve_tool_family_impl(&canonical);
 
         let exact_key = normalized_name.to_lowercase();
@@ -1099,51 +1045,6 @@ pub fn extract_client_tool_index_json(input_json: String) -> NapiResult<String> 
     };
 
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-// Helper implementations (reused from other functions)
-fn strip_function_namespace_impl(input: &str) -> String {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    let lowered = trimmed.to_lowercase();
-    if lowered.starts_with("functions.") {
-        trimmed["functions.".len()..].trim().to_string()
-    } else if lowered.starts_with("function.") {
-        trimmed["function.".len()..].trim().to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn to_canonical_tool_name_impl(input: &str) -> String {
-    let stripped = strip_function_namespace_impl(input);
-    let result: String = stripped
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c == ' ' || c == '_' || c == '-' {
-                '.'
-            } else {
-                c
-            }
-        })
-        .collect();
-    let mut collapsed = String::new();
-    let mut prev_dot = false;
-    for c in result.chars() {
-        if c == '.' {
-            if !prev_dot {
-                collapsed.push('.');
-                prev_dot = true;
-            }
-        } else {
-            collapsed.push(c);
-            prev_dot = false;
-        }
-    }
-    collapsed.trim_matches('.').to_string()
 }
 
 fn resolve_tool_family_impl(canonical: &str) -> String {
@@ -1231,9 +1132,9 @@ pub fn resolve_client_tool_from_index_json(input_json: String) -> NapiResult<Str
 
     // Then try various normalizations
     let exact_lower = trimmed.to_lowercase();
-    let stripped_lower = strip_function_namespace_impl(trimmed);
-    let canonical = to_canonical_tool_name_impl(&stripped_lower);
-    let compact = canonical.replace(|c: char| c == '.' || c == '_' || c == '-', "");
+    let stripped_lower = strip_function_namespace(trimmed);
+    let canonical = to_canonical_tool_name(&stripped_lower);
+    let compact = to_compact_tool_name(&canonical);
     let family = resolve_tool_family_impl(&canonical);
 
     // Try in order
@@ -1333,9 +1234,9 @@ pub fn remap_chat_tool_calls_json(input_json: String) -> NapiResult<String> {
         }
 
         let exact_lower = trimmed.to_lowercase();
-        let stripped_lower = strip_function_namespace_impl(trimmed);
-        let canonical = to_canonical_tool_name_impl(&stripped_lower);
-        let compact = canonical.replace(|c: char| c == '.' || c == '_' || c == '-', "");
+        let stripped_lower = strip_function_namespace(trimmed);
+        let canonical = to_canonical_tool_name(&stripped_lower);
+        let compact = to_compact_tool_name(&canonical);
 
         // Try exact
         if let Some(result) = index.by_exact_lower.get(&exact_lower) {
@@ -1484,8 +1385,8 @@ pub fn remap_responses_tool_calls_json(input_json: String) -> NapiResult<String>
         }
 
         let exact_lower = trimmed.to_lowercase();
-        let stripped_lower = strip_function_namespace_impl(trimmed);
-        let canonical = to_canonical_tool_name_impl(&stripped_lower);
+        let stripped_lower = strip_function_namespace(trimmed);
+        let canonical = to_canonical_tool_name(&stripped_lower);
 
         if let Some(result) = index.by_exact_lower.get(&exact_lower) {
             return Some(result.clone());

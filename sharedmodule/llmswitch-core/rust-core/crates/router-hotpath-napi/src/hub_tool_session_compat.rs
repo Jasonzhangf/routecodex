@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
+use crate::shared_json_utils::{read_first_object_trimmed_string, read_trimmed_string};
+
 const TOOL_UNKNOWN_PREFIX: &str = "[RouteCodex] Tool call result unknown";
 
 #[derive(Debug, Clone)]
@@ -98,33 +100,6 @@ pub struct ToolSessionHistoryUpdateOutput {
     pub records_count: usize,
 }
 
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(|entry| entry.as_str())?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
-fn read_tool_call_id(call: &Map<String, Value>) -> Option<String> {
-    read_trimmed_string(call.get("id"))
-        .or_else(|| read_trimmed_string(call.get("tool_call_id")))
-        .or_else(|| read_trimmed_string(call.get("call_id")))
-}
-
-fn read_tool_message_id(message: &Map<String, Value>) -> Option<String> {
-    read_trimmed_string(message.get("tool_call_id"))
-        .or_else(|| read_trimmed_string(message.get("call_id")))
-        .or_else(|| read_trimmed_string(message.get("id")))
-}
-
-fn read_tool_output_id(message: &Map<String, Value>) -> Option<String> {
-    read_trimmed_string(message.get("tool_call_id"))
-        .or_else(|| read_trimmed_string(message.get("call_id")))
-        .or_else(|| read_trimmed_string(message.get("id")))
-}
-
 fn read_tool_output_content(message: &Map<String, Value>) -> Option<String> {
     let raw = message.get("output").or_else(|| message.get("content"))?;
     match raw {
@@ -182,7 +157,7 @@ fn find_tool_message_index(messages: &[Value], start_index: usize, call_id: &str
         if role != "tool" {
             continue;
         }
-        if read_tool_message_id(message_obj).as_deref() == Some(call_id) {
+        if read_first_object_trimmed_string(message_obj, &["tool_call_id", "call_id", "id"]).as_deref() == Some(call_id) {
             return Some(idx);
         }
     }
@@ -290,7 +265,7 @@ fn normalize_tool_call_ordering(
             let Some(call_obj) = call.as_object() else {
                 continue;
             };
-            let Some(call_id) = read_tool_call_id(call_obj) else {
+            let Some(call_id) = read_first_object_trimmed_string(call_obj, &["id", "tool_call_id", "call_id"]) else {
                 continue;
             };
             if let Some(existing_index) =
@@ -361,7 +336,7 @@ fn collect_valid_call_ids(messages: &[Value]) -> HashSet<String> {
         };
         for call in tool_calls {
             if let Some(call_obj) = call.as_object() {
-                if let Some(call_id) = read_tool_call_id(call_obj) {
+                if let Some(call_id) = read_first_object_trimmed_string(call_obj, &["id", "tool_call_id", "call_id"]) {
                     valid.insert(call_id);
                 }
             }
@@ -385,7 +360,7 @@ fn filter_tool_outputs(
         let Some(row) = entry.as_object() else {
             continue;
         };
-        let Some(call_id) = read_tool_output_id(row) else {
+        let Some(call_id) = read_first_object_trimmed_string(row, &["tool_call_id", "call_id", "id"]) else {
             continue;
         };
         if !valid_call_ids.contains(call_id.as_str()) {
@@ -450,7 +425,7 @@ fn collect_tool_history_records(messages: &[Value], ts: &str) -> Vec<ToolHistory
                 let Some(call_obj) = call.as_object() else {
                     continue;
                 };
-                let Some(call_id) = read_tool_call_id(call_obj) else {
+                let Some(call_id) = read_first_object_trimmed_string(call_obj, &["id", "tool_call_id", "call_id"]) else {
                     continue;
                 };
                 let name = read_tool_name_from_call(call_obj);
@@ -464,7 +439,7 @@ fn collect_tool_history_records(messages: &[Value], ts: &str) -> Vec<ToolHistory
             continue;
         }
         if role == "tool" {
-            let Some(call_id) = read_tool_message_id(message_obj) else {
+            let Some(call_id) = read_first_object_trimmed_string(message_obj, &["tool_call_id", "call_id", "id"]) else {
                 continue;
             };
             let name = read_tool_name_from_message(message_obj);

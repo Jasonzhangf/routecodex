@@ -2,6 +2,8 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::shared_json_utils::read_object_trimmed_string;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteSelectionApplyInput {
@@ -24,13 +26,6 @@ pub struct RouteSelectionApplyOutput {
     pub normalized_metadata: Value,
 }
 
-fn read_trimmed_string(map: &Map<String, Value>, key: &str) -> Option<String> {
-    map.get(key)
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
 fn read_tool_call_id_style(target_map: &Map<String, Value>) -> Option<String> {
     target_map
         .get("responsesConfig")
@@ -42,13 +37,13 @@ fn read_tool_call_id_style(target_map: &Map<String, Value>) -> Option<String> {
 }
 
 fn read_target_model(target_map: &Map<String, Value>) -> Option<String> {
-    if let Some(model_id) = read_trimmed_string(target_map, "modelId") {
+    if let Some(model_id) = read_object_trimmed_string(target_map, "modelId") {
         return Some(model_id);
     }
 
-    let provider_key = read_trimmed_string(target_map, "providerKey")?;
+    let provider_key = read_object_trimmed_string(target_map, "providerKey")?;
 
-    if let Some(runtime_key) = read_trimmed_string(target_map, "runtimeKey") {
+    if let Some(runtime_key) = read_object_trimmed_string(target_map, "runtimeKey") {
         let prefix = format!("{}.", runtime_key);
         if provider_key.starts_with(&prefix) {
             let candidate = provider_key[prefix.len()..].trim().to_string();
@@ -138,7 +133,7 @@ fn apply_target_metadata(
 
     apply_route_params(normalized_metadata, target_map);
 
-    if let Some(provider_key) = read_trimmed_string(target_map, "providerKey") {
+    if let Some(provider_key) = read_object_trimmed_string(target_map, "providerKey") {
         normalized_metadata.insert(
             "pipelineId".to_string(),
             Value::String(provider_key.clone()),
@@ -146,18 +141,19 @@ fn apply_target_metadata(
         normalized_metadata.insert("providerKey".to_string(), Value::String(provider_key));
     }
 
-    if let Some(provider_type) = read_trimmed_string(target_map, "providerType") {
+    if let Some(provider_type) = read_object_trimmed_string(target_map, "providerType") {
         normalized_metadata.insert("providerType".to_string(), Value::String(provider_type));
     }
 
     normalized_metadata.insert(
         "processMode".to_string(),
         Value::String(
-            read_trimmed_string(target_map, "processMode").unwrap_or_else(|| "chat".to_string()),
+            read_object_trimmed_string(target_map, "processMode")
+                .unwrap_or_else(|| "chat".to_string()),
         ),
     );
 
-    if let Some(model_id) = read_trimmed_string(target_map, "modelId") {
+    if let Some(model_id) = read_object_trimmed_string(target_map, "modelId") {
         normalized_metadata.insert("modelId".to_string(), Value::String(model_id.clone()));
         normalized_metadata.insert("assignedModelId".to_string(), Value::String(model_id));
     }
@@ -168,7 +164,7 @@ fn apply_target_metadata(
         normalized_metadata.insert("toolCallIdStyle".to_string(), Value::String(style));
     }
 
-    if let Some(streaming) = read_trimmed_string(target_map, "streaming") {
+    if let Some(streaming) = read_object_trimmed_string(target_map, "streaming") {
         normalized_metadata.insert("targetStreaming".to_string(), Value::String(streaming));
     }
 
@@ -286,17 +282,18 @@ fn apply_target_to_subject(
         );
     }
 
-    if let Some(provider_key) = read_trimmed_string(target_map, "providerKey") {
+    if let Some(provider_key) = read_object_trimmed_string(target_map, "providerKey") {
         metadata_map.insert("providerKey".to_string(), Value::String(provider_key));
     }
-    if let Some(provider_type) = read_trimmed_string(target_map, "providerType") {
+    if let Some(provider_type) = read_object_trimmed_string(target_map, "providerType") {
         metadata_map.insert("providerType".to_string(), Value::String(provider_type));
     }
 
     metadata_map.insert(
         "processMode".to_string(),
         Value::String(
-            read_trimmed_string(target_map, "processMode").unwrap_or_else(|| "chat".to_string()),
+            read_object_trimmed_string(target_map, "processMode")
+                .unwrap_or_else(|| "chat".to_string()),
         ),
     );
 

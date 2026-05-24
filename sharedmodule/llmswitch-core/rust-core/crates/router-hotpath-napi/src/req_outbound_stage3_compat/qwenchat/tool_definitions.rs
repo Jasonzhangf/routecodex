@@ -1,27 +1,7 @@
 use serde_json::{Map, Value};
 
-use super::super::qwen::tool_definitions::normalize_qwen_family_tool_definitions;
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(|v| v.as_str())?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
-fn append_description(existing: Option<&Value>, extra: &str) -> Value {
-    let base = read_trimmed_string(existing).unwrap_or_default();
-    if base.contains(extra) {
-        return Value::String(base);
-    }
-    if base.is_empty() {
-        Value::String(extra.to_string())
-    } else {
-        Value::String(format!("{} {}", base, extra))
-    }
-}
+use super::super::qwen::tool_definitions::{append_description, normalize_qwen_family_tool_definitions};
+use crate::shared_json_utils::read_trimmed_string;
 
 pub(crate) fn normalize_qwenchat_tool_definitions(root: &Map<String, Value>) -> Option<Value> {
     let base_tools =

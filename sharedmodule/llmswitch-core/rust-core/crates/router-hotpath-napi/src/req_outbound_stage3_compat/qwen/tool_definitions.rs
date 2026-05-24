@@ -1,13 +1,5 @@
 use serde_json::{Map, Value};
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(|v| v.as_str())?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
+use crate::shared_json_utils::read_trimmed_string;
 
 fn has_exec_command_tool(tools: Option<&Value>) -> bool {
     tools
@@ -28,7 +20,7 @@ fn has_exec_command_tool(tools: Option<&Value>) -> bool {
         .unwrap_or(false)
 }
 
-fn append_description(existing: Option<&Value>, extra: &str) -> Value {
+pub(crate) fn append_description(existing: Option<&Value>, extra: &str) -> Value {
     let base = read_trimmed_string(existing).unwrap_or_default();
     if base.contains(extra) {
         return Value::String(base);

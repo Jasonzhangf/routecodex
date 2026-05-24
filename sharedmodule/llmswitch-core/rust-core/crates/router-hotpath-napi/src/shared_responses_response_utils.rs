@@ -7,19 +7,8 @@ use crate::hub_reasoning_tool_normalizer::{
     project_message_reasoning_text, sanitize_reasoning_tagged_text,
 };
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
+use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_output_content_normalizer::extract_output_segments;
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
-}
 
 fn normalize_function_call_id(call_id: Option<&str>, fallback: &str) -> String {
     let trimmed = call_id.unwrap_or("").trim();
@@ -68,7 +57,7 @@ fn normalize_tool_call(entry: &Map<String, Value>, fallback_prefix: &str) -> Opt
         .cloned()
         .unwrap_or_else(|| Value::Object(Map::new()));
     let args_str =
-        crate::resp_process_stage1_tool_governance::normalize_tool_args_preserving_raw_shape(
+        crate::resp_process_stage1_tool_governance_blocks::tool_args::normalize_tool_args_preserving_raw_shape(
             normalized_name.as_str(),
             Some(&args_value),
         )
@@ -451,7 +440,7 @@ fn build_chat_response_from_responses_impl(payload: &Value) -> Value {
         if !has_tool_calls {
             return reasoning_sanitized;
         }
-        crate::resp_process_stage1_tool_governance::strip_tool_markup_for_display_text(
+        crate::resp_process_stage1_tool_governance_blocks::display_sanitize::strip_tool_markup_for_display_text(
             reasoning_sanitized.as_str(),
         )
     };

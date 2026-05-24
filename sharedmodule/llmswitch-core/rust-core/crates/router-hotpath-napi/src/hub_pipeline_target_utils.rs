@@ -2,14 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value?.as_str()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
+use crate::shared_json_utils::read_trimmed_string;
 
 fn extract_target_model_id(target: &Value) -> Option<String> {
     let target_obj = target.as_object()?;

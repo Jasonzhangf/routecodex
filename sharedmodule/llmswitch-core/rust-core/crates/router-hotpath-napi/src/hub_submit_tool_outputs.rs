@@ -6,6 +6,8 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::shared_json_utils::{read_first_object_trimmed_string, read_trimmed_string};
+
 /// Input for building a submit_tool_outputs payload.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,19 +42,6 @@ pub struct SubmitToolOutputEntry {
     pub name: Option<String>,
 }
 
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        None
-    } else {
-        Some(raw)
-    }
-}
-
 fn normalize_output_text(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(text)) => text.clone(),
@@ -78,9 +67,7 @@ fn collect_tool_outputs(chat_envelope: &Value) -> Vec<(String, String, Option<St
                 Some(r) => r,
                 None => continue,
             };
-            let id = read_trimmed_string(row.get("tool_call_id"))
-                .or_else(|| read_trimmed_string(row.get("call_id")))
-                .or_else(|| read_trimmed_string(row.get("id")));
+            let id = read_first_object_trimmed_string(row, &["tool_call_id", "call_id", "id"]);
             let Some(id) = id else {
                 continue;
             };
@@ -105,10 +92,7 @@ fn collect_tool_outputs(chat_envelope: &Value) -> Vec<(String, String, Option<St
                     Some(r) => r,
                     None => continue,
                 };
-                let id = match read_trimmed_string(row.get("tool_call_id")) {
-                    Some(v) => Some(v),
-                    None => read_trimmed_string(row.get("call_id")),
-                };
+                let id = read_first_object_trimmed_string(row, &["tool_call_id", "call_id"]);
                 let Some(id) = id else {
                     continue;
                 };

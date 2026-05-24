@@ -3,6 +3,8 @@ use napi_derive::napi;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::shared_json_utils::read_trimmed_string;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GovernanceContextOutput {
@@ -13,18 +15,6 @@ struct GovernanceContextOutput {
     inbound_stream_intent: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     raw_request_body: Option<Value>,
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
 }
 
 fn normalize_record(value: Option<&Value>) -> Value {

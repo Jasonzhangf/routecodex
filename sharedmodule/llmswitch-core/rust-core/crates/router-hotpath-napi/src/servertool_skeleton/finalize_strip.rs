@@ -1,14 +1,7 @@
 //! finalize_strip.rs — Patch 6: migrate filterOutExecutedServerToolCalls to Rust
 
+use crate::shared_json_utils::read_object_trimmed_string;
 use serde_json::{Map, Value};
-
-fn read_string(record: &Map<String, Value>, key: &str) -> String {
-    record
-        .get(key)
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .unwrap_or_default()
-}
 
 fn collect_executed_servertool_call_ids(payload: &Value) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
@@ -22,8 +15,8 @@ fn collect_executed_servertool_call_ids(payload: &Value) -> std::collections::Ha
         let Some(row) = entry.as_object() else {
             continue;
         };
-        let name = read_string(row, "name");
-        let tool_call_id = read_string(row, "tool_call_id");
+        let name = read_object_trimmed_string(row, "name").unwrap_or_default();
+        let tool_call_id = read_object_trimmed_string(row, "tool_call_id").unwrap_or_default();
         if !name.is_empty() && !tool_call_id.is_empty() {
             ids.insert(tool_call_id);
         }
@@ -42,7 +35,7 @@ fn strip_tool_calls_in_message(
         let Some(row) = entry.as_object() else {
             return true;
         };
-        let id = read_string(row, "id");
+        let id = read_object_trimmed_string(row, "id").unwrap_or_default();
         id.is_empty() || !executed_ids.contains(id.as_str())
     });
 }

@@ -1,11 +1,6 @@
 use serde_json::Value;
 
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    value
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
+use crate::shared_json_utils::read_trimmed_string;
 
 fn read_request_id(metadata: &Value) -> Option<String> {
     read_trimmed_string(metadata.get("requestId"))

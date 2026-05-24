@@ -1,4 +1,3 @@
-use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use napi::bindgen_prelude::Result as NapiResult;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -8,8 +7,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
 
-use crate::hub_reasoning_tool_normalizer::{
-    normalize_assistant_text_to_tool_calls_json, repair_arguments_to_string,
+use crate::hub_reasoning_tool_normalizer::normalize_assistant_text_to_tool_calls_json;
+use crate::shared_json_utils::{extract_balanced_json_candidate_at, split_command_string};
+use crate::shared_tool_mapping::{
+    normalize_routecodex_tool_name, read_routecodex_tool_name_hint_from_args,
+};
+use crate::shared_tooling::{
+    chunk_string_by_bytes, extract_rcc_tool_call_fence_segments,
+    extract_structured_apply_patch_payloads_with,
+    repair_arguments_to_string,
 };
 
 #[cfg(test)]
@@ -71,9 +77,6 @@ fn hash_string(value: &str) -> String {
     out
 }
 
-fn to_json_string(value: &Value) -> String {
-    repair_arguments_to_string(value)
-}
 
 fn gen_id(ctx: Option<&HarvestContext>, index: usize) -> String {
     let prefix = ctx
@@ -84,93 +87,6 @@ fn gen_id(ctx: Option<&HarvestContext>, index: usize) -> String {
     let stamp = chrono::Utc::now().timestamp_millis();
     let suffix = Uuid::new_v4().simple().to_string();
     format!("{}_{}_{}_{}", prefix, stamp, &suffix[..6], index)
-}
-
-fn chunk_string(input: &str, size: usize) -> Vec<String> {
-    let s = input.to_string();
-    if s.is_empty() {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    let mut idx = 0usize;
-    while idx < s.len() {
-        let end = std::cmp::min(idx + size, s.len());
-        out.push(s[idx..end].to_string());
-        idx = end;
-    }
-    out
-}
-
-fn is_structured_apply_patch_payload(value: &Value) -> bool {
-    matches!(value.get("changes"), Some(Value::Array(_)))
-}
-
-fn extract_structured_apply_patch_payloads(text: &str) -> Vec<Value> {
-    let mut payloads = Vec::new();
-    let fence_re = Regex::new(r"```(?:json|apply_patch|toon)?\s*([\s\S]*?)\s*```").unwrap();
-    for caps in fence_re.captures_iter(text) {
-        if let Some(body) = caps.get(1) {
-            if let Ok(parsed) = serde_json::from_str::<Value>(body.as_str()) {
-                if is_structured_apply_patch_payload(&parsed) {
-                    payloads.push(parsed);
-                }
-            }
-        }
-    }
-    if payloads.is_empty() && text.contains("\"changes\"") {
-        if let Ok(parsed) = serde_json::from_str::<Value>(text) {
-            if is_structured_apply_patch_payload(&parsed) {
-                payloads.push(parsed);
-            }
-        }
-    }
-    payloads
-}
-
-fn extract_balanced_json_candidate_at(
-    text: &str,
-    start_byte: usize,
-    open: char,
-    close: char,
-) -> Option<(usize, String)> {
-    if start_byte >= text.len() {
-        return None;
-    }
-    let first = text[start_byte..].chars().next()?;
-    if first != open {
-        return None;
-    }
-    let mut depth: i32 = 0;
-    let mut in_string = false;
-    let mut escaped = false;
-    let mut end_byte: Option<usize> = None;
-    for (offset, ch) in text[start_byte..].char_indices() {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        if ch == '"' {
-            in_string = true;
-            continue;
-        }
-        if ch == open {
-            depth += 1;
-        } else if ch == close {
-            depth -= 1;
-            if depth == 0 {
-                end_byte = Some(start_byte + offset + ch.len_utf8());
-                break;
-            }
-        }
-    }
-    let end = end_byte?;
-    Some((end, text[start_byte..end].to_string()))
 }
 
 fn collect_json_candidates(text: &str) -> Vec<String> {
@@ -223,58 +139,6 @@ fn collect_json_candidates(text: &str) -> Vec<String> {
     out
 }
 
-fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
-    fn find_open_marker(raw: &str, cursor: usize, open_marker: &str) -> Option<usize> {
-        let mut search_from = cursor;
-        while search_from < raw.len() {
-            let rel_start = raw[search_from..].find(open_marker)?;
-            let start = search_from + rel_start;
-            if open_marker == "<<RCC_TOOL_CALLS"
-                && raw[start + open_marker.len()..].starts_with("_JSON")
-            {
-                search_from = start + open_marker.len();
-                continue;
-            }
-            return Some(start);
-        }
-        None
-    }
-
-    let mut out: Vec<String> = Vec::new();
-    let mut seen = HashSet::<String>::new();
-    let markers = [
-        ("<<RCC_TOOL_CALLS_JSON", "RCC_TOOL_CALLS_JSON"),
-        ("<<RCC_TOOL_CALLS", "RCC_TOOL_CALLS"),
-    ];
-
-    for (open_marker, close_marker) in markers {
-        let mut cursor = 0usize;
-        while cursor < raw.len() {
-            let Some(open_start) = find_open_marker(raw, cursor, open_marker) else {
-                break;
-            };
-            let start = open_start + open_marker.len();
-            let remainder = &raw[start..];
-            let inner = if let Some(rel_end) = remainder.find(close_marker) {
-                &remainder[..rel_end]
-            } else {
-                remainder
-            };
-            let candidate = inner.trim();
-            if !candidate.is_empty() && seen.insert(candidate.to_string()) {
-                out.push(candidate.to_string());
-            }
-            if let Some(rel_end) = remainder.find(close_marker) {
-                cursor = start + rel_end + close_marker.len();
-            } else {
-                break;
-            }
-        }
-    }
-
-    out
-}
-
 fn extract_tool_call_entries_from_json_value(value: &Value) -> Vec<Value> {
     if let Some(obj) = value.as_object() {
         if let Some(calls) = obj.get("tool_calls").and_then(Value::as_array) {
@@ -302,40 +166,6 @@ fn extract_tool_call_entries_from_json_value(value: &Value) -> Vec<Value> {
     Vec::new()
 }
 
-fn read_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String> {
-    fn scan(value: &Value, depth: usize) -> Option<String> {
-        if depth == 0 {
-            return None;
-        }
-        let obj = value.as_object()?;
-        if let Some(raw_name) = obj
-            .get("name")
-            .and_then(Value::as_str)
-            .map(|v| v.trim())
-            .filter(|v| !v.is_empty())
-        {
-            let normalized = normalize_tool_name(raw_name);
-            if !normalized.is_empty() {
-                return Some(normalized);
-            }
-        }
-        for key in ["function", "input", "args", "payload"] {
-            if let Some(child) = obj.get(key) {
-                if let Some(found) = scan(child, depth - 1) {
-                    return Some(found);
-                }
-            }
-        }
-        None
-    }
-
-    match raw_args {
-        Some(Value::Object(_)) => scan(raw_args?, 3),
-        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 2)),
-        _ => None,
-    }
-}
-
 fn build_tool_events_from_entries(
     entries: Vec<Value>,
     ctx: Option<&HarvestContext>,
@@ -354,7 +184,7 @@ fn build_tool_events_from_entries(
             .or_else(|| call_obj.get("arguments").cloned())
             .or_else(|| call_obj.get("input").cloned())
             .unwrap_or_else(|| Value::Object(Map::new()));
-        let hinted_name = read_tool_name_hint_from_args(Some(&args_value));
+        let hinted_name = read_routecodex_tool_name_hint_from_args(Some(&args_value));
         let name_raw = fn_obj
             .and_then(|row| row.get("name"))
             .and_then(Value::as_str)
@@ -363,7 +193,8 @@ fn build_tool_events_from_entries(
             .unwrap_or("")
             .trim()
             .to_string();
-        let normalized_name = normalize_tool_name(name_raw.as_str());
+        let normalized_name = normalize_routecodex_tool_name(Some(name_raw.as_str()))
+            .unwrap_or_default();
         if normalized_name.is_empty() {
             continue;
         }
@@ -374,9 +205,9 @@ fn build_tool_events_from_entries(
             .or_else(|| call_obj.get("tool_call_id").and_then(Value::as_str))
             .map(|v| v.to_string())
             .unwrap_or_else(|| gen_id(ctx, idx));
-        let arg_str = to_json_string(&args_value);
+        let arg_str = repair_arguments_to_string(&args_value);
         push_tool_call_event(&mut out, idx, &id, Some(&normalized_name), None);
-        for part in chunk_string(&arg_str, chunk_size) {
+        for part in chunk_string_by_bytes(&arg_str, chunk_size) {
             push_tool_call_event(&mut out, idx, &id, None, Some(&part));
         }
         idx += 1;
@@ -438,58 +269,6 @@ fn extract_reasoning_json_tool_calls(
     build_tool_events_from_entries(tool_calls, ctx, chunk_size)
 }
 
-fn split_command(input: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut quote: Option<char> = None;
-    for ch in input.chars() {
-        if let Some(q) = quote {
-            if ch == q {
-                quote = None;
-            } else {
-                cur.push(ch);
-            }
-            continue;
-        }
-        if ch == '"' || ch == '\'' {
-            quote = Some(ch);
-            continue;
-        }
-        if ch.is_whitespace() {
-            if !cur.is_empty() {
-                out.push(cur.clone());
-                cur.clear();
-            }
-            continue;
-        }
-        cur.push(ch);
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    if out.is_empty() && !input.trim().is_empty() {
-        return vec![input.trim().to_string()];
-    }
-    out
-}
-
-fn normalize_tool_name(name: &str) -> String {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    let without_prefix = if trimmed.to_ascii_lowercase().starts_with("functions.") {
-        trimmed[10..].trim()
-    } else {
-        trimmed
-    };
-    if without_prefix.eq_ignore_ascii_case("execute") {
-        return "shell".to_string();
-    }
-    normalize_responses_function_name(Some(without_prefix))
-        .unwrap_or_else(|| without_prefix.to_string())
-}
-
 fn push_tool_call_event(
     events: &mut Vec<Value>,
     index: usize,
@@ -532,14 +311,16 @@ fn extract_from_textual(
         return events;
     }
 
-    let structured_payloads = extract_structured_apply_patch_payloads(content);
+    let structured_payloads = extract_structured_apply_patch_payloads_with(content, |raw| {
+        serde_json::from_str::<Value>(raw).ok()
+    });
     if !structured_payloads.is_empty() {
         let mut idx = 0usize;
         for payload in structured_payloads {
             let id = gen_id(ctx, idx);
-            let arg_str = to_json_string(&payload);
+            let arg_str = repair_arguments_to_string(&payload);
             push_tool_call_event(&mut events, idx, &id, Some("apply_patch"), None);
-            for part in chunk_string(&arg_str, chunk_size) {
+            for part in chunk_string_by_bytes(&arg_str, chunk_size) {
                 push_tool_call_event(&mut events, idx, &id, None, Some(&part));
             }
             idx += 1;
@@ -580,7 +361,7 @@ fn extract_from_textual(
             continue;
         }
 
-        let normalized_name = normalize_tool_name(&open_name);
+        let normalized_name = normalize_routecodex_tool_name(Some(&open_name)).unwrap_or_default();
         if normalized_name.is_empty() {
             continue;
         }
@@ -598,15 +379,20 @@ fn extract_from_textual(
             let mut value = serde_json::from_str::<Value>(raw)
                 .unwrap_or_else(|_| Value::String(raw.to_string()));
             if normalized_name == "shell" && key == "command" && !value.is_array() {
-                value = Value::Array(split_command(raw).into_iter().map(Value::String).collect());
+                value = Value::Array(
+                    split_command_string(raw)
+                        .into_iter()
+                        .map(Value::String)
+                        .collect(),
+                );
             }
             args_obj.insert(key, value);
         }
 
         let id = gen_id(ctx, idx);
         push_tool_call_event(&mut function_events, idx, &id, Some(&normalized_name), None);
-        let arg_str = to_json_string(&Value::Object(args_obj));
-        for part in chunk_string(&arg_str, chunk_size) {
+        let arg_str = repair_arguments_to_string(&Value::Object(args_obj));
+        for part in chunk_string_by_bytes(&arg_str, chunk_size) {
             push_tool_call_event(&mut function_events, idx, &id, None, Some(&part));
         }
         idx += 1;
@@ -648,11 +434,11 @@ fn extract_from_textual(
             &mut invoke_events,
             idx,
             &id,
-            Some(&normalize_tool_name(&tool_name)),
+            normalize_routecodex_tool_name(Some(&tool_name)).as_deref(),
             None,
         );
-        let arg_str = to_json_string(&Value::Object(args_obj));
-        for part in chunk_string(&arg_str, chunk_size) {
+        let arg_str = repair_arguments_to_string(&Value::Object(args_obj));
+        for part in chunk_string_by_bytes(&arg_str, chunk_size) {
             push_tool_call_event(&mut invoke_events, idx, &id, None, Some(&part));
         }
         idx += 1;
@@ -700,15 +486,21 @@ fn extract_from_textual(
             let mut value = serde_json::from_str::<Value>(raw)
                 .unwrap_or_else(|_| Value::String(raw.to_string()));
             if name == "shell" && key == "command" && !value.is_array() {
-                value = Value::Array(split_command(raw).into_iter().map(Value::String).collect());
+                value = Value::Array(
+                    split_command_string(raw)
+                        .into_iter()
+                        .map(Value::String)
+                        .collect(),
+                );
             }
             args_obj.insert(key, value);
         }
         if !name.is_empty() {
             let id = gen_id(ctx, 0);
-            push_tool_call_event(&mut events, 0, &id, Some(&normalize_tool_name(&name)), None);
-            let arg_str = to_json_string(&Value::Object(args_obj));
-            for part in chunk_string(&arg_str, chunk_size) {
+            let normalized_name = normalize_routecodex_tool_name(Some(&name)).unwrap_or_default();
+            push_tool_call_event(&mut events, 0, &id, Some(&normalized_name), None);
+            let arg_str = repair_arguments_to_string(&Value::Object(args_obj));
+            for part in chunk_string_by_bytes(&arg_str, chunk_size) {
                 push_tool_call_event(&mut events, 0, &id, None, Some(&part));
             }
             matched = true;
@@ -733,16 +525,22 @@ fn extract_from_textual(
             serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.to_string()));
         let mut args_obj = Map::new();
         if name == "shell" && key == "command" && !value.is_array() {
-            value = Value::Array(split_command(raw).into_iter().map(Value::String).collect());
+            value = Value::Array(
+                split_command_string(raw)
+                    .into_iter()
+                    .map(Value::String)
+                    .collect(),
+            );
         }
         if !key.is_empty() {
             args_obj.insert(key, value);
         }
         if !name.is_empty() {
             let id = gen_id(ctx, 0);
-            push_tool_call_event(&mut events, 0, &id, Some(&normalize_tool_name(&name)), None);
-            let arg_str = to_json_string(&Value::Object(args_obj));
-            for part in chunk_string(&arg_str, chunk_size) {
+            let normalized_name = normalize_routecodex_tool_name(Some(&name)).unwrap_or_default();
+            push_tool_call_event(&mut events, 0, &id, Some(&normalized_name), None);
+            let arg_str = repair_arguments_to_string(&Value::Object(args_obj));
+            for part in chunk_string_by_bytes(&arg_str, chunk_size) {
                 push_tool_call_event(&mut events, 0, &id, None, Some(&part));
             }
             return events;
@@ -799,13 +597,14 @@ pub fn harvest_tools_json(input_json: String) -> NapiResult<String> {
                 .and_then(Value::as_str)
                 .map(|v| v.to_string());
             let args_val = fc.get("arguments").cloned().unwrap_or(Value::Null);
-            let arg_str = to_json_string(&args_val);
+            let arg_str = repair_arguments_to_string(&args_val);
             let id = gen_id(ctx, 0);
             if let Some(name_value) = name.as_ref() {
-                let normalized_name = normalize_tool_name(name_value);
+                let normalized_name =
+                    normalize_routecodex_tool_name(Some(name_value)).unwrap_or_default();
                 if !normalized_name.is_empty() {
                     push_tool_call_event(&mut events, 0, &id, Some(&normalized_name), None);
-                    for part in chunk_string(&arg_str, chunk_size) {
+                    for part in chunk_string_by_bytes(&arg_str, chunk_size) {
                         push_tool_call_event(&mut events, 0, &id, None, Some(&part));
                     }
                 }
@@ -843,7 +642,7 @@ pub fn harvest_tools_json(input_json: String) -> NapiResult<String> {
                     .and_then(Value::as_object)
                     .and_then(|row| row.get("arguments"))
                     .cloned();
-                let args_str = args_val.map(|v| to_json_string(&v));
+                let args_str = args_val.map(|v| repair_arguments_to_string(&v));
                 let args_hash = args_str.as_ref().map(|v| hash_string(v));
                 let entry = state_guard.get(key).cloned().unwrap_or_default();
                 let is_dup =
@@ -854,12 +653,12 @@ pub fn harvest_tools_json(input_json: String) -> NapiResult<String> {
                             &mut events,
                             idx,
                             &id,
-                            Some(&normalize_tool_name(nm)),
+                            normalize_routecodex_tool_name(Some(nm)).as_deref(),
                             None,
                         );
                     }
                     if let Some(ref args_chunk) = args_str {
-                        for part in chunk_string(args_chunk, chunk_size) {
+                        for part in chunk_string_by_bytes(args_chunk, chunk_size) {
                             push_tool_call_event(&mut events, idx, &id, None, Some(&part));
                         }
                     }
@@ -899,7 +698,7 @@ pub fn harvest_tools_json(input_json: String) -> NapiResult<String> {
                         {
                             if let Some(args) = function.get_mut("arguments") {
                                 if !args.is_string() {
-                                    let normalized = to_json_string(args);
+                                    let normalized = repair_arguments_to_string(args);
                                     *args = Value::String(normalized);
                                 }
                             }

@@ -1,6 +1,7 @@
 use napi::bindgen_prelude::Result as NapiResult;
-use regex::Regex;
 use serde_json::{json, Map, Value};
+use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_tooling::normalize_standard_chunked_tool_text;
 
 fn parse_json_value(raw: &str) -> NapiResult<Value> {
     serde_json::from_str(raw).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -25,14 +26,6 @@ fn to_array(value: Option<&Value>) -> Vec<Value> {
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default()
-}
-
-fn read_string(value: Option<&Value>) -> Option<String> {
-    value
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string())
 }
 
 fn read_string_array(value: Option<&Value>) -> Vec<String> {
@@ -92,70 +85,15 @@ fn to_string_args(value: Option<&Value>) -> String {
     }
 }
 
-fn strip_terminal_right_gutter_noise(line: &str) -> String {
-    Regex::new(r"\s+[│┃]\s*[·.]{6,}\s*$")
-        .map(|re| re.replace(line, "").to_string())
-        .unwrap_or_else(|_| line.to_string())
-}
-
-fn is_chunked_exec_transcript_header_line(line: &str) -> bool {
-    Regex::new(
-        r"(?i)^(?:\[工具结果\]|Command:\s+.*|Chunk ID:\s+.*|Wall time:\s+.*|Process exited with code\s+.*|Process running with session ID\s+.*|Original token count:\s+.*)$",
-    )
-    .map(|re| re.is_match(line.trim()))
-    .unwrap_or(false)
-}
-
-fn unwrap_chunked_exec_transcript_shape(raw: &str) -> Option<String> {
-    let lines: Vec<&str> = raw.lines().collect();
-    if lines.is_empty() {
-        return None;
-    }
-    let output_idx = lines
-        .iter()
-        .position(|line| line.trim().eq_ignore_ascii_case("Output:"))?;
-    let header = &lines[..output_idx];
-    if header.is_empty()
-        || !header
-            .iter()
-            .all(|line| is_chunked_exec_transcript_header_line(line))
-    {
-        return None;
-    }
-    let output = lines
-        .iter()
-        .skip(output_idx + 1)
-        .copied()
-        .collect::<Vec<&str>>()
-        .join("\n")
-        .trim()
-        .to_string();
-    Some(output)
-}
-
-fn normalize_tool_content_text(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    let without_gutter = trimmed
-        .lines()
-        .map(strip_terminal_right_gutter_noise)
-        .collect::<Vec<String>>()
-        .join("\n");
-    if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(without_gutter.as_str()) {
-        return unwrapped;
-    }
-    without_gutter.trim().to_string()
-}
-
 fn normalize_tool_content(value: Option<&Value>) -> String {
     match value {
-        Some(Value::String(text)) if !text.trim().is_empty() => normalize_tool_content_text(text),
+        Some(Value::String(text)) if !text.trim().is_empty() => {
+            normalize_standard_chunked_tool_text(text)
+        }
         Some(Value::String(_)) | None | Some(Value::Null) => String::new(),
         Some(other) => serde_json::to_string(other)
             .ok()
-            .map(|text| normalize_tool_content_text(text.as_str()))
+            .map(|text| normalize_standard_chunked_tool_text(text.as_str()))
             .filter(|text| !text.is_empty())
             .unwrap_or_default(),
     }
@@ -185,7 +123,7 @@ fn sanitize_historical_user_content(role: &str, content: &Value) -> Value {
                     let Some(obj) = item.as_object() else {
                         return item.clone();
                     };
-                    let has_tool_use_id = read_string(obj.get("tool_use_id")).is_some();
+                    let has_tool_use_id = read_trimmed_string(obj.get("tool_use_id")).is_some();
                     let Some(content_text) = obj.get("content").and_then(|v| v.as_str()) else {
                         return item.clone();
                     };
@@ -229,12 +167,12 @@ fn normalize_assistant_tool_calls(
             out.insert(
                 "type".to_string(),
                 Value::String(
-                    read_string(row.get("type")).unwrap_or_else(|| "function".to_string()),
+                    read_trimmed_string(row.get("type")).unwrap_or_else(|| "function".to_string()),
                 ),
             );
 
             let mut out_function = Map::new();
-            if let Some(name) = read_string(function.get("name")) {
+            if let Some(name) = read_trimmed_string(function.get("name")) {
                 out_function.insert("name".to_string(), Value::String(name));
             }
             if arguments_type == "string" {
@@ -250,7 +188,7 @@ fn normalize_assistant_tool_calls(
             }
             out.insert("function".to_string(), Value::Object(out_function));
 
-            if let Some(id) = read_string(row.get("id")) {
+            if let Some(id) = read_trimmed_string(row.get("id")) {
                 out.insert("id".to_string(), Value::String(id));
             }
             Value::Object(out)
@@ -265,7 +203,7 @@ fn normalize_request_message(
     let row = to_object(Some(message));
     let messages_cfg = to_object(request_cfg.get("messages"));
     let allowed_roles = read_string_array(messages_cfg.get("allowedRoles"));
-    let requested_role = read_string(row.get("role"));
+    let requested_role = read_trimmed_string(row.get("role"));
     let role = requested_role
         .filter(|role| allowed_roles.iter().any(|allowed| allowed == role))
         .unwrap_or_else(|| "user".to_string());
@@ -278,10 +216,10 @@ fn normalize_request_message(
             "content".to_string(),
             Value::String(normalize_tool_content(row.get("content"))),
         );
-        if let Some(name) = read_string(row.get("name")) {
+        if let Some(name) = read_trimmed_string(row.get("name")) {
             out.insert("name".to_string(), Value::String(name));
         }
-        if let Some(tool_call_id) = read_string(row.get("tool_call_id")) {
+        if let Some(tool_call_id) = read_trimmed_string(row.get("tool_call_id")) {
             out.insert("tool_call_id".to_string(), Value::String(tool_call_id));
         }
         return out;
@@ -308,7 +246,7 @@ fn normalize_request_message(
         }
     }
 
-    if let Some(reasoning_content) = read_string(row.get("reasoning_content")) {
+    if let Some(reasoning_content) = read_trimmed_string(row.get("reasoning_content")) {
         out.insert(
             "reasoning_content".to_string(),
             Value::String(reasoning_content),
@@ -359,7 +297,7 @@ fn apply_message_rules(messages: &mut Vec<Map<String, Value>>, request_cfg: &Map
         for rule in &rules {
             let rule_row = to_object(Some(rule));
             let when = to_object(rule_row.get("when"));
-            let match_role = read_string(when.get("role"))
+            let match_role = read_trimmed_string(when.get("role"))
                 .map(|role| {
                     message
                         .get("role")
@@ -378,7 +316,7 @@ fn apply_message_rules(messages: &mut Vec<Map<String, Value>>, request_cfg: &Map
                 continue;
             }
 
-            match read_string(rule_row.get("action")).as_deref() {
+            match read_trimmed_string(rule_row.get("action")).as_deref() {
                 Some("drop") => {
                     dropped = true;
                     break;
@@ -413,8 +351,8 @@ fn pair_tool_results(messages: &mut [Map<String, Value>]) {
                 let call_row = to_object(Some(&call));
                 let function = to_object(call_row.get("function"));
                 if let (Some(id), Some(name)) = (
-                    read_string(call_row.get("id")),
-                    read_string(function.get("name")),
+                    read_trimmed_string(call_row.get("id")),
+                    read_trimmed_string(function.get("name")),
                 ) {
                     names_by_id.insert(id, Value::String(name));
                 }
@@ -428,9 +366,9 @@ fn pair_tool_results(messages: &mut [Map<String, Value>]) {
             .and_then(|value| value.as_str())
             .map(|role| role == "tool")
             .unwrap_or(false)
-            && read_string(message.get("name")).is_none()
+            && read_trimmed_string(message.get("name")).is_none()
         {
-            if let Some(tool_call_id) = read_string(message.get("tool_call_id")) {
+            if let Some(tool_call_id) = read_trimmed_string(message.get("tool_call_id")) {
                 if let Some(Value::String(name)) = names_by_id.get(&tool_call_id) {
                     message.insert("name".to_string(), Value::String(name.clone()));
                 }
@@ -452,7 +390,7 @@ fn enforce_shell_schema(schema: &Map<String, Value>) -> Map<String, Value> {
         .map(|items| !items.is_empty())
         .unwrap_or(false);
     if !has_one_of {
-        let description = read_string(command.get("description")).unwrap_or_else(|| {
+        let description = read_trimmed_string(command.get("description")).unwrap_or_else(|| {
             "Shell command. Prefer a single string; an array of argv tokens is also accepted."
                 .to_string()
         });
@@ -505,11 +443,11 @@ fn normalize_tool_parameters(input: Option<&Value>, name: Option<&str>) -> Optio
 
 fn normalize_single_tool(tool_entry: &Value) -> Value {
     let tool = to_object(Some(tool_entry));
-    let top_name = read_string(tool.get("name"));
-    let top_description = read_string(tool.get("description"));
+    let top_name = read_trimmed_string(tool.get("name"));
+    let top_description = read_trimmed_string(tool.get("description"));
     let function = to_object(tool.get("function"));
-    let name = read_string(function.get("name")).or(top_name);
-    let description = read_string(function.get("description")).or(top_description);
+    let name = read_trimmed_string(function.get("name")).or(top_name);
+    let description = read_trimmed_string(function.get("description")).or(top_description);
     let parameters = normalize_tool_parameters(
         function.get("parameters").or(tool.get("parameters")),
         name.as_deref(),
@@ -615,12 +553,12 @@ fn normalize_response_tool_calls(
             out.insert(
                 "type".to_string(),
                 Value::String(
-                    read_string(row.get("type")).unwrap_or_else(|| "function".to_string()),
+                    read_trimmed_string(row.get("type")).unwrap_or_else(|| "function".to_string()),
                 ),
             );
 
             let mut out_function = Map::new();
-            if let Some(name) = read_string(function.get("name")) {
+            if let Some(name) = read_trimmed_string(function.get("name")) {
                 out_function.insert("name".to_string(), Value::String(name));
             }
             if arguments_type == "string" {
@@ -636,7 +574,7 @@ fn normalize_response_tool_calls(
             }
             out.insert("function".to_string(), Value::Object(out_function));
 
-            if let Some(id) = read_string(row.get("id")) {
+            if let Some(id) = read_trimmed_string(row.get("id")) {
                 out.insert("id".to_string(), Value::String(id));
             }
             Value::Object(out)
@@ -661,8 +599,8 @@ fn normalize_response_message(
     out.insert(
         "role".to_string(),
         Value::String(
-            read_string(row.get("role"))
-                .or_else(|| read_string(message_cfg.get("roleDefault")))
+            read_trimmed_string(row.get("role"))
+                .or_else(|| read_trimmed_string(message_cfg.get("roleDefault")))
                 .unwrap_or_else(|| "assistant".to_string()),
         ),
     );
@@ -689,7 +627,7 @@ fn normalize_response_message(
         );
     }
 
-    if let Some(reasoning_content) = read_string(row.get("reasoning_content")) {
+    if let Some(reasoning_content) = read_trimmed_string(row.get("reasoning_content")) {
         out.insert(
             "reasoning_content".to_string(),
             Value::String(reasoning_content),
