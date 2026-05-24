@@ -10639,3 +10639,18 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi shared_read_object_trimmed_string_deletion_gate_removed_hub_bridge_pipeline_local_wrapper -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] hub pipeline rust shared helper closeout（requested tools canonicalization wrapper 删除）
+- 先补 red gate：`requested_tools_deletion_gate_removed_local_requested_tool_name_key_wrapper`
+- 红测命中证据：`resp_process_stage1_tool_governance_blocks/requested_tools.rs` 仍保留本地 `fn normalize_requested_tool_name_key(raw_name: &str) -> Option<String>`
+- 真源确认：该实现只是 `normalize_routecodex_tool_name(Some(...))` 后再做 `to_ascii_lowercase()` 的零逻辑 wrapper；tool canonicalization 真源应唯一落在 `shared_tool_mapping::normalize_routecodex_tool_name`。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/requested_tools.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_mapping.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是 requested tools 治理语义错误，而是响应治理块内部仍保留 requested-tool-name key canonicalization 第二入口；
+  - 直接物理删除本地 wrapper，并让调用点直连 `normalize_routecodex_tool_name(...).map(|key| key.to_ascii_lowercase())`，才能保证 canonicalization 单点 shared 真源；
+  - 保留 wrapper、另造 shared 包装层、或改别处匹配逻辑，都会继续保留第二真源，不满足 closeout 目标。
+- 验证：
+  - `cargo test -p router-hotpath-napi requested_tools_deletion_gate_removed_local_requested_tool_name_key_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅

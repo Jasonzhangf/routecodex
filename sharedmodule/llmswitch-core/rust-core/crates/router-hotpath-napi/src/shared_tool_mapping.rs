@@ -963,6 +963,22 @@ mod tests {
     }
 
     #[test]
+    fn requested_tools_deletion_gate_removed_local_requested_tool_name_key_wrapper() {
+        let path = crate_src_path("resp_process_stage1_tool_governance_blocks/requested_tools.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn normalize_requested_tool_name_key(raw_name: &str) -> Option<String> {"),
+            "requested_tools.rs still owns local normalize_requested_tool_name_key wrapper"
+        );
+        assert!(
+            source.contains("normalize_routecodex_tool_name(Some(raw_name)).map(|key| key.to_ascii_lowercase())")
+                || source.contains("normalize_routecodex_tool_name(Some(raw_name.as_str())).map(|key| key.to_ascii_lowercase())"),
+            "requested_tools.rs must route requested tool key canonicalization through shared normalize_routecodex_tool_name truth"
+        );
+    }
+
+    #[test]
     fn normalize_tool_name_responses_mode_canonicalizes_routecodex_tool_aliases() {
         assert_eq!(
             normalize_routecodex_tool_name(Some("websearch")),

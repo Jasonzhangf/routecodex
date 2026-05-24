@@ -1,5 +1,5 @@
-use crate::resp_process_stage1_tool_governance_blocks::tool_names::normalize_tool_name;
 use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 
@@ -77,15 +77,6 @@ pub(crate) fn inject_requested_tool_names_into_internal_governance(
     );
 }
 
-fn normalize_requested_tool_name_key(raw_name: &str) -> Option<String> {
-    let normalized = normalize_tool_name(raw_name)?;
-    let key = normalized.trim().to_ascii_lowercase();
-    if key.is_empty() {
-        return None;
-    }
-    Some(key)
-}
-
 fn collect_requested_tool_name_keys_from_candidate(
     candidate: Option<&Value>,
     out: &mut HashSet<String>,
@@ -99,7 +90,9 @@ fn collect_requested_tool_name_keys_from_candidate(
 
     for row in rows {
         if let Some(raw_name) = row.as_str() {
-            if let Some(key) = normalize_requested_tool_name_key(raw_name) {
+            if let Some(key) = normalize_routecodex_tool_name(Some(raw_name))
+                .map(|key| key.to_ascii_lowercase())
+            {
                 out.insert(key);
             }
             continue;
@@ -113,7 +106,9 @@ fn collect_requested_tool_name_keys_from_candidate(
             .and_then(|function| read_trimmed_string(function.get("name")))
             .or_else(|| read_trimmed_string(obj.get("name")));
         if let Some(raw_name) = raw_name {
-            if let Some(key) = normalize_requested_tool_name_key(raw_name.as_str()) {
+            if let Some(key) = normalize_routecodex_tool_name(Some(raw_name.as_str()))
+                .map(|key| key.to_ascii_lowercase())
+            {
                 out.insert(key);
             }
         }
@@ -146,7 +141,7 @@ pub(crate) fn read_tool_call_name_key(tool_call: &Value) -> Option<String> {
         .and_then(|row| row.get("function"))
         .and_then(Value::as_object)
         .and_then(|function| read_trimmed_string(function.get("name")))?;
-    normalize_requested_tool_name_key(raw_name.as_str())
+    normalize_routecodex_tool_name(Some(raw_name.as_str())).map(|key| key.to_ascii_lowercase())
 }
 
 pub(crate) fn retain_allowed_tool_calls(
