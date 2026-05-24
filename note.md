@@ -1,5 +1,17 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-05-24 hub pipeline rust closeout / 当前红门禁核对
+
+- `tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts` 当前 4/4 绿，说明 request-side `web_search/review/clientInjectReady` contract 已真实命中最新 native。
+- `tests/sharedmodule/chat-semantics-stage1.spec.ts` 当前剩余 2 红里，有 2 个已确认是 **stale test/fixture**，不是 Rust 真源应倒退：
+  1. deepseek web search bypass case 的 fixture 缺 `executionMode: "direct"` / `directActivation: "route"`；而项目当前 SSOT（`src/cli/config/init-provider-catalog.ts`、`docs/design/route-classifier-simplify.md`）已明确 deepseek native search 是 direct route。
+  2. 默认 clock 注入断言与 `tests/servertool/servertool-clock.spec.ts` 冲突；当前 Rust 真源 `req_process_stage1_tool_governance_blocks/servertool_injection.rs` 也明确默认不注入 clock，除非 runtime `clock.enabled` 或 followup 特殊开关为真。
+- `tests/servertool/review-followup.spec.ts` 6/6 全红的唯一高价值根因已确认：
+  - `src/servertool/server-side-tools.ts` 运行主注册入口缺少 `./handlers/review.js` side-effect import；
+  - 同时也缺少 `./handlers/web-search.js` import，属于 active runtime handler registration residue；
+  - `src/servertool/handlers/` 下当前不存在 `review.ts`，所以 `review` tool_call 根本没有 active handler，导致 orchestration 全部落成 `skipped_passthrough / flow=none`。
+- 这不是 req_process 问题，也不是 followup-mainline 的问题；唯一正确修改点是 **servertool runtime active handler registration + review handler 本体**。先补这层，才能继续谈 response-side Rust/TS closeout。
+
 ## 2026-05-18 responses conversation store 持续涨真源
 
 - 线上证据：`mem-observer` 中 `scopeIndex` 基本稳定（如 4），但 `requestMap/responseIndex` 随同一 session 连续请求单调上升（如 19/18）。这说明不是“新 scope 正常增加”，而是**旧 scoped entry 被新的 scoped entry 覆盖后，仍残留在 requestMap/responseIndex**。
@@ -8722,3 +8734,602 @@ Protocol target:
 - Current evidence is not enough to claim all tools are fully verified on live 5520. Unit coverage is strong for tool partitioning, RCC prompt guidance, tool_result pairing, repeated same-args/new-call-id handling, and apply_patch schema/guidance.
 - Verified by tests: Windsurf provider suite 228/228, TS compile, apply_patch servertool flow/schema tests exist. Live 5520 codex-samples show tool guidance injection for broad text tools, but no complete live model-executed matrix for every text tool.
 - Missing closeout: real 5520 smoke matrix for representative native tool (`shell_command`/`exec_command`) plus RCC text tools (`apply_patch`, `update_plan`, `write_stdin`) and at least one generic MCP/computer-use text tool, each proving call harvest -> executor result -> paired tool_result reinjection -> next-turn model uses result.
+
+## 2026-05-24 hub pipeline clock closeout 继续
+
+- 当前 P0 唯一残留 stage residue 仍是 `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts` 里的 `applyChatProcessClockRuntimeBridge(...)`。
+- 现状确认：Rust `req_process_stage1_tool_governance.rs` 只负责 clock tool schema 注入，还没有把 clear directive / marker scheduling / due reminder inject / time tag / reservation metadata 收进 Rust。
+- 现有 TS `chat-process-clock-runtime-bridge.ts` 仍承载上述语义，属于 active TS-authoritative residue，不是薄壳。
+- 下一步顺序固定：先补 `req-process-stage1-clock-deletion-gate.spec.ts` 与 `req-process-clock-native-contract.spec.ts`，再把 clock req_process 主链语义收进 Rust，最后删除 stage1 对 TS clock bridge 的调用。
+
+
+## 2026-05-24 Windsurf RCC summary verbosity cleanup
+- Root cause: `buildWindsurfRccToolResultContext` injected verbose final-answer marker instructions, duplicated marker guidance before/after tool_result, and could push Windsurf into long summaries.
+- Fix: keep only concise paired-execution feedback plus a compact `Markers:` line when markers exist; do not ask the model to explain tool results or include marker evidence verbatim in final answers by default.
+- Validation: Windsurf provider Jest 228/228 passed; `npx tsc --noEmit` passed.
+
+## 2026-05-24 Windsurf provider architecture audit
+- Scope: `src/providers/core/runtime/windsurf-chat-provider.ts` is still a 5.4k-line monolith carrying proto parsing, auth, LS process lifecycle, http2 transport, Cascade orchestration, tool partitioning, prompt projection, history parsing, response conversion, and error classification.
+- Fallback risks found: health swallows errors to boolean; persisted token parse returns null on all failures; CheckUserLoginMethod/PostAuth dual-path and live runtime/configured runtime selection need explicit strategy naming; parser has silent `continue` branches and id/input fallback paths that should become typed accepted-shape handling or explicit fail-fast.
+- FD/resource risks found: managed LS spawn uses ignored stdio and unref; http2 sessions are pooled and closed on error/transport reset, but no global provider dispose hook was found; stale LS termination is SIGTERM-only without wait/reap verification; readiness probe creates short-lived http2 sessions but closes them.
+- Blocks design gap: provider is not yet common-functions + blocks + pure orchestration; Windsurf-specific request/history/tool/prompt/Cascade transport semantics remain in one TS class instead of extracted pure blocks or Rust/shared-core truth.
+
+## 2026-05-24 Windsurf P0 typed-resource cleanup pass 1
+- Implemented first P0 slice in `src/providers/core/runtime/windsurf-chat-provider.ts`: persisted token file parsing now returns a typed parse result and fails fast on malformed/read failures; missing file remains explicit `credential:null`.
+- SSE connect-frame JSON/object parse now emits `WINDSURF_SSE_MALFORMED_FRAME` instead of silently skipping malformed frames.
+- Runtime candidate selection now returns `WindsurfRuntimeCandidatePlan` with named strategy/diagnostics and only selects configured-exact or routecodex-scoped live LS; unrelated live LS no longer overrides configured runtime.
+- Added `disposeWindsurfProviderResources()` resource block to close pooled http2 sessions and terminate stale managed runtimes by explicit PID.
+- Validation: `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand` passed 232/232; `npx tsc --noEmit` passed.
+- Remaining objective gaps: provider still monolithic; more silent catches/continues remain; LS termination still SIGTERM-only without wait confirmation; P1/P2 block/Rust migration not complete.
+
+## 2026-05-24 Windsurf provider architecture audit notes
+
+- Scope: reviewed `src/providers/core/runtime/windsurf-chat-provider.ts` against no-fallback, FD lifecycle, and public-functions/blocks/pure-orchestration requirements.
+- Verified current tree compiles with `npx tsc --noEmit` and Windsurf runtime suite passes `232/232` via `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand`.
+- P0 remaining audit finding: auth credential flow still contains password-login fallthrough strategy for inline/persisted session auth failures (`canFallbackToPasswordLogin`); this should be renamed/reworked as explicit auth strategy or fail-fast, not fallback semantics.
+- P0 resource lifecycle finding: disposal now closes local grpc/http2 pooled sessions and sends explicit PID SIGTERM for stale managed LS; recently added exit-confirmation path compiles and tests pass, but coverage should explicitly assert confirmed vs unconfirmed termination outcomes.
+- P1 architecture finding: provider file remains a 5.6k-line TS monolith with many private build/parse/transport/history functions; it has blocks in spirit but not a public block library + pure orchestration shape. Next structural step should split auth, runtime lifecycle, cascade transport, history/tool projection, response parse into provider-local blocks, then move reusable tool/history semantics to Rust/shared truth.
+
+## 2026-05-24 Windsurf provider goal continuation
+
+- P0 resource closeout progressed: provider dispose test now verifies SIGTERM plus liveness probe, and a new unconfirmed-exit test covers stale managed LS remaining alive on pid/port.
+- P1 block split progressed: extracted `src/providers/core/runtime/windsurf/auth-block.ts` for managed auth pure helpers/strategy and `src/providers/core/runtime/windsurf/runtime-lifecycle-block.ts` for managed runtime termination confirmation.
+- Fallback wording cleanup: provider source no longer uses auth fallback helper/name; auth tests now describe explicit account-password strategy instead of fallback/fallthrough.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 233/233.
+- Remaining objective gaps: cascade transport, history/tool projection, and response parse blocks still live in `windsurf-chat-provider.ts`; reusable tool/history/prompt semantics still need Rust/shared truth migration; dual PostAuth strategy naming remains to inspect/normalize.
+
+## 2026-05-24 Windsurf provider goal continuation 2
+
+- P1 runtime block progressed: moved live LS candidate selection strategy into `src/providers/core/runtime/windsurf/runtime-lifecycle-block.ts`; provider now only supplies configured runtime + live runtime scan result.
+- P1 named strategy progressed: PostAuth endpoint ordering is now represented by `buildWindsurfPostAuthEndpointStrategy(...)` with strategy name `app_backend_then_self_serve`, and logs carry the strategy name instead of an implicit dual/fallback loop.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 233/233.
+- Remaining objective gaps: cascade transport block, history/tool projection block, response parse block, completed-native-step strategy extraction, and P2 Rust/shared truth migration are still active.
+
+## 2026-05-24 Windsurf provider goal continuation 3
+
+- P1 history/tool projection progressed: extracted `src/providers/core/runtime/windsurf/history-tool-projection-block.ts` for native tool signature, completed native call-id/signature collection, and named strategy `completed_native_tool_result_suppression`.
+- Provider poll loop now calls `shouldSuppressCompletedNativeToolCall(...)` instead of embedding completed-native suppression branches inline; `poll.emptyAfterNativeResult` logs the strategy name.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 233/233.
+- Remaining objective gaps: cascade transport block and response parse block still live in `windsurf-chat-provider.ts`; broader tool/history/prompt Rust/shared truth migration remains active.
+
+## 2026-05-24 Windsurf provider goal continuation 4
+
+- P1 response parse block progressed: extracted `WindsurfConnectSseTransform` into `src/providers/core/runtime/windsurf/response-parse-block.ts` and kept provider static export compatibility.
+- Provider stream path now constructs `WindsurfConnectSseTransform(createWindsurfProviderError)` so malformed SSE frame errors still use provider-classified error fields.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 233/233.
+- Remaining objective gaps: non-stream `parseGetChatMessageResponse`, trajectory proto parse helpers, and cascade transport block still live in `windsurf-chat-provider.ts`; P2 Rust/shared truth migration remains active.
+
+## 2026-05-24 Windsurf provider goal continuation 5
+
+- P1 response parse block progressed: moved generic proto read helpers (`decodeProtoVarint`, `parseProtoFields`, `getProtoField`, `getAllProtoFields`, `readProtoString`, `readProtoNumber`) into `src/providers/core/runtime/windsurf/response-parse-block.ts`.
+- Moved small trajectory response parsers `parseStartCascadeResponse` and `parseTrajectoryStatus` plus `parseWindsurfModelUsageStats` into the response parse block; provider keeps thin wrappers for test compatibility.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 233/233.
+- Remaining objective gaps: large `parseTrajectorySteps`, `parseGetChatMessageResponse`, and cascade transport block still live in `windsurf-chat-provider.ts`; P2 Rust/shared truth migration remains active.
+
+## 2026-05-24 Windsurf provider goal continuation 6
+
+- P1 response parse block progressed: moved the large `parseTrajectorySteps(...)` parser into `src/providers/core/runtime/windsurf/response-parse-block.ts`; provider now keeps only a thin wrapper calling the block with `stableStringify`.
+- Existing WindsurfAPI blackbox parity tests for trajectory proposal/choice/mcp/custom/native/error fields continue to pass after extraction.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 233/233.
+- Remaining objective gaps: `parseGetChatMessageResponse` and cascade transport block still live in `windsurf-chat-provider.ts`; P2 Rust/shared truth migration remains active.
+
+## 2026-05-24 Windsurf provider goal continuation 7
+
+- P1 response parse block progressed: moved `parseGetChatMessageResponse(...)` into `src/providers/core/runtime/windsurf/response-parse-block.ts` with explicit injected dependencies for error construction, upstream payload classification, stable stringify, proto delta parsing, and connect-frame error formatting.
+- Provider now keeps a thin wrapper around `parseGetChatMessageResponse(...)`; all chat response parse tests and Windsurf suite continue to pass.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 233/233.
+- Remaining objective gaps: cascade transport block still lives in `windsurf-chat-provider.ts`; P2 Rust/shared truth migration remains active.
+
+## 2026-05-24 Windsurf provider goal continuation 8
+
+- P1 cascade transport block progressed: extracted gRPC frame encoding/decoding, frame extraction, frame stripping, and local unary http2 transport into `src/providers/core/runtime/windsurf/cascade-transport-block.ts`.
+- Provider now delegates `grpcFrame`, `decodeGrpcFramePayload`, `stripGrpcFrame`, `extractGrpcFrames`, and `grpcUnaryLocal` to the transport block while injecting runtime/session/error/classification/log dependencies.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 233/233.
+- Remaining objective gaps: higher-level cascade orchestration (`sendStartCascade`, `sendCascadeMessage`, `pollCascadeTrajectorySteps`, warmup calls) still live in `windsurf-chat-provider.ts`; P2 Rust/shared truth migration remains active.
+
+## 2026-05-24 Windsurf provider goal continuation 9
+
+- P1 cascade transport/orchestration progressed: moved high-level `sendStartCascade(...)` and `sendCascadeMessage(...)` orchestration into `src/providers/core/runtime/windsurf/cascade-transport-block.ts` with explicit dependency injection for warmup, request builders, snapshots, gRPC unary, parser, error factory, and transport-failure handling.
+- Provider keeps thin wrappers preserving existing method names and test access while delegating actual send orchestration to the block.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 233/233.
+- Remaining objective gaps: `pollCascadeTrajectorySteps(...)` and `ensureWindsurfCascadeWarmup(...)` still live in `windsurf-chat-provider.ts`; P2 Rust/shared truth migration remains active.
+
+## 2026-05-24 Windsurf provider architecture audit
+
+- Scope: read-only audit of `src/providers/core/runtime/windsurf-chat-provider.ts`, `src/providers/core/runtime/windsurf/*`, and Windsurf provider tests.
+- Fallback cleanup finding: explicit `fallback` wording is mostly gone, but several exact-processing violations remain: auth login tests still encode probe failure/non-200 as "continue login" behavior; provider still names non-native tools as `unsupportedTools`; completed native tool history block uses `suppression`, which conflicts with the desired neutral tool/tool-result pairing language.
+- FD/resource finding: `disposeWindsurfProviderResources()` closes pooled http2 sessions and stale managed LS runtimes; managed spawn uses `stdio: 'ignore'` and `unref`. Remaining leak risk: `grpcUnaryLocal` timeout closes only the stream (`req.close`) and does not close/reset the pooled http2 session, so a timed-out/canceled stream can leave a bad session until a later provider-level transport handler runs. `waitManagedLsPortReady` also creates probe http2 sessions without `unref`, but closes them on connect/error/timeout.
+- Blocks/orchestration finding: extraction has started (`auth-block`, `runtime-lifecycle-block`, `cascade-transport-block`, `history-tool-projection-block`, `response-parse-block`), but the provider remains a 4.6k-line orchestration+semantics mix. `ensureWindsurfCascadeWarmup`, `pollCascadeTrajectorySteps`, RCC prompt/tool-result guidance, semantic history parsing, additionalSteps construction, and response/tool harvesting are still in TS provider rather than Rust/shared truth.
+- Validation evidence available from prior notes: repeated `npx tsc --noEmit` and Windsurf provider suite passed 233/233 after extraction slices; this audit did not rerun tests because it made no code changes.
+
+## 2026-05-24 Windsurf provider goal continuation 10
+
+- P0 resource block tightened: `grpcUnaryLocal(...)` now closes/resets the pooled local http2 session immediately on local gRPC timeout, not only on stream error or outer provider transport handling.
+- Added direct block-level regression: `grpcUnaryLocal timeout must close the pooled http2 session immediately` in `tests/providers/core/runtime/windsurf-chat-provider.spec.ts`.
+- P1 cascade transport/orchestration progressed: extracted `ensureWindsurfCascadeWarmup(...)` orchestration into `src/providers/core/runtime/windsurf/cascade-transport-block.ts`; provider now keeps a thin dependency-injection wrapper.
+- Validation: `npx tsc --noEmit` passed; `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand` passed 234/234.
+- Remaining objective gaps: `pollCascadeTrajectorySteps(...)`, RCC tool/history/prompt projection, and several semantic history parsers still live in TS provider. P2 Rust/shared truth migration remains active.
+
+## 2026-05-24 Windsurf provider goal continuation 11
+
+- P1 naming cleanup progressed: internal non-native Cascade tools are now named `rccTextTools` / `windsurf_rcc_text_tools` instead of `unsupportedTools` / `windsurf_unsupported_text_tools`, aligning prompt/debug language with tool vs text-tool semantics.
+- P1 completed-native wording progressed: `completed_native_tool_result_suppression` and `shouldSuppressCompletedNativeToolCall(...)` were renamed to `completed_native_tool_result_pairing` and `isCompletedNativeToolCallAlreadyPaired(...)`, so the code describes structured pairing rather than suppression/ignore policy.
+- Source audit after rename: `rg` found no `unsupported tool(s)`, `suppression`, or completed-native ignore naming in Windsurf source/tests; only protocol-level `unsupported grpc frame compression flag` and proto `unsupported wire type` remain as exact parse errors.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 234/234.
+- Remaining objective gaps: `pollCascadeTrajectorySteps(...)` and RCC tool/history/prompt projection still live in TS provider; P2 Rust/shared truth migration remains active.
+
+## 2026-05-24 HubPipeline Rust block refactor progress
+- Fixed current Rust compile break from incomplete `resp_process_stage1_tool_governance_blocks/json_args.rs` extraction: `try_parse_json_value_lenient` and private repair helpers now live in the `json_args` block; `resp_process_stage1_tool_governance.rs` imports from that block instead of carrying duplicate root implementation.
+- Updated `hub_text_markup_normalizer.rs` to import lenient JSON parse from the block truth source.
+- Migrated exec_command large heredoc guard helpers into `resp_process_stage1_tool_governance_blocks/exec_command_guard.rs`; root now calls block helpers and keeps normalize orchestration/field preservation logic.
+- Verified targeted resp governance tests and `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` pass after the split. Existing broad warnings remain unrelated.
+
+## 2026-05-24 Windsurf provider goal continuation 12
+
+- P1 cascade transport/orchestration progressed: moved `pollCascadeTrajectorySteps(...)` into `src/providers/core/runtime/windsurf/cascade-transport-block.ts` as dependency-injected orchestration.
+- Provider now keeps a thin wrapper for poll, injecting gRPC unary, request builders, trajectory parsers, assistant-turn parser, error factory, transport-failure handler, logging, tool-name lookup, stable stringify, and LS service path.
+- This removes the large poll loop from `windsurf-chat-provider.ts` while preserving completed-native tool-result pairing behavior and RCC text-tool harvesting behavior.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 234/234.
+- Remaining objective gaps: RCC tool/history/prompt projection and semantic history parsing still live in TS provider; P2 Rust/shared truth migration remains active.
+
+## 2026-05-24 Windsurf provider goal continuation 13
+
+- P2-adjacent history/tool projection progressed: moved RCC text-tool result context construction and marker contract validation into `src/providers/core/runtime/windsurf/history-tool-projection-block.ts` as exported pure functions.
+- Provider now delegates `buildWindsurfRccToolResultContext(...)` and `assertWindsurfRccToolResultMarkerContract(...)` to the history/tool projection block with injected tool-name lookup and provider error factory.
+- This keeps tool-result pairing semantics outside the provider body and reduces prompt/history logic embedded in `windsurf-chat-provider.ts` without changing transport payload behavior.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 234/234.
+- Remaining objective gaps: RCC tool guidance, pending reminder, tool-call harvesting, assistant/semantic history parsing, and full Rust/shared truth migration remain active.
+
+## 2026-05-24 HubPipeline Rust block refactor progress 2
+- Migrated exec_command args/text-shape helpers from `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/exec_command_args.rs`.
+- Root now imports `read_command_from_args`, `normalize_exec_command_text`, `args_contain_direct_or_nested_key`, and `read_workdir_from_args` from the exec args block; helper implementations were physically removed from root.
+- Removed unused migrated `repair_command_like_fields_in_args` after confirming no call sites remained.
+- Verified pre/post targeted tests for command reading, python heredoc pseudo-escape stripping, exec input/nested args, find predicate preservation, plus final cargo check.
+
+## 2026-05-24 Windsurf provider goal continuation 14
+
+- P2-adjacent prompt/tool projection progressed: moved RCC text-tool guidance generation and pending text-tool reminder into `src/providers/core/runtime/windsurf/history-tool-projection-block.ts`.
+- The history/tool projection block now owns schema-type descriptions for prompt guidance, apply_patch line-edit contract text, and remaining text-tool reminder construction; provider delegates through thin wrappers with tool-name lookup and native-tool predicate injection.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 234/234.
+- Remaining objective gaps: RCC tool-call harvesting, assistant/semantic history parsing, native additional-step construction, and full Rust/shared truth migration remain active.
+
+## 2026-05-24 HubPipeline Rust block refactor progress 3
+- Migrated apply_patch text extraction/window/prefix helpers from `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/apply_patch_text.rs`.
+- Root imports `decode_escaped_newlines_if_needed`, `extract_apply_patch_text`, `has_unified_like_header`, `strip_apply_patch_command_prefix`, and `trim_to_patch_window` from the apply_patch text block; duplicate root helper implementations were physically removed.
+- Verified pre/post targeted apply_patch extraction/prefix tests and final cargo check.
+
+## 2026-05-24 Hub Pipeline rust closeout - clock req_process/chat-process bridge convergence
+- P0 clock focused contract advanced: `tests/sharedmodule/req-process-clock-native-contract.spec.ts` is now green after aligning the contract to Rust summary (`shouldClearTasks` replaces stale `hadClear` expectation).
+- `runHubChatProcess(...)` clock marker path no longer depends on the legacy `chat-process-clock-runtime-bridge.ts` for active behavior. `chat-process-governance-orchestration.ts` now consumes native req_process output plus runtime side-effect shells (`heartbeat` + `clock`) instead of re-running legacy clock bridge semantics.
+- Expanded `chat-process-clock-runtime-side-effects.ts` so the TS shell only consumes Rust `processingMetadata.clockRuntime` and performs runtime IO / native message-shape assembly: schedule marker tasks, emit assistant/tool clock messages via native builders, inject due reminders, preserve reservation metadata, and inject standard tools for due reminders.
+- Verified green focused flow for clock followup + marker cases:
+  - `tests/servertool/servertool-clock.spec.ts` targeted cases: valid marker scheduling, malformed marker stripping, followup due reminder injection, tmux-scoped marker scheduling.
+  - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
+  - `tests/sharedmodule/req-process-stage1-clock-deletion-gate.spec.ts`
+  - `cargo test -p router-hotpath-napi apply_req_process_tool_governance --release`
+- Remaining residue for clock family still exists in inactive/legacy TS files:
+  - `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-clock-reminders.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/hub/process/blocks/chat-process-clock-runtime-bridge.ts`
+  - one unused caller shell still references them: `chat-process-servertool-orchestration.ts`
+- Next closeout step should be deletion-gated removal or rewiring of that legacy caller, then physical delete old clock bridge/reminders TS files.
+- Separate non-clock residue observed during audit: `tests/sharedmodule/chat-semantics-stage1.spec.ts` has pre-existing red expectations around web_search/review injection that do not block the focused clock slice but confirm wider servertool-orchestration rust closeout is still incomplete.
+
+## 2026-05-24 Windsurf provider goal continuation 15
+
+- P2-adjacent tool projection progressed: moved RCC text-tool call harvesting into `src/providers/core/runtime/windsurf/history-tool-projection-block.ts` as `harvestWindsurfRccToolCalls(...)`.
+- The block now owns RCC text-tool declaration lookup, JSON schema parameter coercion, malformed parameter/tool-call errors, dedupe signature logic, and RCC block cleanup; provider delegates through a thin wrapper injecting lookup, stable stringify, hash id, and error factory.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 234/234.
+- Remaining objective gaps: assistant/semantic history parsing, native additional-step construction, and full Rust/shared truth migration remain active.
+
+## 2026-05-24 Windsurf provider goal continuation 16
+
+- P2-adjacent native tool projection progressed: moved native additional-step semantic projection into `src/providers/core/runtime/windsurf/history-tool-projection-block.ts` as `buildWindsurfNativeAdditionalStepPayloads(...)`.
+- Provider now keeps only protobuf encoding orchestration for additional steps: it injects native-tool predicate, tool map, and lookup into the projection block, then encodes returned `{kind,payload}` rows via existing `buildCascadeAdditionalStep(...)`.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 234/234.
+- Remaining objective gaps: assistant/semantic history parsing and full Rust/shared truth migration remain active.
+
+## 2026-05-24 HubPipeline Rust block refactor progress 4
+- Migrated apply_patch header/path normalization helpers from `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/apply_patch_text.rs`.
+- Root imports `normalize_apply_patch_header_line`, `normalize_apply_patch_header_path`, `normalize_unified_header_path`, and `current_workspace_root` from the apply_patch text block; duplicate root implementations and now-unused `std::env`/`PathBuf` imports were removed.
+- Verified pre/post targeted header/path tests plus final cargo check.
+
+## 2026-05-24 Windsurf provider goal continuation 17
+
+- P2-adjacent assistant parsing progressed: moved `parseCascadeAssistantTurn(...)` into `src/providers/core/runtime/windsurf/history-tool-projection-block.ts`.
+- Provider now delegates `parseCascadeAssistantTurnSync(...)` through a thin wrapper that injects stable stringify, RCC text-tool harvester, and provider error factory.
+- This removes assistant candidate parsing, top-level/content tool-call normalization, legacy text protocol rejection, and RCC/native tool-call conflict detection from the provider body.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 234/234.
+- Remaining objective gaps: full semantic roundtrip parsing / bridge history projection and Rust/shared truth migration remain active.
+- clock legacy deletion gate added: `tests/sharedmodule/chat-process-clock-legacy-deletion-gate.spec.ts`.
+- After green focused gates, physically deleted old TS bridge files:
+  - `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-clock-reminders.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/hub/process/blocks/chat-process-clock-runtime-bridge.ts`
+- `chat-process-servertool-orchestration.ts` rewired off legacy clock reminder bridge; it now calls `applyClockRuntimeSideEffectsFromProcessedRequest(...)` directly.
+
+## 2026-05-24 HubPipeline Rust block refactor progress 5
+- Migrated apply_patch line-number/live-context hunk repair helpers from `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/apply_patch_live_context.rs`.
+- Root now imports only `repair_line_number_update_hunks_with_live_context`; exact/trimmed/whitespace-normalized matching helpers and unified hunk parser are private to the block.
+- Verified pre/post live-context apply_patch tests and final cargo check.
+
+## 2026-05-24 Windsurf provider goal continuation 18
+
+- P2-adjacent bridge history projection progressed: moved `readBridgeToolHistoryPairs(...)` and `appendBridgeToolHistoryToSemanticConversation(...)` into `src/providers/core/runtime/windsurf/history-tool-projection-block.ts`.
+- Provider now delegates bridge tool-history extraction and injection through thin wrappers, keeping `semantics.responses.context.toolHistory` handling out of the provider body.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 234/234.
+- Remaining objective gaps: full semantic roundtrip parser and full Rust/shared truth migration remain active.
+
+## 2026-05-24 Windsurf provider goal continuation 19
+
+- P2-adjacent semantic parsing progressed: moved tool-result turn parsing into `src/providers/core/runtime/windsurf/history-tool-projection-block.ts` as `parseCascadeToolResultTurn(...)`.
+- Provider now delegates `parseCascadeToolResultTurnSync(...)` through a thin wrapper; nested tool-result call-id extraction, structured tool-result content normalization, orphan result validation, duplicate-read-risk annotation now live in the projection block.
+- Validation: `npx tsc --noEmit` passed; Windsurf provider suite passed 234/234.
+- Remaining objective gaps: full semantic roundtrip parser and full Rust/shared truth migration remain active.
+
+## 2026-05-24 HubPipeline Rust block refactor progress
+- resp_process apply_patch schema/hashline/structured normalization cluster migrated from `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/apply_patch_schema_args.rs`.
+- Public callers now import `normalize_apply_patch_schema_args` from the block; root keeps orchestration/NAPI validation glue only. Verified with targeted apply_patch tests and `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml`.
+
+## 2026-05-24 Windsurf provider architecture audit
+- Scope: `src/providers/core/runtime/windsurf-chat-provider.ts` plus `src/providers/core/runtime/windsurf/*`.
+- Validation evidence: `npx tsc --noEmit` passed; `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand` passed 234/234.
+- Audit result: code has moved toward block extraction and explicit error handling; remaining risks are naming/test text with old unsupported/fallback wording, TS provider still retaining many private protocol/build/parsing helpers, and fd lifecycle relying on close/delete without force destroy on stubborn http2 sessions.
+
+## 2026-05-24 HubPipeline Rust block refactor progress - text harvest shape
+- Moved transcript/right-gutter text harvest shape helpers from `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/text_harvest_shape.rs`.
+- Verified with targeted green tests: `test_govern_response_harvests_dsml_wrapper_inside_ran_transcript_with_right_gutter_noise`, `test_collect_harvest_text_variants_masks_wrapper_lines_and_bullet_prefix`, `test_harvest_text_tool_calls_recovers_noisy_exec_command_json_wrapper_with_trailing_status`, plus `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml`.
+- Baseline note: `test_harvest_text_tool_calls_recovers_exec_command_inside_chunked_transcript_shape` is red before this migration (`left: 1`, `right: 0`), so it was not used as migration success evidence.
+
+## 2026-05-24 Windsurf resource lifecycle slice
+- Added `src/providers/core/runtime/windsurf/resource-lifecycle-block.ts` as the shared resource close truth for local gRPC HTTP/2 sessions.
+- Provider `closeLocalGrpcSession*` now delegates to the block; close path calls `close()` then `destroy()` before removing pool entries to reduce stubborn fd retention risk.
+- Test gate added for provider close path and block-level `closeAllGrpcSessionPoolEntries`; naming gate has no fallback/unsupported/suppression hits in Windsurf provider/test paths after cleanup.
+
+## 2026-05-24 Hub Pipeline rust closeout - clock closeout followup
+- Confirmed prior `build:min` failure was stale / transient around resp_process release compile; fresh `cargo build -p router-hotpath-napi --release --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed.
+- Found one real post-closeout residue harness: `sharedmodule/llmswitch-core/scripts/tests/clock-clear-alias-scopes.mjs` still imported deleted `dist/conversion/hub/process/chat-process-clock-reminders.js`.
+- Verified equivalent active coverage already exists in:
+  - `tests/servertool/servertool-clock.spec.ts` (`<**clock:clear**>` clear behavior, tmux-scoped session behavior, followup inject, marker scheduling)
+  - `sharedmodule/llmswitch-core/scripts/tests/clock-injection-chat-process.mjs` (chat-process path smoke)
+- Added deletion gate `tests/sharedmodule/chat-process-clock-legacy-script-deletion-gate.spec.ts` and physically deleted `sharedmodule/llmswitch-core/scripts/tests/clock-clear-alias-scopes.mjs`.
+- Current chat-process smoke script was stale against the new closeout wiring (it still expected old `metadata.sessionId` + plain due-inject semantics). Rewired `sharedmodule/llmswitch-core/scripts/tests/clock-injection-chat-process.mjs` to current truth source contract:
+  - `tmuxSessionId`-scoped session resolution
+  - Rust `clockRuntime` driven followup reminder inject
+  - marker schedule assistant/tool message pair
+  - `<**clock:clear**>` stripping + tmux-scoped clear
+- `build:min` then failed on a real thin-shell TS type boundary bug in `sharedmodule/llmswitch-core/src/conversion/hub/process/blocks/chat-process-clock-runtime-side-effects.ts`: predicate returned `Record<string, unknown>` for values typed as `NativeGuardedClockScheduleItem`. Fixed by importing the native item type and tightening the predicate to `NativeGuardedClockScheduleItem`.
+- Validation after the fix:
+  - `npm run jest:run -- --runTestsByPath tests/sharedmodule/chat-process-clock-legacy-script-deletion-gate.spec.ts tests/sharedmodule/chat-process-clock-legacy-deletion-gate.spec.ts tests/sharedmodule/req-process-clock-native-contract.spec.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/sharedmodule/req-process-stage1-clock-deletion-gate.spec.ts --runInBand --no-cache` ✅
+  - `node sharedmodule/llmswitch-core/scripts/tests/clock-injection-chat-process.mjs` ✅
+  - `cd sharedmodule/llmswitch-core && npx tsc -p tsconfig.json --noEmit` ✅
+  - `cargo test -p router-hotpath-napi apply_req_process_tool_governance --release --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` ✅ (0 selected / filtered target slice, command green)
+  - `npm run build:min` ✅
+- Remaining overall goal gap unchanged: full Hub Pipeline Rust closeout is still not done; known non-clock residue remains in servertool orchestration / web_search / review lines (e.g. `tests/sharedmodule/chat-semantics-stage1.spec.ts` still has pre-existing red cases outside this clock slice).
+
+## 2026-05-24 HubPipeline Rust block refactor progress - XML text utils
+- Moved pure XML/DSML text utility helpers from `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/xml_text_utils.rs`.
+- Kept `extract_tool_prefixed_exec_command_block` and `extract_reasoning_inline_exec_command_arg_key` in root for now because they call `normalize_tool_call_entry`; moving them requires a larger harvest/tool-call-entry block split to avoid reverse dependency on root.
+- Verified before/after with targeted XML tests and `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml`.
+
+## 2026-05-24 HubPipeline Rust block refactor progress - tool args and tool call entry
+- Moved tool argument normalization from `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/tool_args.rs`.
+- Moved tool-call entry normalization, tool-call JSON candidate parsing, malformed tool_calls recovery, and tool-call id assignment into `resp_process_stage1_tool_governance_blocks/tool_call_entry.rs`.
+- Updated downstream Rust callers in `resp_process_stage2_finalize.rs` and `shared_responses_response_utils.rs` to import the new `tool_args` block truth instead of the old stage root path.
+- Verified with targeted entry/tool-args tests and `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml`.
+
+## 2026-05-24 Windsurf P2 native tool-result projection slice
+- Added Rust native truth `windsurf_tool_history_projection.rs` for RCC `tool_result` context construction and marker contract validation.
+- `history-tool-projection-block.ts` no longer keeps the tool-result context / marker-contract algorithm in TS; it calls `router_hotpath_napi.node` exports directly and fails if native is unavailable.
+- Validation: `node scripts/build-core.mjs` passed; direct native export smoke returned expected marker order; `npx tsc --noEmit` passed; Windsurf provider suite passed 237/237.
+
+## 2026-05-24 HubPipeline Rust block refactor progress - message content
+- Moved message content candidate extraction and thinking/reasoning-only normalization from `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/message_content.rs`.
+- Verified with green targeted tests: `test_thinking_only_content_maps_to_reasoning_content_when_no_tool_calls`, `test_message_candidates_misc`, `test_read_message_text_candidates_collects_reasoning_fields`, plus `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml`.
+- Baseline note: `test_structured_tool_calls_strip_chunking_noise_from_content_and_reasoning` and `test_failed_chunking_error_without_tool_calls_is_preserved_as_assistant_content` were red before this migration, so they were not used as migration success evidence.
+
+## 2026-05-24 Windsurf P2 native cascade prompt slice
+- Moved Cascade prompt/history text assembly into Rust native `buildWindsurfCascadePromptTextJson` in `windsurf_tool_history_projection.rs`.
+- Provider `buildCascadePromptText` now only gathers orchestration inputs: raw messages, semantic conversation, RCC guidance/reminder, history budget, and native tool names.
+- Validation: `node scripts/build-core.mjs` passed, direct native prompt smoke returned `{\"prompt\":\"hello\"}`, `npx tsc --noEmit` passed, Windsurf provider suite passed 237/237.
+
+## 2026-05-24 Windsurf P2 prompt dead-code removal
+- Removed obsolete TS provider helpers `extractLatestCascadeUserText`, `buildCascadeHistoryTurnText`, and `isWindsurfRccTextToolResult`; Rust native prompt builder now owns those semantics.
+- Validation after deletion: `npx tsc --noEmit` passed and Windsurf provider suite passed 237/237.
+
+## 2026-05-24 HubPipeline Rust block refactor progress
+
+- Moved response display/sanitize helper cluster out of `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/display_sanitize.rs`.
+- Registered `display_sanitize` in `resp_process_stage1_tool_governance_blocks.rs` and rewired `shared_responses_response_utils.rs` to call the block truth for `strip_tool_markup_for_display_text`.
+- Validation: `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed after migration.
+- Targeted red evidence before/after migration: `test_govern_response_sanitizes_marker_text_when_structured_tool_calls_already_exist` still fails with `left: Null`, `right: ""`; this is existing behavior red, not fixed in this structural move.
+- Targeted test bundle compiles after adding test-only imports for moved helpers; final bundle stops on the known red above.
+
+## 2026-05-24 Windsurf P2 native RCC guidance/reminder slice
+- Moved RCC text-tool guidance and pending text-tool reminder generation into Rust native `windsurf_tool_history_projection.rs`.
+- `history-tool-projection-block.ts` now delegates `buildWindsurfRccToolGuidance` and `buildWindsurfRccPendingToolReminder` to native exports; TS no longer owns prompt wording/remaining-tool reminder generation.
+- Validation: `node scripts/build-core.mjs` passed, direct native guidance/reminder export smoke passed, `npx tsc --noEmit` passed, Windsurf provider suite passed 237/237.
+
+## 2026-05-24 HubPipeline Rust block refactor progress 2
+
+- Moved shell/XML/text harvest extraction helper cluster out of `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/text_harvest_extract.rs`.
+- Registered `text_harvest_extract` in `resp_process_stage1_tool_governance_blocks.rs`; root now imports extraction helpers instead of owning shell spacing/path repair/XML wrapper extraction logic.
+- Pre/post targeted regression passed for: `test_extract_xml_tool_call_blocks_exec_command`, `test_extract_xml_named_tool_call_blocks_generic_command_wrapper_masks_nested_tags`, `test_extract_xml_named_tool_call_blocks_invoke_parameter_attribute_wrapper_inside_tool_calls`, `test_extract_xml_named_tool_call_blocks_dsml_parameter_cdata_wrapper`, `test_extract_tool_prefixed_exec_command_block`, `test_extract_reasoning_inline_exec_command_arg_key`, `test_collect_harvest_text_variants_masks_wrapper_lines_and_bullet_prefix`, `test_harvest_tool_calls_from_xml_named_tool_blocks`.
+- Validation: `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed after migration.
+- Remaining `resp_process_stage1_tool_governance.rs` root functions are now mostly provider-family detection, strict wrapper harvest orchestration, apply_patch/remap/drop/count/prepare/govern public orchestration, plus tests.
+
+## 2026-05-24 Windsurf provider architecture audit scratch
+- Scope: audited `src/providers/core/runtime/windsurf-chat-provider.ts`, `src/providers/core/runtime/windsurf/*`, and native `windsurf_tool_history_projection.rs` for fallback cleanup, fd/resource lifecycle risk, and public-functions/blocks/orchestration alignment.
+- Evidence: resource lifecycle now centralizes HTTP/2 `close()+destroy()` in `resource-lifecycle-block.ts`; gRPC unary closes request on timeout/error and clears timers; provider dispose closes all pooled sessions and terminates stale managed LS runtimes by explicit pid path.
+- Gaps: RCC harvest native export exists in Rust but is not wired into TS native required exports/block loader; TS still keeps harvest/schema parser logic in `history-tool-projection-block.ts`, so tool/history projection is still double implemented. Loader has two native candidate locations with swallowed load errors; this should become exact native resolution or explicit diagnostics, not silent candidate fallback. Send path rewarms on panel/expired/untrusted errors; this is a controlled recovery path that needs product decision whether it violates no-fallback semantics.
+
+## 2026-05-24 HubPipeline Rust block refactor progress 3
+
+- Moved strict wrapper/text tool harvest orchestration out of `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/text_harvest_strict.rs`.
+- Registered `text_harvest_strict` in `resp_process_stage1_tool_governance_blocks.rs`; root now delegates strict `<function_calls>`, `<tool_calls>`, RCC heredoc, malformed text tool-call recovery, and payload text harvest to the block.
+- Pre/post targeted regression passed for: `test_harvest_tool_calls_from_function_calls_json`, `test_harvest_tool_calls_when_tool_calls_field_missing`, `test_quote_wrapped_tool_calls_can_be_harvested`, `test_rcc_heredoc_tool_calls_can_be_harvested`, `test_truncated_rcc_heredoc_tool_calls_can_be_harvested`, `test_glued_closing_rcc_heredoc_tool_calls_can_be_harvested`, `test_maybe_harvest_empty_tool_calls_paths`, `test_harvest_tool_calls_from_xml_invoke_parameter_attribute_blocks`.
+- Validation: `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed after migration.
+- Remaining `resp_process_stage1_tool_governance.rs` root functions are now provider-family detection, small NAPI wrapper, apply_patch normalize/drop/remap/count, prepare/govern orchestration, and tests.
+
+## 2026-05-24 HubPipeline Rust block refactor progress 4
+
+- Moved response tool-call governance helpers out of `resp_process_stage1_tool_governance.rs` into `resp_process_stage1_tool_governance_blocks/tool_call_governance.rs`.
+- Registered `tool_call_governance` in `resp_process_stage1_tool_governance_blocks.rs`; root now delegates apply_patch argument normalization, disallowed tool-call dropping, client-protocol tool remap, empty-harvest bridge, and normalized tool-call counting to the block.
+- Pre/post targeted regression passed for: `test_normalize_apply_patch_tool_calls_noop_and_count`, `test_govern_response_apply_patch_current_schema_preserves_filepath_and_patch_without_guard`, `test_govern_response_apply_patch_canonical_patch_with_stray_filepath_stays_canonical`, `test_govern_response_apply_patch_strips_quoted_paths`, `test_govern_response_apply_patch_raw_string_is_repaired_into_schema`, `test_govern_response_drops_structured_tool_calls_not_in_requested_allowlist`, `test_govern_response_allows_shell_alias_when_exec_command_requested`, `test_govern_response_preserves_allowed_multi_tool_calls`.
+- Validation: `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed after migration.
+- Remaining `resp_process_stage1_tool_governance.rs` root functions are provider-family/text-harvest enablement detection, NAPI wrappers, and prepare/govern orchestration.
+
+## 2026-05-24 Hub Pipeline rust closeout - servertool/web_search/review red gate audit
+- 当前下一条真实 P0 主线不是 clock，而是 servertool/web_search/review closeout。
+- 已复现 `tests/sharedmodule/chat-semantics-stage1.spec.ts` 3 个稳定红点：
+  - `forces web_search injection when semantics providerExtras.webSearch.force=true`
+  - `keeps servertool web_search injection for non-deepseek search engines`
+  - `does not inject continue_execution tool when stopMessage is not active`（真实失败点是 review tool 缺失）
+- 已复现 `tests/servertool/review-followup.spec.ts` 6/6 全红；运行日志显示 review tool_call 进入 servertool orchestration 后直接 `skipped_passthrough`，当前没有执行 `review_flow`。
+- 真源判定：
+  - request-side tool inject 真源在 Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs`
+  - web_search/review bundle planner 真源在 Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
+  - review flow profile 缺口还关联 `docs/design/servertool-flow-skeleton-refactor.md` 中已记录的 `review_flow` skeleton gap。
+- 已确认的具体缺口：
+  - `chat_servertool_orchestration.rs` 里 `build_review_operations(...)` 当前直接返回空数组。
+  - `chat_web_search_tool_schema.rs` 仍输出 servertool tool 名 `websearch`；而 `tests/sharedmodule/chat-semantics-stage1.spec.ts` 当前 request-side contract 断言的是 `web_search`，说明 request-side canonical naming contract 仍需先用 red gate 锁清楚，不能拍脑袋改。
+  - `tests/servertool/review-followup.spec.ts` 当前行为证明 review tool-call handler/registration 不在 active path；需要先补 contract，确认是 skeleton/profile 缺口、handler 缺口，还是 active js shadow / registration gap。
+- 下一步正确顺序：
+  1. 先补 `req-process-servertool-bundle-contract` 类 red gate，锁定 web_search force/selective、review present、continue_execution absent、clientInjectReady=false 全禁。
+  2. 再修 Rust req_process/chat_servertool_orchestration/servertool skeleton 真源与接线。
+  3. 绿测后再删 TS/JS residue，禁止 fallback / 双实现 / active js shadow。
+
+## 2026-05-24 Windsurf P2 native harvest closeout
+- Moved RCC text tool harvest caller to native shared truth: `history-tool-projection-block.ts` now calls `harvestWindsurfRccToolCallsWithNative`; TS harvest/schema parser helpers were removed from the provider block.
+- Wired native export requirement `harvestWindsurfRccToolCallsJson`, added llmswitch-core wrapper exports, and replaced provider-local native binary candidate loading with the shared `rcc-llmswitch-core` native wrapper path.
+- Validation: `node scripts/build-core.mjs` passed; native smoke confirmed `harvestWindsurfRccToolCallsWithNative` returns `call_395702bfbb7ac5d1`; `npx tsc --noEmit --pretty false` passed; Windsurf provider jest passed `237/237` with `--forceExit` after `--detectOpenHandles` showed existing native `CustomGC` handles.
+- Remaining objective gaps: cascade rewarm recovery is still a named recovery behavior, not yet converted into an explicit state-machine typed result; live runtime configured-candidate append still needs exact strategy cleanup; full provider private method count/block purity not yet proven complete.
+
+## 2026-05-24 HubPipeline Rust block refactor progress
+- Verified after moving response text-harvest detection/utilities into Rust blocks: `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passes with existing warnings.
+- Response governance targeted harvest tests passed: dsml wrapper, transcript gutter noise, nested rcc wrapper, allowlist preservation, explicit wrapper cleanup.
+- Apply patch validation utility migrated behind `resp_process_stage1_tool_governance_blocks/napi_utilities.rs`; root NAPI functions are parse/serialize thin wrappers. Regression: `test_validate_apply_patch_arguments*` 11 passed, 1 diagnostic ignored.
+- Current `resp_process_stage1_tool_governance.rs` root function audit shows only orchestrator/public NAPI wrappers plus tests remain; no TS functional changes.
+
+## 2026-05-24 Windsurf runtime candidate typed result closeout
+- Converted `buildRoutecodexWindsurfRuntimeCandidatePlan()` from implicit candidate append to typed `{ ok, selected, error }` result.
+- Removed `configured_runtime_appended_after_live_scan`; configured stale port is now diagnosed as `configured_runtime_rejected_after_live_scan` and is not inserted as a backup candidate.
+- `resolveLiveLocalGrpcRuntime()` now fail-fast throws `WINDSURF_RUNTIME_CANDIDATE_UNAVAILABLE` when no selected candidate has `lsPort`, instead of returning `{}` or falling through to runtime config.
+- Validation: `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` passed `238/238`; `node scripts/build-core.mjs` passed; `npx tsc --noEmit --pretty false` passed.
+- Remaining objective gaps: cascade rewarm is still recovery semantics that needs explicit named state-machine treatment; full provider pure orchestration/private-method shrink still needs a completion audit.
+
+## 2026-05-24 Windsurf completed native step strategy closeout
+- Replaced boolean `isCompletedNativeToolCallAlreadyPaired` internals with `decideCompletedNativeToolCallPairing()` returning named actions/reasons: `skip_completed_native_tool_call` vs `emit_tool_call`.
+- `pollCascadeTrajectorySteps()` now logs `poll.nativeToolCall.pairingDecision` before skipping an already completed native tool call, so the completed native step is no longer silently ignored.
+- Added regression: `completed native tool call pairing exposes named skip strategy instead of silent ignore`.
+- Validation: Windsurf provider jest passed `239/239`; `node scripts/build-core.mjs` passed; `npx tsc --noEmit --pretty false` passed.
+- Remaining objective gaps: cascade rewarm still needs explicit state-machine naming; final full-scope completion audit is still pending.
+
+## 2026-05-24 req-process request sanitizer block migration
+- Moved req-process governance context, anthropic alias metadata, post-governed media cleanup, and generic marker stripping into `req_process_stage1_tool_governance_blocks/request_sanitizer.rs`; root now calls the block instead of carrying those helpers.
+- Validation: `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passes with existing warnings.
+- Targeted req-process tests passed: `test_apply_tool_governance_basic`, `test_anthropic_alias_semantics`, `test_processed_request_shape_and_node_metadata`, `test_post_governed_media_cleanup_preserves_followup_messages_and_context`, `test_post_governed_media_cleanup_preserves_latest_user_media_turn`.
+- No TS functional changes in this migration slice. Remaining large roots: req-process servertool/tool injection helpers and `hub_resp_outbound_client_semantics.rs` still need block extraction.
+
+## 2026-05-24 Windsurf cascade rewarm state-machine closeout
+- Replaced inline `isPanelMissing` / `isExpiredCascade` / `isUntrustedWorkspace` catch checks with `decideWindsurfCascadeRewarmState()` typed decisions: `rewarm_fresh_cascade` or `propagate_error`.
+- Rewarm reset reasons are now phase-specific and named: `cascade_start_panel_state_missing`, `cascade_send_panel_state_missing`, `cascade_send_expired_or_missing`, `cascade_send_workspace_untrusted`.
+- Added regression: `cascade rewarm uses explicit state-machine decision instead of catch-only retry`.
+- Validation: Windsurf provider jest passed `240/240`; `node scripts/build-core.mjs` passed; `npx tsc --noEmit --pretty false` passed.
+- Completion audit result: P0 token parse/resource/runtime/SSE gates have evidence, P1 named strategy gaps are mostly closed, P2 tool/history/prompt harvest migrated further to native. Still not marking complete because provider remains large (`windsurf-chat-provider.ts` 3684 lines) and full “TS provider only orchestration” needs a stricter source audit before claiming the entire objective.
+
+## 2026-05-24 req-process servertool injection block migration
+- Moved req-process servertool/tool injection helpers into `req_process_stage1_tool_governance_blocks/servertool_injection.rs`: bundle plan parsing/defaults, runtime metadata reads, websearch/clock operation assembly, tool-name detection, and hub operation application.
+- Root `req_process_stage1_tool_governance.rs` now keeps `apply_hub_operations_json` as NAPI parse/serialize wrapper and calls block functions from the main orchestrator.
+- Validation: servertool orchestration targeted tests passed: clock-only hidden review/continue, skip direct websearch, inject servertool websearch, skip mixed direct+servertool websearch, explicit stop-message flag.
+- Validation: apply_patch schema targeted tests passed for declared legacy fields, default client contract, and direct responses tool shape; final `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passes with existing warnings.
+- No TS functional changes. Remaining req root helpers: governed filter payload, sanitizer metadata, processed/node result assembly, public orchestrator wrappers.
+
+## 2026-05-24 Windsurf rewarm block migration and orchestration audit
+- Moved cascade rewarm typed state-machine decision from `windsurf-chat-provider.ts` into `runtime-lifecycle-block.ts`; provider now imports `decideWindsurfCascadeRewarmState()` and only orchestrates reset + fresh cascade selection.
+- Updated regression to call the runtime lifecycle block directly, proving the state-machine is not provider-private catch logic.
+- Validation: Windsurf provider jest passed `240/240`; `node scripts/build-core.mjs` passed; `npx tsc --noEmit --pretty false` passed.
+- Source audit: `windsurf-chat-provider.ts` still has 118 class methods and 3684 lines. Blocks exist and cover auth/runtime/cascade/history/response/resource, but the provider still contains request building, auth HTTP orchestration, managed LS spawning/adoption, and proto helpers. Do not mark objective complete until remaining provider-local semantic helpers are either justified as provider orchestration or moved to blocks/native shared truth.
+
+## 2026-05-24 outbound client tool semantics block migration
+- Moved outbound client alias-map and client-tools semantics into `hub_resp_outbound_client_semantics_blocks/tool_semantics.rs`; root wrappers now call block functions.
+- Registered `hub_resp_outbound_client_semantics_blocks` in `lib.rs`; no TS functional changes.
+- Validation: alias/client-tools targeted tests passed: adapter-context/metadata priority, semantics fallback, anthropic semantics mirror alias, anthropic clientToolsRaw mirror, derived shell_command alias from anthropic client tools.
+- Validation: `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passes with existing warnings.
+- Remaining outbound root still contains passthrough patching, anthropic response mapping, responses payload normalization, reasoning/usage/tool-call conversion and public NAPI wrappers.
+
+## 2026-05-24 outbound chat reasoning block migration
+- Moved outbound passthrough patching, chat-completion shape sanitize, and OpenAI chat reasoning outbound normalization into `hub_resp_outbound_client_semantics_blocks/chat_reasoning.rs`; root NAPI wrappers now call block functions.
+- Validation: `normalize_openai_chat_reasoning_outbound_maps_structured_reasoning_for_clients` passed; wrapper-name filters for `apply_client_passthrough_patch_json` and `sanitize_chat_completion_like_json` completed; final `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passes with existing warnings.
+- No TS functional changes. Remaining outbound root still contains provider context helpers, Anthropic response mapping, Responses payload/tool-call/usage/reasoning normalization, SSE wrapper, and full bridge entry.
+
+## 2026-05-24 Windsurf token file parse auth block migration
+- Moved token file path resolution and persisted token JSON parsing into `auth-block.ts` via `resolveWindsurfTokenFilePath()` and `parsePersistedWindsurfSessionCredential()`.
+- Parser now returns typed reasons: `session_token`, `missing`, `not_session_token`, `read_failed`, `malformed`; provider only reads the file and maps typed parse result to orchestration flow.
+- Added block-level regression: `persisted token file parser returns typed malformed result in auth block`.
+- Validation: Windsurf provider jest passed `241/241`; `node scripts/build-core.mjs` passed; `npx tsc --noEmit --pretty false` passed.
+- Remaining objective gap: provider still owns auth HTTP orchestration and managed LS lifecycle implementation. Need final audit/migration decision before marking complete.
+
+## 2026-05-24 outbound provider outcome block migration
+- Moved provider outcome helpers into `hub_resp_outbound_client_semantics_blocks/provider_outcome.rs`: Anthropic stop reason mapping, chat completion outcome, provider tool-call summary, and provider protocol type inference.
+- Root wrappers now call provider outcome block functions; no TS functional changes.
+- Validation: targeted tests passed for context-overflow stop reason, tool_use/default stop reason, chat completion outcome tool-call precedence/overflow gate, tool-call summary across chat/responses/anthropic, and provider protocol mapping.
+- Validation: final `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passes with existing warnings.
+- Remaining outbound root still includes full Anthropic response construction, client tool index/argument normalization, Responses payload construction, and context passthrough/finalization helpers.
+
+## 2026-05-24 Windsurf provider architecture audit
+- Scope: fallback 精确处理、FD/resource lifecycle、公共函数库 + blocks + provider 纯编排边界。
+- Evidence: `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` passed 241/241.
+- Finding: typed blocks/native shared truth 已覆盖 history/tool projection、response parsing、runtime candidate、rewarm、resource cleanup；provider 仍保留 auth payload parse/proto helpers/managed LS orchestration，下一步应继续迁移纯解析语义到 `windsurf/*-block.ts`，provider 保留编排。
+
+## 2026-05-24 Windsurf auth block migration progress
+- Moved PostAuth proto/payload parsing, CheckUserLoginMethod parsing, and auth detail extraction out of `windsurf-chat-provider.ts` into `src/providers/core/runtime/windsurf/auth-block.ts`.
+- Replaced provider-local PostAuth endpoint try/catch loop with `selectWindsurfPostAuthEndpoint()` typed result (`ok`, `attempts`, `strategy`, `endpoint`), preserving named strategy `app_backend_then_self_serve` without local fallback-style swallowing.
+- Verification: `npx tsc --noEmit --pretty false` passed; `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` passed 242/242.
+- Remaining goal gap: provider still contains managed LS spawn/adoption orchestration, proto request builders, and outer cascade attempt loop; continue moving pure decisions/parsers into blocks while keeping TS provider as provider orchestration.
+
+## 2026-05-24 HubPipeline Rust block refactor progress
+- Current goal remains active: Rust HubPipeline-related files must become shared pure helpers + blocks + thin root orchestration; no TS functional changes.
+- Moved Anthropic chat->message response construction out of `hub_resp_outbound_client_semantics.rs` into `hub_resp_outbound_client_semantics_blocks/anthropic_response.rs`; root now imports/re-exports `build_anthropic_response_from_chat_value` to preserve existing Rust callers.
+- Moved Responses usage normalization out of `hub_resp_outbound_client_semantics.rs` into `hub_resp_outbound_client_semantics_blocks/responses_usage.rs`; root keeps only JSON wrapper/call sites.
+- Validation evidence:
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml build_anthropic_response_from_chat -- --nocapture` passed.
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml build_anthropic_response_from_chat_full_json -- --nocapture` passed.
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml normalize_responses_usage -- --nocapture` passed.
+  - `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed with existing warnings.
+- Remaining gap: `hub_resp_outbound_client_semantics.rs` still contains Responses payload construction, client tool argument normalization, context helper logic, and bridge/full-response wrappers; goal is not complete.
+
+## 2026-05-24 Windsurf live LS strategy migration progress
+- Moved live local language_server ps-line parsing and preferred RouteCodex runtime selection into `runtime-lifecycle-block.ts` as typed/named functions: `parseWindsurfLiveLocalGrpcRuntimeLine()` and `selectPreferredRoutecodexWindsurfRuntime()`.
+- Provider now only lists `ps` rows and delegates parsing/selection; rejection reasons are explicit (`line_shape_mismatch`, `not_windsurf_language_server`, `missing_server_port`).
+- Verification: `npx tsc --noEmit --pretty false` passed; `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` passed 244/244.
+- Remaining target gap: continue shrinking provider request/proto builders and outer cascade attempt semantics into blocks/Rust shared truth.
+
+## 2026-05-24 HubPipeline Rust block refactor progress - context and client args
+- Moved outbound provider-response context helpers from `hub_resp_outbound_client_semantics.rs` into `hub_resp_outbound_client_semantics_blocks/context_helpers.rs`; root keeps only NAPI JSON wrappers and call sites.
+- Moved Responses client tool argument normalization/indexing from `hub_resp_outbound_client_semantics.rs` into `hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`; root imports the block functions used by Responses payload construction and public JSON wrappers.
+- Validation evidence:
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml resolve_provider_response_context_helpers -- --nocapture` passed.
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml resolve_clock_reservation_from_context -- --nocapture` passed.
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml normalize_responses_tool_call_arguments_for_client -- --nocapture` passed.
+  - `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed with existing warnings.
+- Current audit: `hub_resp_outbound_client_semantics.rs` is down to 3275 lines; remaining root logic includes Responses payload construction/finalization, reasoning summary normalization, context passthrough helpers, bridge/full response wrappers, and public NAPI JSON exports. Goal remains active.
+
+## 2026-05-24 Windsurf managed runtime lifecycle block progress
+- Moved managed LS codeium_dir filtering and preferred managed runtime sorting into `runtime-lifecycle-block.ts`: `filterManagedWindsurfRuntimesForCodeiumDir()` and `selectPreferredManagedWindsurfRuntime()`.
+- Provider now supplies live runtime rows and side-effectful termination only; path comparison and sorting are block-owned pure semantics.
+- Verification: `npx tsc --noEmit --pretty false` passed; `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` passed 245/245.
+- Remaining target gap: provider still owns request/proto builders, response wrapper methods, and outer cascade attempt orchestration.
+
+## 2026-05-24 HubPipeline Rust block refactor progress - responses reasoning block
+- Moved Responses reasoning summary/display and output merge helpers from `hub_resp_outbound_client_semantics.rs` into `hub_resp_outbound_client_semantics_blocks/responses_reasoning.rs`.
+- Kept root call sites only for `merge_responses_output_items` and `normalize_reasoning_summary_for_codex_display`.
+- Red/shape evidence: targeted `build_responses_payload_from_chat_preserves_output_text_whitespace_and_concat_shape` failed because `normalize_output_text_content` trimmed `output_text`; fixed by preserving original text while still using `trim().is_empty()` only as emptiness check.
+- Validation evidence:
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml build_responses_payload_from_chat_preserves_output_text_whitespace_and_concat_shape -- --nocapture` passed after the shape fix.
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml build_responses_payload_from_chat_normalizes -- --nocapture` passed.
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml build_responses_payload_from_chat_keeps_display_compatible_reasoning_summary -- --nocapture` passed.
+  - `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed with existing warnings.
+- Current audit: `hub_resp_outbound_client_semantics.rs` is down to 2976 lines. Remaining root logic still includes Responses payload construction/finalization, response context passthrough/source retention, output text normalization/collection, failed payload helpers, bridge/full response wrappers, and public NAPI JSON exports. Goal remains active.
+
+## 2026-05-24 Windsurf cascade proto builder block progress
+- Moved shared proto writer helpers and lifecycle request builders into `cascade-transport-block.ts`: metadata, StartCascade, InitializePanelState, Heartbeat, AddTrackedWorkspace, UpdateWorkspaceTrust, GetCascadeTrajectory, GetCascadeTrajectorySteps.
+- Provider now reuses transport block builders; send-message/native-tool step construction remains provider-side for a later focused migration because it mixes tool prompt policy and native tool config.
+- Verification: `npx tsc --noEmit --pretty false` passed; `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` passed 246/246.
+- Remaining target gap: migrate SendUserCascadeMessage builder/tool config policy and response wrapper helpers, then reassess provider as pure orchestration.
+
+## 2026-05-24 Windsurf native additional step encoder migration
+- Moved `buildCascadeAdditionalStep()` / `buildCascadeStepBody()` from provider into `cascade-transport-block.ts`; tests now use the block encoder directly for WindsurfAPI blackbox parity and poll fixtures.
+- Provider keeps only semantic history projection (`buildWindsurfNativeAdditionalStepPayloads`) and delegates raw protobuf step encoding to transport block.
+- Verification: `npx tsc --noEmit --pretty false` passed; `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` passed 246/246.
+- Remaining target gap: full `SendUserCascadeMessage` request builder and native tool config policy remain in provider and should move next.
+
+## 2026-05-24 HubPipeline Rust block refactor progress - responses payload block
+- Moved Responses payload construction/finalization helpers from `hub_resp_outbound_client_semantics.rs` into `hub_resp_outbound_client_semantics_blocks/responses_payload.rs`.
+- Root now re-exports `build_responses_payload_from_chat_core` and `normalize_responses_function_name` for existing Rust callers, while public NAPI JSON wrappers remain in root.
+- Kept `normalize_responses_tool_call_arguments_for_client_json` and `normalize_responses_usage_json` as root wrappers calling their blocks.
+- Validation evidence:
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml build_responses_payload -- --nocapture` passed: 18 tests.
+  - `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed with existing warnings.
+- Current audit: `hub_resp_outbound_client_semantics.rs` is down to 2112 lines and root functions are mostly NAPI JSON wrappers plus Anthropic/OpenAI bridge/full-response functions and SSE shell input helper. Goal remains active.
+
+## 2026-05-24 HubPipeline Rust block refactor progress - anthropic full response block
+- Moved Anthropic full response assembly and shell-like tool input normalization from `hub_resp_outbound_client_semantics.rs` into `hub_resp_outbound_client_semantics_blocks/anthropic_full_response.rs`.
+- Root now keeps `build_anthropic_response_from_chat_full_json` as a parse/call/serialize NAPI wrapper.
+- Validation evidence:
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml build_anthropic_response_from_chat_full -- --nocapture` passed.
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml build_anthropic_response_from_chat -- --nocapture` passed.
+  - `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed with existing warnings.
+- Current audit: `hub_resp_outbound_client_semantics.rs` is down to 1907 lines; remaining root functions are public NAPI wrappers plus test module. Goal remains active until all four named roots satisfy orchestrator-only status.
+
+## 2026-05-24 Windsurf SendUserCascadeMessage builder migration
+- Moved native tool config and full `buildSendCascadeMessageRequest()` protobuf construction into `cascade-transport-block.ts`.
+- Provider now only supplies metadata, model/native mode parameters, additional steps, and no-tools prompt constants; raw protobuf assembly is transport block-owned.
+- Removed provider direct proto writer imports; provider no longer owns protobuf writer calls for SendUserCascadeMessage.
+- Verification: `npx tsc --noEmit --pretty false` passed; `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` passed 246/246.
+- Remaining target gap: response wrapper/classification helpers and outer cascade attempt orchestration still need a final ownership audit; P2 Rust/shared truth can continue for prompt/tool/history semantics.
+
+## 2026-05-24 Windsurf response helper ownership cleanup
+- Moved response meta extraction, gzip decoding helper, and connect-frame error-message formatting into `response-parse-block.ts`.
+- Removed provider-local wrappers for those helpers; provider now delegates connect-frame diagnostic message formatting directly to response block.
+- Verification: `npx tsc --noEmit --pretty false` passed; `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` passed 246/246.
+- Remaining target gap: provider still owns response classification (`classifyWindsurfCascadeError`) and completion assembly (`buildCascadeCompletionFromOutput`); audit whether they belong in response block or provider orchestration.
+
+## 2026-05-24 Windsurf provider 架构审计草稿
+- 审计目标：fallback 清理、fd 生命周期、公共函数库 + blocks + 纯编排边界；本轮只读审计，未改实现。
+- 已确认风险点：`sendRequestInternal` 仍有 provider 内部二次 attempt/rewarm 编排；`selectWindsurfPostAuthEndpoint` 仍 catch 后试下一 endpoint；`findWindsurfLanguageServerBinary` 仍有 try-next 二进制选择；`classifyWindsurfCascadeError` 仍在 provider 内承担错误语义。
+- fd 现状：http2 pool 有 close/destroy 集中 block，reset/dispose 会清 session；managed LS spawn/stdout ignore + unref，exit 会清 pool；剩余风险是资源生命周期策略仍散在 provider，`waitManagedLsPortReady` 的探测 session 未纳入 pool 但有 connect/error/timeout close。
+- blocks 现状：auth/runtime/resource/history/transport/response 已拆出；但 provider 仍有 response/error/header/body/runtime orchestration 的语义函数，不是完全纯编排。
+
+## 2026-05-24 HubPipeline Rust block refactor progress - root shrink pass
+- Moved inline tests out of Rust root files into `*_tests.rs` modules for `hub_pipeline`, `hub_resp_outbound_client_semantics`, and `req_process_stage1_tool_governance`; `resp_process_stage1_tool_governance` tests were already external and kept external.
+- Moved `hub_pipeline` NAPI JSON wrappers into `hub_pipeline_blocks/napi_bindings.rs`; root now keeps core pipeline structs/functions plus stable re-exports.
+- Moved `hub_resp_outbound_client_semantics` NAPI JSON wrappers into `hub_resp_outbound_client_semantics_blocks/napi_bindings.rs`; root now only re-exports block APIs and attaches tests.
+- Moved `resp_process_stage1_tool_governance` orchestration/NAPI helpers into `resp_process_stage1_tool_governance_blocks/orchestrator.rs` and `napi_bindings.rs`; root now only re-exports and attaches tests.
+- Moved `req_process_stage1_tool_governance` orchestration/NAPI helpers into `req_process_stage1_tool_governance_blocks/orchestrator.rs`; root now only re-exports and attaches tests.
+- Validation evidence so far: `cargo test ... test_basic_pipeline_success` passed; `cargo test ... test_govern_response_coerces_responses_shape_and_harvests_dsml_wrapper` passed after adding explicit test imports for extracted block functions.
+- Validation evidence update: `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml test_apply_tool_governance_basic -- --nocapture && cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed. Existing warnings remain baseline/noise; no new compile errors after root/block extraction.
+- Root audit after extraction: `resp_process_stage1_tool_governance.rs` 13 lines, `req_process_stage1_tool_governance.rs` 8 lines, `hub_resp_outbound_client_semantics.rs` 23 lines, `hub_pipeline.rs` 282 lines. `hub_pipeline.rs` still owns core pipeline structs and four public pipeline orchestration functions; other roots are re-export/test attach only.
+
+## 2026-05-24 Windsurf response/runtime block closeout
+- 已迁移 response/error 语义到 `src/providers/core/runtime/windsurf/response-parse-block.ts`：`classifyWindsurfCascadeError`、`classifyWindsurfUpstreamPayloadError`、`buildCascadeCompletionFromOutput`、tool output extraction、quota cooldown/error attach；provider 仅保留私有委托，兼容现有测试入口。
+- 已把 managed LS binary 选择改为 runtime lifecycle block 的 typed named strategy `managed_ls_binary_executable_selection`，无 executable 时 fail-fast 返回 typed error，不再 provider 内 catch 后注释式 try-next。
+- 验证：`npx tsc --noEmit --pretty false` 通过；`npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` 247/247 通过；`node scripts/build-core.mjs` 通过（仅既有 Rust warnings）。
+- Added JSON wrapper/core shape-equivalence tests for the four refactored roots: `test_run_hub_pipeline_json_matches_core_shape`, `test_apply_req_process_tool_governance_json_matches_core_shape`, `test_govern_response_json_matches_core_shape`, `build_responses_payload_from_chat_json_matches_core_shape`.
+- Validation evidence update: the four new equivalence tests passed, and `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed again after the tests.
+- Completion audit status: Rust root/block structure and Rust build gate are satisfied for this pass; live/real-entry smoke is still not proven in this turn, so the overall goal remains active.
+
+## 2026-05-24 Windsurf resource block closeout
+- 已把 stale managed runtime 遍历/保留 keepPort/终止/日志事件下沉到 `resource-lifecycle-block.ts` 的 `terminateStaleManagedGrpcRuntimes()`；provider 只传入 runtime 列表、terminate 回调和 log 回调。
+- 新增 resource block 单测覆盖：保留 keepPort、不终止缺 pid runtime、终止 stale pid 并产出 `managedLs.staleTerm` 事件。
+- 验证：`npx tsc --noEmit --pretty false` 通过；`npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts --runInBand --forceExit` 248/248 通过；`node scripts/build-core.mjs` 通过（仅既有 Rust warnings）。
+
+## 2026-05-24 HubPipeline Rust closeout - web_search servertool shadow/deletion gate
+- `tests/servertool/server-side-web-search.spec.ts` 剩余 2 红点已做真因拆分：
+  1) `/v1/responses` followup case 不是业务实现错，而是 **stale test**。实际 followup 经 `src/servertool/followup-shape-guard.ts` 规范化后必须是 `input[]`，不是 `messages[]`。证据：手工复现 `runServerToolOrchestration()` 输出的 `sawFollowup.body` 为 `{ input:[user,function_call,function_call_output], stream:false }`；同仓已有 contract `tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts:942-986` 断言 responses reenter 必须转成 `function_call_output` input。
+  2) Gemini backend case 的唯一正确修改点不是再补 fallback，而是 **物理删除 active js shadow**。`web-search.ts` 运行时会相对 import `./web-search-pure-blocks.js`；源目录 sibling `web-search-pure-blocks.js` 仍是旧实现，不认 `gemini-cli.` / `antigravity.`，会把 providerInvoker 路径误导回 `/v1/chat/completions`。删除 shadow 后，Jest 通过 mapper 回到 `.ts` 真源，Gemini case 转绿。
+- 本轮物理删除：
+  - `sharedmodule/llmswitch-core/src/servertool/handlers/web-search.js`
+  - `sharedmodule/llmswitch-core/src/servertool/handlers/web-search.js.map`
+  - `sharedmodule/llmswitch-core/src/servertool/handlers/web-search-pure-blocks.js`
+  - `sharedmodule/llmswitch-core/src/servertool/handlers/web-search-pure-blocks.js.map`
+- 新增 deletion/residue gate：`tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts` 扩展 web_search 检查，防止 `web-search.ts` / `web-search-pure-blocks.ts` 旁边再次落回 active `.js` shadow`.
+- 测试修正：`tests/servertool/server-side-web-search.spec.ts` 将 `/v1/responses` followup 断言改为 `input[]` continuity，而不是错误地断言 `messages[]`。
+- 验证证据：
+  - `npm run jest:run -- --runTestsByPath tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts --runInBand --no-cache` 通过。
+  - `npm run jest:run -- --runTestsByPath tests/servertool/server-side-web-search.spec.ts --runInBand --no-cache` 13/13 通过。
+  - 回归矩阵继续通过：
+    - `tests/sharedmodule/chat-semantics-stage1.spec.ts` 10/10
+    - `tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts` 4/4
+    - `tests/servertool/review-followup.spec.ts` 6/6
+- 当前唯一正确结论：这次 web_search closeout 的唯一正确修改处不是 Hub req/resp 语义层，也不是再加兼容分支，而是 **删 active js shadow + 修 stale responses followup contract**；这样既消除双实现，又让真实 TS 真源命中当前公共 blocks 逻辑。
+- Module-level audit update: `req_process_stage1_tool_governance_tests` initially exposed two stale assertions; current Rust truth injects `review` and canonical web search tool name is `web_search`, not legacy `websearch`. Tests were aligned to Rust truth and the full req module test suite passed (15/15).
+- Resp module full-suite audit exposed existing/broad baseline failures (11 red) unrelated to root/block extraction. One non-baseline actionable red in `test_normalize_tool_args_variants` showed `bash -lc'...'` repair appended an extra quote; fixed the unique Rust truth in `resp_process_stage1_tool_governance_blocks/exec_command_args.rs` and the focused test passed.
+- Validation evidence update: `hub_pipeline_tests`, `req_process_stage1_tool_governance_tests`, `hub_resp_outbound_client_semantics_tests`, and `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed after the latest fixes. Full `resp_process_stage1_tool_governance_tests` remains not green due to recorded baseline semantic reds.
+- Build/smoke evidence update: `npm run build:min` passed and rebuilt llmswitch-core dist/native. Native smoke scripts passed: `coverage-native-hub-pipeline-resp-semantics.mjs` and `coverage-native-chat-process-governance-semantics.mjs`.
+- Real/local hub pipeline smoke remains red after rebuild: `node sharedmodule/llmswitch-core/scripts/tests/hub-pipeline-smoke.mjs` fails in TS dist semantic gate with `[HubPipeline][semantic_gate] Mappable semantics must not be stored in metadata (chat_process.request.entry): responsesResume`. Per current Rust-only goal, this is recorded as remaining completion blocker rather than patched in TS.
+- Full resp_process module suite remains red on existing semantic tests; focused migrated/core/JSON equivalence tests pass. One actionable quote normalization red was fixed in Rust `exec_command_args.rs`.
+
+## 2026-05-24 Windsurf native pairing shared truth closeout
+- 已把 native tool signature 与 completed native tool-call pairing 决策迁到 Rust/native shared truth：`buildWindsurfNativeToolSignatureJson`、`decideWindsurfCompletedNativeToolCallPairingJson`。
+- TS `history-tool-projection-block.ts` 现在对签名/配对只调用 `rcc-llmswitch-core` native wrapper，不再本地解析 JSON 后自行判定 signature/call-id skip。
+- 验证：`node scripts/build-core.mjs` 通过并生成 native；`npx tsc --noEmit --pretty false` 通过；Windsurf 定向 Jest 248/248 通过；native export 测试覆盖新增两个导出。
+- 剩余 P2 缺口：`buildWindsurfNativeAdditionalStepPayloads()` 仍在 TS 中负责 native tool payload 投影/observation apply，后续若要严格“可复用 tool/history/prompt 语义全部 Rust/shared truth”，还需继续迁移这块或证明它只是 provider-specific mapping 编排。
