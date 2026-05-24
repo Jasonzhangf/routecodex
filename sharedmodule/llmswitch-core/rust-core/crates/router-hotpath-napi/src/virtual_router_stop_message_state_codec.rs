@@ -2,7 +2,9 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Number, Value};
 
-use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_json_utils::{
+    normalize_on_off_auto_mode, normalize_on_off_mode, read_trimmed_string,
+};
 
 const DEFAULT_STOP_MESSAGE_MAX_REPEATS: i64 = 10;
 const STOP_MESSAGE_AI_HISTORY_MAX: usize = 8;
@@ -19,22 +21,6 @@ fn read_bool(value: Option<&Value>) -> Option<bool> {
         Some(Value::Bool(flag)) => Some(*flag),
         _ => None,
     }
-}
-
-fn normalize_stage_mode(value: Option<&Value>) -> Option<String> {
-    let normalized = read_trimmed_string(value)?.to_ascii_lowercase();
-    if normalized == "on" || normalized == "off" || normalized == "auto" {
-        return Some(normalized);
-    }
-    None
-}
-
-fn normalize_ai_mode(value: Option<&Value>) -> Option<String> {
-    let normalized = read_trimmed_string(value)?.to_ascii_lowercase();
-    if normalized == "on" || normalized == "off" {
-        return Some(normalized);
-    }
-    None
 }
 
 fn to_i64_floor(value: f64) -> i64 {
@@ -113,10 +99,10 @@ fn serialize_stop_message_state_from_map(state: &Map<String, Value>) -> Map<Stri
             to_i64_floor(last_used_at),
         );
     }
-    if let Some(mode) = normalize_stage_mode(state.get("stopMessageStageMode")) {
+    if let Some(mode) = normalize_on_off_auto_mode(state.get("stopMessageStageMode")) {
         out.insert("stopMessageStageMode".to_string(), Value::String(mode));
     }
-    if let Some(ai_mode) = normalize_ai_mode(state.get("stopMessageAiMode")) {
+    if let Some(ai_mode) = normalize_on_off_mode(state.get("stopMessageAiMode")) {
         out.insert("stopMessageAiMode".to_string(), Value::String(ai_mode));
     }
     if let Some(seed_prompt) = read_trimmed_string(state.get("stopMessageAiSeedPrompt")) {
@@ -133,7 +119,7 @@ fn serialize_stop_message_state_from_map(state: &Map<String, Value>) -> Map<Stri
 }
 
 fn ensure_stop_message_mode_max_repeats(state: &mut Map<String, Value>) {
-    let mode = normalize_stage_mode(state.get("stopMessageStageMode"));
+    let mode = normalize_on_off_auto_mode(state.get("stopMessageStageMode"));
     if mode.as_deref() != Some("on") && mode.as_deref() != Some("auto") {
         return;
     }
@@ -186,10 +172,10 @@ fn deserialize_stop_message_state_maps(data: &Map<String, Value>, state: &mut Ma
             to_i64_floor(last_used_at_raw),
         );
     }
-    if let Some(mode) = normalize_stage_mode(data.get("stopMessageStageMode")) {
+    if let Some(mode) = normalize_on_off_auto_mode(data.get("stopMessageStageMode")) {
         state.insert("stopMessageStageMode".to_string(), Value::String(mode));
     }
-    if let Some(ai_mode) = normalize_ai_mode(data.get("stopMessageAiMode")) {
+    if let Some(ai_mode) = normalize_on_off_mode(data.get("stopMessageAiMode")) {
         state.insert("stopMessageAiMode".to_string(), Value::String(ai_mode));
     }
     if let Some(seed_prompt) = read_trimmed_string(data.get("stopMessageAiSeedPrompt")) {

@@ -119,6 +119,22 @@ pub(crate) fn read_workdir_from_args(args: &Map<String, Value>) -> Option<String
         .or_else(|| input.and_then(|row| read_trimmed_string(row.get("cwd"))))
 }
 
+pub(crate) fn normalize_on_off_auto_mode(value: Option<&Value>) -> Option<String> {
+    let normalized = read_trimmed_string(value)?.to_ascii_lowercase();
+    match normalized.as_str() {
+        "on" | "off" | "auto" => Some(normalized),
+        _ => None,
+    }
+}
+
+pub(crate) fn normalize_on_off_mode(value: Option<&Value>) -> Option<String> {
+    let normalized = read_trimmed_string(value)?.to_ascii_lowercase();
+    match normalized.as_str() {
+        "on" | "off" => Some(normalized),
+        _ => None,
+    }
+}
+
 pub(crate) fn split_command_string(input: &str) -> Vec<String> {
     let s = input.trim();
     if s.is_empty() {
@@ -628,6 +644,38 @@ mod tests {
             source.contains("read_trimmed_string("),
             "virtual_router_stop_message_actions.rs must use shared read_trimmed_string truth"
         );
+    }
+
+    #[test]
+    fn shared_stop_message_mode_normalizers_deletion_gate_removed_local_clones() {
+        for relative in [
+            "virtual_router_stop_message_actions.rs",
+            "virtual_router_stop_message_state_codec.rs",
+        ] {
+            let path = crate_src_path(relative);
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+            assert!(
+                !source.contains("fn normalize_stage_mode(value: Option<&Value>) -> Option<String> {"),
+                "local normalize_stage_mode clone still present in {}",
+                path.display()
+            );
+            assert!(
+                !source.contains("fn normalize_ai_mode(value: Option<&Value>) -> Option<String> {"),
+                "local normalize_ai_mode clone still present in {}",
+                path.display()
+            );
+            assert!(
+                source.contains("normalize_on_off_auto_mode("),
+                "{} must use shared normalize_on_off_auto_mode truth directly",
+                path.display()
+            );
+            assert!(
+                source.contains("normalize_on_off_mode("),
+                "{} must use shared normalize_on_off_mode truth directly",
+                path.display()
+            );
+        }
     }
 
     #[test]

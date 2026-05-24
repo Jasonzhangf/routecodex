@@ -2,6 +2,10 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Number, Value};
 
+use crate::shared_json_utils::{
+    normalize_on_off_auto_mode, normalize_on_off_mode, read_trimmed_string,
+};
+
 const DEFAULT_STOP_MESSAGE_MAX_REPEATS: i64 = 10;
 
 fn read_finite_f64(value: Option<&Value>) -> Option<f64> {
@@ -9,31 +13,6 @@ fn read_finite_f64(value: Option<&Value>) -> Option<f64> {
         Some(Value::Number(num)) => num.as_f64().filter(|v| v.is_finite()),
         _ => None,
     }
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value?.as_str()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
-fn normalize_stage_mode(value: Option<&Value>) -> Option<String> {
-    let normalized = read_trimmed_string(value)?.to_ascii_lowercase();
-    if normalized == "on" || normalized == "off" || normalized == "auto" {
-        return Some(normalized);
-    }
-    None
-}
-
-fn normalize_ai_mode(value: Option<&Value>) -> Option<String> {
-    let normalized = read_trimmed_string(value)?.to_ascii_lowercase();
-    if normalized == "on" || normalized == "off" {
-        return Some(normalized);
-    }
-    None
 }
 
 fn to_i64_floor(value: f64) -> i64 {
@@ -95,16 +74,16 @@ fn apply_stop_message_set(
     }
 
     let text_value = text.unwrap_or_default();
-    let incoming_mode = normalize_stage_mode(instruction.get("stopMessageStageMode"));
-    let current_mode = normalize_stage_mode(state.get("stopMessageStageMode"));
+    let incoming_mode = normalize_on_off_auto_mode(instruction.get("stopMessageStageMode"));
+    let current_mode = normalize_on_off_auto_mode(state.get("stopMessageStageMode"));
     let target_mode = incoming_mode.unwrap_or_else(|| match current_mode.as_deref() {
         Some("off") | None => "on".to_string(),
         Some(mode) => mode.to_string(),
     });
 
-    let incoming_ai_mode = normalize_ai_mode(instruction.get("stopMessageAiMode"));
+    let incoming_ai_mode = normalize_on_off_mode(instruction.get("stopMessageAiMode"));
     let current_ai_mode =
-        normalize_ai_mode(state.get("stopMessageAiMode")).unwrap_or_else(|| "off".to_string());
+        normalize_on_off_mode(state.get("stopMessageAiMode")).unwrap_or_else(|| "off".to_string());
     let target_ai_mode = incoming_ai_mode.unwrap_or_else(|| "off".to_string());
 
     let same_text = read_trimmed_string(state.get("stopMessageText"))
@@ -165,7 +144,7 @@ fn apply_stop_message_mode(
     state: &Map<String, Value>,
     now_ms: i64,
 ) -> NapiResult<String> {
-    let mode = normalize_stage_mode(instruction.get("stopMessageStageMode"));
+    let mode = normalize_on_off_auto_mode(instruction.get("stopMessageStageMode"));
     if mode.is_none() {
         return make_result(true, Map::new(), Vec::new());
     }

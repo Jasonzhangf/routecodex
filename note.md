@@ -10689,3 +10689,14 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi shared_pick_first_trimmed_string_value_deletion_gate_removed_local_clones -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+- 2026-05-24 orphan_tool_result 线索：线上重复报 `native:run_command:21`，怀疑不是 seed 内重复 tool message，而是 `responses-conversation-store` / `responses-openai-bridge` / followup replay 之间重复把同一 tool_call_id 重新投影进 bridge input。
+- 2026-05-24 已修过的点：`followup-origin-delta.appendToolMessagesFromToolOutputs()` 跳过 seed 中已存在的同 `tool_call_id` tool message；但线上还报 orphan，说明还有别的重复入口。
+
+[2026-05-24] hub pipeline rust shared helper closeout（stop_message mode normalizer 删除双 clone）
+- 红测：`cargo test -p router-hotpath-napi shared_stop_message_mode_normalizers_deletion_gate_removed_local_clones -- --nocapture` 初次失败，命中 `virtual_router_stop_message_actions.rs` 仍保留本地 `normalize_stage_mode` clone。
+- 真源确认：`virtual_router_stop_message_actions.rs` 与 `virtual_router_stop_message_state_codec.rs` 各自的 `normalize_stage_mode(value: Option<&Value>) -> Option<String>` / `normalize_ai_mode(value: Option<&Value>) -> Option<String>` 完全同形：都只做 `read_trimmed_string(...).to_ascii_lowercase()` + allowlist(`on/off/auto` 或 `on/off`)；这是纯 shared JSON string mode canonicalization，不属于模块专属语义。
+- 唯一正确修改点：`shared_json_utils.rs`。因为这两个 helper 只是基于 JSON Value 的 trim + allowlist 归一，既非 tool mapping，也非 orchestration；若继续保留在 stop_message 两文件内，就是重复 helper 第二真源。
+- 实现：在 `shared_json_utils.rs` 新增 `normalize_on_off_auto_mode` 与 `normalize_on_off_mode`，并删除 `virtual_router_stop_message_actions.rs` / `virtual_router_stop_message_state_codec.rs` 两处本地 `normalize_stage_mode` / `normalize_ai_mode` clone，调用点直连 shared 真源。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_stop_message_mode_normalizers_deletion_gate_removed_local_clones -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
