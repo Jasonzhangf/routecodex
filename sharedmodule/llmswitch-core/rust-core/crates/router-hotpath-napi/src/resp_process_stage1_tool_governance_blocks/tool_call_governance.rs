@@ -1,10 +1,13 @@
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
 use crate::resp_process_stage1_tool_governance_blocks::requested_tools::{
     collect_requested_tool_name_keys, read_tool_call_name_key,
 };
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_strict::harvest_explicit_wrapper_only_tool_calls_from_payload;
+use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::{normalize_exec_command_text, read_command_from_args};
+use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
+use crate::resp_process_stage1_tool_governance_blocks::text_harvest_extract::looks_like_exec_command_candidate;
 use crate::resp_process_stage1_tool_governance_blocks::tool_args::normalize_tool_args_preserving_raw_shape;
 use crate::shared_json_utils::read_trimmed_string;
 
@@ -105,6 +108,42 @@ pub(crate) fn drop_disallowed_tool_calls_from_payload(payload: &mut Value) -> i6
     dropped
 }
 
+fn maybe_repair_malformed_exec_command_name(function: &mut Map<String, Value>) -> bool {
+    let Some(raw_name) = read_trimmed_string(function.get("name")) else {
+        return false;
+    };
+    let lowered = raw_name.to_ascii_lowercase();
+    if matches!(
+        lowered.as_str(),
+        "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
+    ) {
+        return false;
+    }
+    if !looks_like_exec_command_candidate(raw_name.as_str()) {
+        return false;
+    }
+
+    let mut args = parse_json_record(function.get("arguments")).unwrap_or_default();
+    if read_command_from_args(&args).is_some() {
+        return false;
+    }
+
+    args.insert(
+        "cmd".to_string(),
+        Value::String(normalize_exec_command_text(raw_name.as_str())),
+    );
+    let Ok(arguments) = serde_json::to_string(&Value::Object(args)) else {
+        return false;
+    };
+
+    function.insert(
+        "name".to_string(),
+        Value::String("exec_command".to_string()),
+    );
+    function.insert("arguments".to_string(), Value::String(arguments));
+    true
+}
+
 pub(crate) fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_protocol: &str) {
     let protocol = client_protocol.trim().to_ascii_lowercase();
     let wants_anthropic_shell = protocol == "anthropic-messages";
@@ -133,6 +172,7 @@ pub(crate) fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_p
             else {
                 continue;
             };
+            let _ = maybe_repair_malformed_exec_command_name(function);
             let Some(name) = read_trimmed_string(function.get("name")) else {
                 continue;
             };

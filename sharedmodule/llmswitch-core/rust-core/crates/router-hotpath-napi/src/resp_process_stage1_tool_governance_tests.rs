@@ -30,7 +30,7 @@ use crate::resp_process_stage1_tool_governance_blocks::tool_args::{
 };
 use crate::resp_process_stage1_tool_governance_blocks::tool_call_governance::{
     count_normalized_tool_calls, maybe_harvest_empty_tool_calls_from_json_content,
-    normalize_apply_patch_tool_calls,
+    normalize_apply_patch_tool_calls, remap_tool_calls_for_client_protocol,
 };
 use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::{
     extract_json_candidates_from_text, extract_tool_call_entries_from_malformed_tool_calls_text,
@@ -1556,9 +1556,36 @@ fn test_tool_call_entry_and_qwen_marker_parsing() {
     let entry = json!({"function": {"name": "unknown_tool"}});
     assert!(normalize_tool_call_entry(&entry, 1).is_none());
 
-    let obj = json!({"tool_calls": [{"function": {"name": "exec_command", "arguments": {"command": "pwd"}}}]});
-    let out = extract_tool_call_entries_from_unknown(&obj);
-    assert_eq!(out.len(), 1);
+    let obj = json!({
+        "choices": [{
+            "message": {
+                "tool_calls": [{
+                    "id": "call_bad_name_1",
+                    "type": "function",
+                    "function": {
+                        "name": "wc -l /Users/fanzhang/Documents/github/routecodex/src/providers/auth/oauth-lifecycle.ts",
+                        "arguments": "{}"
+                    }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    });
+
+    let mut payload = obj;
+    remap_tool_calls_for_client_protocol(&mut payload, "openai-chat");
+    assert_eq!(
+        payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    let args = payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .unwrap_or("{}");
+    let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+    assert!(args_json["cmd"]
+        .as_str()
+        .unwrap_or("")
+        .contains("wc -l"));
 
     let malformed = r#"{"tool_calls":[{"name":"update_plan","input":{"action":"create","plan":[{"step":"A","status":"pending"}]}},{"name":"agent.dispatch","input":{"target_agent_id":"finger-project-agent","task":"alpha"},{"name":"agent.dispatch","input":{"target_agent_id":"finger-reviewer","task":"beta"}}]}"#;
     let out = extract_tool_call_entries_from_malformed_tool_calls_text(malformed, 1);
