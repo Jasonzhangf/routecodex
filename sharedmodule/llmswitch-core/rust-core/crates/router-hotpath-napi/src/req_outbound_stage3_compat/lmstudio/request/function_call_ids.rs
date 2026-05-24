@@ -16,7 +16,7 @@ fn apply_lmstudio_responses_fc_ids(root: &mut Map<String, Value>) {
             continue;
         }
         call_counter += 1;
-        let raw_call_id = pick_trimmed_string_values(&[
+        let raw_call_id = crate::shared_json_utils::pick_first_trimmed_string_value(&[
             item_obj.get("call_id"),
             item_obj.get("tool_call_id"),
             item_obj.get("id"),
@@ -37,7 +37,7 @@ fn apply_lmstudio_responses_fc_ids(root: &mut Map<String, Value>) {
             item_obj.insert("id".to_string(), Value::String(normalized_item_id));
             continue;
         }
-        let existing_id = pick_trimmed_string_values(&[item_obj.get("id")]);
+        let existing_id = crate::shared_json_utils::pick_first_trimmed_string_value(&[item_obj.get("id")]);
         let fallback_output_id = existing_id
             .clone()
             .unwrap_or_else(|| format!("fc_tool_{}", call_counter));

@@ -10669,3 +10669,23 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi virtual_router_metadata_deletion_gate_removed_local_read_metadata_token_wrapper -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] hub pipeline rust shared helper closeout（trimmed string candidate picker 删除双 clone）
+- 先补 red gate：`shared_pick_first_trimmed_string_value_deletion_gate_removed_local_clones`
+- 红测命中证据：
+  - `req_outbound_stage3_compat/lmstudio/request/core_utils.rs` 仍保留本地 `fn pick_trimmed_string_values(values: &[Option<&Value>]) -> Option<String>`
+  - `shared_response_compat.rs` 仍保留本地 `fn pick_string(candidates: &[Option<&Value>]) -> Option<String>`
+- 真源确认：两者都是完全同形的 `Option<&Value>` 候选列表扫描：`as_str -> trim -> empty-skip -> first non-empty string`，应统一归到 `shared_json_utils::pick_first_trimmed_string_value`。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_response_compat.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/lmstudio/request/core_utils.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/lmstudio/request/tool_ids.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/lmstudio/request/function_call_ids.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是 lmstudio/request 或 shared response compat 的业务语义错误，而是两边同时维护了完全同形的 trimmed-string candidate picker 第二真源；
+  - 直接把 picker 下沉到 `shared_json_utils.rs`，并物理删除两个本地 helper，再让调用点直连 shared 真源，才能保证 helper 单点 shared 真源；
+  - 保留任一本地 helper、保留 alias wrapper、或只改其中一个模块，都会继续保留第二真源，不满足 closeout 目标。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_pick_first_trimmed_string_value_deletion_gate_removed_local_clones -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅

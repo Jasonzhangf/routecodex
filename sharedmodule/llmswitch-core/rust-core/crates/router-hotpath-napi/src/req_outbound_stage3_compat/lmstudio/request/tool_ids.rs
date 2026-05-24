@@ -6,7 +6,7 @@ fn normalize_tool_outputs_array(tool_outputs: &mut Value) {
         let Some(row) = entry.as_object_mut() else {
             continue;
         };
-        let resolved = pick_trimmed_string_values(&[
+        let resolved = crate::shared_json_utils::pick_first_trimmed_string_value(&[
             row.get("tool_call_id"),
             row.get("call_id"),
             row.get("id"),
@@ -31,7 +31,7 @@ fn normalize_chat_messages_tool_ids(messages: &mut Value) {
 }
 
 fn normalize_message_tool_ids(message_obj: &mut Map<String, Value>) {
-    let resolved = pick_trimmed_string_values(&[
+    let resolved = crate::shared_json_utils::pick_first_trimmed_string_value(&[
         message_obj.get("tool_call_id"),
         message_obj.get("call_id"),
     ]);
@@ -49,8 +49,8 @@ fn normalize_message_tool_ids(message_obj: &mut Map<String, Value>) {
         let Some(call_obj) = tool_call.as_object_mut() else {
             continue;
         };
-        let id = pick_trimmed_string_values(&[call_obj.get("id")]);
-        let call_id = pick_trimmed_string_values(&[call_obj.get("call_id")]);
+        let id = crate::shared_json_utils::pick_first_trimmed_string_value(&[call_obj.get("id")]);
+        let call_id = crate::shared_json_utils::pick_first_trimmed_string_value(&[call_obj.get("call_id")]);
         match (id, call_id) {
             (Some(id_value), None) => {
                 call_obj.insert("call_id".to_string(), Value::String(id_value));
@@ -91,8 +91,8 @@ pub(super) fn normalize_lmstudio_tool_call_ids(root: &mut Map<String, Value>) {
                     .map(|v| v.to_ascii_lowercase())
                     .unwrap_or_default();
                 if item_type == "function_call" {
-                    let id = pick_trimmed_string_values(&[item_obj.get("id")]);
-                    let call_id = pick_trimmed_string_values(&[item_obj.get("call_id")]);
+                    let id = crate::shared_json_utils::pick_first_trimmed_string_value(&[item_obj.get("id")]);
+                    let call_id = crate::shared_json_utils::pick_first_trimmed_string_value(&[item_obj.get("call_id")]);
                     match (id, call_id) {
                         (None, Some(call_id_value)) => {
                             item_obj.insert("id".to_string(), Value::String(call_id_value));
@@ -106,9 +106,9 @@ pub(super) fn normalize_lmstudio_tool_call_ids(root: &mut Map<String, Value>) {
                     || item_type == "tool_result"
                     || item_type == "tool_message"
                 {
-                    let id = pick_trimmed_string_values(&[item_obj.get("id")]);
-                    let call_id = pick_trimmed_string_values(&[item_obj.get("call_id")]);
-                    let tool_call_id = pick_trimmed_string_values(&[item_obj.get("tool_call_id")]);
+                    let id = crate::shared_json_utils::pick_first_trimmed_string_value(&[item_obj.get("id")]);
+                    let call_id = crate::shared_json_utils::pick_first_trimmed_string_value(&[item_obj.get("call_id")]);
+                    let tool_call_id = crate::shared_json_utils::pick_first_trimmed_string_value(&[item_obj.get("tool_call_id")]);
                     let resolved = call_id.clone().or(tool_call_id.clone()).or(id.clone());
                     if let Some(resolved_value) = resolved {
                         if item_obj.get("call_id").and_then(|v| v.as_str()).is_none() {
@@ -157,8 +157,8 @@ pub(super) fn normalize_lmstudio_tool_call_ids(root: &mut Map<String, Value>) {
                 if item_type != "function_call" {
                     continue;
                 }
-                let id = pick_trimmed_string_values(&[item_obj.get("id"), item_obj.get("item_id")]);
-                let call_id = pick_trimmed_string_values(&[item_obj.get("call_id")]);
+                let id = crate::shared_json_utils::pick_first_trimmed_string_value(&[item_obj.get("id"), item_obj.get("item_id")]);
+                let call_id = crate::shared_json_utils::pick_first_trimmed_string_value(&[item_obj.get("call_id")]);
                 match (id, call_id) {
                     (None, Some(call_id_value)) => {
                         item_obj.insert("id".to_string(), Value::String(call_id_value));

@@ -151,15 +151,3 @@ fn normalize_function_call_id(call_id: Option<&str>, fallback: Option<&str>) -> 
     normalize_with_fallback(call_id, fallback, "fc_")
 }
 
-fn pick_trimmed_string_values(values: &[Option<&Value>]) -> Option<String> {
-    for value in values {
-        let Some(raw) = value.and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
-    }
-    None
-}

@@ -80,6 +80,19 @@ pub(crate) fn read_first_object_trimmed_string(
         .find_map(|key| read_object_trimmed_string(object, key))
 }
 
+pub(crate) fn pick_first_trimmed_string_value(values: &[Option<&Value>]) -> Option<String> {
+    for value in values {
+        let Some(raw) = value.and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
 pub(crate) fn read_string_array_command(value: Option<&Value>) -> Option<String> {
     let parts = value.and_then(|v| v.as_array())?;
     let tokens: Vec<String> = parts
@@ -264,6 +277,45 @@ mod tests {
             source.contains(r#"read_trimmed_string(metadata.get("stopMessageClientInjectSessionScope")).unwrap_or_default()"#)
                 || source.contains(r#"read_trimmed_string(metadata.get("clientTmuxSessionId")).unwrap_or_default()"#),
             "virtual_router_engine/routing/metadata.rs must route metadata token trimming through shared read_trimmed_string truth"
+        );
+    }
+
+    #[test]
+    fn shared_pick_first_trimmed_string_value_deletion_gate_removed_local_clones() {
+        let lmstudio_core_path = crate_src_path("req_outbound_stage3_compat/lmstudio/request/core_utils.rs");
+        let lmstudio_core_source = fs::read_to_string(&lmstudio_core_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", lmstudio_core_path.display(), error));
+        assert!(
+            !lmstudio_core_source.contains("fn pick_trimmed_string_values(values: &[Option<&Value>]) -> Option<String> {"),
+            "lmstudio request core_utils still owns local pick_trimmed_string_values clone"
+        );
+
+        let lmstudio_tool_ids_path = crate_src_path("req_outbound_stage3_compat/lmstudio/request/tool_ids.rs");
+        let lmstudio_tool_ids_source = fs::read_to_string(&lmstudio_tool_ids_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", lmstudio_tool_ids_path.display(), error));
+        assert!(
+            lmstudio_tool_ids_source.contains("pick_first_trimmed_string_value(&["),
+            "lmstudio request tool_ids must route trimmed string picker through shared_json_utils truth"
+        );
+
+        let lmstudio_function_ids_path = crate_src_path("req_outbound_stage3_compat/lmstudio/request/function_call_ids.rs");
+        let lmstudio_function_ids_source = fs::read_to_string(&lmstudio_function_ids_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", lmstudio_function_ids_path.display(), error));
+        assert!(
+            lmstudio_function_ids_source.contains("pick_first_trimmed_string_value(&["),
+            "lmstudio request function_call_ids must route trimmed string picker through shared_json_utils truth"
+        );
+
+        let compat_path = crate_src_path("shared_response_compat.rs");
+        let compat_source = fs::read_to_string(&compat_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", compat_path.display(), error));
+        assert!(
+            !compat_source.contains("fn pick_string(candidates: &[Option<&Value>]) -> Option<String> {"),
+            "shared_response_compat.rs still owns local pick_string clone"
+        );
+        assert!(
+            compat_source.contains("pick_first_trimmed_string_value(&["),
+            "shared_response_compat.rs must route trimmed string picker through shared_json_utils truth"
         );
     }
 

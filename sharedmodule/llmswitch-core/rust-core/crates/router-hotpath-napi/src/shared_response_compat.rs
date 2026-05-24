@@ -2,6 +2,8 @@ use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
+use crate::shared_json_utils::pick_first_trimmed_string_value;
+
 fn is_record(value: &Value) -> bool {
     matches!(value, Value::Object(_))
 }
@@ -522,18 +524,6 @@ pub fn apply_response_blacklist_json(
     serde_json::to_string(&out).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-fn pick_string(candidates: &[Option<&Value>]) -> Option<String> {
-    for candidate in candidates {
-        if let Some(text) = candidate.and_then(|v| v.as_str()) {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
-}
-
 fn normalize_tool_call_ids_value(root: &mut Value) {
     let Some(root_row) = root.as_object_mut() else {
         return;
@@ -546,8 +536,8 @@ fn normalize_tool_call_ids_value(root: &mut Value) {
             };
             let type_name = item_row.get("type").and_then(|v| v.as_str()).unwrap_or("");
             if type_name == "function_call" {
-                let id = pick_string(&[item_row.get("id")]);
-                let call_id = pick_string(&[item_row.get("call_id")]);
+                let id = pick_first_trimmed_string_value(&[item_row.get("id")]);
+                let call_id = pick_first_trimmed_string_value(&[item_row.get("call_id")]);
                 if call_id.is_some() && id.is_none() {
                     item_row.insert("id".to_string(), Value::String(call_id.unwrap()));
                 } else if id.is_some() && call_id.is_none() {
@@ -559,9 +549,9 @@ fn normalize_tool_call_ids_value(root: &mut Value) {
                 || type_name == "tool_result"
                 || type_name == "tool_message"
             {
-                let id = pick_string(&[item_row.get("id")]);
-                let call_id = pick_string(&[item_row.get("call_id")]);
-                let tool_call_id = pick_string(&[item_row.get("tool_call_id")]);
+                let id = pick_first_trimmed_string_value(&[item_row.get("id")]);
+                let call_id = pick_first_trimmed_string_value(&[item_row.get("call_id")]);
+                let tool_call_id = pick_first_trimmed_string_value(&[item_row.get("tool_call_id")]);
                 let resolved = call_id.clone().or(tool_call_id.clone());
                 if let Some(call) = resolved {
                     if call_id.is_none() {
@@ -583,7 +573,7 @@ fn normalize_tool_call_ids_value(root: &mut Value) {
                 let Some(entry_row) = entry.as_object_mut() else {
                     continue;
                 };
-                let resolved = pick_string(&[
+                let resolved = pick_first_trimmed_string_value(&[
                     entry_row.get("tool_call_id"),
                     entry_row.get("call_id"),
                     entry_row.get("id"),
@@ -603,8 +593,8 @@ fn normalize_tool_call_ids_value(root: &mut Value) {
             };
             let type_name = item_row.get("type").and_then(|v| v.as_str()).unwrap_or("");
             if type_name == "function_call" {
-                let id = pick_string(&[item_row.get("id"), item_row.get("item_id")]);
-                let call_id = pick_string(&[item_row.get("call_id")]);
+                let id = pick_first_trimmed_string_value(&[item_row.get("id"), item_row.get("item_id")]);
+                let call_id = pick_first_trimmed_string_value(&[item_row.get("call_id")]);
                 if call_id.is_some() && id.is_none() {
                     item_row.insert("id".to_string(), Value::String(call_id.unwrap()));
                 } else if id.is_some() && call_id.is_none() {
@@ -619,8 +609,8 @@ fn normalize_tool_call_ids_value(root: &mut Value) {
             let Some(message_row) = message.as_object_mut() else {
                 continue;
             };
-            let tool_call_id = pick_string(&[message_row.get("tool_call_id")]);
-            let call_id = pick_string(&[message_row.get("call_id")]);
+            let tool_call_id = pick_first_trimmed_string_value(&[message_row.get("tool_call_id")]);
+            let call_id = pick_first_trimmed_string_value(&[message_row.get("call_id")]);
             let resolved = tool_call_id.clone().or(call_id.clone());
             if let Some(value) = resolved {
                 message_row.insert("tool_call_id".to_string(), Value::String(value.clone()));
@@ -634,8 +624,8 @@ fn normalize_tool_call_ids_value(root: &mut Value) {
                     let Some(call_row) = call.as_object_mut() else {
                         continue;
                     };
-                    let id = pick_string(&[call_row.get("id")]);
-                    let call_id2 = pick_string(&[call_row.get("call_id")]);
+                    let id = pick_first_trimmed_string_value(&[call_row.get("id")]);
+                    let call_id2 = pick_first_trimmed_string_value(&[call_row.get("call_id")]);
                     if id.is_some() && call_id2.is_none() {
                         call_row.insert("call_id".to_string(), Value::String(id.unwrap()));
                     } else if call_id2.is_some() && id.is_none() {
@@ -1254,7 +1244,7 @@ fn enforce_lmstudio_responses_fc_tool_call_ids_value(root: &mut Value) {
         }
 
         call_counter += 1;
-        let raw_call_id = pick_string(&[
+        let raw_call_id = pick_first_trimmed_string_value(&[
             item_row.get("call_id"),
             item_row.get("tool_call_id"),
             item_row.get("id"),
@@ -1277,7 +1267,7 @@ fn enforce_lmstudio_responses_fc_tool_call_ids_value(root: &mut Value) {
             continue;
         }
 
-        let fallback_output_id = pick_string(&[item_row.get("id")])
+        let fallback_output_id = pick_first_trimmed_string_value(&[item_row.get("id")])
             .unwrap_or_else(|| format!("fc_tool_{}", call_counter));
         let normalized_output_id = normalize_function_call_output_id(
             Some(normalized_call_id.as_str()),
