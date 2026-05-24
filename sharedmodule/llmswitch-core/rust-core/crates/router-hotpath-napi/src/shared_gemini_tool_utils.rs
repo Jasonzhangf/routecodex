@@ -404,10 +404,6 @@ fn prepare_gemini_tools_for_bridge(raw_tools: &Value, missing: &Value) -> Value 
     serde_json::json!({ "defs": defs_value, "missing": next_missing })
 }
 
-fn normalize_tool_name(name: &str, mode: &str) -> String {
-    name.to_string()
-}
-
 fn apply_fixups(name: &str, parameters: &Value, mode: &str) -> Value {
     let Some(params_obj) = parameters.as_object() else {
         return parameters.clone();
@@ -519,7 +515,7 @@ fn build_gemini_tools_from_bridge(defs: &Value, mode_raw: Option<&str>) -> Value
         let Some(name) = name else {
             continue;
         };
-        let final_name = normalize_tool_name(name, mode);
+        let final_name = name.to_string();
         let description = fn_node
             .and_then(|row| row.get("description").and_then(Value::as_str))
             .or_else(|| def_obj.get("description").and_then(Value::as_str));
@@ -578,6 +574,22 @@ pub fn build_gemini_tools_from_bridge_json(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn gemini_deletion_gate_removed_local_normalize_tool_name_wrapper() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/shared_gemini_tool_utils.rs");
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn normalize_tool_name(name: &str, mode: &str) -> String {"),
+            "shared_gemini_tool_utils.rs still owns local normalize_tool_name wrapper"
+        );
+        assert!(
+            source.contains("let final_name = name.to_string();"),
+            "shared_gemini_tool_utils.rs must inline name passthrough instead of retaining local normalize_tool_name wrapper"
+        );
+    }
 
     #[test]
     fn gemini_does_not_own_apply_patch_contract_anymore() {

@@ -10608,3 +10608,18 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi shared_read_object_trimmed_string_deletion_gate_removed_deepseek_prompt_content_local_clone -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+
+[2026-05-24] hub pipeline rust shared helper closeout（gemini local normalize_tool_name wrapper 删除）
+- 先补 red gate：`gemini_deletion_gate_removed_local_normalize_tool_name_wrapper`
+- 红测命中证据：`shared_gemini_tool_utils.rs` 仍保留本地 `fn normalize_tool_name(name: &str, mode: &str) -> String`
+- 真源确认：该实现是零逻辑 wrapper，仅返回 `name.to_string()`，不承载任何 canonicalization 或 provider 语义，不应作为第二 helper 入口存在。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_gemini_tool_utils.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是 gemini tool build 语义错误，而是本模块内保留了无意义 helper 第二入口；
+  - 直接物理删除 wrapper 并把调用点内联为 `name.to_string()`，才能消除重复 helper 真源；
+  - 保留 wrapper 或另造 shared 层都只会继续保留无价值 helper，不满足 closeout 目标。
+- 验证：
+  - `cargo test -p router-hotpath-napi gemini_deletion_gate_removed_local_normalize_tool_name_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
