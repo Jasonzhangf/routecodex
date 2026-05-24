@@ -1288,6 +1288,25 @@ mod tests {
     }
 
     #[test]
+    fn shared_json_utils_deletion_gate_removed_shared_responses_conversation_utils_wrappers() {
+        let path = crate_src_path("shared_responses_conversation_utils.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn read_trimmed_text(value: Option<&Value>) -> Option<String> {"),
+            "shared_responses_conversation_utils.rs still owns local read_trimmed_text wrapper"
+        );
+        assert!(
+            !source.contains("fn read_workdir_from_args_map(args: &Map<String, Value>) -> Option<String> {"),
+            "shared_responses_conversation_utils.rs still owns local read_workdir_from_args_map wrapper"
+        );
+        assert!(
+            source.contains("read_trimmed_string(") && source.contains("read_workdir_from_args(args)"),
+            "shared_responses_conversation_utils.rs must call shared json utils truth directly"
+        );
+    }
+
+    #[test]
     fn shared_read_first_object_trimmed_string_deletion_gate_removed_hub_pipeline_metadata_wrapper() {
         let path = crate_src_path("hub_pipeline_blocks/metadata.rs");
         let source = fs::read_to_string(&path)

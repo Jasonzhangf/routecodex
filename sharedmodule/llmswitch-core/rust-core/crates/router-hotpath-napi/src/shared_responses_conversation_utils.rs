@@ -3,6 +3,9 @@ use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, collect_reasoning_content_segments,
     collect_reasoning_summary_segments, project_message_reasoning_text,
 };
+use crate::shared_json_utils::{
+    read_string_array_command, read_trimmed_string, read_workdir_from_args, value_as_object_or_empty,
+};
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 
@@ -11,32 +14,6 @@ fn is_shell_like_function_name(name: &str) -> bool {
         name.trim().to_ascii_lowercase().as_str(),
         "exec_command" | "shell_command" | "shell" | "bash" | "terminal" | "run_command"
     )
-}
-
-fn read_trimmed_text(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(Value::as_str)?.trim().to_string();
-    if raw.is_empty() {
-        None
-    } else {
-        Some(raw)
-    }
-}
-
-fn read_string_array_command(value: Option<&Value>) -> Option<String> {
-    let parts = value.and_then(Value::as_array)?;
-    let tokens: Vec<String> = parts
-        .iter()
-        .map(|item| match item {
-            Value::String(v) => v.trim().to_string(),
-            Value::Null => String::new(),
-            other => other.to_string().trim().to_string(),
-        })
-        .filter(|token| !token.is_empty())
-        .collect();
-    if tokens.is_empty() {
-        return None;
-    }
-    Some(tokens.join(" "))
 }
 
 fn parse_arguments_record(value: Option<&Value>) -> Option<Map<String, Value>> {
@@ -56,7 +33,7 @@ fn parse_arguments_record(value: Option<&Value>) -> Option<Map<String, Value>> {
 
 fn read_command_from_args_map(args: &Map<String, Value>) -> Option<String> {
     let read_value = |value: Option<&Value>| -> Option<String> {
-        read_trimmed_text(value).or_else(|| read_string_array_command(value))
+        read_trimmed_string(value).or_else(|| read_string_array_command(value))
     };
 
     let direct = read_value(args.get("cmd"))
@@ -75,15 +52,6 @@ fn read_command_from_args_map(args: &Map<String, Value>) -> Option<String> {
                 read_value(row.get("cmd")).or_else(|| read_value(row.get("command")))
             })
         })
-}
-
-fn read_workdir_from_args_map(args: &Map<String, Value>) -> Option<String> {
-    let input = args.get("input").and_then(Value::as_object);
-    read_trimmed_text(args.get("workdir"))
-        .or_else(|| read_trimmed_text(args.get("cwd")))
-        .or_else(|| read_trimmed_text(args.get("workDir")))
-        .or_else(|| input.and_then(|row| read_trimmed_text(row.get("workdir"))))
-        .or_else(|| input.and_then(|row| read_trimmed_text(row.get("cwd"))))
 }
 
 fn args_contain_direct_or_nested_key(args: &Map<String, Value>, key: &str) -> bool {
@@ -127,7 +95,7 @@ fn build_shell_like_output_arguments(
     if emit_cmd {
         normalized.insert("cmd".to_string(), Value::String(cmd));
     }
-    if let Some(workdir) = read_workdir_from_args_map(args) {
+    if let Some(workdir) = read_workdir_from_args(args) {
         normalized.insert("workdir".to_string(), Value::String(workdir));
     }
     serde_json::to_string(&Value::Object(normalized)).ok()
