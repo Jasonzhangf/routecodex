@@ -100,7 +100,6 @@ mod shared_responses_response_utils;
 mod shared_responses_tool_utils;
 mod shared_tool_call_id_manager;
 mod shared_tool_mapping;
-mod shared_tool_result_text_normalizer;
 mod shared_tooling;
 mod streaming_tool_extractor;
 mod thought_signature_validator;

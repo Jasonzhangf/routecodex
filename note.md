@@ -10707,3 +10707,10 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_anthropic_codec_local_clone -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅（当前工作树）
+
+[2026-05-24] hub pipeline rust shared helper closeout（shared_tool_result_text_normalizer 模块物理删除）
+- 真源确认：tool result transcript unwrap / normalize 逻辑已经落在 `shared_tooling.rs::{normalize_tool_result_text, normalize_tool_result_value}`；`shared_tool_result_text_normalizer.rs` 继续存在只会构成第二真源死代码模块。
+- 唯一正确修改点：物理删除 `shared_tool_result_text_normalizer.rs`，并让 `anthropic_response.rs` / 其他调用点只走 `shared_tooling.rs` 真源；同时从 `lib.rs` 删除旧模块注册入口。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_shared_tool_result_text_normalizer_module -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅（当前工作树）

@@ -7,7 +7,7 @@ use crate::hub_reasoning_tool_normalizer::{
     normalize_message_reasoning_ssot,
 };
 use crate::shared_tool_mapping::normalize_anthropic_tool_name;
-use crate::shared_tool_result_text_normalizer::normalize_tool_result_text;
+use crate::shared_tooling::normalize_tool_result_text;
 
 fn now_unix_millis() -> u128 {
     SystemTime::now()
