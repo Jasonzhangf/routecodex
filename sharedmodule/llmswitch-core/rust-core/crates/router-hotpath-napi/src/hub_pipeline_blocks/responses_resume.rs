@@ -171,7 +171,9 @@ pub(crate) fn lift_responses_resume_into_semantics(request: &Value, metadata: &V
         }
     }
 
-    next_metadata.remove("responsesResume");
+    if next_metadata.contains_key("responsesResume") {
+        next_metadata.insert("responsesResume".to_string(), Value::Null);
+    }
     output.insert("request".to_string(), Value::Object(next_request));
     output.insert("metadata".to_string(), Value::Object(next_metadata));
     Value::Object(output)

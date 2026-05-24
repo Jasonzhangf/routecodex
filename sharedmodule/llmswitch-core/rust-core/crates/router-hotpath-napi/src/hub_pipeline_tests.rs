@@ -574,6 +574,45 @@ fn test_build_router_metadata_input_extracts_runtime_flags_and_stop_message_fiel
 }
 
 #[test]
+fn test_lift_responses_resume_into_semantics_emits_null_tombstone_for_metadata_merge() {
+    let request = json!({
+        "messages": [{"role": "user", "content": "hi"}]
+    });
+    let metadata = json!({
+        "responsesResume": {
+            "tool_call_id": "call_demo_exec",
+            "output": "ok"
+        },
+        "routeHint": "tools"
+    });
+
+    let output = lift_responses_resume_into_semantics(&request, &metadata);
+    let row = output.as_object().expect("output object");
+    let next_metadata = row
+        .get("metadata")
+        .and_then(|v| v.as_object())
+        .expect("metadata object");
+
+    assert!(
+        next_metadata.contains_key("responsesResume"),
+        "native metadata patch must include explicit tombstone so TS Object.assign clears stale key"
+    );
+    assert!(
+        next_metadata.get("responsesResume").is_some_and(|v| v.is_null()),
+        "responsesResume tombstone must be null for shape-preserving merge semantics"
+    );
+    assert_eq!(
+        row.get("request")
+            .and_then(|v| v.get("semantics"))
+            .and_then(|v| v.get("responses"))
+            .and_then(|v| v.get("resume"))
+            .and_then(|v| v.get("tool_call_id"))
+            .and_then(|v| v.as_str()),
+        Some("call_demo_exec")
+    );
+}
+
+#[test]
 fn test_build_router_metadata_input_hides_estimated_tokens_when_not_requested() {
     let input = json!({
         "requestId": "req-2",
@@ -2402,6 +2441,17 @@ fn test_find_mappable_semantics_keys_collects_only_present_keys() {
         keys,
         vec!["responses_resume".to_string(), "extraFields".to_string()]
     );
+}
+
+#[test]
+fn test_find_mappable_semantics_keys_ignores_null_tombstones() {
+    let metadata = json!({
+        "responsesResume": null,
+        "extraFields": {"x": 1},
+        "safe": true
+    });
+    let keys = find_mappable_semantics_keys(&metadata);
+    assert_eq!(keys, vec!["extraFields".to_string()]);
 }
 
 #[test]

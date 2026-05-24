@@ -9333,3 +9333,23 @@ Protocol target:
 - TS `history-tool-projection-block.ts` 现在对签名/配对只调用 `rcc-llmswitch-core` native wrapper，不再本地解析 JSON 后自行判定 signature/call-id skip。
 - 验证：`node scripts/build-core.mjs` 通过并生成 native；`npx tsc --noEmit --pretty false` 通过；Windsurf 定向 Jest 248/248 通过；native export 测试覆盖新增两个导出。
 - 剩余 P2 缺口：`buildWindsurfNativeAdditionalStepPayloads()` 仍在 TS 中负责 native tool payload 投影/observation apply，后续若要严格“可复用 tool/history/prompt 语义全部 Rust/shared truth”，还需继续迁移这块或证明它只是 provider-specific mapping 编排。
+
+## 2026-05-24 HubPipeline Rust closeout progress - responsesResume tombstone/gate fix
+- 真实入口 `hub-pipeline-smoke.mjs` 红点最终真因不是新的 TS 语义实现，而是 Rust->TS 薄壳交界的 shape 合约缺口：
+  1) `lift_responses_resume_into_semantics()` 之前直接 `remove("responsesResume")`，但 TS 侧用 `Object.assign(base, lifted.metadata)` 合并 metadata，删除不会跨 merge 生效；旧键残留进 chat_process entry。
+  2) 把 `responsesResume: null` 作为 tombstone 后，`find_mappable_semantics_keys()` 又把 null tombstone 误判成“仍有 mappable semantic”，导致 semantic gate 继续红。
+- 已补两条红测并转绿：
+  - `test_lift_responses_resume_into_semantics_emits_null_tombstone_for_metadata_merge`
+  - `test_find_mappable_semantics_keys_ignores_null_tombstones`
+- 唯一真源修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs`
+    - 对已有 `responsesResume` 输出 `null tombstone`，保证 TS merge 后旧键被清空而非残留。
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/process_mode.rs`
+    - semantic gate 只把非 null 值视作 mappable semantic，忽略 tombstone。
+- 验证证据：
+  - 两条红测通过。
+  - `npm run build:min` 通过。
+  - `node sharedmodule/llmswitch-core/scripts/tests/hub-pipeline-smoke.mjs` 通过。
+  - `node sharedmodule/llmswitch-core/scripts/tests/coverage-native-hub-pipeline-resp-semantics.mjs` 通过。
+  - `node sharedmodule/llmswitch-core/scripts/tests/coverage-native-chat-process-governance-semantics.mjs` 通过。
+- 当前结论：`responsesResume` 在 HubPipeline chat_process re-entry 的 metadata 污染 blocker 已被 Rust 真源收口；剩余工作转回总目标 completion audit，而不是继续追这条链路。
