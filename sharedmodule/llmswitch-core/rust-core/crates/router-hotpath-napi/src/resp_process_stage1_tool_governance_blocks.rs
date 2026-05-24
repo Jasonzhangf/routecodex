@@ -19,5 +19,4 @@ pub(crate) mod text_harvest_strict;
 pub(crate) mod tool_call_governance;
 pub(crate) mod tool_args;
 pub(crate) mod tool_call_entry;
-pub(crate) mod tool_names;
 pub(crate) mod xml_text_utils;

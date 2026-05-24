@@ -15,12 +15,11 @@ use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::{
     strip_tool_call_marker_payload,
 };
 use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::{
-    read_command_from_args, read_workdir_from_args,
+    read_command_from_args,
 };
 use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_extract::{
     collect_harvest_text_variants, extract_reasoning_inline_exec_command_arg_key,
-    extract_rcc_tool_call_fence_segments,
     extract_tool_prefixed_exec_command_block, extract_xml_named_tool_call_blocks,
     extract_xml_tool_call_blocks,
 };
@@ -34,15 +33,17 @@ use crate::resp_process_stage1_tool_governance_blocks::tool_call_governance::{
     normalize_apply_patch_tool_calls,
 };
 use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::{
-    extract_balanced_json_object_at, extract_json_candidates_from_text,
-    extract_tool_call_entries_from_malformed_tool_calls_text,
-    extract_tool_call_entries_from_unknown, normalize_tool_call_entry,
-    parse_tool_calls_shape_from_text,
+    extract_json_candidates_from_text, extract_tool_call_entries_from_malformed_tool_calls_text,
+    extract_tool_call_entries_from_unknown, normalize_tool_call_entry, parse_tool_calls_shape_from_text,
 };
-use crate::resp_process_stage1_tool_governance_blocks::tool_names::normalize_tool_name;
 use crate::resp_process_stage1_tool_governance_blocks::xml_text_utils::{
     strip_xml_tags_preserve_text, unwrap_xml_cdata_sections,
 };
+use crate::shared_json_utils::{
+    extract_balanced_json_array_at, extract_balanced_json_object_at, read_workdir_from_args,
+};
+use crate::shared_tool_mapping::normalize_routecodex_tool_name;
+use crate::shared_tooling::extract_rcc_tool_call_fence_segments;
 use serde_json::Map;
 use serde_json::json;
 
@@ -741,26 +742,26 @@ fn test_strip_orphan_tool_markup_lines() {
 #[test]
 fn test_normalize_tool_name_shell_command_aliases_to_exec_command() {
     assert_eq!(
-        normalize_tool_name("functions.shell_command"),
+        normalize_routecodex_tool_name(Some("functions.shell_command")),
         Some("exec_command".to_string())
     );
     assert_eq!(
-        normalize_tool_name("totally_unknown_tool"),
+        normalize_routecodex_tool_name(Some("totally_unknown_tool")),
         Some("totally_unknown_tool".to_string())
     );
     assert_eq!(
-        normalize_tool_name("mailbox.status"),
+        normalize_routecodex_tool_name(Some("mailbox.status")),
         Some("mailbox.status".to_string())
     );
 }
 
 #[test]
 fn test_normalize_tool_name_edge_cases() {
-    assert!(normalize_tool_name("").is_none());
-    assert!(normalize_tool_name("   ").is_none());
-    assert!(normalize_tool_name("functions.").is_none());
+    assert!(normalize_routecodex_tool_name(Some("")).is_none());
+    assert!(normalize_routecodex_tool_name(Some("   ")).is_none());
+    assert!(normalize_routecodex_tool_name(Some("functions.")).is_none());
     assert_eq!(
-        normalize_tool_name("  FuNcTiOnS.SHELL_COMMAND "),
+        normalize_routecodex_tool_name(Some("  FuNcTiOnS.SHELL_COMMAND ")),
         Some("exec_command".to_string())
     );
 }
@@ -1511,10 +1512,17 @@ fn test_json_extraction_helpers() {
     let text = "xx {\"a\":1} yy";
     let idx = text.find('{').unwrap();
     assert_eq!(
-        extract_balanced_json_object_at(text, idx).unwrap(),
+        extract_balanced_json_object_at(text, idx).unwrap().1,
         "{\"a\":1}"
     );
     assert!(extract_balanced_json_object_at("nope", 0).is_none());
+    let array_text = "yy [1,{\"a\":2}] zz";
+    let array_idx = array_text.find('[').unwrap();
+    assert_eq!(
+        extract_balanced_json_array_at(array_text, array_idx).unwrap().1,
+        "[1,{\"a\":2}]"
+    );
+    assert!(extract_balanced_json_array_at("nope", 0).is_none());
 
     let fenced = "```json\n{\"tool_calls\": []}\n```";
     let out = extract_json_candidates_from_text(fenced);

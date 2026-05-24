@@ -3,7 +3,6 @@ use serde_json::{json, Map, Value};
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
 use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::{
     args_contain_direct_or_nested_key, normalize_exec_command_text, read_command_from_args,
-    read_workdir_from_args,
 };
 use crate::resp_process_stage1_tool_governance_blocks::exec_command_guard::{
     build_exec_command_large_write_guard_command, build_exec_command_object_with_shape,
@@ -11,7 +10,7 @@ use crate::resp_process_stage1_tool_governance_blocks::exec_command_guard::{
     maybe_guard_large_exec_command_from_raw_string, truncate_preview,
 };
 use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
-use crate::resp_process_stage1_tool_governance_blocks::tool_names::normalize_tool_name;
+use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 pub(crate) fn infer_tool_name_from_args(raw_args: Option<&Value>) -> Option<String> {
     let args = parse_json_record(raw_args).unwrap_or_default();
     if args.is_empty() {
@@ -59,7 +58,7 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
         source_tool_name.as_str(),
         "shell_command" | "shell" | "bash" | "terminal" | "execute_command" | "execute-command"
     );
-    let name = normalize_tool_name(tool_name)?;
+    let name = normalize_routecodex_tool_name(Some(tool_name))?;
     let args = parse_json_record(raw_args).unwrap_or_default();
     if name == "exec_command" {
         if let Some(guarded) = maybe_guard_large_exec_command_from_raw_string(
@@ -73,7 +72,6 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
                     force_cmd,
                     force_command,
                     args_contain_direct_or_nested_key,
-                    read_workdir_from_args,
                 )
             },
         ) {
@@ -170,7 +168,6 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
             None,
             None,
             args_contain_direct_or_nested_key,
-            read_workdir_from_args,
         )?;
         let mut out_value: Value = serde_json::from_str(parsed.as_str()).ok()?;
         let out = out_value.as_object_mut()?;
@@ -296,7 +293,7 @@ pub(crate) fn normalize_tool_args_preserving_raw_shape(
     tool_name: &str,
     raw_args: Option<&Value>,
 ) -> Option<String> {
-    let canonical_name = normalize_tool_name(tool_name)?;
+    let canonical_name = normalize_routecodex_tool_name(Some(tool_name))?;
     if canonical_name != "exec_command" {
         return normalize_tool_args(tool_name, raw_args);
     }
@@ -316,7 +313,6 @@ pub(crate) fn normalize_tool_args_preserving_raw_shape(
                 force_cmd,
                 force_command,
                 args_contain_direct_or_nested_key,
-                read_workdir_from_args,
             )
         },
     ) {
@@ -334,7 +330,6 @@ pub(crate) fn normalize_tool_args_preserving_raw_shape(
             None,
             None,
             args_contain_direct_or_nested_key,
-            read_workdir_from_args,
         );
     }
     serde_json::to_string(&Value::Object(args)).ok()

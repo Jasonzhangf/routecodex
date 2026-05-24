@@ -12,102 +12,15 @@ use crate::resp_process_stage1_tool_governance_blocks::json_args::{
 use crate::resp_process_stage1_tool_governance_blocks::tool_args::{
     infer_tool_name_from_args, normalize_tool_args, normalize_tool_args_preserving_raw_shape,
 };
-use crate::resp_process_stage1_tool_governance_blocks::tool_names::normalize_tool_name;
-use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_json_utils::{
+    extract_balanced_json_array_at as extract_balanced_json_array_at_shared,
+    extract_balanced_json_object_at as extract_balanced_json_object_at_shared, read_trimmed_string,
+};
+use crate::shared_tool_mapping::{
+    normalize_routecodex_tool_name, read_routecodex_tool_name_hint_from_args,
+};
 
 const TOOL_CALL_JSON_MARKER: &str = "\"tool_calls\"";
-
-pub(crate) fn extract_balanced_json_object_at(text: &str, start_index: usize) -> Option<String> {
-    let bytes = text.as_bytes();
-    if start_index >= bytes.len() || bytes[start_index] != b'{' {
-        return None;
-    }
-
-    let mut depth = 0i64;
-    let mut in_string = false;
-    let mut escaped = false;
-
-    for idx in start_index..bytes.len() {
-        let ch = bytes[idx];
-        if in_string {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if ch == b'\\' {
-                escaped = true;
-                continue;
-            }
-            if ch == b'"' {
-                in_string = false;
-            }
-            continue;
-        }
-
-        if ch == b'"' {
-            in_string = true;
-            continue;
-        }
-        if ch == b'{' {
-            depth += 1;
-            continue;
-        }
-        if ch == b'}' {
-            depth -= 1;
-            if depth == 0 {
-                return Some(text[start_index..=idx].to_string());
-            }
-        }
-    }
-
-    None
-}
-
-pub(crate) fn extract_balanced_json_array_at(text: &str, start_index: usize) -> Option<String> {
-    let bytes = text.as_bytes();
-    if start_index >= bytes.len() || bytes[start_index] != b'[' {
-        return None;
-    }
-
-    let mut depth = 0i64;
-    let mut in_string = false;
-    let mut escaped = false;
-
-    for idx in start_index..bytes.len() {
-        let ch = bytes[idx];
-        if in_string {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if ch == b'\\' {
-                escaped = true;
-                continue;
-            }
-            if ch == b'"' {
-                in_string = false;
-            }
-            continue;
-        }
-
-        if ch == b'"' {
-            in_string = true;
-            continue;
-        }
-        if ch == b'[' {
-            depth += 1;
-            continue;
-        }
-        if ch == b']' {
-            depth -= 1;
-            if depth == 0 {
-                return Some(text[start_index..=idx].to_string());
-            }
-        }
-    }
-
-    None
-}
 
 fn has_unclosed_code_fence(text: &str) -> bool {
     let fence_count = text.match_indices("```").count();
@@ -166,7 +79,9 @@ pub(crate) fn extract_json_candidates_from_text(text: &str) -> Vec<Value> {
             let idx = search_from + rel_idx;
             let prefix = &text[..idx];
             if let Some(open_brace_idx) = prefix.rfind('{') {
-                if let Some(segment) = extract_balanced_json_object_at(text, open_brace_idx) {
+                if let Some((_, segment)) =
+                    extract_balanced_json_object_at_shared(text, open_brace_idx)
+                {
                     let normalized = segment.trim().to_string();
                     if !normalized.is_empty() && !seen.contains(&normalized) {
                         if is_unsafe_double_quoted_tool_json_candidate(&normalized) {
@@ -192,7 +107,8 @@ pub(crate) fn extract_json_candidates_from_text(text: &str) -> Vec<Value> {
             continue;
         };
         let open_idx = marker.end() + rel_open;
-        let Some(array_segment) = extract_balanced_json_array_at(text, open_idx) else {
+        let Some((_, array_segment)) = extract_balanced_json_array_at_shared(text, open_idx)
+        else {
             continue;
         };
         let normalized = array_segment.trim().to_string();
@@ -244,13 +160,13 @@ pub(crate) fn maybe_parse_tool_call_text_value(raw: &str) -> Option<Value> {
         return Some(parsed);
     }
     if trimmed.starts_with('{') {
-        if let Some(balanced) = extract_balanced_json_object_at(trimmed, 0) {
+        if let Some((_, balanced)) = extract_balanced_json_object_at_shared(trimmed, 0) {
             if let Some(parsed) = try_parse_json_value_lenient(balanced.as_str()) {
                 return Some(parsed);
             }
         }
     } else if trimmed.starts_with('[') {
-        if let Some(balanced) = extract_balanced_json_array_at(trimmed, 0) {
+        if let Some((_, balanced)) = extract_balanced_json_array_at_shared(trimmed, 0) {
             if let Some(parsed) = try_parse_json_value_lenient(balanced.as_str()) {
                 return Some(parsed);
             }
@@ -262,13 +178,15 @@ pub(crate) fn maybe_parse_tool_call_text_value(raw: &str) -> Option<Value> {
             return Some(parsed);
         }
         if unescaped.starts_with('{') {
-            if let Some(balanced) = extract_balanced_json_object_at(unescaped.as_str(), 0) {
+            if let Some((_, balanced)) = extract_balanced_json_object_at_shared(unescaped.as_str(), 0)
+            {
                 if let Some(parsed) = try_parse_json_value_lenient(balanced.as_str()) {
                     return Some(parsed);
                 }
             }
         } else if unescaped.starts_with('[') {
-            if let Some(balanced) = extract_balanced_json_array_at(unescaped.as_str(), 0) {
+            if let Some((_, balanced)) = extract_balanced_json_array_at_shared(unescaped.as_str(), 0)
+            {
                 if let Some(parsed) = try_parse_json_value_lenient(balanced.as_str()) {
                     return Some(parsed);
                 }
@@ -341,11 +259,11 @@ pub(crate) fn normalize_tool_call_entry(entry: &Value, fallback_id: usize) -> Op
 
     let explicit_name = read_trimmed_string(row.get("name"))
         .or_else(|| fn_row.and_then(|f| read_trimmed_string(f.get("name"))));
-    let inferred_name = read_tool_name_hint_from_args(Some(args_source))
+    let inferred_name = read_routecodex_tool_name_hint_from_args(Some(args_source))
         .or_else(|| infer_tool_name_from_args(Some(args_source)))
         .or(direct_root_inferred_name);
     let raw_name = explicit_name.clone().or_else(|| inferred_name.clone())?;
-    let canonical_name = normalize_tool_name(&raw_name)?;
+    let canonical_name = normalize_routecodex_tool_name(Some(&raw_name))?;
     let explicit_call_id = read_trimmed_string(row.get("call_id"))
         .or_else(|| read_trimmed_string(row.get("id")))
         .or_else(|| read_trimmed_string(row.get("tool_call_id")));
@@ -412,7 +330,7 @@ fn ensure_tool_call_id_fields(
         .or_else(|| read_trimmed_string(tool_call_obj.get("name")));
     let canonical_name = function_name
         .as_deref()
-        .and_then(normalize_tool_name)
+        .and_then(|name| normalize_routecodex_tool_name(Some(name)))
         .or(function_name.clone());
     let generated = match canonical_name {
         Some(name) if can_servertool_own_tool_call_id(name.as_str()) => {
@@ -514,11 +432,11 @@ fn build_tool_calls_shape_candidate(text: &str) -> Option<String> {
         }
     }
     if candidate.starts_with('{') {
-        if let Some(balanced) = extract_balanced_json_object_at(candidate.as_str(), 0) {
+        if let Some((_, balanced)) = extract_balanced_json_object_at_shared(candidate.as_str(), 0) {
             candidate = balanced;
         }
     } else if candidate.starts_with('[') {
-        if let Some(balanced) = extract_balanced_json_array_at(candidate.as_str(), 0) {
+        if let Some((_, balanced)) = extract_balanced_json_array_at_shared(candidate.as_str(), 0) {
             candidate = balanced;
         }
     }
@@ -783,34 +701,6 @@ pub(crate) fn extract_tool_call_entries_from_malformed_tool_calls_text(
     }
 
     recovered
-}
-
-pub(crate) fn read_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String> {
-    fn scan(value: &Value, depth: usize) -> Option<String> {
-        if depth == 0 {
-            return None;
-        }
-        let obj = value.as_object()?;
-        if let Some(raw_name) = read_trimmed_string(obj.get("name")) {
-            if let Some(normalized) = normalize_tool_name(&raw_name) {
-                return Some(normalized);
-            }
-        }
-        for key in ["function", "input", "args", "payload"] {
-            if let Some(child) = obj.get(key) {
-                if let Some(hint) = scan(child, depth - 1) {
-                    return Some(hint);
-                }
-            }
-        }
-        None
-    }
-
-    match raw_args {
-        Some(Value::Object(_)) => scan(raw_args?, 3),
-        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 2)),
-        _ => None,
-    }
 }
 
 pub(crate) fn read_tool_call_id_hint_from_args(raw_args: Option<&Value>) -> Option<String> {
