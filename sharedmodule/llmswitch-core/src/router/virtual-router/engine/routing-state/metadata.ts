@@ -37,11 +37,11 @@ export function resolveRoutingMode(
   if (hasClear) {
     return 'none';
   }
-  if (hasAllow || state.allowedProviders.size > 0) {
-    return 'sticky';
-  }
   if (hasForce || state.forcedTarget) {
     return 'force';
+  }
+  if (hasAllow || state.allowedProviders.size > 0) {
+    return 'sticky';
   }
   if (hasPrefer || state.preferTarget) {
     return 'sticky';
@@ -145,6 +145,14 @@ function parseMetadataForceProviderKey(entry: unknown): {
     }
     return { provider, model: second, pathLength: 2 };
   }
+  if (parts.length === 3 && /^\d+[a-zA-Z0-9_-]*$/.test(parts[2] || '')) {
+    return {
+      provider,
+      model: `${parts[1]}.${parts[2]}`,
+      pathLength: 2
+    };
+  }
+
   const keyAlias = parts[1] || '';
   const model = parts.slice(2).join('.').trim();
   if (!keyAlias) {

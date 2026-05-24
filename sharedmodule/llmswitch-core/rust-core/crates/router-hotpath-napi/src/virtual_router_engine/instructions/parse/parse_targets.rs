@@ -286,6 +286,21 @@ pub(crate) fn parse_target(target: &str) -> Option<InstructionTarget> {
         });
     }
 
+    if parts.len() == 3 && Regex::new(r"^\d+[a-zA-Z0-9_-]*$").unwrap().is_match(parts[2]) {
+        let model = format!("{}.{}", parts[1], parts[2]);
+        if !Regex::new(r"^[a-zA-Z0-9_.-]+$").unwrap().is_match(&model) {
+            return None;
+        }
+        return Some(InstructionTarget {
+            provider: Some(provider),
+            key_alias: None,
+            key_index: None,
+            model: Some(model),
+            path_length: Some(2),
+            process_mode: None,
+        });
+    }
+
     let key_alias = parts[1].to_string();
     if key_alias.is_empty() || !is_valid_identifier(&key_alias) {
         return None;
