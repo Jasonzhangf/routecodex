@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 
-use super::super::super::read_trimmed_string;
+use crate::shared_json_utils::read_trimmed_string;
 use super::content::{
     normalize_content_to_text, normalize_tool_calls_as_text, normalize_tool_message_to_text,
 };

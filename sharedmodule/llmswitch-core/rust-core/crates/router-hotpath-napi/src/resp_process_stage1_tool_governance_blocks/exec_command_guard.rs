@@ -1,5 +1,6 @@
 use regex::Regex;
 use serde_json::{Map, Value};
+use crate::shared_json_utils::read_workdir_from_args;
 
 const EXEC_COMMAND_HEREDOC_BLOCK_THRESHOLD: usize = 4096;
 const EXEC_COMMAND_HEREDOC_PREVIEW_CHARS: usize = 240;
@@ -69,7 +70,6 @@ pub(crate) fn build_exec_command_object_with_shape(
     force_cmd: Option<bool>,
     force_command: Option<bool>,
     args_contain_direct_or_nested_key: impl Fn(&Map<String, Value>, &str) -> bool,
-    read_workdir_from_args: impl Fn(&Map<String, Value>) -> Option<String>,
 ) -> Option<String> {
     let empty = Map::new();
     let args = args.unwrap_or(&empty);

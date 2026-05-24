@@ -4,7 +4,8 @@ use self::history_context::{
     build_history_context_transcript, RCC_HISTORY_CONTENT_TYPE, RCC_HISTORY_FILENAME,
 };
 use self::prompt::{build_deepseek_continuation_prompt, build_deepseek_prompt};
-use super::{read_trimmed_string, AdapterContext};
+use super::AdapterContext;
+use crate::shared_json_utils::read_trimmed_string;
 
 const SEARCH_ROUTE_PREFIXES: [&str; 2] = ["web_search", "search"];
 

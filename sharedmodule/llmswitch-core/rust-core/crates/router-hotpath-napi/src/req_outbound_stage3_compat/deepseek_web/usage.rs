@@ -1,6 +1,7 @@
 use serde_json::{Map, Value};
 
-use super::{read_trimmed_string, AdapterContext};
+use super::AdapterContext;
+use crate::shared_json_utils::read_trimmed_string;
 
 #[derive(Default)]
 struct UsageSnapshot {

@@ -1,5 +1,6 @@
 use serde_json::{Map, Value};
 use std::collections::HashSet;
+use crate::shared_json_utils::read_object_trimmed_string;
 
 use super::reasoning::extract_reasoning_segments;
 use super::types::{
@@ -8,15 +9,6 @@ use super::types::{
     ApplyBridgeMetadataActionInput, ApplyBridgeMetadataActionOutput,
 };
 use super::utils::{ensure_object_value, flatten_content_to_string, read_option_string};
-
-fn read_instruction_value(source: &Map<String, Value>, field: &str) -> Option<String> {
-    let raw = source.get(field).and_then(Value::as_str)?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
 
 fn read_instruction_reasoning(source: &Map<String, Value>, field: Option<&str>) -> Vec<String> {
     let Some(reasoning_field) = field else {
@@ -91,7 +83,7 @@ pub(crate) fn apply_bridge_inject_system_instruction(
     let options = input.options.as_ref().and_then(Value::as_object);
     let field = read_option_string(options, "field").unwrap_or_else(|| "instructions".to_string());
     let reasoning_field = read_option_string(options, "reasoningField");
-    let Some(instructions) = read_instruction_value(raw_obj, field.as_str()) else {
+    let Some(instructions) = read_object_trimmed_string(raw_obj, field.as_str()) else {
         return ApplyBridgeInjectSystemInstructionOutput { messages };
     };
     let reasoning_segments = read_instruction_reasoning(raw_obj, reasoning_field.as_deref());

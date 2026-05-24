@@ -1,7 +1,7 @@
 use regex::Regex;
 use serde_json::{Map, Value};
 
-use super::read_trimmed_string;
+use crate::shared_json_utils::read_trimmed_string;
 
 fn normalize_function_results_markup_text(value: &str) -> (String, bool) {
     let re = match Regex::new(r"(?is)<function_results>\s*([\s\S]*?)\s*</function_results>") {

@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 
-use super::super::super::read_trimmed_string;
+use crate::shared_json_utils::read_trimmed_string;
 use crate::req_outbound_stage3_compat::shared_tool_text_guidance::build_tool_text_instruction;
 
 pub(super) const TOOL_TEXT_GUIDANCE_MARKER: &str = "Tool-call output contract (STRICT)";

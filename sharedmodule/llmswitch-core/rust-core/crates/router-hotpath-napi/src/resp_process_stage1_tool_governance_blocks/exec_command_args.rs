@@ -200,11 +200,34 @@ pub(crate) fn args_contain_direct_or_nested_key(args: &Map<String, Value>, key: 
     })
 }
 
-pub(crate) fn read_workdir_from_args(args: &Map<String, Value>) -> Option<String> {
-    let input = args.get("input").and_then(|v| v.as_object());
-    read_trimmed_string(args.get("workdir"))
-        .or_else(|| read_trimmed_string(args.get("cwd")))
-        .or_else(|| read_trimmed_string(args.get("workDir")))
-        .or_else(|| input.and_then(|row| read_trimmed_string(row.get("workdir"))))
-        .or_else(|| input.and_then(|row| read_trimmed_string(row.get("cwd"))))
+#[cfg(test)]
+mod tests {
+    use super::read_command_from_args;
+    use crate::shared_json_utils::read_workdir_from_args;
+    use serde_json::json;
+
+    #[test]
+    fn shared_read_workdir_from_args_reads_nested_input_cwd() {
+        let args = json!({
+            "input": {
+                "cwd": "/tmp/nested"
+            }
+        });
+        let row = args.as_object().expect("args object");
+        assert_eq!(
+            read_workdir_from_args(row),
+            Some("/tmp/nested".to_string())
+        );
+    }
+
+    #[test]
+    fn read_command_from_args_preserves_toon_alias_shape() {
+        let args = json!({
+            "args": {
+                "toon": "pwd"
+            }
+        });
+        let row = args.as_object().expect("args object");
+        assert_eq!(read_command_from_args(row), Some("pwd".to_string()));
+    }
 }

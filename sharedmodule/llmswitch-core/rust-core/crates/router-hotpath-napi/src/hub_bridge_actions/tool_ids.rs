@@ -1,11 +1,12 @@
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
+use crate::shared_json_utils::read_trimmed_string;
+
 use super::types::{
     ApplyBridgeNormalizeToolIdentifiersInput, NormalizeBridgeToolCallIdsInput,
     NormalizeBridgeToolCallIdsOutput,
 };
-use super::utils::read_trimmed_string;
 
 #[derive(Debug)]
 struct ToolIdNormalizer {
