@@ -7,6 +7,9 @@ use napi_derive::napi;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use crate::shared_tooling::{
+    collapse_extra_newlines_and_trim, find_last_user_message_index as find_last_user_index_shared,
+};
 
 const HB_MARKER_START: &str = "<**hb:";
 const HB_MARKER_END: &str = "**>";
@@ -51,37 +54,6 @@ pub struct HeartbeatDirectiveApplyOutput {
     pub runtime_summary: Option<HeartbeatDirectiveRuntimeSummary>,
 }
 
-fn collapse_extra_newlines_and_trim(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut newline_run = 0usize;
-    for ch in input.chars() {
-        if ch == '\n' {
-            newline_run += 1;
-            if newline_run <= 2 {
-                out.push(ch);
-            }
-            continue;
-        }
-        newline_run = 0;
-        out.push(ch);
-    }
-    out.trim().to_string()
-}
-
-fn find_last_user_message_index(messages: &Value) -> Option<usize> {
-    let arr = messages.as_array()?;
-    for (i, msg) in arr.iter().enumerate().rev() {
-        let role = msg.get("role")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if role == "user" {
-            return Some(i);
-        }
-    }
-    None
-}
 
 fn read_string_field(obj: &serde_json::map::Map<String, Value>, keys: &[&str]) -> Option<String> {
     for key in keys {
@@ -167,8 +139,12 @@ fn strip_valid_hb_directives_from_text(text: &str) -> (String, Vec<(String, Opti
         output.push_str(&text[cursor..marker_start]);
 
         let search_from = marker_start + 3;
-        let close_index = text[search_from..].find("**>").map(|offset| search_from + offset);
-        let newline_index = text[search_from..].find('\n').map(|offset| search_from + offset);
+        let close_index = text[search_from..]
+            .find("**>")
+            .map(|offset| search_from + offset);
+        let newline_index = text[search_from..]
+            .find('\n')
+            .map(|offset| search_from + offset);
         let has_closed_marker = match (close_index, newline_index) {
             (Some(close), Some(newline)) => close < newline,
             (Some(_), None) => true,
@@ -274,7 +250,7 @@ pub fn apply_heartbeat_directive_semantics(
         }
     };
 
-    let Some(last_user_idx) = find_last_user_message_index(&Value::Array(rows.clone())) else {
+    let Some(last_user_idx) = find_last_user_index_shared(rows.as_slice()) else {
         return HeartbeatDirectiveApplyOutput {
             messages: Value::Array(rows),
             runtime_summary: None,
@@ -377,17 +353,6 @@ fn resolve_heartbeat_directive(input: HeartbeatDirectiveInput) -> HeartbeatDirec
     let messages = &input.messages;
     let metadata = &input.metadata;
 
-    let last_user_idx = find_last_user_message_index(messages);
-    let Some(last_user_idx) = last_user_idx else {
-        return HeartbeatDirectiveOutput {
-            action: "none".to_string(),
-            interval_ms: None,
-            tmux_session_id: None,
-            workdir: None,
-            content_changed: None,
-        };
-    };
-
     let messages_arr = match messages.as_array() {
         Some(a) => a,
         None => {
@@ -399,6 +364,16 @@ fn resolve_heartbeat_directive(input: HeartbeatDirectiveInput) -> HeartbeatDirec
                 content_changed: None,
             }
         }
+    };
+
+    let Some(last_user_idx) = find_last_user_index_shared(messages_arr) else {
+        return HeartbeatDirectiveOutput {
+            action: "none".to_string(),
+            interval_ms: None,
+            tmux_session_id: None,
+            workdir: None,
+            content_changed: None,
+        };
     };
 
     let last_user_msg = match messages_arr.get(last_user_idx) {
