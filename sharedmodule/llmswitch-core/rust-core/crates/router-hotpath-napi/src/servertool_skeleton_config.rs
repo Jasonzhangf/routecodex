@@ -85,8 +85,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
 
             },
             "skeleton": {
-                "requestPrepare": { "enabled": true },
-                "internalDispatch": { "enabled": true },
                 "finalizeStrip": { "enabled": true, "requireFinalizedMarker": true },
                 "autoHooks": {
                     "optionalPrimaryOrder": ["clock_auto", "stop_message_auto"],
@@ -334,5 +332,18 @@ mod tests {
         )
         .expect("profile json");
         assert_eq!(raw, "null");
+    }
+
+    #[test]
+    fn removes_unwired_servertool_skeleton_stub_stages() {
+        let raw = get_default_servertool_skeleton_document_json().expect("skeleton json");
+        let parsed: Value = serde_json::from_str(&raw).expect("parse skeleton");
+        let skeleton = parsed
+            .get("servertool")
+            .and_then(|v| v.get("skeleton"))
+            .and_then(|v| v.as_object())
+            .expect("skeleton object");
+        assert!(!skeleton.contains_key("requestPrepare"));
+        assert!(!skeleton.contains_key("internalDispatch"));
     }
 }
