@@ -10714,3 +10714,12 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_shared_tool_result_text_normalizer_module -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅（当前工作树）
+
+[2026-05-24] hub pipeline rust shared helper closeout（instruction state stop_message mode normalizer 删除 string clone）
+- 红测：`cargo test -p router-hotpath-napi shared_stop_message_string_mode_normalizers_deletion_gate_removed_instruction_state_clones -- --nocapture` 初次失败，命中 `virtual_router_engine/instructions/state.rs` 仍保留本地 `normalize_stage_mode(value: &Option<String>) -> Option<String>` clone。
+- 真源确认：`virtual_router_engine/instructions/state.rs` 的 `normalize_stage_mode` / `normalize_ai_mode` 与 stop_message 模块刚收口的 mode normalizer 完全同形，都是对 `Option<String>` 做 `trim + to_ascii_lowercase + allowlist(on/off/auto 或 on/off)`；这是纯 shared string canonicalization，不属于 instruction state 专属语义。
+- 唯一正确修改点：`shared_json_utils.rs`。因为缺的不是编排判断，而是 shared 层还没有 `Option<String>` 承载版 mode canonicalization 真源；只有把 string 版下沉到 shared，并物理删除 `instructions/state.rs` 本地 clone，才能消除第二真源。
+- 实现：在 `shared_json_utils.rs` 新增 `normalize_on_off_auto_string` 与 `normalize_on_off_string`，并删除 `virtual_router_engine/instructions/state.rs` 本地 `normalize_stage_mode` / `normalize_ai_mode`，调用点直连 shared 真源。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_stop_message_string_mode_normalizers_deletion_gate_removed_instruction_state_clones -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅

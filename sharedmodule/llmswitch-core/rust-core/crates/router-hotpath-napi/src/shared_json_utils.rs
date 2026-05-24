@@ -135,6 +135,22 @@ pub(crate) fn normalize_on_off_mode(value: Option<&Value>) -> Option<String> {
     }
 }
 
+pub(crate) fn normalize_on_off_auto_string(value: &Option<String>) -> Option<String> {
+    let normalized = value.as_ref()?.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "on" | "off" | "auto" => Some(normalized),
+        _ => None,
+    }
+}
+
+pub(crate) fn normalize_on_off_string(value: &Option<String>) -> Option<String> {
+    let normalized = value.as_ref()?.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "on" | "off" => Some(normalized),
+        _ => None,
+    }
+}
+
 pub(crate) fn split_command_string(input: &str) -> Vec<String> {
     let s = input.trim();
     if s.is_empty() {
@@ -676,6 +692,34 @@ mod tests {
                 path.display()
             );
         }
+    }
+
+    #[test]
+    fn shared_stop_message_string_mode_normalizers_deletion_gate_removed_instruction_state_clones()
+    {
+        let path = crate_src_path("virtual_router_engine/instructions/state.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn normalize_stage_mode(value: &Option<String>) -> Option<String> {"),
+            "local string normalize_stage_mode clone still present in {}",
+            path.display()
+        );
+        assert!(
+            !source.contains("fn normalize_ai_mode(value: &Option<String>) -> Option<String> {"),
+            "local string normalize_ai_mode clone still present in {}",
+            path.display()
+        );
+        assert!(
+            source.contains("normalize_on_off_auto_string("),
+            "{} must use shared normalize_on_off_auto_string truth directly",
+            path.display()
+        );
+        assert!(
+            source.contains("normalize_on_off_string("),
+            "{} must use shared normalize_on_off_string truth directly",
+            path.display()
+        );
     }
 
     #[test]

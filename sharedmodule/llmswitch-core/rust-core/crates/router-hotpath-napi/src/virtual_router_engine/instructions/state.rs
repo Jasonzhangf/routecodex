@@ -1,6 +1,9 @@
 use serde_json::{Map, Value};
 
-use crate::virtual_router_engine::time_utils::now_ms;
+use crate::{
+    shared_json_utils::{normalize_on_off_auto_string, normalize_on_off_string},
+    virtual_router_engine::time_utils::now_ms,
+};
 
 use super::types::{
     InstructionTarget, PreCommandInstruction, PreCommandState, RoutingInstruction,
@@ -471,24 +474,8 @@ pub(crate) fn apply_routing_instructions(
     Ok(())
 }
 
-fn normalize_stage_mode(value: &Option<String>) -> Option<String> {
-    let raw = value.as_ref()?.trim().to_ascii_lowercase();
-    if raw == "on" || raw == "off" || raw == "auto" {
-        return Some(raw);
-    }
-    None
-}
-
-fn normalize_ai_mode(value: &Option<String>) -> Option<String> {
-    let raw = value.as_ref()?.trim().to_ascii_lowercase();
-    if raw == "on" || raw == "off" {
-        return Some(raw);
-    }
-    None
-}
-
 pub(crate) fn ensure_stop_message_mode_max_repeats(state: &mut StopMessageState) {
-    let mode = normalize_stage_mode(&state.stop_message_stage_mode);
+    let mode = normalize_on_off_auto_string(&state.stop_message_stage_mode);
     if mode.as_deref() != Some("on") && mode.as_deref() != Some("auto") {
         return;
     }
@@ -507,11 +494,11 @@ pub(crate) fn stop_message_state_snapshot(state: &StopMessageState) -> Option<Va
         .map(|v| v.trim().to_string())
         .unwrap_or_default();
     let max_repeats = state.stop_message_max_repeats.unwrap_or(0);
-    let stage_mode = normalize_stage_mode(&state.stop_message_stage_mode);
+    let stage_mode = normalize_on_off_auto_string(&state.stop_message_stage_mode);
     if stage_mode.as_deref() == Some("off") || text.is_empty() || max_repeats <= 0 {
         return None;
     }
-    let ai_mode = normalize_ai_mode(&state.stop_message_ai_mode);
+    let ai_mode = normalize_on_off_string(&state.stop_message_ai_mode);
     let mut out = Map::new();
     out.insert("stopMessageText".to_string(), Value::String(text));
     out.insert(
