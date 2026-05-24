@@ -8,7 +8,8 @@ use crate::hub_reasoning_tool_normalizer::{
 use crate::hub_resp_outbound_client_semantics::build_anthropic_response_from_chat_value;
 use crate::resp_process_stage1_tool_governance::{govern_response, ToolGovernanceInput};
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
-use crate::shared_tool_result_text_normalizer::normalize_tool_result_text;
+use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_tooling::normalize_tool_result_text;
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -52,15 +53,6 @@ const ANTHROPIC_REQUEST_TOP_LEVEL_FIELDS: &[&str] = &[
     "tool_choice",
     "thinking",
 ];
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(|v| v.as_str())?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
 
 fn has_visible_text(value: &str) -> bool {
     !value.trim().is_empty()

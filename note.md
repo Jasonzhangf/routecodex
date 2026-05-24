@@ -10700,3 +10700,10 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi shared_stop_message_mode_normalizers_deletion_gate_removed_local_clones -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] hub pipeline rust shared helper closeout（anthropic_openai_codec read_trimmed_string clone 删除）
+- 真源确认：`anthropic_openai_codec.rs` 的本地 `read_trimmed_string(value: Option<&Value>) -> Option<String>` 与 `shared_json_utils.rs::read_trimmed_string` 完全同形，只有 trim + empty-filter，不承载 anthropic 专属语义。
+- 唯一正确修改点：`anthropic_openai_codec.rs` 调用点直连 `shared_json_utils::read_trimmed_string`。继续保留本地 helper 会形成重复 JSON string trim 第二真源。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_anthropic_codec_local_clone -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅（当前工作树）
