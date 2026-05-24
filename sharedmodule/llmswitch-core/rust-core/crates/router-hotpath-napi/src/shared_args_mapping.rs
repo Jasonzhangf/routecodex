@@ -311,34 +311,6 @@ pub fn normalize_args_by_schema_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-fn normalize_tool_name(value: Option<&Value>) -> String {
-    value
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase()
-}
-
-fn extract_tool_function_name(entry: &Map<String, Value>) -> String {
-    if let Some(fn_name) = entry
-        .get("function")
-        .and_then(Value::as_object)
-        .and_then(|row| row.get("name"))
-        .and_then(Value::as_str)
-    {
-        let trimmed = fn_name.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_string();
-        }
-    }
-    entry
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string()
-}
-
 fn is_shell_tool_name(name: &str) -> bool {
     matches!(name, "shell" | "shell_command" | "exec_command")
 }
