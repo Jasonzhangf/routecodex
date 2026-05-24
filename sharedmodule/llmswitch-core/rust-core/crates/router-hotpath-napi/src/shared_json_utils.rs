@@ -1463,6 +1463,23 @@ mod tests {
     }
 
     #[test]
+    fn shared_value_as_object_or_empty_deletion_gate_removed_responses_resume_local_wrapper() {
+        let path = crate_src_path("hub_pipeline_blocks/responses_resume.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn value_as_object_or_empty(value: &Value) -> Map<String, Value> {"),
+            "hub_pipeline_blocks/responses_resume.rs still owns local value_as_object_or_empty wrapper"
+        );
+        assert!(
+            source.contains("use crate::shared_json_utils::{read_trimmed_string, value_as_object_or_empty};")
+                || source.contains("use crate::shared_json_utils::value_as_object_or_empty;")
+                || source.contains("shared_json_utils::value_as_object_or_empty"),
+            "hub_pipeline_blocks/responses_resume.rs must use shared value_as_object_or_empty truth directly"
+        );
+    }
+
+    #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_chat_servertool_orchestration_local_wrapper() {
         let path = crate_src_path("chat_servertool_orchestration.rs");
         let source = fs::read_to_string(&path)

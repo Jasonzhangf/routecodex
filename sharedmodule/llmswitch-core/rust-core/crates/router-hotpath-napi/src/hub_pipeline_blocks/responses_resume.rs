@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 
-use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_json_utils::{read_trimmed_string, value_as_object_or_empty};
 
 pub(crate) fn read_responses_resume_from_metadata(metadata: &Value) -> Option<Value> {
     let metadata_obj = metadata.as_object()?;
@@ -215,6 +215,3 @@ fn read_resume_tool_outputs_detailed(resume_obj: &Map<String, Value>) -> Vec<(St
     mapped
 }
 
-fn value_as_object_or_empty(value: &Value) -> Map<String, Value> {
-    value.as_object().cloned().unwrap_or_default()
-}

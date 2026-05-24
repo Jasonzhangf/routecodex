@@ -10801,3 +10801,12 @@ Using skills: coding-principals + rcc-dev-skills
   - `cargo test -p router-hotpath-napi hub_semantic_mapper_chat::tests::normalize_tool_content_unwraps_chunked_exec_transcript_shape -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi hub_semantic_mapper_chat::tests::normalize_tool_content_strips_terminal_right_gutter_noise -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] hub pipeline rust shared helper closeout（responses resume object wrapper 删除）
+- 红测：`cargo test -p router-hotpath-napi shared_value_as_object_or_empty_deletion_gate_removed_responses_resume_local_wrapper -- --nocapture` 初次失败，命中 `hub_pipeline_blocks/responses_resume.rs` 仍保留本地 `value_as_object_or_empty(value: &Value) -> Map<String, Value>` wrapper。
+- 真源确认：该函数与 `shared_json_utils::value_as_object_or_empty` 完全同形，只负责把非 object 值归一为空 `Map<String, Value>`；不承载 responses resume 专属语义。
+- 唯一正确修改点：`hub_pipeline_blocks/responses_resume.rs`。因为 shared 真源已经存在，问题只剩本模块保留第二入口；只有物理删除本地 `value_as_object_or_empty`，并让调用点直连 shared 真源，才能消除第二真源且保持 `hub_pipeline.rs` 继续作为编排壳。
+- 实现：删除本地 `value_as_object_or_empty`，并把文件顶部 import 改为 `use crate::shared_json_utils::{read_trimmed_string, value_as_object_or_empty};`；在 `shared_json_utils.rs` 补 deletion gate。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_value_as_object_or_empty_deletion_gate_removed_responses_resume_local_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
