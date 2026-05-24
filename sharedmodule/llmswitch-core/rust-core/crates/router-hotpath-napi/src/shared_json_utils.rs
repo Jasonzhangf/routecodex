@@ -1276,12 +1276,31 @@ mod tests {
         let metadata_source = fs::read_to_string(&metadata_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", metadata_path.display(), error));
         assert!(
-            !metadata_source.contains("fn read_trimmed_string_token(metadata: &Map<String, Value>, keys: &[&str]) -> Option<String> {\n    for key in keys {"),
-            "hub_pipeline_blocks/metadata.rs still owns local multi-key trim scan clone"
+            !metadata_source.contains("fn read_trimmed_string_token(metadata: &Map<String, Value>, keys: &[&str]) -> Option<String> {"),
+            "hub_pipeline_blocks/metadata.rs still owns local multi-key trim wrapper"
         );
         assert!(
-            metadata_source.contains("read_first_object_trimmed_string(metadata, keys)"),
-            "hub_pipeline_blocks/metadata.rs must route multi-key trim scan through shared read_first_object_trimmed_string truth"
+            metadata_source.contains("read_first_object_trimmed_string(metadata_obj,")
+                && metadata_source.contains("stopMessageClientInjectSessionScope")
+                && metadata_source.contains("clientTmuxSessionId"),
+            "hub_pipeline_blocks/metadata.rs must call shared read_first_object_trimmed_string directly"
+        );
+    }
+
+    #[test]
+    fn shared_read_first_object_trimmed_string_deletion_gate_removed_hub_pipeline_metadata_wrapper() {
+        let path = crate_src_path("hub_pipeline_blocks/metadata.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn read_trimmed_string_token(metadata: &Map<String, Value>, keys: &[&str]) -> Option<String> {"),
+            "hub_pipeline_blocks/metadata.rs still owns local multi-key trim wrapper"
+        );
+        assert!(
+            source.contains("read_first_object_trimmed_string(metadata_obj,")
+                && source.contains("stopMessageClientInjectSessionScope")
+                && source.contains("clientTmuxSessionId"),
+            "hub_pipeline_blocks/metadata.rs must call shared read_first_object_trimmed_string directly"
         );
     }
 

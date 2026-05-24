@@ -10723,3 +10723,13 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi shared_stop_message_string_mode_normalizers_deletion_gate_removed_instruction_state_clones -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+Using skills: coding-principals + rcc-dev-skills
+
+[2026-05-24] hub pipeline rust shared helper closeout（hub pipeline metadata multi-key trim wrapper 删除）
+- 红测：`cargo test -p router-hotpath-napi shared_read_first_object_trimmed_string_deletion_gate_removed_hub_pipeline_metadata_wrapper -- --nocapture` 初次失败，命中 `hub_pipeline_blocks/metadata.rs` 仍保留本地 `fn read_trimmed_string_token(metadata: &Map<String, Value>, keys: &[&str]) -> Option<String>` wrapper。
+- 真源确认：该 helper 只是 `shared_json_utils::read_first_object_trimmed_string` 的零逻辑透传包装，不承载 metadata 专属语义；multi-key trimmed string scan 的唯一真源应继续落在 `shared_json_utils.rs`。
+- 唯一正确修改点：`hub_pipeline_blocks/metadata.rs`。因为 shared 真源已经存在，问题只剩 metadata 模块还保留一个第二入口 wrapper；只有物理删除 wrapper 并让调用点直连 shared 真源，才能满足 closeout。
+- 实现：删除 `read_trimmed_string_token`，并把 stop-message scope / tmux session 读取调用点全部改直连 `read_first_object_trimmed_string`。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_read_first_object_trimmed_string_deletion_gate_removed_hub_pipeline_metadata_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅

@@ -10,14 +10,15 @@ pub(crate) fn resolve_stop_message_router_metadata(metadata: &Value) -> Value {
     };
 
     if let Some(scope) =
-        read_trimmed_string_token(metadata_obj, &["stopMessageClientInjectSessionScope"])
+        read_first_object_trimmed_string(metadata_obj, &["stopMessageClientInjectSessionScope"])
     {
         out.insert(
             "stopMessageClientInjectSessionScope".to_string(),
             Value::String(scope),
         );
     }
-    if let Some(scope) = read_trimmed_string_token(metadata_obj, &["stopMessageClientInjectScope"])
+    if let Some(scope) =
+        read_first_object_trimmed_string(metadata_obj, &["stopMessageClientInjectScope"])
     {
         out.insert(
             "stopMessageClientInjectScope".to_string(),
@@ -25,11 +26,11 @@ pub(crate) fn resolve_stop_message_router_metadata(metadata: &Value) -> Value {
         );
     }
 
-    let client_tmux = read_trimmed_string_token(
+    let client_tmux = read_first_object_trimmed_string(
         metadata_obj,
         &["clientTmuxSessionId", "client_tmux_session_id"],
     );
-    let tmux = read_trimmed_string_token(metadata_obj, &["tmuxSessionId", "tmux_session_id"]);
+    let tmux = read_first_object_trimmed_string(metadata_obj, &["tmuxSessionId", "tmux_session_id"]);
     let resolved_tmux = client_tmux.or(tmux);
     if let Some(tmux_id) = resolved_tmux {
         out.insert(
@@ -190,9 +191,6 @@ pub(crate) fn build_hub_pipeline_result_metadata(input: &Value) -> Result<Value,
     Ok(Value::Object(out))
 }
 
-fn read_trimmed_string_token(metadata: &Map<String, Value>, keys: &[&str]) -> Option<String> {
-    read_first_object_trimmed_string(metadata, keys)
-}
 
 fn normalize_hub_policy_mode(raw: Option<&str>) -> String {
     let token = raw.unwrap_or("").trim().to_ascii_lowercase();
