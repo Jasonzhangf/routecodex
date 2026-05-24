@@ -2,6 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
+use crate::shared_tooling::find_last_user_message_index as find_last_user_index_shared;
 
 static CLOCK_MARKER_CALL_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -28,24 +29,6 @@ fn build_clock_marker_call_id(request_id: String, marker_index: i64) -> String {
     format!("call_clock_marker_{}_{}_{}", token, marker_index + 1, seq)
 }
 
-fn find_last_user_message_index(messages: &[Value]) -> i64 {
-    if messages.is_empty() {
-        return -1;
-    }
-    for idx in (0..messages.len()).rev() {
-        if messages[idx]
-            .as_object()
-            .and_then(|obj| obj.get("role"))
-            .and_then(|v| v.as_str())
-            .map(|v| v == "user")
-            .unwrap_or(false)
-        {
-            return idx as i64;
-        }
-    }
-    -1
-}
-
 fn normalize_time_tag_line(time_tag_line: String) -> String {
     time_tag_line.trim().to_string()
 }
@@ -60,7 +43,9 @@ fn inject_time_tag_into_messages(messages: Value, time_tag_line: String) -> Valu
         return Value::Array(rows);
     }
 
-    let idx = find_last_user_message_index(rows.as_slice());
+    let idx = find_last_user_index_shared(rows.as_slice())
+        .map(|idx| idx as i64)
+        .unwrap_or(-1);
     if idx < 0 {
         let mut user = Map::new();
         user.insert("role".to_string(), Value::String("user".to_string()));
@@ -268,7 +253,11 @@ pub fn find_last_user_message_index_json(messages_json: String) -> NapiResult<St
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let index = messages
         .as_array()
-        .map(|rows| find_last_user_message_index(rows.as_slice()))
+        .map(|rows| {
+            find_last_user_index_shared(rows.as_slice())
+                .map(|idx| idx as i64)
+                .unwrap_or(-1)
+        })
         .unwrap_or(-1);
     serde_json::to_string(&index).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

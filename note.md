@@ -10772,3 +10772,12 @@ Using skills: coding-principals + rcc-dev-skills
 - 验证：
   - `cargo test -p router-hotpath-napi shared_json_utils_deletion_gate_removed_virtual_router_routing_metadata_wrappers -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] hub pipeline rust shared helper closeout（chat clock reminder semantics last-user-index wrapper 删除）
+- 红测：`cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_chat_clock_reminder_semantics_local_wrapper -- --nocapture` 初次失败，命中 `chat_clock_reminder_semantics.rs` 仍保留本地 `find_last_user_message_index(messages: &[Value]) -> i64` wrapper。
+- 真源确认：该函数并不承载 reminder semantics 专属判定，只是把 `shared_tooling::find_last_user_message_index(messages)` 的 `Option<usize>` 结果转成 `i64` / `-1` 哨兵；这属于零业务逻辑的第二 helper 入口。
+- 唯一正确修改点：`chat_clock_reminder_semantics.rs`。因为 shared 真源已经存在，问题只剩本模块保留一层本地包装；只有物理删除 wrapper，并把 `map(|idx| idx as i64).unwrap_or(-1)` 直接内联到调用点，才能消除第二真源且不改变模块现有返回语义。
+- 实现：删除本地 `find_last_user_message_index`，并把 `inject_time_tag_into_messages` 与 `find_last_user_message_index_json` 改为直连 `find_last_user_index_shared(...).map(|idx| idx as i64).unwrap_or(-1)`。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_chat_clock_reminder_semantics_local_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
