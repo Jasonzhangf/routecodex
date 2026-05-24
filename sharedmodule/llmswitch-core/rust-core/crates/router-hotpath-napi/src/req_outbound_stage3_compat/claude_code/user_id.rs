@@ -5,18 +5,10 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::super::AdapterContext;
-use crate::shared_json_utils::read_object_trimmed_string;
+use crate::shared_json_utils::{read_object_trimmed_string, read_trimmed_string};
 
 const DEFAULT_USER_ID_ENV: &str = "ROUTECODEX_CLAUDE_CODE_USER_ID";
 const DEFAULT_ACCOUNT_SEED_ENV: &str = "ROUTECODEX_CLAUDE_CODE_ACCOUNT_SEED";
-
-pub(super) fn read_non_empty_str(value: Option<&Value>) -> Option<String> {
-    value
-        .and_then(|v| v.as_str())
-        .map(|raw| raw.trim())
-        .filter(|trimmed| !trimmed.is_empty())
-        .map(|trimmed| trimmed.to_string())
-}
 
 fn read_env_trimmed(name: &str) -> Option<String> {
     std::env::var(name)
@@ -125,32 +117,32 @@ pub(super) fn resolve_claude_code_user_id(
         .or_else(|| normalize_session_uuid(env_user_id.as_deref()))
         .or_else(|| {
             client_headers
-                .and_then(|headers| read_non_empty_str(headers.get("session_id")))
+                .and_then(|headers| read_trimmed_string(headers.get("session_id")))
                 .and_then(|value| normalize_session_uuid(Some(&value)))
         })
         .or_else(|| {
             client_headers
-                .and_then(|headers| read_non_empty_str(headers.get("anthropic-session-id")))
+                .and_then(|headers| read_trimmed_string(headers.get("anthropic-session-id")))
                 .and_then(|value| normalize_session_uuid(Some(&value)))
         })
         .or_else(|| {
             client_headers
-                .and_then(|headers| read_non_empty_str(headers.get("x-session-id")))
+                .and_then(|headers| read_trimmed_string(headers.get("x-session-id")))
                 .and_then(|value| normalize_session_uuid(Some(&value)))
         })
         .or_else(|| {
             client_headers
-                .and_then(|headers| read_non_empty_str(headers.get("conversation_id")))
+                .and_then(|headers| read_trimmed_string(headers.get("conversation_id")))
                 .and_then(|value| normalize_session_uuid(Some(&value)))
         })
         .or_else(|| {
             client_headers
-                .and_then(|headers| read_non_empty_str(headers.get("anthropic-conversation-id")))
+                .and_then(|headers| read_trimmed_string(headers.get("anthropic-conversation-id")))
                 .and_then(|value| normalize_session_uuid(Some(&value)))
         })
         .or_else(|| {
             client_headers
-                .and_then(|headers| read_non_empty_str(headers.get("openai-conversation-id")))
+                .and_then(|headers| read_trimmed_string(headers.get("openai-conversation-id")))
                 .and_then(|value| normalize_session_uuid(Some(&value)))
         })
         .or_else(|| {
@@ -200,7 +192,7 @@ pub(crate) fn apply_anthropic_claude_code_user_id(
         .get_mut("metadata")
         .and_then(|value| value.as_object_mut())
     {
-        let current = read_non_empty_str(metadata.get("user_id"));
+        let current = read_trimmed_string(metadata.get("user_id"));
         if !is_claude_code_user_id(current.as_deref()) {
             if let Some(user_id) = resolve_claude_code_user_id(metadata, adapter_context) {
                 metadata.insert("user_id".to_string(), Value::String(user_id));

@@ -1515,6 +1515,31 @@ mod tests {
     }
 
     #[test]
+    fn shared_read_trimmed_string_deletion_gate_removed_claude_code_local_wrappers() {
+        for rel in [
+            "req_outbound_stage3_compat/claude_code/user_id.rs",
+            "req_outbound_stage3_compat/claude_code/system_prompt.rs",
+        ] {
+            let path = crate_src_path(rel);
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+            assert!(
+                !source.contains("fn read_non_empty_str(value: Option<&Value>) -> Option<String> {")
+                    && !source.contains("fn read_trimmed_str(value: Option<&Value>) -> Option<String> {"),
+                "{} still owns local trimmed-string wrapper",
+                path.display()
+            );
+            assert!(
+                source.contains("use crate::shared_json_utils::read_trimmed_string;")
+                    || source.contains("use crate::shared_json_utils::{read_object_trimmed_string, read_trimmed_string};")
+                    || source.contains("shared_json_utils::read_trimmed_string"),
+                "{} must use shared read_trimmed_string truth directly",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_chat_servertool_orchestration_local_wrapper() {
         let path = crate_src_path("chat_servertool_orchestration.rs");
         let source = fs::read_to_string(&path)

@@ -1,6 +1,7 @@
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 
+use crate::shared_json_utils::read_trimmed_string;
 use super::super::AdapterContext;
 use super::user_id::apply_anthropic_claude_code_user_id;
 
@@ -114,13 +115,6 @@ fn block_text(block: &Map<String, Value>) -> Option<String> {
         .filter(|trimmed| !trimmed.is_empty())
 }
 
-fn read_trimmed_str(value: Option<&Value>) -> Option<String> {
-    value
-        .and_then(|v| v.as_str())
-        .map(|raw| raw.trim().to_string())
-        .filter(|trimmed| !trimmed.is_empty())
-}
-
 fn should_inject_thinking(value: Option<&Value>) -> bool {
     match value {
         None => true,
@@ -158,7 +152,7 @@ fn resolve_effort(adapter_context: &AdapterContext, model: Option<&Value>) -> &'
     {
         return configured;
     }
-    let model_id = read_trimmed_str(model)
+    let model_id = read_trimmed_string(model)
         .unwrap_or_default()
         .to_ascii_lowercase();
     if model_id.starts_with("glm-5") {
