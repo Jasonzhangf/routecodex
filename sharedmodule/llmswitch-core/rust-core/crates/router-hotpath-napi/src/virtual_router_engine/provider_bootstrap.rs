@@ -7,6 +7,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::shared_json_utils::read_trimmed_string as read_optional_string;
 use crate::virtual_router_engine::error::format_virtual_router_error;
 
 const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS: i64 = 8192;
@@ -2924,14 +2925,6 @@ fn normalize_alias(candidate: Option<&str>, existing: &HashSet<String>) -> Strin
         index += 1;
     }
     alias
-}
-
-fn read_optional_string(value: Option<&Value>) -> Option<String> {
-    value
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string())
 }
 
 fn as_object(value: Option<&Value>) -> Option<&Map<String, Value>> {

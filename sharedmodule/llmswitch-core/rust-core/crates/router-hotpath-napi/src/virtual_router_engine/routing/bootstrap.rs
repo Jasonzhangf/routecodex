@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use crate::shared_json_utils::read_trimmed_string as read_optional_string;
 use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::load_balancer::LoadBalancingPolicy;
 
@@ -810,14 +811,6 @@ fn split_model_priority(raw: &str) -> (String, i64) {
 
 fn build_runtime_key(provider_id: &str, key_alias: &str) -> String {
     format!("{}.{}", provider_id, key_alias)
-}
-
-fn read_optional_string(value: Option<&Value>) -> Option<String> {
-    value
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string())
 }
 
 fn parse_bool_like(value: &Value) -> Option<bool> {

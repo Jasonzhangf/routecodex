@@ -3,6 +3,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
+use crate::shared_json_utils::read_trimmed_string;
 use crate::virtual_router_engine::error::format_virtual_router_error;
 
 const DEFAULT_LONG_CONTEXT_THRESHOLD_TOKENS: i64 = 180_000;
@@ -226,26 +227,34 @@ pub(crate) fn bootstrap_virtual_router_config_meta_json(
         )?,
         exec_command_guard: normalize_exec_command_guard(section.get("execCommandGuard")),
         clock: normalize_clock(section.get("clock")),
-        apply_patch: normalize_apply_patch_config(resolve_apply_patch_config_node(section)).map_err(|error| napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error)))?,
+        apply_patch: normalize_apply_patch_config(resolve_apply_patch_config_node(section))
+            .map_err(|error| {
+                napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error))
+            })?,
     };
 
     serde_json::to_string(&output).map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
-
-
 fn resolve_apply_patch_config_node<'a>(section: &'a Map<String, Value>) -> Option<&'a Value> {
-    section.get("applyPatch").or_else(|| section.get("apply_patch")).or_else(|| {
-        section
-            .get("servertool")
-            .and_then(|v| v.as_object())
-            .and_then(|row| row.get("applyPatch").or_else(|| row.get("apply_patch")))
-    })
+    section
+        .get("applyPatch")
+        .or_else(|| section.get("apply_patch"))
+        .or_else(|| {
+            section
+                .get("servertool")
+                .and_then(|v| v.as_object())
+                .and_then(|row| row.get("applyPatch").or_else(|| row.get("apply_patch")))
+        })
 }
 
-fn normalize_apply_patch_config(value: Option<&Value>) -> Result<Option<ApplyPatchConfigOutput>, String> {
+fn normalize_apply_patch_config(
+    value: Option<&Value>,
+) -> Result<Option<ApplyPatchConfigOutput>, String> {
     let Some(raw) = value else {
-        return Ok(Some(ApplyPatchConfigOutput { mode: "client".to_string() }));
+        return Ok(Some(ApplyPatchConfigOutput {
+            mode: "client".to_string(),
+        }));
     };
     let Some(record) = raw.as_object() else {
         return Err("servertool.apply_patch/applyPatch must be object when configured".to_string());
@@ -257,9 +266,16 @@ fn normalize_apply_patch_config(value: Option<&Value>) -> Result<Option<ApplyPat
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "client".to_string());
     match mode_raw.as_str() {
-        "client" => Ok(Some(ApplyPatchConfigOutput { mode: "client".to_string() })),
-        "servertool" => Ok(Some(ApplyPatchConfigOutput { mode: "servertool".to_string() })),
-        other => Err(format!("servertool.apply_patch.mode must be client or servertool, got {}", other)),
+        "client" => Ok(Some(ApplyPatchConfigOutput {
+            mode: "client".to_string(),
+        })),
+        "servertool" => Ok(Some(ApplyPatchConfigOutput {
+            mode: "servertool".to_string(),
+        })),
+        other => Err(format!(
+            "servertool.apply_patch.mode must be client or servertool, got {}",
+            other
+        )),
     }
 }
 
@@ -432,8 +448,8 @@ fn normalize_exec_command_guard(value: Option<&Value>) -> Option<ExecCommandGuar
     }
     let policy_file = record
         .get("policyFile")
-        .and_then(read_trimmed_string)
-        .or_else(|| record.get("policy_file").and_then(read_trimmed_string));
+        .and_then(|value| read_trimmed_string(Some(value)))
+        .or_else(|| record.get("policy_file").and_then(|value| read_trimmed_string(Some(value))));
     Some(ExecCommandGuardConfigOutput {
         enabled: true,
         policy_file,
@@ -480,14 +496,17 @@ fn normalize_web_search(
             let Some(node) = raw.as_object() else {
                 continue;
             };
-            let Some(id) = node.get("id").and_then(read_trimmed_string) else {
+            let Some(id) = node
+                .get("id")
+                .and_then(|value| read_trimmed_string(Some(value)))
+            else {
                 continue;
             };
             let provider_key_raw = node
                 .get("providerKey")
-                .and_then(read_trimmed_string)
-                .or_else(|| node.get("provider").and_then(read_trimmed_string))
-                .or_else(|| node.get("target").and_then(read_trimmed_string));
+                .and_then(|value| read_trimmed_string(Some(value)))
+                .or_else(|| node.get("provider").and_then(|value| read_trimmed_string(Some(value))))
+                .or_else(|| node.get("target").and_then(|value| read_trimmed_string(Some(value))));
             let Some(provider_key) = provider_key_raw else {
                 continue;
             };
@@ -497,12 +516,14 @@ fn normalize_web_search(
             let resolved_provider_key =
                 resolve_web_search_engine_provider_key(&provider_key, &web_search_route_targets)
                     .unwrap_or(provider_key);
-            let description = node.get("description").and_then(read_trimmed_string);
+            let description = node
+                .get("description")
+                .and_then(|value| read_trimmed_string(Some(value)));
             let default = truthy_option(node.get("default"));
             let execution_mode = node
                 .get("executionMode")
-                .and_then(read_trimmed_string)
-                .or_else(|| node.get("mode").and_then(read_trimmed_string))
+                .and_then(|value| read_trimmed_string(Some(value)))
+                .or_else(|| node.get("mode").and_then(|value| read_trimmed_string(Some(value))))
                 .map(|value| value.to_ascii_lowercase())
                 .map(|value| {
                     if value == "direct" {
@@ -514,8 +535,8 @@ fn normalize_web_search(
                 .unwrap_or_else(|| "servertool".to_string());
             let direct_activation = node
                 .get("directActivation")
-                .and_then(read_trimmed_string)
-                .or_else(|| node.get("activation").and_then(read_trimmed_string))
+                .and_then(|value| read_trimmed_string(Some(value)))
+                .or_else(|| node.get("activation").and_then(|value| read_trimmed_string(Some(value))))
                 .map(|value| value.to_ascii_lowercase())
                 .and_then(|value| match value.as_str() {
                     "builtin" => Some("builtin".to_string()),
@@ -529,7 +550,9 @@ fn normalize_web_search(
                         None
                     }
                 });
-            let model_id = node.get("modelId").and_then(read_trimmed_string);
+            let model_id = node
+                .get("modelId")
+                .and_then(|value| read_trimmed_string(Some(value)));
             let max_uses = node.get("maxUses").and_then(normalize_positive_floor_i64);
             let server_tools_disabled =
                 truthy_option(node.get("serverToolsDisabled")).or_else(|| {
@@ -586,8 +609,8 @@ fn normalize_web_search(
 
     let inject_policy = record
         .get("injectPolicy")
-        .and_then(read_trimmed_string)
-        .or_else(|| record.get("inject_policy").and_then(read_trimmed_string))
+        .and_then(|value| read_trimmed_string(Some(value)))
+        .or_else(|| record.get("inject_policy").and_then(|value| read_trimmed_string(Some(value))))
         .map(|value| value.to_ascii_lowercase())
         .filter(|value| value == "always" || value == "selective")
         .unwrap_or_else(|| "selective".to_string());
@@ -623,7 +646,7 @@ fn normalize_alias_selection(value: Option<&Value>) -> Option<AliasSelectionConf
     let enabled = record.get("enabled").and_then(parse_bool_like);
     let default_strategy = record
         .get("defaultStrategy")
-        .and_then(read_trimmed_string)
+        .and_then(|value| read_trimmed_string(Some(value)))
         .and_then(|value| coerce_alias_selection_strategy(&value));
     let session_lease_cooldown_ms = record
         .get("sessionLeaseCooldownMs")
@@ -677,7 +700,7 @@ fn normalize_string_array(value: Option<&Value>, fallback: Vec<String>) -> Vec<S
     };
     let normalized = entries
         .iter()
-        .filter_map(read_trimmed_string)
+        .filter_map(|value| read_trimmed_string(Some(value)))
         .collect::<Vec<String>>();
     if normalized.is_empty() {
         fallback
@@ -751,16 +774,6 @@ fn parse_bool_like(value: &Value) -> Option<bool> {
     }
 }
 
-fn read_trimmed_string(value: &Value) -> Option<String> {
-    let raw = value.as_str()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
 fn clamp_warn_ratio(value: f64) -> f64 {
     if !value.is_finite() {
         return DEFAULT_WARN_RATIO;
@@ -786,7 +799,7 @@ fn collect_web_search_route_targets(routing_source: &Map<String, Value>) -> Vec<
             continue;
         };
         for target in pool_targets {
-            let Some(normalized) = read_trimmed_string(target) else {
+            let Some(normalized) = read_trimmed_string(Some(target)) else {
                 continue;
             };
             if !targets.iter().any(|candidate| candidate == &normalized) {
