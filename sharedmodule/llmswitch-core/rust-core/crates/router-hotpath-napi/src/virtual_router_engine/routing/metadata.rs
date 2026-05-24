@@ -86,21 +86,12 @@ pub(crate) fn resolve_session_scope(metadata: &Value) -> Option<String> {
     read_conversation_scope(metadata)
 }
 
-fn read_metadata_token(metadata: &Value, key: &str) -> String {
-    metadata
-        .get(key)
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_default()
-}
-
 pub(crate) fn resolve_stop_message_scope(metadata: &Value) -> Option<String> {
-    let explicit = read_metadata_token(metadata, "stopMessageClientInjectSessionScope");
+    let explicit = read_trimmed_string(metadata.get("stopMessageClientInjectSessionScope")).unwrap_or_default();
     let explicit = if !explicit.is_empty() {
         explicit
     } else {
-        read_metadata_token(metadata, "stopMessageClientInjectScope")
+        read_trimmed_string(metadata.get("stopMessageClientInjectScope")).unwrap_or_default()
     };
     if !explicit.is_empty() {
         if explicit.starts_with("tmux:")
@@ -110,21 +101,21 @@ pub(crate) fn resolve_stop_message_scope(metadata: &Value) -> Option<String> {
             return Some(explicit);
         }
     }
-    let tmux_session = read_metadata_token(metadata, "clientTmuxSessionId");
+    let tmux_session = read_trimmed_string(metadata.get("clientTmuxSessionId")).unwrap_or_default();
     let tmux_session = if !tmux_session.is_empty() {
         tmux_session
     } else {
-        read_metadata_token(metadata, "client_tmux_session_id")
+        read_trimmed_string(metadata.get("client_tmux_session_id")).unwrap_or_default()
     };
     let tmux_session = if !tmux_session.is_empty() {
         tmux_session
     } else {
-        read_metadata_token(metadata, "tmuxSessionId")
+        read_trimmed_string(metadata.get("tmuxSessionId")).unwrap_or_default()
     };
     let tmux_session = if !tmux_session.is_empty() {
         tmux_session
     } else {
-        read_metadata_token(metadata, "tmux_session_id")
+        read_trimmed_string(metadata.get("tmux_session_id")).unwrap_or_default()
     };
     if !tmux_session.is_empty() {
         return Some(format!("tmux:{}", tmux_session));

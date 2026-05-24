@@ -252,6 +252,22 @@ mod tests {
     }
 
     #[test]
+    fn virtual_router_metadata_deletion_gate_removed_local_read_metadata_token_wrapper() {
+        let path = crate_src_path("virtual_router_engine/routing/metadata.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn read_metadata_token(metadata: &Value, key: &str) -> String {"),
+            "virtual_router_engine/routing/metadata.rs still owns local read_metadata_token wrapper"
+        );
+        assert!(
+            source.contains(r#"read_trimmed_string(metadata.get("stopMessageClientInjectSessionScope")).unwrap_or_default()"#)
+                || source.contains(r#"read_trimmed_string(metadata.get("clientTmuxSessionId")).unwrap_or_default()"#),
+            "virtual_router_engine/routing/metadata.rs must route metadata token trimming through shared read_trimmed_string truth"
+        );
+    }
+
+    #[test]
     fn read_trimmed_string_returns_trimmed_non_empty_string() {
         let value = json!("  hello  ");
         assert_eq!(read_trimmed_string(Some(&value)), Some("hello".to_string()));

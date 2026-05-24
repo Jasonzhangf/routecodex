@@ -10654,3 +10654,18 @@ NOTE
 - 验证：
   - `cargo test -p router-hotpath-napi requested_tools_deletion_gate_removed_local_requested_tool_name_key_wrapper -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] hub pipeline rust shared helper closeout（virtual router metadata token wrapper 删除）
+- 先补 red gate：`virtual_router_metadata_deletion_gate_removed_local_read_metadata_token_wrapper`
+- 红测命中证据：`virtual_router_engine/routing/metadata.rs` 仍保留本地 `fn read_metadata_token(metadata: &Value, key: &str) -> String`
+- 真源确认：该实现只是 `shared_json_utils::read_trimmed_string(metadata.get(key)).unwrap_or_default()` 的零逻辑 wrapper；metadata token trim 真源应唯一落在 `shared_json_utils::read_trimmed_string`。
+- 唯一正确修改点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs`
+- 为什么这是唯一正确修改处：
+  - 问题不是 virtual router sticky/stop-message scope 语义错误，而是 routing metadata 模块内部仍保留 trimmed-string 第二 helper 入口；
+  - 直接物理删除本地 wrapper，并让调用点直连 `read_trimmed_string(...).unwrap_or_default()`，才能保证 trimmed-string 单点 shared 真源；
+  - 保留 wrapper、另造包装层、或改别处 scope 逻辑，都会继续保留第二真源，不满足 closeout 目标。
+- 验证：
+  - `cargo test -p router-hotpath-napi virtual_router_metadata_deletion_gate_removed_local_read_metadata_token_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅
