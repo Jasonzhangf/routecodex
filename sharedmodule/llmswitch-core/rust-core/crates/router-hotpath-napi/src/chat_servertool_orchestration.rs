@@ -8,6 +8,7 @@ use crate::chat_web_search_intent::analyze_chat_web_search_intent;
 use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, is_synthetic_routecodex_tool_call_id,
 };
+use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 use crate::virtual_router_engine::routing::{
     resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
 };
@@ -374,7 +375,8 @@ fn is_name_included(
     include: Option<&Vec<String>>,
     exclude: Option<&Vec<String>>,
 ) -> bool {
-    let normalized = normalize_servertool_call_name(name);
+    let normalized = normalize_routecodex_tool_name(Some(name))
+        .unwrap_or_else(|| name.trim().to_ascii_lowercase());
     if let Some(allow) = include {
         if !allow.iter().any(|entry| entry == &normalized) {
             return false;
@@ -386,14 +388,6 @@ fn is_name_included(
         }
     }
     true
-}
-
-fn normalize_servertool_call_name(name: &str) -> String {
-    let normalized = name.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "websearch" | "web-search" => "web_search".to_string(),
-        _ => normalized,
-    }
 }
 
 fn normalize_auto_hook_phase(value: &str) -> String {
@@ -1420,7 +1414,8 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
         .registered_tool_call_handlers
         .into_iter()
         .filter_map(|entry| {
-            let name = normalize_servertool_call_name(entry.name.as_str());
+            let name = normalize_routecodex_tool_name(Some(entry.name.as_str()))
+                .unwrap_or_else(|| entry.name.trim().to_ascii_lowercase());
             if name.is_empty() {
                 return None;
             }
@@ -1436,7 +1431,8 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
     let mut skipped_tool_calls = Vec::new();
 
     for tool_call in input.tool_calls {
-        let normalized_name = normalize_servertool_call_name(tool_call.name.as_str());
+        let normalized_name = normalize_routecodex_tool_name(Some(tool_call.name.as_str()))
+            .unwrap_or_else(|| tool_call.name.trim().to_ascii_lowercase());
         if input.disable_tool_call_handlers {
             skipped_tool_calls.push(ServertoolDispatchSkippedOutput {
                 id: tool_call.id,
@@ -1604,7 +1600,10 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
                 input
                     .executed_tool_calls
                     .first()
-                    .map(|entry| normalize_servertool_call_name(entry.name.as_str()))
+                    .map(|entry| {
+                        normalize_routecodex_tool_name(Some(entry.name.as_str()))
+                            .unwrap_or_else(|| entry.name.trim().to_ascii_lowercase())
+                    })
             })
     } else {
         Some("servertool_multi".to_string())
@@ -1655,7 +1654,8 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
         .hooks
         .into_iter()
         .filter_map(|hook| {
-            let id = normalize_servertool_call_name(hook.id.as_str());
+            let id = normalize_routecodex_tool_name(Some(hook.id.as_str()))
+                .unwrap_or_else(|| hook.id.trim().to_ascii_lowercase());
             if id.is_empty() || !is_name_included(id.as_str(), include.as_ref(), exclude.as_ref()) {
                 return None;
             }
@@ -1692,7 +1692,8 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
         consumed.insert(hook.id.clone());
     }
     for raw_id in input.optional_primary_hook_order.iter() {
-        let id = normalize_servertool_call_name(raw_id.as_str());
+        let id = normalize_routecodex_tool_name(Some(raw_id.as_str()))
+            .unwrap_or_else(|| raw_id.trim().to_ascii_lowercase());
         if id.is_empty() || consumed.contains(id.as_str()) {
             continue;
         }
@@ -1712,7 +1713,8 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
     let mut mandatory_seen = std::collections::HashSet::new();
     let mut mandatory_specs: Vec<ServertoolAutoHookSpecInput> = Vec::new();
     for raw_id in input.mandatory_hook_order.iter() {
-        let id = normalize_servertool_call_name(raw_id.as_str());
+        let id = normalize_routecodex_tool_name(Some(raw_id.as_str()))
+            .unwrap_or_else(|| raw_id.trim().to_ascii_lowercase());
         if id.is_empty() || mandatory_seen.contains(id.as_str()) {
             continue;
         }

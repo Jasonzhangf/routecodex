@@ -10781,3 +10781,12 @@ Using skills: coding-principals + rcc-dev-skills
 - 验证：
   - `cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed_chat_clock_reminder_semantics_local_wrapper -- --nocapture` ✅
   - `cargo test -p router-hotpath-napi --no-run` ✅
+
+[2026-05-24] hub pipeline rust shared helper closeout（chat servertool orchestration canonicalization wrapper 删除）
+- 红测：`cargo test -p router-hotpath-napi shared_tool_mapping_deletion_gate_removed_chat_servertool_orchestration_local_websearch_wrapper -- --nocapture` 初次失败，命中 `chat_servertool_orchestration.rs` 仍保留本地 `normalize_servertool_call_name(name: &str) -> String` wrapper。
+- 真源确认：该本地函数只负责 `trim + lowercase + websearch/web-search -> web_search`，与 `shared_tool_mapping::normalize_routecodex_tool_name` 的 canonicalization 职责重叠；计划文档也要求 tool canonicalization 收口为 shared 单点真源。
+- 唯一正确修改点：`chat_servertool_orchestration.rs`。因为 shared 真源已经具备 legacy alias 归一，问题只剩本模块保留第二 canonicalization 入口；只有物理删除本地 `normalize_servertool_call_name`，并把调用点改为直连 `normalize_routecodex_tool_name`，才能消除第二真源且保持 `hub_pipeline.rs` 不回流语义。
+- 实现：删除本地 `normalize_servertool_call_name`，并把 `is_name_included`、tool-call dispatch/outcome、auto-hook queue、message tool-call extract 等名称归一点改为直连 `normalize_routecodex_tool_name(...)`；`Option<String>` 为空时仅内联旧调用方原有的 `trim().to_ascii_lowercase()` 返回语义，不新增第二路径。
+- 验证：
+  - `cargo test -p router-hotpath-napi shared_tool_mapping_deletion_gate_removed_chat_servertool_orchestration_local_websearch_wrapper -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi --no-run` ✅

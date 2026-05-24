@@ -1323,6 +1323,23 @@ mod tests {
     }
 
     #[test]
+    fn shared_tool_mapping_deletion_gate_removed_chat_servertool_orchestration_local_websearch_wrapper() {
+        let path = crate_src_path("chat_servertool_orchestration.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn normalize_servertool_call_name(name: &str) -> String {"),
+            "chat_servertool_orchestration.rs still owns local normalize_servertool_call_name wrapper"
+        );
+        assert!(
+            source.contains("normalize_routecodex_tool_name(Some(name))")
+                || source.contains("normalize_routecodex_tool_name(Some(entry.name.as_str()))")
+                || source.contains("normalize_routecodex_tool_name(Some(raw_name.as_str()))"),
+            "chat_servertool_orchestration.rs must use shared tool canonicalization truth directly"
+        );
+    }
+
+    #[test]
     fn normalize_routecodex_tool_name_with_embedded_hint_extracts_tool_and_function_prefixes() {
         assert_eq!(
             normalize_routecodex_tool_name_with_embedded_hint("need retry tool:functions.shell-command now"),
