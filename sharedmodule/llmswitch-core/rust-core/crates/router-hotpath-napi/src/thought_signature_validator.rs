@@ -53,9 +53,6 @@ fn resolve_options(value: Option<&Value>) -> ThoughtSignatureValidationOptions {
     resolved
 }
 
-fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {
-    read_trimmed_string(value)
-}
 
 fn is_thinking_block_type(block_type: &str) -> bool {
     matches!(block_type, "thinking" | "reasoning" | "redacted_thinking")
@@ -76,7 +73,7 @@ fn read_thinking_text(obj: &Map<String, Value>) -> String {
 }
 
 fn read_thought_signature(obj: &Map<String, Value>) -> Option<String> {
-    coerce_thought_signature(obj.get("thoughtSignature").or_else(|| obj.get("signature")))
+    read_trimmed_string(obj.get("thoughtSignature").or_else(|| obj.get("signature")))
 }
 
 fn has_valid_thought_signature_block(

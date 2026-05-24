@@ -1341,6 +1341,21 @@ mod tests {
     }
 
     #[test]
+    fn shared_json_utils_deletion_gate_removed_thought_signature_validator_wrapper() {
+        let path = crate_src_path("thought_signature_validator.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        assert!(
+            !source.contains("fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {"),
+            "thought_signature_validator.rs still owns local coerce_thought_signature wrapper"
+        );
+        assert!(
+            source.contains(r#"read_trimmed_string(obj.get("thoughtSignature").or_else(|| obj.get("signature")))"#),
+            "thought_signature_validator.rs must call shared read_trimmed_string truth directly"
+        );
+    }
+
+    #[test]
     fn shared_read_object_trimmed_string_deletion_gate_removed_chat_node_result_local_wrapper() {
         let path = crate_src_path("chat_node_result_semantics.rs");
         let source = fs::read_to_string(&path)
