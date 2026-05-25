@@ -11,6 +11,7 @@ import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-wr
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { buildInfo } from '../../build-info.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../utils/finish-reason.js';
+import { STREAM_CONTRACT_PROBE_BODY_KEY } from '../runtime/http-server/executor/servertool-response-normalizer.js';
 import {
   colorizeRequestLog,
   formatHighlightedFinishReasonLabel,
@@ -57,6 +58,37 @@ type SseTerminalWatch = {
   terminalSource?: string;
 };
 
+
+type StreamContractProbeEnvelope = {
+  probe?: Record<string, unknown>;
+  emitted?: boolean;
+};
+
+function buildResponsesTerminalSseFramesFromProbe(probe: Record<string, unknown> | undefined): string[] {
+  if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
+    return [];
+  }
+  const status = typeof probe.status === 'string' ? probe.status.trim().toLowerCase() : '';
+  const requiredAction =
+    probe.required_action && typeof probe.required_action === 'object' && !Array.isArray(probe.required_action)
+      ? (probe.required_action as Record<string, unknown>)
+      : undefined;
+  const responsePayload: Record<string, unknown> = {
+    object: 'response',
+    status: status || (requiredAction ? 'requires_action' : 'completed')
+  };
+  if (Array.isArray(probe.output)) responsePayload.output = probe.output;
+  if (typeof probe.output_text === 'string') responsePayload.output_text = probe.output_text;
+  if (probe.reasoning && typeof probe.reasoning === 'object' && !Array.isArray(probe.reasoning)) responsePayload.reasoning = probe.reasoning;
+  const frames: string[] = [];
+  if (requiredAction) {
+    frames.push(`event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response: responsePayload, required_action: requiredAction })}\n\n`);
+  }
+  frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
+  frames.push('data: [DONE]\n\n');
+  return frames;
+}
+
 type ChatUsageNormalizationResult = {
   payload: unknown;
   normalized: boolean;
@@ -101,6 +133,20 @@ function resolveResponsesConversationRecordRequestIds(
   return [...responseIds, ...requestIds];
 }
 
+function deriveResponsesConversationProviderKey(usageLogInfo?: { providerKey?: string; timingRequestIds?: string[] }): string | undefined {
+  const direct = typeof usageLogInfo?.providerKey === 'string' ? usageLogInfo.providerKey.trim() : '';
+  if (direct) return direct;
+  const ids = Array.isArray(usageLogInfo?.timingRequestIds) ? usageLogInfo.timingRequestIds : [];
+  for (const id of ids) {
+    if (typeof id !== 'string') continue;
+    const match = id.match(/^openai-responses-(.+)-\d{8}T\d{9}-\d+-\d+$/);
+    if (!match) continue;
+    const normalized = match[1].replace(/-/g, '.');
+    if (normalized) return normalized;
+  }
+  return undefined;
+}
+
 function readResponsesConversationResponseId(body: unknown): string | undefined {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
   const record = body as Record<string, unknown>;
@@ -142,6 +188,7 @@ async function recordResponsesConversationToolCallResponse(args: {
   requestLabel: string;
   timingRequestIds?: string[];
   routeHint?: string;
+  providerKey?: string;
   sessionId?: unknown;
   conversationId?: unknown;
   body: unknown;
@@ -169,6 +216,7 @@ async function recordResponsesConversationToolCallResponse(args: {
       requestId: recordRequestId,
       response: recordBody,
       routeHint: args.routeHint,
+      providerKey: args.providerKey,
       sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
       conversationId: typeof args.conversationId === 'string' ? args.conversationId : undefined,
     }).catch((error) => {
@@ -180,19 +228,48 @@ async function recordResponsesConversationToolCallResponse(args: {
     timingRequestIds: args.timingRequestIds,
     responseId,
   });
-  if (responseId) {
-    await finalizeResponsesConversationRequestRetention(responseId, {
+  // Keep retention by request ids (authoritative key in requestMap). Using responseId here
+  // can miss the active request entry before rebind propagation completes.
+  for (const retainRequestId of resolveResponsesConversationRecordRequestIds(
+    args.requestLabel,
+    args.timingRequestIds,
+    responseId
+  )) {
+    await finalizeResponsesConversationRequestRetention(retainRequestId, {
       keepForSubmitToolOutputs: true,
     }).catch((error) => {
-      logResponseNonBlockingError(`responses-conversation-finalize:${responseId}`, error);
+      logResponseNonBlockingError(`responses-conversation-finalize:${retainRequestId}`, error);
     });
   }
+}
+
+async function finalizeResponsesConversationNonToolResponse(args: {
+  entryEndpoint?: string;
+  requestLabel: string;
+  body: unknown;
+}): Promise<void> {
+  if (
+    args.entryEndpoint !== '/v1/responses'
+    && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
+  ) {
+    return;
+  }
+  const finishReason = deriveFinishReason(args.body);
+  if (finishReason === 'tool_calls') {
+    return;
+  }
+  await finalizeResponsesConversationRequestRetention(args.requestLabel, {
+    keepForSubmitToolOutputs: false,
+  }).catch((error) => {
+    logResponseNonBlockingError(`responses-conversation-finalize:${args.requestLabel}`, error);
+  });
 }
 
 async function captureResponsesConversationToolCallRequestContext(args: {
   entryEndpoint?: string;
   requestLabel: string;
   routeHint?: string;
+  providerKey?: string;
   body: unknown;
   requestContext?: DispatchOptions['responsesRequestContext'];
 }): Promise<void> {
@@ -214,6 +291,7 @@ async function captureResponsesConversationToolCallRequestContext(args: {
       sessionId: args.requestContext.sessionId,
       conversationId: args.requestContext.conversationId,
       routeHint: args.routeHint,
+      providerKey: args.providerKey,
     }).catch((error) => {
       logResponseNonBlockingError(`responses-conversation-capture:${requestId}`, error);
     });
@@ -570,20 +648,50 @@ function updateSseTerminalTrackerFromChunk(
     terminalWatch.terminalSource = terminalWatch.terminalSource ?? '[DONE]';
   }
 
-  if (!text.includes('response.completed') && !text.includes('response.done')) {
-    return;
-  }
-
   const blocks = text.split(/\n\n+/);
   for (const block of blocks) {
-    if (!block || (!block.includes('response.completed') && !block.includes('response.done'))) {
+    if (!block) {
       continue;
     }
     const lines = block.split(/\n/);
     const eventName = lines
       .filter((line) => line.startsWith('event:'))
       .map((line) => line.slice('event:'.length).trim())
-      .find((name) => name === 'response.completed' || name === 'response.done');
+      .find(Boolean);
+    const dataText = lines
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice('data:'.length).trim())
+      .join('\n');
+    if (!dataText || dataText === '[DONE]') {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(dataText) as unknown;
+      const derived = deriveFinishReason(parsed);
+      if (!derived) {
+        continue;
+      }
+      finishTracker.finishReason = derived;
+      finishTracker.seenTerminalEvent = true;
+      terminalWatch.sawTerminalChunk = true;
+      terminalWatch.terminalSource = terminalWatch.terminalSource ?? eventName ?? 'finish_reason';
+    } catch {
+      // ignore parse failure; handled by explicit response.* scanning below
+    }
+  }
+
+  if (!text.includes('response.completed') && !text.includes('response.done') && !text.includes('response.required_action')) {
+    return;
+  }
+  for (const block of blocks) {
+    if (!block || (!block.includes('response.completed') && !block.includes('response.done') && !block.includes('response.required_action'))) {
+      continue;
+    }
+    const lines = block.split(/\n/);
+    const eventName = lines
+      .filter((line) => line.startsWith('event:'))
+      .map((line) => line.slice('event:'.length).trim())
+      .find((name) => name === 'response.completed' || name === 'response.done' || name === 'response.required_action');
     if (!eventName) {
       continue;
     }
@@ -601,7 +709,7 @@ function updateSseTerminalTrackerFromChunk(
       }
     }
     finishTracker.seenTerminalEvent = true;
-    finishTracker.finishReason = derived ?? 'stop';
+    finishTracker.finishReason = derived ?? (eventName === 'response.required_action' ? 'tool_calls' : 'stop');
     terminalWatch.sawTerminalChunk = true;
     terminalWatch.terminalSource = eventName;
   }
@@ -677,7 +785,7 @@ function sendStructuredSseError(res: Response, requestLabel: string, payload: Re
 }
 
 
-function normalizeResponsesToolCallsForClientBody(body: unknown, entryEndpoint?: string): unknown {
+async function normalizeResponsesToolCallsForClientBody(body: unknown, entryEndpoint?: string): Promise<unknown> {
   if (entryEndpoint !== '/v1/responses') {
     return body;
   }
@@ -685,7 +793,7 @@ function normalizeResponsesToolCallsForClientBody(body: unknown, entryEndpoint?:
     return body;
   }
   try {
-    const mod = requireCoreDist<{ normalizeResponsesToolCallArgumentsForClientWithNative?: (payload: unknown, toolsRaw: unknown[]) => Record<string, unknown> }>(
+    const mod = await importCoreDist<{ normalizeResponsesToolCallArgumentsForClientWithNative?: (payload: unknown, toolsRaw: unknown[]) => Record<string, unknown> }>(
       'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics'
     );
     if (typeof mod.normalizeResponsesToolCallArgumentsForClientWithNative !== 'function') {
@@ -755,12 +863,15 @@ function streamResponsesJsonAsSse(args: {
             requestId: args.requestLabel
           }) as Record<string, unknown>;
         })();
-      const normalizedResponsesPayload = normalizeResponsesToolCallsForClientBody(responsesPayload, args.entryEndpoint) as Record<string, unknown>;
+      const normalizedResponsesPayload = await normalizeResponsesToolCallsForClientBody(responsesPayload, args.entryEndpoint) as Record<string, unknown>;
       const sanitizedResponsesPayload = stripInternalKeysDeep(normalizedResponsesPayload);
+      const conversationRouteHint = args.result.usageLogInfo?.routeName;
+      const conversationProviderKey = deriveResponsesConversationProviderKey(args.result.usageLogInfo);
       await captureResponsesConversationToolCallRequestContext({
         entryEndpoint: args.entryEndpoint,
         requestLabel: args.requestLabel,
-        routeHint: args.result.usageLogInfo?.routeName,
+        routeHint: conversationRouteHint,
+        providerKey: conversationProviderKey,
         body: sanitizedResponsesPayload,
         requestContext: args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined,
       });
@@ -768,7 +879,8 @@ function streamResponsesJsonAsSse(args: {
         entryEndpoint: args.entryEndpoint,
         requestLabel: args.requestLabel,
         timingRequestIds: args.result.usageLogInfo?.timingRequestIds,
-        routeHint: args.result.usageLogInfo?.routeName,
+        routeHint: conversationRouteHint,
+        providerKey: conversationProviderKey,
         sessionId: args.result.usageLogInfo?.sessionId,
         conversationId: args.result.usageLogInfo?.conversationId,
         body: sanitizedResponsesPayload
@@ -888,6 +1000,8 @@ export async function sendPipelineResponse(
       logUsageSummary(requestLabel, {
         providerKey: usageLogInfo.providerKey,
         model: usageLogInfo.model,
+        requestModel: usageLogInfo.requestModel,
+        targetModel: usageLogInfo.targetModel,
         routeName: usageLogInfo.routeName,
         poolId: usageLogInfo.poolId,
         finishReason: resolvedFinishReason,
@@ -1039,6 +1153,12 @@ export async function sendPipelineResponse(
     const terminalWatch: SseTerminalWatch = {
       sawTerminalChunk: false,
     };
+    const contractProbe: StreamContractProbeEnvelope = {
+      probe: sseBody[STREAM_CONTRACT_PROBE_BODY_KEY] && typeof sseBody[STREAM_CONTRACT_PROBE_BODY_KEY] === 'object' && !Array.isArray(sseBody[STREAM_CONTRACT_PROBE_BODY_KEY])
+        ? sseBody[STREAM_CONTRACT_PROBE_BODY_KEY] as Record<string, unknown>
+        : undefined,
+      emitted: false
+    };
 
     const readTimeoutMs = (names: string[], fallback: number): number => {
       for (const name of names) {
@@ -1075,7 +1195,7 @@ export async function sendPipelineResponse(
 
     const keepaliveMs = readTimeoutMs(
       ['ROUTECODEX_HTTP_SSE_KEEPALIVE_MS', 'RCC_HTTP_SSE_KEEPALIVE_MS'],
-      15_000
+      3_000
     );
 
     const clearTimers = () => {
@@ -1123,6 +1243,14 @@ export async function sendPipelineResponse(
 
     // Keep-alive: send SSE comments periodically so clients don't treat long servertool holds as a dead connection.
     // Comment frames (": ...") are ignored by SSE parsers and safe across OpenAI/Anthropic streams.
+    // Emit one frame immediately so short client read deadlines are refreshed before first upstream token arrives.
+    if (!ended) {
+      try {
+        res.write(`: keepalive\n\n`);
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.keepalive.initial_write:${requestLabel}`, error);
+      }
+    }
     if (Number.isFinite(keepaliveMs) && keepaliveMs > 0) {
       keepaliveTimer = setInterval(() => {
         if (ended) {
@@ -1242,36 +1370,96 @@ export async function sendPipelineResponse(
         completedLogged = true;
         logStreamRequestComplete(entryEndpoint, requestLabel, status, resolvedStreamFinishReason, requestLogContext);
       }
-      const closedBeforeTerminalEvent = !finishTracker.seenTerminalEvent;
-      if (closedBeforeTerminalEvent) {
-        logPipelineStage('response.sse.stream.error', requestLabel, {
-          message: 'stream closed before response.completed',
-          code: 'upstream_stream_incomplete'
-        });
-        if (!res.writableEnded && !res.destroyed) {
-          try {
-            const payload = {
-              type: 'error',
-              status: 502,
-              error: {
-                message: 'stream closed before response.completed',
-                code: 'upstream_stream_incomplete',
-                request_id: requestLabel
-              }
-            };
-            res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
-          } catch (writeError) {
-            logResponseNonBlockingError(`response.sse.stream.end.write_error_event:${requestLabel}`, writeError);
-          }
-        }
-      }
-      if (!res.writableEnded && !res.destroyed) {
+      const repairedTerminalFrames = !finishTracker.seenTerminalEvent
+        ? buildResponsesTerminalSseFramesFromProbe(contractProbe.probe)
+        : [];
+      if (repairedTerminalFrames.length > 0 && !res.writableEnded && !res.destroyed) {
         try {
-          res.end();
-        } catch (endError) {
-          logResponseNonBlockingError(`response.sse.stream.end:${requestLabel}`, endError);
+          for (const frame of repairedTerminalFrames) {
+            res.write(frame);
+          }
+          finishTracker.seenTerminalEvent = true;
+          finishTracker.finishReason = finishTracker.finishReason ?? (contractProbe.probe?.required_action ? 'tool_calls' : 'stop');
+          contractProbe.emitted = true;
+        } catch (repairWriteError) {
+          logResponseNonBlockingError(`response.sse.stream.end.write_terminal_probe:${requestLabel}`, repairWriteError);
         }
       }
+      const finalizeNativeSsePersistence = async (): Promise<void> => {
+        // Native SSE (`__sse_responses`) bypasses JSON dispatch path, so persist
+        // responses continuation state here from contract probe body.
+        if (
+          entryEndpoint !== '/v1/responses'
+          || !contractProbe.probe
+          || typeof contractProbe.probe !== 'object'
+          || Array.isArray(contractProbe.probe)
+        ) {
+          return;
+        }
+        const conversationRouteHint = result.usageLogInfo?.routeName;
+        const conversationProviderKey = deriveResponsesConversationProviderKey(result.usageLogInfo);
+        const sanitizedProbeBody = stripInternalKeysDeep(contractProbe.probe as Record<string, unknown>);
+        await captureResponsesConversationToolCallRequestContext({
+          entryEndpoint,
+          requestLabel,
+          routeHint: conversationRouteHint,
+          providerKey: conversationProviderKey,
+          body: sanitizedProbeBody,
+          requestContext: options?.responsesRequestContext,
+        });
+        await recordResponsesConversationToolCallResponse({
+          entryEndpoint,
+          requestLabel,
+          timingRequestIds: result.usageLogInfo?.timingRequestIds,
+          routeHint: conversationRouteHint,
+          providerKey: conversationProviderKey,
+          sessionId: result.usageLogInfo?.sessionId,
+          conversationId: result.usageLogInfo?.conversationId,
+          body: sanitizedProbeBody
+        });
+        await finalizeResponsesConversationNonToolResponse({
+          entryEndpoint,
+          requestLabel,
+          body: sanitizedProbeBody,
+        });
+      };
+
+      void finalizeNativeSsePersistence()
+        .catch((error) => {
+          logResponseNonBlockingError(`responses-conversation-native-sse:${requestLabel}`, error);
+        })
+        .finally(() => {
+          const closedBeforeTerminalEvent = !finishTracker.seenTerminalEvent;
+          if (closedBeforeTerminalEvent) {
+            logPipelineStage('response.sse.stream.error', requestLabel, {
+              message: 'stream closed before response.completed',
+              code: 'upstream_stream_incomplete'
+            });
+            if (!res.writableEnded && !res.destroyed) {
+              try {
+                const payload = {
+                  type: 'error',
+                  status: 502,
+                  error: {
+                    message: 'stream closed before response.completed',
+                    code: 'upstream_stream_incomplete',
+                    request_id: requestLabel
+                  }
+                };
+                res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+              } catch (writeError) {
+                logResponseNonBlockingError(`response.sse.stream.end.write_error_event:${requestLabel}`, writeError);
+              }
+            }
+          }
+          if (!res.writableEnded && !res.destroyed) {
+            try {
+              res.end();
+            } catch (endError) {
+              logResponseNonBlockingError(`response.sse.stream.end:${requestLabel}`, endError);
+            }
+          }
+        });
     });
     res.on('close', () => {
       if (!streamEnded) {
@@ -1309,7 +1497,7 @@ export async function sendPipelineResponse(
   logPipelineStage('response.json.write', requestLabel, { status });
   // E1 boundary rule: internal env variables use "__*" and must never reach client payloads.
   // Preserve the SSE carrier key (it is handled above and never JSON-encoded).
-  const normalizedJsonBody = normalizeResponsesToolCallsForClientBody(
+  const normalizedJsonBody = await normalizeResponsesToolCallsForClientBody(
     normalizeResponsesJsonBody(body, entryEndpoint, requestLabel),
     entryEndpoint
   );
@@ -1325,10 +1513,13 @@ export async function sendPipelineResponse(
   const clientBody = usageNormalized.payload;
   const sanitized = stripInternalKeysDeep(clientBody);
   const jsonFinishReason = deriveFinishReason(clientBody);
+  const conversationRouteHint = result.usageLogInfo?.routeName;
+  const conversationProviderKey = deriveResponsesConversationProviderKey(result.usageLogInfo);
   await captureResponsesConversationToolCallRequestContext({
     entryEndpoint,
     requestLabel,
-    routeHint: result.usageLogInfo?.routeName,
+    routeHint: conversationRouteHint,
+    providerKey: conversationProviderKey,
     body: sanitized,
     requestContext: options?.responsesRequestContext,
   });
@@ -1336,10 +1527,16 @@ export async function sendPipelineResponse(
     entryEndpoint,
     requestLabel,
     timingRequestIds: result.usageLogInfo?.timingRequestIds,
-    routeHint: result.usageLogInfo?.routeName,
+    routeHint: conversationRouteHint,
+    providerKey: conversationProviderKey,
     sessionId: result.usageLogInfo?.sessionId,
     conversationId: result.usageLogInfo?.conversationId,
     body: sanitized
+  });
+  await finalizeResponsesConversationNonToolResponse({
+    entryEndpoint,
+    requestLabel,
+    body: sanitized,
   });
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
   if (captureClientResponse) {
