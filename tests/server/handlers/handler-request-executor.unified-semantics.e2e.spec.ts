@@ -481,7 +481,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     }
   });
 
-  it('rewrites /v1/responses.submit_tool_outputs into a resumed /v1/responses pipeline request and preserves response continuity', async () => {
+  it('keeps /v1/responses.submit_tool_outputs as a resumed synthetic pipeline request and preserves response continuity', async () => {
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {
         model: 'claude-sonnet-4-5',
@@ -625,7 +625,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
       expect(pipelineExecute).toHaveBeenCalledTimes(1);
       const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
-      expect(pipelineInput.endpoint).toBe('/v1/responses');
+      expect(pipelineInput.endpoint).toBe('/v1/responses.submit_tool_outputs');
       expect(pipelineInput.metadata?.providerProtocol).toBe('openai-responses');
       expect(pipelineInput.metadata?.inboundStream).toBe(false);
       expect(pipelineInput.metadata?.responsesResume).toEqual({
@@ -633,11 +633,12 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         restoredFromResponseId: 'resp_submit_prev_1',
         routeHint: 'thinking'
       });
-      expect(pipelineInput.metadata?.entryEndpoint).toBe('/v1/responses');
+      expect(pipelineInput.metadata?.entryEndpoint).toBe('/v1/responses.submit_tool_outputs');
       expect(pipelineInput.metadata?.routeHint).toBe('thinking');
       expect(pipelineInput.payload?.previous_response_id).toBe('resp_submit_prev_1');
       expect(pipelineInput.payload?.tool_outputs).toEqual([{ tool_call_id: 'call_submit_1', output: 'ok' }]);
       expect(pipelineInput.metadata?.__raw_request_body).toEqual({
+        response_id: 'resp_submit_prev_1',
         tool_outputs: [{ tool_call_id: 'call_submit_1', output: 'ok' }]
       });
 
@@ -1538,8 +1539,11 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(result.status).toBe(200);
       expect(result.payload).toMatchObject({ id: 'resp_submit_capture_next_1', status: 'requires_action' });
       await waitForMockCalls(mockCaptureResponsesRequestContext, 3);
-      expect(mockCaptureResponsesRequestContext).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: 'resp_submit_capture_next_1',
+      const resumedCaptureCall = mockCaptureResponsesRequestContext.mock.calls
+        .map(([arg]) => arg)
+        .find((arg) => arg?.payload?.previous_response_id === 'resp_submit_prev_capture_1');
+      expect(resumedCaptureCall).toEqual(expect.objectContaining({
+        requestId: expect.any(String),
         payload: expect.objectContaining({ previous_response_id: 'resp_submit_prev_capture_1' }),
         context: expect.objectContaining({
           input: expect.arrayContaining([

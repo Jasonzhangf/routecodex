@@ -53,6 +53,9 @@ function buildResponsesResumeRawRequestBody(originalPayload: ResponsesPayload, r
   const raw = originalPayload && typeof originalPayload === 'object' && !Array.isArray(originalPayload)
     ? { ...(originalPayload as Record<string, unknown>) }
     : {};
+  if (typeof responseId === 'string' && responseId.trim() && typeof raw.response_id !== 'string') {
+    raw.response_id = responseId.trim();
+  }
   return raw;
 }
 
@@ -228,10 +231,13 @@ export async function handleResponses(
         const resumeResult = await resumeResponsesConversation(responseId, payload, { requestId });
         payload = (resumeResult.payload ?? {}) as ResponsesPayload;
         resumeMeta = resumeResult.meta;
-        // After resuming, the outbound request becomes a normal `/v1/responses` create request.
-        // Keeping the synthetic entrypoint would cause the outbound mapper to rebuild an upstream
-        // submit_tool_outputs payload (which many OpenAI-compatible upstreams do not implement).
-        pipelineEntryEndpoint = '/v1/responses';
+        // Keep the synthetic submit endpoint through the pipeline.
+        // Outbound mapping must decide based on the routed provider protocol:
+        // - openai-responses target => rebuild native /submit_tool_outputs payload
+        // - cross-protocol target   => use resumed payload semantics for relay
+        // Rewriting to `/v1/responses` here breaks same-protocol responses providers
+        // that reject `previous_response_id` on plain HTTP create requests.
+        pipelineEntryEndpoint = entryEndpoint;
       } catch (error: unknown) {
         const structured = error as { status?: number; code?: string; origin?: string };
         const origin = typeof structured?.origin === 'string' ? structured.origin : undefined;
@@ -329,7 +335,10 @@ export async function handleResponses(
 	        ...(mockSampleReqId ? { mockSampleReqId } : {})
 	      })
 	    };
-    if (pipelineEntryEndpoint === '/v1/responses') {
+    if (
+      pipelineEntryEndpoint === '/v1/responses'
+      || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
+    ) {
       await captureResponsesRequestContextForRequest({
         requestId,
         payload: payload as Record<string, unknown>,
@@ -419,7 +428,10 @@ export async function handleResponses(
       return;
     }
     const effectiveRequestId = pipelineInput.requestId;
-    if (pipelineEntryEndpoint === '/v1/responses') {
+    if (
+      pipelineEntryEndpoint === '/v1/responses'
+      || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
+    ) {
       result.metadata = {
         ...(result.metadata || {}),
         responsesRequestContext: {
@@ -437,7 +449,10 @@ export async function handleResponses(
         preserveTimingForUsage: true
       });
     }
-    if (pipelineEntryEndpoint === '/v1/responses') {
+    if (
+      pipelineEntryEndpoint === '/v1/responses'
+      || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
+    ) {
       try {
         const responseId = readResponsesResponseId(result.body);
         const finishReason = deriveFinishReason(result.body);
