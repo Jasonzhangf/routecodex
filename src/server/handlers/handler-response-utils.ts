@@ -1531,25 +1531,6 @@ export async function sendPipelineResponse(
         void persistNativeSseConversationState().catch((error) => {
           logResponseNonBlockingError(`responses-conversation-native-sse-terminal:${requestLabel}`, error);
         });
-        try {
-          if (!contractProbe.emitted && contractProbe.probe) {
-            const repairedTerminalFrames = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe);
-            for (const frame of repairedTerminalFrames) {
-              res.write(frame);
-            }
-            contractProbe.emitted = true;
-          } else {
-            res.write(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed' })}\n\n`);
-            res.write('data: [DONE]\n\n');
-          }
-        } catch (flushError) {
-          logResponseNonBlockingError(`response.sse.terminal_flush.write:${requestLabel}`, flushError);
-        }
-        try {
-          res.end();
-        } catch (endError) {
-          logResponseNonBlockingError(`response.sse.terminal_flush.end:${requestLabel}`, endError);
-        }
       }, 25);
       terminalFlushTimer.unref?.();
     });

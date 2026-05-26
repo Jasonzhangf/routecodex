@@ -2183,9 +2183,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const daily = typeof planStatus.dailyQuotaRemainingPercent === 'number' ? planStatus.dailyQuotaRemainingPercent : null;
     const weekly = typeof planStatus.weeklyQuotaRemainingPercent === 'number' ? planStatus.weeklyQuotaRemainingPercent : null;
     const overageMicros = typeof planStatus.overageBalanceMicros === 'number' ? planStatus.overageBalanceMicros : null;
-    const explicitExtra = record.isExtra === true;
     const overageBalance = overageMicros === null ? null : overageMicros / 1_000_000;
-    const hasExtraQuota = explicitExtra || (overageBalance !== null && overageBalance > 0);
+    const hasExtraQuota = overageBalance !== null && overageBalance > 0;
     const minScoreRaw = Math.min(
       typeof daily === 'number' ? daily : 100,
       typeof weekly === 'number' ? weekly : 100
@@ -2213,7 +2212,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       if (ah.exhausted !== bh.exhausted) return ah.exhausted ? 1 : -1;
       if (ah.hasExtraQuota !== bh.hasExtraQuota) return ah.hasExtraQuota ? -1 : 1;
       if (ah.remainingScore !== bh.remainingScore) return bh.remainingScore - ah.remainingScore;
-      return bh.fetchedAt - ah.fetchedAt;
+      return a.alias.localeCompare(b.alias);
     });
   }
 
@@ -2226,10 +2225,16 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       if (pinned && !(pinned.health?.exhausted)) {
         return pinned;
       }
+      try {
+        console.warn(`[windsurf-account] sticky-invalidated session=${normalized} previousAlias=${pinnedAlias} reason=${pinned ? 'exhausted' : 'missing'}`);
+      } catch { /* best-effort */ }
       this.windsurfSessionStickyAccount.delete(normalized);
     }
     const selected = ranked.find((entry) => !(entry.health?.exhausted)) || ranked[0]!;
     this.windsurfSessionStickyAccount.set(normalized, selected.alias);
+    try {
+      console.warn(`[windsurf-account] sticky-bind session=${normalized} alias=${selected.alias} remainingScore=${selected.health?.remainingScore ?? 'null'} extra=${selected.health?.hasExtraQuota ?? false}`);
+    } catch { /* best-effort */ }
     return selected;
   }
 
@@ -2238,7 +2243,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     return Math.max(1, available);
   }
 
-  private async fetchWindsurfUserStatusForHealth(apiKey: string): Promise<WindsurfQuotaHealthSnapshot | null> {
+  private async fetchWindsurfUserStatusForHealth(apiKey: string, alias?: string): Promise<WindsurfQuotaHealthSnapshot | null> {
     const body = this.buildCascadeAuthProbeBody(apiKey);
     const headers = this.buildCascadeAuthProbeHeaders(apiKey);
     const response = await this.fetchWithTimeout(
@@ -2248,6 +2253,11 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     );
     const raw = await response.text();
     if (!response.ok) {
+      // Token expired (401/403) — mark account unavailable so the next
+      // ensureWindsurfSessionCredential flow re-logs in.
+      if (response.status === 401 || response.status === 403) {
+        if (alias) this.windsurfUnavailableAccounts.add(alias);
+      }
       return null;
     }
     try {
@@ -2259,11 +2269,23 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   }
 
   private async selectWindsurfAccount(managed: { auth: ApiKeyAuthProvider; entries: WindsurfManagedCredentialEntry[]; rawType: string }): Promise<{ accountAlias: string; apiKey: string }> {
+    const HEALTH_CACHE_TTL_MS = 60_000;
     for (const entry of managed.entries) {
-      const latest = await this.fetchWindsurfUserStatusForHealth(entry.apiKey);
-      if (latest) {
-        this.windsurfHealthCache.set(entry.alias, latest);
-        entry.health = latest;
+      const cached = this.windsurfHealthCache.get(entry.alias);
+      const isCacheFresh = cached && (Date.now() - cached.fetchedAt) < HEALTH_CACHE_TTL_MS;
+      if (isCacheFresh) {
+        entry.health = cached;
+      } else {
+        const latest = await this.fetchWindsurfUserStatusForHealth(entry.apiKey, entry.alias);
+        if (latest) {
+          this.windsurfHealthCache.set(entry.alias, latest);
+          entry.health = latest;
+        } else if (cached) {
+          // Health fetch failed (e.g. transient timeout); keep stale cache
+          // rather than setting health to null which would demote this entry
+          // in ranking and potentially destabilize sticky bindings.
+          entry.health = cached;
+        }
       }
       if (this.windsurfUnavailableAccounts.has(entry.alias)) {
         entry.health = entry.health ? { ...entry.health, exhausted: true } : {
@@ -2289,6 +2311,13 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     // Intentionally do not mutate managed.auth.config.apiKey/accountAlias.
     // resolveCascadeApiKey() returns the selected apiKey directly, and downstream
     // request builders consume that return value instead of relying on auth config mutation.
+    const total = managed.entries.length;
+    const available = managed.entries.filter((e) => !(e.health?.exhausted)).length;
+    try {
+      console.warn(`[windsurf-account] selected=${selected.alias} remainingScore=${selected.health?.remainingScore ?? 'null'} extra=${selected.health?.hasExtraQuota ?? false} available=${available}/${total} unavailable=[${Array.from(this.windsurfUnavailableAccounts).join(',')}]`);
+    } catch {
+      // best-effort logging, never throw
+    }
     return { accountAlias: selected.alias, apiKey: selected.apiKey };
   }
 

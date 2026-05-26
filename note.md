@@ -10884,3 +10884,10 @@ Using skills: coding-principals + rcc-dev-skills
   - `cargo test -p router-hotpath-napi --no-run`
 
 - 2026-05-26 MCP-only: windsurf-chat-provider removed RCC text-tool guidance/parsing path, renamed unsupported->windsurf_mcp_tools, added gRPC field10 mcpCompat passthrough + new focused tests tests/providers/core/runtime/windsurf-mcp-only.spec.ts (3 pass).
+
+
+[2026-05-26] 5555 submit_tool_outputs expired 真红：runtime-integrations store authority 分裂
+- 真红证据：14:12:14 首轮 5555 tool_calls 后 `mem-observer` 显示 `requestMap=1 responseIndex=0 scopeIndex=0 pendingNoResponseId=0`，随后的 `/v1/responses/{id}/submit_tool_outputs` 报 `Responses conversation expired or not found`。
+- 根因确认：`src/modules/llmswitch/bridge/runtime-integrations.ts` 里 `clear/finalize/rebind` 优先走 `globalThis.__rccResponsesConversationStore`，但 `capture/record/resume/resumeLatestByScope` 仍固定走 `importCoreDist('conversion/shared/responses-conversation-store')`。当 live 运行态 authoritative store 在 global 上而 imported module 不是同一实例时，会出现 capture/record 写入 A、mem-observer/finalize/resume 读取 B，导致 `responseIndex=0`。
+- 红测：`tests/modules/llmswitch/bridge/runtime-integrations.responses-store.spec.ts` 先证明 capture/record/resume/resumeLatestByScope 没有优先命中 global authoritative store；修改前失败。
+- 唯一修复点：`src/modules/llmswitch/bridge/runtime-integrations.ts`。因为 continuation store 的对外桥接全收敛在这里，只有把 capture/record/resume/resumeLatestByScope 与 clear/finalize/rebind 统一到同一个 authoritative store 选择策略，才能根除 live 的 store 分裂；改 handler 或 store 本体都只能掩盖症状。

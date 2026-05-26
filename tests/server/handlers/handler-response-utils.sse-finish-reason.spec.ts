@@ -73,6 +73,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
   it('logs finish_reason after streamed responses complete', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -129,6 +133,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
   it('logs client_close diagnostics when SSE closes before terminal event', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -176,6 +184,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
   it('does not enforce stopless contract inside raw SSE handler path', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -228,6 +240,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
   it('does not treat streamed wrapper finish_reason as stopless truth source in handler path', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -278,6 +294,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
   it('passes structured non-stream errors through SSE without rewriting them to HTTP_502', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -325,6 +345,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
   it('does not close SSE before upstream emits trailing tail after response.completed', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -370,5 +394,63 @@ describe('sendPipelineResponse SSE completion logging', () => {
     const output = chunks.join('');
     expect(output).toContain('event: response.completed');
     expect(output).toContain('data: [DONE]');
+  });
+
+  it('RED: does not silently swallow trailing frames after tool_calls terminal event before upstream end', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    const responseErrors: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    res.on('error', (error) => responseErrors.push(String(error instanceof Error ? error.message : error)));
+    const stream = new PassThrough();
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream,
+          __routecodex_stream_finish_reason: 'tool_calls'
+        }
+      } as any,
+      'req-stream-tool-calls-tail',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    stream.write('event: response.completed\n');
+    stream.write(
+      'data: {"type":"response.completed","response":{"id":"resp_tool_tail","object":"response","status":"requires_action"}}\n\n'
+    );
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    stream.write(': trailing-tail-after-terminal\n\n');
+    stream.write('data: [DONE]\n\n');
+    stream.end();
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output).toContain(': trailing-tail-after-terminal');
+    expect(output).toContain('data: [DONE]');
+    expect(responseErrors).toEqual([]);
   });
 });

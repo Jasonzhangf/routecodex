@@ -40,6 +40,19 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
     return provider;
   }
 
+  function makeHealth(overrides: Record<string, unknown> = {}) {
+    return {
+      hasExtraQuota: false,
+      dailyRemainingPercent: 80,
+      weeklyRemainingPercent: 70,
+      remainingScore: 70,
+      overageBalance: null,
+      exhausted: false,
+      fetchedAt: Date.now(),
+      ...overrides,
+    } as never;
+  }
+
   // --- Test 1: Sticky session ---
 
   test('sticky: consecutive sendRequestInternal calls use same account key and cascadeId across rounds', async () => {
@@ -111,21 +124,35 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
       ],
     });
 
+    // Mock health so ws-primary (extra=true) ranks first, ws-backup ranks second
+    jest.spyOn(provider, 'fetchWindsurfUserStatusForHealth')
+      .mockResolvedValueOnce(makeHealth({ hasExtraQuota: true, remainingScore: 70, overageBalance: 5 }))
+      .mockResolvedValueOnce(makeHealth({ hasExtraQuota: false, remainingScore: 90 }));
+
     const managed = provider.readManagedWindsurfAuthConfigDetailed();
     expect(managed).not.toBeNull();
 
+    // First selection picks ws-primary (has extra quota)
     const first = await provider.selectWindsurfAccount(managed);
     expect(first.accountAlias).toBe('ws-primary');
 
+    // Second call — sticky, same account
     const sticky = await provider.selectWindsurfAccount(managed);
     expect(sticky.accountAlias).toBe('ws-primary');
 
+    // After clearing, ws-primary is unavailable
+    expect(provider.windsurfSessionCredential?.accountAlias).toBe('ws-primary');
     provider.clearManagedWindsurfSessionCredential();
+    expect(provider.windsurfSessionCredential).toBeNull();
     expect(provider.windsurfUnavailableAccounts.has('ws-primary')).toBe(true);
 
+    // Third call — rotates to ws-backup
+    jest.spyOn(provider, 'fetchWindsurfUserStatusForHealth')
+      .mockResolvedValue(makeHealth({ hasExtraQuota: false, remainingScore: 90 }));
     const rotated = await provider.selectWindsurfAccount(managed);
     expect(rotated.accountAlias).toBe('ws-backup');
 
+    // Fourth call stays on ws-backup
     const stillBackup = await provider.selectWindsurfAccount(managed);
     expect(stillBackup.accountAlias).toBe('ws-backup');
   });
@@ -152,7 +179,7 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
 
     jest.spyOn(provider, 'pollCascadeTrajectorySteps')
       .mockResolvedValueOnce({
-        candidate: { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'view_file', arguments: '{"path":"file.txt"}' } }] },
+        candidate: { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"file.txt"}' } }] },
         usage: { inputTokens: 5, outputTokens: 1 },
       } as never)
       .mockResolvedValue({
@@ -171,7 +198,7 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
         model: 'gpt-5.4-medium',
         messages: [
           { role: 'user', content: 'read file.txt' },
-          { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'view_file', arguments: '{"path":"file.txt"}' } }] },
+          { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"file.txt"}' } }] },
           { role: 'tool', tool_call_id: 'call_1', content: 'file content: hello world' },
           { role: 'user', content: 'summarize the file' },
         ],
@@ -184,7 +211,7 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
         model: 'gpt-5.4-medium',
         messages: [
           { role: 'user', content: 'read file.txt' },
-          { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'view_file', arguments: '{"path":"file.txt"}' } }] },
+          { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"file.txt"}' } }] },
           { role: 'tool', tool_call_id: 'call_1', content: 'file content: hello world' },
           { role: 'user', content: 'summarize the file' },
           { role: 'assistant', content: 'The file says hello' },
@@ -231,11 +258,11 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
     // Round 1 → read_file tool, Round 2 → exec_command tool, Round 3 → text
     jest.spyOn(provider, 'pollCascadeTrajectorySteps')
       .mockResolvedValueOnce({
-        candidate: { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'view_file', arguments: '{"path":"file.txt"}' } }] },
+        candidate: { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"file.txt"}' } }] },
         usage: { inputTokens: 5, outputTokens: 1 },
       } as never)
       .mockResolvedValueOnce({
-        candidate: { role: 'assistant', content: '', tool_calls: [{ id: 'call_2', type: 'function', function: { name: 'run_command', arguments: '{"command":"ls"}' } }] },
+        candidate: { role: 'assistant', content: '', tool_calls: [{ id: 'call_2', type: 'function', function: { name: 'exec_command', arguments: '{"command":"ls"}' } }] },
         usage: { inputTokens: 15, outputTokens: 2 },
       } as never)
       .mockResolvedValue({
@@ -254,7 +281,7 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
         model: 'gpt-5.4-medium',
         messages: [
           { role: 'user', content: 'read file.txt' },
-          { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'view_file', arguments: '{"path":"file.txt"}' } }] },
+          { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"file.txt"}' } }] },
           { role: 'tool', tool_call_id: 'call_1', content: 'file content: data' },
           { role: 'user', content: 'list directory' },
         ],
@@ -267,10 +294,10 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
         model: 'gpt-5.4-medium',
         messages: [
           { role: 'user', content: 'read file.txt' },
-          { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'view_file', arguments: '{"path":"file.txt"}' } }] },
+          { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"file.txt"}' } }] },
           { role: 'tool', tool_call_id: 'call_1', content: 'file content: data' },
           { role: 'user', content: 'list directory' },
-          { role: 'assistant', content: '', tool_calls: [{ id: 'call_2', type: 'function', function: { name: 'run_command', arguments: '{"command":"ls"}' } }] },
+          { role: 'assistant', content: '', tool_calls: [{ id: 'call_2', type: 'function', function: { name: 'exec_command', arguments: '{"command":"ls"}' } }] },
           { role: 'tool', tool_call_id: 'call_2', content: 'file1.txt\nfile2.txt' },
           { role: 'user', content: 'finish' },
         ],

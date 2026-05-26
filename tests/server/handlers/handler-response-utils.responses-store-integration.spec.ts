@@ -1,43 +1,63 @@
-import { PassThrough, Readable } from 'node:stream';
-import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import { PassThrough, Readable } from "node:stream";
+import { afterEach, describe, expect, it, jest } from "@jest/globals";
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', async () => {
-  const store = await import('../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
-  return {
-    createResponsesJsonToSseConverter: jest.fn(async () => ({
-      convertResponseToJsonToSse: jest.fn(async () => Readable.from(['event: response.completed\n', 'data: {}\n\n']))
-    })),
-    importCoreDist: jest.fn(),
-    requireCoreDist: jest.fn(),
-    captureResponsesRequestContextForRequest: jest.fn(async (args: {
-      requestId: string;
-      payload: Record<string, unknown>;
-      context: Record<string, unknown>;
-      sessionId?: string;
-      routeHint?: string;
-    }) => store.captureResponsesRequestContext(args)),
-    clearResponsesConversationByRequestId: jest.fn(async (requestId?: string) => {
-      store.clearResponsesConversationByRequestId(requestId);
-      return undefined;
-    }),
-    finalizeResponsesConversationRequestRetention: jest.fn(async (requestId?: string, options?: { keepForSubmitToolOutputs?: boolean }) => {
-      store.finalizeResponsesConversationRequestRetention(requestId, options);
-      return undefined;
-    }),
-    recordResponsesResponseForRequest: jest.fn(async (args: {
-      requestId: string;
-      response: Record<string, unknown>;
-      routeHint?: string;
-    }) => {
-      store.recordResponsesResponse(args);
-      return undefined;
-    })
-  };
-});
+jest.unstable_mockModule(
+  "../../../src/modules/llmswitch/bridge.js",
+  async () => {
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    return {
+      createResponsesJsonToSseConverter: jest.fn(async () => ({
+        convertResponseToJsonToSse: jest.fn(async () =>
+          Readable.from(["event: response.completed\n", "data: {}\n\n"]),
+        ),
+      })),
+      importCoreDist: jest.fn(),
+      requireCoreDist: jest.fn(),
+      captureResponsesRequestContextForRequest: jest.fn(
+        async (args: {
+          requestId: string;
+          payload: Record<string, unknown>;
+          context: Record<string, unknown>;
+          sessionId?: string;
+          routeHint?: string;
+        }) => store.captureResponsesRequestContext(args),
+      ),
+      clearResponsesConversationByRequestId: jest.fn(
+        async (requestId?: string) => {
+          store.clearResponsesConversationByRequestId(requestId);
+          return undefined;
+        },
+      ),
+      finalizeResponsesConversationRequestRetention: jest.fn(
+        async (
+          requestId?: string,
+          options?: { keepForSubmitToolOutputs?: boolean },
+        ) => {
+          store.finalizeResponsesConversationRequestRetention(
+            requestId,
+            options,
+          );
+          return undefined;
+        },
+      ),
+      recordResponsesResponseForRequest: jest.fn(
+        async (args: {
+          requestId: string;
+          response: Record<string, unknown>;
+          routeHint?: string;
+        }) => {
+          store.recordResponsesResponse(args);
+          return undefined;
+        },
+      ),
+    };
+  },
+);
 
-jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+jest.unstable_mockModule("../../../src/utils/snapshot-writer.js", () => ({
   isSnapshotsEnabled: () => false,
-  writeServerSnapshot: async () => undefined
+  writeServerSnapshot: async () => undefined,
 }));
 
 class MockResponse extends PassThrough {
@@ -61,62 +81,81 @@ class MockResponse extends PassThrough {
 
 async function waitForEnd(stream: PassThrough): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    stream.once('end', resolve);
-    stream.once('error', reject);
+    stream.once("end", resolve);
+    stream.once("error", reject);
     stream.resume();
   });
 }
 
-describe('sendPipelineResponse responses store integration', () => {
+describe("sendPipelineResponse responses store integration", () => {
   const requestIds = [
-    'openai-responses-router-gpt-5.3-codex-native-sse-store',
-    'openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T102906604-222183-867',
-    'openai-responses-router-gpt-5.3-codex-20260523T102906604-222183-867',
-    'resp_native_sse_store_1',
-    'resp_1779503404150',
-    'resp_windsurf_json_resume_1',
-    'openai-responses-router-gpt-5.3-codex-orphan-cleanup',
-    'openai-responses-windsurf.ws-pro-4-gpt-5.4-none-orphan-cleanup',
-    'resp_windsurf_orphan_cleanup_1',
-    'req-windsurf-history-tool-next'
+    "openai-responses-router-gpt-5.3-codex-native-sse-store",
+    "openai-responses-router-gpt-5.3-codex-native-sse-premature-persist",
+    "openai-responses-router-gpt-5.3-codex-native-sse-tail-store",
+    "openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T102906604-222183-867",
+    "openai-responses-router-gpt-5.3-codex-20260523T102906604-222183-867",
+    "resp_native_sse_premature_persist_1",
+    "resp_native_sse_store_1",
+    "resp_native_sse_tail_store_1",
+    "resp_1779503404150",
+    "resp_windsurf_json_resume_1",
+    "openai-responses-router-gpt-5.3-codex-orphan-cleanup",
+    "openai-responses-windsurf.ws-pro-4-gpt-5.4-none-orphan-cleanup",
+    "resp_windsurf_orphan_cleanup_1",
+    "req-windsurf-history-tool-next",
   ];
 
   afterEach(async () => {
-    const bridge = await import('../../../src/modules/llmswitch/bridge.js');
+    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
     (bridge.captureResponsesRequestContextForRequest as jest.Mock).mockClear();
     (bridge.recordResponsesResponseForRequest as jest.Mock).mockClear();
     (bridge.clearResponsesConversationByRequestId as jest.Mock).mockClear();
-    (bridge.finalizeResponsesConversationRequestRetention as jest.Mock).mockClear();
-    const store = await import('../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
+    (
+      bridge.finalizeResponsesConversationRequestRetention as jest.Mock
+    ).mockClear();
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
     for (const requestId of requestIds) {
       store.clearResponsesConversationByRequestId(requestId);
     }
   });
 
-  it('RED: streamed Windsurf tool_calls records provider context so history plus tools restore together', async () => {
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-    const store = await import('../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
-    const providerRequestId = 'openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T102906604-222183-867';
-    const routerRequestId = 'openai-responses-router-gpt-5.3-codex-20260523T102906604-222183-867';
-    const responseId = 'resp_1779503404150';
+  it("RED: streamed Windsurf tool_calls records provider context so history plus tools restore together", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const providerRequestId =
+      "openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T102906604-222183-867";
+    const routerRequestId =
+      "openai-responses-router-gpt-5.3-codex-20260523T102906604-222183-867";
+    const responseId = "resp_1779503404150";
 
     store.captureResponsesRequestContext({
       requestId: responseId,
-      sessionId: 'rcc-routecodex-2',
+      sessionId: "rcc-routecodex-2",
       payload: {
-        model: 'gpt-5.3-codex',
+        model: "gpt-5.3-codex",
         input: [
-          { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'first coding request' }] }
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "first coding request" }],
+          },
         ],
-        tools: [{ type: 'function', function: { name: 'exec_command' } }]
+        tools: [{ type: "function", function: { name: "exec_command" } }],
       },
       context: {
         input: [
-          { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'first coding request' }] }
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "first coding request" }],
+          },
         ],
-        toolsRaw: [{ type: 'function', function: { name: 'exec_command' } }]
+        toolsRaw: [{ type: "function", function: { name: "exec_command" } }],
       },
-      routeHint: 'tools/gateway-priority-5520-tools'
+      routeHint: "tools/gateway-priority-5520-tools",
     });
 
     const res = new MockResponse();
@@ -126,26 +165,26 @@ describe('sendPipelineResponse responses store integration', () => {
         status: 200,
         body: {
           id: responseId,
-          object: 'response',
-          status: 'requires_action',
+          object: "response",
+          status: "requires_action",
           output: [
             {
-              type: 'function_call',
-              name: 'exec_command',
+              type: "function_call",
+              name: "exec_command",
               arguments: '{"cmd":"pwd"}',
-              call_id: 'call_windsurf_history_tool'
-            }
-          ]
+              call_id: "call_windsurf_history_tool",
+            },
+          ],
         },
         usageLogInfo: {
-          finishReason: 'tool_calls',
-          routeName: 'tools/gateway-priority-5520-tools',
-          sessionId: 'rcc-routecodex-2',
-          timingRequestIds: [providerRequestId, routerRequestId]
-        }
+          finishReason: "tool_calls",
+          routeName: "tools/gateway-priority-5520-tools",
+          sessionId: "rcc-routecodex-2",
+          timingRequestIds: [providerRequestId, routerRequestId],
+        },
       } as any,
       routerRequestId,
-      { entryEndpoint: '/v1/responses', forceSSE: true }
+      { entryEndpoint: "/v1/responses", forceSSE: true },
     );
     await waitForEnd(res);
 
@@ -155,33 +194,177 @@ describe('sendPipelineResponse responses store integration', () => {
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
 
     const restored = store.resumeLatestResponsesContinuationByScope({
-      requestId: 'req-windsurf-history-tool-next',
-      sessionId: 'rcc-routecodex-2',
+      requestId: "req-windsurf-history-tool-next",
+      sessionId: "rcc-routecodex-2",
       payload: {
-        model: 'gpt-5.3-codex',
+        model: "gpt-5.3-codex",
         input: [
-          { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'first coding request' }] },
-          { type: 'function_call_output', call_id: 'call_windsurf_history_tool', output: '/Users/fanzhang/Documents/github/routecodex' },
-          { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'continue coding' }] }
-        ]
-      }
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "first coding request" }],
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_windsurf_history_tool",
+            output: "/Users/fanzhang/Documents/github/routecodex",
+          },
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "continue coding" }],
+          },
+        ],
+      },
     });
 
     expect(restored).not.toBeNull();
-    expect(restored?.payload.previous_response_id).toBe('resp_1779503404150');
-    expect(restored?.payload.tools).toEqual([{ type: 'function', function: { name: 'exec_command' } }]);
+    expect(restored?.payload.previous_response_id).toBe("resp_1779503404150");
+    expect(restored?.payload.tools).toEqual([
+      { type: "function", function: { name: "exec_command" } },
+    ]);
     expect(restored?.payload.input).toEqual([
-      { type: 'function_call_output', call_id: 'call_windsurf_history_tool', output: '/Users/fanzhang/Documents/github/routecodex' },
-      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'continue coding' }] }
+      {
+        type: "function_call_output",
+        call_id: "call_windsurf_history_tool",
+        output: "/Users/fanzhang/Documents/github/routecodex",
+      },
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "continue coding" }],
+      },
     ]);
   });
 
-  it('RED: native SSE (__sse_responses) tool_calls must record responses continuation context', async () => {
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-    const store = await import('../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
-    const requestId = 'openai-responses-router-gpt-5.3-codex-native-sse-store';
-    const responseId = 'resp_native_sse_store_1';
-    const callId = 'call_native_sse_store_1';
+  it("RED: preset stream finish_reason must not persist native SSE conversation before terminal chunk arrives", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const requestId =
+      "openai-responses-router-gpt-5.3-codex-native-sse-premature-persist";
+    const responseId = "resp_native_sse_premature_persist_1";
+    const callId = "call_native_sse_premature_persist_1";
+
+    async function* delayedTerminalStream(): AsyncGenerator<string> {
+      yield "event: response.created\n";
+      yield `data: ${JSON.stringify({
+        type: "response.created",
+        response: {
+          id: responseId,
+          object: "response",
+          status: "in_progress",
+        },
+      })}\n\n`;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      yield "event: response.output_item.done\n";
+      yield `data: ${JSON.stringify({
+        type: "response.output_item.done",
+        output_index: 0,
+        item: {
+          id: `fc_${callId}`,
+          type: "function_call",
+          status: "completed",
+          call_id: callId,
+          name: "exec_command",
+          arguments: '{"cmd":"pwd"}',
+        },
+      })}\n\n`;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      yield "event: response.completed\n";
+      yield `data: ${JSON.stringify({
+        type: "response.completed",
+        response: {
+          id: responseId,
+          object: "response",
+          status: "completed",
+        },
+      })}\n\n`;
+      yield "data: [DONE]\n\n";
+    }
+
+    const res = new MockResponse();
+    await sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: Readable.from(delayedTerminalStream()),
+          __routecodex_stream_finish_reason: "tool_calls",
+        },
+        usageLogInfo: {
+          finishReason: "tool_calls",
+          routeName: "thinking/gateway-priority-5555-thinking",
+          sessionId: "rcc-native-sse-premature-persist",
+        },
+        metadata: {
+          outboundStream: true,
+        },
+      } as any,
+      requestId,
+      {
+        entryEndpoint: "/v1/responses",
+        responsesRequestContext: {
+          payload: {
+            model: "gpt-5.3-codex",
+            input: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "call exec_command then continue",
+                  },
+                ],
+              },
+            ],
+            tools: [{ type: "function", name: "exec_command" }],
+          },
+          context: {
+            input: [
+              {
+                type: "message",
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "call exec_command then continue",
+                  },
+                ],
+              },
+            ],
+            toolsRaw: [{ type: "function", name: "exec_command" }],
+          },
+          sessionId: "rcc-native-sse-premature-persist",
+        },
+      },
+    );
+    await waitForEnd(res);
+
+    const stats = store.responsesConversationStore.getDebugStats();
+    expect(stats.responseIndexSize).toBe(1);
+    expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
+
+    const resumed = store.resumeResponsesConversation(responseId, {
+      tool_outputs: [
+        {
+          call_id: callId,
+          output: "/Users/fanzhang/Documents/github/routecodex",
+        },
+      ],
+    });
+    expect(resumed.payload.previous_response_id).toBe(responseId);
+  });
+
+  it("RED: native SSE (__sse_responses) tool_calls must record responses continuation context", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const requestId = "openai-responses-router-gpt-5.3-codex-native-sse-store";
+    const responseId = "resp_native_sse_store_1";
+    const callId = "call_native_sse_store_1";
 
     const res = new MockResponse();
     await sendPipelineResponse(
@@ -190,65 +373,100 @@ describe('sendPipelineResponse responses store integration', () => {
         status: 200,
         body: {
           __sse_responses: Readable.from([
-            'event: response.required_action\n',
+            "event: response.required_action\n",
             `data: ${JSON.stringify({
-              type: 'response.required_action',
-              response: { id: responseId, object: 'response', status: 'requires_action' },
+              type: "response.required_action",
+              response: {
+                id: responseId,
+                object: "response",
+                status: "requires_action",
+              },
               required_action: {
-                type: 'submit_tool_outputs',
-                submit_tool_outputs: { tool_calls: [{ id: callId, type: 'function_call', name: 'update_plan', arguments: '{"plan":[{"step":"native-sse-store"}]}' }] }
-              }
+                type: "submit_tool_outputs",
+                submit_tool_outputs: {
+                  tool_calls: [
+                    {
+                      id: callId,
+                      type: "function_call",
+                      name: "update_plan",
+                      arguments: '{"plan":[{"step":"native-sse-store"}]}',
+                    },
+                  ],
+                },
+              },
             })}\n\n`,
-            'event: response.completed\n',
-            `data: ${JSON.stringify({ type: 'response.completed', response: { id: responseId, object: 'response', status: 'requires_action' } })}\n\n`
+            "event: response.completed\n",
+            `data: ${JSON.stringify({ type: "response.completed", response: { id: responseId, object: "response", status: "requires_action" } })}\n\n`,
           ]),
-          __routecodex_stream_finish_reason: 'tool_calls',
+          __routecodex_stream_finish_reason: "tool_calls",
           __routecodex_stream_contract_probe_body: {
             id: responseId,
-            object: 'response',
-            status: 'requires_action',
+            object: "response",
+            status: "requires_action",
             output: [
               {
-                type: 'function_call',
+                type: "function_call",
                 call_id: callId,
                 id: `fc_${callId}`,
-                name: 'update_plan',
-                arguments: '{"plan":[{"step":"native-sse-store"}]}'
-              }
+                name: "update_plan",
+                arguments: '{"plan":[{"step":"native-sse-store"}]}',
+              },
             ],
             required_action: {
-              type: 'submit_tool_outputs',
-              submit_tool_outputs: { tool_calls: [{ id: callId, type: 'function_call', name: 'update_plan', arguments: '{"plan":[{"step":"native-sse-store"}]}' }] }
-            }
-          }
+              type: "submit_tool_outputs",
+              submit_tool_outputs: {
+                tool_calls: [
+                  {
+                    id: callId,
+                    type: "function_call",
+                    name: "update_plan",
+                    arguments: '{"plan":[{"step":"native-sse-store"}]}',
+                  },
+                ],
+              },
+            },
+          },
         },
         usageLogInfo: {
-          finishReason: 'tool_calls',
-          routeName: 'thinking/gateway-priority-5555-thinking',
-          sessionId: 'rcc-native-sse-store'
+          finishReason: "tool_calls",
+          routeName: "thinking/gateway-priority-5555-thinking",
+          sessionId: "rcc-native-sse-store",
         },
         metadata: {
-          outboundStream: true
-        }
+          outboundStream: true,
+        },
       } as any,
       requestId,
       {
-        entryEndpoint: '/v1/responses',
+        entryEndpoint: "/v1/responses",
         responsesRequestContext: {
           payload: {
-            model: 'gpt-5.3-codex',
-            input: [{ role: 'user', content: [{ type: 'input_text', text: 'call update_plan and continue' }] }],
-            tools: [{ type: 'function', name: 'update_plan' }]
+            model: "gpt-5.3-codex",
+            input: [
+              {
+                role: "user",
+                content: [
+                  { type: "input_text", text: "call update_plan and continue" },
+                ],
+              },
+            ],
+            tools: [{ type: "function", name: "update_plan" }],
           },
           context: {
             input: [
-              { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'call update_plan and continue' }] }
+              {
+                type: "message",
+                role: "user",
+                content: [
+                  { type: "input_text", text: "call update_plan and continue" },
+                ],
+              },
             ],
-            toolsRaw: [{ type: 'function', name: 'update_plan' }]
+            toolsRaw: [{ type: "function", name: "update_plan" }],
           },
-          sessionId: 'rcc-native-sse-store'
-        }
-      }
+          sessionId: "rcc-native-sse-store",
+        },
+      },
     );
     await waitForEnd(res);
 
@@ -257,12 +475,158 @@ describe('sendPipelineResponse responses store integration', () => {
     expect(stats.requestMapSize).toBe(1);
   });
 
-  it('records JSON /v1/responses tool_calls under client-visible response id and submit_tool_outputs resumes', async () => {
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-    const bridge = await import('../../../src/modules/llmswitch/bridge.js');
-    const store = await import('../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
-    const routerRequestId = 'openai-responses-router-gpt-5.3-codex-json-resume';
-    const responseId = 'resp_windsurf_json_resume_1';
+  it("RED: native SSE (__sse_responses) tool_calls with trailing tail must not leave continuation context half-closed", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const requestId =
+      "openai-responses-router-gpt-5.3-codex-native-sse-tail-store";
+    const responseId = "resp_native_sse_tail_store_1";
+    const callId = "call_native_sse_tail_store_1";
+
+    const res = new MockResponse();
+    await sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: Readable.from([
+            "event: response.required_action\n",
+            `data: ${JSON.stringify({
+              type: "response.required_action",
+              response: {
+                id: responseId,
+                object: "response",
+                status: "requires_action",
+              },
+              required_action: {
+                type: "submit_tool_outputs",
+                submit_tool_outputs: {
+                  tool_calls: [
+                    {
+                      id: callId,
+                      type: "function_call",
+                      name: "update_plan",
+                      arguments: '{"plan":[{"step":"native-sse-tail-store"}]}',
+                    },
+                  ],
+                },
+              },
+            })}\n\n`,
+            "event: response.completed\n",
+            `data: ${JSON.stringify({ type: "response.completed", response: { id: responseId, object: "response", status: "requires_action" } })}\n\n`,
+            ": trailing-tail-after-terminal\n\n",
+            "data: [DONE]\n\n",
+          ]),
+          __routecodex_stream_finish_reason: "tool_calls",
+          __routecodex_stream_contract_probe_body: {
+            id: responseId,
+            object: "response",
+            status: "requires_action",
+            output: [
+              {
+                type: "function_call",
+                call_id: callId,
+                id: `fc_${callId}`,
+                name: "update_plan",
+                arguments: '{"plan":[{"step":"native-sse-tail-store"}]}',
+              },
+            ],
+            required_action: {
+              type: "submit_tool_outputs",
+              submit_tool_outputs: {
+                tool_calls: [
+                  {
+                    id: callId,
+                    type: "function_call",
+                    name: "update_plan",
+                    arguments: '{"plan":[{"step":"native-sse-tail-store"}]}',
+                  },
+                ],
+              },
+            },
+          },
+        },
+        usageLogInfo: {
+          finishReason: "tool_calls",
+          routeName: "thinking/gateway-priority-5555-thinking",
+          sessionId: "rcc-native-sse-tail-store",
+        },
+        metadata: {
+          outboundStream: true,
+        },
+      } as any,
+      requestId,
+      {
+        entryEndpoint: "/v1/responses",
+        responsesRequestContext: {
+          payload: {
+            model: "gpt-5.3-codex",
+            input: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "call update_plan and continue with tail",
+                  },
+                ],
+              },
+            ],
+            tools: [{ type: "function", name: "update_plan" }],
+          },
+          context: {
+            input: [
+              {
+                type: "message",
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "call update_plan and continue with tail",
+                  },
+                ],
+              },
+            ],
+            toolsRaw: [{ type: "function", name: "update_plan" }],
+          },
+          sessionId: "rcc-native-sse-tail-store",
+        },
+      },
+    );
+    await waitForEnd(res);
+
+    const stats = store.responsesConversationStore.getDebugStats();
+    expect(stats.responseIndexSize).toBe(1);
+    expect(stats.requestMapSize).toBe(1);
+    expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
+
+    const resumed = store.resumeResponsesConversation(responseId, {
+      response_id: responseId,
+      tool_outputs: [{ tool_call_id: callId, output: "tail-store-ok" }],
+    });
+
+    expect(resumed.payload.previous_response_id).toBe(responseId);
+    expect(resumed.payload.input).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "function_call_output",
+          call_id: callId,
+          output: "tail-store-ok",
+        }),
+      ]),
+    );
+  });
+
+  it("records JSON /v1/responses tool_calls under client-visible response id and submit_tool_outputs resumes", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const routerRequestId = "openai-responses-router-gpt-5.3-codex-json-resume";
+    const responseId = "resp_windsurf_json_resume_1";
 
     try {
       const res = new MockResponse();
@@ -272,78 +636,108 @@ describe('sendPipelineResponse responses store integration', () => {
           status: 200,
           body: {
             id: responseId,
-            object: 'response',
-            status: 'requires_action',
+            object: "response",
+            status: "requires_action",
             output: [
               {
-                type: 'function_call',
-                name: 'shell_command',
+                type: "function_call",
+                name: "shell_command",
                 arguments: '{"command":"printf native-windsurf-ok"}',
-                call_id: 'native:run_command:3'
-              }
+                call_id: "native:run_command:3",
+              },
             ],
             required_action: {
-              type: 'submit_tool_outputs',
-              submit_tool_outputs: { tool_calls: [] }
-            }
+              type: "submit_tool_outputs",
+              submit_tool_outputs: { tool_calls: [] },
+            },
           },
           usageLogInfo: {
-            finishReason: 'tool_calls',
-            routeName: 'thinking/gateway-priority-5520-thinking',
-            sessionId: 'rcc-json-resume-session'
-          }
+            finishReason: "tool_calls",
+            routeName: "thinking/gateway-priority-5520-thinking",
+            sessionId: "rcc-json-resume-session",
+          },
         } as any,
         routerRequestId,
         {
-          entryEndpoint: '/v1/responses',
+          entryEndpoint: "/v1/responses",
           responsesRequestContext: {
             payload: {
-              model: 'gpt-5.3-codex',
-              input: [{ role: 'user', content: [{ type: 'input_text', text: 'call shell_command' }] }],
-              tools: [{ type: 'function', name: 'shell_command' }]
+              model: "gpt-5.3-codex",
+              input: [
+                {
+                  role: "user",
+                  content: [{ type: "input_text", text: "call shell_command" }],
+                },
+              ],
+              tools: [{ type: "function", name: "shell_command" }],
             },
             context: {
-              input: [{ role: 'user', content: [{ type: 'input_text', text: 'call shell_command' }] }],
-              toolsRaw: [{ type: 'function', name: 'shell_command' }]
+              input: [
+                {
+                  role: "user",
+                  content: [{ type: "input_text", text: "call shell_command" }],
+                },
+              ],
+              toolsRaw: [{ type: "function", name: "shell_command" }],
             },
-            sessionId: 'rcc-json-resume-session'
-          }
-        }
+            sessionId: "rcc-json-resume-session",
+          },
+        },
       );
 
       const stats = store.responsesConversationStore.getDebugStats();
-      expect((bridge.captureResponsesRequestContextForRequest as jest.Mock).mock.calls.map(([arg]) => arg.requestId)).toEqual([
-        responseId
-      ]);
-      expect((bridge.recordResponsesResponseForRequest as jest.Mock).mock.calls.map(([arg]) => arg.requestId)).toEqual([
-        responseId
-      ]);
-      expect((bridge.recordResponsesResponseForRequest as jest.Mock).mock.calls.map(([arg]) => arg.response?.id)).toEqual([
-        responseId
-      ]);
+      expect(
+        (
+          bridge.captureResponsesRequestContextForRequest as jest.Mock
+        ).mock.calls.map(([arg]) => arg.requestId),
+      ).toEqual([responseId]);
+      expect(
+        (bridge.recordResponsesResponseForRequest as jest.Mock).mock.calls.map(
+          ([arg]) => arg.requestId,
+        ),
+      ).toEqual([responseId]);
+      expect(
+        (bridge.recordResponsesResponseForRequest as jest.Mock).mock.calls.map(
+          ([arg]) => arg.response?.id,
+        ),
+      ).toEqual([responseId]);
       expect(stats.responseIndexSize).toBe(1);
 
       const resumed = store.resumeResponsesConversation(responseId, {
         response_id: responseId,
-        tool_outputs: [{ tool_call_id: 'native:run_command:3', output: 'native-windsurf-ok' }]
+        tool_outputs: [
+          {
+            tool_call_id: "native:run_command:3",
+            output: "native-windsurf-ok",
+          },
+        ],
       });
 
       expect(resumed.payload.previous_response_id).toBe(responseId);
-      expect(resumed.payload.input).toEqual(expect.arrayContaining([
-        expect.objectContaining({ type: 'function_call_output', call_id: 'native:run_command:3', output: 'native-windsurf-ok' })
-      ]));
+      expect(resumed.payload.input).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "function_call_output",
+            call_id: "native:run_command:3",
+            output: "native-windsurf-ok",
+          }),
+        ]),
+      );
     } finally {
       store.clearResponsesConversationByRequestId(routerRequestId);
       store.clearResponsesConversationByRequestId(responseId);
     }
   });
 
-  it('RED: /v1/responses string input must be captured into store so submit_tool_outputs keeps terminal user history', async () => {
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-    const store = await import('../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
-    const routerRequestId = 'openai-responses-router-gpt-5.3-codex-string-input-submit';
-    const responseId = 'resp_windsurf_string_input_submit_1';
-    const callId = 'call_windsurf_string_input_submit_1';
+  it("RED: /v1/responses string input must be captured into store so submit_tool_outputs keeps terminal user history", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const routerRequestId =
+      "openai-responses-router-gpt-5.3-codex-string-input-submit";
+    const responseId = "resp_windsurf_string_input_submit_1";
+    const callId = "call_windsurf_string_input_submit_1";
 
     try {
       const res = new MockResponse();
@@ -353,77 +747,101 @@ describe('sendPipelineResponse responses store integration', () => {
           status: 200,
           body: {
             id: responseId,
-            object: 'response',
-            status: 'requires_action',
+            object: "response",
+            status: "requires_action",
             output: [
               {
-                type: 'function_call',
-                name: 'apply_patch',
-                arguments: '{"filePath":"tmp/windsurf-live-smoke.txt","patch":"+ alpha"}',
-                call_id: callId
-              }
+                type: "function_call",
+                name: "apply_patch",
+                arguments:
+                  '{"filePath":"tmp/windsurf-live-smoke.txt","patch":"+ alpha"}',
+                call_id: callId,
+              },
             ],
             required_action: {
-              type: 'submit_tool_outputs',
-              submit_tool_outputs: { tool_calls: [] }
-            }
+              type: "submit_tool_outputs",
+              submit_tool_outputs: { tool_calls: [] },
+            },
           },
           usageLogInfo: {
-            finishReason: 'tool_calls',
-            routeName: 'thinking/gateway-priority-5520-thinking',
-            sessionId: 'rcc-string-input-submit'
-          }
+            finishReason: "tool_calls",
+            routeName: "thinking/gateway-priority-5520-thinking",
+            sessionId: "rcc-string-input-submit",
+          },
         } as any,
         routerRequestId,
         {
-          entryEndpoint: '/v1/responses',
+          entryEndpoint: "/v1/responses",
           responsesRequestContext: {
             payload: {
-              model: 'gpt-5.3-codex',
-              input: 'Use apply_patch to create tmp/windsurf-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.',
-              tools: [{ type: 'function', function: { name: 'apply_patch' } }]
+              model: "gpt-5.3-codex",
+              input:
+                "Use apply_patch to create tmp/windsurf-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.",
+              tools: [{ type: "function", function: { name: "apply_patch" } }],
             },
             context: {
               input: [
                 {
-                  type: 'message',
-                  role: 'user',
-                  content: [{ type: 'input_text', text: 'Use apply_patch to create tmp/windsurf-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.' }]
-                }
+                  type: "message",
+                  role: "user",
+                  content: [
+                    {
+                      type: "input_text",
+                      text: "Use apply_patch to create tmp/windsurf-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.",
+                    },
+                  ],
+                },
               ],
-              toolsRaw: [{ type: 'function', function: { name: 'apply_patch' } }]
+              toolsRaw: [
+                { type: "function", function: { name: "apply_patch" } },
+              ],
             },
-            sessionId: 'rcc-string-input-submit'
-          }
-        }
+            sessionId: "rcc-string-input-submit",
+          },
+        },
       );
       await waitForEnd(res);
 
       const resumed = store.resumeResponsesConversation(responseId, {
         previous_response_id: responseId,
-        tool_outputs: [{ tool_call_id: callId, output: 'created tmp/windsurf-live-smoke.txt with alpha' }]
+        tool_outputs: [
+          {
+            tool_call_id: callId,
+            output: "created tmp/windsurf-live-smoke.txt with alpha",
+          },
+        ],
       });
 
-      const bridge = await import('../../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js');
-      const ctx = bridge.captureResponsesContext(resumed.payload as Record<string, unknown>, {
-        route: { requestId: `${routerRequestId}-resume` }
-      });
-      const chat = bridge.buildChatRequestFromResponses(resumed.payload as Record<string, unknown>, ctx as any).request;
+      const bridge =
+        await import("../../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js");
+      const ctx = bridge.captureResponsesContext(
+        resumed.payload as Record<string, unknown>,
+        {
+          route: { requestId: `${routerRequestId}-resume` },
+        },
+      );
+      const chat = bridge.buildChatRequestFromResponses(
+        resumed.payload as Record<string, unknown>,
+        ctx as any,
+      ).request;
       expect(Array.isArray((chat as any).messages)).toBe(true);
       expect((chat as any).messages).toEqual([
         {
-          role: 'user',
-          content: 'Use apply_patch to create tmp/windsurf-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.'
+          role: "user",
+          content:
+            "Use apply_patch to create tmp/windsurf-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.",
         },
         expect.objectContaining({
-          role: 'assistant',
-          tool_calls: [expect.objectContaining({ id: callId, type: 'function' })]
+          role: "assistant",
+          tool_calls: [
+            expect.objectContaining({ id: callId, type: "function" }),
+          ],
         }),
         expect.objectContaining({
-          role: 'tool',
+          role: "tool",
           tool_call_id: callId,
-          content: 'created tmp/windsurf-live-smoke.txt with alpha'
-        })
+          content: "created tmp/windsurf-live-smoke.txt with alpha",
+        }),
       ]);
     } finally {
       store.clearResponsesConversationByRequestId(routerRequestId);
@@ -431,41 +849,69 @@ describe('sendPipelineResponse responses store integration', () => {
     }
   });
 
-  it('clears superseded router/provider request contexts after client response id is known', async () => {
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-    const bridge = await import('../../../src/modules/llmswitch/bridge.js');
-    const store = await import('../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
-    const routerRequestId = 'openai-responses-router-gpt-5.3-codex-orphan-cleanup';
-    const providerRequestId = 'openai-responses-windsurf.ws-pro-4-gpt-5.4-none-orphan-cleanup';
-    const responseId = 'resp_windsurf_orphan_cleanup_1';
+  it("clears superseded router/provider request contexts after client response id is known", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const routerRequestId =
+      "openai-responses-router-gpt-5.3-codex-orphan-cleanup";
+    const providerRequestId =
+      "openai-responses-windsurf.ws-pro-4-gpt-5.4-none-orphan-cleanup";
+    const responseId = "resp_windsurf_orphan_cleanup_1";
 
     store.captureResponsesRequestContext({
       requestId: routerRequestId,
-      sessionId: 'rcc-orphan-cleanup-session',
+      sessionId: "rcc-orphan-cleanup-session",
       payload: {
-        model: 'gpt-5.3-codex',
-        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'call tool' }] }],
-        tools: [{ type: 'function', name: 'exec_command' }]
+        model: "gpt-5.3-codex",
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "call tool" }],
+          },
+        ],
+        tools: [{ type: "function", name: "exec_command" }],
       },
       context: {
-        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'call tool' }] }],
-        toolsRaw: [{ type: 'function', name: 'exec_command' }]
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "call tool" }],
+          },
+        ],
+        toolsRaw: [{ type: "function", name: "exec_command" }],
       },
-      routeHint: 'tools/gateway-priority-5520-tools'
+      routeHint: "tools/gateway-priority-5520-tools",
     });
     store.captureResponsesRequestContext({
       requestId: providerRequestId,
-      sessionId: 'rcc-orphan-cleanup-session',
+      sessionId: "rcc-orphan-cleanup-session",
       payload: {
-        model: 'gpt-5.3-codex',
-        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'call tool' }] }],
-        tools: [{ type: 'function', name: 'exec_command' }]
+        model: "gpt-5.3-codex",
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "call tool" }],
+          },
+        ],
+        tools: [{ type: "function", name: "exec_command" }],
       },
       context: {
-        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'call tool' }] }],
-        toolsRaw: [{ type: 'function', name: 'exec_command' }]
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "call tool" }],
+          },
+        ],
+        toolsRaw: [{ type: "function", name: "exec_command" }],
       },
-      routeHint: 'tools/gateway-priority-5520-tools'
+      routeHint: "tools/gateway-priority-5520-tools",
     });
 
     const before = store.responsesConversationStore.getDebugStats();
@@ -479,81 +925,112 @@ describe('sendPipelineResponse responses store integration', () => {
         status: 200,
         body: {
           id: responseId,
-          object: 'response',
-          status: 'requires_action',
+          object: "response",
+          status: "requires_action",
           output: [
             {
-              type: 'function_call',
-              name: 'exec_command',
+              type: "function_call",
+              name: "exec_command",
               arguments: '{"cmd":"pwd"}',
-              call_id: 'call_orphan_cleanup'
-            }
-          ]
+              call_id: "call_orphan_cleanup",
+            },
+          ],
         },
         usageLogInfo: {
-          finishReason: 'tool_calls',
-          routeName: 'tools/gateway-priority-5520-tools',
-          sessionId: 'rcc-orphan-cleanup-session',
-          timingRequestIds: [providerRequestId, routerRequestId]
-        }
+          finishReason: "tool_calls",
+          routeName: "tools/gateway-priority-5520-tools",
+          sessionId: "rcc-orphan-cleanup-session",
+          timingRequestIds: [providerRequestId, routerRequestId],
+        },
       } as any,
       routerRequestId,
       {
-        entryEndpoint: '/v1/responses',
+        entryEndpoint: "/v1/responses",
         responsesRequestContext: {
           payload: {
-            model: 'gpt-5.3-codex',
-            input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'call tool' }] }],
-            tools: [{ type: 'function', name: 'exec_command' }]
+            model: "gpt-5.3-codex",
+            input: [
+              {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: "call tool" }],
+              },
+            ],
+            tools: [{ type: "function", name: "exec_command" }],
           },
           context: {
-            input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'call tool' }] }],
-            toolsRaw: [{ type: 'function', name: 'exec_command' }]
+            input: [
+              {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: "call tool" }],
+              },
+            ],
+            toolsRaw: [{ type: "function", name: "exec_command" }],
           },
-          sessionId: 'rcc-orphan-cleanup-session'
-        }
-      }
+          sessionId: "rcc-orphan-cleanup-session",
+        },
+      },
     );
 
     const after = store.responsesConversationStore.getDebugStats();
-    expect((bridge.clearResponsesConversationByRequestId as jest.Mock).mock.calls.map(([requestId]) => requestId).sort()).toEqual([
-      providerRequestId,
-      routerRequestId
-    ].sort());
-    expect((bridge.finalizeResponsesConversationRequestRetention as jest.Mock).mock.calls).toEqual([
-      [responseId, { keepForSubmitToolOutputs: true }]
-    ]);
+    expect(
+      (bridge.clearResponsesConversationByRequestId as jest.Mock).mock.calls
+        .map(([requestId]) => requestId)
+        .sort(),
+    ).toEqual([providerRequestId, routerRequestId].sort());
+    expect(
+      (bridge.finalizeResponsesConversationRequestRetention as jest.Mock).mock
+        .calls,
+    ).toEqual([[responseId, { keepForSubmitToolOutputs: true }]]);
     expect(after.responseIndexSize).toBe(1);
     expect(after.scopeIndexSize).toBe(1);
     expect(after.requestEntriesWithoutLastResponseId).toBe(0);
     expect(after.retainedInputItems).toBe(0);
   });
 
-  it('keeps 5520 tool-lane continuation bounded across tool_calls then stop followup', async () => {
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-    const store = await import('../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
-    const routerRequestId = 'openai-responses-router-gpt-5.3-codex-20260523T212223310-222654-435';
-    const providerRequestId = 'openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T212223310-222654-435';
-    const stopRequestId = 'openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T212244407-223292-1073';
-    const responseId = 'resp_5520_tools_followup_1';
-    const stopResponseId = 'resp_5520_tools_followup_stop';
-    const sessionId = 'rcc-routecodex';
-    const routeHint = 'tools/gateway-priority-5520-tools';
+  it("keeps 5520 tool-lane continuation bounded across tool_calls then stop followup", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const routerRequestId =
+      "openai-responses-router-gpt-5.3-codex-20260523T212223310-222654-435";
+    const providerRequestId =
+      "openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T212223310-222654-435";
+    const stopRequestId =
+      "openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T212244407-223292-1073";
+    const responseId = "resp_5520_tools_followup_1";
+    const stopResponseId = "resp_5520_tools_followup_stop";
+    const sessionId = "rcc-routecodex";
+    const routeHint = "tools/gateway-priority-5520-tools";
 
     try {
       store.captureResponsesRequestContext({
         requestId: routerRequestId,
         sessionId,
         payload: {
-          model: 'gpt-5.3-codex',
-          input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '先调用工具' }] }],
-          tools: [{ type: 'function', name: 'exec_command' }]
+          model: "gpt-5.3-codex",
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "先调用工具" }],
+            },
+          ],
+          tools: [{ type: "function", name: "exec_command" }],
         },
         context: {
-          input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '先调用工具' }] }],
-          toolsRaw: [{ type: 'function', name: 'exec_command' }]
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "先调用工具" }],
+            },
+          ],
+          toolsRaw: [{ type: "function", name: "exec_command" }],
         },
-        routeHint
+        routeHint,
       });
 
       const toolRes = new MockResponse();
@@ -563,40 +1040,52 @@ describe('sendPipelineResponse responses store integration', () => {
           status: 200,
           body: {
             id: responseId,
-            object: 'response',
-            status: 'requires_action',
+            object: "response",
+            status: "requires_action",
             output: [
               {
-                type: 'function_call',
-                name: 'exec_command',
+                type: "function_call",
+                name: "exec_command",
                 arguments: '{"cmd":"pwd"}',
-                call_id: 'call_5520_followup'
-              }
-            ]
+                call_id: "call_5520_followup",
+              },
+            ],
           },
           usageLogInfo: {
-            finishReason: 'tool_calls',
+            finishReason: "tool_calls",
             routeName: routeHint,
             sessionId,
-            timingRequestIds: [providerRequestId, routerRequestId]
-          }
+            timingRequestIds: [providerRequestId, routerRequestId],
+          },
         } as any,
         routerRequestId,
         {
-          entryEndpoint: '/v1/responses',
+          entryEndpoint: "/v1/responses",
           responsesRequestContext: {
             payload: {
-              model: 'gpt-5.3-codex',
-              input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '先调用工具' }] }],
-              tools: [{ type: 'function', name: 'exec_command' }]
+              model: "gpt-5.3-codex",
+              input: [
+                {
+                  type: "message",
+                  role: "user",
+                  content: [{ type: "input_text", text: "先调用工具" }],
+                },
+              ],
+              tools: [{ type: "function", name: "exec_command" }],
             },
             context: {
-              input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '先调用工具' }] }],
-              toolsRaw: [{ type: 'function', name: 'exec_command' }]
+              input: [
+                {
+                  type: "message",
+                  role: "user",
+                  content: [{ type: "input_text", text: "先调用工具" }],
+                },
+              ],
+              toolsRaw: [{ type: "function", name: "exec_command" }],
             },
-            sessionId
-          }
-        }
+            sessionId,
+          },
+        },
       );
       await waitForEnd(toolRes);
 
@@ -612,27 +1101,27 @@ describe('sendPipelineResponse responses store integration', () => {
           status: 200,
           body: {
             id: stopResponseId,
-            object: 'response',
-            status: 'completed',
+            object: "response",
+            status: "completed",
             output: [
               {
-                type: 'message',
-                role: 'assistant',
-                content: [{ type: 'output_text', text: '继续执行' }]
-              }
-            ]
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "继续执行" }],
+              },
+            ],
           },
           usageLogInfo: {
-            finishReason: 'stop',
+            finishReason: "stop",
             routeName: routeHint,
             sessionId,
-            timingRequestIds: [stopRequestId]
-          }
+            timingRequestIds: [stopRequestId],
+          },
         } as any,
         stopRequestId,
         {
-          entryEndpoint: '/v1/responses'
-        }
+          entryEndpoint: "/v1/responses",
+        },
       );
       await waitForEnd(stopRes);
 
@@ -642,31 +1131,51 @@ describe('sendPipelineResponse responses store integration', () => {
       expect(afterStop.scopeIndexSize).toBe(1);
       expect(afterStop.retainedInputItems).toBe(0);
     } finally {
-      for (const requestId of [routerRequestId, providerRequestId, stopRequestId, responseId, stopResponseId]) {
+      for (const requestId of [
+        routerRequestId,
+        providerRequestId,
+        stopRequestId,
+        responseId,
+        stopResponseId,
+      ]) {
         store.clearResponsesConversationByRequestId(requestId);
       }
     }
   });
 
-  it('releases non-tool-call responses request context for /v1/responses json stop path', async () => {
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-    const bridge = await import('../../../src/modules/llmswitch/bridge.js');
-    const store = await import('../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
-    const requestId = 'openai-responses-router-gpt-5.3-codex-json-stop-release';
-    const sessionId = 'rcc-json-stop-release';
+  it("releases non-tool-call responses request context for /v1/responses json stop path", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const requestId = "openai-responses-router-gpt-5.3-codex-json-stop-release";
+    const sessionId = "rcc-json-stop-release";
 
     try {
       store.captureResponsesRequestContext({
         requestId,
         sessionId,
         payload: {
-          model: 'gpt-5.3-codex',
-          input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '只回复 OK' }] }],
+          model: "gpt-5.3-codex",
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "只回复 OK" }],
+            },
+          ],
         },
         context: {
-          input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '只回复 OK' }] }],
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "只回复 OK" }],
+            },
+          ],
         },
-        routeHint: 'thinking/gateway-priority-5555-thinking'
+        routeHint: "thinking/gateway-priority-5555-thinking",
       });
 
       const before = store.responsesConversationStore.getDebugStats();
@@ -679,43 +1188,55 @@ describe('sendPipelineResponse responses store integration', () => {
         {
           status: 200,
           body: {
-            id: 'resp_json_stop_release_1',
-            object: 'response',
-            status: 'completed',
+            id: "resp_json_stop_release_1",
+            object: "response",
+            status: "completed",
             output: [
               {
-                type: 'message',
-                role: 'assistant',
-                content: [{ type: 'output_text', text: 'OK' }]
-              }
-            ]
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "OK" }],
+              },
+            ],
           },
           usageLogInfo: {
-            finishReason: 'stop',
-            routeName: 'thinking/gateway-priority-5555-thinking',
-            sessionId
-          }
+            finishReason: "stop",
+            routeName: "thinking/gateway-priority-5555-thinking",
+            sessionId,
+          },
         } as any,
         requestId,
         {
-          entryEndpoint: '/v1/responses',
+          entryEndpoint: "/v1/responses",
           responsesRequestContext: {
             payload: {
-              model: 'gpt-5.3-codex',
-              input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '只回复 OK' }] }],
+              model: "gpt-5.3-codex",
+              input: [
+                {
+                  type: "message",
+                  role: "user",
+                  content: [{ type: "input_text", text: "只回复 OK" }],
+                },
+              ],
             },
             context: {
-              input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '只回复 OK' }] }],
+              input: [
+                {
+                  type: "message",
+                  role: "user",
+                  content: [{ type: "input_text", text: "只回复 OK" }],
+                },
+              ],
             },
-            sessionId
-          }
-        }
+            sessionId,
+          },
+        },
       );
 
-      expect((bridge.finalizeResponsesConversationRequestRetention as jest.Mock).mock.calls).toContainEqual([
-        requestId,
-        { keepForSubmitToolOutputs: false }
-      ]);
+      expect(
+        (bridge.finalizeResponsesConversationRequestRetention as jest.Mock).mock
+          .calls,
+      ).toContainEqual([requestId, { keepForSubmitToolOutputs: false }]);
       const after = store.responsesConversationStore.getDebugStats();
       expect(after.requestMapSize).toBe(0);
       expect(after.retainedInputItems).toBe(0);

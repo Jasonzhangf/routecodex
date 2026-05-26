@@ -29,7 +29,7 @@ describe('Windsurf account health routing (RED before implementation)', () => {
     ({ WindsurfChatProvider } = await import('../../../../src/providers/core/runtime/windsurf-chat-provider.ts'));
   });
 
-  test('RED: health api payload must expose quota snapshot (extra + daily/weekly remaining)', async () => {
+  test('health api payload must expose quota snapshot (extra via overage + daily/weekly remaining)', async () => {
     const provider = createProvider();
     const snapshot = (provider as any).extractQuotaHealthFromUserStatusPayload({
       userStatus: {
@@ -39,7 +39,6 @@ describe('Windsurf account health routing (RED before implementation)', () => {
           overageBalanceMicros: 9000000,
         },
       },
-      isExtra: true,
     });
     expect(snapshot).toEqual(expect.objectContaining({
       hasExtraQuota: true,
@@ -52,7 +51,7 @@ describe('Windsurf account health routing (RED before implementation)', () => {
     }));
   });
 
-  test('RED: account ranking must prefer extra quota first, then higher remaining quota', async () => {
+  test('account ranking must prefer extra quota first, then higher remaining quota', async () => {
     const provider = createProvider();
     const ranked = (provider as any).rankManagedCredentialsByHealth([
       { alias: 'normal-high', apiKey: 'k1', health: { hasExtraQuota: false, remainingScore: 90 } },
@@ -69,7 +68,7 @@ describe('Windsurf account health routing (RED before implementation)', () => {
     ]);
   });
 
-  test('RED: session sticky must pin healthy key until quota exhausted', async () => {
+  test('session sticky must pin healthy key until quota exhausted', async () => {
     const provider = createProvider();
     const sessionKey = 'sess-sticky-001';
     const first = (provider as any).selectManagedCredentialForSession(sessionKey, [
@@ -85,7 +84,7 @@ describe('Windsurf account health routing (RED before implementation)', () => {
     expect(second.apiKey).toBe('k-main');
   });
 
-  test('RED: provider-local concurrency capacity must track available healthy accounts', async () => {
+  test('provider-local concurrency capacity must track available healthy accounts', async () => {
     const provider = createProvider();
     const cap = (provider as any).computeAccountConcurrencyCapacity([
       { alias: 'a1', health: { exhausted: false } },
