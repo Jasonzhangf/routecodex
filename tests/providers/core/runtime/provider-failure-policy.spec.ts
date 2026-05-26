@@ -173,6 +173,52 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('classifies provider business error 2013 context overflow as special_400 (no pool exclusion)', () => {
+    const error = Object.assign(new Error('provider business error: context_length_exceeded'), {
+      code: 'MALFORMED_RESPONSE',
+      statusCode: 400,
+      details: {
+        detected: 'provider_business_error',
+        reason: 'context_length_exceeded',
+        upstreamCode: 'context_length_exceeded',
+        providerStatusCode: 2013
+      }
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'MALFORMED_RESPONSE',
+      reason: 'provider business error: context_length_exceeded'
+    });
+
+    expect(classification).toBe('special_400');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      errorCode: 'MALFORMED_RESPONSE',
+      statusCode: 400,
+      classification
+    })).toBe(true);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'MALFORMED_RESPONSE',
+      reason: 'provider business error: context_length_exceeded',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'special_400',
+      affectsHealth: false,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return',
+      backoff: expect.objectContaining({
+        scope: 'none'
+      })
+    }));
+  });
+
   it('classifies windsurf repeated tool call after tool_result as special_400', () => {
     const error = Object.assign(new Error('[windsurf] upstream repeated prior tool call after tool_result'), {
       code: 'WINDSURF_SERVICE_UNREACHABLE',

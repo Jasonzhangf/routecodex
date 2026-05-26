@@ -201,6 +201,26 @@ function readNestedProviderErrorDetails(error: unknown): {
   };
 }
 
+function readProviderProtocolErrorDetails(error: unknown): {
+  reason?: string;
+  upstreamCode?: string;
+  providerStatusCode?: number;
+} {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return {};
+  }
+  const details = (error as { details?: unknown }).details;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) {
+    return {};
+  }
+  const record = details as Record<string, unknown>;
+  return {
+    reason: typeof record.reason === 'string' ? record.reason : undefined,
+    upstreamCode: typeof record.upstreamCode === 'string' ? record.upstreamCode : undefined,
+    providerStatusCode: typeof record.providerStatusCode === 'number' ? record.providerStatusCode : undefined
+  };
+}
+
 export function resolveProviderFailureClassification(args: {
   error: unknown;
   stage?: string;
@@ -231,6 +251,7 @@ export function resolveProviderFailureClassification(args: {
       ? args.statusCode
       : extractProviderFailureStatusCode(args.error);
   const nested = readNestedProviderErrorDetails(args.error);
+  const protocolDetails = readProviderProtocolErrorDetails(args.error);
   const nestedCode = normalizeProviderFailureCodeKey(nested.code);
   const nestedType = normalizeProviderFailureCodeKey(nested.type);
   const nestedParam = typeof nested.param === 'string' ? nested.param.trim().toLowerCase() : '';
@@ -238,6 +259,8 @@ export function resolveProviderFailureClassification(args: {
     .trim()
     .toLowerCase();
   const nestedMessage = typeof nested.message === 'string' ? nested.message.toLowerCase() : '';
+  const protocolReason = typeof protocolDetails.reason === 'string' ? protocolDetails.reason.trim().toLowerCase() : '';
+  const protocolUpstreamCode = normalizeProviderFailureCodeKey(protocolDetails.upstreamCode);
 
   if (
     errorCode === 'ERR_HTTP2_STREAM_CANCEL'
@@ -293,6 +316,28 @@ export function resolveProviderFailureClassification(args: {
     )
   ) {
     return 'recoverable';
+  }
+
+  if (
+    (errorCode === 'MALFORMED_RESPONSE'
+      || upstreamCode === 'MALFORMED_RESPONSE'
+      || nestedCode === 'MALFORMED_RESPONSE')
+    && (
+      protocolReason === 'context_length_exceeded'
+      || protocolUpstreamCode === 'CONTEXT_LENGTH_EXCEEDED'
+      || protocolDetails.providerStatusCode === 2013
+      || reason.includes('context_length_exceeded')
+      || nestedMessage.includes('context_length_exceeded')
+      || isPromptTooLongLike({
+        ...args,
+        statusCode,
+        errorCode: protocolUpstreamCode || errorCode,
+        upstreamCode: protocolUpstreamCode || upstreamCode,
+        reason: protocolReason || reason
+      })
+    )
+  ) {
+    return 'special_400';
   }
 
   if (
