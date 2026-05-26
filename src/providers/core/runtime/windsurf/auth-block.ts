@@ -19,6 +19,7 @@ export type WindsurfSessionCredential = {
   auth1Token: string;
   accountId?: string;
   primaryOrgId?: string;
+  accountAlias?: string;
 };
 
 export type WindsurfPersistedCredentialParseResult =

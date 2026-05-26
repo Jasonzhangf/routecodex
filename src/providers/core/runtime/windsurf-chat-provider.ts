@@ -47,6 +47,7 @@ type WindsurfSessionCredential = {
   auth1Token: string;
   accountId?: string;
   primaryOrgId?: string;
+  accountAlias?: string;
 };
 
 type WindsurfLoginMethodProbe = {
@@ -1660,8 +1661,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   }
 
   private clearManagedWindsurfSessionCredential(): void {
-    const auth = this.authProvider as unknown as { config?: { accountAlias?: string } };
-    const alias = typeof auth?.config?.accountAlias === 'string' ? auth.config.accountAlias.trim() : '';
+    // Read alias from windsurfSessionCredential (set by selectWindsurfAccount) rather than
+    // from authConfig.config.accountAlias, which is no longer mutated to avoid concurrent
+    // mutation of the shared auth config object.
+    const alias = this.windsurfSessionCredential?.accountAlias || '';
     if (alias) {
       this.windsurfUnavailableAccounts.add(alias);
     }
@@ -2281,6 +2284,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       auth1Token: this.windsurfSessionCredential?.auth1Token || '',
       accountId: this.windsurfSessionCredential?.accountId,
       primaryOrgId: this.windsurfSessionCredential?.primaryOrgId,
+      accountAlias: selected.alias,
     };
     // Intentionally do not mutate managed.auth.config.apiKey/accountAlias.
     // resolveCascadeApiKey() returns the selected apiKey directly, and downstream
