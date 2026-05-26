@@ -208,18 +208,26 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     };
 
     const endpoint = provider.resolveRequestEndpoint(
-      { metadata: { qwenWebSearch: true, entryEndpoint: '/api/v1/indices/plugin/web_search' } },
+      {},
       '/chat/completions'
     );
-    expect(endpoint).toBe('/api/v1/indices/plugin/web_search');
+    expect(endpoint).toBe('/chat/completions');
 
     const body = provider.buildHttpRequestBody({
-      metadata: { qwenWebSearch: true },
       data: { model: 'coder-model', uq: 'routecodex', page: 1, rows: 5 }
     });
-    expect(body).toEqual({ uq: 'routecodex', page: 1, rows: 5 });
+    expect(body).toEqual({ model: 'coder-model', uq: 'routecodex', page: 1, rows: 5 });
 
-    provider.lastRuntimeMetadata = { metadata: { qwenWebSearch: true } };
+    provider.lastRuntimeMetadata = {
+      qwenWebSearch: true,
+      metadata: { qwenWebSearch: true, entryEndpoint: '/api/v1/indices/plugin/web_search' }
+    };
+    expect(provider.resolveRequestEndpoint({}, '/chat/completions')).toBe('/api/v1/indices/plugin/web_search');
+    expect(provider.buildHttpRequestBody({ data: { model: 'coder-model', uq: 'routecodex', page: 1, rows: 5 } })).toEqual({
+      uq: 'routecodex',
+      page: 1,
+      rows: 5
+    });
     expect(provider.resolveAuthResourceBaseUrlOverride()).toBe('https://dashscope.aliyuncs.com/compatible-mode');
 
     provider.lastRuntimeMetadata = { metadata: {} };

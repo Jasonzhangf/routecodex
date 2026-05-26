@@ -80,7 +80,7 @@ const GENERIC_STANDARD_TEMPLATES: InitProviderTemplate[] = [
   }
 ];
 
-const MANAGED_TEMPLATE_IDS = ['qwen', 'deepseek-web'] as const;
+const MANAGED_TEMPLATE_IDS = ['deepseek-web'] as const;
 
 function requireCatalogTemplate(id: string): InitProviderTemplate {
   const entry = getInitProviderCatalogEntry(id);

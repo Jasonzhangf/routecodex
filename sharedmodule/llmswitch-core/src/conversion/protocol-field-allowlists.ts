@@ -2,11 +2,15 @@ import { resolveHubProtocolAllowlistsWithNative } from '../router/virtual-router
 
 const allowlists = resolveHubProtocolAllowlistsWithNative();
 
-export const OPENAI_CHAT_ALLOWED_FIELDS = Object.freeze([...allowlists.openaiChatAllowedFields]) as readonly string[];
+function stripForbiddenProviderOutboundFields(fields: readonly string[]): readonly string[] {
+  return Object.freeze(fields.filter((field) => field !== 'metadata'));
+}
+
+export const OPENAI_CHAT_ALLOWED_FIELDS = stripForbiddenProviderOutboundFields([...allowlists.openaiChatAllowedFields]);
 
 export const ANTHROPIC_ALLOWED_FIELDS = Object.freeze([...allowlists.anthropicAllowedFields]) as readonly string[];
 
-export const OPENAI_RESPONSES_ALLOWED_FIELDS = Object.freeze([...allowlists.openaiResponsesAllowedFields]) as readonly string[];
+export const OPENAI_RESPONSES_ALLOWED_FIELDS = stripForbiddenProviderOutboundFields([...allowlists.openaiResponsesAllowedFields]);
 
 export const GEMINI_ALLOWED_FIELDS = Object.freeze([...allowlists.geminiAllowedFields]) as readonly string[];
 

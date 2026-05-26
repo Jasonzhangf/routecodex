@@ -54,12 +54,13 @@ describe('direct-passthrough-payload', () => {
 
     expect(result).toEqual({
       model: 'dbittai-gpt.key1.gpt-5.3-codex',
+      previous_response_id: 'resp_prev',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
       thinking: { type: 'enabled', budget_tokens: 2048 },
-      reasoning_effort: 'low',
-      instructions: 'must-not-copy',
-      tools: [{ name: 'must-not-copy' }],
     });
-    expect((result as Record<string, unknown>).previous_response_id).toBeUndefined();
     expect((result as Record<string, unknown>).foo).toBeUndefined();
+    expect((result as Record<string, unknown>).instructions).toBeUndefined();
+    expect((result as Record<string, unknown>).tools).toBeUndefined();
+    expect((result as Record<string, unknown>).reasoning_effort).toBeUndefined();
   });
 });

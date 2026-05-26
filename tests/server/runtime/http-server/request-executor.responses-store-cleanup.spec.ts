@@ -207,6 +207,59 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
     expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
   });
 
+
+
+  it('RED: does not auto-restore same-session continuation for a plain create request after prior tool-call state exists', async () => {
+    captureResponsesRequestContext({
+      requestId,
+      sessionId: 'sess-plain-create-no-auto-resume',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: '先调用工具' }] }],
+        tools: [{ type: 'function', name: 'exec_command' }],
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '先调用工具' }],
+          },
+        ],
+        toolsRaw: [{ type: 'function', name: 'exec_command' }],
+      },
+    });
+
+    responsesConversationStore.recordResponse({
+      requestId,
+      sessionId: 'sess-plain-create-no-auto-resume',
+      response: {
+        id: 'resp_plain_create_no_auto_resume_1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}',
+            call_id: 'call_plain_create_no_auto_resume_1',
+          },
+        ],
+      },
+    } as any);
+
+    const resumed = resumeLatestResponsesContinuationByScope({
+      requestId: 'req_plain_create_no_auto_resume_attempt',
+      sessionId: 'sess-plain-create-no-auto-resume',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: '这是普通 create，不该自动 continuation' }] }],
+      },
+    });
+
+    expect(resumed).toBeNull();
+  });
+
   it('clears captured responses request when provider send fails before any response is recorded', async () => {
     captureResponsesRequestContext({
       requestId,

@@ -3669,6 +3669,48 @@ describe('HubRequestExecutor failover', () => {
     expect(keyA).toContain('status:429');
   });
 
+  test('RED: 2056 single-attempt 429 with alternative candidate must not exclude current provider immediately', () => {
+    const excluded = new Set<string>();
+    const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+      providerKey: 'mini27.key1.MiniMax-M2.7',
+      status: 429,
+      error: Object.assign(new Error('usage limit exceeded'), {
+        statusCode: 429,
+        code: 'HTTP_429_2056',
+        upstreamCode: 'provider_status_2056'
+      }),
+      classification: 'recoverable',
+      attempt: 1,
+      promptTooLong: false,
+      routePool: ['mini27.key1.MiniMax-M2.7', 'backup.key1.gpt-5.4'],
+      excludedProviderKeys: excluded
+    });
+
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excluded)).toEqual([]);
+  });
+
+  test('RED: last available provider 429 must never be added to excludedProviderKeys', () => {
+    const excluded = new Set<string>();
+    const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+      providerKey: 'mini27.key1.MiniMax-M2.7',
+      status: 429,
+      error: Object.assign(new Error('usage limit exceeded'), {
+        statusCode: 429,
+        code: 'HTTP_429_2056',
+        upstreamCode: 'provider_status_2056'
+      }),
+      classification: 'recoverable',
+      attempt: 3,
+      promptTooLong: false,
+      routePool: ['mini27.key1.MiniMax-M2.7'],
+      excludedProviderKeys: excluded
+    });
+
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excluded)).toEqual([]);
+  });
+
   test('rejects when recoverable backoff waiter queue is overloaded', async () => {
     const providerKey = 'ali-coding-plan.key1.glm-5';
     const processIncoming = jest.fn(async () => {

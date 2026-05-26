@@ -80,6 +80,32 @@ function readResponsesSessionId(metadata: Record<string, unknown> | undefined): 
   return trimmed || undefined;
 }
 
+function shouldPersistResponsesConversation(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return false;
+  }
+  const record = payload as Record<string, unknown>;
+  if (record.store === true) {
+    return true;
+  }
+  const previousResponseId =
+    typeof record.previous_response_id === 'string' && record.previous_response_id.trim()
+      ? record.previous_response_id.trim()
+      : '';
+  const toolOutputs = Array.isArray(record.tool_outputs) ? record.tool_outputs : [];
+  return Boolean(previousResponseId && toolOutputs.length > 0);
+}
+
+function shouldPersistResponsesConversationForEndpoint(
+  entryEndpoint: string | undefined,
+  payload: unknown
+): boolean {
+  if (entryEndpoint === '/v1/responses.submit_tool_outputs') {
+    return true;
+  }
+  return shouldPersistResponsesConversation(payload);
+}
+
 function queueInboundToolHistoryErrorsample(args: {
   requestId: string;
   entryEndpoint: string;
@@ -336,8 +362,11 @@ export async function handleResponses(
 	      })
 	    };
     if (
-      pipelineEntryEndpoint === '/v1/responses'
-      || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
+      (
+        pipelineEntryEndpoint === '/v1/responses'
+        || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
+      )
+      && shouldPersistResponsesConversationForEndpoint(pipelineEntryEndpoint, payload)
     ) {
       await captureResponsesRequestContextForRequest({
         requestId,
@@ -347,7 +376,8 @@ export async function handleResponses(
           toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
         },
         sessionId: readResponsesSessionId(requestBodyMetadata),
-        routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined
+        routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined,
+        providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
       }).catch((error) => {
         logResponsesHandlerNonBlockingError('responses_context.capture_inbound', error, { requestId });
       });
@@ -429,8 +459,11 @@ export async function handleResponses(
     }
     const effectiveRequestId = pipelineInput.requestId;
     if (
-      pipelineEntryEndpoint === '/v1/responses'
-      || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
+      (
+        pipelineEntryEndpoint === '/v1/responses'
+        || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
+      )
+      && shouldPersistResponsesConversationForEndpoint(pipelineEntryEndpoint, payload)
     ) {
       result.metadata = {
         ...(result.metadata || {}),
@@ -450,8 +483,11 @@ export async function handleResponses(
       });
     }
     if (
-      pipelineEntryEndpoint === '/v1/responses'
-      || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
+      (
+        pipelineEntryEndpoint === '/v1/responses'
+        || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
+      )
+      && shouldPersistResponsesConversationForEndpoint(pipelineEntryEndpoint, payload)
     ) {
       try {
         const responseId = readResponsesResponseId(result.body);
@@ -470,13 +506,15 @@ export async function handleResponses(
               context: requestContext.context,
               sessionId: requestContext.sessionId,
               conversationId: requestContext.conversationId,
-              routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined
+              routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined,
+              providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
             });
             if (result.body && typeof result.body === 'object' && !Array.isArray(result.body)) {
               await recordResponsesResponseForRequest({
                 requestId: responseId,
                 response: result.body as Record<string, unknown>,
                 routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined,
+                providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined,
                 sessionId: requestContext.sessionId,
                 conversationId: requestContext.conversationId
               });

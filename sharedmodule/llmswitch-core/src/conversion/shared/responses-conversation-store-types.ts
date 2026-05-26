@@ -7,6 +7,7 @@ export interface CaptureContextArgs {
   sessionId?: string;
   conversationId?: string;
   routeHint?: string;
+  providerKey?: string;
 }
 
 export interface RecordResponseArgs {
@@ -15,6 +16,7 @@ export interface RecordResponseArgs {
   routeHint?: string;
   sessionId?: string;
   conversationId?: string;
+  providerKey?: string;
 }
 
 export interface ResumeOptions {
@@ -37,12 +39,14 @@ export interface ConversationEntry {
   requestId: string;
   basePayload: AnyRecord;
   input: AnyRecord[];
+  allowContinuation?: boolean;
   releasedInputPrefix?: AnyRecord[];
   releasedPendingToolCallIds?: string[];
   inputPrefixDigest?: string;
   inputItemCount?: number;
   tools?: AnyRecord[];
   routeHint?: string;
+  providerKey?: string;
   createdAt: number;
   updatedAt: number;
   lastResponseId?: string;

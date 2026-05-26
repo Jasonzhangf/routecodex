@@ -3,7 +3,6 @@ import { resolveProviderFamilyFromDirectory } from './provider-directory.js';
 import { anthropicFamilyProfile } from './families/anthropic-profile.js';
 import { deepseekFamilyProfile } from './families/deepseek-profile.js';
 import { glmFamilyProfile } from './families/glm-profile.js';
-import { qwenFamilyProfile } from './families/qwen-profile.js';
 import { responsesFamilyProfile } from './families/responses-profile.js';
 
 const FAMILY_PROFILES = new Map<string, ProviderFamilyProfile>([
@@ -11,7 +10,6 @@ const FAMILY_PROFILES = new Map<string, ProviderFamilyProfile>([
   ['anthropic', anthropicFamilyProfile],
   ['deepseek', deepseekFamilyProfile],
   ['glm', glmFamilyProfile],
-  ['qwen', qwenFamilyProfile]
 ]);
 
 function normalizeToken(value?: string): string | undefined {

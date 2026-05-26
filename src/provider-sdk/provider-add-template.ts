@@ -20,7 +20,6 @@ export type ProviderTemplateId =
   | 'responses'
   | 'anthropic'
   | 'gemini'
-  | 'qwen'
   | 'deepseek-web'
   | 'custom';
 

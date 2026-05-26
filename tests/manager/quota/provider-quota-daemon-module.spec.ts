@@ -566,9 +566,9 @@ describe('ProviderQuotaDaemonModule', () => {
 
     const snapshot = mod.getAdminSnapshot();
     expect(snapshot[providerKey]).toBeDefined();
-    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].inPool).toBe(false);
     expect(snapshot[providerKey].reason).toBe('cooldown');
-    expect(snapshot[providerKey].cooldownKeepsPool).toBe(true);
+    expect(snapshot[providerKey].cooldownKeepsPool).toBeUndefined();
     expect(snapshot[providerKey].consecutiveErrorCount).toBe(3);
 
     await mod.stop();

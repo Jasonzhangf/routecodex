@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { buildRoutingHintsConfigFragment, inspectProviderConfig } from '../../src/provider-sdk/provider-inspect.js';
 
 describe('provider inspect', () => {
-  it('merges config facts with catalog metadata and route targets', () => {
+  it('treats removed qwen provider as plain custom openai config without catalog wiring', () => {
     const inspection = inspectProviderConfig(
       {
         version: '2.0.0',
@@ -23,24 +23,15 @@ describe('provider inspect', () => {
     );
 
     expect(inspection.providerId).toBe('qwen');
-    expect(inspection.catalogId).toBe('qwen');
+    expect(inspection.catalogId).toBeUndefined();
     expect(inspection.providerType).toBe('openai');
     expect(inspection.authType).toBe('qwen-oauth');
     expect(inspection.defaultModel).toBe('coder-model');
     expect(inspection.models).toEqual(['coder-model', 'qwen3.5-plus']);
     expect(inspection.routeTargets.default).toBe('qwen.coder-model');
-    expect(inspection.routeTargets.webSearch).toBe('qwen.qwen3.5-plus');
-    expect(inspection.webSearch).toMatchObject({
-      engineId: 'qwen:web_search',
-      routeTarget: 'qwen.qwen3.5-plus',
-      executionMode: 'servertool'
-    });
-    expect(inspection.capabilities).toMatchObject({
-      supportsCoding: true,
-      supportsLongContext: true,
-      supportsMultimodal: true,
-      supportsTools: true
-    });
+    expect(inspection.routeTargets.webSearch).toBeUndefined();
+    expect(inspection.webSearch).toBeUndefined();
+    expect(inspection.capabilities).toMatchObject({ supportsCoding: true, supportsTools: true });
     expect(inspection.configPath).toBe('/tmp/provider/qwen/config.v2.json');
   });
 
@@ -116,7 +107,7 @@ describe('provider inspect', () => {
     });
   });
 
-  it('builds routing hints for capability-driven pools and web search policy wiring', () => {
+  it('does not build routing hints for removed qwen provider catalog wiring', () => {
     const inspection = inspectProviderConfig(
       {
         version: '2.0.0',
@@ -135,100 +126,31 @@ describe('provider inspect', () => {
       { includeRoutingHints: true }
     );
 
-    expect(inspection.routingHints).toBeTruthy();
     expect(inspection.routingHints?.routing).toMatchObject({
-      default: [
-        {
-          id: 'default-primary',
-          loadBalancing: {
-            strategy: 'weighted',
-            weights: { 'qwen.coder-model': 1 }
-          }
-        }
-      ],
-      thinking: [
-        {
-          id: 'thinking-primary',
-          loadBalancing: {
-            strategy: 'weighted',
-            weights: { 'qwen.coder-model': 1 }
-          }
-        }
-      ],
-      tools: [
-        {
-          id: 'tools-primary',
-          loadBalancing: {
-            strategy: 'weighted',
-            weights: { 'qwen.coder-model': 1 }
-          }
-        }
-      ],
-      coding: [
-        {
-          id: 'coding-primary',
-          loadBalancing: {
-            strategy: 'weighted',
-            weights: { 'qwen.coder-model': 1 }
-          }
-        }
-      ],
-      longcontext: [
-        {
-          id: 'longcontext-primary',
-          loadBalancing: {
-            strategy: 'weighted',
-            weights: { 'qwen.coder-model': 1 }
-          }
-        }
-      ],
-      multimodal: [
-        {
-          id: 'multimodal-primary',
-          loadBalancing: {
-            strategy: 'weighted',
-            weights: { 'qwen.coder-model': 1 }
-          }
-        }
-      ],
-      web_search: [
-        {
-          id: 'web_search-primary',
-          loadBalancing: {
-            strategy: 'weighted',
-            weights: { 'qwen.qwen3.5-plus': 1 }
-          }
-        }
-      ]
+      default: [{ id: 'default-primary' }],
+      thinking: [{ id: 'thinking-primary' }],
+      tools: [{ id: 'tools-primary' }],
+      coding: [{ id: 'coding-primary' }]
     });
-    expect(inspection.routingHints?.policyOptions).toMatchObject({
-      webSearch: {
-        engines: [
-          {
-            id: 'qwen:web_search',
-            providerKey: 'qwen.qwen3.5-plus'
-          }
-        ],
-        search: {
-          'qwen:web_search': {
-            providerKey: 'qwen.qwen3.5-plus'
-          }
-        }
-      }
-    });
+    expect(inspection.routingHints?.policyOptions).toBeUndefined();
   });
 
   it('builds a paste-ready config fragment from routing hints', () => {
     const inspection = inspectProviderConfig(
       {
         version: '2.0.0',
-        providerId: 'qwen',
+        providerId: 'deepseek-web',
         provider: {
-          id: 'qwen',
+          id: 'deepseek-web',
           type: 'openai',
+          compatibilityProfile: 'chat:deepseek-web',
+          auth: { type: 'deepseek-account' },
           models: {
-            'qwen3.5-plus': { supportsStreaming: true },
-            'coder-model': { supportsStreaming: true }
+            'deepseek-chat': {
+              supportsStreaming: true,
+              capabilities: ['web_search', 'multimodal'],
+              aliases: ['deepseek-v4-flash', 'deepseek-v4-flash-nothinking', 'deepseek-v4-flash-search', 'deepseek-v4-flash-search-nothinking', 'deepseek-v4-vision']
+            }
           }
         }
       },
@@ -244,18 +166,14 @@ describe('provider inspect', () => {
             routing: {
               default: [
                 {
-                  id: 'default-primary',
-                  loadBalancing: {
-                    strategy: 'weighted',
-                    weights: { 'qwen.coder-model': 1 }
-                  }
+                  id: 'default-primary'
                 }
               ]
             },
             webSearch: {
               engines: [
                 {
-                  id: 'qwen:web_search'
+                  id: 'deepseek:web_search'
                 }
               ]
             }

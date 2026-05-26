@@ -264,9 +264,15 @@ function getRequestMetadata(request: unknown): UnknownRecord | undefined {
   return isRecord(request.metadata) ? request.metadata : undefined;
 }
 
+function getRuntimeMetadataNode(input: ResolveEndpointInput | BuildRequestBodyInput): UnknownRecord | undefined {
+  return input.runtimeMetadata && isRecord(input.runtimeMetadata.metadata)
+    ? (input.runtimeMetadata.metadata as UnknownRecord)
+    : undefined;
+}
+
 function isQwenWebSearchRequest(input: ResolveEndpointInput | BuildRequestBodyInput): boolean {
-  const metadata = getRequestMetadata(input.request);
-  return metadata?.qwenWebSearch === true;
+  const runtimeMetadata = getRuntimeMetadataNode(input);
+  return input.runtimeMetadata?.qwenWebSearch === true || runtimeMetadata?.qwenWebSearch === true;
 }
 
 function normalizeQwenWebSearchEndpoint(value: unknown): string {
@@ -336,8 +342,8 @@ function extractAuthType(input: BuildRequestBodyInput): string {
   if (runtimeType.trim()) {
     return runtimeType.trim().toLowerCase();
   }
-  const metadataNode = isRecord(input.request) && isRecord(input.request.metadata) ? input.request.metadata : undefined;
-  const metadataType = typeof metadataNode?.authType === 'string' ? metadataNode.authType : '';
+  const runtimeMetadataNode = getRuntimeMetadataNode(input);
+  const metadataType = typeof runtimeMetadataNode?.authType === 'string' ? runtimeMetadataNode.authType : '';
   return metadataType.trim().toLowerCase();
 }
 
@@ -400,7 +406,7 @@ function resolveQwenOAuthProviderProtocol(input: BuildRequestBodyInput): string 
   if (runtimeProtocol) {
     return runtimeProtocol;
   }
-  const metadata = getRequestMetadata(input.request);
+  const metadata = getRuntimeMetadataNode(input);
   const metadataProtocol = typeof metadata?.providerProtocol === 'string' ? metadata.providerProtocol.trim() : '';
   return metadataProtocol;
 }
@@ -424,7 +430,7 @@ function resolveQwenOAuthReasoningEffort(body: UnknownRecord, input: BuildReques
   if (metadataEffort) {
     return metadataEffort;
   }
-  const requestMetadata = getRequestMetadata(input.request);
+  const requestMetadata = getRuntimeMetadataNode(input);
   return typeof requestMetadata?.reasoning_effort === 'string' ? requestMetadata.reasoning_effort.trim() : '';
 }
 
@@ -492,7 +498,7 @@ export const qwenFamilyProfile: ProviderFamilyProfile = {
     if (!isQwenWebSearchRequest(input)) {
       return undefined;
     }
-    const metadata = getRequestMetadata(input.request);
+    const metadata = getRuntimeMetadataNode(input);
     return normalizeQwenWebSearchEndpoint(metadata?.entryEndpoint);
   },
   buildRequestBody(input: BuildRequestBodyInput) {

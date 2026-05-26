@@ -47,4 +47,29 @@ describe('provider-request-preprocessor', () => {
     expect(String(text || '')).toContain('Tool exec_command does not exists');
     expect(String(text || '')).toContain('Tool update_plan does not exists');
   });
+
+  it('RED: should move provider runtime hints into runtime symbol instead of keeping control metadata in outbound body', async () => {
+    const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
+    const runtimeMetadata = { metadata: { clientHeaders: { authorization: 'Bearer x' } } } as any;
+    const req = {
+      model: 'qwen3.5-plus',
+      metadata: {
+        entryEndpoint: '/api/v1/indices/plugin/web_search',
+        stream: true,
+        qwenWebSearch: true,
+        clientHeaders: { authorization: 'Bearer x' },
+      },
+      data: { uq: 'routecodex', page: 1, rows: 5 }
+    } as any;
+
+    const out = ProviderRequestPreprocessor.preprocess(req, runtimeMetadata);
+    const attached = extractProviderRuntimeMetadata(out as Record<string, unknown>);
+
+    expect(attached?.metadata?.entryEndpoint).toBe('/api/v1/indices/plugin/web_search');
+    expect(attached?.metadata?.stream).toBe(true);
+    expect(attached?.qwenWebSearch).toBe(true);
+    expect((out as any).metadata?.entryEndpoint).toBeUndefined();
+    expect((out as any).metadata?.stream).toBeUndefined();
+    expect((out as any).metadata?.clientHeaders).toBeUndefined();
+  });
 });

@@ -5,6 +5,35 @@ const mockBridgeModule = () => ({
     if (subpath === 'conversion/shared/responses-conversation-store') {
       return await import('../../../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
     }
+    if (subpath === 'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics') {
+      return {
+        buildResponsesPayloadFromChatWithNative: (payload: any, context: any) => {
+          const output = { object: 'response', id: 'resp_test', status: 'requires_action', output: [{ type: 'function_call', status: 'in_progress', call_id: 'native:run_command:3', name: 'shell_command', arguments: JSON.stringify({ cmd: 'pwd' }) }], required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: [{ id: 'native:run_command:3', tool_call_id: 'native:run_command:3', type: 'function', name: 'shell_command', arguments: JSON.stringify({ cmd: 'pwd' }), function: { name: 'shell_command', arguments: JSON.stringify({ cmd: 'pwd' }) } }] } } };
+          return output;
+        },
+        normalizeResponsesToolCallArgumentsForClientWithNative: (payload: any, toolsRaw: any[]) => {
+          const declared = toolsRaw?.[0]?.function?.name ?? toolsRaw?.[0]?.name;
+          const clone = JSON.parse(JSON.stringify(payload));
+          if (declared === 'shell_command') {
+            for (const item of clone.output ?? []) {
+              if (item?.type === 'function_call' && item.name === 'run_command') {
+                item.name = 'shell_command';
+                item.arguments = JSON.stringify({ cmd: JSON.parse(item.arguments).command_line });
+              }
+            }
+            for (const call of clone.required_action?.submit_tool_outputs?.tool_calls ?? []) {
+              if (call?.name === 'run_command') {
+                call.name = 'shell_command';
+                call.arguments = JSON.stringify({ cmd: JSON.parse(call.arguments).command_line });
+                call.function.name = 'shell_command';
+                call.function.arguments = call.arguments;
+              }
+            }
+          }
+          return clone;
+        }
+      };
+    }
     throw new Error(`unexpected importCoreDist ${subpath}`);
   },
   convertProviderResponse: async (options: any) => {
@@ -14,33 +43,7 @@ const mockBridgeModule = () => ({
   createSnapshotRecorder: jest.fn(async () => ({ record: () => {} })),
   persistStoplessGoalStateSnapshot: jest.fn(),
   readStoplessGoalState: jest.fn(() => null),
-  requireCoreDist: jest.fn(() => ({
-    buildResponsesPayloadFromChatWithNative: (payload: any, context: any) => {
-      const output = { object: 'response', id: 'resp_test', status: 'requires_action', output: [{ type: 'function_call', status: 'in_progress', call_id: 'native:run_command:3', name: 'shell_command', arguments: JSON.stringify({ cmd: 'pwd' }) }], required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: [{ id: 'native:run_command:3', tool_call_id: 'native:run_command:3', type: 'function', name: 'shell_command', arguments: JSON.stringify({ cmd: 'pwd' }), function: { name: 'shell_command', arguments: JSON.stringify({ cmd: 'pwd' }) } }] } } };
-      return output;
-    },
-    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: any, toolsRaw: any[]) => {
-      const declared = toolsRaw?.[0]?.function?.name ?? toolsRaw?.[0]?.name;
-      const clone = JSON.parse(JSON.stringify(payload));
-      if (declared === 'shell_command') {
-        for (const item of clone.output ?? []) {
-          if (item?.type === 'function_call' && item.name === 'run_command') {
-            item.name = 'shell_command';
-            item.arguments = JSON.stringify({ cmd: JSON.parse(item.arguments).command_line });
-          }
-        }
-        for (const call of clone.required_action?.submit_tool_outputs?.tool_calls ?? []) {
-          if (call?.name === 'run_command') {
-            call.name = 'shell_command';
-            call.arguments = JSON.stringify({ cmd: JSON.parse(call.arguments).command_line });
-            call.function.name = 'shell_command';
-            call.function.arguments = call.arguments;
-          }
-        }
-      }
-      return clone;
-    }
-  })),
+  requireCoreDist: jest.fn(() => ({})),
   syncReasoningStopModeFromRequest: jest.fn(() => 'off'),
   syncStoplessGoalStateFromRequest: jest.fn(() => ({ stickyKey: 'session:test', hadDirective: false, directiveTypes: [] })),
   loadRoutingInstructionStateSync: jest.fn(() => null),

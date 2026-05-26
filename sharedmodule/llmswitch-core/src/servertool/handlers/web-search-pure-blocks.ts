@@ -57,7 +57,7 @@ export function parseToolArguments(toolCall: ToolCall): Record<string, unknown> 
 
 export function isGeminiWebSearchEngine(engine: WebSearchEngineConfig): boolean {
   const key = engine.providerKey.toLowerCase();
-  return key.startsWith('gemini.');
+  return key.startsWith('gemini.') || key.startsWith('gemini-cli.');
 }
 
 export function isQwenWebSearchEngine(engine: WebSearchEngineConfig): boolean {
@@ -109,7 +109,9 @@ export function buildToolMessages(chatResponse: JsonObject): JsonObject[] {
       : 'tool';
     const output = typeof (entry as { output?: unknown }).output === 'string'
       ? ((entry as { output: string }).output as string)
-      : '';
+      : typeof (entry as { content?: unknown }).content === 'string'
+        ? ((entry as { content: string }).content as string)
+        : '';
     messages.push({
       role: 'tool',
       tool_call_id: toolCallId,

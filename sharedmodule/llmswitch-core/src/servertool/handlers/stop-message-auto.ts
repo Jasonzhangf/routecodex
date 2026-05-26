@@ -45,6 +45,35 @@ const STOPMESSAGE_IMPLICIT_GEMINI = false;
 const FLOW_ID = 'stop_message_flow';
 const STOP_MESSAGE_EXECUTION_APPEND = '继续执行';
 
+function shouldYieldToEmptyReplyContinueLocal(args: {
+  base: unknown;
+  providerProtocol?: string;
+  entryEndpoint?: string;
+}): boolean {
+  const endpoint = String(args.entryEndpoint || '').toLowerCase();
+  const providerProtocol = String(args.providerProtocol || '').toLowerCase();
+  const payload = args.base && typeof args.base === 'object' && !Array.isArray(args.base)
+    ? (args.base as Record<string, unknown>)
+    : null;
+  if (endpoint.includes('/v1/responses')) {
+    const status = typeof payload?.status === 'string' ? payload.status.trim().toLowerCase() : '';
+    const output = Array.isArray(payload?.output) ? payload.output as unknown[] : [];
+    const requiredAction = payload?.required_action && typeof payload.required_action === 'object';
+    if ((!status || status === 'completed') && output.length === 0 && !requiredAction) {
+      return true;
+    }
+  }
+  if (providerProtocol === 'gemini-chat') {
+    const choices = Array.isArray(payload?.choices) ? payload.choices as unknown[] : [];
+    const first = choices[0] && typeof choices[0] === 'object' && !Array.isArray(choices[0]) ? choices[0] as Record<string, unknown> : null;
+    const finishReason = typeof first?.finish_reason === 'string' ? first.finish_reason.trim().toLowerCase() : '';
+    if (finishReason === 'length') {
+      return true;
+    }
+  }
+  return false;
+}
+
 function isPersistentStickyKey(value: unknown): value is string {
   return typeof value === 'string' && (
     value.startsWith('tmux:') || value.startsWith('session:') || value.startsWith('conversation:')
@@ -464,7 +493,12 @@ const handler: ServerToolHandler = async (
       const implicit = STOPMESSAGE_IMPLICIT_GEMINI
         ? resolveImplicitGeminiStopMessageSnapshot(ctx, record)
         : null;
-      const shouldUseDefaultStopMessage = !hasManagedGoal || effectiveGoalState?.status !== 'active';
+      const shouldUseDefaultStopMessage = (!hasManagedGoal || effectiveGoalState?.status !== 'active')
+        && !shouldYieldToEmptyReplyContinueLocal({
+          base: ctx.base,
+          providerProtocol: ctx.providerProtocol,
+          entryEndpoint: ctx.entryEndpoint
+        });
       if (shouldUseDefaultStopMessage && persistedStopMessageTombstone.exhaustedDefault) {
         return markSkip('skip_goal_default_exhausted');
       }

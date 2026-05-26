@@ -204,8 +204,8 @@ function appendToolMessagesFromToolOutputs(messages: JsonObject[], adapterContex
       .map((entry) => typeof entry.tool_call_id === 'string' ? entry.tool_call_id.trim() : '')
       .filter((entry) => entry.length > 0))
   );
-  if (chatOutputs.length) {
-    const toolCalls = chatOutputs
+  {
+    const toolCalls = outputs
       .map((entry) => {
         const toolCallId = typeof entry.tool_call_id === 'string' && entry.tool_call_id.trim() ? entry.tool_call_id.trim() : '';
         const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'tool';
@@ -221,7 +221,13 @@ function appendToolMessagesFromToolOutputs(messages: JsonObject[], adapterContex
       })
       .filter((entry): entry is JsonObject => Boolean(entry));
     if (toolCalls.length) {
-      messages.push({ role: 'assistant', content: null, tool_calls: toolCalls } as JsonObject);
+      const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+      const lastMsgRole = lastMsg && typeof lastMsg.role === 'string' ? lastMsg.role.trim().toLowerCase() : '';
+      if (lastMsg && lastMsgRole === 'assistant' && !Array.isArray(lastMsg.tool_calls)) {
+        (lastMsg as Record<string, unknown>).tool_calls = toolCalls as JsonValue[];
+      } else {
+        messages.push({ role: 'assistant', content: null, tool_calls: toolCalls } as JsonObject);
+      }
     }
   }
   for (const entry of outputs) {

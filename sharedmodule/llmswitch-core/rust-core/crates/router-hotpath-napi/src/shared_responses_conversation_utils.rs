@@ -483,9 +483,21 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
     ) {
         base_payload.insert("routeHint".to_string(), Value::String(route_hint));
     }
+    if let Some(provider_key) = read_trimmed_string(
+        context
+            .as_object()
+            .and_then(|row| row.get("providerKey"))
+            .or_else(|| payload.as_object().and_then(|row| row.get("providerKey"))),
+    ) {
+        base_payload.insert("providerKey".to_string(), Value::String(provider_key));
+    }
 
     let route_hint_value = base_payload
         .get("routeHint")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let provider_key_value = base_payload
+        .get("providerKey")
         .cloned()
         .unwrap_or(Value::Null);
 
@@ -494,6 +506,7 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
         "input": Value::Array(input),
         "tools": tools.map(Value::Array).unwrap_or(Value::Null),
         "routeHint": route_hint_value,
+        "providerKey": provider_key_value,
     })
 }
 
@@ -565,6 +578,10 @@ fn resume_responses_conversation_payload(
     if let Some(route_hint) = read_trimmed_string(entry_obj.get("routeHint")) {
         payload.insert("routeHint".to_string(), Value::String(route_hint.clone()));
     }
+    let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
+    if let Some(provider_key) = provider_key.clone() {
+        payload.insert("providerKey".to_string(), Value::String(provider_key));
+    }
 
     if let Some(model) =
         read_trimmed_string(submit_payload.as_object().and_then(|row| row.get("model")))
@@ -597,6 +614,7 @@ fn resume_responses_conversation_payload(
             "restoredFromResponseId": response_id,
             "previousRequestId": entry_obj.get("requestId").cloned().unwrap_or(Value::Null),
             "routeHint": entry_obj.get("routeHint").cloned().unwrap_or(Value::Null),
+            "providerKey": provider_key.map(Value::String).unwrap_or(Value::Null),
             "toolOutputs": tool_outputs.len(),
             "toolOutputsDetailed": submitted_details,
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
@@ -906,6 +924,10 @@ fn restore_responses_continuation_payload(
     if let Some(route_hint) = read_trimmed_string(entry_obj.get("routeHint")) {
         payload.insert("routeHint".to_string(), Value::String(route_hint.clone()));
     }
+    let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
+    if let Some(provider_key) = provider_key.clone() {
+        payload.insert("providerKey".to_string(), Value::String(provider_key));
+    }
 
     payload.insert("input".to_string(), Value::Array(delta_input.clone()));
     payload.insert(
@@ -925,6 +947,7 @@ fn restore_responses_continuation_payload(
             "restoredFromResponseId": response_id,
             "previousRequestId": entry_obj.get("requestId").cloned().unwrap_or(Value::Null),
             "routeHint": entry_obj.get("routeHint").cloned().unwrap_or(Value::Null),
+            "providerKey": provider_key.map(Value::String).unwrap_or(Value::Null),
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "deltaInputItems": delta_input.len(),
@@ -999,6 +1022,10 @@ fn materialize_responses_continuation_payload(
     if let Some(route_hint) = read_trimmed_string(entry_obj.get("routeHint")) {
         payload.insert("routeHint".to_string(), Value::String(route_hint.clone()));
     }
+    let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
+    if let Some(provider_key) = provider_key.clone() {
+        payload.insert("providerKey".to_string(), Value::String(provider_key));
+    }
 
     payload.insert("input".to_string(), Value::Array(full_input.clone()));
     payload.remove("previous_response_id");
@@ -1009,6 +1036,7 @@ fn materialize_responses_continuation_payload(
             "restoredFromResponseId": last_response_id.map(Value::String).unwrap_or(Value::Null),
             "previousRequestId": entry_obj.get("requestId").cloned().unwrap_or(Value::Null),
             "routeHint": entry_obj.get("routeHint").cloned().unwrap_or(Value::Null),
+            "providerKey": provider_key.map(Value::String).unwrap_or(Value::Null),
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "materialized": true,

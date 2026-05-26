@@ -149,6 +149,40 @@ describe('HubPipeline passthrough audit', () => {
     expect(result?.providerPayload).toEqual(payload);
   });
 
+
+
+  test('does not leak internal metadata payload to providerPayload on /v1/responses passthrough', async () => {
+    const pipeline = createPipeline('responses');
+    const payload = {
+      model: 'gpt-test',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello passthrough responses' }] }],
+      stream: true,
+      metadata: {
+        routeHint: 'tools/gateway-priority-5555-tools',
+        responsesResume: { previousResponseId: 'resp_internal_prev' },
+        clientInjectOnly: true,
+        __rt: { serverToolFollowup: true },
+        __shadowCompareForcedProviderKey: 'mini27.key1.MiniMax-M2.7'
+      }
+    };
+
+    const result = await pipeline.execute({
+      id: 'passthrough-audit-responses-metadata-strip-1',
+      endpoint: '/v1/responses',
+      payload: JSON.parse(JSON.stringify(payload)),
+      metadata: {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        processMode: 'passthrough',
+        routeHint: 'default',
+        sessionId: 'sess-passthrough-audit-responses-metadata-strip-1'
+      }
+    });
+
+    expect(result?.providerPayload).toBeDefined();
+    expect((result?.providerPayload as any)?.metadata).toBeUndefined();
+  });
+
   test('throws on passthrough when target protocol differs', async () => {
     const pipeline = createPipeline('responses');
     await expect(

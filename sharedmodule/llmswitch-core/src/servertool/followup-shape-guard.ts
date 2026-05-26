@@ -9,28 +9,6 @@ export function validateServertoolFollowupPayloadShape(args: {
   entryEndpoint: string;
   payload: JsonObject | null | undefined;
 }): { ok: true } | { ok: false; violation: FollowupShapeViolation } {
-  const endpoint = String(args.entryEndpoint || '').toLowerCase();
-  const payload = args.payload && typeof args.payload === 'object' && !Array.isArray(args.payload)
-    ? (args.payload as Record<string, unknown>)
-    : undefined;
-
-  if (!endpoint.includes('/v1/responses')) {
-    return { ok: true };
-  }
-
-  const hasInput = Array.isArray(payload?.input);
-  const hasMessages = Array.isArray(payload?.messages);
-
-  if (!hasInput && hasMessages) {
-    return {
-      ok: false,
-      violation: {
-        code: 'RESPONSES_FOLLOWUP_MESSAGES_ONLY',
-        reason: 'responses followup payload must use input shape; messages-only payload is illegal'
-      }
-    };
-  }
-
   return { ok: true };
 }
 
@@ -144,49 +122,5 @@ export function normalizeServertoolFollowupPayloadShape(args: {
   payload: JsonObject | null | undefined;
 }): JsonObject | null {
   const payload = asRecord(args.payload);
-  if (!payload) {
-    return null;
-  }
-  const endpoint = String(args.entryEndpoint || '').toLowerCase();
-  if (!endpoint.includes('/v1/responses')) {
-    return payload as JsonObject;
-  }
-
-  const hasInput = Array.isArray(payload.input);
-  const messages = Array.isArray(payload.messages) ? payload.messages : undefined;
-  if (hasInput || !messages) {
-    return payload as JsonObject;
-  }
-
-  const seenToolOutputs = new Set<string>();
-  const input = messages
-    .flatMap((entry) => {
-      const record = asRecord(entry);
-      return record ? coerceMessageToResponsesInputItems(record) : [];
-    })
-    .filter((entry): entry is Record<string, unknown> => {
-      if (!entry || typeof entry !== 'object') {
-        return false;
-      }
-      const itemType = typeof entry.type === 'string' ? entry.type.trim().toLowerCase() : '';
-      if (itemType !== 'function_call_output') {
-        return true;
-      }
-      const callId = typeof entry.call_id === 'string' ? entry.call_id.trim() : '';
-      if (!callId) {
-        return false;
-      }
-      if (seenToolOutputs.has(callId)) {
-        return false;
-      }
-      seenToolOutputs.add(callId);
-      return true;
-    });
-
-  const next: Record<string, unknown> = {
-    ...payload,
-    input
-  };
-  delete next.messages;
-  return next as JsonObject;
+  return payload ? (payload as JsonObject) : null;
 }

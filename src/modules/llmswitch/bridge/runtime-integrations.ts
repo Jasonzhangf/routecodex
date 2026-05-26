@@ -152,6 +152,7 @@ export async function captureResponsesRequestContextForRequest(args: {
   sessionId?: string;
   conversationId?: string;
   routeHint?: string;
+  providerKey?: string;
 }): Promise<void> {
   const globalStore = readGlobalResponsesConversationStore();
   if (typeof globalStore?.captureRequestContext === "function") {
@@ -174,6 +175,7 @@ export async function recordResponsesResponseForRequest(args: {
   routeHint?: string;
   sessionId?: string;
   conversationId?: string;
+  providerKey?: string;
 }): Promise<void> {
   const globalStore = readGlobalResponsesConversationStore();
   const fn =

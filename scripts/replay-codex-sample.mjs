@@ -98,8 +98,29 @@ function buildReplayGuidanceError(samplePath, reason) {
   return `${reason}\n${guidance}`;
 }
 
+export function normalizeReplayEndpoint(endpoint) {
+  if (typeof endpoint !== 'string') {
+    return '/v1/responses';
+  }
+  const trimmed = endpoint.trim();
+  if (!trimmed) {
+    return '/v1/responses';
+  }
+  if (trimmed.startsWith('/')) {
+    return trimmed;
+  }
+  try {
+    const url = new URL(trimmed);
+    const pathname = typeof url.pathname === 'string' && url.pathname.trim() ? url.pathname.trim() : '/';
+    const search = typeof url.search === 'string' ? url.search : '';
+    return `${pathname}${search}` || '/v1/responses';
+  } catch {
+    return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  }
+}
+
 function extractEndpoint(doc) {
-  return doc?.data?.url || doc?.url || doc?.endpoint || '/v1/responses';
+  return normalizeReplayEndpoint(doc?.data?.url || doc?.url || doc?.endpoint || '/v1/responses');
 }
 
 function extractBody(doc) {
@@ -182,6 +203,55 @@ function hasOrphanToolHistoryContent(value) {
   });
 }
 
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isFunctionCallOutputItem(item) {
+  return isRecord(item)
+    && typeof item.type === 'string'
+    && item.type.trim().toLowerCase() === 'function_call_output';
+}
+
+export function detectSubmitToolOutputsReplayShape(body, endpoint) {
+  if (!endpoint.includes('/v1/responses')) {
+    return null;
+  }
+  if (!isRecord(body)) {
+    return null;
+  }
+  const previousResponseId =
+    typeof body.previous_response_id === 'string' && body.previous_response_id.trim()
+      ? body.previous_response_id.trim()
+      : '';
+  const input = Array.isArray(body.input) ? body.input : [];
+  if (!previousResponseId || input.length === 0) {
+    return null;
+  }
+  const toolOutputs = input
+    .filter((entry) => isFunctionCallOutputItem(entry))
+    .map((entry) => ({
+      call_id:
+        typeof entry.call_id === 'string' && entry.call_id.trim()
+          ? entry.call_id.trim()
+          : typeof entry.id === 'string' && entry.id.trim()
+            ? entry.id.trim()
+            : undefined,
+      output: Object.prototype.hasOwnProperty.call(entry, 'output') ? entry.output : ''
+    }))
+    .filter((entry) => typeof entry.call_id === 'string' && entry.call_id);
+  if (!toolOutputs.length) {
+    return null;
+  }
+  return {
+    endpoint: `/v1/responses/${previousResponseId}/submit_tool_outputs`,
+    body: {
+      response_id: previousResponseId,
+      tool_outputs: toolOutputs
+    }
+  };
+}
+
 function detectStream(doc, requestBody) {
   if (doc?.data?.meta?.stream === true || doc?.meta?.stream === true) return true;
   if (doc?.data?.body?.metadata?.stream === true || doc?.body?.metadata?.stream === true) return true;
@@ -258,19 +328,25 @@ async function readSse(response) {
   return frames;
 }
 
-async function main() {
+export async function main() {
   const opts = parseArgs();
   const samplePath = path.resolve(opts.sample);
   const sample = readJson(samplePath);
-  const endpoint = extractEndpoint(sample);
+  let endpoint = extractEndpoint(sample);
   const rawRequestBody = extractBody(sample);
   if (!rawRequestBody) throw new Error('Sample does not contain request body');
-  const requestBody = isProviderRequestShape(rawRequestBody)
+  let requestBody = isProviderRequestShape(rawRequestBody)
     ? buildReplayInputFromProviderRequest(rawRequestBody, endpoint)
     : rawRequestBody;
+  const submitReplayShape = detectSubmitToolOutputsReplayShape(rawRequestBody, endpoint);
+  if (submitReplayShape) {
+    endpoint = submitReplayShape.endpoint;
+    requestBody = submitReplayShape.body;
+  }
   if (
     endpoint.includes('/v1/responses')
     && (!Array.isArray(requestBody?.input) || requestBody.input.length === 0)
+    && !endpoint.includes('/submit_tool_outputs')
   ) {
     throw new Error(buildReplayGuidanceError(
       samplePath,
@@ -281,6 +357,7 @@ async function main() {
     endpoint.includes('/v1/responses')
     && Array.isArray(requestBody?.input)
     && requestBody.input.some((message) => hasOrphanToolHistoryContent(message?.content))
+    && !endpoint.includes('/submit_tool_outputs')
   ) {
     throw new Error(buildReplayGuidanceError(
       samplePath,
@@ -355,7 +432,17 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('[replay-codex-sample] failed:', err);
-  process.exit(1);
-});
+const isDirectCliEntry = (() => {
+  try {
+    return import.meta.url === new URL(`file://${process.argv[1]}`).href;
+  } catch {
+    return false;
+  }
+})();
+
+if (isDirectCliEntry) {
+  main().catch((err) => {
+    console.error('[replay-codex-sample] failed:', err);
+    process.exit(1);
+  });
+}

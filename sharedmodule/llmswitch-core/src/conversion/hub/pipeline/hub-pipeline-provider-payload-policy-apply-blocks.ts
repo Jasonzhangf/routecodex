@@ -8,6 +8,7 @@ import {
 } from "../policy/policy-engine.js";
 import { applyProviderOutboundToolSurface } from "../tool-surface/tool-surface-engine.js";
 import { applyDirectBuiltinWebSearchToolWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
+import { stripInternalToolingMetadataWithNative } from "../../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js";
 
 export function buildShadowBaselineProviderPayload(args: {
   shadowCompareBaselineMode?: NormalizedRequest["shadowCompare"] extends {
@@ -101,6 +102,15 @@ export function finalizeProviderPayloadWithPolicy(args: {
     providerPayload,
     args.outboundProtocol,
   );
+
+  if (providerPayload.metadata && typeof providerPayload.metadata === 'object' && !Array.isArray(providerPayload.metadata)) {
+    const strippedMetadata = stripInternalToolingMetadataWithNative(providerPayload.metadata);
+    if (!strippedMetadata || Object.keys(strippedMetadata).length === 0) {
+      delete providerPayload.metadata;
+    } else {
+      providerPayload.metadata = strippedMetadata;
+    }
+  }
 
   recordHubPolicyObservation({
     policy: args.effectivePolicy,

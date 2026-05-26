@@ -193,6 +193,53 @@ RouteCodex 现在完全依赖 sharedmodule/llmswitch-core 的 Hub Pipeline，实
 
 借助 Hub Pipeline，HTTP 层只需关注请求封装与 Provider runtime 生命周期，核心能力全部收敛在 sharedmodule 中，实现“入口单一、fail-fast”的目标。
 
+## Responses continuation / save-restore ownership（2026-05-26）
+
+`/v1/responses` 的 continuation、submit_tool_outputs、servertool followup、direct / relay 切换，必须遵守单一 ownership 语义；不得再以“同 session / 同 scope 是否有历史”为恢复依据。
+
+### 单一语义
+
+1. `store=false`
+   - 不保存 continuation 状态
+   - 不存在恢复权
+   - 后续请求只能按普通 create 处理
+
+2. `direct + store=true`
+   - 状态保存于远程 provider
+   - `previous_response_id / response_id` 属于远程 provider state
+   - 只能由**同一个 provider**继续恢复
+
+3. `relay + store=true`
+   - 状态保存于本地 responses conversation store
+   - 只能由本地 store materialize / resume
+   - 恢复后再按标准请求重新进入 relay 流水线
+
+### 硬约束
+
+- 普通 `/v1/responses` create 不得因 scope/session/conversation 命中历史就自动注入 `previous_response_id`
+- direct 保存的状态不能切换到 relay 恢复
+- relay 保存的状态不能伪装成 remote direct continuation
+- direct provider A 保存的 remote state 不能切到 direct provider B 恢复
+- 若 direct remote continuation 的原 provider 不可用，必须显式报错；禁止偷偷 reroute 到其他 provider
+
+### followup / submit_tool_outputs 规则
+
+- `submit_tool_outputs` 是显式 continuation 入口
+- followup 不是第二套私有协议，它只是“正常请求重入”
+- followup 若触发 continuation，仍必须遵守 ownership：
+  - direct-origin → 只能同 provider 远程恢复
+  - relay-origin → 只能本地恢复
+
+### metadata 边界
+
+内部 continuation / route / sticky / runtime hint metadata：
+
+- 允许在 hub / router / servertool / provider runtime 内部流转
+- 不允许出 hub pipeline 发给 provider
+- 不允许透传给客户端
+
+这条约束与 provider outbound allowlist 共同组成单一真源：continuation 判定在 hub 内部完成，provider 只接收合法协议字段。
+
 ## 技术栈
 
 ### 核心技术

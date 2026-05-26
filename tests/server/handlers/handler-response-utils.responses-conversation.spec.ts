@@ -15,6 +15,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
   importCoreDist: jest.fn(),
   requireCoreDist: jest.fn(),
+  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
   recordResponsesResponseForRequest: recordResponsesResponseForRequestMock
 }));
 
@@ -82,7 +83,13 @@ describe('sendPipelineResponse responses conversation recording', () => {
         }
       } as any,
       'openai-responses-router-missing-context',
-      { entryEndpoint: '/v1/responses' }
+      {
+        entryEndpoint: '/v1/responses',
+        responsesRequestContext: {
+          payload: { model: 'gpt-5.4', store: true, input: [], tools: [] },
+          context: { input: [], toolsRaw: [] }
+        }
+      }
     );
 
     expect(res.statusCode).toBe(200);
@@ -137,7 +144,13 @@ describe('sendPipelineResponse responses conversation recording', () => {
         }
       } as any,
       'openai-responses-windsurf.ws-pro-4-gpt-5.4-medium-20260523T053402638-222073-757',
-      { entryEndpoint: '/v1/responses' }
+      {
+        entryEndpoint: '/v1/responses',
+        responsesRequestContext: {
+          payload: { model: 'gpt-5.4', store: true, input: [], tools: [] },
+          context: { input: [], toolsRaw: [] }
+        }
+      }
     );
 
     expect(res.statusCode).toBe(200);
@@ -243,7 +256,14 @@ describe('sendPipelineResponse responses conversation recording', () => {
         }
       } as any,
       'openai-responses-router-gpt-5.3-codex-20260523T100318513-222172-856',
-      { entryEndpoint: '/v1/responses', forceSSE: true }
+      {
+        entryEndpoint: '/v1/responses',
+        forceSSE: true,
+        responsesRequestContext: {
+          payload: { model: 'gpt-5.4', store: true, input: [], tools: [] },
+          context: { input: [], toolsRaw: [] }
+        }
+      }
     );
     await waitForEnd(res);
 

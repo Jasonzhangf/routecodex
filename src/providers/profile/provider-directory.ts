@@ -6,7 +6,6 @@ const KNOWN_FAMILIES = new Set([
   'anthropic',
   'gemini',
   'deepseek',
-  'qwen',
   'glm',
   'lmstudio',
   'mock'

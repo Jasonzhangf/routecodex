@@ -110,7 +110,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
       const seed = extractCapturedChatSeed((ctx.adapterContext as any)?.capturedChatRequest);
       const assistantMessage = seed ? extractAssistantMessage(patched) : null;
       const toolMessages = seed ? buildToolMessages(patched) : [];
-      const canFollowup = Boolean(seed && assistantMessage && toolMessages.length > 0);
+      const canFollowup = Boolean(seed && ctx.capabilities.reenterPipeline && toolMessages.length > 0);
       return {
         chatResponse: patched,
         execution: {
@@ -122,10 +122,13 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
                 entryEndpoint: ctx.entryEndpoint,
                 injection: {
                   ops: [
-                    { op: 'append_assistant_message' },
-                    { op: 'append_tool_messages_from_tool_outputs' },
                     { op: 'drop_tool_by_name', name: toolName }
                   ]
+                },
+                metadata: {
+                  stream: false,
+                  preserveRouteHint: false,
+                  disableStickyRoutes: true
                 }
               }
             }

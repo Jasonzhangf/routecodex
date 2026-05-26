@@ -239,42 +239,6 @@ const CATALOG: InitProviderTemplate[] = [
     defaultModel: 'gpt-oss-20b-mlx'
   },
   {
-    id: 'qwen',
-    label: 'Qwen (OAuth)',
-    description: 'Qwen Chat (OAuth token file), OpenAI-compatible wire',
-    sdkBinding: { family: 'openai-compatible', supported: true },
-    capabilities: {
-      supportsCoding: true,
-      supportsLongContext: true,
-      supportsMultimodal: true,
-      supportsTools: true
-    },
-    webSearch: {
-      engineId: 'qwen:web_search',
-      providerKey: 'qwen.qwen3.5-plus',
-      routeTarget: 'qwen.qwen3.5-plus',
-      modelId: 'qwen3.5-plus',
-      description: 'Qwen native web_search backend',
-      executionMode: 'servertool'
-    },
-    provider: {
-      id: 'qwen',
-      enabled: true,
-      type: 'openai',
-      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      compatibilityProfile: 'chat:qwen',
-      auth: {
-        type: 'qwen-oauth',
-        tokenFile: 'default'
-      },
-      models: {
-        'coder-model': { supportsStreaming: true, maxContext: 1000000 },
-        'qwen3.5-plus': { supportsStreaming: true, maxContext: 1000000 },
-      }
-    },
-    defaultModel: 'coder-model'
-  },
-  {
     id: 'mimo',
     label: 'MiMo (OpenAI-compatible)',
     description: 'Xiaomi MiMo OpenAI-compatible endpoint',

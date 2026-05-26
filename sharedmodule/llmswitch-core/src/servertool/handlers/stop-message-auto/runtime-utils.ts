@@ -364,6 +364,7 @@ export function resolveEntryEndpoint(record: Record<string, unknown>): string {
   return '/v1/chat/completions';
 }
 
+
 function isEmptyAssistantReply(base: unknown): boolean {
   if (!base || typeof base !== 'object' || Array.isArray(base)) {
     return false;

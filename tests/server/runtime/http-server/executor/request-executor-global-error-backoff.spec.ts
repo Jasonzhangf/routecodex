@@ -1,13 +1,19 @@
 import { describe, expect, jest, test, beforeEach, afterEach } from '@jest/globals';
 import {
-  peekGlobalErrorBackoffWaitMs,
-  recordGlobalErrorBackoff,
+  peekScopedErrorBackoffWaitMs,
+  recordScopedErrorBackoff,
   resetGlobalErrorBackoffStateForTests,
-  resetGlobalErrorBackoff,
-  waitGlobalErrorBackoffWithGate
+  resetScopedErrorBackoff,
+  resetScopedErrorBackoffByProvider,
+  waitScopedErrorBackoffWithGate
 } from '../../../../../src/server/runtime/http-server/executor/request-executor-global-error-backoff';
 
 describe('request-executor-global-error-backoff', () => {
+  const scopeA = '5520|windsurf.managed.gpt-5.3-codex-low|windsurf_upstream_transient';
+  const scopeB = '5555|windsurf.managed.gpt-5.3-codex-low|windsurf_upstream_transient';
+  const scopeC = '5520|openai.gpt-5.3-codex-low|windsurf_upstream_transient';
+  const scopeD = '5520|windsurf.managed.gpt-5.3-codex-low|status_429';
+
   beforeEach(() => {
     resetGlobalErrorBackoffStateForTests();
     jest.useFakeTimers();
@@ -19,45 +25,56 @@ describe('request-executor-global-error-backoff', () => {
     resetGlobalErrorBackoffStateForTests();
   });
 
-  test('applies minimum 1s wait after first error', () => {
-    const delayMs = recordGlobalErrorBackoff(new Error('first error'));
+  test('applies minimum 1s wait after first error in same scope', () => {
+    const delayMs = recordScopedErrorBackoff(scopeA);
     expect(delayMs).toBe(1000);
-    expect(peekGlobalErrorBackoffWaitMs()).toBe(1000);
+    expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(1000);
   });
 
-  test('uses exponential backoff for consecutive errors and resets on success', () => {
-    expect(recordGlobalErrorBackoff(new Error('e1'))).toBe(1000);
-    expect(recordGlobalErrorBackoff(new Error('e2'))).toBe(2000);
-    expect(recordGlobalErrorBackoff(new Error('e3'))).toBe(4000);
+  test('uses exponential backoff for consecutive same-scope errors and resets on success', () => {
+    expect(recordScopedErrorBackoff(scopeA)).toBe(1000);
+    expect(recordScopedErrorBackoff(scopeA)).toBe(2000);
+    expect(recordScopedErrorBackoff(scopeA)).toBe(4000);
 
-    resetGlobalErrorBackoff();
-    expect(peekGlobalErrorBackoffWaitMs()).toBe(0);
+    resetScopedErrorBackoff(scopeA);
+    expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(0);
   });
 
-  test('does not accumulate delayed debt after the current backoff window elapses', () => {
-    expect(recordGlobalErrorBackoff(new Error('e1'))).toBe(1000);
-    expect(peekGlobalErrorBackoffWaitMs()).toBe(1000);
+  test('does not accumulate delayed debt after the current backoff window elapses in same scope', () => {
+    expect(recordScopedErrorBackoff(scopeA)).toBe(1000);
+    expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(1000);
 
     jest.advanceTimersByTime(1000);
-    expect(peekGlobalErrorBackoffWaitMs()).toBe(0);
+    expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(0);
 
-    expect(recordGlobalErrorBackoff(new Error('e2'))).toBe(2000);
-    expect(peekGlobalErrorBackoffWaitMs()).toBe(2000);
+    expect(recordScopedErrorBackoff(scopeA)).toBe(2000);
+    expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(2000);
   });
 
-  test('resets consecutive global errors after non-error request completion', () => {
-    expect(recordGlobalErrorBackoff(new Error('e1'))).toBe(1000);
-    resetGlobalErrorBackoff();
+  test('resets consecutive scoped errors after provider-scope success', () => {
+    expect(recordScopedErrorBackoff(scopeA)).toBe(1000);
+    expect(recordScopedErrorBackoff(scopeD)).toBe(1000);
+    resetScopedErrorBackoffByProvider('5520|windsurf.managed.gpt-5.3-codex-low|');
 
-    expect(recordGlobalErrorBackoff(new Error('e2'))).toBe(1000);
-    expect(peekGlobalErrorBackoffWaitMs()).toBe(1000);
+    expect(recordScopedErrorBackoff(scopeA)).toBe(1000);
+    expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(1000);
+    expect(peekScopedErrorBackoffWaitMs(scopeD)).toBe(0);
   });
 
-  test('wait gate blocks until timer elapses', async () => {
-    recordGlobalErrorBackoff(new Error('e1'));
-    const waiting = waitGlobalErrorBackoffWithGate();
+  test('isolates scopes by port / provider / error-code', () => {
+    expect(recordScopedErrorBackoff(scopeA)).toBe(1000);
+    expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(1000);
+    expect(peekScopedErrorBackoffWaitMs(scopeB)).toBe(0);
+    expect(peekScopedErrorBackoffWaitMs(scopeC)).toBe(0);
+    expect(peekScopedErrorBackoffWaitMs(scopeD)).toBe(0);
+  });
+
+  test('wait gate blocks only the same scope until timer elapses', async () => {
+    recordScopedErrorBackoff(scopeA);
+    const waiting = waitScopedErrorBackoffWithGate(scopeA);
     await jest.advanceTimersByTimeAsync(1000);
     await expect(waiting).resolves.toBe(1000);
-    expect(peekGlobalErrorBackoffWaitMs()).toBe(0);
+    expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(0);
+    expect(peekScopedErrorBackoffWaitMs(scopeB)).toBe(0);
   });
 });

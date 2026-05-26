@@ -11,22 +11,29 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
 
 describe('responses conversation store plain continuation restore', () => {
-  const requestIds = ['req-resp-store-1', 'req-resp-store-2', 'req-resp-store-3'];
+  const requestIds = new Set<string>();
+  const track = (requestId: string): string => {
+    requestIds.add(requestId);
+    return requestId;
+  };
 
   afterEach(() => {
     for (const requestId of requestIds) {
       clearResponsesConversationByRequestId(requestId);
     }
+    requestIds.clear();
   });
 
   it('restores previous_response_id by session scope when incoming input replays the exact prefix', () => {
     captureResponsesRequestContext({
-      requestId: 'req-resp-store-1',
+      requestId: track('req-resp-store-1'),
       sessionId: 'sess-1',
       conversationId: 'conv-1',
       routeHint: 'tools',
+      providerKey: 'crs.direct.gpt-5.4',
       payload: {
         model: 'gpt-5.3-codex',
+        store: true,
         stream: true,
         tools: [{ type: 'function', function: { name: 'exec_command' } }]
       },
@@ -42,8 +49,9 @@ describe('responses conversation store plain continuation restore', () => {
     });
 
     recordResponsesResponse({
-      requestId: 'req-resp-store-1',
+      requestId: track('req-resp-store-1'),
       routeHint: 'thinking',
+      providerKey: 'crs.direct.gpt-5.4',
       response: {
         id: 'resp-store-1',
         output: [
@@ -57,7 +65,7 @@ describe('responses conversation store plain continuation restore', () => {
     });
 
     const restored = resumeLatestResponsesContinuationByScope({
-      requestId: 'req-resp-store-2',
+      requestId: track('req-resp-store-2'),
       sessionId: 'sess-1',
       payload: {
         model: 'gpt-5.3-codex',
@@ -97,16 +105,75 @@ describe('responses conversation store plain continuation restore', () => {
       restoredFromResponseId: 'resp-store-1',
       scopeKey: 'session:sess-1',
       routeHint: 'thinking',
+      providerKey: 'crs.direct.gpt-5.4',
       restored: true
+    });
+  });
+
+  it('RED: submit_tool_outputs resume must preserve direct providerKey pin for same-provider remote continuation ownership', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-direct-pin-1'),
+      sessionId: 'sess-direct-pin',
+      conversationId: 'conv-direct-pin',
+      routeHint: 'thinking',
+      providerKey: 'dibittai.crsa.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        stream: false,
+        tools: [{ type: 'function', function: { name: 'exec_command' } }]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'call tool' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-direct-pin-1'),
+      routeHint: 'thinking',
+      providerKey: 'dibittai.crsa.gpt-5.4',
+      response: {
+        id: 'resp-direct-pin-1',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_direct_pin_1',
+            call_id: 'call_direct_pin_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}'
+          }
+        ]
+      }
+    });
+
+    const resumed = resumeResponsesConversation(
+      'resp-direct-pin-1',
+      {
+        response_id: 'resp-direct-pin-1',
+        tool_outputs: [{ call_id: 'call_direct_pin_1', output: '/tmp' }]
+      },
+      { requestId: track('req-resp-store-direct-pin-2') }
+    );
+
+    expect(resumed.meta).toMatchObject({
+      restoredFromResponseId: 'resp-direct-pin-1',
+      providerKey: 'dibittai.crsa.gpt-5.4'
     });
   });
 
   it('returns null when no exact prefix match exists', () => {
     captureResponsesRequestContext({
-      requestId: 'req-resp-store-3',
+      requestId: track('req-resp-store-3'),
       sessionId: 'sess-x',
       payload: {
-        model: 'gpt-5.3-codex'
+        model: 'gpt-5.3-codex',
+        store: true
       },
       context: {
         input: [
@@ -120,7 +187,7 @@ describe('responses conversation store plain continuation restore', () => {
     });
 
     recordResponsesResponse({
-      requestId: 'req-resp-store-3',
+      requestId: track('req-resp-store-3'),
       response: {
         id: 'resp-store-x',
         output: [
@@ -134,7 +201,7 @@ describe('responses conversation store plain continuation restore', () => {
     });
 
     const restored = resumeLatestResponsesContinuationByScope({
-      requestId: 'req-resp-store-4',
+      requestId: track('req-resp-store-4'),
       sessionId: 'sess-x',
       payload: {
         input: [
@@ -162,6 +229,7 @@ describe('responses conversation store plain continuation restore', () => {
       sessionId: 'sess-1',
       payload: {
         model: 'gpt-5.3-codex',
+        store: true,
         input: [
           {
             type: 'message',
@@ -238,7 +306,8 @@ describe('responses conversation store plain continuation restore', () => {
       requestId: 'req-resp-store-1',
       sessionId: 'sess-1',
       payload: {
-        model: 'gpt-5.3-codex'
+        model: 'gpt-5.3-codex',
+        store: true
       },
       context: {
         input: [
@@ -313,7 +382,8 @@ describe('responses conversation store plain continuation restore', () => {
       sessionId: 'sess-supersede',
       conversationId: 'conv-supersede',
       payload: {
-        model: 'gpt-5.3-codex'
+        model: 'gpt-5.3-codex',
+        store: true
       },
       context: {
         input: [
@@ -347,7 +417,8 @@ describe('responses conversation store plain continuation restore', () => {
       sessionId: 'sess-supersede',
       conversationId: 'conv-supersede',
       payload: {
-        model: 'gpt-5.3-codex'
+        model: 'gpt-5.3-codex',
+        store: true
       },
       context: {
         input: [
@@ -421,7 +492,8 @@ describe('responses conversation store plain continuation restore', () => {
       requestId: 'req-resp-store-1',
       sessionId: 'sess-1',
       payload: {
-        model: 'gpt-5.3-codex'
+        model: 'gpt-5.3-codex',
+        store: true
       },
       context: {
         input: [
@@ -458,10 +530,11 @@ describe('responses conversation store plain continuation restore', () => {
 
   it('keeps recording when response capture sees synthetic RouteCodex tool placeholder output', () => {
     captureResponsesRequestContext({
-      requestId: 'req-resp-store-tool-1',
+      requestId: track('req-resp-store-tool-1'),
       sessionId: 'sess-tool-1',
       payload: {
-        model: 'gpt-5.3-codex'
+        model: 'gpt-5.3-codex',
+        store: true
       },
       context: {
         input: [
@@ -476,7 +549,7 @@ describe('responses conversation store plain continuation restore', () => {
 
     expect(() =>
       recordResponsesResponse({
-        requestId: 'req-resp-store-tool-1',
+        requestId: track('req-resp-store-tool-1'),
         response: {
           id: 'resp-store-tool-synthetic-1',
           output: [
@@ -508,7 +581,8 @@ describe('responses conversation store plain continuation restore', () => {
       requestId: 'req-resp-store-2',
       sessionId: 'sess-synthetic-control',
       payload: {
-        model: 'gpt-5.3-codex'
+        model: 'gpt-5.3-codex',
+        store: true
       },
       context: {
         input: [
@@ -545,10 +619,11 @@ describe('responses conversation store plain continuation restore', () => {
 
   it('captures a requires_action response with unresolved function_call for later submit_tool_outputs resume', () => {
     captureResponsesRequestContext({
-      requestId: 'req-resp-store-pending-call',
+      requestId: track('req-resp-store-pending-call'),
       sessionId: 'sess-pending-call',
       payload: {
-        model: 'gpt-5.3-codex'
+        model: 'gpt-5.3-codex',
+        store: true
       },
       context: {
         input: [
@@ -563,7 +638,7 @@ describe('responses conversation store plain continuation restore', () => {
 
     expect(() =>
       recordResponsesResponse({
-        requestId: 'req-resp-store-pending-call',
+        requestId: track('req-resp-store-pending-call'),
         response: {
           id: 'resp-store-pending-call',
           object: 'response',
@@ -598,7 +673,7 @@ describe('responses conversation store plain continuation restore', () => {
     const resumed = resumeResponsesConversation(
       'resp-store-pending-call',
       { tool_outputs: [{ tool_call_id: 'call_pending_call_1', output: '/tmp/project\n' }], stream: false },
-      { requestId: 'req-resp-store-pending-call-submit' }
+      { requestId: track('req-resp-store-pending-call-submit') }
     );
     expect(resumed.payload.input).toEqual([
       {
@@ -620,12 +695,132 @@ describe('responses conversation store plain continuation restore', () => {
     ]);
   });
 
+
+
+  it('RED: store=false captured entry must not allow submit_tool_outputs resume or scope continuation', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-store-false-blocked'),
+      sessionId: 'sess-store-false-blocked',
+      payload: {
+        model: 'gpt-5.4',
+        store: false,
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'store false should not persist continuation' }]
+          }
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: {
+                type: 'object',
+                properties: { cmd: { type: 'string' } },
+                required: ['cmd']
+              }
+            }
+          }
+        ]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'store false should not persist continuation' }]
+          }
+        ],
+        toolsRaw: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: {
+                type: 'object',
+                properties: { cmd: { type: 'string' } },
+                required: ['cmd']
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(() =>
+      recordResponsesResponse({
+        requestId: track('req-resp-store-store-false-blocked'),
+        response: {
+          id: 'resp-store-false-blocked',
+          object: 'response',
+          status: 'requires_action',
+          output: [
+            {
+              type: 'function_call',
+              id: 'fc_store_false_blocked_1',
+              call_id: 'call_store_false_blocked_1',
+              name: 'exec_command',
+              arguments: '{"cmd":"pwd"}',
+              status: 'in_progress'
+            }
+          ],
+          required_action: {
+            type: 'submit_tool_outputs',
+            submit_tool_outputs: {
+              tool_calls: [
+                {
+                  id: 'call_store_false_blocked_1',
+                  type: 'function',
+                  name: 'exec_command',
+                  arguments: '{"cmd":"pwd"}'
+                }
+              ]
+            }
+          }
+        }
+      })
+    ).not.toThrow();
+
+    expect(() =>
+      resumeResponsesConversation(
+        'resp-store-false-blocked',
+        {
+          tool_outputs: [{ tool_call_id: 'call_store_false_blocked_1', output: '/tmp/project\n' }],
+          stream: false
+        },
+        { requestId: track('req-resp-store-store-false-blocked-submit') }
+      )
+    ).toThrow(/Responses conversation expired or not found/);
+
+    const restored = resumeLatestResponsesContinuationByScope({
+      sessionId: 'sess-store-false-blocked',
+      requestId: track('req-resp-store-store-false-blocked-next'),
+      payload: {
+        model: 'gpt-5.4',
+        store: false,
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn should not auto-continue' }]
+          }
+        ]
+      }
+    });
+    expect(restored).toBeNull();
+
+    clearResponsesConversationByRequestId('req-resp-store-store-false-blocked');
+    clearResponsesConversationByRequestId('resp-store-false-blocked');
+  });
   it('keeps native Cascade run_command function_call arguments during submit_tool_outputs resume', () => {
     captureResponsesRequestContext({
-      requestId: 'req-resp-store-native-run-command',
+      requestId: track('req-resp-store-native-run-command'),
       sessionId: 'sess-native-run-command',
       payload: {
-        model: 'gpt-5.4-medium'
+        model: 'gpt-5.4-medium',
+        store: true
       },
       context: {
         input: [
@@ -639,7 +834,7 @@ describe('responses conversation store plain continuation restore', () => {
     });
 
     recordResponsesResponse({
-      requestId: 'req-resp-store-native-run-command',
+      requestId: track('req-resp-store-native-run-command'),
       response: {
         id: 'resp-store-native-run-command',
         object: 'response',
@@ -660,7 +855,7 @@ describe('responses conversation store plain continuation restore', () => {
     const resumed = resumeResponsesConversation(
       'resp-store-native-run-command',
       { tool_outputs: [{ tool_call_id: 'native:run_command:3', output: '/Users/fanzhang/Documents/github/routecodex\n' }], stream: false },
-      { requestId: 'req-resp-store-native-run-command-submit' }
+      { requestId: track('req-resp-store-native-run-command-submit') }
     );
     expect(resumed.payload.input).toEqual([
       {

@@ -1,5 +1,21 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-05-26 continuation ownership / meta 收口文档落盘
+
+- 已把新的架构共识正式落盘到：
+  - `docs/design/responses-continuation-storage-ownership.md`
+  - `docs/goals/followup-meta-outbound-whitelist-plan.md`
+  - `docs/ARCHITECTURE.md`
+- 新共识核心：
+  1. `store=false` 不保存、不续接
+  2. `direct + store=true` 只允许同 provider 远程恢复
+  3. `relay + store=true` 只允许本地 store 恢复
+  4. followup 只是正常请求重入，不是第二套 continuation 协议
+  5. 内部 meta / ownership / sticky 不能出 hub pipeline，也不能回给客户端
+- 这次先只做文档与 goal 收口，不碰实现逻辑；后续代码改动必须继续以
+  `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
+  为唯一 continuation 判定真源。
+
 ## 2026-05-24 hub pipeline rust closeout / 当前红门禁核对
 
 - `tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts` 当前 4/4 绿，说明 request-side `web_search/review/clientInjectReady` contract 已真实命中最新 native。
@@ -10892,3 +10908,51 @@ Using skills: coding-principals + rcc-dev-skills
 - 红测：`tests/modules/llmswitch/bridge/runtime-integrations.responses-store.spec.ts` 先证明 capture/record/resume/resumeLatestByScope 没有优先命中 global authoritative store；修改前失败。
 - 唯一修复点：`src/modules/llmswitch/bridge/runtime-integrations.ts`。因为 continuation store 的对外桥接全收敛在这里，只有把 capture/record/resume/resumeLatestByScope 与 clear/finalize/rebind 统一到同一个 authoritative store 选择策略，才能根除 live 的 store 分裂；改 handler 或 store 本体都只能掩盖症状。
 [note] [2026-05-26] 5555 direct/native SSE submit_tool_outputs expired 新真因：handler-response-utils.ts 把 wrapper __routecodex_finish_reason 提前当成 terminal truth，导致首个 data chunk 即抢跑 persistNativeSseConversationState，contractProbe 尚未收齐 function_call/required_action，responseIndex=0；真修复是只把真实 terminal chunk(response.required_action/response.completed/response.done/[DONE])作为 persist 门槛。
+
+## 2026-05-26 direct->relay audit followup
+- 结论已收敛：当前 submit_tool_outputs expired 首根因不在 direct->relay 切换，而在 direct 首轮 responses tool_call 结束后的 store 落库：requestMap=1, responseIndex=0, pendingNoResponseId=1。
+- 下一步：先补红测，钉住首轮 native/direct SSE 完成后 responseIndex 必须建立，resumeResponsesConversation(responseId, tool_outputs) 必须成功；再决定最小修点。
+
+[2026-05-26] continuation ownership 新真红与最小收口
+- 红测已补到 `tests/sharedmodule/route-aware-responses-continuation.spec.ts`：
+  1. 显式 `previous_response_id` 的 direct continuation 不得 consult 本地 scope store；
+  2. 显式 `previous_response_id` 不得跨到 relay materialize 本地 continuation。
+- 真根因确认：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts` 之前把“显式 previous_response_id / response_id”与“submit_tool_outputs / followup / responsesResume”混成同一类 explicit evidence，导致 direct remote continuation 被错误送去 `resumeLatest/materializeLatestResponsesContinuationByScope(...)`。
+- 唯一正确修点：仍然只在 `route-aware-responses-continuation.ts`。因为 continuation ownership 判定真源只允许在这里；改 handler/provider/client 都会形成第二语义面。
+- 本轮收口：新增 `ContinuationResolutionMode = none | passthrough_remote_direct | consult_scope_store`；只有 submit_tool_outputs / responsesResume / followup 显式证据才 consult scope store，显式 `previous_response_id/response_id` 一律 remote passthrough。
+- 定向回归已绿：
+  - `tests/sharedmodule/route-aware-responses-continuation.spec.ts`
+  - `tests/provider/provider-outbound-internal-meta.spec.ts`
+  - `tests/providers/core/runtime/provider-request-preprocessor.unit.test.ts`
+  - `tests/providers/runtime/responses-provider.direct-passthrough.spec.ts`
+  - `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts`
+  - `tests/server/handlers/handler-response-utils.responses-conversation.spec.ts`
+
+## 2026-05-26 store=false continuation ownership red/green
+- 红测已抓到真问题不在 response retain，而在 shared responses conversation store：`captureResponsesRequestContext(store=false)` 仍创建可续接 entry，后续 `resumeResponsesConversation` / `resumeLatestResponsesContinuationByScope` 会错误命中。
+- 最小修复已落在 `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`：entry 新增 `allowContinuation` 门禁，只允许 `store=true` 或合法 submit payload（有 response/previous_response_id + tool_outputs）的 continuation owner；resume/scope restore/materialize 全部统一检查这个门禁。
+- 新增红测：`tests/sharedmodule/responses-continuation-store.spec.ts` 中 `store=false captured entry must not allow submit_tool_outputs resume or scope continuation`。
+- 对齐旧测试：所有本来就依赖 continuation 的样本补 `store:true`，符合新的 ownership 真实语义。
+- 定向回归已绿：responses-continuation-store / handler-response-utils.responses-store-integration / handler-response-utils.responses-conversation / route-aware-responses-continuation / responses-handler.submit-tool-outputs.responses-provider。
+
+## 2026-05-26 followup/servertool red test audit
+- 红测确认：`tests/servertool/gemini-empty-reply-continue.spec.ts` 3 红、`tests/servertool/server-side-web-search.spec.ts` 1 红。
+- 真相1：`sharedmodule/llmswitch-core/src/servertool/handlers/gemini-empty-reply-continue.ts` 当前是 tombstone 空文件，auto-hook 能力已物理丢失，不是配置问题。
+- 真相2：`web_search` finalize 虽然生成了 followup plan，但 `/v1/responses` 场景下 `runServerToolOrchestration` 没真正 reenter，需检查 finalize/flow 主线的唯一阻断点。
+- 约束：按现有 followup 框架补最小兼容实现；不发明新协议；followup 仍走 origin rebuild + delta + normal create reenter。
+
+## 2026-05-26 direct continuation sticky 红测启动
+
+- 当前 live 主问题已从“普通 create 误续接”收敛为：`direct + store=true` 的 `submit_tool_outputs` 在 provider recoverable failure 后丢失 provider sticky，错误 reroute 到别的 provider。
+- 先做两层红测：
+  1. store/resume 是否保留 providerKey 事实
+  2. submit_tool_outputs direct continuation 在 recoverable failure 后不得切 provider
+- 若 `route-aware-responses-continuation.ts` 现有输入里根本拿不到 providerKey，则必须把 providerKey 作为 continuation 事实写入 store/resume；这不改变 continuation 判定真源，只是补齐判定所需事实输入。
+
+## 2026-05-26 2056/最后一个 provider 被移除 红线
+
+- Jason 新 live 证据：`mini27.key1.MiniMax-M2.7` 在 `provider_status_2056 / usage limit exceeded` 后，下一跳直接出现 `No available providers after applying routing instructions`。
+- 这说明当前 provider failure -> router exclusion/cooldown 语义仍然错误：
+  1. 瞬时业务错误被过早提升为路由池移除/拉黑
+  2. 最后一个 provider 也被排空，违反“最后一个 provider 永远不移除”约束
+- 当前先暂停 continuation 修复收尾，优先抓这条虚拟路由/错误分类红测与唯一修改点。

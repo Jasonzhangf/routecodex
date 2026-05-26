@@ -4,9 +4,6 @@ import type { ProviderInvoker, ServerSideToolEngineOptions } from './types.js';
 import { runServerSideToolEngine } from './server-side-tools.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { attachStopGatewayContext, inspectStopGatewaySignal } from './stop-gateway-context.js';
-import {
-  detectEmptyAssistantPayloadContractSignalWithNative,
-} from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import { createServertoolProgressLogger } from './progress-log-block.js';
 import { recordServertoolMatchHit, recordServertoolMatchSkipped } from './match-log-block.js';
 import {
@@ -116,8 +113,7 @@ export async function runServerToolOrchestration(
   const RESET = '\x1b[0m';
 
   if (
-    detectEmptyAssistantPayloadContractSignalWithNative(options.chat)
-    || containsSyntheticRouteCodexControlText(options.chat)
+    containsSyntheticRouteCodexControlText(options.chat)
   ) {
     return {
       chat: options.chat,

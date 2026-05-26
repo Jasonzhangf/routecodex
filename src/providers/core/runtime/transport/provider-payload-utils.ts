@@ -92,7 +92,7 @@ export class ProviderPayloadUtils {
     const runtimeMeta = extractProviderRuntimeMetadata(payload as Record<string, unknown>);
     const metadata = (runtimeMeta && typeof runtimeMeta.metadata === 'object')
       ? (runtimeMeta.metadata as Record<string, unknown>)
-      : (payload as { metadata?: Record<string, unknown> }).metadata;
+      : undefined;
     if (metadata && typeof metadata.entryEndpoint === 'string' && metadata.entryEndpoint.trim()) {
       return metadata.entryEndpoint;
     }

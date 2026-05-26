@@ -65,6 +65,67 @@ describe('servertool followup origin clone delta', () => {
     expect(JSON.stringify(payload)).not.toContain('*** Begin Patch');
   });
 
+
+
+
+
+  test('RED: captured responses tool results rebuild canonical assistant/tool messages for apply_patch followup', () => {
+    const seed = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'retry edit' }],
+      tools: [
+        { type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } },
+        { type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }
+      ]
+    } as any;
+    const payload = applyFollowupDeltaPlan({
+      adapterContext: {
+        responsesContext: {
+          __captured_tool_results: [
+            {
+              tool_call_id: 'call_patch_ctx_1',
+              name: 'apply_patch',
+              arguments: JSON.stringify({ filePath: 'a.ts', patch: '- old\n+ new' }),
+              output: { status: 'APPLY_PATCH_ERROR', ok: false }
+            }
+          ]
+        }
+      } as any,
+      finalChatResponse: {} as any,
+      seed,
+      injection: {
+        ops: [
+          { op: 'append_tool_messages_from_tool_outputs', required: true },
+          { op: 'drop_tool_by_name', name: 'apply_patch' }
+        ]
+      } as any
+    }) as any;
+
+    expect(payload.messages).toEqual([
+      { role: 'user', content: 'retry edit' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_patch_ctx_1',
+            type: 'function',
+            function: {
+              name: 'apply_patch',
+              arguments: '{}'
+            }
+          }
+        ]
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call_patch_ctx_1',
+        content: JSON.stringify({ status: 'APPLY_PATCH_ERROR', ok: false })
+      }
+    ]);
+    expect(payload.tools.map((tool: any) => tool.function.name)).toEqual(['exec_command']);
+  });
+
   test('normalizes split pending tool calls before appending multiple tool outputs', () => {
     const seed = {
       model: 'gpt-test',

@@ -2,6 +2,7 @@ import type { ProviderContext } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import { resolveProviderFailureOutcome } from './provider-failure-policy.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
+import { extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 
 export type ResponsesStreamingMode = 'auto' | 'always' | 'never';
 
@@ -95,6 +96,15 @@ export function extractEntryEndpoint(source: unknown): string | undefined {
   if (!source || typeof source !== 'object') {
     return undefined;
   }
+  const runtimeMetadata = extractProviderRuntimeMetadata(source);
+  const runtimeNode =
+    runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object'
+      ? (runtimeMetadata.metadata as Record<string, unknown>)
+      : undefined;
+  if (runtimeNode && 'entryEndpoint' in runtimeNode) {
+    const value = runtimeNode.entryEndpoint;
+    return typeof value === 'string' ? value : undefined;
+  }
   const metadata = (source as { metadata?: unknown }).metadata;
   if (metadata && typeof metadata === 'object' && 'entryEndpoint' in metadata) {
     const value = (metadata as Record<string, unknown>).entryEndpoint;
@@ -106,6 +116,14 @@ export function extractEntryEndpoint(source: unknown): string | undefined {
 export function extractResponsesDirectPassthroughFlag(source: unknown): boolean {
   if (!source || typeof source !== 'object') {
     return false;
+  }
+  const runtimeMetadata = extractProviderRuntimeMetadata(source);
+  const runtimeNode =
+    runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object'
+      ? (runtimeMetadata.metadata as Record<string, unknown>)
+      : undefined;
+  if (runtimeNode?.__responsesDirectPassthrough === true) {
+    return true;
   }
   const metadata = (source as { metadata?: unknown }).metadata;
   if (metadata && typeof metadata === 'object') {

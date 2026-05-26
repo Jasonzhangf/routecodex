@@ -226,6 +226,10 @@ export function applyFollowupRuntimeMetadata(args: {
   } else if ((args.metadata as Record<string, unknown>).routeHint !== undefined) {
     delete (args.metadata as Record<string, unknown>).routeHint;
   }
+  (rt as Record<string, unknown>).preserveRouteHint = false;
+  if ((args.metadata as Record<string, unknown>).disableStickyRoutes === true) {
+    (rt as Record<string, unknown>).disableStickyRoutes = true;
+  }
   (rt as Record<string, unknown>).serverToolOriginalEntryEndpoint =
     (typeof args.originalEntryEndpoint === 'string' && args.originalEntryEndpoint.trim().length
       ? args.originalEntryEndpoint

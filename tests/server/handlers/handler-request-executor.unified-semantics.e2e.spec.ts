@@ -693,6 +693,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     try {
       const payload = {
         model: 'gpt-5.3-codex',
+        store: true,
         metadata: { session_id: 'rcc-routecodex-capture' },
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'call shell_command' }] }],
         tools: [{ type: 'function', name: 'shell_command', parameters: { type: 'object' } }]

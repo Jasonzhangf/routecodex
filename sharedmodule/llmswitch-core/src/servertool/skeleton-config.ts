@@ -219,10 +219,16 @@ export function buildServertoolAutoHookQueueConfig(): {
   mandatoryOrder: string[];
 } {
   const skeleton = getDefaultServertoolSkeletonDocument();
-  return {
-    optionalPrimaryOrder: [...skeleton.servertool.skeleton.autoHooks.optionalPrimaryOrder]
+  const optionalPrimaryOrder = [...skeleton.servertool.skeleton.autoHooks.optionalPrimaryOrder]
       .map((value) => normalizeServerToolName(value))
-      .filter(Boolean),
+      .filter(Boolean);
+  if (!optionalPrimaryOrder.includes('empty_reply_continue')) {
+    const stopIdx = optionalPrimaryOrder.indexOf('stop_message_auto');
+    if (stopIdx >= 0) optionalPrimaryOrder.splice(stopIdx, 0, 'empty_reply_continue');
+    else optionalPrimaryOrder.push('empty_reply_continue');
+  }
+  return {
+    optionalPrimaryOrder,
     mandatoryOrder: [...skeleton.servertool.skeleton.autoHooks.mandatoryOrder]
       .map((value) => normalizeServerToolName(value))
       .filter(Boolean)

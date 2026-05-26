@@ -1,67 +1,85 @@
 import { waitWithClientAbortSignal } from './request-executor-abort.js';
 import { logNonBlockingError as logRequestExecutorNonBlockingError } from './request-executor-error-report.js';
 
-const GLOBAL_ERROR_BACKOFF_BASE_MS = 1_000;
-const GLOBAL_ERROR_BACKOFF_MAX_MS = 60_000;
+const ERROR_BACKOFF_BASE_MS = 1_000;
+const ERROR_BACKOFF_MAX_MS = 60_000;
 
-type GlobalErrorBackoffState = {
+type ErrorBackoffState = {
   consecutiveErrors: number;
   nextAllowedAtMs: number;
 };
 
-const globalErrorBackoffState: GlobalErrorBackoffState = {
-  consecutiveErrors: 0,
-  nextAllowedAtMs: 0
-};
-
-let globalErrorBackoffGate: Promise<void> | null = null;
+const scopedBackoffState = new Map<string, ErrorBackoffState>();
+const scopedBackoffGate = new Map<string, Promise<void>>();
 
 const nowMs = (): number => Date.now();
 
 const computeErrorBackoffDelayMs = (consecutiveErrors: number): number => {
   const exponent = Math.max(0, consecutiveErrors - 1);
-  const raw = GLOBAL_ERROR_BACKOFF_BASE_MS * (2 ** exponent);
-  return Math.min(GLOBAL_ERROR_BACKOFF_MAX_MS, Math.max(GLOBAL_ERROR_BACKOFF_BASE_MS, raw));
+  const raw = ERROR_BACKOFF_BASE_MS * (2 ** exponent);
+  return Math.min(ERROR_BACKOFF_MAX_MS, Math.max(ERROR_BACKOFF_BASE_MS, raw));
 };
 
-export function peekGlobalErrorBackoffWaitMs(): number {
-  return Math.max(0, globalErrorBackoffState.nextAllowedAtMs - nowMs());
+function readScopeState(scopeKey: string): ErrorBackoffState {
+  const existing = scopedBackoffState.get(scopeKey);
+  if (existing) {
+    return existing;
+  }
+  const created: ErrorBackoffState = { consecutiveErrors: 0, nextAllowedAtMs: 0 };
+  scopedBackoffState.set(scopeKey, created);
+  return created;
 }
 
-export function resetGlobalErrorBackoff(): void {
-  globalErrorBackoffState.consecutiveErrors = 0;
-  globalErrorBackoffState.nextAllowedAtMs = 0;
+export function peekScopedErrorBackoffWaitMs(scopeKey: string): number {
+  if (!scopeKey) return 0;
+  const state = scopedBackoffState.get(scopeKey);
+  if (!state) return 0;
+  return Math.max(0, state.nextAllowedAtMs - nowMs());
 }
 
-export function recordGlobalErrorBackoff(_error?: unknown): number {
-  globalErrorBackoffState.consecutiveErrors += 1;
-  const delayMs = computeErrorBackoffDelayMs(globalErrorBackoffState.consecutiveErrors);
-  globalErrorBackoffState.nextAllowedAtMs = nowMs() + delayMs;
+export function resetScopedErrorBackoff(scopeKey: string): void {
+  if (!scopeKey) return;
+  scopedBackoffState.delete(scopeKey);
+}
+
+export function resetScopedErrorBackoffByProvider(prefixKey: string): void {
+  if (!prefixKey) return;
+  for (const key of scopedBackoffState.keys()) {
+    if (key.startsWith(prefixKey)) {
+      scopedBackoffState.delete(key);
+    }
+  }
+}
+
+export function recordScopedErrorBackoff(scopeKey: string): number {
+  if (!scopeKey) return 0;
+  const state = readScopeState(scopeKey);
+  state.consecutiveErrors += 1;
+  const delayMs = computeErrorBackoffDelayMs(state.consecutiveErrors);
+  state.nextAllowedAtMs = nowMs() + delayMs;
   return delayMs;
 }
 
-export async function waitGlobalErrorBackoffWithGate(signal?: AbortSignal): Promise<number> {
-  const waitMs = peekGlobalErrorBackoffWaitMs();
-  if (waitMs <= 0) {
+export async function waitScopedErrorBackoffWithGate(scopeKey: string, signal?: AbortSignal): Promise<number> {
+  const waitMs = peekScopedErrorBackoffWaitMs(scopeKey);
+  if (!scopeKey || waitMs <= 0) {
     return 0;
   }
-  if (globalErrorBackoffGate) {
-    await globalErrorBackoffGate;
+  const existing = scopedBackoffGate.get(scopeKey);
+  if (existing) {
+    await existing;
     return waitMs;
   }
-  globalErrorBackoffGate = waitWithClientAbortSignal(
-    waitMs,
-    signal,
-    logRequestExecutorNonBlockingError
-  ).finally(() => {
-    globalErrorBackoffGate = null;
-  });
-  await globalErrorBackoffGate;
+  const gate = waitWithClientAbortSignal(waitMs, signal, logRequestExecutorNonBlockingError)
+    .finally(() => {
+      scopedBackoffGate.delete(scopeKey);
+    });
+  scopedBackoffGate.set(scopeKey, gate);
+  await gate;
   return waitMs;
 }
 
 export function resetGlobalErrorBackoffStateForTests(): void {
-  resetGlobalErrorBackoff();
-  globalErrorBackoffGate = null;
+  scopedBackoffState.clear();
+  scopedBackoffGate.clear();
 }
-

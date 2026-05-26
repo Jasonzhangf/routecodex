@@ -34,6 +34,17 @@ impl VirtualRouterEngineCore {
             .any(|candidate| self.health_manager.is_available(&candidate, now))
     }
 
+    fn event_has_route_alternative_provider(
+        &mut self,
+        event: &Value,
+        current_provider_key: &str,
+    ) -> bool {
+        if let Some(route_pool_size) = extract_route_pool_size(event) {
+            return route_pool_size > 1;
+        }
+        self.has_alternative_available_provider(current_provider_key)
+    }
+
     pub(crate) fn handle_provider_success(&mut self, event: &Value) {
         let provider_key = event
             .get("runtime")
@@ -68,7 +79,7 @@ impl VirtualRouterEngineCore {
         if provider_key.is_empty() {
             return;
         }
-        if !self.has_alternative_available_provider(&provider_key) {
+        if !self.event_has_route_alternative_provider(event, &provider_key) {
             return;
         }
         let reason = extract_error_reason(event);
@@ -143,7 +154,7 @@ impl VirtualRouterEngineCore {
         let Some(provider_key) = provider_key.as_deref() else {
             return false;
         };
-        if !self.has_alternative_available_provider(provider_key) {
+        if !self.event_has_route_alternative_provider(event, provider_key) {
             return true;
         }
         let reason = extract_error_reason(event);
@@ -274,6 +285,14 @@ fn resolve_provider_key(event: &Value) -> Option<String> {
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty())
         })
+}
+
+fn extract_route_pool_size(event: &Value) -> Option<i64> {
+    event
+        .get("details")
+        .and_then(|v| v.get("routePoolSize"))
+        .and_then(as_i64_like)
+        .map(|value| value.max(0))
 }
 
 fn extract_status_code(event: &Value) -> Option<i64> {
@@ -690,6 +709,64 @@ mod tests {
         assert_eq!(state.state, "healthy");
         assert_eq!(state.failure_count, 0);
         assert_eq!(state.cooldown_expires_at, None);
+    }
+
+    #[test]
+    fn route_pool_size_one_keeps_provider_available_even_if_registry_has_other_candidates() {
+        let mut core = build_test_core_with_providers(&[
+            ("test.key1.model-a", "gpt-test"),
+            ("test.key1.model-b", "gpt-test"),
+        ]);
+        let event = json!({
+            "code": "HTTP_429_2056",
+            "message": "usage limit exceeded",
+            "stage": "provider.send",
+            "status": 429,
+            "runtime": {
+                "requestId": "req-single-route-pool",
+                "providerKey": "test.key1.model-a"
+            },
+            "details": {
+                "errorClassification": "recoverable",
+                "upstreamCode": "provider_status_2056",
+                "routePoolSize": 1
+            }
+        });
+
+        core.handle_provider_error(&event);
+
+        let state = provider_state(&core, "test.key1.model-a");
+        assert_eq!(state.state, "healthy");
+        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.cooldown_expires_at, None);
+    }
+
+    #[test]
+    fn route_pool_size_two_allows_health_mutation_without_current_availability_probe() {
+        let mut core = build_test_core_with_providers(&[
+            ("test.key1.model-a", "gpt-test"),
+            ("test.key1.model-b", "gpt-test"),
+        ]);
+        let event = json!({
+            "code": "HTTP_429_2056",
+            "message": "usage limit exceeded",
+            "stage": "provider.send",
+            "status": 429,
+            "runtime": {
+                "requestId": "req-multi-route-pool",
+                "providerKey": "test.key1.model-a"
+            },
+            "details": {
+                "errorClassification": "recoverable",
+                "upstreamCode": "provider_status_2056",
+                "routePoolSize": 2
+            }
+        });
+
+        core.handle_provider_error(&event);
+
+        let state = provider_state(&core, "test.key1.model-a");
+        assert_eq!(state.failure_count, 1);
     }
 
     #[test]

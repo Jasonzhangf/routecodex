@@ -35,6 +35,15 @@ export async function buildResponsesChatEnvelopeFromPayload(
   logHubStageTiming(requestId, 'req_inbound.responses.capture_context', 'start');
   const captureStart = Date.now();
   const responsesContext = captureResponsesContext(payload, { route: { requestId: ctx.requestId } });
+  if (
+    (typeof (payload as Record<string, unknown>).previous_response_id === 'string'
+      && ((payload as Record<string, unknown>).previous_response_id as string).trim().length > 0)
+    && typeof (responsesContext as Record<string, unknown>).previous_response_id !== 'string'
+  ) {
+    (responsesContext as Record<string, unknown>).previous_response_id = String(
+      (payload as Record<string, unknown>).previous_response_id
+    ).trim();
+  }
   logHubStageTiming(requestId, 'req_inbound.responses.capture_context', 'completed', {
     elapsedMs: Date.now() - captureStart,
     forceLog: true

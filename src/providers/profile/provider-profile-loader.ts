@@ -78,7 +78,6 @@ const protocolAliases = {
   openai: new Set([
     'openai',
     'glm',
-    'qwen',
     'lmstudio',
     'deepseek',
     'deepseek-http',

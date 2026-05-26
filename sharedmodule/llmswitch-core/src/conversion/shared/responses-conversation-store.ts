@@ -37,6 +37,19 @@ function readToolCallId(item: AnyRecord): string | undefined {
   return undefined;
 }
 
+function shouldAllowContinuation(payload: AnyRecord | undefined): boolean {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return false;
+  }
+  if (payload.store === true) {
+    return true;
+  }
+  const previousResponseId = typeof payload.previous_response_id === 'string' ? payload.previous_response_id.trim() : '';
+  const responseId = typeof payload.response_id === 'string' ? payload.response_id.trim() : '';
+  const toolOutputs = Array.isArray(payload.tool_outputs) ? payload.tool_outputs : [];
+  return Boolean((previousResponseId || responseId) && toolOutputs.length > 0);
+}
+
 function collectPendingToolCallIds(input: AnyRecord[]): string[] {
   const pending: string[] = [];
   for (const item of input) {
@@ -86,6 +99,17 @@ function readResumeScopeKeysFromSubmitPayload(payload: AnyRecord | undefined): s
     ?? readScopeToken(metadata?.conversation_id)
     ?? readScopeToken(metadata?.conversationId);
   return buildScopeKeys({ sessionId, conversationId });
+}
+
+
+function ensureMetaProviderKey(meta: AnyRecord | undefined, entry: ConversationEntry): AnyRecord {
+  const baseMeta: AnyRecord = isRecord(meta) ? { ...meta } : {};
+  const metaProviderKey = readScopeToken(baseMeta.providerKey);
+  const entryProviderKey = readScopeToken(entry.providerKey) ?? readScopeToken((entry.basePayload as AnyRecord | undefined)?.providerKey);
+  if (!metaProviderKey && entryProviderKey) {
+    baseMeta.providerKey = entryProviderKey;
+  }
+  return baseMeta;
 }
 
 class ResponsesConversationStore {
@@ -147,8 +171,10 @@ class ResponsesConversationStore {
       requestId,
       basePayload: isRecord(prepared.basePayload) ? prepared.basePayload : pickPersistedFields(payload),
       input: Array.isArray(prepared.input) ? prepared.input : [],
+      allowContinuation: shouldAllowContinuation(payload),
       tools: Array.isArray(prepared.tools) ? prepared.tools : undefined,
       routeHint: readScopeToken(args.routeHint),
+      providerKey: readScopeToken(args.providerKey) ?? readScopeToken(payload.providerKey) ?? readScopeToken((prepared.basePayload as AnyRecord | undefined)?.providerKey),
       sessionId: readScopeToken(args.sessionId),
       conversationId: readScopeToken(args.conversationId),
       scopeKeys,
@@ -202,6 +228,11 @@ class ResponsesConversationStore {
       entry.routeHint = responseRouteHint;
       entry.basePayload.routeHint = responseRouteHint;
     }
+    const responseProviderKey = readScopeToken(args.providerKey);
+    if (responseProviderKey) {
+      entry.providerKey = responseProviderKey;
+      entry.basePayload.providerKey = responseProviderKey;
+    }
     const nextScopeKeys = buildScopeKeys({
       sessionId: args.sessionId,
       conversationId: args.conversationId
@@ -251,7 +282,7 @@ class ResponsesConversationStore {
         }
       }
     }
-    if (!entry) {
+    if (!entry || entry.allowContinuation !== true) {
       throw new ProviderProtocolError('Responses conversation expired or not found', {
         code: 'MALFORMED_REQUEST',
         protocol: 'openai-responses',
@@ -281,7 +312,7 @@ class ResponsesConversationStore {
     this.cleanupEntry(entry, responseId);
     return {
       payload: resumed.payload,
-      meta: resumed.meta
+      meta: ensureMetaProviderKey(resumed.meta, entry)
     };
   }
 
@@ -302,6 +333,7 @@ class ResponsesConversationStore {
     entry.basePayload = {
       ...(isRecord(entry.basePayload) ? entry.basePayload : {}),
       ...(entry.routeHint ? { routeHint: entry.routeHint } : {}),
+      ...(entry.providerKey ? { providerKey: entry.providerKey } : {}),
       ...(entry.lastResponseId ? { previous_response_id: entry.lastResponseId } : {})
     };
     entry.releasedPendingToolCallIds = collectPendingToolCallIds(entry.input);
@@ -315,7 +347,7 @@ class ResponsesConversationStore {
     const scopeKeys = buildScopeKeys(args);
     for (const scopeKey of scopeKeys) {
       const entry = this.scopeIndex.get(scopeKey);
-      if (!entry || !entry.lastResponseId) {
+      if (!entry || entry.allowContinuation !== true || !entry.lastResponseId) {
         continue;
       }
       assertResponsesConversationStoreNativeAvailable();
@@ -325,7 +357,7 @@ class ResponsesConversationStore {
       }
       return {
         payload: restored.payload,
-        meta: restored.meta
+        meta: ensureMetaProviderKey(restored.meta, entry)
       };
     }
     return null;
@@ -336,7 +368,7 @@ class ResponsesConversationStore {
     const scopeKeys = buildScopeKeys(args);
     for (const scopeKey of scopeKeys) {
       const entry = this.scopeIndex.get(scopeKey);
-      if (!entry) {
+      if (!entry || entry.allowContinuation !== true) {
         continue;
       }
       assertResponsesConversationStoreNativeAvailable();
@@ -346,7 +378,7 @@ class ResponsesConversationStore {
       }
       return {
         payload: materialized.payload,
-        meta: materialized.meta
+        meta: ensureMetaProviderKey(materialized.meta, entry)
       };
     }
     return null;

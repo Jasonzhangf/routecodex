@@ -333,6 +333,23 @@ async function cleanupResponsesConversationSupersededRequestIds(args: {
   }
 }
 
+function shouldPersistResponsesToolCallContinuationRecord(
+  entryEndpoint: string | undefined,
+  requestContext?: DispatchOptions['responsesRequestContext']
+): boolean {
+  if (entryEndpoint === '/v1/responses.submit_tool_outputs') {
+    return true;
+  }
+  if (entryEndpoint !== '/v1/responses') {
+    return false;
+  }
+  const payload =
+    requestContext?.payload && typeof requestContext.payload === 'object' && !Array.isArray(requestContext.payload)
+      ? (requestContext.payload as Record<string, unknown>)
+      : undefined;
+  return payload?.store === true;
+}
+
 async function recordResponsesConversationToolCallResponse(args: {
   entryEndpoint?: string;
   requestLabel: string;
@@ -348,6 +365,9 @@ async function recordResponsesConversationToolCallResponse(args: {
     args.entryEndpoint !== '/v1/responses'
     && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
   ) {
+    return;
+  }
+  if (!shouldPersistResponsesToolCallContinuationRecord(args.entryEndpoint, args.requestContext)) {
     return;
   }
   if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
@@ -442,6 +462,11 @@ async function captureResponsesConversationToolCallRequestContext(args: {
     && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
   ) return;
   if (!args.requestContext) return;
+  if (!shouldPersistResponsesToolCallContinuationRecord(args.entryEndpoint, args.requestContext)) return;
+  const requestPayload =
+    args.requestContext.payload && typeof args.requestContext.payload === 'object' && !Array.isArray(args.requestContext.payload)
+      ? (args.requestContext.payload as Record<string, unknown>)
+      : undefined;
   if (!isToolCallContinuationResponse(args.body)) return;
   const body = args.body && typeof args.body === 'object' && !Array.isArray(args.body)
     ? args.body as Record<string, unknown>
@@ -1390,6 +1415,7 @@ export async function sendPipelineResponse(
         providerKey: conversationProviderKey,
         sessionId: result.usageLogInfo?.sessionId,
         conversationId: result.usageLogInfo?.conversationId,
+        requestContext: effectiveResponsesRequestContext,
         body: sanitizedProbeBody
       });
       if (finishTracker.finishReason !== 'tool_calls') {

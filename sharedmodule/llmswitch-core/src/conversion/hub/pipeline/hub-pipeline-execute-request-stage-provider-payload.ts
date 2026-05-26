@@ -202,6 +202,7 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
     requestId: normalized.id,
     entryProtocol: normalized.providerProtocol,
     outboundProtocol,
+    outboundProviderKey: typeof outboundAdapterContext.providerKey === 'string' ? outboundAdapterContext.providerKey : undefined,
   });
   const outboundStage1 = await measureHubStage(normalized.id, "req_outbound.stage1_semantic_map", () => runReqOutboundStage1SemanticMap({
     request: routeAwareWorkingRequest,

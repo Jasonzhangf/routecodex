@@ -1,653 +1,311 @@
-import { afterEach, describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, jest, test } from '@jest/globals';
 
-import {
-  captureResponsesRequestContext,
-  clearResponsesConversationByRequestId,
-  recordResponsesResponse
-} from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
-import { resolveRouteAwareResponsesContinuation } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js';
-import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+const mockResumeLatestResponsesContinuationByScope = jest.fn();
+const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
+
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js', () => ({
+  captureResponsesRequestContext: jest.fn(),
+  clearResponsesConversationByRequestId: jest.fn(),
+  recordResponsesResponse: jest.fn(),
+  resumeLatestResponsesContinuationByScope: mockResumeLatestResponsesContinuationByScope,
+  materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
+}));
 
 describe('route-aware responses continuation', () => {
-  const requestIds = ['req-route-aware-1', 'req-route-aware-2'];
+  const sessionId = 'sess_route_aware_seed_1';
 
   afterEach(() => {
-    for (const requestId of requestIds) {
-      clearResponsesConversationByRequestId(requestId);
-    }
+    jest.clearAllMocks();
   });
 
-  it('restores remote previous_response_id + deltaInput only after target resolves to responses provider', () => {
-    captureResponsesRequestContext({
-      requestId: 'req-route-aware-1',
-      sessionId: 'sess-route-aware-1',
-      routeHint: 'tools',
+  test('RED: plain /v1/responses create must not consult scope continuation store without explicit continuation evidence', async () => {
+    mockResumeLatestResponsesContinuationByScope.mockReturnValue({
       payload: {
-        model: 'gpt-5.3-codex',
-        tools: [{ type: 'function', function: { name: 'exec_command' } }]
+        previous_response_id: 'resp_should_not_resume',
+        input: [{ type: 'function_call_output', call_id: 'call_should_not_resume', output: 'bad' }],
+        tools: [{ type: 'function', name: 'exec_command' }],
       },
-      context: {
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'hello' }]
-          }
-        ],
-        toolsRaw: [{ type: 'function', function: { name: 'exec_command' } }]
-      }
+      meta: {
+        previousResponseId: 'resp_should_not_resume',
+        restoredFromScopeKey: `session:${sessionId}`,
+      },
     });
 
-    recordResponsesResponse({
-      requestId: 'req-route-aware-1',
-      routeHint: 'thinking',
-      response: {
-        id: 'resp-route-aware-1',
-        output: [
-          {
-            type: 'message',
-            role: 'assistant',
-            content: [{ type: 'output_text', text: 'world' }]
-          }
-        ]
-      }
-    });
+    const { resolveRouteAwareResponsesContinuation } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js');
 
-    const workingRequest = {
-      model: 'gpt-5.3-codex',
-      messages: [
-        { role: 'user', content: 'hello' },
-        { role: 'assistant', content: 'world' },
-        { role: 'user', content: 'next turn' }
+    const plainCreate = {
+      model: 'gpt-5.4',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '普通首发，不该续接' }],
+        },
       ],
-      parameters: {},
-      metadata: {}
-    } as any;
+    } as Record<string, unknown>;
 
-    const resolved = resolveRouteAwareResponsesContinuation({
-      request: workingRequest,
-      rawRequest: {
-        model: 'gpt-5.3-codex',
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'hello' }]
-          },
-          {
-            type: 'message',
-            role: 'assistant',
-            content: [{ type: 'output_text', text: 'world' }]
-          },
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'next turn' }]
-          }
-        ]
-      } as any,
+    const result = resolveRouteAwareResponsesContinuation({
+      request: plainCreate as any,
+      rawRequest: plainCreate as any,
       normalizedMetadata: {
-        sessionId: 'sess-route-aware-1'
+        sessionId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
       },
-      requestId: 'req-route-aware-2',
+      requestId: 'req_route_aware_plain_create_no_explicit_resume',
       entryProtocol: 'openai-responses',
-      outboundProtocol: 'openai-responses'
-    });
+      outboundProtocol: 'openai-responses',
+    }) as Record<string, unknown>;
 
-    expect((resolved as any).semantics?.responses?.resume).toMatchObject({
-      previousRequestId: 'req-route-aware-1',
-      restoredFromResponseId: 'resp-route-aware-1',
-      routeHint: 'thinking',
-      restored: true
-    });
-    expect((resolved as any).semantics?.responses?.resume?.restoredTools).toEqual([
-      { type: 'function', function: { name: 'exec_command' } }
-    ]);
-    expect((resolved as any).semantics?.responses?.resume?.deltaInput).toEqual([
-      {
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: 'next turn' }]
-      }
-    ]);
-
-    const outbound = buildResponsesRequestFromChat(resolved as any, {
-      requestId: 'req-route-aware-2',
-      metadata: {}
-    });
-    expect((outbound.request as any).previous_response_id).toBe('resp-route-aware-1');
-    expect((outbound.request as any).input).toEqual([
-      {
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: 'next turn' }]
-      }
-    ]);
+    expect(mockResumeLatestResponsesContinuationByScope).not.toHaveBeenCalled();
+    expect(result.previous_response_id).toBeUndefined();
+    expect(result.input).toEqual(plainCreate.input);
   });
 
-  it('does not rewrite ordinary responses request before capability is known for non-responses outbound', () => {
-    captureResponsesRequestContext({
-      requestId: 'req-route-aware-1',
-      sessionId: 'sess-route-aware-1',
+  test('RED: explicit previous_response_id direct continuation must stay remote and must not consult local scope store', async () => {
+    mockResumeLatestResponsesContinuationByScope.mockReturnValue({
       payload: {
-        model: 'gpt-5.3-codex'
+        previous_response_id: 'resp_local_scope_should_not_win',
+        input: [{ type: 'function_call_output', call_id: 'call_local_scope_should_not_win', output: 'bad' }],
+        tools: [{ type: 'function', name: 'exec_command' }],
       },
-      context: {
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'hello' }]
-          },
-          {
-            type: 'message',
-            role: 'assistant',
-            content: [{ type: 'output_text', text: 'world' }]
-          }
-        ]
-      }
+      meta: {
+        previousResponseId: 'resp_local_scope_should_not_win',
+        restoredFromScopeKey: `session:${sessionId}`,
+      },
     });
 
-    recordResponsesResponse({
-      requestId: 'req-route-aware-1',
-      response: {
-        id: 'resp-route-aware-1',
-        output: []
-      }
-    });
+    const { resolveRouteAwareResponsesContinuation } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js');
 
-    const workingRequest = {
-      model: 'gpt-5.3-codex',
-      messages: [{ role: 'user', content: 'next turn' }],
-      parameters: {},
-      metadata: {}
-    } as any;
+    const request = {
+      model: 'gpt-5.4',
+      previous_response_id: 'resp_remote_direct_truth',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '远程 direct continuation' }] }],
+    } as Record<string, unknown>;
 
-    const resolved = resolveRouteAwareResponsesContinuation({
-      request: workingRequest,
-      rawRequest: {
-        model: 'gpt-5.3-codex',
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'next turn' }]
-          }
-        ]
-      } as any,
+    const result = resolveRouteAwareResponsesContinuation({
+      request: request as any,
+      rawRequest: request as any,
       normalizedMetadata: {
-        sessionId: 'sess-route-aware-1'
+        sessionId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
       },
-      requestId: 'req-route-aware-2',
+      requestId: 'req_route_aware_direct_previous_response_id_remote_only',
       entryProtocol: 'openai-responses',
-      outboundProtocol: 'anthropic-messages'
-    });
+      outboundProtocol: 'openai-responses',
+    }) as Record<string, unknown>;
 
-    expect(resolved).not.toBe(workingRequest);
-    expect((resolved as any).messages).toEqual([
-      { role: 'user', content: 'hello' },
-      { role: 'assistant', content: 'world' },
-      { role: 'user', content: 'next turn' }
-    ]);
-    expect((resolved as any).semantics?.responses?.resume).toMatchObject({
-      previousRequestId: 'req-route-aware-1',
-      restoredFromResponseId: 'resp-route-aware-1',
-      materialized: true,
-      materializedMode: 'local_full_input'
-    });
+    expect(mockResumeLatestResponsesContinuationByScope).not.toHaveBeenCalled();
+    expect(result.previous_response_id).toBe('resp_remote_direct_truth');
+    expect(result.input).toEqual(request.input);
   });
 
-  it('preserves the already route-selected model when materializing responses continuation for non-responses outbound', () => {
-    captureResponsesRequestContext({
-      requestId: 'req-route-aware-1',
-      sessionId: 'sess-route-aware-1',
+  test('RED: explicit previous_response_id must not materialize local relay continuation across ownership boundary', async () => {
+    mockMaterializeLatestResponsesContinuationByScope.mockReturnValue({
       payload: {
-        model: 'gpt-5.4'
+        input: [{ type: 'function_call_output', call_id: 'call_local_scope_materialized', output: 'bad' }],
+        tools: [{ type: 'function', name: 'exec_command' }],
       },
-      context: {
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'hello' }]
-          },
-          {
-            type: 'message',
-            role: 'assistant',
-            content: [{ type: 'output_text', text: 'world' }]
-          }
-        ]
-      }
+      meta: {
+        previousResponseId: 'resp_local_scope_materialized',
+        restoredFromScopeKey: `session:${sessionId}`,
+      },
     });
 
-    recordResponsesResponse({
-      requestId: 'req-route-aware-1',
-      response: {
-        id: 'resp-route-aware-1',
-        output: []
-      }
-    });
+    const { resolveRouteAwareResponsesContinuation } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js');
 
-    const workingRequest = {
-      model: 'qwen3.6-plus',
-      messages: [{ role: 'user', content: 'next turn' }],
-      parameters: {},
-      metadata: {}
-    } as any;
+    const request = {
+      model: 'gpt-5.4',
+      previous_response_id: 'resp_remote_direct_truth_forbidden_to_relay',
+      messages: [{ role: 'user', content: '不能跨 direct/relay 恢复' }],
+    } as Record<string, unknown>;
 
-    const resolved = resolveRouteAwareResponsesContinuation({
-      request: workingRequest,
-      rawRequest: {
-        model: 'gpt-5.4',
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'next turn' }]
-          }
-        ]
-      } as any,
+    const result = resolveRouteAwareResponsesContinuation({
+      request: request as any,
+      rawRequest: request as any,
       normalizedMetadata: {
-        sessionId: 'sess-route-aware-1'
+        sessionId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
       },
-      requestId: 'req-route-aware-2',
+      requestId: 'req_route_aware_cross_protocol_previous_response_id_forbidden',
       entryProtocol: 'openai-responses',
-      outboundProtocol: 'openai-chat-completions'
-    });
+      outboundProtocol: 'openai-chat',
+    }) as Record<string, unknown>;
 
-    expect((resolved as any).model).toBe('qwen3.6-plus');
-    expect((resolved as any).messages).toEqual([
-      { role: 'user', content: 'hello' },
-      { role: 'assistant', content: 'world' },
-      { role: 'user', content: 'next turn' }
-    ]);
-    expect((resolved as any).semantics?.responses?.resume).toMatchObject({
-      previousRequestId: 'req-route-aware-1',
-      restoredFromResponseId: 'resp-route-aware-1',
-      materialized: true,
-      materializedMode: 'local_full_input'
-    });
+    expect(mockMaterializeLatestResponsesContinuationByScope).not.toHaveBeenCalled();
+    expect(result.messages).toEqual(request.messages);
+    expect(result.previous_response_id).toBe('resp_remote_direct_truth_forbidden_to_relay');
   });
 
-  it('synthesizes unified submit_tool_outputs continuation when materialized resume carries function_call_output items', () => {
-    captureResponsesRequestContext({
-      requestId: 'req-route-aware-1',
-      sessionId: 'sess-route-aware-1',
-      payload: {
-        model: 'gpt-5.4'
-      },
-      context: {
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: '请执行 pwd' }]
-          },
-          {
-            type: 'function_call',
-            id: 'fc_route_aware_submit_1',
-            call_id: 'call_route_aware_submit_1',
-            name: 'exec_command',
-            arguments: JSON.stringify({ cmd: 'pwd' })
-          }
-        ]
-      }
-    });
 
-    recordResponsesResponse({
-      requestId: 'req-route-aware-1',
-      response: {
-        id: 'resp-route-aware-submit-1',
-        output: []
-      }
-    });
 
-    const resolved = resolveRouteAwareResponsesContinuation({
-      request: {
-        model: 'qwen3.6-plus',
-        messages: [{ role: 'user', content: '继续' }],
-        parameters: {},
-        metadata: {}
-      } as any,
-      rawRequest: {
-        model: 'gpt-5.4',
-        input: [
-          {
-            type: 'function_call_output',
-            call_id: 'call_route_aware_submit_1',
-            output: '/tmp'
-          },
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: '继续' }]
-          }
-        ]
-      } as any,
+  test('RED: direct previous_response_id continuation must fail fast when responsesResume pins a different provider', async () => {
+    const { resolveRouteAwareResponsesContinuation } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js');
+
+    const request = {
+      model: 'gpt-5.4',
+      previous_response_id: 'resp_remote_direct_truth',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '远程 direct continuation provider mismatch' }] }],
+    } as Record<string, unknown>;
+
+    expect(() => resolveRouteAwareResponsesContinuation({
+      request: request as any,
+      rawRequest: request as any,
       normalizedMetadata: {
-        sessionId: 'sess-route-aware-1'
-      },
-      requestId: 'req-route-aware-2',
-      entryProtocol: 'openai-responses',
-      outboundProtocol: 'openai-chat-completions'
-    });
-
-    expect((resolved as any).semantics?.responses?.resume).toMatchObject({
-      previousRequestId: 'req-route-aware-1',
-      restoredFromResponseId: 'resp-route-aware-submit-1',
-      materialized: true,
-      materializedMode: 'local_full_input'
-    });
-    expect((resolved as any).semantics?.continuation).toMatchObject({
-      chainId: 'req-route-aware-1',
-      stickyScope: 'request_chain',
-      stateOrigin: 'openai-responses',
-      restored: true,
-      toolContinuation: {
-        mode: 'submit_tool_outputs',
-        submittedToolCallIds: ['call_route_aware_submit_1'],
-        resumeOutputs: ['/tmp']
-      }
-    });
-    expect((resolved as any).messages).toEqual([
-      { role: 'user', content: '请执行 pwd' },
-      {
-        role: 'assistant',
-        tool_calls: [
-          expect.objectContaining({
-            id: 'call_route_aware_submit_1'
-          })
-        ],
-        content: ''
-      },
-      {
-        role: 'tool',
-        id: 'call_route_aware_submit_1',
-        name: 'exec_command',
-        tool_call_id: 'call_route_aware_submit_1',
-        content: '/tmp'
-      },
-      { role: 'user', content: '继续' }
-    ]);
-  });
-
-  it('RED: restores responses previous_response_id when history continuation includes tool output and declared tools', () => {
-    captureResponsesRequestContext({
-      requestId: 'req-route-aware-1',
-      sessionId: 'sess-route-aware-1',
-      routeHint: 'tools/gateway-priority-5520-tools',
-      payload: {
-        model: 'gpt-5.4',
-        tools: [{ type: 'function', function: { name: 'exec_command' } }]
-      },
-      context: {
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'first coding request' }]
-          }
-        ],
-        toolsRaw: [{ type: 'function', function: { name: 'exec_command' } }]
-      }
-    });
-
-    recordResponsesResponse({
-      requestId: 'req-route-aware-1',
-      routeHint: 'coding/gateway-priority-5520-coding',
-      response: {
-        id: 'resp-route-aware-history-tool-1',
-        object: 'response',
-        status: 'requires_action',
-        output: [
-          {
-            type: 'function_call',
-            id: 'fc_route_aware_history_tool_1',
-            call_id: 'call_route_aware_history_tool_1',
-            name: 'exec_command',
-            arguments: JSON.stringify({ cmd: 'pwd' })
-          }
-        ]
-      }
-    });
-
-    const resolved = resolveRouteAwareResponsesContinuation({
-      request: {
-        model: 'gpt-5.4',
-        messages: [{ role: 'user', content: 'continue coding' }],
-        parameters: {},
-        metadata: {}
-      } as any,
-      rawRequest: {
-        model: 'gpt-5.4',
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'first coding request' }]
-          },
-          {
-            type: 'function_call_output',
-            call_id: 'call_route_aware_history_tool_1',
-            output: '/Users/fanzhang/Documents/github/routecodex'
-          },
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'continue coding' }]
-          }
-        ]
-      } as any,
-      normalizedMetadata: {
-        sessionId: 'sess-route-aware-1'
-      },
-      requestId: 'req-route-aware-2',
-      entryProtocol: 'openai-responses',
-      outboundProtocol: 'openai-responses'
-    });
-
-    expect((resolved as any).semantics?.responses?.resume).toMatchObject({
-      previousRequestId: 'req-route-aware-1',
-      restoredFromResponseId: 'resp-route-aware-history-tool-1',
-      routeHint: 'coding/gateway-priority-5520-coding',
-      restored: true
-    });
-    expect((resolved as any).semantics?.responses?.resume?.deltaInput).toEqual([
-      {
-        type: 'function_call_output',
-        call_id: 'call_route_aware_history_tool_1',
-        output: '/Users/fanzhang/Documents/github/routecodex'
-      },
-      {
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: 'continue coding' }]
-      }
-    ]);
-
-    const outbound = buildResponsesRequestFromChat(resolved as any, {
-      requestId: 'req-route-aware-2',
-      metadata: {}
-    });
-    expect((outbound.request as any).previous_response_id).toBe('resp-route-aware-history-tool-1');
-    expect((outbound.request as any).tools).toEqual([{ type: 'function', function: { name: 'exec_command' } }]);
-    expect((outbound.request as any).input).toEqual([
-      {
-        type: 'function_call_output',
-        call_id: 'call_route_aware_history_tool_1',
-        output: '/Users/fanzhang/Documents/github/routecodex'
-      },
-      {
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: 'continue coding' }]
-      }
-    ]);
-  });
-
-  it('does not materialize scope continuation when stored prefix still has unresolved tool call and incoming turn has no tool output', () => {
-    captureResponsesRequestContext({
-      requestId: 'req-route-aware-1',
-      sessionId: 'sess-route-aware-1',
-      payload: {
-        model: 'gpt-5.4'
-      },
-      context: {
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: '请执行 pwd' }]
-          }
-        ]
-      }
-    });
-
-    recordResponsesResponse({
-      requestId: 'req-route-aware-1',
-      response: {
-        id: 'resp-route-aware-pending-plain-1',
-        object: 'response',
-        status: 'requires_action',
-        output: [
-          {
-            type: 'function_call',
-            id: 'fc_route_aware_pending_plain_1',
-            call_id: 'call_route_aware_pending_plain_1',
-            name: 'exec_command',
-            arguments: JSON.stringify({ cmd: 'pwd' }),
-            status: 'in_progress'
-          }
-        ],
-        required_action: {
-          type: 'submit_tool_outputs',
-          submit_tool_outputs: {
-            tool_calls: [
-              {
-                id: 'call_route_aware_pending_plain_1',
-                type: 'function',
-                name: 'exec_command',
-                arguments: JSON.stringify({ cmd: 'pwd' })
-              }
-            ]
+        sessionId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        responsesResume: {
+          resumeFrom: {
+            providerKey: 'provider.expected.gpt-5.4'
           }
         }
-      }
-    });
-
-    const workingRequest = {
-      model: 'qwen3.6-plus',
-      messages: [{ role: 'user', content: '继续，但没有工具结果' }],
-      parameters: {},
-      metadata: {}
-    } as any;
-
-    const resolved = resolveRouteAwareResponsesContinuation({
-      request: workingRequest,
-      rawRequest: {
-        model: 'gpt-5.4',
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: '继续，但没有工具结果' }]
-          }
-        ]
-      } as any,
-      normalizedMetadata: {
-        sessionId: 'sess-route-aware-1'
       },
-      requestId: 'req-route-aware-2',
+      requestId: 'req_route_aware_direct_previous_response_id_provider_mismatch',
       entryProtocol: 'openai-responses',
-      outboundProtocol: 'openai-chat-completions'
-    });
-
-    expect((resolved as any).messages).toEqual([{ role: 'user', content: '继续，但没有工具结果' }]);
-    expect((resolved as any).semantics?.responses?.resume).toBeUndefined();
-    expect((resolved as any).semantics?.continuation).toBeUndefined();
+      outboundProtocol: 'openai-responses',
+      outboundProviderKey: 'provider.actual.gpt-5.4',
+    } as any)).toThrow(/provider mismatch/i);
+    expect(mockResumeLatestResponsesContinuationByScope).not.toHaveBeenCalled();
   });
 
-  it('strips historical image turns when materializing responses continuation for non-responses outbound', () => {
-    captureResponsesRequestContext({
-      requestId: 'req-route-aware-1',
-      sessionId: 'sess-route-aware-1',
-      payload: {
-        model: 'gpt-5.4'
-      },
-      context: {
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [
-              {
-                type: 'input_image',
-                image_url: 'data:image/png;base64,AAAA'
-              },
-              {
-                type: 'input_text',
-                text: 'old image turn'
-              }
-            ]
-          },
-          {
-            type: 'message',
-            role: 'assistant',
-            content: [{ type: 'output_text', text: 'ack' }]
-          }
-        ]
-      }
-    });
+  test('keeps direct previous_response_id continuation when responsesResume pins the same provider', async () => {
+    const { resolveRouteAwareResponsesContinuation } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js');
 
-    recordResponsesResponse({
-      requestId: 'req-route-aware-1',
-      response: {
-        id: 'resp-route-aware-1',
-        output: []
-      }
-    });
+    const request = {
+      model: 'gpt-5.4',
+      previous_response_id: 'resp_remote_direct_truth',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '远程 direct continuation provider match' }] }],
+    } as Record<string, unknown>;
 
-    const resolved = resolveRouteAwareResponsesContinuation({
-      request: {
-        model: 'qwen3.6-plus',
-        messages: [{ role: 'user', content: 'next turn' }],
-        parameters: {},
-        metadata: {}
-      } as any,
-      rawRequest: {
-        model: 'gpt-5.4',
-        input: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'next turn' }]
-          }
-        ]
-      } as any,
+    const result = resolveRouteAwareResponsesContinuation({
+      request: request as any,
+      rawRequest: request as any,
       normalizedMetadata: {
-        sessionId: 'sess-route-aware-1'
+        sessionId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        responsesResume: {
+          resumeFrom: {
+            providerKey: 'provider.expected.gpt-5.4'
+          }
+        }
       },
-      requestId: 'req-route-aware-2',
+      requestId: 'req_route_aware_direct_previous_response_id_provider_match',
       entryProtocol: 'openai-responses',
-      outboundProtocol: 'openai-chat-completions'
+      outboundProtocol: 'openai-responses',
+      outboundProviderKey: 'provider.expected.gpt-5.4',
+    } as any) as Record<string, unknown>;
+
+    expect(result.previous_response_id).toBe('resp_remote_direct_truth');
+    expect(result.input).toEqual(request.input);
+    expect(mockResumeLatestResponsesContinuationByScope).not.toHaveBeenCalled();
+  });
+  test('keeps explicit previous_response_id continuation for openai-responses outbound', async () => {
+    const { resolveRouteAwareResponsesContinuation } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js');
+
+    const request = {
+      model: 'gpt-5.4',
+      previous_response_id: 'resp_explicit_1',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '继续上一轮' }],
+        },
+      ],
+    } as Record<string, unknown>;
+
+    const result = resolveRouteAwareResponsesContinuation({
+      request: request as any,
+      rawRequest: request as any,
+      normalizedMetadata: {
+        sessionId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+      },
+      requestId: 'req_route_aware_explicit_continue',
+      entryProtocol: 'openai-responses',
+      outboundProtocol: 'openai-responses',
+    }) as Record<string, unknown>;
+
+    expect(result.previous_response_id).toBe('resp_explicit_1');
+    expect(result.input).toEqual(request.input);
+  });
+
+  test('consults continuation store when submit_tool_outputs/responsesResume provide explicit continuation evidence', async () => {
+    mockResumeLatestResponsesContinuationByScope.mockReturnValue({
+      payload: {
+        previous_response_id: 'resp_explicit_resume_ok',
+        input: [{ type: 'function_call_output', call_id: 'call_explicit_resume_ok', output: 'ok' }],
+        tools: [{ type: 'function', name: 'exec_command' }],
+      },
+      meta: {
+        previousResponseId: 'resp_explicit_resume_ok',
+        restoredFromScopeKey: `session:${sessionId}`,
+      },
     });
 
-    expect((resolved as any).messages).toEqual([
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: '[Image omitted]'
-          },
-          {
-            type: 'input_text',
-            text: 'old image turn'
-          }
-        ]
+    const { resolveRouteAwareResponsesContinuation } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js');
+
+    const explicitResume = {
+      model: 'gpt-5.4',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'submit_tool_outputs continuation' }],
+        },
+      ],
+    } as Record<string, unknown>;
+
+    const result = resolveRouteAwareResponsesContinuation({
+      request: explicitResume as any,
+      rawRequest: explicitResume as any,
+      normalizedMetadata: {
+        sessionId,
+        entryEndpoint: '/v1/responses.submit_tool_outputs',
+        providerProtocol: 'openai-responses',
+        responsesResume: { previousResponseId: 'resp_explicit_resume_ok' },
       },
-      { role: 'assistant', content: 'ack' },
-      { role: 'user', content: 'next turn' }
-    ]);
+      requestId: 'req_route_aware_explicit_resume_ok',
+      entryProtocol: 'openai-responses',
+      outboundProtocol: 'openai-responses',
+    }) as Record<string, unknown>;
+
+    expect(mockResumeLatestResponsesContinuationByScope).toHaveBeenCalledTimes(1);
+    expect(result).toBeTruthy();
+  });
+
+  test('accepts direct submit_tool_outputs provider pin carried as flat responsesResume.providerKey', async () => {
+    const { resolveRouteAwareResponsesContinuation } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js');
+
+    const request = {
+      model: 'gpt-5.4',
+      previous_response_id: 'resp_submit_direct_provider_pin_flat',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'flat provider pin' }] }],
+    } as Record<string, unknown>;
+
+    const result = resolveRouteAwareResponsesContinuation({
+      request: request as any,
+      rawRequest: request as any,
+      normalizedMetadata: {
+        sessionId,
+        entryEndpoint: '/v1/responses.submit_tool_outputs',
+        providerProtocol: 'openai-responses',
+        responsesResume: {
+          providerKey: 'dibittai.crsa.gpt-5.4'
+        }
+      },
+      requestId: 'req_route_aware_submit_tool_outputs_provider_pin_flat',
+      entryProtocol: 'openai-responses',
+      outboundProtocol: 'openai-responses',
+      outboundProviderKey: 'dibittai.crsa.gpt-5.4',
+    } as any) as Record<string, unknown>;
+
+    expect(result.previous_response_id).toBe('resp_submit_direct_provider_pin_flat');
+    expect(result.input).toEqual(request.input);
   });
 });

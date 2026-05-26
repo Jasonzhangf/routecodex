@@ -495,20 +495,24 @@ export async function handleProviderQuotaErrorEvent(
     (errorClassification === 'unrecoverable' || isRepeated5xxOutOfPool)
     && appliedState.consecutiveErrorCount >= 3
     && routePoolSize > 1;
+  const mustKeepInPoolAsLastProvider = routePoolSize <= 1;
   const nextState: QuotaState =
     shouldEvictFromPool
       ? {
           ...appliedState,
-          inPool: true,
+          inPool: false,
           reason: 'cooldown',
-          cooldownKeepsPool: true,
+          cooldownKeepsPool: undefined,
           blacklistUntil: null
         }
       : {
           ...appliedState,
-          inPool: true,
+          inPool: mustKeepInPoolAsLastProvider ? true : appliedState.inPool,
           reason: appliedState.reason === 'ok' ? 'ok' : 'cooldown',
-          cooldownKeepsPool: appliedState.reason === 'ok' ? undefined : true
+          cooldownKeepsPool:
+            appliedState.reason === 'ok'
+              ? undefined
+              : (mustKeepInPoolAsLastProvider ? true : appliedState.cooldownKeepsPool)
         };
   ctx.quotaStates.set(providerKey, nextState);
 

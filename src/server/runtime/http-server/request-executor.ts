@@ -117,11 +117,11 @@ import {
   waitWithClientAbortSignal
 } from './executor/request-executor-abort.js';
 import {
-  peekGlobalErrorBackoffWaitMs,
-  recordGlobalErrorBackoff,
-  resetGlobalErrorBackoff,
+  peekScopedErrorBackoffWaitMs,
+  recordScopedErrorBackoff,
+  resetScopedErrorBackoffByProvider,
   resetGlobalErrorBackoffStateForTests,
-  waitGlobalErrorBackoffWithGate
+  waitScopedErrorBackoffWithGate
 } from './executor/request-executor-global-error-backoff.js';
 import {
   bodyContainsReasoningStopFinalizedMarker,
@@ -383,17 +383,22 @@ export class HubRequestExecutor implements RequestExecutor {
       this.deps.stats.recordCompletion(statsRequestId, options);
       recordedAnyAttempt = true;
     };
+    const metadataRecord = asFlatRecord(input.metadata);
+    const portScope =
+      readString(metadataRecord?.routecodexRoutingPolicyGroup)
+      || readString(metadataRecord?.routecodexPort)
+      || 'unknown-port';
+    const buildScopedBackoffKey = (providerKey: string, errorCode: string): string =>
+      `${portScope}|${providerKey || 'unknown-provider'}|${errorCode || 'unknown-error'}`;
+    const resolveScopedBackoffErrorCode = (error: unknown): string => {
+      const record = asFlatRecord(error);
+      const code =
+        readString(record?.code)
+        || readString(record?.upstreamCode)
+        || (typeof extractStatusCodeFromError(error) === 'number' ? `status_${extractStatusCodeFromError(error)}` : '');
+      return normalizeCodeKey(code || 'unknown_error') || 'unknown_error';
+    };
     try {
-      const pendingGlobalErrorWaitMs = peekGlobalErrorBackoffWaitMs();
-      if (pendingGlobalErrorWaitMs > 0) {
-        logStage('server.global_error_backoff_wait', executorRequestId, {
-          waitMs: pendingGlobalErrorWaitMs
-        });
-        await waitGlobalErrorBackoffWithGate(getClientConnectionAbortSignal(input.metadata));
-        logStage('server.global_error_backoff_wait.completed', executorRequestId, {
-          waitMs: pendingGlobalErrorWaitMs
-        });
-      }
       const hubPipeline = ensureHubPipeline(this.deps.getHubPipeline);
       const {
         initialMetadata,
@@ -407,45 +412,6 @@ export class HubRequestExecutor implements RequestExecutor {
         onRequestStart: this.deps.onRequestStart,
         logNonBlockingError: logRequestExecutorNonBlockingError
       });
-      if (input.entryEndpoint === '/v1/responses') {
-        const responsesRequestContext =
-          input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
-            ? (input.metadata as Record<string, unknown>).responsesRequestContext
-            : undefined;
-        const contextRecord =
-          responsesRequestContext && typeof responsesRequestContext === 'object' && !Array.isArray(responsesRequestContext)
-            ? (responsesRequestContext as Record<string, unknown>)
-            : undefined;
-        const payloadRecord =
-          contextRecord?.payload && typeof contextRecord.payload === 'object' && !Array.isArray(contextRecord.payload)
-            ? (contextRecord.payload as Record<string, unknown>)
-            : undefined;
-        const contextPayload =
-          contextRecord?.context && typeof contextRecord.context === 'object' && !Array.isArray(contextRecord.context)
-            ? (contextRecord.context as Record<string, unknown>)
-            : undefined;
-        if (payloadRecord && contextPayload) {
-          const sessionId =
-            typeof contextRecord?.sessionId === 'string' ? contextRecord.sessionId : undefined;
-          const conversationId =
-            typeof contextRecord?.conversationId === 'string' ? contextRecord.conversationId : undefined;
-          await captureResponsesRequestContextForRequest({
-            requestId: input.requestId,
-            payload: payloadRecord,
-            context: contextPayload,
-            sessionId,
-            conversationId,
-            routeHint: typeof (input.metadata as Record<string, unknown>).routeHint === 'string'
-              ? String((input.metadata as Record<string, unknown>).routeHint)
-              : undefined
-          }).catch((error) => {
-            logRequestExecutorNonBlockingError('responses_context.capture_inbound', error, {
-              requestId: input.requestId,
-              entryEndpoint: input.entryEndpoint
-            });
-          });
-        }
-      }
       try {
         const pipelineLabel = 'hub';
         let aggregatedUsage: UsageMetrics | undefined;
@@ -1175,7 +1141,7 @@ export class HubRequestExecutor implements RequestExecutor {
           for (const scope of sessionStormBackoffScopes ?? []) {
             clearSessionStormBackoff(scope);
           }
-          resetGlobalErrorBackoff();
+          resetScopedErrorBackoffByProvider(`${portScope}|${target.providerKey}|`);
           return buildProviderExecutionSuccessResult({
             converted,
             providerKey: target.providerKey,
@@ -1257,6 +1223,23 @@ export class HubRequestExecutor implements RequestExecutor {
           forcedRouteHint = failureState.forcedRouteHint;
           contextOverflowRetries = failureState.contextOverflowRetries;
           cumulativeExternalLatencyMs = failureState.cumulativeExternalLatencyMs;
+          if (target.providerKey) {
+            const scopedErrorCode = resolveScopedBackoffErrorCode(error);
+            const scopedBackoffKey = buildScopedBackoffKey(target.providerKey, scopedErrorCode);
+            const pendingScopedWaitMs = peekScopedErrorBackoffWaitMs(scopedBackoffKey);
+            if (pendingScopedWaitMs > 0) {
+              logStage('server.global_error_backoff_wait', providerRequestId, {
+                waitMs: pendingScopedWaitMs,
+                scope: scopedBackoffKey
+              });
+              await waitScopedErrorBackoffWithGate(scopedBackoffKey, getClientConnectionAbortSignal(input.metadata));
+              logStage('server.global_error_backoff_wait.completed', providerRequestId, {
+                waitMs: pendingScopedWaitMs,
+                scope: scopedBackoffKey
+              });
+            }
+            recordScopedErrorBackoff(scopedBackoffKey);
+          }
           continue;
         } finally {
           if (trafficPermit) {
@@ -1285,7 +1268,9 @@ export class HubRequestExecutor implements RequestExecutor {
       } catch {
         // non-blocking cleanup
       }
-      recordGlobalErrorBackoff(error);
+      const scopedErrorCode = resolveScopedBackoffErrorCode(error);
+      const scopedBackoffKey = buildScopedBackoffKey('unresolved-provider', scopedErrorCode);
+      recordScopedErrorBackoff(scopedBackoffKey);
       // If we failed before selecting a provider (no bindProvider/recordAttempt),
       // at least record one error sample for this request.
       if (!recordedAnyAttempt) {
@@ -1348,10 +1333,10 @@ export const __requestExecutorTestables = {
   buildSessionStormHardBlockError,
   consumeSessionStormBackoffMs,
   peekSessionStormBackoffWaitMs,
-  peekGlobalErrorBackoffWaitMs,
+  peekScopedErrorBackoffWaitMs,
   clearSessionStormBackoff,
-  recordGlobalErrorBackoff,
-  resetGlobalErrorBackoff,
+  recordScopedErrorBackoff,
+  resetScopedErrorBackoffByProvider,
   prepareRequestPayloadRetrySeed,
   resolveOriginalRequestForResponseConversion,
   resolveRequestExecutorProviderErrorClassification,

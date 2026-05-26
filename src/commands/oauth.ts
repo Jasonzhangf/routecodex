@@ -92,53 +92,6 @@ export function createOauthCommand(): Command {
       }
     });
 
-  cmd
-    .command('qwen-auto')
-    .description('Trigger Qwen OAuth re-auth using Camoufox automation (auto confirm on authorize page)')
-    .argument(
-      '<selector>',
-      'Token selector: file basename, full path, or provider id (e.g. "qwen-oauth-1-default.json" or "qwen")'
-    )
-    .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
-    .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
-    .action(async (selector: string, options: { dev?: boolean; headful?: boolean }) => {
-      const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
-      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-      const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
-      const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-      process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
-      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'qwen';
-      process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
-      if (options?.dev || options?.headful) {
-        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
-      } else {
-        delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-      }
-      try {
-        await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
-      } finally {
-        if (prevBrowser === undefined) {
-          delete process.env.ROUTECODEX_OAUTH_BROWSER;
-        } else {
-          process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
-        }
-        if (prevAutoMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
-        }
-        if (prevAutoConfirm === undefined) {
-          delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
-        } else {
-          process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
-        }
-        if (prevDevMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
-        }
-      }
-    });
 
   return cmd;
 }

@@ -84,6 +84,28 @@ describe('Windsurf account health routing (RED before implementation)', () => {
     expect(second.apiKey).toBe('k-main');
   });
 
+  test('sticky key must be resolved from request session fields before fallback default', async () => {
+    const provider = createProvider();
+    expect((provider as any).resolveWindsurfSessionStickyKeyFromRequest({
+      body: { conversation_id: 'conv-001' },
+    })).toBe('conv-001');
+    expect((provider as any).resolveWindsurfSessionStickyKeyFromRequest({
+      body: { sessionId: 'sess-xyz' },
+    })).toBe('sess-xyz');
+    expect((provider as any).resolveWindsurfSessionStickyKeyFromRequest({
+      body: {},
+    })).toBe('provider-default-session');
+  });
+
+  test('permission_denied text alone must not be treated as auth failure', async () => {
+    const provider = createProvider();
+    const isAuthFailure = (provider as any).isWindsurfAuthFailure({
+      message: 'upstream permission_denied for unrelated local runtime gate',
+      status: 502,
+    });
+    expect(isAuthFailure).toBe(false);
+  });
+
   test('provider-local concurrency capacity must track available healthy accounts', async () => {
     const provider = createProvider();
     const cap = (provider as any).computeAccountConcurrencyCapacity([

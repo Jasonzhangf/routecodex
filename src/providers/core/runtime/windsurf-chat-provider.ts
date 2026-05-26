@@ -39,6 +39,7 @@ const WINDSURF_CASCADE_TIMEOUT_MS = 300_000;
 
 type WindsurfCascadeRuntimeScope = {
   pinnedRuntime: WindsurfProviderRuntimeOptions | null;
+  sessionKey: string;
 };
 
 type WindsurfSessionCredential = {
@@ -1345,8 +1346,12 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
     const existingScope = WindsurfChatProvider.cascadeRuntimeScope.getStore();
     if (!existingScope) {
+      const initialSessionKey = this.resolveWindsurfSessionStickyKeyFromRequest(request);
       return await this.runExclusiveCascadeRuntime(async () => {
-        return await WindsurfChatProvider.cascadeRuntimeScope.run({ pinnedRuntime: null }, async () => this.sendRequestInternal(request));
+        return await WindsurfChatProvider.cascadeRuntimeScope.run(
+          { pinnedRuntime: null, sessionKey: initialSessionKey },
+          async () => this.sendRequestInternal(request),
+        );
       });
     }
     const body = this.readRequestBodyRecord(request);
@@ -1714,7 +1719,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       || statusText === 'unauthenticated'
       || message.includes('unauthenticated')
       || message.includes('invalid authentication credentials')
-      || message.includes('permission_denied')
     );
   }
 
@@ -2117,6 +2121,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     await this.ensureWindsurfSessionCredential();
     const managed = this.readManagedWindsurfAuthConfigDetailed();
     if (managed) {
+      const scope = WindsurfChatProvider.cascadeRuntimeScope.getStore();
+      const sessionKey = (scope?.sessionKey || 'provider-default-session').trim() || 'provider-default-session';
       const selected = await this.selectWindsurfAccount(managed);
       if (selected?.apiKey) {
         return selected.apiKey;
@@ -2127,6 +2133,26 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       return raw;
     }
     return this.readApiKey();
+  }
+
+  private resolveWindsurfSessionStickyKeyFromRequest(request: UnknownObject): string {
+    const body = this.readRequestBodyRecord(request);
+    const candidates: Array<unknown> = [
+      body.session_id,
+      body.sessionId,
+      body.conversation_id,
+      body.conversationId,
+      body.response_id,
+      body.responseId,
+      body.parent_response_id,
+      body.parentResponseId,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+    return 'provider-default-session';
   }
 
   private readManagedWindsurfAuthConfigDetailed(): { auth: ApiKeyAuthProvider; entries: WindsurfManagedCredentialEntry[]; rawType: string } | null {
@@ -2243,7 +2269,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     return Math.max(1, available);
   }
 
-  private async fetchWindsurfUserStatusForHealth(apiKey: string, alias?: string): Promise<WindsurfQuotaHealthSnapshot | null> {
+  private async fetchWindsurfUserStatusForHealth(apiKey: string): Promise<WindsurfQuotaHealthSnapshot | null> {
     const body = this.buildCascadeAuthProbeBody(apiKey);
     const headers = this.buildCascadeAuthProbeHeaders(apiKey);
     const response = await this.fetchWithTimeout(
@@ -2253,11 +2279,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     );
     const raw = await response.text();
     if (!response.ok) {
-      // Token expired (401/403) — mark account unavailable so the next
-      // ensureWindsurfSessionCredential flow re-logs in.
-      if (response.status === 401 || response.status === 403) {
-        if (alias) this.windsurfUnavailableAccounts.add(alias);
-      }
       return null;
     }
     try {
@@ -2268,7 +2289,11 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     }
   }
 
-  private async selectWindsurfAccount(managed: { auth: ApiKeyAuthProvider; entries: WindsurfManagedCredentialEntry[]; rawType: string }): Promise<{ accountAlias: string; apiKey: string }> {
+  private async selectWindsurfAccount(
+    managed: { auth: ApiKeyAuthProvider; entries: WindsurfManagedCredentialEntry[]; rawType: string },
+  ): Promise<{ accountAlias: string; apiKey: string }> {
+    const scope = WindsurfChatProvider.cascadeRuntimeScope.getStore();
+    const sessionKey = (scope?.sessionKey || 'provider-default-session').trim() || 'provider-default-session';
     const HEALTH_CACHE_TTL_MS = 60_000;
     for (const entry of managed.entries) {
       const cached = this.windsurfHealthCache.get(entry.alias);
@@ -2276,7 +2301,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       if (isCacheFresh) {
         entry.health = cached;
       } else {
-        const latest = await this.fetchWindsurfUserStatusForHealth(entry.apiKey, entry.alias);
+        const latest = await this.fetchWindsurfUserStatusForHealth(entry.apiKey);
         if (latest) {
           this.windsurfHealthCache.set(entry.alias, latest);
           entry.health = latest;
@@ -2299,7 +2324,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         };
       }
     }
-    const selected = this.selectManagedCredentialForSession('provider-default-session', managed.entries);
+    const selected = this.selectManagedCredentialForSession(sessionKey, managed.entries);
     this.windsurfSessionCredential = {
       apiKey: selected.apiKey,
       sessionToken: selected.apiKey,
