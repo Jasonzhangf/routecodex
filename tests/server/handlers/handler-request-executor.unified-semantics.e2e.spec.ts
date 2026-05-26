@@ -634,10 +634,6 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         routeHint: 'thinking'
       });
       expect(pipelineInput.metadata?.entryEndpoint).toBe('/v1/responses');
-      expect(pipelineInput.metadata?.__raw_request_body).toMatchObject({
-        previous_response_id: 'resp_submit_prev_1',
-        tool_outputs: [{ tool_call_id: 'call_submit_1', output: 'ok' }]
-      });
       expect(pipelineInput.metadata?.routeHint).toBe('thinking');
       expect(pipelineInput.payload?.previous_response_id).toBe('resp_submit_prev_1');
       expect(pipelineInput.payload?.tool_outputs).toEqual([{ tool_call_id: 'call_submit_1', output: 'ok' }]);

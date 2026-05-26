@@ -52,9 +52,6 @@ function buildResponsesResumeRawRequestBody(originalPayload: ResponsesPayload, r
   const raw = originalPayload && typeof originalPayload === 'object' && !Array.isArray(originalPayload)
     ? { ...(originalPayload as Record<string, unknown>) }
     : {};
-  if (typeof responseId === 'string' && responseId.trim() && typeof raw.previous_response_id !== 'string') {
-    raw.previous_response_id = responseId.trim();
-  }
   return raw;
 }
 

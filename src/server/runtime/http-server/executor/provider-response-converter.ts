@@ -36,7 +36,7 @@ import {
   extractServerToolFollowupErrorLogDetails,
   finalizeServerToolBridgeConvertError
 } from './servertool-followup-error.js';
-import { requireCoreDist } from '../../../../modules/llmswitch/bridge.js';
+import { importCoreDist } from '../../../../modules/llmswitch/bridge.js';
 
 import {
   asFlatRecord,
@@ -92,13 +92,22 @@ type NativeRespSemanticsModule = {
   ) => Record<string, unknown>;
 };
 
-function normalizeResponsesToolCallArgumentsForClientWithNative(
+let nativeRespSemanticsModulePromise: Promise<NativeRespSemanticsModule> | null = null;
+
+async function loadNativeRespSemanticsModule(): Promise<NativeRespSemanticsModule> {
+  if (!nativeRespSemanticsModulePromise) {
+    nativeRespSemanticsModulePromise = importCoreDist<NativeRespSemanticsModule>(
+      'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics'
+    );
+  }
+  return nativeRespSemanticsModulePromise;
+}
+
+async function normalizeResponsesToolCallArgumentsForClientWithNative(
   responsesPayload: unknown,
   toolsRaw: unknown[]
-): Record<string, unknown> {
-  const mod = requireCoreDist<NativeRespSemanticsModule>(
-    'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics'
-  );
+): Promise<Record<string, unknown>> {
+  const mod = await loadNativeRespSemanticsModule();
   const fn = mod.normalizeResponsesToolCallArgumentsForClientWithNative;
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-bridge] normalizeResponsesToolCallArgumentsForClientWithNative not available');
@@ -107,13 +116,11 @@ function normalizeResponsesToolCallArgumentsForClientWithNative(
 }
 
 
-function buildResponsesPayloadFromChatWithNative(
+async function buildResponsesPayloadFromChatWithNative(
   payload: unknown,
   context: Record<string, unknown>
-): Record<string, unknown> {
-  const mod = requireCoreDist<NativeRespSemanticsModule>(
-    'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics'
-  );
+): Promise<Record<string, unknown>> {
+  const mod = await loadNativeRespSemanticsModule();
   const fn = mod.buildResponsesPayloadFromChatWithNative;
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-bridge] buildResponsesPayloadFromChatWithNative not available');
@@ -346,13 +353,13 @@ function readClientToolsRawForResponsesNormalization(args: {
   return originalTools?.length ? originalTools : [];
 }
 
-function normalizeResponsesToolCallsViaRustSsot(args: {
+async function normalizeResponsesToolCallsViaRustSsot(args: {
   payload: Record<string, unknown>;
   adapterContext?: Record<string, unknown>;
   requestSemantics?: Record<string, unknown>;
   originalRequest?: Record<string, unknown>;
   entryEndpoint?: string;
-}): Record<string, unknown> {
+}): Promise<Record<string, unknown>> {
   const entry = String(args.entryEndpoint || '').toLowerCase();
   if (!entry.includes('/v1/responses')) {
     return args.payload;
@@ -901,6 +908,22 @@ export async function convertProviderResponseIfNeeded(
     const bridgeProviderResponse =
       extractBridgeProviderResponsePayload(body as Record<string, unknown>)
       ?? (body as Record<string, unknown>);
+    if (
+      bridgeProviderResponse
+      && typeof bridgeProviderResponse === 'object'
+      && !Array.isArray(bridgeProviderResponse)
+      && '__sse_responses' in (bridgeProviderResponse as Record<string, unknown>)
+      && (options.entryEndpoint || entry).toLowerCase().includes('/v1/responses')
+    ) {
+      logPipelineStage('convert.bridge.prebuilt_sse_passthrough', options.requestId, {
+        entryEndpoint: options.entryEndpoint || entry,
+        providerProtocol: options.providerProtocol
+      });
+      return attachTimingBreakdown({
+        ...options.response,
+        body: bridgeProviderResponse as Record<string, unknown>
+      });
+    }
     const effectiveRequestSemantics = (() => {
       const existing = asFlatRecord(options.requestSemantics);
       const existingTools = asFlatRecord(existing?.tools);
@@ -925,7 +948,7 @@ export async function convertProviderResponseIfNeeded(
       && options.providerFamily === 'windsurf'
       && hasChatToolCalls(bridgeProviderResponse)
     ) {
-      const directBody = buildResponsesPayloadFromChatWithNative(bridgeProviderResponse, {
+      const directBody = await buildResponsesPayloadFromChatWithNative(bridgeProviderResponse, {
         requestId: options.requestId,
         toolsRaw: readClientToolsRawForResponsesNormalization({
           adapterContext,
@@ -967,7 +990,7 @@ export async function convertProviderResponseIfNeeded(
       elapsedMs: Date.now() - bridgeStartMs
     });
     if (converted.body && typeof converted.body === 'object' && !Array.isArray(converted.body)) {
-      converted.body = normalizeResponsesToolCallsViaRustSsot({
+      converted.body = await normalizeResponsesToolCallsViaRustSsot({
         payload: converted.body as Record<string, unknown>,
         adapterContext,
         requestSemantics: effectiveRequestSemantics,
@@ -979,7 +1002,7 @@ export async function convertProviderResponseIfNeeded(
         && hasChatToolCalls(bridgeProviderResponse)
         && !hasResponsesFunctionCalls(converted.body)
       ) {
-        converted.body = buildResponsesPayloadFromChatWithNative(bridgeProviderResponse, {
+        converted.body = await buildResponsesPayloadFromChatWithNative(bridgeProviderResponse, {
           requestId: options.requestId,
           toolsRaw: readClientToolsRawForResponsesNormalization({
             adapterContext,
