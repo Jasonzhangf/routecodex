@@ -19,6 +19,21 @@ enum ProviderErrorClassification {
 }
 
 impl VirtualRouterEngineCore {
+    fn has_alternative_available_provider(&mut self, current_provider_key: &str) -> bool {
+        let now = now_ms();
+        self.provider_registry
+            .list_keys()
+            .into_iter()
+            .filter(|candidate| candidate != current_provider_key)
+            .filter(|candidate| {
+                self.provider_registry
+                    .get(candidate)
+                    .map(|profile| profile.enabled)
+                    .unwrap_or(false)
+            })
+            .any(|candidate| self.health_manager.is_available(&candidate, now))
+    }
+
     pub(crate) fn handle_provider_success(&mut self, event: &Value) {
         let provider_key = event
             .get("runtime")
@@ -54,6 +69,9 @@ impl VirtualRouterEngineCore {
         }
         let provider_key = resolve_provider_key(event).unwrap_or_default();
         if provider_key.is_empty() {
+            return;
+        }
+        if !self.has_alternative_available_provider(&provider_key) {
             return;
         }
         let reason = extract_error_reason(event);
@@ -131,6 +149,9 @@ impl VirtualRouterEngineCore {
         let Some(provider_key) = provider_key.as_deref() else {
             return false;
         };
+        if !self.has_alternative_available_provider(provider_key) {
+            return true;
+        }
         let reason = extract_error_reason(event);
         let now = now_ms();
         match classification {
@@ -621,33 +642,64 @@ mod tests {
     }
 
     #[test]
-    fn recoverable_error_enters_short_provider_cooldown() {
+    fn recoverable_error_keeps_single_provider_available() {
         let provider_key = "test.key1.model";
         let mut core = build_test_core(provider_key, "gpt-test");
-        let started_at = now_ms();
 
         core.handle_provider_error(&build_error_event(provider_key, "recoverable"));
 
         let state = provider_state(&core, provider_key);
+        assert_eq!(state.state, "healthy");
+        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.cooldown_expires_at, None);
+    }
+
+    #[test]
+    fn unrecoverable_error_keeps_single_provider_available() {
+        let provider_key = "test.key1.model";
+        let mut core = build_test_core(provider_key, "gpt-test");
+
+        core.handle_provider_error(&build_error_event(provider_key, "unrecoverable"));
+
+        let state = provider_state(&core, provider_key);
+        assert_eq!(state.state, "healthy");
+        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.cooldown_expires_at, None);
+    }
+
+    #[test]
+    fn recoverable_error_trips_when_alternative_provider_exists() {
+        let mut core = build_test_core_with_providers(&[
+            ("test.key1.model-a", "gpt-test"),
+            ("test.key1.model-b", "gpt-test"),
+        ]);
+        let started_at = now_ms();
+        core.handle_provider_error(&build_error_event("test.key1.model-a", "recoverable"));
+
+        let state = provider_state(&core, "test.key1.model-a");
         assert_eq!(state.state, "tripped");
         assert_eq!(state.failure_count, 1);
         let expiry = state
             .cooldown_expires_at
             .expect("recoverable cooldown expiry");
         let ttl = expiry - started_at;
-        assert!(ttl >= health::DEFAULT_COOLDOWN_MS - 2_000, "ttl={ttl}");
+        assert!(
+            ttl >= health::DEFAULT_COOLDOWN_MS - 2_000,
+            "ttl={ttl}"
+        );
         assert!(ttl <= health::DEFAULT_COOLDOWN_MS + 5_000, "ttl={ttl}");
     }
 
     #[test]
-    fn unrecoverable_error_trips_provider_until_local_midnight_window() {
-        let provider_key = "test.key1.model";
-        let mut core = build_test_core(provider_key, "gpt-test");
+    fn unrecoverable_error_trips_when_alternative_provider_exists() {
+        let mut core = build_test_core_with_providers(&[
+            ("test.key1.model-a", "gpt-test"),
+            ("test.key1.model-b", "gpt-test"),
+        ]);
         let started_at = now_ms();
+        core.handle_provider_error(&build_error_event("test.key1.model-a", "unrecoverable"));
 
-        core.handle_provider_error(&build_error_event(provider_key, "unrecoverable"));
-
-        let state = provider_state(&core, provider_key);
+        let state = provider_state(&core, "test.key1.model-a");
         assert_eq!(state.state, "tripped");
         assert!(state.failure_count >= 3);
         let expiry = state

@@ -242,6 +242,12 @@ export function handleProviderFailureImpl(
   if (event.affectsHealth === false) {
     return;
   }
+  const hasAlternativeAvailableProvider = healthManager
+    .getSnapshot()
+    .some((state) => state.providerKey !== event.providerKey && healthManager.isAvailable(state.providerKey));
+  if (!hasAlternativeAvailableProvider) {
+    return;
+  }
  if (event.fatal) {
    healthManager.tripProvider(event.providerKey, event.reason, event.cooldownOverrideMs);
  } else if (event.reason === 'rate_limit' && event.statusCode === 429) {
