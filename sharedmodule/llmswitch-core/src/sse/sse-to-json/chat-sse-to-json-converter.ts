@@ -861,8 +861,7 @@ export class ChatSseToJsonConverter {
         message: {
           role: 'assistant',
           content: ''
-        },
-        finish_reason: 'stop'
+        }
       });
     }
     return choiceBuilder;
@@ -1076,7 +1075,6 @@ export class ChatSseToJsonConverter {
           role: 'assistant',
           content: ''
         },
-        finish_reason: 'stop',
         logprobs: choice.logprobs
       });
     }
@@ -1483,13 +1481,6 @@ export class ChatSseToJsonConverter {
 
     const choices = context.currentResponse.choices || [];
 
-    // 确保所有choices都已完成
-    for (const choice of choices) {
-      if (!choice.finish_reason) {
-        choice.finish_reason = 'stop';
-      }
-    }
-
     // 构建usage信息
     const usage = this.buildUsageInfo(context);
 
@@ -1610,12 +1601,6 @@ export class ChatSseToJsonConverter {
 
     if (!hasMaterializedChoice) {
       return null;
-    }
-
-    for (const choice of choices) {
-      if (!choice.finish_reason) {
-        choice.finish_reason = 'stop';
-      }
     }
 
     return this.finalizeResponse(context);

@@ -230,11 +230,6 @@ export function resolveRequestSemantics(
     fallbackTools
   );
 
-  const existingRouteCodex =
-    normalizedBase.__routecodex && typeof normalizedBase.__routecodex === 'object' && !Array.isArray(normalizedBase.__routecodex)
-      ? (normalizedBase.__routecodex as Record<string, unknown>)
-      : undefined;
-
   return {
     ...normalizedBase,
     ...(mergedFollowupClientToolsRaw
@@ -246,12 +241,7 @@ export function resolveRequestSemantics(
             clientToolsRaw: mergedFollowupClientToolsRaw
           }
         }
-      : {}),
-    __routecodex: {
-      ...existingRouteCodex,
-      ...(serverToolFollowup ? { serverToolFollowup: true } : {}),
-      ...(followupSource ? { serverToolFollowupSource: followupSource } : {})
-    }
+      : {})
   };
 }
 

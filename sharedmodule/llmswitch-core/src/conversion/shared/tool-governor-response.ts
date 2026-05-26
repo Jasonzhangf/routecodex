@@ -63,7 +63,7 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
         }
       }
       try {
-        if (!choice.finish_reason) choice.finish_reason = 'tool_calls';
+        if (!choice.finish_reason || choice.finish_reason === 'stop') choice.finish_reason = 'tool_calls';
       } catch (error) {
         logToolGovernorNonBlocking('enhance_response_tool_arguments_finish_reason', error);
       }

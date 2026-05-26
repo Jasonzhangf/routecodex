@@ -229,9 +229,10 @@ describe('servertool adapter context builder', () => {
 
 
 
-  it('fails fast when reasoning stop seed sync fails', async () => {
+  it('forwards reasoning stop seed errors to onReasoningStopSeedError callback', async () => {
     jest.resetModules();
     mockSyncStoplessGoalStateFromRequest.mockClear();
+    const onError = jest.fn();
     mockSyncStoplessGoalStateFromRequest.mockImplementationOnce(() => {
       throw new Error('stopless-goal seed failed');
     });
@@ -240,15 +241,19 @@ describe('servertool adapter context builder', () => {
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
     );
 
-    expect(() => buildServerToolAdapterContext({
+    buildServerToolAdapterContext({
       metadata: {},
       originalRequest: {
         messages: [{ role: 'user', content: '<**rcc**>\nstopless start\n继续\n</rcc**>' }]
       },
       requestId: 'req-fail',
       entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
-    })).toThrow('stopless-goal seed failed');
+      providerProtocol: 'openai-responses',
+      onReasoningStopSeedError: onError
+    });
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(new Error('stopless-goal seed failed'));
   });
 
   it('prefers original request as captured chat request for RCC stopless goal sync', async () => {

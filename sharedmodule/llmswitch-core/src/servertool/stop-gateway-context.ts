@@ -105,7 +105,10 @@ export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
   const payload = base as { [key: string]: unknown };
   const choicesRaw = payload.choices;
   if (Array.isArray(choicesRaw) && choicesRaw.length) {
-    for (let idx = 0; idx < choicesRaw.length; idx += 1) {
+    let latestChoiceIndex = -1;
+    let latestChoice: { [key: string]: unknown } | null = null;
+    let latestFinishReason = '';
+    for (let idx = choicesRaw.length - 1; idx >= 0; idx -= 1) {
       const choice = choicesRaw[idx];
       if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
         continue;
@@ -118,6 +121,15 @@ export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
       if (!finishReason) {
         continue;
       }
+      latestChoiceIndex = idx;
+      latestChoice = choice as { [key: string]: unknown };
+      latestFinishReason = finishReason;
+      break;
+    }
+
+    if (latestChoice && latestFinishReason) {
+      const idx = latestChoiceIndex;
+      const finishReason = latestFinishReason;
       if (finishReason === 'tool_calls') {
         return {
           observed: true,
@@ -140,10 +152,10 @@ export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
       }
 
       const message =
-        (choice as { message?: unknown }).message &&
-        typeof (choice as { message?: unknown }).message === 'object' &&
-        !Array.isArray((choice as { message?: unknown }).message)
-          ? ((choice as { message: unknown }).message as { [key: string]: unknown })
+        latestChoice.message &&
+        typeof latestChoice.message === 'object' &&
+        !Array.isArray(latestChoice.message)
+          ? (latestChoice.message as { [key: string]: unknown })
           : null;
       const hasEmbeddedToolMarkers = hasEmbeddedToolCallMarkersInChatMessage(message);
       if (hasEmbeddedToolMarkers) {

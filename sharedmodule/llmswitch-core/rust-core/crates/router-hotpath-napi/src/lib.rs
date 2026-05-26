@@ -107,6 +107,7 @@ mod thought_signature_validator;
 mod tool_harvester;
 mod virtual_router_engine;
 mod virtual_router_provider_key;
+mod stop_message_auto_blocks;
 mod virtual_router_stop_message_actions;
 mod virtual_router_stop_message_instruction;
 mod virtual_router_stop_message_state_codec;
@@ -948,6 +949,15 @@ pub fn parse_rcc_fence_document_json(text: String) -> NapiResult<String> {
     let parsed = virtual_router_engine::rcc_fence::parse_rcc_fence_document(&text)
         .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&parsed).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn decide_stop_message_action(ctx_json: String) -> NapiResult<String> {
+    let ctx: stop_message_core::StopMessageDecisionContext = serde_json::from_str(&ctx_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize StopMessageDecisionContext: {e}")))?;
+    let decision = stop_message_auto_blocks::decide_stop_message_action(&ctx);
+    serde_json::to_string(&decision)
+        .map_err(|e| napi::Error::from_reason(format!("serialize StopMessageDecision: {e}")))
 }
 
 #[napi]

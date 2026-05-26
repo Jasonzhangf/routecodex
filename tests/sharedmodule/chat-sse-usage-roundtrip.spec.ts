@@ -161,4 +161,24 @@ describe('chat SSE usage compatibility', () => {
       parseChatChunkPayloadSpy.mockRestore();
     }
   });
+
+  it('does not synthesize finish_reason=stop when upstream never emits finish_reason', async () => {
+    const sseText = [
+      'data: {"id":"chatcmpl_no_finish","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant"},"logprobs":null,"finish_reason":null}]}',
+      '',
+      'data: {"id":"chatcmpl_no_finish","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"hello"},"logprobs":null,"finish_reason":null}]}',
+      '',
+      'data: [DONE]',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    const response = await converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_no_finish',
+      model: 'gpt-4o-mini'
+    });
+
+    expect(response.choices?.[0]?.finish_reason).toBeUndefined();
+    expect(response.choices?.[0]?.message?.content).toBe('hello');
+  });
 });

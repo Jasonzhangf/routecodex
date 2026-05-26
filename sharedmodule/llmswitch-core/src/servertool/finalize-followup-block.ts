@@ -34,7 +34,6 @@ function decorateContinueExecutionSummary(chat: JsonObject, execution: { context
     baseContent && baseContent.trim().length
       ? `${visibleSummary}\n\n${baseContent}`
       : visibleSummary;
-  first.finish_reason = 'stop';
   return cloned;
 }
 

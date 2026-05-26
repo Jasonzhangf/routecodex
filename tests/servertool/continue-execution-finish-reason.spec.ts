@@ -3,7 +3,7 @@ import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conve
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 
 describe('continue_execution finish_reason handling', () => {
-  test('sets finish_reason to stop when summary is provided', async () => {
+  test('does not rewrite finish_reason when summary is provided', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-ce-finish-1',
       entryEndpoint: '/v1/messages',
@@ -56,8 +56,8 @@ describe('continue_execution finish_reason handling', () => {
     expect(chat.choices).toBeTruthy();
     expect(chat.choices[0]).toBeTruthy();
     
-    // finish_reason should be changed to 'stop' by decorateFinalChatWithServerToolContext
-    expect(chat.choices[0].finish_reason).toBe('stop');
+    // finish_reason should remain unchanged (no tool->stop rewrite)
+    expect(chat.choices[0].finish_reason).toBe('tool_calls');
     
     // content should have the summary prepended
     expect(chat.choices[0].message.content).toContain('Processing step 1 complete');

@@ -10,7 +10,12 @@ import {
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
-import { extractBlockedReportFromMessagesForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.js';
+import {
+  extractBlockedReportFromMessagesForTests,
+  __setDecideOverrideForTests,
+  type StopMessageDecisionContext,
+  type StopMessageDecision
+} from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.js';
 import { resolveStickyKey } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 import { resetStopMessageRuntimeConfigCacheForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js';
 
@@ -170,8 +175,103 @@ function buildStopChatResponse(id = 'chatcmpl-stopmessage-double-dispatch'): Jso
   } as JsonObject;
 }
 
+// Inline TS decision fallback for tests (native binding not available).
+// Mirrors the Rust stop-message-core::decide() logic for common test scenarios.
+function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, unknown> {
+  // Port disabled?
+  if (ctx.port_stop_message_disabled) {
+    return { action: 'skip', skip_reason: 'skip_port_stopmessage_disabled' };
+  }
+
+  // Followup flow with ineligible stop?
+  if (ctx.followup_flow_id && !ctx.stop_eligible) {
+    return { action: 'skip', skip_reason: 'skip_servertool_followup_hop' };
+  }
+
+  // Responses submit tool outputs resume?
+  if (ctx.has_responses_submit_tool_outputs_resume) {
+    return { action: 'skip', skip_reason: 'skip_responses_submit_tool_outputs_resume' };
+  }
+
+  // Resolve snapshot — ignore default-source snapshots outside followup context
+  const hasFollowupCtx = Boolean(ctx.followup_flow_id);
+  const rawSnap = (ctx.persisted_snapshot ?? ctx.runtime_snapshot) as Record<string, unknown> | undefined;
+  const snap = rawSnap && (hasFollowupCtx || String(rawSnap.source ?? '').toLowerCase() !== 'default')
+    ? rawSnap
+    : undefined;
+
+  // Explicit mode without snapshot?
+  if (!snap && (ctx.explicit_mode === 'on' || ctx.explicit_mode === 'auto')) {
+    return { action: 'skip', skip_reason: 'skip_explicit_mode_without_snapshot' };
+  }
+
+  // No snapshot → try default (only when followup context present)
+  if (!snap) {
+    const goalStatus = String(ctx.goal_status ?? 'idle').toLowerCase();
+    const goalActive = goalStatus === 'active';
+    if (hasFollowupCtx && !goalActive && ctx.default_enabled) {
+      if (ctx.persisted_default_exhausted) {
+        return { action: 'skip', skip_reason: 'skip_goal_default_exhausted' };
+      }
+      return {
+        action: 'trigger',
+        used: 0,
+        max_repeats: typeof ctx.default_max_repeats === 'number' ? ctx.default_max_repeats : 3,
+        followup_text: ctx.default_text || '继续执行',
+      };
+    }
+    return { action: 'skip', skip_reason: 'skip_no_stopmessage_snapshot' };
+  }
+
+  // Snapshot fields
+  const text = String(snap.text ?? '').trim();
+  const mode = String(snap.stage_mode ?? 'on').toLowerCase();
+  const maxRepeats = typeof snap.max_repeats === 'number' ? Math.max(0, Math.floor(snap.max_repeats)) : 0;
+  const used = typeof snap.used === 'number' ? Math.max(0, Math.floor(snap.used)) : 0;
+
+  // Mode off?
+  if (mode === 'off') {
+    return { action: 'skip', skip_reason: 'skip_stopmessage_mode_off' };
+  }
+
+  // Empty text?
+  if (!text) {
+    return { action: 'skip', skip_reason: 'skip_stopmessage_empty_text' };
+  }
+
+  // Invalid repeats?
+  if (maxRepeats <= 0) {
+    return { action: 'skip', skip_reason: 'skip_stopmessage_invalid_repeats' };
+  }
+
+  // Not stop eligible?
+  if (!ctx.stop_eligible) {
+    return { action: 'skip', skip_reason: 'skip_not_stop_finish_reason' };
+  }
+
+  // Reached max repeats?
+  if (used >= maxRepeats) {
+    return { action: 'skip', skip_reason: 'skip_reached_max_repeats' };
+  }
+
+  // Goal active?
+  const goalStatus = String(ctx.goal_status ?? 'idle').toLowerCase();
+  if (goalStatus === 'active') {
+    return { action: 'skip', skip_reason: 'skip_goal_active' };
+  }
+
+  // ── Trigger ──
+  return {
+    action: 'trigger',
+    used,
+    max_repeats: maxRepeats,
+    followup_text: text,
+  };
+}
+
 describe('stop_message_auto servertool', () => {
   beforeAll(() => {
+    __setDecideOverrideForTests(testStopMessageDecision as any);
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
     process.env.ROUTECODEX_USER_DIR = USER_DIR;
     process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = 'auto';
@@ -240,6 +340,7 @@ describe('stop_message_auto servertool', () => {
   });
 
   afterAll(() => {
+    __setDecideOverrideForTests(null);
     resetStopMessageRuntimeConfigCacheForTests();
     if (ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_ENABLED === undefined) {
       delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
@@ -294,6 +395,103 @@ describe('stop_message_auto servertool', () => {
     if (fs.existsSync(DEFAULT_MOCK_CODEX_BIN_PATH)) {
       fs.unlinkSync(DEFAULT_MOCK_CODEX_BIN_PATH);
     }
+  });
+
+  test('RED: does NOT trigger stop_message_flow on normal request without followup context even when default enabled', async () => {
+    process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '1';
+    resetStopMessageRuntimeConfigCacheForTests();
+
+    const sessionId = 'stopmessage-red-default-no-followup';
+    // No persisted stopMessage state — no writeRoutingStateForSession
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hi' }]
+    };
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-red-default-stop',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: 'ok' },
+        finish_reason: 'stop'
+      }]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-red-default-stop',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-red-default-stop',
+      providerProtocol: 'openai-chat'
+    });
+
+    // Must NOT trigger stop_message_flow — normal request has no followup context
+    expect(result.execution?.flowId).not.toBe('stop_message_flow');
+
+    process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
+    resetStopMessageRuntimeConfigCacheForTests();
+  });
+
+  test('RED: does NOT trigger when scoped snapshot source=default but request is not followup', async () => {
+    const sessionId = 'stopmessage-red-default-scoped-snapshot';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 3,
+      stopMessageUsed: 2,
+      stopMessageSource: 'default',
+      stopMessageStageMode: 'on'
+    } as RoutingInstructionState;
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-red-default-scoped-state',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: 'ok' },
+        finish_reason: 'stop'
+      }]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-red-default-scoped-state',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      tmuxSessionId: sessionId,
+      clientTmuxSessionId: sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hi' }]
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-red-default-scoped-state',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.execution?.flowId).not.toBe('stop_message_flow');
   });
 
   test('schedules followup when stopMessage is active and finish_reason=stop', async () => {
@@ -1374,6 +1572,63 @@ describe('stop_message_auto servertool', () => {
 
     expect(result.mode).toBe('tool_flow');
     expect(result.execution?.flowId).toBe('stop_message_flow');
+  });
+
+  test('does not trigger stopMessage when latest choice finish_reason is non-stop even if earlier choice is stop', async () => {
+    const sessionId = 'stopmessage-spec-session-multi-choice-latest-nonstop';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-multi-choice-latest-nonstop',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'old' },
+          finish_reason: 'stop'
+        },
+        {
+          index: 1,
+          message: { role: 'assistant', content: 'new' },
+          finish_reason: 'content_filter'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-multi-choice-latest-nonstop',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '继续处理' }]
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-multi-choice-latest-nonstop',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => ({ body: {} as JsonObject })
+    });
+
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
   });
 
 

@@ -487,15 +487,18 @@ export async function handleProviderQuotaErrorEvent(
     typeof routePoolSizeRaw === 'number' && Number.isFinite(routePoolSizeRaw)
       ? Math.max(0, Math.floor(routePoolSizeRaw))
       : 0;
+  const transientBusinessError = shouldTreatAsTransientBusinessError(detailsRecord, event);
   const isRepeated5xxOutOfPool =
     appliedState.lastErrorSeries === 'E5XX'
     && appliedState.inPool === false
     && appliedState.consecutiveErrorCount >= 3;
   const shouldEvictFromPool =
-    (errorClassification === 'unrecoverable' || isRepeated5xxOutOfPool)
+    !transientBusinessError
+    && (errorClassification === 'unrecoverable' || isRepeated5xxOutOfPool)
     && appliedState.consecutiveErrorCount >= 3
     && routePoolSize > 1;
   const mustKeepInPoolAsLastProvider = routePoolSize <= 1;
+  const forceKeepInPool = mustKeepInPoolAsLastProvider || transientBusinessError || event.recoverable === true;
   const nextState: QuotaState =
     shouldEvictFromPool
       ? {
@@ -507,12 +510,12 @@ export async function handleProviderQuotaErrorEvent(
         }
       : {
           ...appliedState,
-          inPool: mustKeepInPoolAsLastProvider ? true : appliedState.inPool,
+          inPool: forceKeepInPool ? true : appliedState.inPool,
           reason: appliedState.reason === 'ok' ? 'ok' : 'cooldown',
           cooldownKeepsPool:
             appliedState.reason === 'ok'
               ? undefined
-              : (mustKeepInPoolAsLastProvider ? true : appliedState.cooldownKeepsPool)
+              : (forceKeepInPool ? true : appliedState.cooldownKeepsPool)
         };
   ctx.quotaStates.set(providerKey, nextState);
 
@@ -589,4 +592,21 @@ function readPositiveNumberFromEnv(name: string, fallback: number): number {
     return fallback;
   }
   return Math.floor(parsed);
+}
+
+function shouldTreatAsTransientBusinessError(details: Record<string, unknown>, event: ProviderErrorEvent): boolean {
+  const upstreamCode = String(details.upstreamCode || '').trim().toLowerCase();
+  const errorCode = String(details.errorCode || '').trim().toLowerCase();
+  const eventCode = String(event.code || '').trim().toLowerCase();
+  const status = typeof event.status === 'number' ? event.status : undefined;
+  if (status === 429) {
+    return true;
+  }
+  const transientCodes = new Set([
+    'provider_status_2056',
+    'provider_status_2013'
+  ]);
+  return transientCodes.has(upstreamCode)
+    || transientCodes.has(errorCode)
+    || transientCodes.has(eventCode);
 }

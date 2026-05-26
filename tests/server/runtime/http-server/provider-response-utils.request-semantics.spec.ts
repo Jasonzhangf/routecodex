@@ -68,10 +68,8 @@ describe('provider-response-utils resolveRequestSemantics', () => {
     expect(clientToolsRaw).toHaveLength(2);
     expect(clientToolsRaw[0]?.function?.name).toBe('exec_command');
     expect(clientToolsRaw[1]?.function?.name).toBe('reasoning.stop');
-    expect((semantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
-    expect((semantics as any)?.__routecodex?.serverToolFollowupSource).toBe('servertool.reasoning_stop_continue');
+    expect((semantics as any)?.__routecodex).toBeUndefined();
   });
-
 
   it('prefers metadata.requestSemantics on servertool followup so original client tools survive nested turns', () => {
     const processed = {
@@ -106,8 +104,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
     expect(clientToolsRaw[0]?.function?.name).toBe('exec_command');
     expect(clientToolsRaw[1]?.function?.name).toBe('apply_patch');
     expect(clientToolsRaw[2]?.function?.name).toBe('reasoning.stop');
-    expect((semantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
-    expect((semantics as any)?.__routecodex?.serverToolFollowupSource).toBe('servertool.reasoning_stop_continue');
+    expect((semantics as any)?.__routecodex).toBeUndefined();
   });
 
   it('merges followup root tools into clientToolsRaw so internal reasoning.stop stays declared', () => {

@@ -31,6 +31,10 @@ import {
 } from './stop-message-auto/runtime-utils.js';
 import { readStoplessGoalState } from './stopless-goal-state.js';
 import { loadRoutingInstructionStateSync } from '../../router/virtual-router/sticky-session-store.js';
+import type {
+  StopMessageDecisionContext,
+  StopMessageDecision
+} from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
 import {
   applyStopMessageSnapshotToState,
   clearStopMessageState,
@@ -39,6 +43,27 @@ import {
 } from './stop-message-auto/routing-state.js';
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
+
+/** Pluggable decision function — default calls native, overridable for tests. */
+let decideOverride: ((ctx: StopMessageDecisionContext) => StopMessageDecision) | null = null;
+
+export function __setDecideOverrideForTests(
+  fn: ((ctx: StopMessageDecisionContext) => StopMessageDecision) | null
+): void {
+  decideOverride = fn;
+}
+
+async function decideStopMessageAction(
+  ctx: StopMessageDecisionContext
+): Promise<StopMessageDecision> {
+  if (decideOverride) {
+    return decideOverride(ctx);
+  }
+  const { decideStopMessageActionWithNative: nativeFn } = await import(
+    '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js'
+  );
+  return nativeFn(ctx);
+}
 
 const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTECODEX_STOPMESSAGE_DEBUG || '').trim() === '1';
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
@@ -396,252 +421,157 @@ function readRequestScopedGoalState(adapterContext: unknown): {
 const handler: ServerToolHandler = async (
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerPlan | null> => {
-  const record = ctx.adapterContext as unknown as {
-    clientConnectionState?: unknown;
-    sessionId?: unknown;
-    providerProtocol?: unknown;
-    metadata?: unknown;
+  const record = ctx.adapterContext as unknown as Record<string, unknown>;
+  const rt = readRuntimeMetadata(ctx.adapterContext as unknown as Record<string, unknown>) ?? {};
+
+  // ── Build native decision context ──
+  const followupFlowId = readServerToolFollowupFlowId(rt);
+  const persistedLookupPlan = planStopMessagePersistedLookup(record, rt, {
+    includeSnapshotLookup: true,
+    includeTombstoneLookup: true
+  });
+  const candidateKeys = persistedLookupPlan.candidateKeys;
+  const persistedSnap = persistedLookupPlan.readStopMessageSnapshot
+    ? readPersistedStopMessageSnapshotFromCandidateKeys(candidateKeys)
+    : null;
+  const runtimeSnap = resolveRuntimeStopMessageState(rt);
+  const requestScopedGoal = readRequestScopedGoalState(ctx.adapterContext);
+  const persistedGoal = readStoplessGoalState(ctx.adapterContext).state;
+  const effectiveGoal = requestScopedGoal.state ?? persistedGoal;
+  const tombstone = persistedLookupPlan.readStopMessageTombstone
+    ? readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys)
+    : { exhaustedDefault: false };
+  const explicitMode = (normalizeStopMessageStageMode(undefined) ?? readRuntimeStopMessageStageMode(rt));
+  const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
+
+  const decisionCtx: StopMessageDecisionContext = {
+    port_stop_message_disabled: isStopMessageDisabledByPort(ctx.adapterContext),
+    followup_flow_id: followupFlowId || undefined,
+    stop_eligible: stopGateway.eligible,
+    has_responses_submit_tool_outputs_resume: hasResponsesSubmitToolOutputsResume(ctx.adapterContext),
+    persisted_snapshot: persistedSnap ? {
+      text: String(persistedSnap.text ?? ''),
+      max_repeats: typeof persistedSnap.maxRepeats === 'number' ? Math.max(0, Math.floor(persistedSnap.maxRepeats)) : 0,
+      used: typeof persistedSnap.used === 'number' ? Math.max(0, Math.floor(persistedSnap.used)) : 0,
+      source: (persistedSnap.source === 'default' ? 'default' : 'persisted') as any,
+      stage_mode: (persistedSnap.stageMode ?? 'on') as any,
+    } : undefined,
+    runtime_snapshot: runtimeSnap ? {
+      text: String(runtimeSnap.text ?? ''),
+      max_repeats: typeof runtimeSnap.maxRepeats === 'number' ? Math.max(0, Math.floor(runtimeSnap.maxRepeats)) : 0,
+      used: typeof runtimeSnap.used === 'number' ? Math.max(0, Math.floor(runtimeSnap.used)) : 0,
+      source: 'default' as any,
+      stage_mode: 'on' as any,
+    } : undefined,
+    persisted_default_exhausted: tombstone.exhaustedDefault,
+    explicit_mode: explicitMode === 'on' ? 'on' as any : explicitMode === 'auto' ? 'auto' as any : undefined,
+    goal_status: !effectiveGoal || effectiveGoal.status === 'idle' ? 'idle' as any : effectiveGoal.status as any,
+    default_enabled: resolveStopMessageDefaultEnabledLive(),
+    default_max_repeats: resolveStopMessageDefaultMaxRepeatsLive(),
+    default_text: resolveStopMessageDefaultTextLive(),
+    empty_reply_continue_local: shouldYieldToEmptyReplyContinueLocal({
+      base: ctx.base, providerProtocol: ctx.providerProtocol, entryEndpoint: ctx.entryEndpoint
+    }),
+    provider_pin: undefined,
   };
-  const rt = readRuntimeMetadata(ctx.adapterContext as unknown as Record<string, unknown>);
+
+  // ── Call decision (native by default, overridable for tests) ──
+  const decision = await decideStopMessageAction(decisionCtx);
+
+  // ── Build compare context ──
+  const captured = getCapturedRequest(ctx.adapterContext);
   const compare: StopMessageCompareContext = {
-    armed: false,
-    mode: 'off',
+    armed: decision.action === 'trigger',
+    mode: decision.action === 'trigger' ? 'on' : 'off',
     allowModeOnly: false,
-    textLength: 0,
-    maxRepeats: 0,
-    used: 0,
-    remaining: 0,
-    active: false,
-    stopEligible: false,
-    hasCapturedRequest: false,
-    compactionRequest: false,
-    hasSeed: false,
-    decision: 'skip',
-    reason: 'handler_start'
-  };
-
-  const syncCompareRound = (): void => {
-    const max = Number.isFinite(compare.maxRepeats) ? Math.max(0, Math.floor(compare.maxRepeats)) : 0;
-    const used = Number.isFinite(compare.used) ? Math.max(0, Math.floor(compare.used)) : 0;
-    compare.maxRepeats = max;
-    compare.used = used;
-    compare.remaining = max > 0 ? Math.max(0, max - used) : 0;
-    compare.active = compare.armed && compare.mode !== 'off' && max > 0 && compare.textLength > 0;
-  };
-
-  const updateCompare = (patch: Partial<StopMessageCompareContext>): void => {
-    Object.assign(compare, patch);
-    syncCompareRound();
-  };
-
-  const markSkip = (reason: string, patch?: Partial<StopMessageCompareContext>): null => {
-    updateCompare({ decision: 'skip', reason, ...(patch || {}) });
-    return null;
+    textLength: decision.followup_text?.length ?? 0,
+    maxRepeats: decision.max_repeats,
+    used: decision.used,
+    remaining: decision.max_repeats > decision.used ? decision.max_repeats - decision.used : 0,
+    active: decision.action === 'trigger',
+    stopEligible: stopGateway.eligible,
+    hasCapturedRequest: Boolean(captured),
+    compactionRequest: Boolean(captured && isCompactionRequest(captured)),
+    hasSeed: Boolean(captured && extractCapturedChatSeed(captured)),
+    decision: decision.action === 'trigger' ? 'trigger' : 'skip',
+    reason: decision.skip_reason ?? 'native_decision',
   };
 
   try {
-    if (isStopMessageDisabledByPort(ctx.adapterContext)) {
-      return markSkip('skip_port_stopmessage_disabled');
+    if (decision.action !== 'trigger') {
+      return null;
     }
 
-    const followupFlowId = readServerToolFollowupFlowId(rt);
-    if (followupFlowId) {
-      const followupStopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
-      if (followupStopGateway.eligible) {
-        debugLog('followup_request_stopless_allowed', { followupFlowId } as JsonObject);
-      } else {
-        debugLog('followup_request_allowed', { followupFlowId } as JsonObject);
-        return markSkip('skip_servertool_followup_hop');
-      }
-    }
-
-    if (hasResponsesSubmitToolOutputsResume(ctx.adapterContext)) {
-      return markSkip('skip_responses_submit_tool_outputs_resume');
-    }
-
-    const persistedLookupPlan = planStopMessagePersistedLookup(record, rt, {
-      includeSnapshotLookup: true,
-      includeTombstoneLookup: true
-    });
-    const strictSessionScope = persistedLookupPlan.strictSessionScope || undefined;
+    // ── Persist used counter ──
     const stickyKey = persistedLookupPlan.stickyKey || undefined;
-    const candidateKeys = persistedLookupPlan.candidateKeys;
-    const persistedStopMessageState = persistedLookupPlan.readStopMessageSnapshot
-      ? readPersistedStopMessageSnapshotFromCandidateKeys(candidateKeys)
-      : null;
-    const persistedStopMessageTombstone = persistedLookupPlan.readStopMessageTombstone
-      ? readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys)
-      : { exhaustedDefault: false };
-    const runtimeStopMessageState = resolveRuntimeStopMessageState(rt);
-    const requestScopedGoal = readRequestScopedGoalState(ctx.adapterContext);
-    const persistedGoal = readStoplessGoalState(ctx.adapterContext).state;
-    const effectiveGoalState = requestScopedGoal.state ?? persistedGoal;
-    const hasManagedGoal = Boolean(effectiveGoalState && effectiveGoalState.status !== 'idle');
-    let snapshot = persistedStopMessageState ?? runtimeStopMessageState;
-    const stickyMode = normalizeStopMessageStageMode(undefined);
-    const runtimeMode = readRuntimeStopMessageStageMode(rt);
-    const explicitMode = stickyMode ?? runtimeMode;
-
-    if (explicitMode === 'off') {
-      return markSkip('skip_stopmessage_mode_off');
+    const strictSessionScope = persistedLookupPlan.strictSessionScope || undefined;
+    // Always use the standard execution text for stop_message followup.
+    // The snapshot text is only used for persistence/counter, not for the followup message.
+    const text = STOP_MESSAGE_EXECUTION_APPEND;
+    const usedAt = Date.now();
+    const persistStickyKeys = Array.from(new Set([
+      ...(stickyKey && isPersistentStickyKey(stickyKey) ? [stickyKey] : []),
+      ...candidateKeys.filter((key) => isPersistentStickyKey(key)),
+      ...(strictSessionScope && isPersistentStickyKey(strictSessionScope) ? [strictSessionScope] : [])
+    ]));
+    for (const key of persistStickyKeys) {
+      const persistedState = loadRoutingInstructionStateSync(key) ?? null;
+      const nextState = applyStopMessageSnapshotToState(persistedState, {
+        text,
+        maxRepeats: decision.max_repeats,
+        used: decision.used + 1,
+        source: 'default',
+        stageMode: 'on',
+        aiMode: 'off',
+        updatedAt: usedAt,
+        lastUsedAt: usedAt
+      });
+      persistStopMessageState(key, nextState);
     }
 
-    if (!snapshot) {
-      if (explicitMode === 'on' || explicitMode === 'auto') {
-        return markSkip('skip_explicit_mode_without_snapshot');
-      }
-      const implicit = STOPMESSAGE_IMPLICIT_GEMINI
-        ? resolveImplicitGeminiStopMessageSnapshot(ctx, record)
-        : null;
-      const shouldUseDefaultStopMessage = (!hasManagedGoal || effectiveGoalState?.status !== 'active')
-        && !shouldYieldToEmptyReplyContinueLocal({
-          base: ctx.base,
-          providerProtocol: ctx.providerProtocol,
-          entryEndpoint: ctx.entryEndpoint
-        });
-      if (shouldUseDefaultStopMessage && persistedStopMessageTombstone.exhaustedDefault) {
-        return markSkip('skip_goal_default_exhausted');
-      }
-      const defaultSnapshot = shouldUseDefaultStopMessage && resolveStopMessageDefaultEnabledLive()
-        ? resolveDefaultStopMessageSnapshot(ctx, {
-            text: resolveStopMessageDefaultTextLive(),
-            maxRepeats: resolveStopMessageDefaultMaxRepeatsLive()
-          })
-        : null;
-      const snapshotCandidate = implicit
-        ? {
-            text: implicit.text,
-            maxRepeats: implicit.maxRepeats,
-            used: implicit.used,
-            source: implicit.source,
-            updatedAt: implicit.updatedAt,
-            lastUsedAt: implicit.lastUsedAt,
-            stageMode: 'on' as const,
-            aiMode: 'off' as const
-          }
-        : defaultSnapshot
-          ? {
-              text: defaultSnapshot.text,
-              maxRepeats: defaultSnapshot.maxRepeats,
-              used: defaultSnapshot.used,
-              source: defaultSnapshot.source,
-              updatedAt: defaultSnapshot.updatedAt,
-              lastUsedAt: defaultSnapshot.lastUsedAt,
-              stageMode: 'on' as const,
-              aiMode: 'off' as const
-            }
-          : null;
-      snapshot = snapshotCandidate;
-      if (!snapshot) {
-        return markSkip('skip_no_stopmessage_snapshot');
-      }
-    }
-
-    const mode = snapshot.stageMode ?? 'on';
-    const textRaw = typeof snapshot.text === 'string' ? snapshot.text.trim() : '';
-    const text = textRaw;
-    const maxRepeats =
-      typeof snapshot.maxRepeats === 'number' && Number.isFinite(snapshot.maxRepeats)
-        ? Math.max(1, Math.floor(snapshot.maxRepeats))
-        : 0;
-    const used =
-      typeof snapshot.used === 'number' && Number.isFinite(snapshot.used)
-        ? Math.max(0, Math.floor(snapshot.used))
-        : 0;
-
-    updateCompare({
-      armed: true,
-      mode,
-      allowModeOnly: false,
-      textLength: text.length,
-      maxRepeats,
-      used
-    });
-
-    if (mode === 'off') {
-      return markSkip('skip_stopmessage_mode_off');
-    }
-    if (!text.length) {
-      return markSkip('skip_stopmessage_empty_text');
-    }
-    if (!(maxRepeats > 0)) {
-      return markSkip('skip_stopmessage_invalid_repeats');
-    }
-
-    const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
-    const stopEligible = stopGateway.eligible;
-    updateCompare({ stopEligible });
-    if (!stopEligible) {
-      return markSkip('skip_not_stop_finish_reason');
-    }
-
-    if (used > maxRepeats) {
-      return markSkip('skip_reached_max_repeats');
-    }
-
-    if (hasManagedGoal && effectiveGoalState?.status === 'active') {
-      return markSkip('skip_goal_active');
-    }
-
-    const captured = getCapturedRequest(ctx.adapterContext);
-    updateCompare({
-      hasCapturedRequest: Boolean(captured),
-      compactionRequest: Boolean(captured && isCompactionRequest(captured)),
-      hasSeed: Boolean(captured && extractCapturedChatSeed(captured))
-    });
-
-    const followupText = enforceStopMessageExecutionFollowupText(STOP_MESSAGE_EXECUTION_APPEND);
-    updateCompare({ used, decision: 'trigger', reason: 'triggered' });
-
+    // ── Build followup plan ──
     const connectionState = resolveClientConnectionState(record.clientConnectionState);
     const pinnedTarget = readPinnedTargetFromAdapterContext(ctx.adapterContext);
-    emitStopFollowupPinLog({
-      adapterContext: ctx.adapterContext,
-      pinnedTarget,
-      followupText
-    });
+    emitStopFollowupPinLog({ adapterContext: ctx.adapterContext, pinnedTarget, followupText: text });
+
     return {
       flowId: FLOW_ID,
-      finalize: async () => ({
-        chatResponse: ctx.base,
-        execution: {
-          flowId: FLOW_ID,
-          ...(stickyKey
-            ? {
-                stopMessageReservation: {
-                  stickyKey,
-                  previousState: null
-                }
-              }
-            : {}),
-          followup: {
-            requestIdSuffix: ':stop_followup',
-            injection: {
-              ops: [
-                { op: 'append_assistant_message', required: false },
-                { op: 'append_user_text', text: followupText }
-              ]
-            },
-            metadata: {
-              ...(connectionState ? { clientConnectionState: connectionState as JsonObject } : {}),
-              ...(pinnedTarget.providerKey ? {
-                __shadowCompareForcedProviderKey: pinnedTarget.providerKey,
-                providerKey: pinnedTarget.providerKey,
-                targetProviderKey: pinnedTarget.providerKey
-              } : {}),
-              ...(pinnedTarget.modelId ? {
-                assignedModelId: pinnedTarget.modelId,
-                modelId: pinnedTarget.modelId,
-                target: {
-                  ...(pinnedTarget.providerKey ? { providerKey: pinnedTarget.providerKey } : {}),
-                  modelId: pinnedTarget.modelId
-                }
-              } : {}),
-              ...(pinnedTarget.routecodexPortMode ? { routecodexPortMode: pinnedTarget.routecodexPortMode } : {})
-            } as JsonObject
+      finalize: async () => {
+        const followupText = STOP_MESSAGE_EXECUTION_APPEND;
+        return {
+          chatResponse: ctx.base,
+          execution: {
+            flowId: FLOW_ID,
+            ...(stickyKey ? { stopMessageReservation: { stickyKey, previousState: null } } : {}),
+            followup: {
+              requestIdSuffix: ':stop_followup',
+              injection: {
+                ops: [
+                  { op: 'append_assistant_message', required: false },
+                  { op: 'append_user_text', text: followupText }
+                ]
+              },
+              metadata: {
+                ...(connectionState ? { clientConnectionState: connectionState as JsonObject } : {}),
+                ...(pinnedTarget.providerKey ? {
+                  __shadowCompareForcedProviderKey: pinnedTarget.providerKey,
+                  providerKey: pinnedTarget.providerKey,
+                  targetProviderKey: pinnedTarget.providerKey
+                } : {}),
+                ...(pinnedTarget.modelId ? {
+                  assignedModelId: pinnedTarget.modelId,
+                  modelId: pinnedTarget.modelId,
+                  target: {
+                    ...(pinnedTarget.providerKey ? { providerKey: pinnedTarget.providerKey } : {}),
+                    modelId: pinnedTarget.modelId
+                  }
+                } : {}),
+                ...(pinnedTarget.routecodexPortMode ? { routecodexPortMode: pinnedTarget.routecodexPortMode } : {})
+              } as JsonObject
+            }
           }
-        }
-      })
+        };
+      }
     };
   } finally {
     attachStopMessageCompareContext(ctx.adapterContext, compare);

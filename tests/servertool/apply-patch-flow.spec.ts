@@ -110,7 +110,7 @@ describe('apply_patch servertool flow', () => {
     await expect(fs.readFile(path.join(workspace, 'target.txt'), 'utf8')).resolves.toBe('new\n');
 
     const finalChatResponse = result.finalChatResponse as any;
-    expect(finalChatResponse.choices[0].finish_reason).toBe('stop');
+    expect(finalChatResponse.choices[0].finish_reason).toBe('tool_calls');
     expect(finalChatResponse.choices[0].message.tool_calls).toBeUndefined();
     expect(finalChatResponse.tool_outputs).toHaveLength(1);
     expect(finalChatResponse.tool_outputs[0].arguments).toBe(JSON.stringify({ filePath: 'target.txt', patch: '- old\n+ new' }));

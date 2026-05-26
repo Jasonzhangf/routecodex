@@ -131,9 +131,6 @@ function stripApplyPatchToolCall(base: JsonObject, toolCallId: string): void {
       messageRow.tool_calls = kept as JsonValue[];
     } else {
       delete messageRow.tool_calls;
-      if (choiceRow.finish_reason === 'tool_calls') {
-        choiceRow.finish_reason = 'stop';
-      }
     }
   }
 }

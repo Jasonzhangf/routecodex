@@ -58,9 +58,9 @@ function shouldReplaceCapturedChatRequestTools(args: {
 
   const rt = asFlatRecord(args.baseContext.__rt);
   const isServerToolFollowup =
-    args.baseContext.serverToolFollowup === true
-    || args.baseContext.isServerToolFollowup === true
-    || rt?.serverToolFollowup === true;
+    rt?.serverToolFollowup === true
+    || args.baseContext.serverToolFollowup === true
+    || args.baseContext.isServerToolFollowup === true;
   if (!isServerToolFollowup) {
     return false;
   }

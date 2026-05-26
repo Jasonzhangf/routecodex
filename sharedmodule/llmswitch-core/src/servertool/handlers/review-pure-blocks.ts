@@ -211,9 +211,6 @@ export function injectReviewToolOutput(args: {
       continue;
     }
     delete message.tool_calls;
-    if (choiceRow.finish_reason === 'tool_calls') {
-      choiceRow.finish_reason = 'stop';
-    }
   }
   return cloned;
 }

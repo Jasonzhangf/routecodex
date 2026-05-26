@@ -1,6 +1,7 @@
 [workspace]
 members = [
-  "crates/router-hotpath-napi"
+  "crates/router-hotpath-napi",
+  "crates/stop-message-core"
 ]
 resolver = "2"
 

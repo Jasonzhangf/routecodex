@@ -247,6 +247,50 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
+  it('provider_status_2056 burst does not evict from pool even when routePoolSize > 1', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-26T20:40:00.000Z'));
+    const baseNow = Date.now();
+    const providerKey = 'mini27.key1.MiniMax-M2.7';
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    for (let i = 0; i < 3; i += 1) {
+      await emitProviderError(mod, {
+        code: 'MALFORMED_RESPONSE',
+        message: '[hub_response] Upstream provider returned structured business error',
+        stage: 'chat_process.response.entry',
+        status: 520,
+        recoverable: false,
+        affectsHealth: true,
+        timestamp: baseNow + i * 1_000,
+        runtime: {
+          requestId: `req_2056_${i}`,
+          providerKey,
+          providerId: 'mini27'
+        },
+        details: {
+          errorClassification: 'unrecoverable',
+          errorCode: 'MALFORMED_RESPONSE',
+          upstreamCode: 'provider_status_2056',
+          routePoolSize: 2
+        }
+      } as any);
+      await jest.advanceTimersByTimeAsync(5);
+    }
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey]).toBeDefined();
+    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].reason).toBe('cooldown');
+    expect(snapshot[providerKey].cooldownKeepsPool).toBe(true);
+    expect(snapshot[providerKey].consecutiveErrorCount).toBe(3);
+
+    await mod.stop();
+  });
+
   it('unknown route pool repeated 5xx stays in pool as last-provider backoff', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-05-15T20:03:00.000Z'));
