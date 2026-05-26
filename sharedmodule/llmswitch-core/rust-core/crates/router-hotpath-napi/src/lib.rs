@@ -80,6 +80,7 @@ mod resp_process_stage1_tool_governance_blocks;
 mod resp_process_stage2_finalize;
 mod responses_openai_codec;
 mod responses_reasoning_registry;
+mod servertool_core_blocks;
 mod servertool_skeleton;
 mod servertool_skeleton_config;
 mod shared_args_mapping;
@@ -979,6 +980,34 @@ pub fn inject_loop_warning_json(input_json: String) -> NapiResult<String> {
 pub fn decide_budget_reset_json(stop_observed: bool, stop_eligible: bool, current_used: u32) -> String {
     let decision = followup_mainline_blocks::budget_reset(stop_observed, stop_eligible, current_used);
     serde_json::to_string(&decision).unwrap_or_else(|_| r#"{"should_reset":false,"next_used":0}"#.to_string())
+}
+
+#[napi]
+pub fn inspect_stop_gateway_signal(payload_json: String) -> NapiResult<String> {
+    servertool_core_blocks::inspect_stop_gateway_signal(&payload_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn evaluate_loop_guard(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::evaluate_loop_guard(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn calculate_budget(
+    observed: bool,
+    stop_eligible: bool,
+    snapshot_json: Option<String>,
+    default_config_json: Option<String>,
+) -> NapiResult<String> {
+    servertool_core_blocks::calculate_budget_json(
+        observed,
+        stop_eligible,
+        snapshot_json.as_deref(),
+        default_config_json.as_deref(),
+    )
+    .map_err(|e| napi::Error::from_reason(e))
 }
 
 #[napi]

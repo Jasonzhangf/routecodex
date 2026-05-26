@@ -861,7 +861,8 @@ export class ChatSseToJsonConverter {
         message: {
           role: 'assistant',
           content: ''
-        }
+        },
+        finish_reason: null
       });
     }
     return choiceBuilder;
@@ -1075,6 +1076,7 @@ export class ChatSseToJsonConverter {
           role: 'assistant',
           content: ''
         },
+        finish_reason: null,
         logprobs: choice.logprobs
       });
     }

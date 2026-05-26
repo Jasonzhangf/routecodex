@@ -2,7 +2,8 @@
 members = [
   "crates/router-hotpath-napi",
   "crates/stop-message-core",
-  "crates/followup-core"
+  "crates/followup-core",
+  "crates/servertool-core"
 ]
 resolver = "2"
 

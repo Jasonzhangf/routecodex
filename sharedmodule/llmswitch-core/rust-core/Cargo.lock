@@ -453,6 +453,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "servertool-core",
  "sha2",
  "stop-message-core",
  "uuid",
@@ -511,6 +512,14 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "servertool-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
