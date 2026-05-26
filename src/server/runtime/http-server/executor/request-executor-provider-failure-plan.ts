@@ -79,12 +79,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   const forceExcludeCurrentProviderOnRetry =
     suppressForceExclude
       ? false
-      : args.forceExcludeCurrentProviderOnRetry
-    ?? (
-      args.stage === 'provider.send'
-      && !suppressForceExclude
-      && (!Array.isArray(args.routePool) || args.routePool.length === 0)
-    );
+      : args.forceExcludeCurrentProviderOnRetry === true;
   const retryExecutionPlan = await resolveProviderRetryExecutionPlan({
     error: args.error,
     retryError: args.retryError,

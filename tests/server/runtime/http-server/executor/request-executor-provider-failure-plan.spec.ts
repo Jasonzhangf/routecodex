@@ -36,4 +36,38 @@ describe('request-executor-provider-failure-plan', () => {
     expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
     expect(plan.retryExecutionPlan.shouldRetry).toBe(false);
   });
+
+  test('does not force-exclude provider when route pool is unknown/empty', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const plan = await resolveRequestExecutorProviderFailurePlan({
+      error: Object.assign(new Error('provider runtime resolve failed'), {
+        code: 'ERR_PROVIDER_NOT_FOUND',
+        upstreamCode: 'ERR_PROVIDER_NOT_FOUND',
+        statusCode: 502
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'ERR_PROVIDER_NOT_FOUND',
+        upstreamCode: 'ERR_PROVIDER_NOT_FOUND',
+        reason: 'provider runtime resolve failed'
+      },
+      requestId: 'req-empty-pool-no-force-exclude',
+      providerKey: 'crs.crsa.gpt-5.4',
+      runtimeKey: 'runtime:crs',
+      dependencies: {} as any,
+      attempt: 1,
+      maxAttempts: 3,
+      stage: 'provider.send',
+      logicalRequestChainKey: 'logical-empty-pool-no-force-exclude',
+      logicalChainRetryLimitStageRequestId: 'logical-empty-pool-no-force-exclude',
+      routePool: [],
+      excludedProviderKeys,
+      recordAttempt: () => undefined,
+      logStage: () => undefined,
+      logNonBlockingError: () => undefined
+    });
+
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
+    expect(excludedProviderKeys.size).toBe(0);
+  });
 });

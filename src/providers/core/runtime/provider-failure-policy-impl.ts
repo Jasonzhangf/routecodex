@@ -82,6 +82,23 @@ function isHostFailureStage(stage?: string): boolean {
   return stage === 'host.response_contract';
 }
 
+function isProviderBusinessStatus2013(value: unknown): boolean {
+  if (typeof value === 'number') {
+    return value === 2013;
+  }
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const normalized = value.trim().toUpperCase();
+  if (!normalized) {
+    return false;
+  }
+  if (normalized === '2013') {
+    return true;
+  }
+  return /(?:^|_)2013(?:_|$)/.test(normalized);
+}
+
 export function normalizeProviderFailureCodeKey(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -261,6 +278,16 @@ export function resolveProviderFailureClassification(args: {
   const nestedMessage = typeof nested.message === 'string' ? nested.message.toLowerCase() : '';
   const protocolReason = typeof protocolDetails.reason === 'string' ? protocolDetails.reason.trim().toLowerCase() : '';
   const protocolUpstreamCode = normalizeProviderFailureCodeKey(protocolDetails.upstreamCode);
+
+  if (
+    isProviderBusinessStatus2013(errorCode)
+    || isProviderBusinessStatus2013(upstreamCode)
+    || isProviderBusinessStatus2013(nestedCode)
+    || isProviderBusinessStatus2013(protocolUpstreamCode)
+    || isProviderBusinessStatus2013(protocolDetails.providerStatusCode)
+  ) {
+    return 'special_400';
+  }
 
   if (
     errorCode === 'ERR_HTTP2_STREAM_CANCEL'

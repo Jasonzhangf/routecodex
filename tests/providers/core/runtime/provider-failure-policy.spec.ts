@@ -219,6 +219,31 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('classifies HTTP_429_2013 as special_400 to avoid pool eviction', () => {
+    const error = Object.assign(new Error('provider business error 2013'), {
+      code: 'HTTP_429_2013',
+      upstreamCode: 'HTTP_429_2013',
+      statusCode: 429
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 429,
+      errorCode: 'HTTP_429_2013',
+      upstreamCode: 'HTTP_429_2013',
+      reason: 'provider business error 2013'
+    });
+
+    expect(classification).toBe('special_400');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      errorCode: 'HTTP_429_2013',
+      upstreamCode: 'HTTP_429_2013',
+      statusCode: 429,
+      classification
+    })).toBe(true);
+  });
+
   it('classifies windsurf repeated tool call after tool_result as special_400', () => {
     const error = Object.assign(new Error('[windsurf] upstream repeated prior tool call after tool_result'), {
       code: 'WINDSURF_SERVICE_UNREACHABLE',
