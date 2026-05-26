@@ -866,6 +866,10 @@ export function isProviderFailureHealthNeutral(args: {
       || upstreamCode === 'PROVIDER_STATUS_1000'
     )
   ) {
+    // HTTP 429 must affect health so priority route can apply cooldown/blacklist policy.
+    if (statusCode === 429 || errorCode === 'HTTP_429' || upstreamCode === 'HTTP_429') {
+      return false;
+    }
     return true;
   }
   if (errorCode === 'CLIENT_TOOL_ARGS_INVALID') {

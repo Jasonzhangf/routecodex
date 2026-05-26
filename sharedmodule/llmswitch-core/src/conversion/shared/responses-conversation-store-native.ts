@@ -48,11 +48,20 @@ export function resumeConversationPayload(
   submitPayload: AnyRecord,
   requestId?: string
 ): { payload: AnyRecord; meta: AnyRecord } {
+  const resumeInput = Array.isArray(entry.input) && entry.input.length > 0
+    ? entry.input
+    : (Array.isArray(entry.releasedInputPrefix) ? entry.releasedInputPrefix : []);
+  const usesReleasedPrefixAsInput =
+    (!Array.isArray(entry.input) || entry.input.length === 0)
+    && Array.isArray(entry.releasedInputPrefix)
+    && entry.releasedInputPrefix.length > 0;
   const resumed = resumeResponsesConversationPayloadWithNative(
     {
       requestId: entry.requestId,
       basePayload: entry.basePayload,
-      input: entry.input,
+      input: resumeInput,
+      releasedInputPrefix: entry.releasedInputPrefix,
+      releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
       routeHint: entry.routeHint
     },

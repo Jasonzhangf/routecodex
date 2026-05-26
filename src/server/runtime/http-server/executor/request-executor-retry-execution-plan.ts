@@ -228,6 +228,9 @@ export async function resolveProviderRetryExecutionPlan(args: {
     retryError: args.retryError,
     backoffScope: retryBackoffPlan.backoffScope
   });
+  const providerOwnsWindsurfAccountRouting =
+    (args.error as { retryScope?: unknown; providerAccountOwnership?: unknown } | undefined)?.retryScope === 'provider-internal-only'
+    || (args.error as { providerAccountOwnership?: unknown } | undefined)?.providerAccountOwnership === 'internal';
   if (
     retrySwitchPlan.switchAction === 'retry_same_provider'
     && !exclusionPlan.excludedCurrentProvider
@@ -241,6 +244,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       (typeof args.providerKey === 'string' && args.providerKey.startsWith('windsurf.'))
       || (typeof args.runtimeKey === 'string' && args.runtimeKey.startsWith('windsurf.'))
     )
+    && !providerOwnsWindsurfAccountRouting
   ) {
     applyRetryExclusionForCurrentProvider({
       providerKey: args.providerKey,

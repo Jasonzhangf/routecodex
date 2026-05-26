@@ -9,6 +9,8 @@ function buildStreamContractProbeBody(convertedBody: unknown): Record<string, un
   const source = convertedBody as Record<string, unknown>;
   const probe: Record<string, unknown> = {};
   for (const key of [
+    'id',
+    'object',
     'choices',
     'status',
     'required_action',

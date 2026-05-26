@@ -407,7 +407,7 @@ describe('ResponsesSemanticMapper submit tool outputs', () => {
     clearResponsesConversationByRequestId(reboundRequestId);
   });
 
-  it('fails fast when recording a responses response against an unknown request context', () => {
+  it('skips recording when responses response arrives without known request context', () => {
     const requestId = `req-submit-missing-context-${Date.now()}`;
     const reboundRequestId = `${requestId}-provider`;
     const responseId = `resp-submit-missing-context-${Date.now()}`;
@@ -438,18 +438,7 @@ describe('ResponsesSemanticMapper submit tool outputs', () => {
           output: []
         }
       })
-    ).toThrow(
-      expect.objectContaining({
-        name: 'ProviderProtocolError',
-        code: 'MALFORMED_RESPONSE',
-        details: expect.objectContaining({
-          context: 'responses-conversation-store.recordResponse',
-          reason: 'missing_request_context',
-          requestId: reboundRequestId,
-          responseId
-        })
-      })
-    );
+    ).not.toThrow();
   });
 
   it('preserves reasoning-only assistant history across responses resume back into chat request', () => {

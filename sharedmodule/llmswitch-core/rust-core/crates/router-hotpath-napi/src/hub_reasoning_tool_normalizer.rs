@@ -3,7 +3,7 @@ use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name
 use crate::hub_text_markup_normalizer::{
     extract_explicit_top_level_tool_calls_as_values, TextMarkupNormalizeOptions,
 };
-use crate::resp_process_stage1_tool_governance::normalize_apply_patch_schema_args;
+use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use regex::Regex;

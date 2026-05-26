@@ -158,6 +158,13 @@ impl VirtualRouterEngineCore {
             ProviderErrorClassification::Special400 => true,
             ProviderErrorClassification::Recoverable => {
                 let status = extract_status_code(event);
+                if status == Some(429) {
+                    self.health_manager
+                        .record_http_429_failure(provider_key, reason, now);
+                    self.apply_series_cooldown(event);
+                    self.persist_provider_health();
+                    return true;
+                }
                 if status == Some(503) {
                     let ttl = compute_cooldown_until_next_local_midnight_ms(now);
                     self.health_manager

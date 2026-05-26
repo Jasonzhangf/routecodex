@@ -31,6 +31,15 @@ struct ProviderInternalState {
     last_failure_at: Option<i64>,
     reason: Option<String>,
     consecutive_http_502_failures: i64,
+    consecutive_http_429_failures: i64,
+    http_429_cooldown_cycles: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Http429ControlOutcome {
+    None,
+    CooldownApplied,
+    Blacklisted,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +116,8 @@ impl ProviderHealthManager {
                         last_failure_at: None,
                         reason: None,
                         consecutive_http_502_failures: 0,
+                        consecutive_http_429_failures: 0,
+                        http_429_cooldown_cycles: 0,
                     },
                 );
             }
@@ -126,6 +137,8 @@ impl ProviderHealthManager {
         let state = self.get_state_mut(provider_key);
         state.failure_count += 1;
         state.consecutive_http_502_failures = 0;
+        state.consecutive_http_429_failures = 0;
+        state.http_429_cooldown_cycles = 0;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
             state.reason = Some(reason);
@@ -149,6 +162,8 @@ impl ProviderHealthManager {
         let state = self.get_state_mut(provider_key);
         state.failure_count += 1;
         state.consecutive_http_502_failures = 0;
+        state.consecutive_http_429_failures = 0;
+        state.http_429_cooldown_cycles = 0;
         state.state = "tripped".to_string();
         state.reason = reason;
         state.cooldown_expires_at = Some(now_ms + ttl);
@@ -165,6 +180,8 @@ impl ProviderHealthManager {
         let state = self.get_state_mut(provider_key);
         state.failure_count += 1;
         state.consecutive_http_502_failures = 0;
+        state.consecutive_http_429_failures = 0;
+        state.http_429_cooldown_cycles = 0;
         state.state = "tripped".to_string();
         state.reason = Some(PERSIST_REASON_HTTP_503_DAILY.to_string());
         state.cooldown_expires_at = Some(now_ms + ttl);
@@ -175,6 +192,8 @@ impl ProviderHealthManager {
         let state = self.get_state_mut(provider_key);
         state.failure_count = 0;
         state.consecutive_http_502_failures = 0;
+        state.consecutive_http_429_failures = 0;
+        state.http_429_cooldown_cycles = 0;
         state.state = "healthy".to_string();
         state.cooldown_expires_at = None;
         state.last_failure_at = None;
@@ -193,6 +212,8 @@ impl ProviderHealthManager {
         let state = self.get_state_mut(provider_key);
         state.failure_count = state.failure_count.max(failure_threshold);
         state.consecutive_http_502_failures = 0;
+        state.consecutive_http_429_failures = 0;
+        state.http_429_cooldown_cycles = 0;
         state.state = "tripped".to_string();
         state.reason = reason;
         state.cooldown_expires_at = Some(now_ms + ttl);
@@ -206,7 +227,15 @@ impl ProviderHealthManager {
         }
         if let Some(expiry) = state.cooldown_expires_at {
             if now_ms >= expiry {
-                self.record_success(provider_key);
+                // Cooldown expiry is time-based recovery, not a real upstream success.
+                // Keep 429 cooldown-cycle memory so repeated 3x 429 waves can escalate.
+                state.state = "healthy".to_string();
+                state.failure_count = 0;
+                state.cooldown_expires_at = None;
+                state.last_failure_at = None;
+                state.reason = None;
+                state.consecutive_http_502_failures = 0;
+                state.consecutive_http_429_failures = 0;
                 return true;
             }
         }
@@ -303,6 +332,44 @@ impl ProviderHealthManager {
         }
     }
 
+    pub(crate) fn record_http_429_failure(
+        &mut self,
+        provider_key: &str,
+        reason: Option<String>,
+        now_ms: i64,
+    ) -> Http429ControlOutcome {
+        const HTTP_429_THRESHOLD: i64 = 3;
+        const HTTP_429_BLACKLIST_AFTER_COOLDOWN_CYCLES: i64 = 1;
+        const HTTP_429_BLACKLIST_MS: i64 = 24 * 60 * 60_000;
+
+        let cooldown_ms = self.config.cooldown_ms;
+        let state = self.get_state_mut(provider_key);
+        state.failure_count += 1;
+        state.consecutive_http_502_failures = 0;
+        state.consecutive_http_429_failures += 1;
+        state.last_failure_at = Some(now_ms);
+        if let Some(reason) = reason {
+            state.reason = Some(reason);
+        }
+
+        if state.consecutive_http_429_failures < HTTP_429_THRESHOLD {
+            return Http429ControlOutcome::None;
+        }
+
+        state.consecutive_http_429_failures = 0;
+        if state.http_429_cooldown_cycles >= HTTP_429_BLACKLIST_AFTER_COOLDOWN_CYCLES {
+            state.state = "blacklisted".to_string();
+            state.cooldown_expires_at = Some(now_ms + HTTP_429_BLACKLIST_MS);
+            state.http_429_cooldown_cycles = 0;
+            return Http429ControlOutcome::Blacklisted;
+        }
+
+        state.state = "tripped".to_string();
+        state.cooldown_expires_at = Some(now_ms + cooldown_ms);
+        state.http_429_cooldown_cycles += 1;
+        Http429ControlOutcome::CooldownApplied
+    }
+
     fn get_state_mut(&mut self, provider_key: &str) -> &mut ProviderInternalState {
         let canonical = Self::canonicalize_provider_key(provider_key);
         if !self.states.contains_key(&canonical) {
@@ -316,6 +383,8 @@ impl ProviderHealthManager {
                     last_failure_at: None,
                     reason: None,
                     consecutive_http_502_failures: 0,
+                    consecutive_http_429_failures: 0,
+                    http_429_cooldown_cycles: 0,
                 },
             );
         }
@@ -417,5 +486,72 @@ mod tests {
             .unwrap();
         assert_eq!(state2.failure_count, 1);
         assert_eq!(state2.state, "healthy");
+    }
+
+    #[test]
+    fn test_http_429_three_strikes_trigger_cooldown_then_blacklist_on_next_cycle() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-provider".to_string()]);
+        let now = 10_000i64;
+
+        // first cycle: 3 consecutive 429 -> cooldown
+        assert_eq!(
+            manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now),
+            Http429ControlOutcome::None
+        );
+        assert_eq!(
+            manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now + 1),
+            Http429ControlOutcome::None
+        );
+        assert_eq!(
+            manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now + 2),
+            Http429ControlOutcome::CooldownApplied
+        );
+        let first = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-provider")
+            .expect("provider state");
+        assert_eq!(first.state, "tripped");
+        assert!(first.cooldown_expires_at.is_some());
+
+        // cooldown passes -> healthy and counters reset
+        assert!(manager.is_available(
+            "test-provider",
+            first.cooldown_expires_at.expect("expiry") + 1
+        ));
+
+        // second cycle: 3 consecutive 429 -> blacklist
+        assert_eq!(
+            manager.record_http_429_failure(
+                "test-provider",
+                Some("HTTP_429".to_string()),
+                first.cooldown_expires_at.expect("expiry") + 2
+            ),
+            Http429ControlOutcome::None
+        );
+        assert_eq!(
+            manager.record_http_429_failure(
+                "test-provider",
+                Some("HTTP_429".to_string()),
+                first.cooldown_expires_at.expect("expiry") + 3
+            ),
+            Http429ControlOutcome::None
+        );
+        assert_eq!(
+            manager.record_http_429_failure(
+                "test-provider",
+                Some("HTTP_429".to_string()),
+                first.cooldown_expires_at.expect("expiry") + 4
+            ),
+            Http429ControlOutcome::Blacklisted
+        );
+        let second = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-provider")
+            .expect("provider state");
+        assert_eq!(second.state, "blacklisted");
+        assert!(second.cooldown_expires_at.is_some());
     }
 }

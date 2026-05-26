@@ -279,6 +279,53 @@ describe('HubRequestExecutor failover', () => {
     expect(Array.from(windsurfWeeklyQuotaExcluded)).toEqual(['windsurf.ws-pro-1.gpt-5.4-medium']);
   });
 
+  test('RED: windsurf provider-owned account/session sticky must not leak account routing to executor layer', async () => {
+    const recordAttempt = () => undefined;
+    const excluded = new Set<string>();
+    const executionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+      error: Object.assign(new Error('provider-internal transient'), {
+        code: 'WINDSURF_UPSTREAM_TRANSIENT',
+        upstreamCode: 'WINDSURF_UPSTREAM_TRANSIENT',
+        status: 502,
+        retryable: true,
+        retryScope: 'provider-internal-only',
+        providerAccountOwnership: 'internal',
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'WINDSURF_UPSTREAM_TRANSIENT',
+        upstreamCode: 'WINDSURF_UPSTREAM_TRANSIENT',
+        reason: 'provider-internal transient'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      providerKey: 'windsurf.ws-pro-1.gpt-5.3-codex-low',
+      runtimeKey: 'windsurf.ws-pro-1',
+      logicalRequestChainKey: 'req-windsurf-provider-internal-sticky',
+      logicalChainRetryLimitStageRequestId: 'req-windsurf-provider-internal-sticky',
+      routePool: [
+        'windsurf.ws-pro-1.gpt-5.3-codex-low',
+        'windsurf.ws-pro-2.gpt-5.3-codex-low'
+      ],
+      runtimeManager: {
+        resolveRuntimeKey: (providerKey?: string) => providerKey ? providerKey.split('.gpt-')[0] : undefined
+      },
+      excludedProviderKeys: excluded,
+      recordAttempt,
+      logStage: () => undefined,
+      status: 502
+    });
+
+    expect(executionPlan).toEqual(expect.objectContaining({
+      shouldRetry: true,
+      excludedCurrentProvider: false,
+      retrySwitchPlan: expect.objectContaining({
+        switchAction: 'retry_same_provider'
+      })
+    }));
+    expect(Array.from(excluded)).toEqual([]);
+  });
+
   test('propagates concurrency busy state by runtime/alias scope instead of provider target key', async () => {
     let busyCallback: ((scopeKey: string, busy: boolean) => void) | null = null;
     const fakeTrafficGovernor: ProviderTrafficGovernorLike = {
@@ -2541,7 +2588,8 @@ describe('HubRequestExecutor failover', () => {
 
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
     const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
+    // HTTP 429 in priority/single-provider path should not force provider exclusion.
+    expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
   });
   test('keeps blocking on singleton 429 when reroute temporarily reports provider unavailable', async () => {
     const firstProviderKey = 'glm.key1.glm-4.7';
@@ -3586,6 +3634,27 @@ describe('HubRequestExecutor failover', () => {
         process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = prevMax;
       }
     }
+  });
+
+  test('keeps 429 recoverable backoff key stable across reason/code variants for same provider', () => {
+    const providerKey = 'sdfv.key1.gpt-5.4';
+    const keyA = __requestExecutorTestables.buildRecoverableErrorBackoffKey({
+      providerKey,
+      statusCode: 429,
+      errorCode: 'HTTP_429_2056',
+      upstreamCode: 'HTTP_429_2056',
+      reason: 'rate limited 2056'
+    });
+    const keyB = __requestExecutorTestables.buildRecoverableErrorBackoffKey({
+      providerKey,
+      statusCode: 429,
+      errorCode: 'HTTP_429',
+      upstreamCode: 'WINDSURF_RATE_LIMITED',
+      reason: 'temporarily rate limited'
+    });
+
+    expect(keyA).toBe(keyB);
+    expect(keyA).toContain('status:429');
   });
 
   test('rejects when recoverable backoff waiter queue is overloaded', async () => {

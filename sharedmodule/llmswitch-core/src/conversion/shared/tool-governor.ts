@@ -17,7 +17,6 @@ import {
 import {
   processChatResponseTools
 } from './tool-governor-response.js';
-
 export {
     normalizeApplyPatchToolCallsOnRequest,
     normalizeRequestToolCalls,

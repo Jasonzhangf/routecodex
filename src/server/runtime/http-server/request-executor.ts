@@ -24,8 +24,8 @@ import {
 } from './executor-metadata.js';
 import {
   rebindResponsesConversationRequestId,
-  clearResponsesConversationByRequestId,
-  finalizeResponsesConversationRequestRetention
+  captureResponsesRequestContextForRequest,
+  clearResponsesConversationByRequestId
 } from '../../../modules/llmswitch/bridge.js';
 import {
   convertProviderResponseIfNeeded as convertProviderResponseWithBridge
@@ -407,6 +407,45 @@ export class HubRequestExecutor implements RequestExecutor {
         onRequestStart: this.deps.onRequestStart,
         logNonBlockingError: logRequestExecutorNonBlockingError
       });
+      if (input.entryEndpoint === '/v1/responses') {
+        const responsesRequestContext =
+          input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+            ? (input.metadata as Record<string, unknown>).responsesRequestContext
+            : undefined;
+        const contextRecord =
+          responsesRequestContext && typeof responsesRequestContext === 'object' && !Array.isArray(responsesRequestContext)
+            ? (responsesRequestContext as Record<string, unknown>)
+            : undefined;
+        const payloadRecord =
+          contextRecord?.payload && typeof contextRecord.payload === 'object' && !Array.isArray(contextRecord.payload)
+            ? (contextRecord.payload as Record<string, unknown>)
+            : undefined;
+        const contextPayload =
+          contextRecord?.context && typeof contextRecord.context === 'object' && !Array.isArray(contextRecord.context)
+            ? (contextRecord.context as Record<string, unknown>)
+            : undefined;
+        if (payloadRecord && contextPayload) {
+          const sessionId =
+            typeof contextRecord?.sessionId === 'string' ? contextRecord.sessionId : undefined;
+          const conversationId =
+            typeof contextRecord?.conversationId === 'string' ? contextRecord.conversationId : undefined;
+          await captureResponsesRequestContextForRequest({
+            requestId: input.requestId,
+            payload: payloadRecord,
+            context: contextPayload,
+            sessionId,
+            conversationId,
+            routeHint: typeof (input.metadata as Record<string, unknown>).routeHint === 'string'
+              ? String((input.metadata as Record<string, unknown>).routeHint)
+              : undefined
+          }).catch((error) => {
+            logRequestExecutorNonBlockingError('responses_context.capture_inbound', error, {
+              requestId: input.requestId,
+              entryEndpoint: input.entryEndpoint
+            });
+          });
+        }
+      }
       try {
         const pipelineLabel = 'hub';
         let aggregatedUsage: UsageMetrics | undefined;
@@ -1127,28 +1166,10 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           aggregatedUsage = providerResponseResult.aggregatedUsage;
 
-          const convertedStatus = providerResponseResult.convertedStatus;
-          const convertedBody =
-            converted.body && typeof converted.body === 'object' && !Array.isArray(converted.body)
-              ? (converted.body as Record<string, unknown>)
-              : undefined;
-          const convertedError =
-            convertedBody?.error && typeof convertedBody.error === 'object' && !Array.isArray(convertedBody.error)
-              ? (convertedBody.error as Record<string, unknown>)
-              : undefined;
-          const shouldClearResponsesConversation =
-            input.entryEndpoint?.includes('/v1/responses')
-            && (
-              (typeof convertedStatus === 'number' && Number.isFinite(convertedStatus) && convertedStatus >= 400)
-              || Boolean(convertedError)
-            );
-          if (shouldClearResponsesConversation) {
-            await clearResponsesConversationByRequestId(input.requestId || executorRequestId);
-          } else if (input.entryEndpoint?.includes('/v1/responses')) {
-            await finalizeResponsesConversationRequestRetention(input.requestId || executorRequestId, {
-              keepForSubmitToolOutputs: finishReason === 'tool_calls'
-            });
-          }
+          // Responses continuation retention/cleanup must be decided after HTTP response shaping,
+          // because response.id (submit anchor) is finalized there. Doing release/clear here can
+          // race ahead of response-id indexing and break submit_tool_outputs restore across
+          // direct/relay hops. Keep executor transport-only; handler owns responses store finalization.
 
           recordAttempt({ usage: aggregatedUsage, error: false });
           for (const scope of sessionStormBackoffScopes ?? []) {

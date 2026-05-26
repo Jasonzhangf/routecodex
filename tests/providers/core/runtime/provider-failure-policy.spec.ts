@@ -329,7 +329,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies short-lived 429 as recoverable and health-neutral', () => {
+  it('classifies short-lived 429 as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('HTTP 429: transient limit'), {
       statusCode: 429
     });
@@ -345,7 +345,7 @@ describe('provider failure policy ssot', () => {
       stage: 'provider.http',
       statusCode: 429,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.http',
@@ -355,7 +355,7 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'retry_same_provider',
@@ -382,7 +382,7 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'retry_same_provider',

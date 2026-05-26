@@ -664,7 +664,7 @@ export async function convertProviderResponseIfNeeded(
       throw error;
     }
   }
-  if (options.processMode === 'passthrough' && !options.wantsStream && options.serverToolsEnabled === false) {
+  if (options.processMode === 'passthrough') {
     return options.response;
   }
   const entry = (options.entryEndpoint || '').toLowerCase();

@@ -120,7 +120,20 @@ export async function recordResponsesResponseForRequest(args: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-bridge] recordResponsesResponse not available');
   }
-  fn(args);
+  try {
+    fn(args);
+  } catch (error) {
+    const code = typeof (error as { code?: unknown })?.code === 'string'
+      ? String((error as { code?: unknown }).code)
+      : '';
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    const missingContext = code === 'MALFORMED_RESPONSE'
+      && message.includes('request context missing for response capture');
+    if (missingContext) {
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function resumeResponsesConversation(

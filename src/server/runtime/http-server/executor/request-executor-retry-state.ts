@@ -45,6 +45,14 @@ export function buildRecoverableErrorBackoffKey(args: {
     return `provider:${raw}`;
   })();
   const statusPart = typeof args.statusCode === 'number' ? `status:${args.statusCode}` : 'status:none';
+  const is429 = args.statusCode === 429
+    || normalizeCodeKey(args.errorCode) === 'HTTP_429'
+    || normalizeCodeKey(args.upstreamCode) === 'HTTP_429';
+  if (is429) {
+    // Keep 429 backoff chain stable to preserve exponential growth across
+    // provider-specific wording/code noise in upstream payload.
+    return `${providerScope}|status:429|rate_limit`;
+  }
   const errorPart = normalizeCodeKey(args.errorCode) ?? 'error:none';
   const upstreamPart = normalizeCodeKey(args.upstreamCode) ?? 'upstream:none';
   const reasonPart = (() => {

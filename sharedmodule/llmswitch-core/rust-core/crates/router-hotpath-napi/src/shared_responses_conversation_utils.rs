@@ -4,7 +4,7 @@ use crate::hub_reasoning_tool_normalizer::{
     collect_reasoning_summary_segments, project_message_reasoning_text,
 };
 use crate::shared_json_utils::{
-    read_string_array_command, read_trimmed_string, read_workdir_from_args, value_as_object_or_empty,
+    read_string_array_command, read_workdir_from_args,
 };
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};

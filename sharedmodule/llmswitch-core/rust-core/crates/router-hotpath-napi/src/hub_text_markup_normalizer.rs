@@ -1,4 +1,4 @@
-use crate::resp_process_stage1_tool_governance::try_parse_json_value_lenient;
+use crate::resp_process_stage1_tool_governance_blocks::json_args::try_parse_json_value_lenient;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use regex::Regex;

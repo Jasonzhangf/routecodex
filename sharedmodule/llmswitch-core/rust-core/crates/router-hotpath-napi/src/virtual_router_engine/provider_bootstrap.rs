@@ -57,6 +57,8 @@ struct ProviderAuthConfigJson {
     oauth_provider_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     raw_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entries: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -359,6 +361,78 @@ fn build_provider_runtime_entries(
                 provider_id
             ));
         }
+        let use_internal_managed_windsurf =
+            should_use_internal_managed_windsurf(provider_id, provider, &normalized_provider);
+
+        if use_internal_managed_windsurf {
+            let managed_alias = String::from("managed");
+            alias_index.insert(provider_id.clone(), vec![managed_alias.clone()]);
+            let selected_entry = auth_entries
+                .first()
+                .ok_or_else(|| format!("Provider {} requires at least one auth entry", provider_id))?;
+            let mut runtime_auth = selected_entry.auth.clone();
+            runtime_auth.entries = extract_raw_auth_entries(provider);
+            if runtime_auth.auth_type == "apiKey" && runtime_auth.secret_ref.is_none() {
+                runtime_auth.secret_ref = Some(format!("{}.{}", provider_id, managed_alias));
+            }
+            let runtime_key = build_runtime_key(provider_id, &managed_alias);
+            runtime_entries.insert(
+                runtime_key.clone(),
+                ProviderRuntimeProfileJson {
+                    runtime_key,
+                    provider_id: provider_id.clone(),
+                    key_alias: managed_alias,
+                    provider_type: normalized_provider.provider_type.clone(),
+                    provider_module: normalized_provider.provider_module.clone(),
+                    endpoint: normalized_provider.endpoint.clone(),
+                    headers: normalized_provider.headers.clone(),
+                    auth: runtime_auth,
+                    enabled: normalized_provider.enabled,
+                    outbound_profile: normalized_provider.outbound_profile.clone(),
+                    compatibility_profile: Some(normalized_provider.compatibility_profile.clone()),
+                    process_mode: Some(normalized_provider.process_mode.clone()),
+                    responses_config: normalized_provider.responses_config.clone(),
+                    streaming: normalized_provider.streaming.clone(),
+                    model_streaming: normalized_provider.model_streaming.clone(),
+                    model_output_tokens: normalized_provider.model_output_tokens.clone(),
+                    default_output_tokens: normalized_provider.default_output_tokens,
+                    model_context_tokens: normalized_provider.model_context_tokens.clone(),
+                    default_context_tokens: normalized_provider.default_context_tokens,
+                    model_anthropic_thinking_config: normalized_provider
+                        .model_anthropic_thinking_config
+                        .clone(),
+                    default_anthropic_thinking_config: normalized_provider
+                        .default_anthropic_thinking_config
+                        .clone(),
+                    model_anthropic_thinking: normalized_provider.model_anthropic_thinking.clone(),
+                    default_anthropic_thinking: normalized_provider
+                        .default_anthropic_thinking
+                        .clone(),
+                    model_anthropic_thinking_budgets: normalized_provider
+                        .model_anthropic_thinking_budgets
+                        .clone(),
+                    default_anthropic_thinking_budgets: normalized_provider
+                        .default_anthropic_thinking_budgets
+                        .clone(),
+                    deepseek: normalized_provider.deepseek.clone(),
+                    extensions: normalized_provider.extensions.clone(),
+                    server_tools_disabled: if normalized_provider.server_tools_disabled {
+                        Some(true)
+                    } else {
+                        None
+                    },
+                    model_capabilities: normalized_provider.model_capabilities.clone(),
+                    model_id: None,
+                    max_context_tokens: None,
+                    anthropic_thinking_config: None,
+                    anthropic_thinking: None,
+                    anthropic_thinking_budgets: None,
+                },
+            );
+            model_index.insert(provider_id.clone(), collected_models);
+            continue;
+        }
+
         alias_index.insert(
             provider_id.clone(),
             auth_entries
@@ -441,6 +515,47 @@ fn build_provider_runtime_entries(
     }
 
     Ok((runtime_entries, alias_index, model_index))
+}
+
+fn extract_raw_auth_entries(provider: &Map<String, Value>) -> Option<Vec<Value>> {
+    let auth = provider.get("auth").and_then(|value| value.as_object())?;
+    let entries = auth.get("entries").and_then(|value| value.as_array())?;
+    if entries.is_empty() {
+        return None;
+    }
+    Some(entries.clone())
+}
+
+fn should_use_internal_managed_windsurf(
+    provider_id: &str,
+    provider: &Map<String, Value>,
+    normalized_provider: &NormalizedProvider,
+) -> bool {
+    if provider_id.trim().eq_ignore_ascii_case("windsurf")
+        || normalized_provider
+            .compatibility_profile
+            .trim()
+            .eq_ignore_ascii_case("chat:windsurf")
+    {
+        let auth = match provider.get("auth").and_then(|value| value.as_object()) {
+            Some(v) => v,
+            None => return false,
+        };
+        let entries_len = auth
+            .get("entries")
+            .and_then(|value| value.as_array())
+            .map(|arr| arr.len())
+            .unwrap_or(0);
+        if entries_len < 2 {
+            return false;
+        }
+        let raw_type = read_optional_string(auth.get("rawType").or_else(|| auth.get("raw_type")))
+            .or_else(|| read_optional_string(auth.get("type")))
+            .unwrap_or_default()
+            .to_lowercase();
+        return raw_type == "windsurf-account" || raw_type == "windsurf-devin-token";
+    }
+    false
 }
 
 fn build_provider_profiles(
@@ -1295,6 +1410,7 @@ fn push_auth_entry(
             .refresh_url
             .clone()
             .or_else(|| defaults.refresh_url.clone()),
+        entries: None,
     };
 
     if normalized.auth_type == "apiKey" && normalized.secret_ref.is_none() {

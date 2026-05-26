@@ -105,56 +105,50 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
 }
 
 export function syncStoplessGoalStateFromRequest(adapterContext: unknown): unknown {
-  const stoplessGoalStateModule = requireCoreDist<{
-    syncStoplessGoalStateFromRequest?: (adapterContext: unknown) => unknown;
-  }>('servertool/handlers/stopless-goal-state');
-  const fn = stoplessGoalStateModule.syncStoplessGoalStateFromRequest;
-  if (typeof fn !== 'function') {
-    throw buildStateIntegrationFailure(
-      'stopless_goal_state.sync.api_unavailable',
-      'syncStoplessGoalStateFromRequest not available'
-    );
-  }
   try {
+    const stoplessGoalStateModule = requireCoreDist<{
+      syncStoplessGoalStateFromRequest?: (adapterContext: unknown) => unknown;
+    }>('servertool/handlers/stopless-goal-state');
+    const fn = stoplessGoalStateModule.syncStoplessGoalStateFromRequest;
+    if (typeof fn !== 'function') {
+      return null;
+    }
     return fn(adapterContext);
   } catch (error) {
-    throw buildStateIntegrationFailure('stopless_goal_state.sync.invoke', error);
+    logStateIntegrationsNonBlocking('stopless_goal_state.sync.invoke', error);
+    return null;
   }
 }
 
 export function persistStoplessGoalStateSnapshot(adapterContext: unknown, state: unknown): unknown {
-  const stoplessGoalStateModule = requireCoreDist<{
-    persistStoplessGoalStateSnapshot?: (adapterContext: unknown, state: unknown) => unknown;
-  }>('servertool/handlers/stopless-goal-state');
-  const fn = stoplessGoalStateModule.persistStoplessGoalStateSnapshot;
-  if (typeof fn !== 'function') {
-    throw buildStateIntegrationFailure(
-      'stopless_goal_state.persist.api_unavailable',
-      'persistStoplessGoalStateSnapshot not available'
-    );
-  }
   try {
+    const stoplessGoalStateModule = requireCoreDist<{
+      persistStoplessGoalStateSnapshot?: (adapterContext: unknown, state: unknown) => unknown;
+    }>('servertool/handlers/stopless-goal-state');
+    const fn = stoplessGoalStateModule.persistStoplessGoalStateSnapshot;
+    if (typeof fn !== 'function') {
+      return null;
+    }
     return fn(adapterContext, state);
   } catch (error) {
-    throw buildStateIntegrationFailure('stopless_goal_state.persist.invoke', error);
+    logStateIntegrationsNonBlocking('stopless_goal_state.persist.invoke', error);
+    return null;
   }
 }
 
 export function readStoplessGoalState(adapterContext: unknown): unknown {
-  const stoplessGoalStateModule = requireCoreDist<{
-    readStoplessGoalState?: (adapterContext: unknown) => unknown;
-  }>('servertool/handlers/stopless-goal-state');
-  const fn = stoplessGoalStateModule.readStoplessGoalState;
-  if (typeof fn !== 'function') {
-    throw buildStateIntegrationFailure(
-      'stopless_goal_state.read.api_unavailable',
-      'readStoplessGoalState not available'
-    );
-  }
   try {
+    const stoplessGoalStateModule = requireCoreDist<{
+      readStoplessGoalState?: (adapterContext: unknown) => unknown;
+    }>('servertool/handlers/stopless-goal-state');
+    const fn = stoplessGoalStateModule.readStoplessGoalState;
+    if (typeof fn !== 'function') {
+      return null;
+    }
     return fn(adapterContext);
   } catch (error) {
-    throw buildStateIntegrationFailure('stopless_goal_state.read.invoke', error);
+    logStateIntegrationsNonBlocking('stopless_goal_state.read.invoke', error);
+    return null;
   }
 }
 

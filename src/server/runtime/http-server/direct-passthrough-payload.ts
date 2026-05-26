@@ -29,12 +29,23 @@ export function applyMinimalDirectOverrides(
     routeParams?: Record<string, unknown>;
   }
 ): Record<string, unknown> {
+  const next = cloneRecord(payload);
   const providerPayload =
     options?.providerPayload && isRecord(options.providerPayload)
       ? (options.providerPayload as Record<string, unknown>)
       : undefined;
-  if (providerPayload) {
-    return cloneRecord(providerPayload);
+  if (providerPayload && typeof providerPayload.model === 'string' && providerPayload.model.trim()) {
+    next.model = providerPayload.model.trim();
   }
-  return cloneRecord(payload);
+  if (providerPayload && isRecord(providerPayload.reasoning)) {
+    next.reasoning = cloneRecord(providerPayload.reasoning);
+  }
+  if (providerPayload && isRecord(providerPayload.thinking)) {
+    next.thinking = cloneRecord(providerPayload.thinking);
+  }
+  const routeModel = typeof options?.routeParams?.model === 'string' ? options.routeParams.model.trim() : '';
+  if (routeModel) {
+    next.model = routeModel;
+  }
+  return next;
 }

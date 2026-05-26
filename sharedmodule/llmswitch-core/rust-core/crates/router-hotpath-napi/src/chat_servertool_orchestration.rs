@@ -502,7 +502,8 @@ fn extract_tool_calls_from_message_mut(
         if raw_name.is_empty() {
             continue;
         }
-        let name = normalize_servertool_call_name(raw_name.as_str());
+        let name = normalize_routecodex_tool_name(Some(raw_name.as_str()))
+            .unwrap_or_else(|| raw_name.to_ascii_lowercase());
         let args = stringify_tool_args(
             function_obj
                 .and_then(|row| {

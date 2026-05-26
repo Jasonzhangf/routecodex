@@ -37,7 +37,10 @@ export interface ConversationEntry {
   requestId: string;
   basePayload: AnyRecord;
   input: AnyRecord[];
+  releasedInputPrefix?: AnyRecord[];
   releasedPendingToolCallIds?: string[];
+  inputPrefixDigest?: string;
+  inputItemCount?: number;
   tools?: AnyRecord[];
   routeHint?: string;
   createdAt: number;

@@ -1,6 +1,6 @@
 use regex::Regex;
 
-use crate::resp_process_stage1_tool_governance_blocks::tool_names::normalize_tool_name;
+use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 
 pub(crate) fn decode_basic_xml_entities(raw: &str) -> String {
     raw.replace("&lt;", "<")
@@ -127,7 +127,7 @@ pub(crate) fn resolve_xml_wrapper_tool_name(raw_name: &str) -> Option<String> {
         return None;
     }
     if is_supported_xml_named_tool_name(normalized.as_str()) {
-        return normalize_tool_name(raw_name);
+        return normalize_routecodex_tool_name(Some(raw_name));
     }
     if looks_like_apply_patch_wrapper_name(normalized.as_str()) {
         return Some("apply_patch".to_string());
@@ -272,7 +272,7 @@ pub(crate) fn resolve_xml_wrapper_tool_name_from_attrs(
     let attr_tool_name =
         read_xml_tag_attribute(attrs, &["name", "tool", "tool_name", "call", "action"]);
     if let Some(candidate) = attr_tool_name {
-        if let Some(canonical) = normalize_tool_name(candidate) {
+        if let Some(canonical) = normalize_routecodex_tool_name(Some(candidate)) {
             return Some(canonical);
         }
     }

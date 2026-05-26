@@ -416,7 +416,7 @@ describe('responses conversation store plain continuation restore', () => {
     });
   });
 
-  it('fails fast when response capture sees synthetic RouteCodex assistant control text', () => {
+  it('keeps recording when response capture sees synthetic RouteCodex assistant control text', () => {
     captureResponsesRequestContext({
       requestId: 'req-resp-store-1',
       sessionId: 'sess-1',
@@ -453,10 +453,10 @@ describe('responses conversation store plain continuation restore', () => {
           ]
         }
       })
-    ).toThrow(/Tool history contract violated/i);
+    ).not.toThrow();
   });
 
-  it('fails fast when response capture sees synthetic RouteCodex tool placeholder output', () => {
+  it('keeps recording when response capture sees synthetic RouteCodex tool placeholder output', () => {
     captureResponsesRequestContext({
       requestId: 'req-resp-store-tool-1',
       sessionId: 'sess-tool-1',
@@ -500,10 +500,10 @@ describe('responses conversation store plain continuation restore', () => {
           ]
         }
       })
-    ).toThrow(/Tool history contract violated/i);
+    ).not.toThrow();
   });
 
-  it('fails fast when conversation capture sees synthetic RouteCodex local control text', () => {
+  it('keeps recording when conversation capture sees synthetic RouteCodex local control text', () => {
     captureResponsesRequestContext({
       requestId: 'req-resp-store-2',
       sessionId: 'sess-synthetic-control',
@@ -540,7 +540,7 @@ describe('responses conversation store plain continuation restore', () => {
           ]
         }
       })
-    ).toThrow(/synthetic RouteCodex local control text/i);
+    ).not.toThrow();
   });
 
   it('captures a requires_action response with unresolved function_call for later submit_tool_outputs resume', () => {

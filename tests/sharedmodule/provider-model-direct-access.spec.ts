@@ -3,7 +3,7 @@ import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/route
 import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
 describe('provider.model direct access without routing', () => {
-  it('expands provider.model routing target through all auth entries without hand-written key aliases', async () => {
+  it('windsurf provider.model keeps auth.entries internal and exposes single managed runtime alias', async () => {
     const input: any = {
       virtualrouter: {
         providers: {
@@ -42,23 +42,18 @@ describe('provider.model direct access without routing', () => {
     const config = bootstrapVirtualRouterConfig(input);
 
     expect(config.config.routing.thinking[0].targets).toEqual([
-      'windsurf.ws-pro-1.gpt-5.4-none',
-      'windsurf.ws-pro-2.gpt-5.4-none',
-      'windsurf.ws-pro-3.gpt-5.4-none',
-      'windsurf.ws-pro-4.gpt-5.4-none',
-      'windsurf.ws-pro-5.gpt-5.4-none'
+      'windsurf.managed.gpt-5.4-none'
     ]);
     expect(Object.keys(config.runtime).sort()).toEqual([
-      'windsurf.ws-pro-1',
-      'windsurf.ws-pro-2',
-      'windsurf.ws-pro-3',
-      'windsurf.ws-pro-4',
-      'windsurf.ws-pro-5'
+      'windsurf.managed'
     ]);
-    expect(config.targetRuntime['windsurf.ws-pro-5.gpt-5.4-none']).toMatchObject({
-      runtimeKey: 'windsurf.ws-pro-5',
-      keyAlias: 'ws-pro-5'
+    expect(config.targetRuntime['windsurf.managed.gpt-5.4-none']).toMatchObject({
+      runtimeKey: 'windsurf.managed',
+      keyAlias: 'managed'
     });
+    const auth = config.runtime['windsurf.managed']?.auth as Record<string, unknown>;
+    expect(Array.isArray(auth?.entries)).toBe(true);
+    expect((auth.entries as unknown[]).length).toBe(5);
   });
 
   it('should route directly to provider.model when specified in request', async () => {

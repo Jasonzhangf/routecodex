@@ -10882,3 +10882,5 @@ Using skills: coding-principals + rcc-dev-skills
   - `cargo test -p router-hotpath-napi shared_read_trimmed_string_deletion_gate_removed_resp_process_stage2_finalize_local_clone -- --nocapture`
   - `cargo test -p router-hotpath-napi lmstudio_responses_fc_ids_normalizes_call_and_output_ids -- --nocapture`
   - `cargo test -p router-hotpath-napi --no-run`
+
+- 2026-05-26 MCP-only: windsurf-chat-provider removed RCC text-tool guidance/parsing path, renamed unsupported->windsurf_mcp_tools, added gRPC field10 mcpCompat passthrough + new focused tests tests/providers/core/runtime/windsurf-mcp-only.spec.ts (3 pass).
