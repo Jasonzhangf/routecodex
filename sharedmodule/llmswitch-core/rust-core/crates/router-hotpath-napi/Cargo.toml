@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 napi = { version = "2", default-features = false, features = ["napi4"] }
 stop-message-core = { path = "../stop-message-core" }
+followup-core = { path = "../followup-core" }
 napi-derive = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

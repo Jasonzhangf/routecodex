@@ -1,0 +1,85 @@
+// Native bridge for followup-core helper functions.
+
+import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+export interface LoopWarningInput {
+  messages: Array<{ role: string; content: string }>;
+  repeat_count: number;
+  warn_threshold: number;
+  fail_threshold: number;
+}
+
+export interface BudgetResetDecision {
+  should_reset: boolean;
+  next_used: number;
+}
+
+// ── Followup request ID builder ─────────────────────────────────────────────
+
+export function buildFollowupRequestIdWithNative(base: string, suffix?: string | null): string {
+  const capability = 'buildFollowupRequestId';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    // Fallback: pure TS implementation
+    const b = (base || '').trim() || 'servertool';
+    const s = (suffix || '').trim() || ':followup';
+    return `${b}${s}`;
+  }
+  return String(fn(base, suffix ?? null));
+}
+
+// ── Loop warning injector ───────────────────────────────────────────────────
+
+export function injectLoopWarningWithNative(input: LoopWarningInput): Array<{ role: string; content: string }> {
+  const capability = 'injectLoopWarningJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    // Fallback: pure TS
+    const repeatCount = Math.max(input.warn_threshold, input.repeat_count);
+    const warningText = [
+      `检测到 stopMessage 请求/响应参数已连续 ${repeatCount} 轮一致。`,
+      '请立即尝试跳出循环（换路径、换验证方法、或直接给结论）。',
+      `若继续达到 ${input.fail_threshold} 轮一致，将返回 fetch failed 网络错误并停止自动续跑。`
+    ].join('\n');
+    return [...input.messages, { role: 'system', content: warningText }];
+  }
+  const inputJson = JSON.stringify(input);
+  const resultJson = fn(inputJson);
+  if (typeof resultJson !== 'string') {
+    return input.messages;
+  }
+  try {
+    return JSON.parse(resultJson);
+  } catch {
+    return input.messages;
+  }
+}
+
+// ── Budget reset decision ───────────────────────────────────────────────────
+
+export function decideBudgetResetWithNative(
+  stopObserved: boolean,
+  stopEligible: boolean,
+  currentUsed: number
+): BudgetResetDecision {
+  const capability = 'decideBudgetResetJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    // Fallback: pure TS
+    if (!stopObserved || stopEligible) {
+      return { should_reset: false, next_used: currentUsed };
+    }
+    return { should_reset: true, next_used: currentUsed + 1 };
+  }
+  const resultJson = fn(stopObserved, stopEligible, currentUsed);
+  if (typeof resultJson !== 'string') {
+    return { should_reset: false, next_used: currentUsed };
+  }
+  try {
+    return JSON.parse(resultJson);
+  } catch {
+    return { should_reset: false, next_used: currentUsed };
+  }
+}

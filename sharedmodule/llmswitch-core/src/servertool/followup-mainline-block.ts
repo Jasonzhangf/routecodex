@@ -49,6 +49,11 @@ import {
   buildStopMessageLoopPayload
 } from './stop-message-loop-payload-block.js';
 import {
+  buildFollowupRequestIdWithNative,
+  injectLoopWarningWithNative,
+  decideBudgetResetWithNative
+} from '../router/virtual-router/engine-selection/native-followup-mainline-semantics.js';
+import {
   compactFollowupErrorReason,
   normalizeClientInjectText,
   readClientInjectOnly,
@@ -70,18 +75,20 @@ type OrchestrationResult = {
 };
 
 function buildFollowupRequestId(baseRequestId: string, suffix?: string): string {
-  const trimmedBase = typeof baseRequestId === 'string' && baseRequestId.trim() ? baseRequestId.trim() : 'servertool';
-  const trimmedSuffix = typeof suffix === 'string' && suffix.trim() ? suffix.trim() : ':followup';
-  return `${trimmedBase}${trimmedSuffix}`;
+  return buildFollowupRequestIdWithNative(baseRequestId, suffix ?? null);
 }
 
 function appendLoopWarning(payload: JsonObject, repeatCountRaw: number, warnThreshold: number, failThreshold: number): void {
-  appendStopMessageLoopWarning({
-    payload,
-    repeatCountRaw,
-    warnThreshold,
-    failThreshold
+  const messages = Array.isArray((payload as Record<string, unknown>).messages)
+    ? ((payload as Record<string, unknown>).messages as Array<{ role: string; content: string }>)
+    : [];
+  const result = injectLoopWarningWithNative({
+    messages,
+    repeat_count: repeatCountRaw,
+    warn_threshold: warnThreshold,
+    fail_threshold: failThreshold
   });
+  (payload as Record<string, unknown>).messages = result as any;
 }
 
 function disableStopMessageAfterFailedFollowup(args: {
@@ -114,7 +121,12 @@ function resetStopMessageBudgetAfterNonStopFollowup(args: {
   followupBody: JsonObject;
 }): void {
   const stopSignal = inspectStopGatewaySignal(args.followupBody);
-  if (!stopSignal.observed || stopSignal.eligible) {
+  const decision = decideBudgetResetWithNative(
+    stopSignal.observed,
+    stopSignal.eligible,
+    0  // currentUsed handled by applyStopMessageFinishReasonBudget internally
+  );
+  if (!decision.should_reset) {
     return;
   }
   applyStopMessageFinishReasonBudget({

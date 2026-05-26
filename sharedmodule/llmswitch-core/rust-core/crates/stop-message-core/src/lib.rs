@@ -110,6 +110,9 @@ pub struct StopMessageDecisionContext {
     // Servertool followup context
     pub followup_flow_id: Option<String>,
     pub stop_eligible: bool,
+    /// finish_reason sequence from current response choices, in original order.
+    /// Decision must only consider the latest non-empty finish_reason.
+    pub finish_reasons: Option<Vec<String>>,
 
     // Submit tool outputs resume
     pub has_responses_submit_tool_outputs_resume: bool,
@@ -217,6 +220,13 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
         return skip(SkipReason::InvalidRepeats);
     }
 
+    // 7.5 Latest finish_reason gate (current response only)
+    if let Some(latest) = latest_finish_reason(ctx.finish_reasons.as_ref()) {
+        if latest != "stop" {
+            return skip(SkipReason::NotStopFinishReason);
+        }
+    }
+
     // 8. Not stop eligible?
     if !ctx.stop_eligible {
         return skip(SkipReason::NotStopFinishReason);
@@ -290,6 +300,21 @@ fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnaps
     None
 }
 
+fn latest_finish_reason(finish_reasons: Option<&Vec<String>>) -> Option<String> {
+    let reasons = finish_reasons?;
+    reasons
+        .iter()
+        .rev()
+        .find_map(|raw| {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_ascii_lowercase())
+            }
+        })
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn skip(reason: SkipReason) -> StopMessageDecision {
@@ -314,6 +339,7 @@ mod tests {
             port_stop_message_disabled: false,
             followup_flow_id: Some("stop_message_flow".to_string()),
             stop_eligible: true,
+            finish_reasons: Some(vec!["stop".to_string()]),
             has_responses_submit_tool_outputs_resume: false,
             persisted_snapshot: None,
             runtime_snapshot: None,
@@ -342,6 +368,25 @@ mod tests {
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
         assert_eq!(result.skip_reason.unwrap(), "skip_port_stopmessage_disabled");
+    }
+
+    #[test]
+    fn only_latest_finish_reason_is_considered() {
+        let mut ctx = base_ctx();
+        ctx.stop_eligible = true;
+        ctx.finish_reasons = Some(vec!["stop".to_string(), "content_filter".to_string()]);
+        let result = decide(&ctx);
+        assert_eq!(result.action, Action::Skip);
+        assert_eq!(result.skip_reason.unwrap(), "skip_not_stop_finish_reason");
+    }
+
+    #[test]
+    fn latest_non_empty_finish_reason_is_considered() {
+        let mut ctx = base_ctx();
+        ctx.stop_eligible = true;
+        ctx.finish_reasons = Some(vec!["stop".to_string(), "   ".to_string()]);
+        let result = decide(&ctx);
+        assert_eq!(result.action, Action::Trigger);
     }
 
     #[test]

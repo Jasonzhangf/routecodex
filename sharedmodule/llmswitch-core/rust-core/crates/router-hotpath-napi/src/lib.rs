@@ -35,6 +35,7 @@ mod compat_field_mapping;
 mod compat_harvest_tool_calls_from_text;
 mod compat_tool_schema;
 mod failure_policy;
+mod followup_mainline_blocks;
 mod gemini_openai_codec;
 mod hashline;
 mod hub_bridge_actions;
@@ -958,6 +959,26 @@ pub fn decide_stop_message_action(ctx_json: String) -> NapiResult<String> {
     let decision = stop_message_auto_blocks::decide_stop_message_action(&ctx);
     serde_json::to_string(&decision)
         .map_err(|e| napi::Error::from_reason(format!("serialize StopMessageDecision: {e}")))
+}
+
+#[napi]
+pub fn build_followup_request_id(base: String, suffix: Option<String>) -> String {
+    followup_mainline_blocks::build_request_id(&base, suffix.as_deref())
+}
+
+#[napi]
+pub fn inject_loop_warning_json(input_json: String) -> NapiResult<String> {
+    let input: followup_core::LoopWarningInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize LoopWarningInput: {e}")))?;
+    let messages = followup_mainline_blocks::inject_warning(input);
+    serde_json::to_string(&messages)
+        .map_err(|e| napi::Error::from_reason(format!("serialize messages: {e}")))
+}
+
+#[napi]
+pub fn decide_budget_reset_json(stop_observed: bool, stop_eligible: bool, current_used: u32) -> String {
+    let decision = followup_mainline_blocks::budget_reset(stop_observed, stop_eligible, current_used);
+    serde_json::to_string(&decision).unwrap_or_else(|_| r#"{"should_reset":false,"next_used":0}"#.to_string())
 }
 
 #[napi]
