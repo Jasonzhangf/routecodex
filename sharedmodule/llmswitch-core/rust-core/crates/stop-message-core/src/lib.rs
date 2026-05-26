@@ -179,12 +179,27 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
         return skip(SkipReason::ResponsesSubmitToolOutputsResume);
     }
 
-    // 4. Resolve snapshot: persisted > runtime > default
+    // 4. Explicit mode without snapshot?
+    if let Some(mode) = &ctx.explicit_mode {
+        if matches!(mode, StageMode::On | StageMode::Auto) && ctx.persisted_snapshot.is_none() && ctx.runtime_snapshot.is_none() {
+            return skip(SkipReason::ExplicitModeWithoutSnapshot);
+        }
+    }
+
+    // 5. Resolve snapshot: persisted > runtime > default
     let resolved_snapshot = resolve_snapshot(ctx);
 
     let snapshot = match resolved_snapshot {
         Some(s) => s,
-        None => return skip(SkipReason::NoSnapshot),
+        None => {
+            // 5a. Default exhausted tombstone?
+            if ctx.followup_flow_id.is_some() && !ctx.goal_status.is_active() && !ctx.empty_reply_continue_local
+                && ctx.persisted_default_exhausted
+            {
+                return skip(SkipReason::GoalDefaultExhausted);
+            }
+            return skip(SkipReason::NoSnapshot);
+        }
     };
 
     // 5. Mode off?
@@ -208,7 +223,7 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
     }
 
     // 9. Reached max repeats?
-    if snapshot.used > snapshot.max_repeats {
+    if snapshot.used >= snapshot.max_repeats {
         return skip(SkipReason::ReachedMaxRepeats);
     }
 
@@ -382,6 +397,21 @@ mod tests {
     }
 
     #[test]
+    fn skips_when_used_equals_max_repeats() {
+        let mut ctx = base_ctx();
+        ctx.persisted_snapshot = Some(StopMessageSnapshot {
+            text: "继续执行".to_string(),
+            max_repeats: 3,
+            used: 3,
+            source: SnapshotSource::Persisted,
+            stage_mode: StageMode::On,
+        });
+        let result = decide(&ctx);
+        assert_eq!(result.action, Action::Skip);
+        assert_eq!(result.skip_reason.unwrap(), "skip_reached_max_repeats");
+    }
+
+    #[test]
     fn skips_when_used_exceeds_max_repeats() {
         let mut ctx = base_ctx();
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
@@ -466,6 +496,7 @@ mod tests {
         ctx.explicit_mode = Some(StageMode::On);
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
+        assert_eq!(result.skip_reason.unwrap(), "skip_explicit_mode_without_snapshot");
     }
 
     #[test]
@@ -476,6 +507,7 @@ mod tests {
         ctx.persisted_default_exhausted = true;
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
+        assert_eq!(result.skip_reason.unwrap(), "skip_goal_default_exhausted");
     }
 
     #[test]
