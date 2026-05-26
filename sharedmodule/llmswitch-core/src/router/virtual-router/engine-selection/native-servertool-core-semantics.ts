@@ -1,0 +1,120 @@
+// Native bridge for servertool-core functions.
+// Provides inspect_stop_gateway_signal, evaluate_loop_guard, calculate_budget.
+
+import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+export interface StopGatewayContext {
+  observed: boolean;
+  eligible: boolean;
+  source: string;
+  reason: string;
+  choiceIndex?: number;
+  hasToolCalls?: boolean;
+}
+
+export interface LoopGuardInput {
+  started_at_ms?: number;
+  stop_pair_repeat_count?: number;
+  stop_pair_warned?: boolean;
+  now_ms?: number;
+  warn_threshold: number;
+  fail_threshold: number;
+}
+
+export interface LoopGuardOutput {
+  should_inject_warning: boolean;
+  stop_pair_warned?: boolean;
+  hit_limit: boolean;
+  elapsed_ms: number;
+  repeat_count: number;
+}
+
+export interface BudgetDecision {
+  observed: boolean;
+  stop_eligible: boolean;
+  next_used: number;
+  max_repeats: number;
+}
+
+export interface BudgetSnapshot {
+  text: string;
+  max_repeats: number;
+  used: number;
+  source: string;
+}
+
+export interface DefaultBudgetConfig {
+  enabled: boolean;
+  text: string;
+  max_repeats: number;
+  is_non_active_managed_goal: boolean;
+}
+
+// ── Stop gateway context ────────────────────────────────────────────────────
+
+export function inspectStopGatewaySignalWithNative(payload: unknown): StopGatewayContext {
+  const capability = 'inspectStopGatewaySignal';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    // Fallback: import and use the TS implementation directly
+    // This avoids circular deps during migration
+    throw new Error('inspectStopGatewaySignal native unavailable');
+  }
+  const payloadJson = JSON.stringify(payload);
+  const resultJson = fn(payloadJson);
+  if (typeof resultJson !== 'string') {
+    throw new Error(`inspectStopGatewaySignal native returned non-string: ${typeof resultJson}`);
+  }
+  const raw = JSON.parse(resultJson);
+  return {
+    observed: raw.observed,
+    eligible: raw.eligible,
+    source: raw.source,
+    reason: raw.reason,
+    ...(raw.choice_index !== undefined && raw.choice_index !== null ? { choiceIndex: raw.choice_index } : {}),
+    ...(raw.has_tool_calls !== undefined && raw.has_tool_calls !== null ? { hasToolCalls: raw.has_tool_calls } : {}),
+  };
+}
+
+// ── Loop guard ──────────────────────────────────────────────────────────────
+
+export function evaluateLoopGuardWithNative(input: LoopGuardInput): LoopGuardOutput {
+  const capability = 'evaluateLoopGuard';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('evaluateLoopGuard native unavailable');
+  }
+  const inputJson = JSON.stringify(input);
+  const resultJson = fn(inputJson);
+  if (typeof resultJson !== 'string') {
+    throw new Error(`evaluateLoopGuard native returned non-string: ${typeof resultJson}`);
+  }
+  return JSON.parse(resultJson);
+}
+
+// ── Budget counter ──────────────────────────────────────────────────────────
+
+export function calculateBudgetWithNative(
+  observed: boolean,
+  stop_eligible: boolean,
+  snapshot: BudgetSnapshot | undefined,
+  default_config: DefaultBudgetConfig | undefined,
+): BudgetDecision {
+  const capability = 'calculateBudget';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('calculateBudget native unavailable');
+  }
+  const resultJson = fn(
+    observed,
+    stop_eligible,
+    snapshot ? JSON.stringify(snapshot) : undefined,
+    default_config ? JSON.stringify(default_config) : undefined,
+  );
+  if (typeof resultJson !== 'string') {
+    throw new Error(`calculateBudget native returned non-string: ${typeof resultJson}`);
+  }
+  return JSON.parse(resultJson);
+}

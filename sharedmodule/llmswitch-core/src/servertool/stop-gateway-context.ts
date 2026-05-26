@@ -10,236 +10,99 @@ export interface StopGatewayContext {
   hasToolCalls?: boolean;
 }
 
+// ── Main ────────────────────────────────────────────────────────────────────
+
 const HARVESTABLE_TOOL_MARKER_PATTERN =
   /<\|\s*tool_calls_section_begin\s*\|>|<\|\s*tool_call_begin\s*\|>|<\|\s*tool_call_argument_begin\s*\|>/i;
 
 function hasHarvestableToolMarkers(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return HARVESTABLE_TOOL_MARKER_PATTERN.test(value);
-  }
-  if (Array.isArray(value)) {
-    return value.some((item) => hasHarvestableToolMarkers(item));
-  }
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
+  if (typeof value === 'string') return HARVESTABLE_TOOL_MARKER_PATTERN.test(value);
+  if (Array.isArray(value)) return value.some((item) => hasHarvestableToolMarkers(item));
+  if (!value || typeof value !== 'object') return false;
   return Object.values(value as Record<string, unknown>).some((item) => hasHarvestableToolMarkers(item));
 }
 
 function hasEmbeddedToolCallMarkersInChatMessage(message: Record<string, unknown> | null): boolean {
-  if (!message) {
-    return false;
-  }
+  if (!message) return false;
   const reasoning = message.reasoning;
   return hasHarvestableToolMarkers([
-    message.content,
-    message.reasoning_content,
-    message.thinking,
-    reasoning,
+    message.content, message.reasoning_content, message.thinking, reasoning,
     reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)
-      ? (reasoning as Record<string, unknown>).content
-      : undefined,
+      ? (reasoning as Record<string, unknown>).content : undefined,
     reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)
-      ? (reasoning as Record<string, unknown>).text
-      : undefined
+      ? (reasoning as Record<string, unknown>).text : undefined,
   ]);
 }
 
 function hasVisibleAssistantText(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return value.trim().length > 0;
-  }
-  if (Array.isArray(value)) {
-    return value.some((item) => hasVisibleAssistantText(item));
-  }
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some((item) => hasVisibleAssistantText(item));
+  if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
-  if (typeof record.text === 'string' && record.text.trim().length > 0) {
-    return true;
-  }
-  if (typeof record.content === 'string' && record.content.trim().length > 0) {
-    return true;
-  }
-  if (Array.isArray(record.content) && record.content.some((item) => hasVisibleAssistantText(item))) {
-    return true;
-  }
-  if (Array.isArray(record.parts) && record.parts.some((item) => hasVisibleAssistantText(item))) {
-    return true;
-  }
+  if (typeof record.text === 'string' && record.text.trim().length > 0) return true;
+  if (typeof record.content === 'string' && record.content.trim().length > 0) return true;
+  if (Array.isArray(record.content) && record.content.some((item) => hasVisibleAssistantText(item))) return true;
+  if (Array.isArray(record.parts) && record.parts.some((item) => hasVisibleAssistantText(item))) return true;
   return false;
 }
 
 function isReasoningOnlyEmptyAssistantMessage(message: Record<string, unknown> | null): boolean {
-  if (!message) {
-    return false;
-  }
+  if (!message) return false;
   const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-  if (hasToolCalls) {
-    return false;
-  }
+  if (hasToolCalls) return false;
   const hasVisibleContent = hasVisibleAssistantText(message.content);
-  if (hasVisibleContent) {
-    return false;
-  }
-  return hasVisibleAssistantText([
-    message.reasoning_content,
-    message.thinking,
-    message.reasoning,
-    message.reasoning_text
-  ]);
+  if (hasVisibleContent) return false;
+  return hasVisibleAssistantText([message.reasoning_content, message.thinking, message.reasoning, message.reasoning_text]);
 }
 
-
-export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
+function tsFallbackInspect(base: unknown): StopGatewayContext {
   if (!base || typeof base !== 'object' || Array.isArray(base)) {
-    return {
-      observed: false,
-      eligible: false,
-      source: 'none',
-      reason: 'invalid_payload'
-    };
+    return { observed: false, eligible: false, source: 'none', reason: 'invalid_payload' };
   }
-
-  const payload = base as { [key: string]: unknown };
+  const payload = base as Record<string, unknown>;
   const choicesRaw = payload.choices;
   if (Array.isArray(choicesRaw) && choicesRaw.length) {
-    let latestChoiceIndex = -1;
-    let latestChoice: { [key: string]: unknown } | null = null;
-    let latestFinishReason = '';
     for (let idx = choicesRaw.length - 1; idx >= 0; idx -= 1) {
       const choice = choicesRaw[idx];
-      if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
-        continue;
-      }
-      const finishReasonRaw = (choice as { finish_reason?: unknown }).finish_reason;
-      const finishReason =
-        typeof finishReasonRaw === 'string' && finishReasonRaw.trim()
-          ? finishReasonRaw.trim().toLowerCase()
-          : '';
-      if (!finishReason) {
-        continue;
-      }
-      latestChoiceIndex = idx;
-      latestChoice = choice as { [key: string]: unknown };
-      latestFinishReason = finishReason;
-      break;
+      if (!choice || typeof choice !== 'object' || Array.isArray(choice)) continue;
+      const finishReason = String((choice as Record<string, unknown>).finish_reason ?? '').trim().toLowerCase();
+      if (!finishReason) continue;
+      if (finishReason === 'tool_calls')
+        return { observed: true, eligible: false, source: 'chat', reason: 'finish_reason_tool_calls', choiceIndex: idx, hasToolCalls: true };
+      if (finishReason !== 'stop')
+        return { observed: true, eligible: false, source: 'chat', reason: `finish_reason_${finishReason}`, choiceIndex: idx, hasToolCalls: false };
+      const message = (choice as Record<string, unknown>).message as Record<string, unknown> | undefined ?? null;
+      if (hasEmbeddedToolCallMarkersInChatMessage(message))
+        return { observed: true, eligible: false, source: 'chat', reason: `finish_reason_${finishReason}_with_embedded_tool_markers`, choiceIndex: idx, hasToolCalls: false };
+      const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+      const hasTC = toolCalls.length > 0;
+      if (isReasoningOnlyEmptyAssistantMessage(message))
+        return { observed: true, eligible: false, source: 'chat', reason: `finish_reason_${finishReason}_reasoning_only_empty_assistant`, choiceIndex: idx, hasToolCalls: hasTC };
+      return { observed: true, eligible: !hasTC, source: 'chat', reason: `finish_reason_${finishReason}`, choiceIndex: idx, hasToolCalls: hasTC };
     }
-
-    if (latestChoice && latestFinishReason) {
-      const idx = latestChoiceIndex;
-      const finishReason = latestFinishReason;
-      if (finishReason === 'tool_calls') {
-        return {
-          observed: true,
-          eligible: false,
-          source: 'chat',
-          reason: 'finish_reason_tool_calls',
-          choiceIndex: idx,
-          hasToolCalls: true
-        };
-      }
-      if (finishReason !== 'stop') {
-        return {
-          observed: true,
-          eligible: false,
-          source: 'chat',
-          reason: `finish_reason_${finishReason}`,
-          choiceIndex: idx,
-          hasToolCalls: false
-        };
-      }
-
-      const message =
-        latestChoice.message &&
-        typeof latestChoice.message === 'object' &&
-        !Array.isArray(latestChoice.message)
-          ? (latestChoice.message as { [key: string]: unknown })
-          : null;
-      const hasEmbeddedToolMarkers = hasEmbeddedToolCallMarkersInChatMessage(message);
-      if (hasEmbeddedToolMarkers) {
-        return {
-          observed: true,
-          eligible: false,
-          source: 'chat',
-          reason: `finish_reason_${finishReason}_with_embedded_tool_markers`,
-          choiceIndex: idx,
-          hasToolCalls: false
-        };
-      }
-      const toolCalls = message && Array.isArray(message.tool_calls) ? message.tool_calls : [];
-      const hasToolCalls = toolCalls.length > 0;
-      if (isReasoningOnlyEmptyAssistantMessage(message)) {
-        return {
-          observed: true,
-          eligible: false,
-          source: 'chat',
-          reason: `finish_reason_${finishReason}_reasoning_only_empty_assistant`,
-          choiceIndex: idx,
-          hasToolCalls
-        };
-      }
-      return {
-        observed: true,
-        eligible: !hasToolCalls,
-        source: 'chat',
-        reason: `finish_reason_${finishReason}`,
-        choiceIndex: idx,
-        hasToolCalls
-      };
-    }
-
-    return {
-      observed: false,
-      eligible: false,
-      source: 'chat',
-      reason: 'no_stop_finish_reason'
-    };
+    return { observed: false, eligible: false, source: 'chat', reason: 'no_stop_finish_reason' };
   }
-
   const statusRaw = typeof payload.status === 'string' ? payload.status.trim().toLowerCase() : '';
-  if (statusRaw && statusRaw !== 'completed') {
-    return {
-      observed: false,
-      eligible: false,
-      source: 'responses',
-      reason: `status_${statusRaw}`
-    };
-  }
-
+  if (statusRaw && statusRaw !== 'completed')
+    return { observed: false, eligible: false, source: 'responses', reason: `status_${statusRaw}` };
   const hasRequiredAction = Boolean(payload.required_action && typeof payload.required_action === 'object');
-  const outputRaw = Array.isArray(payload.output) ? (payload.output as unknown[]) : [];
-  if (!statusRaw && outputRaw.length === 0) {
-    return {
-      observed: false,
-      eligible: false,
-      source: 'responses',
-      reason: 'no_status_or_output'
-    };
-  }
-  if (outputRaw.some((item) => hasToolLikeOutput(item))) {
-    return {
-      observed: true,
-      eligible: false,
-      source: 'responses',
-      reason: 'responses_tool_like_output'
-    };
-  }
-  if (hasRequiredAction) {
-    return {
-      observed: true,
-      eligible: false,
-      source: 'responses',
-      reason: 'responses_required_action'
-    };
-  }
-  return {
-    observed: true,
-    eligible: true,
-    source: 'responses',
-    reason: statusRaw ? `status_${statusRaw}` : 'responses_output_completed'
-  };
+  const outputRaw = Array.isArray(payload.output) ? payload.output as unknown[] : [];
+  if (!statusRaw && outputRaw.length === 0)
+    return { observed: false, eligible: false, source: 'responses', reason: 'no_status_or_output' };
+  if (outputRaw.some((item) => {
+    const type = String((item as Record<string, unknown>)?.type ?? '').trim().toLowerCase();
+    return ['tool_call', 'tool_use', 'function_call'].includes(type) || type.includes('tool');
+  }))
+    return { observed: true, eligible: false, source: 'responses', reason: 'responses_tool_like_output' };
+  if (hasRequiredAction)
+    return { observed: true, eligible: false, source: 'responses', reason: 'responses_required_action' };
+  return { observed: true, eligible: true, source: 'responses', reason: statusRaw ? `status_${statusRaw}` : 'responses_output_completed' };
+}
+
+// ── Public API ──────────────────────────────────────────────────────────────
+
+export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
+  return tsFallbackInspect(base);
 }
 
 export function attachStopGatewayContext(adapterContext: AdapterContext, context: StopGatewayContext): void {
