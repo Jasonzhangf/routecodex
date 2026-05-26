@@ -19,7 +19,7 @@ import {
 } from '../utils/request-log-color.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { extractClientModelId } from '../runtime/http-server/executor/provider-response-utils.js';
-import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, createResponsesJsonToSseConverter, finalizeResponsesConversationRequestRetention, importCoreDist, recordResponsesResponseForRequest, requireCoreDist } from '../../modules/llmswitch/bridge.js';
+import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, createResponsesJsonToSseConverter, finalizeResponsesConversationRequestRetention, importCoreDist, recordResponsesResponseForRequest, rebindResponsesConversationRequestId, requireCoreDist } from '../../modules/llmswitch/bridge.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 
@@ -215,14 +215,40 @@ function resolveResponsesConversationRecordRequestIds(
     target.push(trimmed);
   };
   add(responseIds, responseId);
-  if (responseIds.length > 0) {
-    return responseIds;
-  }
   add(requestIds, requestLabel);
   if (Array.isArray(timingRequestIds)) {
     for (const id of timingRequestIds) add(requestIds, id);
   }
+  if (responseIds.length > 0) {
+    return responseIds;
+  }
   return requestIds;
+}
+
+async function rebindResponsesConversationRequestIdsToResponseId(args: {
+  requestLabel: string;
+  timingRequestIds?: string[];
+  responseId?: string;
+}): Promise<void> {
+  if (!args.responseId) {
+    return;
+  }
+  const sourceIds: string[] = [];
+  const add = (value: unknown): void => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === args.responseId || sourceIds.includes(trimmed)) return;
+    sourceIds.push(trimmed);
+  };
+  add(args.requestLabel);
+  if (Array.isArray(args.timingRequestIds)) {
+    for (const id of args.timingRequestIds) add(id);
+  }
+  for (const requestId of sourceIds) {
+    await rebindResponsesConversationRequestId(requestId, args.responseId).catch((error) => {
+      logResponseNonBlockingError(`responses-conversation-rebind:${requestId}->${args.responseId}`, error);
+    });
+  }
 }
 
 function deriveResponsesConversationProviderKey(usageLogInfo?: { providerKey?: string; timingRequestIds?: string[] }): string | undefined {
@@ -332,6 +358,11 @@ async function recordResponsesConversationToolCallResponse(args: {
   }
   const recordBody = args.body as Record<string, unknown>;
   const responseId = readResponsesConversationResponseId(recordBody);
+  await rebindResponsesConversationRequestIdsToResponseId({
+    requestLabel: args.requestLabel,
+    timingRequestIds: args.timingRequestIds,
+    responseId,
+  });
   const effectiveSessionId =
     typeof args.sessionId === 'string' && args.sessionId.trim()
       ? args.sessionId
@@ -1321,6 +1352,9 @@ export async function sendPipelineResponse(
         : undefined,
       emitted: false
     };
+    const effectiveResponsesRequestContext =
+      (result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined)
+      ?? options?.responsesRequestContext;
     let nativeSseConversationPersisted = false;
     const persistNativeSseConversationState = async (): Promise<void> => {
       if (nativeSseConversationPersisted) {
@@ -1346,7 +1380,7 @@ export async function sendPipelineResponse(
         routeHint: conversationRouteHint,
         providerKey: conversationProviderKey,
         body: sanitizedProbeBody,
-        requestContext: options?.responsesRequestContext,
+        requestContext: effectiveResponsesRequestContext,
       });
       await recordResponsesConversationToolCallResponse({
         entryEndpoint,
