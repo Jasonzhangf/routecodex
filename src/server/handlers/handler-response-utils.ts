@@ -1517,9 +1517,23 @@ export async function sendPipelineResponse(
         ...(finishTracker.finishReason ? { finishReason: finishTracker.finishReason } : {})
       });
     };
+    let ssePending = '';
     stream.on('data', (chunk: unknown) => {
-      updateSseTerminalTrackerFromChunk(chunk, finishTracker, terminalWatch);
-      updateContractProbeFromSseChunk(chunk, contractProbe);
+      // SSE frames may span TCP chunk boundaries. Buffer partial frames
+      // and only feed complete \n\n-delimited blocks to the probe/tracker.
+      const text = typeof chunk === 'string' ? chunk
+        : Buffer.isBuffer(chunk) ? chunk.toString('utf8')
+        : chunk instanceof Uint8Array ? Buffer.from(chunk).toString('utf8')
+        : '';
+      if (!text) return;
+      ssePending += text;
+      const parts = ssePending.split(/\n\n/);
+      ssePending = parts.pop() ?? '';
+      for (const part of parts) {
+        if (!part.trim()) continue;
+        updateSseTerminalTrackerFromChunk(part, finishTracker, terminalWatch);
+        updateContractProbeFromSseChunk(part, contractProbe);
+      }
       if (!terminalWatch.sawTerminalChunk || ended || streamEnded || terminalFlushTimer) {
         return;
       }
