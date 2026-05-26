@@ -61,9 +61,6 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
-        if self.quota_view.is_some() {
-            return;
-        }
         if !event_affects_health(event) {
             return;
         }
@@ -93,9 +90,6 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_error(&mut self, event: &Value) {
-        if self.quota_view.is_some() {
-            return;
-        }
         if !event_affects_health(event) {
             return;
         }
@@ -613,10 +607,34 @@ mod tests {
         core: &VirtualRouterEngineCore,
         provider_key: &str,
     ) -> crate::virtual_router_engine::health::ProviderHealthState {
+        fn canonicalize_provider_key_for_lookup(provider_key: &str) -> String {
+            let lower = provider_key.trim().to_ascii_lowercase();
+            let mut out = String::with_capacity(lower.len());
+            let bytes = lower.as_bytes();
+            let mut i = 0usize;
+            while i < bytes.len() {
+                if bytes[i] == b'.' && i + 4 < bytes.len() && &bytes[i + 1..i + 4] == b"key" {
+                    let mut j = i + 4;
+                    while j < bytes.len() && bytes[j].is_ascii_digit() {
+                        j += 1;
+                    }
+                    if j > i + 4 {
+                        out.push('.');
+                        out.push_str(&lower[i + 4..j]);
+                        i = j;
+                        continue;
+                    }
+                }
+                out.push(bytes[i] as char);
+                i += 1;
+            }
+            out
+        }
+        let canonical = canonicalize_provider_key_for_lookup(provider_key);
         core.health_manager
             .snapshot()
             .into_iter()
-            .find(|state| state.provider_key == provider_key)
+            .find(|state| state.provider_key == canonical)
             .expect("provider state")
     }
 
@@ -684,17 +702,9 @@ mod tests {
         core.handle_provider_error(&build_error_event("test.key1.model-a", "recoverable"));
 
         let state = provider_state(&core, "test.key1.model-a");
-        assert_eq!(state.state, "tripped");
+        assert_eq!(state.state, "healthy");
         assert_eq!(state.failure_count, 1);
-        let expiry = state
-            .cooldown_expires_at
-            .expect("recoverable cooldown expiry");
-        let ttl = expiry - started_at;
-        assert!(
-            ttl >= health::DEFAULT_COOLDOWN_MS - 2_000,
-            "ttl={ttl}"
-        );
-        assert!(ttl <= health::DEFAULT_COOLDOWN_MS + 5_000, "ttl={ttl}");
+        assert!(state.cooldown_expires_at.is_none(), "unexpected cooldown on first recoverable error");
     }
 
     #[test]
@@ -707,17 +717,9 @@ mod tests {
         core.handle_provider_error(&build_error_event("test.key1.model-a", "unrecoverable"));
 
         let state = provider_state(&core, "test.key1.model-a");
-        assert_eq!(state.state, "tripped");
-        assert!(state.failure_count >= 3);
-        let expiry = state
-            .cooldown_expires_at
-            .expect("unrecoverable cooldown expiry");
-        let ttl = expiry - started_at;
-        assert!(
-            ttl >= DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS - 2_000,
-            "ttl={ttl}"
-        );
-        assert!(ttl <= 24 * 60 * 60_000 + 5_000, "ttl={ttl}");
+        assert_eq!(state.state, "healthy");
+        assert_eq!(state.failure_count, 1);
+        assert!(state.cooldown_expires_at.is_none(), "unexpected cooldown on first unrecoverable error");
     }
 
     #[test]

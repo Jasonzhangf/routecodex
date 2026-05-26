@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use chrono::{Datelike, Local, TimeZone};
 
 const PERSIST_REASON_HTTP_503_DAILY: &str = "__http_503_daily_cooldown__";
 
@@ -340,7 +341,6 @@ impl ProviderHealthManager {
     ) -> Http429ControlOutcome {
         const HTTP_429_THRESHOLD: i64 = 3;
         const HTTP_429_BLACKLIST_AFTER_COOLDOWN_CYCLES: i64 = 1;
-        const HTTP_429_BLACKLIST_MS: i64 = 24 * 60 * 60_000;
 
         let cooldown_ms = self.config.cooldown_ms;
         let state = self.get_state_mut(provider_key);
@@ -358,8 +358,9 @@ impl ProviderHealthManager {
 
         state.consecutive_http_429_failures = 0;
         if state.http_429_cooldown_cycles >= HTTP_429_BLACKLIST_AFTER_COOLDOWN_CYCLES {
+            let blacklist_ttl = compute_cooldown_until_next_local_midnight_ms(now_ms);
             state.state = "blacklisted".to_string();
-            state.cooldown_expires_at = Some(now_ms + HTTP_429_BLACKLIST_MS);
+            state.cooldown_expires_at = Some(now_ms + blacklist_ttl);
             state.http_429_cooldown_cycles = 0;
             return Http429ControlOutcome::Blacklisted;
         }
@@ -390,6 +391,24 @@ impl ProviderHealthManager {
         }
         self.states.get_mut(&canonical).expect("state exists")
     }
+}
+
+fn compute_cooldown_until_next_local_midnight_ms(now_ms: i64) -> i64 {
+    if now_ms <= 0 {
+        return 24 * 60 * 60_000;
+    }
+    let Some(current) = Local.timestamp_millis_opt(now_ms).single() else {
+        return 24 * 60 * 60_000;
+    };
+    let Some(next_midnight) = Local
+        .with_ymd_and_hms(current.year(), current.month(), current.day(), 0, 0, 0)
+        .single()
+        .and_then(|dt| dt.checked_add_days(chrono::Days::new(1)))
+    else {
+        return 24 * 60 * 60_000;
+    };
+    let ttl = next_midnight.timestamp_millis() - now_ms;
+    if ttl > 0 { ttl } else { 24 * 60 * 60_000 }
 }
 
 impl Default for ProviderHealthConfigNormalized {
@@ -553,5 +572,46 @@ mod tests {
             .expect("provider state");
         assert_eq!(second.state, "blacklisted");
         assert!(second.cooldown_expires_at.is_some());
+    }
+
+    #[test]
+    fn test_http_429_blacklist_expires_by_next_local_midnight() {
+        use chrono::{Datelike, Local, TimeZone};
+
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-provider".to_string()]);
+        let now = 1_747_800_000_000i64;
+
+        // First 3x 429 => cooldown
+        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now);
+        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now + 1);
+        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now + 2);
+        let first = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-provider")
+            .expect("provider state");
+        let first_expiry = first.cooldown_expires_at.expect("cooldown expiry");
+        assert!(manager.is_available("test-provider", first_expiry + 1));
+
+        // Second 3x 429 => blacklist
+        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), first_expiry + 2);
+        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), first_expiry + 3);
+        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), first_expiry + 4);
+        let second = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-provider")
+            .expect("provider state");
+        let blacklist_expiry = second.cooldown_expires_at.expect("blacklist expiry");
+
+        let current = Local.timestamp_millis_opt(first_expiry + 4).single().expect("ts");
+        let next_midnight = Local
+            .with_ymd_and_hms(current.year(), current.month(), current.day(), 0, 0, 0)
+            .single()
+            .and_then(|dt| dt.checked_add_days(chrono::Days::new(1)))
+            .expect("next midnight");
+        let expected_max = next_midnight.timestamp_millis();
+        assert!(blacklist_expiry <= expected_max + 2_000);
     }
 }
