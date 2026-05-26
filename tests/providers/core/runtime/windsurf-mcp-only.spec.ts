@@ -10,7 +10,7 @@ const deps: any = {
   errorHandlingCenter: { handleError: async () => {} },
 };
 
-describe('Windsurf MCP-only protocol', () => {
+describe('Windsurf custom tools protocol (gRPC field 10)', () => {
   let WindsurfChatProvider: any;
 
   beforeAll(async () => {
@@ -27,7 +27,7 @@ describe('Windsurf MCP-only protocol', () => {
     },
   } as any, deps);
 
-  test('preprocess maps non-native tools to neutral windsurf_mcp_tools field', async () => {
+  test('preprocess maps non-native tools to neutral windsurf_custom_tools field', async () => {
     const provider = createProvider();
     const mapped = await (provider as any).preprocessRequest({
       body: {
@@ -36,11 +36,11 @@ describe('Windsurf MCP-only protocol', () => {
         tools: [{ type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } }],
       },
     });
-    expect(mapped.body.windsurf_mcp_tools.map((t: any) => t.function.name)).toEqual(['apply_patch']);
+    expect(mapped.body.windsurf_custom_tools.map((t: any) => t.function.name)).toEqual(['apply_patch']);
     expect(mapped.body.windsurf_text_tool_protocol).toBeUndefined();
   });
 
-  test('preprocess fully covers native-mappable tool conversion and keeps MCP tools separate', async () => {
+  test('preprocess fully covers native-mappable tool conversion and keeps custom tools separate', async () => {
     const provider = createProvider();
     const mapped = await (provider as any).preprocessRequest({
       body: {
@@ -60,7 +60,7 @@ describe('Windsurf MCP-only protocol', () => {
     expect(mapped.body.windsurf_native_allowlist).toEqual(
       expect.arrayContaining(['view_file', 'run_command', 'list_directory', 'grep_search_v2', 'find']),
     );
-    expect(mapped.body.windsurf_mcp_tools.map((t: any) => t.function.name)).toEqual(['custom_mcp_tool']);
+    expect(mapped.body.windsurf_custom_tools.map((t: any) => t.function.name)).toEqual(['custom_mcp_tool']);
   });
 
   test('grpc body forwards single mcp_compat payload via SendUserCascadeMessageRequest field 10', async () => {
@@ -107,7 +107,7 @@ describe('Windsurf MCP-only protocol', () => {
     }));
   });
 
-  test('outbound cascade text never injects RCC guidance markers even when MCP tools exist', async () => {
+  test('outbound cascade text never injects RCC guidance markers even when custom tools exist', async () => {
     const provider = createProvider();
     const mapped = await (provider as any).preprocessRequest({
       body: {
@@ -125,7 +125,7 @@ describe('Windsurf MCP-only protocol', () => {
       },
     });
     const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
-    const text = (provider as any).buildCascadePromptText(mapped.body.messages, semantic, 'gpt-5-4-medium', mapped.body.windsurf_mcp_tools);
+    const text = (provider as any).buildCascadePromptText(mapped.body.messages, semantic, 'gpt-5-4-medium', mapped.body.windsurf_custom_tools);
     expect(text.includes('<|RCC|')).toBe(false);
   });
 });

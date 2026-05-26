@@ -127,6 +127,7 @@ export function resolveProviderRetryExclusionPlan(args: {
   status?: number;
   error: unknown;
   classification?: RequestExecutorProviderErrorClassification;
+  attempt?: number;
   promptTooLong: boolean;
   routePool?: string[];
   excludedProviderKeys: Set<string>;
@@ -138,6 +139,23 @@ export function resolveProviderRetryExclusionPlan(args: {
     };
   }
   const is429 = args.status === 429;
+  const hasAlternativeCandidate = hasExplicitAlternativeRouteCandidate({
+    providerKey,
+    routePool: args.routePool,
+    excludedProviderKeys: args.excludedProviderKeys
+  });
+
+  // Priority-mode rule: after 3 consecutive 429 retries on current provider,
+  // exclude this provider so the same request can move to next priority target.
+  if (is429 && (args.attempt ?? 0) >= 3 && hasAlternativeCandidate) {
+    return {
+      excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
+        providerKey,
+        excludedProviderKeys: args.excludedProviderKeys
+      })
+    };
+  }
+
   const exclusionDecision = resolveProviderFailureExclusionDecision({
     promptTooLong: args.promptTooLong,
     classification: args.classification,
@@ -146,11 +164,7 @@ export function resolveProviderRetryExclusionPlan(args: {
     upstreamCode: normalizeCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode),
     isProviderTrafficSaturated: isProviderTrafficSaturatedRetryError({ status: args.status, error: args.error }),
     isNetworkTransport: isNetworkTransportLikeError(args.error),
-    hasAlternativeCandidate: hasExplicitAlternativeRouteCandidate({
-      providerKey,
-      routePool: args.routePool,
-      excludedProviderKeys: args.excludedProviderKeys
-    }),
+    hasAlternativeCandidate,
     is429
   });
   if (exclusionDecision.excludeCurrentProvider) {

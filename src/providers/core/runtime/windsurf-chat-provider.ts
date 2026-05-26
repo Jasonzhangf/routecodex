@@ -572,11 +572,11 @@ function collectWindsurfMappedTools(tools: Array<Record<string, unknown>>): Arra
 
 function partitionWindsurfTools(tools: Array<Record<string, unknown>>): {
   nativeTools: Array<Record<string, unknown>>;
-  mcpTools: Array<Record<string, unknown>>;
+  customTools: Array<Record<string, unknown>>;
   mappedNativeTools: Array<{ name: string; kind: WindsurfCascadeToolStepKind }>;
 } {
   const nativeTools: Array<Record<string, unknown>> = [];
-  const mcpTools: Array<Record<string, unknown>> = [];
+  const customTools: Array<Record<string, unknown>> = [];
   const mappedNativeTools: Array<{ name: string; kind: WindsurfCascadeToolStepKind }> = [];
   for (const tool of tools) {
     const normalized = normalizeWindsurfToolDefinition(tool);
@@ -588,10 +588,10 @@ function partitionWindsurfTools(tools: Array<Record<string, unknown>>): {
       nativeTools.push(normalized);
       mappedNativeTools.push({ name, kind: mapped.kind });
     } else if (name) {
-      mcpTools.push(normalized);
+      customTools.push(normalized);
     }
   }
-  return { nativeTools, mcpTools, mappedNativeTools };
+  return { nativeTools, customTools, mappedNativeTools };
 }
 
 function windsurfToolNameSet(tools: unknown): Set<string> {
@@ -1323,7 +1323,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         body.windsurf_native_mode = partition.nativeTools.length > 0;
         body.windsurf_native_allowlist = uniqueWindsurfToolKinds(partition.mappedNativeTools);
         body.windsurf_declared_native_tools = partition.nativeTools;
-        body.windsurf_mcp_tools = partition.mcpTools;
+        body.windsurf_custom_tools = partition.customTools;
         delete body.windsurf_declared_tools;
         delete body.tools_preamble;
         delete body.windsurf_tools_preamble_tier;
@@ -1378,15 +1378,15 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         const resolvedModel = resolveWindsurfChatCompletionsModel(model);
         const nativeMode = body.windsurf_native_mode === true;
         const nativeAllowlist = Array.isArray(body.windsurf_native_allowlist) ? body.windsurf_native_allowlist.filter((item): item is WindsurfCascadeToolStepKind => typeof item === 'string' && item in WINDSURF_CASCADE_TOOL_CONFIG_FIELDS) : [];
-        const mcpTools = Array.isArray(body.windsurf_mcp_tools) ? body.windsurf_mcp_tools as Array<Record<string, unknown>> : [];
-        const mcpCompatPayloads = mcpTools
+        const customTools = Array.isArray(body.windsurf_custom_tools) ? body.windsurf_custom_tools as Array<Record<string, unknown>> : [];
+        const mcpCompatPayloads = customTools
           .map((tool) => {
             const compat = tool && typeof tool === 'object' && !Array.isArray(tool) ? (tool as Record<string, unknown>).mcp_compat : undefined;
             return compat && typeof compat === 'object' && !Array.isArray(compat) ? compat as Record<string, unknown> : null;
           })
           .filter((entry): entry is Record<string, unknown> => !!entry);
         const nativeDeclaredTools = Array.isArray(body.windsurf_declared_native_tools) ? body.windsurf_declared_native_tools as Array<Record<string, unknown>> : [];
-        const text = this.buildCascadePromptText(body.messages, semanticConversation, resolvedModel.modelTag, mcpTools);
+        const text = this.buildCascadePromptText(body.messages, semanticConversation, resolvedModel.modelTag, customTools);
         const completedNativeToolCallIds = this.buildCompletedNativeToolCallIds(semanticConversation);
         const completedNativeToolSignatures = this.buildCompletedNativeToolSignatures(semanticConversation, nativeDeclaredTools);
         const isPanelMissing = (error: unknown): boolean => /panel state not found|not_found.*panel/i.test(String(error instanceof Error ? error.message : error || ''));
@@ -1448,7 +1448,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         const output = await this.pollCascadeTrajectorySteps({
           cascadeId,
           model,
-          mcpTools,
+          customTools,
           completedNativeToolCallIds,
           completedNativeToolSignatures,
         });
@@ -3142,7 +3142,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   private async pollCascadeTrajectorySteps(args: {
     cascadeId: string;
     model: string;
-    mcpTools?: Array<Record<string, unknown>>;
+    customTools?: Array<Record<string, unknown>>;
     completedNativeToolCallIds?: string[];
     completedNativeToolSignatures?: string[];
   }): Promise<{
@@ -3248,7 +3248,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             content: accumulatedText,
             ...(accumulatedThinking ? { reasoning_content: accumulatedThinking } : {}),
             tool_calls: toolCalls,
-          }, args.mcpTools || []);
+          }, args.customTools || []);
           return { candidate, usage };
         }
 
@@ -3294,7 +3294,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
                 steps: finalSteps.length,
                 completedNativeToolCallIds: Array.from(completedNativeToolCallIds),
                 completedNativeToolSignatures: Array.from(completedNativeToolSignatures),
-                mcpTools: (args.mcpTools || []).map((tool) => {
+                customTools: (args.customTools || []).map((tool) => {
                   const fn = tool && typeof tool === 'object' && !Array.isArray(tool) ? tool.function as Record<string, unknown> | undefined : undefined;
                   return typeof fn?.name === 'string' ? fn.name : '';
                 }).filter(Boolean),
@@ -3306,7 +3306,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
               role: 'assistant',
               content: finalContent,
               ...(finalReasoning ? { reasoning_content: finalReasoning } : {}),
-            }, args.mcpTools || []);
+            }, args.customTools || []);
             return { candidate, usage };
           }
         }

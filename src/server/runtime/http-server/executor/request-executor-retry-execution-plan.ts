@@ -113,6 +113,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
           status: args.status,
           error: args.error,
           classification,
+          attempt: args.attempt,
           promptTooLong: Boolean(args.promptTooLong),
           routePool: args.routePool,
           excludedProviderKeys: args.excludedProviderKeys

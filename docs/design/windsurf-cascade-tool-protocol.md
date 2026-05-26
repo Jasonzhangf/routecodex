@@ -251,7 +251,7 @@ Known mapped families and semantic status:
 | `Write` / `write` / `write_to_file` | `write_to_file` | partial; single-file only | Do not map multi-file patch semantics here. |
 | `WebSearch` / `ToolSearch` / `web_search` | `search_web` | partial; provider-dependent result shape | Only enable when request allowlist and result projection are tested. |
 | `WebFetch` / `read_url_content` | `read_url_content` | partial/direct URL fetch | Only enable when result projection is tested. |
-| `apply_patch` | none | unsupported native; RCC text harvest or explicit servertool only | Windsurf.app exposes `write_to_file` / `propose_code` as Cascade trajectory/proto steps, not as a controllable executor equivalent to Codex `apply_patch`. Do not native-map `apply_patch` to `write_to_file` / `propose_code`; multi-file patch and failure/aborted semantics are not equivalent. |
+| `apply_patch` | none | custom tool via gRPC field 10 mcpCompat | Windsurf.app exposes `write_to_file` / `propose_code` as Cascade trajectory/proto steps, not as a controllable executor equivalent to Codex `apply_patch`. Do not native-map `apply_patch` to `write_to_file` / `propose_code`. Instead, pass through `windsurf_custom_tools` → gRPC field 10 JSON strip for LS-side decoding. |
 | `write_stdin` / PTY/session continuation | none | unsupported by `run_command` equivalence | Must fail-fast; `run_command` is one-shot blocking, not an interactive session. |
 | `update_plan` / `request_user_input` / `spawn_agent` / `send_input` / `wait_agent` / `close_agent` | none | unsupported by current native map | Candidate only for future MCP registration blackbox, not direct translation. |
 | `mcp__*` caller tools | no per-request input slot proven | MCP candidate, not supported yet | Requires separate MCP registration/request blackbox; cannot be injected through `SendUserCascadeMessageRequest`. |
@@ -289,24 +289,25 @@ Additional evidence:
 
 Therefore RouteCodex must treat arbitrary Codex/MCP/custom tools as **unsupported by Cascade native structured protocol**. They must not be encoded into `SendUserCascadeMessageRequest` as native tool definitions, because that request has no such input slot.
 
-Current RouteCodex decision: unsupported tools use the explicit RCC text-tool protocol described below. This is a request-time partition, not a fallback after native failure:
+Current RouteCodex decision: custom tools (unmapped from `WINDSURF_TOOL_MAP`) are sent as JSON strips via gRPC field 10. No text-tool markers are injected into the prompt. This is a request-time partition, not fallback after native failure:
 
 ```text
 native-equivalent tool -> Cascade native structured protocol
-unsupported tool       -> RCC text-tool protocol
+custom tool            -> gRPC field 10 mcpCompat JSON strip
 ```
 
-`apply_patch` is an unsupported native tool for Windsurf. It must use RCC text-tool harvest, or a future explicitly enabled RouteCodex servertool; it must not be translated to Cascade `write_to_file` / `propose_code` native steps.
+`apply_patch` is a custom tool for Windsurf. It passes through `windsurf_custom_tools` → gRPC field 10; it must not be translated to Cascade `write_to_file` / `propose_code` native steps.
 
 ## RouteCodex Provider Requirements
 
 1. `preprocessRequest`:
    - detect `tools[]`.
-   - partition declared tools into `windsurf_declared_native_tools` and `windsurf_unsupported_text_tools`.
+   - partition declared tools into `windsurf_declared_native_tools` and `windsurf_custom_tools`.
    - native tools set `windsurf_native_mode=true` and `windsurf_native_allowlist=[...]`.
-   - unsupported tools set `windsurf_text_tool_protocol="rcc"`.
+   - custom tools are written to `body.windsurf_custom_tools`.
    - remove original `tools` and legacy `tools_preamble` from outbound body.
    - do not perform provider capability routing/gating.
+   - do NOT set `windsurf_text_tool_protocol` — that path is removed.
 
 2. `buildSendCascadeMessageRequest`:
    - when `windsurf_native_mode=true`, encode planner mode `DEFAULT(1)`.
@@ -314,19 +315,19 @@ unsupported tool       -> RCC text-tool protocol
    - do not write textual tool protocol into native tool fields.
 
 3. `buildCascadePromptText`:
-   - inject RCC guidance only for `windsurf_unsupported_text_tools`.
-   - RCC guidance must not list native tool names.
+   - do NOT inject RCC guidance or any text-tool protocol markers.
+   - custom tools are not represented in prompt text — they pass through gRPC field 10 only.
    - do not restore legacy `tools_preamble`, `<tool_call>`, or `function_call` protocols.
 
 4. `pollCascadeTrajectorySteps` / harvest:
    - collect native tool calls from structured trajectory fields 45/47/49/50 and known native step decode.
-   - collect unsupported tool calls only from `<|RCC|tool_calls>` text when unsupported tools were declared.
-   - fail fast on native/RCC conflicts, malformed RCC, or undeclared RCC tool names.
+   - custom tool calls are returned by Cascade as trajectory steps (field 45 custom_tool / field 47 mcp_tool) — decode them directly.
+   - if `windsurf_custom_tools` were declared and the response contains `<|RCC|tool_calls>` text, fail fast with `WINDSURF_TOOL_PROTOCOL_CONFLICT` (RCC protocol is removed).
 
 5. submit/history:
    - native assistant tool calls + outputs become `additional_steps field9`.
-   - unsupported tool results become prompt-visible `<|RCC|tool_result>` context.
-   - do not mix native additional_steps with unsupported result context.
+   - custom tool results are returned as trajectory step fields 45/47 in the next poll — they are not injected as prompt context.
+   - native additional_steps and custom tool trajectory results coexist in the same poll loop.
 
 ## Test Plan
 
@@ -340,33 +341,32 @@ Blackbox anchors must be added and run in this order:
 
 2. Preprocess / partition blackbox:
    - mapped tools become `windsurf_declared_native_tools` + `windsurf_native_mode=true` + allowlist.
-   - unsupported custom/MCP tools become `windsurf_unsupported_text_tools` + `windsurf_text_tool_protocol="rcc"`.
+   - custom tools become `windsurf_custom_tools`.
+   - `windsurf_text_tool_protocol` must be undefined.
    - App request schema no tool-definition input slot remains a blackbox anchor.
 
 3. Response blackbox:
    - RouteCodex `parseTrajectorySteps` matches WindsurfAPI `parseTrajectorySteps` for fields 45/47/49/50.
    - `pollCascadeTrajectorySteps` emits OpenAI `tool_calls` from structured trajectory for native calls.
-   - RCC text blocks harvest into OpenAI `tool_calls` only for declared unsupported tools.
+   - Custom tools decode from trajectory fields 45/47; RCC text-tool harvest is removed (detected as conflict and fails fast).
 
 4. Submit/history blackbox:
    - RouteCodex `buildCascadeAdditionalStep` matches WindsurfAPI `buildAdditionalStep` for native calls.
    - `SendUserCascadeMessage.field9 additional_steps` matches WindsurfAPI reference.
-   - unsupported results are reinjected as `<|RCC|tool_result>` context.
+   - Custom tool trajectory results are decoded from poll response — not injected as text.
 
 5. Installed smoke after implementation:
    - build + install + restart RouteCodex.
-## Hybrid Native + Unsupported RCC Plan
+## Custom Tools Protocol (gRPC field 10 mcpCompat)
 
-The implementation plan for supporting both native-equivalent tools and unsupported RCC text tools is tracked in:
+Non-native tools (unregistered in `WINDSURF_TOOL_MAP`) are encoded as JSON strips via `SendUserCascadeMessageRequest` gRPC field 10. The LS runtime decodes and adapts them.
 
-- `docs/goals/windsurf-tool-hybrid-protocol-plan.md`
-
-Current protocol decision:
+Protocol decision:
 
 - Native-equivalent tools must use Cascade structured protocol only.
-- Unsupported tools may use the explicit RouteCodex RCC text-tool protocol, selected at request partition time, not as fallback after native failure.
-- Windsurf unsupported-tool fence naming is **RCC only** (`<|RCC|tool_calls>` / `<|RCC|tool_result>`); do not import other provider protocol names into Windsurf facts.
-- Harvest must distinguish native trajectory calls from RCC text calls and fail fast on conflicts.
+- Custom tools pass through `windsurf_custom_tools` → gRPC field 10 mcpCompat JSON strips.
+- RCC text-tool protocol (`<|RCC|tool_calls>` / `<|RCC|tool_result>`) is **removed**. If detected in responses, `WINDSURF_TOOL_PROTOCOL_CONFLICT` (400) is thrown.
+- Harvest decodes custom tool trajectory steps from fields 45/47 directly.
 
 ## Documentation Hygiene
 

@@ -120,7 +120,7 @@ field 3 arguments_json
 - `exec_command` / `shell_command` / `run_command` / `bash` 与 Cascade `run_command` 仅在**单次 blocking shell 执行**子集上语义等同：`cmd|command|command_line -> command_line`，`workdir|cwd -> cwd`，`blocking=true`。不得把 `write_stdin`、PTY、session 续写、yield 中间返回、sandbox/approval 语义冒充为已等同。
 - App schema 中存在 `CustomToolSpec` / `McpServerState` / `ChatToolDefinition`，但 `SendUserCascadeMessageRequest` 已确认只有 fields 1-9：`cascade_id/items/metadata/experiment_config/cascade_config/images/recipe_ids/blocking/additional_steps`，没有 per-request arbitrary tool definitions 输入槽位。
 - WindsurfAPI 对 unmapped tools 走旧 `toolPreamble` emulation，不是 structured custom-tool request；RouteCodex 不得静默恢复该路径。
-- custom/MCP/unmapped tool 不进入 Cascade native structured protocol；当前按 hybrid 设计进入显式 RCC text-tool protocol（`windsurf_text_tool_protocol="rcc"`），不是 fallback，也不做能力路由 gating。
+- custom tools 不进入 Cascade native structured protocol，通过 `SendUserCascadeMessageRequest` gRPC field 10 mcpCompat 单字段 JSON 透传编码，不由文本工具协议引导。`preprocessRequest` 将它们写入 `body.windsurf_custom_tools`，下游 `buildSendCascadeMessageRequest` 编码为 field 10 消息。不注入任何文本引导标记，不 fallback 到 RCC/text 协议。
 
 ## Implementation Contract
 
@@ -145,18 +145,29 @@ Provider 不得负责：
 - 保留旧 cloud JSON chat 主链。
 
 
-## Hybrid Tool Protocol Implementation Plan
+## Custom Tools Protocol (gRPC field 10 mcpCompat)
 
-Detailed implementation and blackbox test plan:
+非 native 工具（未在 `WINDSURF_TOOL_MAP` 中注册的工具）通过 `SendUserCascadeMessageRequest` field 10 编码一次性 JSON 透传，由 LS 端自主解码适配。
 
-- `docs/goals/windsurf-tool-hybrid-protocol-plan.md`
+Preprocess 分区：
 
-Provider behavior target:
+```text
+native-equivalent tool -> Cascade native structured protocol
+custom tool            -> gRPC field 10 mcpCompat JSON strip
+```
 
-- native-equivalent tools: transparent Cascade structured translation;
-- unsupported tools: explicit RCC text-tool contract only for unsupported subset;
-- Windsurf text-tool fence names are RCC-only (`<|RCC|tool_calls>` / `<|RCC|tool_result>`); do not import other provider protocol names into Windsurf facts.
-- harvest: native trajectory and RCC text are parsed by separate paths with conflict fail-fast.
+编码规则：
+
+```text
+field 10: writeProtoMessageField(10, writeProtoStringField(1, stableStringify(entry)))
+```
+
+每个 custom tool 的 `mcp_compat` 元数据被独立编码为一条 field 10 子消息。
+
+Provider 不得做的行为：
+
+- 不得在 prompt 中注入任何 RCC 文本引导标记（`<|RCC|tool_calls>` / `<|RCC|tool_result>`）。
+- 不得通过 `windsurf_text_tool_protocol` 字段做文本收缩回退。（该字段和代码路径已被移除。）
 
 
 ## Multi-account / quota / stopMessage
@@ -176,17 +187,17 @@ Provider behavior target:
 
 ## Verification
 
-## apply_patch RCC 文本收割（当前事实）
+## apply_patch — 当前处理方式
 
 `apply_patch` 对 Windsurf 不是已确认可等价的 native tool。Windsurf.app 只能确认 `write_to_file` / `propose_code` 是 Cascade trajectory/proto step，不能确认它们是可控本地 executor；其字段也不能表达 Codex `apply_patch` 的 multi-file patch、失败/aborted 等完整语义。因此禁止把 `apply_patch` native-map 到 `write_to_file` / `propose_code`。
 
 当前规则：
 
-1. `apply_patch` 走 RCC 文本引导/收割，或未来作为显式配置打开的 RouteCodex servertool 由 RCC 执行。
+1. `apply_patch` 作为 custom tool 处理，通过 `windsurf_custom_tools` gRPC field 10 mcpCompat 透传到 LS。
 2. 不完全兼容工具不得伪装 native；否则执行结果不可控，错误会被模型误解。
 3. `exec_command` / `shell_command` 仍可 bridge 到 Cascade `run_command`，但只限 one-shot blocking shell 子集；不能外推到 PTY/session/stdin，也不能用 `run_command` 代替 `apply_patch` 文件编辑。
 
-当前测试锚点必须覆盖：`apply_patch` 被分入 unsupported/RCC text tools；native allowlist 不包含 `write_to_file`；RCC guidance 可以引导 `apply_patch` 文本收割；Cascade native 轨迹只对已等价工具做回译。
+当前测试锚点必须覆盖：`apply_patch` 被分入 `windsurf_custom_tools`；native allowlist 不包含 `write_to_file`；custom tool 通过 gRPC field 10 编码而不在 prompt 中注入文本引导。
 
 执行顺序固定：
 

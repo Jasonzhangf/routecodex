@@ -1207,6 +1207,18 @@ describe('HubRequestExecutor failover', () => {
       excludedProviderKeys: new Set<string>()
     });
     expect(singleton429ExclusionPlan.excludedCurrentProvider).toBe(false);
+    const multi429ThirdAttemptExclusionPlan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+      providerKey: 'sdfv.key1.gpt-5.4',
+      status: 429,
+      error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429 }),
+      attempt: 3,
+      promptTooLong: false,
+      isVerify: false,
+      isReauth: false,
+      routePool: ['sdfv.key1.gpt-5.4', 'dibittai.crsa.gpt-5.4'],
+      excludedProviderKeys: new Set<string>()
+    });
+    expect(multi429ThirdAttemptExclusionPlan.excludedCurrentProvider).toBe(true);
     expect(__requestExecutorTestables.isLastAvailableProvider429({
       providerKey: 'mimo.key1.mimo-v2.5-pro',
       routePool: ['mimo.key1.mimo-v2.5-pro'],
