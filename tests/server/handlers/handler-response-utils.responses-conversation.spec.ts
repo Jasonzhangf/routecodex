@@ -3,13 +3,16 @@ import { Readable } from 'node:stream';
 import { describe, expect, it, jest } from '@jest/globals';
 
 const recordResponsesResponseForRequestMock = jest.fn(async () => undefined);
+const captureResponsesRequestContextForRequestMock = jest.fn(async () => undefined);
 const convertResponseToJsonToSseMock = jest.fn(async () => Readable.from(['event: response.completed\n', 'data: {}\n\n']));
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-  captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
+  captureResponsesRequestContextForRequest: captureResponsesRequestContextForRequestMock,
+  clearResponsesConversationByRequestId: jest.fn(async () => undefined),
   createResponsesJsonToSseConverter: jest.fn(async () => ({
     convertResponseToJsonToSse: convertResponseToJsonToSseMock
   })),
+  finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
   importCoreDist: jest.fn(),
   requireCoreDist: jest.fn(),
   recordResponsesResponseForRequest: recordResponsesResponseForRequestMock
@@ -249,6 +252,81 @@ describe('sendPipelineResponse responses conversation recording', () => {
     expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toEqual([
       'resp_windsurf_streamed_tool_100318513'
     ]);
+  });
+
+  it('RED: streamed /v1/responses.submit_tool_outputs tool_calls must capture context for next continuation', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    recordResponsesResponseForRequestMock.mockClear();
+    captureResponsesRequestContextForRequestMock.mockClear();
+    convertResponseToJsonToSseMock.mockClear();
+
+    const res = new MockResponse();
+    await sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          id: 'resp_submit_streamed_tool_1',
+          object: 'response',
+          status: 'requires_action',
+          finish_reason: 'tool_calls',
+          output: [
+            {
+              type: 'function_call',
+              name: 'update_plan',
+              arguments: '{"plan":[{"step":"streamed submit"}]}',
+              call_id: 'call_submit_streamed_1'
+            }
+          ],
+          required_action: {
+            type: 'submit_tool_outputs',
+            submit_tool_outputs: {
+              tool_calls: [
+                {
+                  id: 'call_submit_streamed_1',
+                  type: 'function',
+                  name: 'update_plan',
+                  arguments: '{"plan":[{"step":"streamed submit"}]}',
+                  tool_call_id: 'call_submit_streamed_1'
+                }
+              ]
+            }
+          }
+        },
+        usageLogInfo: {
+          finishReason: 'tool_calls',
+          routeName: 'tools/gateway-priority-5555-tools',
+          timingRequestIds: ['openai-responses-submit-streamed-1']
+        }
+      } as any,
+      'openai-responses-submit-streamed-router-1',
+      {
+        entryEndpoint: '/v1/responses.submit_tool_outputs',
+        forceSSE: true,
+        responsesRequestContext: {
+          payload: {
+            model: 'gpt-5.4',
+            previous_response_id: 'resp_parent_streamed_1',
+            input: [{ type: 'function_call_output', call_id: 'call_submit_streamed_0', output: 'ok' }]
+          },
+          context: {
+            input: [{ type: 'function_call_output', call_id: 'call_submit_streamed_0', output: 'ok' }],
+            toolsRaw: [{ type: 'function', name: 'update_plan', parameters: { type: 'object' } }]
+          },
+          sessionId: 'sess-submit-streamed',
+        }
+      }
+    );
+    await waitForEnd(res);
+
+    expect(res.statusCode).toBe(200);
+    expect(captureResponsesRequestContextForRequestMock).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'resp_submit_streamed_tool_1',
+      payload: expect.objectContaining({ previous_response_id: 'resp_parent_streamed_1' })
+    }));
+    expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toContain(
+      'resp_submit_streamed_tool_1'
+    );
   });
 
 });

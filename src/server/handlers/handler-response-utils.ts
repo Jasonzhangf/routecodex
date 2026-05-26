@@ -251,6 +251,38 @@ function readResponsesConversationResponseId(body: unknown): string | undefined 
   return undefined;
 }
 
+function isToolCallContinuationResponse(body: unknown): boolean {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const record = body as Record<string, unknown>;
+  if (deriveFinishReason(record) === 'tool_calls') return true;
+  if (typeof record.status === 'string' && record.status.trim().toLowerCase() === 'requires_action') {
+    return true;
+  }
+  const requiredAction =
+    record.required_action && typeof record.required_action === 'object' && !Array.isArray(record.required_action)
+      ? (record.required_action as Record<string, unknown>)
+      : undefined;
+  const submit =
+    requiredAction?.submit_tool_outputs
+    && typeof requiredAction.submit_tool_outputs === 'object'
+    && !Array.isArray(requiredAction.submit_tool_outputs)
+      ? (requiredAction.submit_tool_outputs as Record<string, unknown>)
+      : undefined;
+  const toolCalls = submit?.tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length > 0) return true;
+  const output = record.output;
+  if (Array.isArray(output)) {
+    return output.some((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+      const type = typeof (item as Record<string, unknown>).type === 'string'
+        ? String((item as Record<string, unknown>).type).trim().toLowerCase()
+        : '';
+      return type === 'function_call' || type === 'tool_call';
+    });
+  }
+  return false;
+}
+
 async function cleanupResponsesConversationSupersededRequestIds(args: {
   requestLabel: string;
   timingRequestIds?: string[];
@@ -295,7 +327,7 @@ async function recordResponsesConversationToolCallResponse(args: {
   if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
     return;
   }
-  if (deriveFinishReason(args.body) !== 'tool_calls') {
+  if (!isToolCallContinuationResponse(args.body)) {
     return;
   }
   const recordBody = args.body as Record<string, unknown>;
@@ -355,7 +387,7 @@ async function finalizeResponsesConversationNonToolResponse(args: {
     return;
   }
   const finishReason = deriveFinishReason(args.body);
-  if (finishReason === 'tool_calls') {
+  if (isToolCallContinuationResponse(args.body) || finishReason === 'tool_calls') {
     return;
   }
   await finalizeResponsesConversationRequestRetention(args.requestLabel, {
@@ -374,9 +406,12 @@ async function captureResponsesConversationToolCallRequestContext(args: {
   body: unknown;
   requestContext?: DispatchOptions['responsesRequestContext'];
 }): Promise<void> {
-  if (args.entryEndpoint !== '/v1/responses') return;
+  if (
+    args.entryEndpoint !== '/v1/responses'
+    && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
+  ) return;
   if (!args.requestContext) return;
-  if (deriveFinishReason(args.body) !== 'tool_calls') return;
+  if (!isToolCallContinuationResponse(args.body)) return;
   const body = args.body && typeof args.body === 'object' && !Array.isArray(args.body)
     ? args.body as Record<string, unknown>
     : undefined;
@@ -900,7 +935,10 @@ function sendStructuredSseError(res: Response, requestLabel: string, payload: Re
 
 
 async function normalizeResponsesToolCallsForClientBody(body: unknown, entryEndpoint?: string): Promise<unknown> {
-  if (entryEndpoint !== '/v1/responses') {
+  if (
+    entryEndpoint !== '/v1/responses'
+    && entryEndpoint !== '/v1/responses.submit_tool_outputs'
+  ) {
     return body;
   }
   if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
@@ -921,7 +959,10 @@ async function normalizeResponsesToolCallsForClientBody(body: unknown, entryEndp
 }
 
 function isResponsesJsonBody(body: unknown, entryEndpoint?: string): body is Record<string, unknown> {
-  if (entryEndpoint !== '/v1/responses') {
+  if (
+    entryEndpoint !== '/v1/responses'
+    && entryEndpoint !== '/v1/responses.submit_tool_outputs'
+  ) {
     return false;
   }
   if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
@@ -944,6 +985,7 @@ function streamResponsesJsonAsSse(args: {
   result: PipelineExecutionResult;
   status: number;
   entryEndpoint?: string;
+  responsesRequestContext?: DispatchOptions['responsesRequestContext'];
   logResponseCompleted: (details?: Record<string, unknown>) => void;
 }): boolean {
   if (!isResponsesJsonBody(args.result.body, args.entryEndpoint)) {
@@ -988,7 +1030,9 @@ function streamResponsesJsonAsSse(args: {
         routeHint: conversationRouteHint,
         providerKey: conversationProviderKey,
         body: sanitizedResponsesPayload,
-        requestContext: args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined,
+        requestContext:
+          (args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined)
+          ?? args.responsesRequestContext,
       });
       await recordResponsesConversationToolCallResponse({
         entryEndpoint: args.entryEndpoint,
@@ -998,7 +1042,9 @@ function streamResponsesJsonAsSse(args: {
         providerKey: conversationProviderKey,
         sessionId: args.result.usageLogInfo?.sessionId,
         conversationId: args.result.usageLogInfo?.conversationId,
-        requestContext: args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined,
+        requestContext:
+          (args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined)
+          ?? args.responsesRequestContext,
         body: sanitizedResponsesPayload
       });
       const sse = await converter.convertResponseToJsonToSse(normalizedResponsesPayload, {
@@ -1154,6 +1200,7 @@ export async function sendPipelineResponse(
       result,
       status,
       entryEndpoint,
+      responsesRequestContext: options?.responsesRequestContext,
       logResponseCompleted
     })) {
       return;
@@ -1280,7 +1327,8 @@ export async function sendPipelineResponse(
         return;
       }
       if (
-        entryEndpoint !== '/v1/responses'
+        (entryEndpoint !== '/v1/responses'
+          && entryEndpoint !== '/v1/responses.submit_tool_outputs')
         || !contractProbe.probe
         || typeof contractProbe.probe !== 'object'
         || Array.isArray(contractProbe.probe)
