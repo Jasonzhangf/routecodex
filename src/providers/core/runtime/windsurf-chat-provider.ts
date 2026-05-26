@@ -3184,7 +3184,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   }> {
     try {
       void args.model;
-      const maxWaitMs = 120_000;
+      // Use pollMaxWaitMs from provider config, defaulting to 120s
+      const maxWaitMs = this.windsurfRuntime?.pollMaxWaitMs ?? 120_000;
       const pollIntervalMs = 500;
       const idleGraceMs = 1_500;
       const startedAt = Date.now();

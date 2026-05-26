@@ -1307,7 +1307,7 @@ export async function sendPipelineResponse(
         typeof sseBody[STREAM_LOG_FINISH_REASON_KEY] === 'string'
           ? String(sseBody[STREAM_LOG_FINISH_REASON_KEY])
           : undefined,
-      seenTerminalEvent: typeof sseBody[STREAM_LOG_FINISH_REASON_KEY] === 'string',
+      seenTerminalEvent: false,
     };
     let totalTimer: NodeJS.Timeout | null = null;
     let keepaliveTimer: NodeJS.Timeout | null = null;
@@ -1520,7 +1520,7 @@ export async function sendPipelineResponse(
     stream.on('data', (chunk: unknown) => {
       updateSseTerminalTrackerFromChunk(chunk, finishTracker, terminalWatch);
       updateContractProbeFromSseChunk(chunk, contractProbe);
-      if (!finishTracker.seenTerminalEvent || ended || streamEnded || terminalFlushTimer) {
+      if (!terminalWatch.sawTerminalChunk || ended || streamEnded || terminalFlushTimer) {
         return;
       }
       terminalFlushTimer = setTimeout(() => {
@@ -1579,7 +1579,7 @@ export async function sendPipelineResponse(
           ? result.usageLogInfo.finishReason.trim()
           : undefined);
       finishTracker.finishReason = resolvedStreamFinishReason;
-      finishTracker.seenTerminalEvent = Boolean(resolvedStreamFinishReason);
+      finishTracker.seenTerminalEvent = terminalWatch.sawTerminalChunk;
       if (!resolvedStreamFinishReason) {
         logPipelineStage('response.sse.finish_reason.missing', requestLabel, {
           status,

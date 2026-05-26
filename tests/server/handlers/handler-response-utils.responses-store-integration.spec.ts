@@ -92,11 +92,13 @@ describe("sendPipelineResponse responses store integration", () => {
     "openai-responses-router-gpt-5.3-codex-native-sse-store",
     "openai-responses-router-gpt-5.3-codex-native-sse-premature-persist",
     "openai-responses-router-gpt-5.3-codex-native-sse-tail-store",
+    "openai-responses-sdfv.key1-gpt-5.4-live-shape-direct-sse",
     "openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T102906604-222183-867",
     "openai-responses-router-gpt-5.3-codex-20260523T102906604-222183-867",
     "resp_native_sse_premature_persist_1",
     "resp_native_sse_store_1",
     "resp_native_sse_tail_store_1",
+    "resp_04c9be1feb153bec016a1539bb89a08196b1c2349ac465d6a3",
     "resp_1779503404150",
     "resp_windsurf_json_resume_1",
     "openai-responses-router-gpt-5.3-codex-orphan-cleanup",
@@ -291,7 +293,7 @@ describe("sendPipelineResponse responses store integration", () => {
         status: 200,
         body: {
           __sse_responses: Readable.from(delayedTerminalStream()),
-          __routecodex_stream_finish_reason: "tool_calls",
+          __routecodex_finish_reason: "tool_calls",
         },
         usageLogInfo: {
           finishReason: "tool_calls",
@@ -352,6 +354,144 @@ describe("sendPipelineResponse responses store integration", () => {
           call_id: callId,
           output: "/Users/fanzhang/Documents/github/routecodex",
         },
+      ],
+    });
+    expect(resumed.payload.previous_response_id).toBe(responseId);
+  });
+
+
+  it("RED: direct 5555 live-shape SSE tool_calls with completed status must still retain responseIndex for submit_tool_outputs", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const requestId = "openai-responses-sdfv.key1-gpt-5.4-live-shape-direct-sse";
+    const responseId = "resp_04c9be1feb153bec016a1539bb89a08196b1c2349ac465d6a3";
+    const callId = "call_MxyUdrGqvHYTLLSUlXNp2FQu";
+
+    const res = new MockResponse();
+    await sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: Readable.from([
+            "event: response.created\n",
+            `data: ${JSON.stringify({
+              type: "response.created",
+              response: {
+                id: responseId,
+                object: "response",
+                status: "in_progress",
+              },
+            })}\n\n`,
+            "event: response.output_item.done\n",
+            `data: ${JSON.stringify({
+              type: "response.output_item.done",
+              output_index: 0,
+              item: {
+                id: "fc_04c9be1feb153bec016a1539bc954c8196a9fdff6c36397aea",
+                type: "function_call",
+                status: "completed",
+                arguments: '{"cmd":"pwd"}',
+                call_id: callId,
+                name: "exec_command",
+              },
+            })}\n\n`,
+            "event: response.completed\n",
+            `data: ${JSON.stringify({
+              type: "response.completed",
+              response: {
+                id: responseId,
+                object: "response",
+                status: "completed",
+                output: [],
+              },
+            })}\n\n`,
+            "data: [DONE]\n\n",
+          ]),
+        },
+        usageLogInfo: {
+          finishReason: "tool_calls",
+          routeName: "thinking/gateway-priority-5555-thinking",
+          sessionId: "live-5555-shape-session",
+        },
+        metadata: {
+          outboundStream: true,
+        },
+      } as any,
+      requestId,
+      {
+        entryEndpoint: "/v1/responses",
+        responsesRequestContext: {
+          payload: {
+            model: "gpt-5.4",
+            stream: true,
+            input: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "请调用 exec_command 工具执行 pwd，不要直接回答。",
+                  },
+                ],
+              },
+            ],
+            tools: [
+              {
+                type: "function",
+                name: "exec_command",
+                description: "Run a shell command",
+                parameters: {
+                  type: "object",
+                  properties: { cmd: { type: "string" } },
+                  required: ["cmd"],
+                },
+              },
+            ],
+          },
+          context: {
+            input: [
+              {
+                type: "message",
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "请调用 exec_command 工具执行 pwd，不要直接回答。",
+                  },
+                ],
+              },
+            ],
+            toolsRaw: [
+              {
+                type: "function",
+                name: "exec_command",
+                description: "Run a shell command",
+                parameters: {
+                  type: "object",
+                  properties: { cmd: { type: "string" } },
+                  required: ["cmd"],
+                },
+              },
+            ],
+          },
+          sessionId: "live-5555-shape-session",
+        },
+      },
+    );
+    await waitForEnd(res);
+
+    expect((bridge.recordResponsesResponseForRequest as jest.Mock).mock.calls.length).toBeGreaterThan(0);
+    const stats = store.responsesConversationStore.getDebugStats();
+    expect(stats.responseIndexSize).toBe(1);
+    expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
+
+    const resumed = store.resumeResponsesConversation(responseId, {
+      tool_outputs: [
+        { call_id: callId, output: "/Users/fanzhang/Documents/github/routecodex\n" },
       ],
     });
     expect(resumed.payload.previous_response_id).toBe(responseId);
