@@ -242,12 +242,17 @@ describe('router-direct-pipeline', () => {
   });
 
   describe('openai-responses protocol', () => {
-    it('RED: skips responses same-protocol direct because Responses requires conversation and outbound conversion', async () => {
+    it('uses direct for openai-responses same-protocol routing and keeps payload untouched', async () => {
       const handle = createMockProviderHandle('openai-responses');
+      const requestPayload = {
+        model: 'gpt-5.4',
+        previous_response_id: 'resp_prev_direct_router',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      };
       const input = {
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'gpt-5', reasoning: { effort: 'high' } },
-        requestPayload: { model: 'gpt-5.4', input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }] },
+        requestPayload,
         target: { providerKey: 'tab.gpt-5', providerType: 'responses', runtimeKey: handle.runtimeKey },
         routingDecision: { routeName: 'default' },
         processMode: 'chat',
@@ -255,9 +260,9 @@ describe('router-direct-pipeline', () => {
         resolveProviderByRuntimeKey: () => handle,
       };
       const result = await executeRouterDirectPipeline(input);
-      expect(result.used).toBe(false);
-      expect((result as any).reason).toContain('full executor conversion');
-      expect(handle.instance.processIncomingDirect).not.toHaveBeenCalled();
+      expect(result.used).toBe(true);
+      expect(handle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
+      expect(handle.instance.processIncomingDirect).toHaveBeenCalledWith(requestPayload);
     });
 
     it('skips when chat inbound targets responses provider', async () => {
@@ -277,7 +282,7 @@ describe('router-direct-pipeline', () => {
       expect((result as any).reason).toContain('protocol mismatch');
     });
 
-    it('skips Windsurf responses even when protocols match because full executor response conversion is required', async () => {
+    it('uses direct for Windsurf responses when protocols match', async () => {
       const handle = {
         ...createMockProviderHandle('openai-responses'),
         providerId: 'windsurf',
@@ -294,9 +299,9 @@ describe('router-direct-pipeline', () => {
         resolveProviderByRuntimeKey: () => handle,
       };
       const result = await executeRouterDirectPipeline(input);
-      expect(result.used).toBe(false);
-      expect((result as any).reason).toContain('full executor conversion');
-      expect(handle.instance.processIncomingDirect).not.toHaveBeenCalled();
+      expect(result.used).toBe(true);
+      expect(handle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
+      expect(handle.instance.processIncomingDirect).toHaveBeenCalledWith(input.requestPayload);
       expect(handle.instance.processIncoming).not.toHaveBeenCalled();
     });
 

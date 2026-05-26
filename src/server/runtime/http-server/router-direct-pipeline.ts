@@ -99,16 +99,6 @@ export async function executeRouterDirectPipeline(
 
   const inboundProtocol = detectInboundProtocolFromRequest(requestInfo);
   const providerProtocol = providerHandle.providerProtocol;
-  if (
-    inboundProtocol === 'openai-responses'
-    && (providerHandle.providerProtocol === 'openai-responses' || providerHandle.providerFamily === 'windsurf')
-  ) {
-    return {
-      used: false,
-      reason: 'openai-responses requires full executor conversion',
-    };
-  }
-
   if (inboundProtocol !== providerProtocol) {
     return {
       used: false,

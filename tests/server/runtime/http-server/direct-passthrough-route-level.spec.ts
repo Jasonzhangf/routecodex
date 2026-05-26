@@ -73,7 +73,7 @@ describe('direct passthrough route-level', () => {
     expect((sentPayload as Record<string, unknown>).instructions).toBeUndefined();
   });
 
-  it('router same-protocol direct keeps ingress payload transparent before provider runtime overrides', async () => {
+  it('router same-protocol direct keeps ingress payload transparent and preserves previous_response_id for responses providers', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -159,9 +159,10 @@ describe('direct passthrough route-level', () => {
     expect(directResult.used).toBe(true);
     expect(sentPayload).toEqual({
       model: 'gpt-5.3-codex',
+      previous_response_id: 'resp_prev_router',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
       reasoning: { effort: 'high' },
-      instructions: 'must-not-copy',
     });
-    expect((sentPayload as Record<string, unknown>).previous_response_id).toBeUndefined();
+    expect((sentPayload as Record<string, unknown>).instructions).toBeUndefined();
   });
 });
