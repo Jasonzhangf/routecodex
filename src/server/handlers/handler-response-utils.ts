@@ -56,6 +56,7 @@ type SseFinishReasonTracker = {
 type SseTerminalWatch = {
   sawTerminalChunk: boolean;
   terminalSource?: string;
+  pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.required_action';
 };
 
 
@@ -63,6 +64,97 @@ type StreamContractProbeEnvelope = {
   probe?: Record<string, unknown>;
   emitted?: boolean;
 };
+
+function updateContractProbeFromSseChunk(
+  chunk: unknown,
+  contractProbe: StreamContractProbeEnvelope
+): void {
+  const text =
+    typeof chunk === 'string'
+      ? chunk
+      : Buffer.isBuffer(chunk)
+        ? chunk.toString('utf8')
+        : chunk instanceof Uint8Array
+          ? Buffer.from(chunk).toString('utf8')
+          : '';
+  if (!text) return;
+  const blocks = text.split(/\n\n+/);
+  for (const block of blocks) {
+    if (!block) continue;
+    const lines = block.split(/\n/);
+    const eventName = lines
+      .filter((line) => line.startsWith('event:'))
+      .map((line) => line.slice('event:'.length).trim())
+      .find(Boolean);
+    const dataText = lines
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice('data:'.length).trim())
+      .join('\n');
+    if (!dataText || dataText === '[DONE]') continue;
+    let parsed: Record<string, unknown> | undefined;
+    try {
+      const value = JSON.parse(dataText);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      parsed = value as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const response =
+      parsed.response && typeof parsed.response === 'object' && !Array.isArray(parsed.response)
+        ? (parsed.response as Record<string, unknown>)
+        : undefined;
+    const requiredAction =
+      parsed.required_action && typeof parsed.required_action === 'object' && !Array.isArray(parsed.required_action)
+        ? (parsed.required_action as Record<string, unknown>)
+        : undefined;
+    const outputItem =
+      parsed.item && typeof parsed.item === 'object' && !Array.isArray(parsed.item)
+        ? (parsed.item as Record<string, unknown>)
+        : undefined;
+    if (!response && !requiredAction && eventName !== 'response.required_action' && parsed.type !== 'response.required_action') {
+      const isOutputItemEvent =
+        eventName === 'response.output_item.done'
+        || eventName === 'response.output_item.added'
+        || parsed.type === 'response.output_item.done'
+        || parsed.type === 'response.output_item.added';
+      if (!isOutputItemEvent || !outputItem) {
+        continue;
+      }
+    }
+    if (!contractProbe.probe) contractProbe.probe = {};
+    const probe = contractProbe.probe;
+    if (response) {
+      if (typeof response.id === 'string' && response.id.trim()) probe.id = response.id;
+      if (typeof response.object === 'string' && response.object.trim()) probe.object = response.object;
+      if (typeof response.status === 'string' && response.status.trim()) probe.status = response.status;
+    }
+    if ((eventName === 'response.required_action' || parsed.type === 'response.required_action') && requiredAction) {
+      probe.required_action = requiredAction;
+    }
+    const isOutputItemEvent =
+      eventName === 'response.output_item.done'
+      || eventName === 'response.output_item.added'
+      || parsed.type === 'response.output_item.done'
+      || parsed.type === 'response.output_item.added';
+    if (isOutputItemEvent && outputItem) {
+      const existing = Array.isArray(probe.output) ? probe.output : [];
+      const itemId = typeof outputItem.id === 'string' ? outputItem.id : undefined;
+      const callId = typeof outputItem.call_id === 'string' ? outputItem.call_id : undefined;
+      const alreadyExists = existing.some((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          return false;
+        }
+        const record = item as Record<string, unknown>;
+        const existingId = typeof record.id === 'string' ? record.id : undefined;
+        const existingCallId = typeof record.call_id === 'string' ? record.call_id : undefined;
+        return (itemId && existingId === itemId) || (callId && existingCallId === callId);
+      });
+      if (!alreadyExists) {
+        probe.output = [...existing, outputItem];
+      }
+    }
+  }
+}
 
 function buildResponsesTerminalSseFramesFromProbe(probe: Record<string, unknown> | undefined): string[] {
   if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
@@ -130,7 +222,7 @@ function resolveResponsesConversationRecordRequestIds(
   if (Array.isArray(timingRequestIds)) {
     for (const id of timingRequestIds) add(requestIds, id);
   }
-  return [...responseIds, ...requestIds];
+  return requestIds;
 }
 
 function deriveResponsesConversationProviderKey(usageLogInfo?: { providerKey?: string; timingRequestIds?: string[] }): string | undefined {
@@ -191,6 +283,7 @@ async function recordResponsesConversationToolCallResponse(args: {
   providerKey?: string;
   sessionId?: unknown;
   conversationId?: unknown;
+  requestContext?: DispatchOptions['responsesRequestContext'];
   body: unknown;
 }): Promise<void> {
   if (
@@ -207,18 +300,26 @@ async function recordResponsesConversationToolCallResponse(args: {
   }
   const recordBody = args.body as Record<string, unknown>;
   const responseId = readResponsesConversationResponseId(recordBody);
-  for (const recordRequestId of resolveResponsesConversationRecordRequestIds(
+  const effectiveSessionId =
+    typeof args.sessionId === 'string' && args.sessionId.trim()
+      ? args.sessionId
+      : args.requestContext?.sessionId;
+  const effectiveConversationId =
+    typeof args.conversationId === 'string' && args.conversationId.trim()
+      ? args.conversationId
+      : args.requestContext?.conversationId;
+  const requestIds = resolveResponsesConversationRecordRequestIds(
     args.requestLabel,
     args.timingRequestIds,
     responseId
-  )) {
+  );
+  for (const recordRequestId of requestIds) {
     await recordResponsesResponseForRequest({
       requestId: recordRequestId,
       response: recordBody,
       routeHint: args.routeHint,
-      providerKey: args.providerKey,
-      sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
-      conversationId: typeof args.conversationId === 'string' ? args.conversationId : undefined,
+      sessionId: effectiveSessionId,
+      conversationId: effectiveConversationId,
     }).catch((error) => {
       logResponseNonBlockingError(`responses-conversation-record:${recordRequestId}`, error);
     });
@@ -228,13 +329,12 @@ async function recordResponsesConversationToolCallResponse(args: {
     timingRequestIds: args.timingRequestIds,
     responseId,
   });
-  // Keep retention by request ids (authoritative key in requestMap). Using responseId here
-  // can miss the active request entry before rebind propagation completes.
-  for (const retainRequestId of resolveResponsesConversationRecordRequestIds(
+  const retainRequestIds = resolveResponsesConversationRecordRequestIds(
     args.requestLabel,
     args.timingRequestIds,
     responseId
-  )) {
+  );
+  for (const retainRequestId of retainRequestIds) {
     await finalizeResponsesConversationRequestRetention(retainRequestId, {
       keepForSubmitToolOutputs: true,
     }).catch((error) => {
@@ -268,6 +368,7 @@ async function finalizeResponsesConversationNonToolResponse(args: {
 async function captureResponsesConversationToolCallRequestContext(args: {
   entryEndpoint?: string;
   requestLabel: string;
+  timingRequestIds?: string[];
   routeHint?: string;
   providerKey?: string;
   body: unknown;
@@ -280,9 +381,11 @@ async function captureResponsesConversationToolCallRequestContext(args: {
     ? args.body as Record<string, unknown>
     : undefined;
   const responseId = readResponsesConversationResponseId(body);
-  const ids = (responseId ? [responseId] : [args.requestLabel]).filter((value, index, array): value is string => {
-    return typeof value === 'string' && value.trim().length > 0 && array.indexOf(value) === index;
-  });
+  const ids = resolveResponsesConversationRecordRequestIds(
+    args.requestLabel,
+    args.timingRequestIds,
+    responseId
+  );
   for (const requestId of ids) {
     await captureResponsesRequestContextForRequest({
       requestId,
@@ -291,7 +394,6 @@ async function captureResponsesConversationToolCallRequestContext(args: {
       sessionId: args.requestContext.sessionId,
       conversationId: args.requestContext.conversationId,
       routeHint: args.routeHint,
-      providerKey: args.providerKey,
     }).catch((error) => {
       logResponseNonBlockingError(`responses-conversation-capture:${requestId}`, error);
     });
@@ -658,6 +760,13 @@ function updateSseTerminalTrackerFromChunk(
       .filter((line) => line.startsWith('event:'))
       .map((line) => line.slice('event:'.length).trim())
       .find(Boolean);
+    if (
+      eventName === 'response.completed'
+      || eventName === 'response.done'
+      || eventName === 'response.required_action'
+    ) {
+      terminalWatch.pendingTerminalEvent = eventName;
+    }
     const dataText = lines
       .filter((line) => line.startsWith('data:'))
       .map((line) => line.slice('data:'.length).trim())
@@ -680,11 +789,8 @@ function updateSseTerminalTrackerFromChunk(
     }
   }
 
-  if (!text.includes('response.completed') && !text.includes('response.done') && !text.includes('response.required_action')) {
-    return;
-  }
   for (const block of blocks) {
-    if (!block || (!block.includes('response.completed') && !block.includes('response.done') && !block.includes('response.required_action'))) {
+    if (!block) {
       continue;
     }
     const lines = block.split(/\n/);
@@ -692,8 +798,15 @@ function updateSseTerminalTrackerFromChunk(
       .filter((line) => line.startsWith('event:'))
       .map((line) => line.slice('event:'.length).trim())
       .find((name) => name === 'response.completed' || name === 'response.done' || name === 'response.required_action');
-    if (!eventName) {
+    const effectiveTerminalEvent = eventName
+      ?? (terminalWatch.pendingTerminalEvent && lines.some((line) => line.startsWith('data:'))
+        ? terminalWatch.pendingTerminalEvent
+        : undefined);
+    if (!effectiveTerminalEvent) {
       continue;
+    }
+    if (!eventName) {
+      terminalWatch.pendingTerminalEvent = undefined;
     }
     const dataText = lines
       .filter((line) => line.startsWith('data:'))
@@ -709,9 +822,10 @@ function updateSseTerminalTrackerFromChunk(
       }
     }
     finishTracker.seenTerminalEvent = true;
-    finishTracker.finishReason = derived ?? (eventName === 'response.required_action' ? 'tool_calls' : 'stop');
+    finishTracker.finishReason = derived ?? (effectiveTerminalEvent === 'response.required_action' ? 'tool_calls' : 'stop');
     terminalWatch.sawTerminalChunk = true;
-    terminalWatch.terminalSource = eventName;
+    terminalWatch.terminalSource = effectiveTerminalEvent;
+    terminalWatch.pendingTerminalEvent = undefined;
   }
 }
 
@@ -870,6 +984,7 @@ function streamResponsesJsonAsSse(args: {
       await captureResponsesConversationToolCallRequestContext({
         entryEndpoint: args.entryEndpoint,
         requestLabel: args.requestLabel,
+        timingRequestIds: args.result.usageLogInfo?.timingRequestIds,
         routeHint: conversationRouteHint,
         providerKey: conversationProviderKey,
         body: sanitizedResponsesPayload,
@@ -883,6 +998,7 @@ function streamResponsesJsonAsSse(args: {
         providerKey: conversationProviderKey,
         sessionId: args.result.usageLogInfo?.sessionId,
         conversationId: args.result.usageLogInfo?.conversationId,
+        requestContext: args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined,
         body: sanitizedResponsesPayload
       });
       const sse = await converter.convertResponseToJsonToSse(normalizedResponsesPayload, {
@@ -1000,8 +1116,6 @@ export async function sendPipelineResponse(
       logUsageSummary(requestLabel, {
         providerKey: usageLogInfo.providerKey,
         model: usageLogInfo.model,
-        requestModel: usageLogInfo.requestModel,
-        targetModel: usageLogInfo.targetModel,
         routeName: usageLogInfo.routeName,
         poolId: usageLogInfo.poolId,
         finishReason: resolvedFinishReason,
@@ -1150,6 +1264,7 @@ export async function sendPipelineResponse(
     };
     let totalTimer: NodeJS.Timeout | null = null;
     let keepaliveTimer: NodeJS.Timeout | null = null;
+    let terminalFlushTimer: NodeJS.Timeout | null = null;
     const terminalWatch: SseTerminalWatch = {
       sawTerminalChunk: false,
     };
@@ -1158,6 +1273,50 @@ export async function sendPipelineResponse(
         ? sseBody[STREAM_CONTRACT_PROBE_BODY_KEY] as Record<string, unknown>
         : undefined,
       emitted: false
+    };
+    let nativeSseConversationPersisted = false;
+    const persistNativeSseConversationState = async (): Promise<void> => {
+      if (nativeSseConversationPersisted) {
+        return;
+      }
+      if (
+        entryEndpoint !== '/v1/responses'
+        || !contractProbe.probe
+        || typeof contractProbe.probe !== 'object'
+        || Array.isArray(contractProbe.probe)
+      ) {
+        return;
+      }
+      nativeSseConversationPersisted = true;
+      const conversationRouteHint = result.usageLogInfo?.routeName;
+      const conversationProviderKey = deriveResponsesConversationProviderKey(result.usageLogInfo);
+      const sanitizedProbeBody = stripInternalKeysDeep(contractProbe.probe as Record<string, unknown>);
+      await captureResponsesConversationToolCallRequestContext({
+        entryEndpoint,
+        requestLabel,
+        timingRequestIds: result.usageLogInfo?.timingRequestIds,
+        routeHint: conversationRouteHint,
+        providerKey: conversationProviderKey,
+        body: sanitizedProbeBody,
+        requestContext: options?.responsesRequestContext,
+      });
+      await recordResponsesConversationToolCallResponse({
+        entryEndpoint,
+        requestLabel,
+        timingRequestIds: result.usageLogInfo?.timingRequestIds,
+        routeHint: conversationRouteHint,
+        providerKey: conversationProviderKey,
+        sessionId: result.usageLogInfo?.sessionId,
+        conversationId: result.usageLogInfo?.conversationId,
+        body: sanitizedProbeBody
+      });
+      if (finishTracker.finishReason !== 'tool_calls') {
+        await finalizeResponsesConversationNonToolResponse({
+          entryEndpoint,
+          requestLabel,
+          body: sanitizedProbeBody,
+        });
+      }
     };
 
     const readTimeoutMs = (names: string[], fallback: number): number => {
@@ -1206,6 +1365,10 @@ export async function sendPipelineResponse(
       if (keepaliveTimer) {
         clearInterval(keepaliveTimer);
         keepaliveTimer = null;
+      }
+      if (terminalFlushTimer) {
+        clearTimeout(terminalFlushTimer);
+        terminalFlushTimer = null;
       }
     };
 
@@ -1308,6 +1471,39 @@ export async function sendPipelineResponse(
     };
     stream.on('data', (chunk: unknown) => {
       updateSseTerminalTrackerFromChunk(chunk, finishTracker, terminalWatch);
+      updateContractProbeFromSseChunk(chunk, contractProbe);
+      if (!finishTracker.seenTerminalEvent || ended || streamEnded || terminalFlushTimer) {
+        return;
+      }
+      terminalFlushTimer = setTimeout(() => {
+        terminalFlushTimer = null;
+        if (ended || streamEnded || res.writableEnded || res.destroyed) {
+          return;
+        }
+        void persistNativeSseConversationState().catch((error) => {
+          logResponseNonBlockingError(`responses-conversation-native-sse-terminal:${requestLabel}`, error);
+        });
+        try {
+          if (!contractProbe.emitted && contractProbe.probe) {
+            const repairedTerminalFrames = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe);
+            for (const frame of repairedTerminalFrames) {
+              res.write(frame);
+            }
+            contractProbe.emitted = true;
+          } else {
+            res.write(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed' })}\n\n`);
+            res.write('data: [DONE]\n\n');
+          }
+        } catch (flushError) {
+          logResponseNonBlockingError(`response.sse.terminal_flush.write:${requestLabel}`, flushError);
+        }
+        try {
+          res.end();
+        } catch (endError) {
+          logResponseNonBlockingError(`response.sse.terminal_flush.end:${requestLabel}`, endError);
+        }
+      }, 25);
+      terminalFlushTimer.unref?.();
     });
     stream.on('error', (error: Error) => {
       ended = true;
@@ -1385,46 +1581,7 @@ export async function sendPipelineResponse(
           logResponseNonBlockingError(`response.sse.stream.end.write_terminal_probe:${requestLabel}`, repairWriteError);
         }
       }
-      const finalizeNativeSsePersistence = async (): Promise<void> => {
-        // Native SSE (`__sse_responses`) bypasses JSON dispatch path, so persist
-        // responses continuation state here from contract probe body.
-        if (
-          entryEndpoint !== '/v1/responses'
-          || !contractProbe.probe
-          || typeof contractProbe.probe !== 'object'
-          || Array.isArray(contractProbe.probe)
-        ) {
-          return;
-        }
-        const conversationRouteHint = result.usageLogInfo?.routeName;
-        const conversationProviderKey = deriveResponsesConversationProviderKey(result.usageLogInfo);
-        const sanitizedProbeBody = stripInternalKeysDeep(contractProbe.probe as Record<string, unknown>);
-        await captureResponsesConversationToolCallRequestContext({
-          entryEndpoint,
-          requestLabel,
-          routeHint: conversationRouteHint,
-          providerKey: conversationProviderKey,
-          body: sanitizedProbeBody,
-          requestContext: options?.responsesRequestContext,
-        });
-        await recordResponsesConversationToolCallResponse({
-          entryEndpoint,
-          requestLabel,
-          timingRequestIds: result.usageLogInfo?.timingRequestIds,
-          routeHint: conversationRouteHint,
-          providerKey: conversationProviderKey,
-          sessionId: result.usageLogInfo?.sessionId,
-          conversationId: result.usageLogInfo?.conversationId,
-          body: sanitizedProbeBody
-        });
-        await finalizeResponsesConversationNonToolResponse({
-          entryEndpoint,
-          requestLabel,
-          body: sanitizedProbeBody,
-        });
-      };
-
-      void finalizeNativeSsePersistence()
+      void persistNativeSseConversationState()
         .catch((error) => {
           logResponseNonBlockingError(`responses-conversation-native-sse:${requestLabel}`, error);
         })
@@ -1518,6 +1675,7 @@ export async function sendPipelineResponse(
   await captureResponsesConversationToolCallRequestContext({
     entryEndpoint,
     requestLabel,
+    timingRequestIds: result.usageLogInfo?.timingRequestIds,
     routeHint: conversationRouteHint,
     providerKey: conversationProviderKey,
     body: sanitized,
@@ -1531,6 +1689,7 @@ export async function sendPipelineResponse(
     providerKey: conversationProviderKey,
     sessionId: result.usageLogInfo?.sessionId,
     conversationId: result.usageLogInfo?.conversationId,
+    requestContext: options?.responsesRequestContext,
     body: sanitized
   });
   await finalizeResponsesConversationNonToolResponse({

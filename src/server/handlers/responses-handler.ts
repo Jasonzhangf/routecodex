@@ -23,6 +23,7 @@ import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { payloadContainsVideoInput, VIDEO_REQUEST_TIMEOUT_MS } from '../utils/video-request-detection.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
+import { deriveFinishReason } from '../utils/finish-reason.js';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -53,43 +54,6 @@ function buildResponsesResumeRawRequestBody(originalPayload: ResponsesPayload, r
     ? { ...(originalPayload as Record<string, unknown>) }
     : {};
   return raw;
-}
-
-async function recordResumedResponsesContextForResponseId(args: {
-  responseId: string;
-  payload: ResponsesPayload;
-  routeHint?: string;
-}): Promise<void> {
-  const responseId = args.responseId.trim();
-  if (!responseId) return;
-  const input = Array.isArray(args.payload.input) ? args.payload.input : [];
-  const output = input.filter((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-    const type = typeof (item as Record<string, unknown>).type === 'string'
-      ? String((item as Record<string, unknown>).type).trim()
-      : '';
-    return type === 'function_call';
-  });
-  if (output.length === 0) return;
-  await captureResponsesRequestContextForRequest({
-    requestId: responseId,
-    payload: args.payload as Record<string, unknown>,
-    context: {
-      input: [],
-      toolsRaw: Array.isArray(args.payload.tools) ? args.payload.tools : undefined,
-    },
-    routeHint: args.routeHint,
-  });
-  await recordResponsesResponseForRequest({
-    requestId: responseId,
-    response: {
-      id: responseId,
-      object: 'response',
-      status: 'requires_action',
-      output,
-    },
-    routeHint: args.routeHint,
-  });
 }
 
 function logResponsesHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
@@ -144,6 +108,18 @@ function queueInboundToolHistoryErrorsample(args: {
       entryEndpoint: args.entryEndpoint
     });
   });
+}
+
+function readResponsesResponseId(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  const record = body as Record<string, unknown>;
+  const nested = record.response && typeof record.response === 'object' && !Array.isArray(record.response)
+    ? (record.response as Record<string, unknown>)
+    : undefined;
+  for (const candidate of [record.id, record.response_id, nested?.id]) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return undefined;
 }
 
 export async function handleResponses(
@@ -206,6 +182,7 @@ export async function handleResponses(
       );
     const originalPayload = captureRawRequestBodyForMetadata(payload) as ResponsesPayload;
     const requestBodyMetadata = readRequestBodyMetadata(originalPayload);
+    const sessionIdForResume = readResponsesSessionId(requestBodyMetadata);
     if (options.responseIdFromPath && !payload.response_id) {
       payload.response_id = options.responseIdFromPath;
     }
@@ -223,6 +200,23 @@ export async function handleResponses(
     const inboundStream = outboundStream;
     let resumeMeta: Record<string, unknown> | undefined;
     if (isSubmitToolOutputs) {
+      const payloadMetadata =
+        payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
+          ? (payload.metadata as Record<string, unknown>)
+          : undefined;
+      if (
+        sessionIdForResume
+        && (
+          !payloadMetadata
+          || typeof payloadMetadata.session_id !== 'string'
+          || !payloadMetadata.session_id
+        )
+      ) {
+        payload.metadata = {
+          ...(payloadMetadata ?? {}),
+          session_id: sessionIdForResume
+        };
+      }
       const responseId = typeof payload?.response_id === 'string'
         ? payload.response_id
         : options.responseIdFromPath;
@@ -234,15 +228,6 @@ export async function handleResponses(
         const resumeResult = await resumeResponsesConversation(responseId, payload, { requestId });
         payload = (resumeResult.payload ?? {}) as ResponsesPayload;
         resumeMeta = resumeResult.meta;
-        try {
-          await recordResumedResponsesContextForResponseId({
-            responseId,
-            payload,
-            routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined,
-          });
-        } catch (recordError) {
-          logResponsesHandlerNonBlockingError('submit_tool_outputs.record_resumed_context', recordError, { requestId, responseId });
-        }
         // After resuming, the outbound request becomes a normal `/v1/responses` create request.
         // Keeping the synthetic entrypoint would cause the outbound mapper to rebuild an upstream
         // submit_tool_outputs payload (which many OpenAI-compatible upstreams do not implement).
@@ -317,7 +302,7 @@ export async function handleResponses(
 	      headers: req.headers as Record<string, unknown>,
 	      query: req.query as Record<string, unknown>,
 	      body: payload,
-      metadata: mergePipelineMetadata(requestBodyMetadata, {
+	      metadata: mergePipelineMetadata(requestBodyMetadata, {
         stream: wantsStream,
         clientRequestId,
         clientStream: acceptsSse || undefined,
@@ -333,9 +318,31 @@ export async function handleResponses(
         clientHeaders,
         clientConnectionState,
 	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),
+          responsesRequestContext: {
+            payload: payload as Record<string, unknown>,
+            context: {
+              input: Array.isArray(payload.input) ? payload.input : [],
+              toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
+            },
+            sessionId: readResponsesSessionId(requestBodyMetadata),
+          },
 	        ...(mockSampleReqId ? { mockSampleReqId } : {})
 	      })
 	    };
+    if (pipelineEntryEndpoint === '/v1/responses') {
+      await captureResponsesRequestContextForRequest({
+        requestId,
+        payload: payload as Record<string, unknown>,
+        context: {
+          input: Array.isArray(payload.input) ? payload.input : [],
+          toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
+        },
+        sessionId: readResponsesSessionId(requestBodyMetadata),
+        routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined
+      }).catch((error) => {
+        logResponsesHandlerNonBlockingError('responses_context.capture_inbound', error, { requestId });
+      });
+    }
 
     const activeRequestTimeoutMs =
       typeof requestTimeoutMs === 'number' && Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
@@ -429,6 +436,41 @@ export async function handleResponses(
       logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body, {
         preserveTimingForUsage: true
       });
+    }
+    if (pipelineEntryEndpoint === '/v1/responses') {
+      try {
+        const responseId = readResponsesResponseId(result.body);
+        const finishReason = deriveFinishReason(result.body);
+        if (responseId && finishReason === 'tool_calls') {
+          const requestContext = result.metadata?.responsesRequestContext as {
+            payload?: Record<string, unknown>;
+            context?: Record<string, unknown>;
+            sessionId?: string;
+            conversationId?: string;
+          } | undefined;
+          if (requestContext?.payload && requestContext?.context) {
+            await captureResponsesRequestContextForRequest({
+              requestId: responseId,
+              payload: requestContext.payload,
+              context: requestContext.context,
+              sessionId: requestContext.sessionId,
+              conversationId: requestContext.conversationId,
+              routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined
+            });
+            if (result.body && typeof result.body === 'object' && !Array.isArray(result.body)) {
+              await recordResponsesResponseForRequest({
+                requestId: responseId,
+                response: result.body as Record<string, unknown>,
+                routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined,
+                sessionId: requestContext.sessionId,
+                conversationId: requestContext.conversationId
+              });
+            }
+          }
+        }
+      } catch (error) {
+        logResponsesHandlerNonBlockingError('responses_context.seed_response_id', error, { requestId: effectiveRequestId });
+      }
     }
     await sendPipelineResponse(res, result, effectiveRequestId, {
       forceSSE: wantsStream,

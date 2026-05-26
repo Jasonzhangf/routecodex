@@ -240,7 +240,13 @@ export function detectRetryableEmptyAssistantResponse(
     const hasReasoningOnly =
       valueHasReasoningOnlyContent(effectiveBody.output)
       || valueHasReasoningOnlyContent(effectiveBody.reasoning);
-    if (!hasRequiredActionToolCalls && !hasFunctionCalls && !hasText && !hasReasoningOnly) {
+    if (
+      !hasRequiredActionToolCalls
+      && !hasFunctionCalls
+      && !hasText
+      && !hasReasoningOnly
+      && !isToolResultFollowupTurn(requestSemantics)
+    ) {
       return {
         reason: `responses status=${status} but output text/tool_calls are empty${hasReasoningOnly ? ' (reasoning-only payload)' : ''}`,
         marker: 'responses_empty_output'

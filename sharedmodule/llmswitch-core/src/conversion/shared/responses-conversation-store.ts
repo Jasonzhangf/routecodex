@@ -1,11 +1,6 @@
 import { ProviderProtocolError } from '../provider-protocol-error.js';
 import { formatUnknownError, isRecord } from '../../shared/common-utils.js';
 import {
-  inspectBridgeInputToolHistory,
-  inspectSyntheticRouteCodexBridgeInput,
-  type ToolHistoryContractViolation
-} from './openai-message-normalize.js';
-import {
   assertResponsesConversationStoreNativeAvailable,
   convertOutputToInputItems,
   materializeContinuationPayload,
@@ -73,38 +68,24 @@ function buildScopeKeys(scope: { sessionId?: unknown; conversationId?: unknown }
   return [...new Set(keys)];
 }
 
-function throwBridgeInputViolation(
-  violation: ToolHistoryContractViolation,
-  context: string
-): never {
-  const detailMessage = `Tool history contract violated: ${violation.code} at index ${violation.index}${
-    violation.callId ? ` (call_id=${violation.callId})` : ''
-  } — ${violation.reason}`;
-  throw new ProviderProtocolError(detailMessage, {
-    code: 'MALFORMED_REQUEST',
-    details: {
-      context,
-      sourceShape: 'bridge_input',
-      toolHistoryContractViolation: violation
-    }
-  });
-}
-
-function assertNoSyntheticOrMalformedBridgeInput(
-  input: unknown,
-  context: string,
-  options?: {
-    allowDanglingToolCalls?: boolean;
+function readResumeScopeKeysFromSubmitPayload(payload: AnyRecord | undefined): string[] {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return [];
   }
-): void {
-  const syntheticViolation = inspectSyntheticRouteCodexBridgeInput(input);
-  if (syntheticViolation) {
-    throwBridgeInputViolation(syntheticViolation, context);
-  }
-  const historyViolation = inspectBridgeInputToolHistory(input, options);
-  if (historyViolation) {
-    throwBridgeInputViolation(historyViolation, context);
-  }
+  const metadata = payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
+    ? (payload.metadata as Record<string, unknown>)
+    : undefined;
+  const sessionId =
+    readScopeToken(payload.session_id)
+    ?? readScopeToken(payload.sessionId)
+    ?? readScopeToken(metadata?.session_id)
+    ?? readScopeToken(metadata?.sessionId);
+  const conversationId =
+    readScopeToken(payload.conversation_id)
+    ?? readScopeToken(payload.conversationId)
+    ?? readScopeToken(metadata?.conversation_id)
+    ?? readScopeToken(metadata?.conversationId);
+  return buildScopeKeys({ sessionId, conversationId });
 }
 
 class ResponsesConversationStore {
@@ -189,19 +170,31 @@ class ResponsesConversationStore {
       });
       return;
     }
-    const entry = this.requestMap.get(requestId);
+    let entry = this.requestMap.get(requestId);
+    if (!entry && responseId) {
+      entry = this.requestMap.get(responseId);
+    }
     if (!entry) {
-      throw new ProviderProtocolError('Responses conversation request context missing for response capture', {
-        code: 'MALFORMED_RESPONSE',
-        protocol: 'openai-responses',
-        providerType: 'responses',
-        details: {
-          context: 'responses-conversation-store.recordResponse',
-          reason: 'missing_request_context',
-          requestId,
-          responseId
-        }
+      const fallbackScopeKeys = buildScopeKeys({
+        sessionId: args.sessionId,
+        conversationId: args.conversationId
       });
+      for (const scopeKey of fallbackScopeKeys) {
+        const candidate = this.scopeIndex.get(scopeKey);
+        if (candidate) {
+          entry = candidate;
+          break;
+        }
+      }
+    }
+    if (!entry) {
+      console.warn('[ResponsesConversationStore] recordResponse: missing request context, skipping', {
+        context: 'responses-conversation-store.recordResponse',
+        reason: 'missing_request_context',
+        requestId,
+        responseId
+      });
+      return;
     }
     if (!responseId) return;
     const responseRouteHint = readScopeToken(args.routeHint);
@@ -221,21 +214,7 @@ class ResponsesConversationStore {
     if (entry.lastResponseId) {
       this.responseIndex.delete(entry.lastResponseId);
     }
-    const rawOutput = Array.isArray(response.output) ? response.output : [];
-    assertNoSyntheticOrMalformedBridgeInput(
-      rawOutput,
-      'responses-conversation-store.recordResponse.raw_output',
-      { allowDanglingToolCalls: true }
-    );
     const assistantBlocks = convertOutputToInputItems(response);
-    assertNoSyntheticOrMalformedBridgeInput(
-      [
-        ...entry.input,
-        ...assistantBlocks
-      ],
-      'responses-conversation-store.recordResponse',
-      { allowDanglingToolCalls: true }
-    );
     if (assistantBlocks.length) {
       entry.input.push(...assistantBlocks);
     }
@@ -258,7 +237,20 @@ class ResponsesConversationStore {
       });
     }
     this.prune();
-    const entry = this.responseIndex.get(responseId);
+    let entry = this.responseIndex.get(responseId);
+    if (!entry) {
+      for (const scopeKey of readResumeScopeKeysFromSubmitPayload(submitPayload)) {
+        const candidate = this.scopeIndex.get(scopeKey);
+        if (
+          candidate
+          && typeof candidate.lastResponseId === 'string'
+          && candidate.lastResponseId === responseId
+        ) {
+          entry = candidate;
+          break;
+        }
+      }
+    }
     if (!entry) {
       throw new ProviderProtocolError('Responses conversation expired or not found', {
         code: 'MALFORMED_REQUEST',
@@ -304,7 +296,11 @@ class ResponsesConversationStore {
     if (!requestId) return;
     const entry = this.requestMap.get(requestId);
     if (!entry) return;
+    entry.releasedInputPrefix = Array.isArray(entry.input)
+      ? entry.input.map((item) => ({ ...item }))
+      : [];
     entry.basePayload = {
+      ...(isRecord(entry.basePayload) ? entry.basePayload : {}),
       ...(entry.routeHint ? { routeHint: entry.routeHint } : {}),
       ...(entry.lastResponseId ? { previous_response_id: entry.lastResponseId } : {})
     };
