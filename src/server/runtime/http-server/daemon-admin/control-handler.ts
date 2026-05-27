@@ -211,7 +211,6 @@ function getQuotaAdapter(options: DaemonAdminRouteOptions): any | null {
     ? (hubPipeline as any).getVirtualRouter()
     : null;
   return createQuotaManagerAdapter({
-    coreManager: null,
     rustHostMutator: virtualRouter,
     quotaRoutingEnabled: true
   });

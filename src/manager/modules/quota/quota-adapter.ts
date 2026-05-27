@@ -82,11 +82,10 @@ export interface CoreQuotaManagerLike {
 }
 
 export function createQuotaManagerAdapter(options: {
-  coreManager: CoreQuotaManagerLike | null;
+  coreManager?: CoreQuotaManagerLike | null;
   rustHostMutator?: RustQuotaHostMutatorLike | null;
   quotaRoutingEnabled?: boolean;
 }): QuotaManagerAdapter {
-  void options.coreManager;
   const rustHostMutator = options.rustHostMutator ?? null;
   const hasRustUnified = rustHostMutator !== null && x7eGate.phase1UnifiedQuota;
   const backend: 'rust' | 'none' = hasRustUnified ? 'rust' : 'none';

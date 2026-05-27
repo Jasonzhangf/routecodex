@@ -49,7 +49,6 @@ function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerAdapter |
   const virtualRouter = typeof getVirtualRouter === 'function' ? getVirtualRouter() : null;
 
   return createQuotaManagerAdapter({
-    coreManager: null,
     rustHostMutator: virtualRouter && typeof virtualRouter === 'object' ? (virtualRouter as any) : null,
     quotaRoutingEnabled: true
   });

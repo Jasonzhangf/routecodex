@@ -12425,3 +12425,16 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
   - 结果：`7 suites / 16 tests` 全绿。
 - 结论：quota bridge 层已去除 core manager 入口，避免后续回流 TS owner。
+
+## 2026-05-27 Phase E 延续7：quota-adapter API 移除 coreManager 必填参数
+- 发现：`createQuotaManagerAdapter` 仍强制要求 `coreManager` 参数（虽已不使用），会误导调用方保留 TS core 注入思路。
+- 本轮改动：
+  - `src/manager/modules/quota/quota-adapter.ts`
+    - `coreManager` 从必填改为可选，并移除内部占位引用。
+  - `src/server/runtime/http-server/daemon-admin/quota-handler.ts`
+  - `src/server/runtime/http-server/daemon-admin/control-handler.ts`
+    - 删除 `coreManager: null` 传参，调用面只保留 `rustHostMutator + quotaRoutingEnabled`。
+- 验证：
+  - `npm run -s jest:run -- --runInBand --runTestsByPath tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
+  - 结果：`4 suites / 6 tests` 全绿。
+- 结论：adapter API 与调用面都已去掉 core 注入语义，进一步压实 Rust-only host wiring。
