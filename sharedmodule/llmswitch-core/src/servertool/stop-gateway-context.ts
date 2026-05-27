@@ -1,5 +1,6 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtime-metadata.js';
+import { inspectStopGatewaySignalWithNative } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
 
 export interface StopGatewayContext {
   observed: boolean;
@@ -101,8 +102,12 @@ function tsFallbackInspect(base: unknown): StopGatewayContext {
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
+function tryNativeInspect(base: unknown): StopGatewayContext | undefined {
+  try { return inspectStopGatewaySignalWithNative(base); } catch { return undefined; }
+}
+
 export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
-  return tsFallbackInspect(base);
+  return tryNativeInspect(base) ?? tsFallbackInspect(base);
 }
 
 export function attachStopGatewayContext(adapterContext: AdapterContext, context: StopGatewayContext): void {

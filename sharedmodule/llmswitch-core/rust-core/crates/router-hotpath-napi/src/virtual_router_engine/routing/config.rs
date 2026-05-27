@@ -85,7 +85,6 @@ pub(crate) fn build_route_queue(
 ) -> Vec<String> {
     let mut queue: Vec<String> = Vec::new();
     let requested_route_trimmed = requested_route.trim();
-    let protects_default_fallback = protects_default_fallback(requested_route_trimmed, routing);
     let has_multimodal_targets = route_has_targets(routing, "multimodal");
     let has_vision_targets = route_has_targets(routing, "vision");
     let has_video_targets = route_has_targets(routing, "video");
@@ -97,9 +96,6 @@ pub(crate) fn build_route_queue(
         queue.push(requested_route.to_string());
     }
     for route in candidates {
-        if protects_default_fallback && route == super::super::classifier::DEFAULT_ROUTE {
-            continue;
-        }
         if !queue.contains(route) {
             queue.push(route.clone());
         }
@@ -139,9 +135,7 @@ pub(crate) fn build_route_queue(
             deduped.push(route);
         }
     }
-    if !protects_default_fallback
-        && !deduped.contains(&super::super::classifier::DEFAULT_ROUTE.to_string())
-    {
+    if !deduped.contains(&super::super::classifier::DEFAULT_ROUTE.to_string()) {
         deduped.push(super::super::classifier::DEFAULT_ROUTE.to_string());
     }
     deduped
@@ -150,10 +144,6 @@ pub(crate) fn build_route_queue(
 fn is_tool_route_with_tools_fallback(route: &str, features: &RoutingFeatures) -> bool {
     matches!(route, "tools" | "search" | "read" | "write" | "web_search")
         || (route == "thinking" && features.has_tools)
-}
-
-fn protects_default_fallback(requested_route: &str, routing: &RoutingPools) -> bool {
-    requested_route == "thinking" && route_has_targets(routing, "thinking")
 }
 
 pub(crate) fn build_route_candidates(
@@ -289,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn thinking_route_with_targets_does_not_fall_back_to_default() {
+    fn thinking_route_with_targets_still_keeps_default_fallback_in_queue() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "thinking".to_string(),
@@ -314,7 +304,7 @@ mod tests {
             &RoutingFeatures::default(),
             &routing,
         );
-        assert_eq!(queue, vec!["thinking".to_string()]);
+        assert_eq!(queue, vec!["thinking".to_string(), "default".to_string()]);
     }
 
     #[test]
@@ -355,7 +345,14 @@ mod tests {
             &features,
             &routing,
         );
-        assert_eq!(queue, vec!["thinking".to_string(), "tools".to_string()]);
+        assert_eq!(
+            queue,
+            vec![
+                "thinking".to_string(),
+                "tools".to_string(),
+                "default".to_string()
+            ]
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@ import { readNativeFunction } from './native-shared-conversion-semantics-core.js
 export interface StopGatewayContext {
   observed: boolean;
   eligible: boolean;
-  source: string;
+  source: 'chat' | 'responses' | 'none';
   reason: string;
   choiceIndex?: number;
   hasToolCalls?: boolean;
