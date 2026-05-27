@@ -18,6 +18,7 @@ const routingInstructionTests = [
   'tests/providers/core/runtime/http-transport-provider.headers.test.ts',
   'tests/providers/core/runtime/protocol-http-providers.unit.test.ts',
   'tests/providers/core/runtime/provider-error-classifier.spec.ts',
+  'tests/providers/core/runtime/provider-2056-classification.spec.ts',
   'tests/providers/core/utils/http-client.postStream.idle-timeout.spec.ts',
   'tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts',
   'tests/manager/quota/provider-quota-center.spec.ts',
