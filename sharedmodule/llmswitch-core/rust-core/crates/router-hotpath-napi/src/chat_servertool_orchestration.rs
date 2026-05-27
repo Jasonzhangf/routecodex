@@ -3388,3 +3388,260 @@ pub fn run_apply_patch_json(input_json: String) -> NapiResult<String> {
         serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 }
+
+// ── Vision Pure Blocks ──────────────────────────────────────────────────
+
+/// Build the complete vision analysis payload from a captured request.
+/// Returns null if no images found.
+#[napi]
+pub fn vision_build_analysis_payload_json(source_json: String) -> String {
+    use serde_json::Value;
+
+    let source: Value = match serde_json::from_str(&source_json) {
+        Ok(v) => v,
+        Err(_) => return "null".to_string(),
+    };
+
+    let messages = source
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .map(|v| v.clone())
+        .unwrap_or_default();
+
+    if messages.is_empty() {
+        return "null".to_string();
+    }
+
+    // Find latest user message with images
+    let mut vision_messages: Vec<Value> = Vec::new();
+
+    // System message
+    let system_prompt = "你现在的任务只是描述图片内容，不要回答用户问题，不要提供建议，不要推理求解，不要做工具规划。用户提示词只用于帮助你理解关注重点；你只能描述图片中可见的信息。若有文字、数字、时间、版本号、路径、报错、界面结构，请尽量详细描述。看不清的内容明确说明无法辨认。若有多张图片，请按输入顺序分别输出，格式使用 [Image 1]、[Image 2]。";
+    vision_messages.push(serde_json::json!({
+        "role": "system",
+        "content": system_prompt
+    }));
+
+    // Latest user message with images
+    let mut found = false;
+    for msg in messages.iter().rev() {
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        if role.to_lowercase() != "user" {
+            continue;
+        }
+        let content = msg.get("content");
+        let image_parts = match content {
+            Some(Value::Array(arr)) => {
+                let parts: Vec<&Value> = arr
+                    .iter()
+                    .filter(|p| {
+                        p.get("type")
+                            .and_then(|t| t.as_str())
+                            .map(|t| t.to_lowercase().contains("image"))
+                            .unwrap_or(false)
+                    })
+                    .collect();
+                if parts.is_empty() {
+                    continue;
+                }
+                // Extract user text prompt
+                let user_text: String = arr
+                    .iter()
+                    .filter_map(|p| {
+                        if p.get("type")
+                            .and_then(|t| t.as_str())
+                            .map(|t| t.to_lowercase().contains("image"))
+                            .unwrap_or(false)
+                        {
+                            return None;
+                        }
+                        p.get("text")
+                            .or_else(|| p.get("input_text"))
+                            .or_else(|| p.get("output_text"))
+                            .or_else(|| p.get("content"))
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                let prompt_hint = format!(
+                    "用户原始提示词如下，它只用于帮助你理解关注重点：\n{}\n\n请根据这个提示词理解用户想关注什么，但不要回答该问题，不要做任何处理，只描述图片中可见内容。\n若有多张图片，请按顺序分别输出，格式为 [Image 1]、[Image 2]。",
+                    if user_text.is_empty() { "（无文本提示词）" } else { &user_text }
+                );
+
+                let mut all_parts: Vec<Value> = Vec::new();
+                all_parts.push(serde_json::json!({
+                    "type": "input_text",
+                    "text": prompt_hint
+                }));
+                for part in parts {
+                    all_parts.push(part.clone());
+                }
+                all_parts
+            }
+            _ => continue,
+        };
+
+        vision_messages.push(serde_json::json!({
+            "role": "user",
+            "content": image_parts
+        }));
+        found = true;
+        break;
+    }
+
+    if !found {
+        return "null".to_string();
+    }
+
+    let mut payload = serde_json::json!({
+        "messages": vision_messages
+    });
+
+    if let Some(model) = source.get("model").and_then(|v| v.as_str()) {
+        payload["model"] = serde_json::json!(model);
+    }
+
+    // Merge parameters
+    if let Some(params) = source.get("parameters").and_then(|v| v.as_object()) {
+        if let Some(obj) = payload.as_object_mut() {
+            for (k, v) in params {
+                if k != "messages" && k != "model" {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+        }
+    }
+
+    serde_json::to_string(&payload).unwrap_or_else(|_| "null".to_string())
+}
+
+/// Build pinned vision backend metadata from adapter context and payload.
+#[napi]
+pub fn vision_build_pinned_metadata_json(adapter_context_json: String, payload_json: String) -> String {
+    let ctx: serde_json::Value = match serde_json::from_str(&adapter_context_json) {
+        Ok(v) => v,
+        Err(_) => return "null".to_string(),
+    };
+    let payload: serde_json::Value = match serde_json::from_str(&payload_json) {
+        Ok(v) => v,
+        Err(_) => return "null".to_string(),
+    };
+
+    let target = ctx.get("target").and_then(|v| v.as_object());
+
+    let provider_key = target
+        .and_then(|t| t.get("providerKey").and_then(|v| v.as_str()))
+        .or_else(|| {
+            ctx.get("targetProviderKey")
+                .and_then(|v| v.as_str())
+        })
+        .or_else(|| ctx.get("providerKey").and_then(|v| v.as_str()))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let model_id = target
+        .and_then(|t| t.get("modelId").and_then(|v| v.as_str()))
+        .or_else(|| {
+            ctx.get("assignedModelId")
+                .and_then(|v| v.as_str())
+        })
+        .or_else(|| ctx.get("modelId").and_then(|v| v.as_str()))
+        .or_else(|| ctx.get("originalModelId").and_then(|v| v.as_str()))
+        .or_else(|| {
+            payload
+                .get("model")
+                .and_then(|v| v.as_str())
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let routecodex_port_mode = ctx
+        .get("routecodexPortMode")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    if provider_key.is_none() && model_id.is_none() && routecodex_port_mode.is_none() {
+        return "null".to_string();
+    }
+
+    let mut metadata = serde_json::Map::new();
+    if let Some(ref pk) = provider_key {
+        metadata.insert(
+            "__shadowCompareForcedProviderKey".to_string(),
+            Value::String(pk.clone()),
+        );
+        metadata.insert("providerKey".to_string(), Value::String(pk.clone()));
+        metadata.insert("targetProviderKey".to_string(), Value::String(pk.clone()));
+    }
+    if let Some(ref mid) = model_id {
+        metadata.insert("assignedModelId".to_string(), Value::String(mid.clone()));
+        metadata.insert("modelId".to_string(), Value::String(mid.clone()));
+        let mut target_obj = serde_json::Map::new();
+        if let Some(ref pk) = provider_key {
+            target_obj.insert("providerKey".to_string(), Value::String(pk.clone()));
+        }
+        target_obj.insert("modelId".to_string(), Value::String(mid.clone()));
+        metadata.insert("target".to_string(), Value::Object(target_obj));
+    }
+    if let Some(ref rpm) = routecodex_port_mode {
+        metadata.insert("routecodexPortMode".to_string(), Value::String(rpm.clone()));
+    }
+
+    serde_json::to_string(&Value::Object(metadata)).unwrap_or_else(|_| "null".to_string())
+}
+
+/// Extract original user prompt from messages array.
+#[napi]
+pub fn vision_extract_original_user_prompt_json(messages_json: String) -> String {
+    let messages: Vec<serde_json::Value> = match serde_json::from_str(&messages_json) {
+        Ok(v) => v,
+        Err(_) => return String::new(),
+    };
+
+    for msg in messages.iter().rev() {
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        if role.to_lowercase() != "user" {
+            continue;
+        }
+        let content = msg.get("content");
+        let text = extract_user_prompt(content);
+        if !text.is_empty() {
+            return text;
+        }
+    }
+    String::new()
+}
+
+fn extract_user_prompt(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(s)) => s.trim().to_string(),
+        Some(Value::Array(arr)) => {
+            let mut parts: Vec<String> = Vec::new();
+            for part in arr {
+                if part
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .map(|t| t.to_lowercase().contains("image"))
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                for key in &["text", "input_text", "output_text", "content"] {
+                    if let Some(v) = part.get(*key).and_then(|v| v.as_str()) {
+                        let trimmed = v.trim();
+                        if !trimmed.is_empty() {
+                            parts.push(trimmed.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+            parts.join("\n")
+        }
+        _ => String::new(),
+    }
+}

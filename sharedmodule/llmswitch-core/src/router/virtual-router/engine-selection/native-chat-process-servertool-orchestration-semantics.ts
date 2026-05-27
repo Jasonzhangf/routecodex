@@ -847,6 +847,38 @@ export function webSearchFindArrayWithNative(chatResponseJson: string): string {
   return invokeWebSearchNative('webSearchFindArrayJson', [chatResponseJson]);
 }
 
+// ── Vision Pure Blocks ────────────────────────────────────────────────
+
+export function visionBuildAnalysisPayloadWithNative(sourceJson: string): string {
+  if (isNativeDisabledByEnv()) return 'null';
+  const fn = readNativeFunction('visionBuildAnalysisPayloadJson');
+  if (!fn) return 'null';
+  try {
+    const raw = fn(sourceJson);
+    return typeof raw === 'string' ? raw : 'null';
+  } catch { return 'null'; }
+}
+
+export function visionBuildPinnedMetadataWithNative(adapterContextJson: string, payloadJson: string): string {
+  if (isNativeDisabledByEnv()) return 'null';
+  const fn = readNativeFunction('visionBuildPinnedMetadataJson');
+  if (!fn) return 'null';
+  try {
+    const raw = fn(adapterContextJson, payloadJson);
+    return typeof raw === 'string' ? raw : 'null';
+  } catch { return 'null'; }
+}
+
+export function visionExtractOriginalUserPromptWithNative(messagesJson: string): string {
+  if (isNativeDisabledByEnv()) return '';
+  const fn = readNativeFunction('visionExtractOriginalUserPromptJson');
+  if (!fn) return '';
+  try {
+    const raw = fn(messagesJson);
+    return typeof raw === 'string' ? raw : '';
+  } catch { return ''; }
+}
+
 export function readFollowupClientInjectSourceWithNative(
   adapterContext: Record<string, unknown>
 ): string {
