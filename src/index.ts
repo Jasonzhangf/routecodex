@@ -31,6 +31,7 @@ import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
 import { detectUserConfigFormat, parseUserConfigText } from './config/user-config-codec.js';
 import { ensureRccUserDirEnvironment, resolveRccPath, resolveRccPathForRead } from './config/user-data-paths.js';
+import { clearAllResponsesConversationState } from './modules/llmswitch/bridge.js';
 import type { RouteCodexHttpServer } from './server/runtime/http-server.js';
 
 type NodeGlobalWithRequire = typeof globalThis & { require?: NodeJS.Require };
@@ -1035,6 +1036,9 @@ class RouteCodexApp {
         if (this.httpServer) {
           await this.httpServer.stop();
         }
+        await clearAllResponsesConversationState().catch((error) => {
+          logNonBlockingError('RouteCodexApp.stop.clear_all_responses_conversation_state', error);
+        });
 
 
         this._isRunning = false;

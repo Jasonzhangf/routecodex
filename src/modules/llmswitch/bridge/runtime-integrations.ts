@@ -88,6 +88,7 @@ type ResponsesConversationStoreLike = {
     requestId?: string,
     options?: { keepForSubmitToolOutputs?: boolean },
   ) => void;
+  clearAll?: () => void;
   rebindRequestId?: (oldId: string, newId: string) => void;
 };
 
@@ -122,6 +123,7 @@ type ResponsesConversationModule = {
     requestId?: string,
     options?: { keepForSubmitToolOutputs?: boolean },
   ) => void;
+  clearAllResponsesConversationState?: () => void;
 };
 
 function readGlobalResponsesConversationStore(): ResponsesConversationStoreLike | null {
@@ -318,6 +320,22 @@ export async function resumeLatestResponsesContinuationByScope(args: {
     );
   }
   return fn(args);
+}
+
+export async function clearAllResponsesConversationState(): Promise<void> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.clearAll === "function") {
+    globalStore.clearAll();
+    return;
+  }
+  const mod = await getResponsesConversationModule();
+  const fn = mod.clearAllResponsesConversationState;
+  if (typeof fn !== "function") {
+    throw new Error(
+      "[llmswitch-bridge] clearAllResponsesConversationState not available",
+    );
+  }
+  fn();
 }
 
 type ResponsesSseToJsonModule = {

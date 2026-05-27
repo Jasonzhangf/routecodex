@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 import {
   captureResponsesRequestContext,
+  clearAllResponsesConversationState,
   clearResponsesConversationByRequestId,
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
@@ -875,5 +876,36 @@ describe('responses conversation store plain continuation restore', () => {
         output: '/Users/fanzhang/Documents/github/routecodex\n'
       })
     ]);
+  });
+
+  it('clears all retained entries on global clear (shutdown cleanup path)', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-clearall-1'),
+      sessionId: 'sess-clearall-1',
+      payload: { model: 'gpt-5.4', store: true },
+      context: {
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]
+      }
+    });
+
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-clearall-2'),
+      sessionId: 'sess-clearall-2',
+      payload: { model: 'gpt-5.4', store: true },
+      context: {
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] }]
+      }
+    });
+
+    const before = responsesConversationStore.getDebugStats();
+    expect(before.requestMapSize).toBeGreaterThan(0);
+
+    clearAllResponsesConversationState();
+
+    const after = responsesConversationStore.getDebugStats();
+    expect(after.requestMapSize).toBe(0);
+    expect(after.responseIndexSize).toBe(0);
+    expect(after.scopeIndexSize).toBe(0);
+    expect(after.retainedInputItems).toBe(0);
   });
 });

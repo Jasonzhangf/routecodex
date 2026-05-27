@@ -447,6 +447,13 @@ class ResponsesConversationStore {
     }
   }
 
+  clearAll(): void {
+    this.requestMap.clear();
+    this.responseIndex.clear();
+    this.scopeIndex.clear();
+    this.stopPruneTimer();
+  }
+
   getLastPruneAt(): number {
     return this.lastPruneAt;
   }
@@ -583,6 +590,10 @@ export function materializeLatestResponsesContinuationByScope(args: RestoreBySco
     console.log('[responses-store] materialize-by-scope', args.sessionId, args.conversationId);
   }
   return store.materializeLatestContinuationByScope(args);
+}
+
+export function clearAllResponsesConversationState(): void {
+  store.clearAll();
 }
 
 export { store as responsesConversationStore };
