@@ -1225,6 +1225,77 @@ fn test_coerce_standardized_request_from_payload_accepts_responses_input_shape()
 }
 
 #[test]
+fn test_coerce_standardized_request_from_payload_allows_submit_tool_output_with_previous_response_id()
+{
+    let input = json!({
+        "payload": {
+            "model": "gpt-5.3-codex",
+            "previous_response_id": "resp_prev_1",
+            "input": [
+                {
+                    "type": "function_call_output",
+                    "call_id": "native:run_command:3",
+                    "output": "/Users/fanzhang/Documents/github/routecodex"
+                }
+            ],
+            "parameters": {}
+        },
+        "normalized": {
+            "id": "req-submit-tool-output",
+            "entryEndpoint": "/v1/responses",
+            "stream": false,
+            "processMode": "chat",
+            "routeHint": "coding"
+        }
+    });
+
+    let output = coerce_standardized_request_from_payload(&input)
+        .expect("coerce standardized request output");
+    let row = output.as_object().expect("output object");
+    let standardized = row
+        .get("standardizedRequest")
+        .and_then(|v| v.as_object())
+        .expect("standardizedRequest object");
+    let first_message = standardized
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .and_then(|v| v.first())
+        .and_then(|v| v.as_object())
+        .expect("first message object");
+    let semantics = standardized
+        .get("semantics")
+        .and_then(|v| v.as_object())
+        .expect("semantics object");
+    let previous_response_id = semantics
+        .get("continuation")
+        .and_then(|v| v.as_object())
+        .and_then(|row| row.get("resumeFrom"))
+        .and_then(|v| v.as_object())
+        .and_then(|row| row.get("previousResponseId"))
+        .and_then(|v| v.as_str());
+    let raw_payload = row
+        .get("rawPayload")
+        .and_then(|v| v.as_object())
+        .expect("rawPayload object");
+
+    assert_eq!(
+        first_message.get("role").and_then(|v| v.as_str()),
+        Some("tool")
+    );
+    assert_eq!(
+        first_message.get("tool_call_id").and_then(|v| v.as_str()),
+        Some("native:run_command:3")
+    );
+    assert_eq!(previous_response_id, Some("resp_prev_1"));
+    assert_eq!(
+        raw_payload
+            .get("previous_response_id")
+            .and_then(|v| v.as_str()),
+        Some("resp_prev_1")
+    );
+}
+
+#[test]
 fn test_coerce_standardized_request_from_payload_normalizes_exec_command_and_apply_patch_shapes(
 ) {
     let input = json!({
@@ -2252,6 +2323,41 @@ fn test_sync_responses_context_from_canonical_messages_allows_terminal_pending_t
     assert_eq!(input.len(), 1);
     assert_eq!(input[0]["type"], "function_call");
     assert_eq!(input[0]["call_id"], "call_keep_me");
+}
+
+#[test]
+fn test_sync_responses_context_from_canonical_messages_allows_orphan_tool_result_with_previous_response_id()
+{
+    let request = json!({
+        "previous_response_id": "resp_prev_1",
+        "messages": [
+            {
+                "role": "tool",
+                "tool_call_id": "native:run_command:3",
+                "content": "/Users/fanzhang/Documents/github/routecodex"
+            }
+        ],
+        "semantics": {
+            "responses": {
+                "context": {
+                    "existing": true
+                }
+            }
+        }
+    });
+
+    let output = sync_responses_context_from_canonical_messages(&request).unwrap();
+    let input = output
+        .get("semantics")
+        .and_then(|v| v.get("responses"))
+        .and_then(|v| v.get("context"))
+        .and_then(|v| v.get("input"))
+        .and_then(|v| v.as_array())
+        .expect("responses context input");
+
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0]["type"], "function_call_output");
+    assert_eq!(input[0]["call_id"], "native:run_command:3");
 }
 
 #[test]

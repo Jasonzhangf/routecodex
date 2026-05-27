@@ -22,6 +22,11 @@ pub(crate) fn sync_responses_context_from_canonical_messages(
         .get("tools")
         .and_then(|v| v.as_array())
         .cloned();
+    let previous_response_id = next_request
+        .get("previous_response_id")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     let semantics = match next_request.get_mut("semantics") {
         Some(v) if v.is_object() => v,
         _ => return Ok(Value::Object(next_request)),
@@ -46,11 +51,11 @@ pub(crate) fn sync_responses_context_from_canonical_messages(
         Some(v) => v,
         None => return Ok(Value::Object(next_request)),
     };
-
     let bridge = build_bridge_history(BuildBridgeHistoryInput {
         messages: sanitized_messages,
         tools,
         allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: Some(previous_response_id.is_some()),
     })?;
     let bridge_input = serde_json::to_value(bridge.input).unwrap_or_else(|_| Value::Array(vec![]));
     let original_system_messages = serde_json::to_value(bridge.original_system_messages)

@@ -71,6 +71,11 @@ fn build_request_from_responses_payload(
         .get("toolsNormalized")
         .and_then(|v| v.as_array())
         .cloned();
+    let has_previous_response_id = payload_row
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
 
     let converted = convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
         input,
@@ -78,7 +83,7 @@ fn build_request_from_responses_payload(
         tool_result_fallback_text: Some(String::new()),
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: Some(true),
-        allow_orphan_tool_result: Some(false),
+        allow_orphan_tool_result: Some(has_previous_response_id),
     })?;
     let messages = append_local_images(converted.messages).map_err(|e| e.to_string())?;
     if messages.is_empty() {
@@ -246,6 +251,38 @@ mod tests {
         assert_eq!(
             context["toolsNormalized"][0]["function"]["name"],
             Value::String("exec_command".to_string())
+        );
+    }
+
+    #[test]
+    fn request_codec_allows_submit_tool_output_with_previous_response_id() {
+        let raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "gpt-4.1",
+                "previous_response_id": "resp_prev_1",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "native:run_command:3",
+                        "output": "/Users/fanzhang/Documents/github/routecodex"
+                    }
+                ]
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_submit_tool_output" }).to_string()),
+        )
+        .unwrap();
+
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        let request = &value["request"];
+        assert_eq!(request["model"], Value::String("gpt-4.1".to_string()));
+        assert_eq!(
+            request["messages"][0]["role"],
+            Value::String("tool".to_string())
+        );
+        assert_eq!(
+            request["messages"][0]["tool_call_id"],
+            Value::String("native:run_command:3".to_string())
         );
     }
 

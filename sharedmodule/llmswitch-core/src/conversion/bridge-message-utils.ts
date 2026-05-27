@@ -109,11 +109,12 @@ export interface BridgeInputToChatOptions {
   normalizeFunctionName?: ((raw: unknown) => string | undefined) | 'default' | 'responses';
   toolResultFallbackText?: string;
   allowDanglingToolCalls?: boolean;
+  allowOrphanToolResult?: boolean;
 }
 
 export function convertBridgeInputToChatMessages(options: BridgeInputToChatOptions): Array<Record<string, unknown>> {
   assertBridgeMessageUtilsNativeAvailable();
-  const { input, tools, normalizeFunctionName, toolResultFallbackText, allowDanglingToolCalls } = options;
+  const { input, tools, normalizeFunctionName, toolResultFallbackText, allowDanglingToolCalls, allowOrphanToolResult } = options;
   const violation = inspectBridgeInputToolHistory(Array.isArray(input) ? input : [], {
     allowDanglingToolCalls
   });
@@ -129,7 +130,8 @@ export function convertBridgeInputToChatMessages(options: BridgeInputToChatOptio
     tools,
     toolResultFallbackText,
     normalizeFunctionName: typeof normalizeFunctionName === 'string' ? normalizeFunctionName : undefined,
-    allowPendingTerminalToolCall: allowDanglingToolCalls === true
+    allowPendingTerminalToolCall: allowDanglingToolCalls === true,
+    allowOrphanToolResult: allowOrphanToolResult === true
   });
   return output.messages;
 }

@@ -1318,6 +1318,15 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const req = { ...request } as Record<string, unknown>;
     const body = (req.body as Record<string, unknown>) || req;
 
+    if (!Array.isArray(body.messages) && typeof body.input === 'string' && body.input.trim()) {
+      body.messages = [
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: body.input }],
+        },
+      ];
+    }
+
     if (!Array.isArray(body.messages) && Array.isArray(body.input)) {
       body.messages = this.convertResponsesInputToChatMessages(body.input);
     }

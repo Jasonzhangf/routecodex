@@ -152,7 +152,8 @@ export function convertBridgeInputToChatMessagesWithNative(
     tools: input.tools,
     toolResultFallbackText: input.toolResultFallbackText,
     normalizeFunctionName: input.normalizeFunctionName,
-    allowPendingTerminalToolCall: input.allowPendingTerminalToolCall
+    allowPendingTerminalToolCall: input.allowPendingTerminalToolCall,
+    allowOrphanToolResult: input.allowOrphanToolResult
   });
   if (!payloadJson) {
     return fail('json stringify failed');

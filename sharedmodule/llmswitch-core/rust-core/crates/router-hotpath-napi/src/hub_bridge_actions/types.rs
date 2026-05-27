@@ -52,6 +52,8 @@ pub struct BuildBridgeHistoryInput {
     pub tools: Option<Vec<Value>>,
     #[serde(default)]
     pub allow_pending_terminal_tool_call: Option<bool>,
+    #[serde(default)]
+    pub allow_orphan_tool_result: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]

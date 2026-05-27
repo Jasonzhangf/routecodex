@@ -61,6 +61,11 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         .and_then(|v| v.as_object())
         .cloned();
     let metadata_from_payload = payload.get("metadata").and_then(|v| v.as_object()).cloned();
+    let previous_response_id = payload
+        .get("previous_response_id")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
 
     let mut metadata = Map::<String, Value>::new();
     metadata.insert(
@@ -117,6 +122,28 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
     }
 
     let mut semantics = semantics_from_payload.unwrap_or_default();
+    if let Some(previous_response_id) = previous_response_id.clone() {
+        let continuation_node = semantics
+            .entry("continuation".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        if !continuation_node.is_object() {
+            *continuation_node = Value::Object(Map::new());
+        }
+        if let Some(continuation_map) = continuation_node.as_object_mut() {
+            let resume_from = continuation_map
+                .entry("resumeFrom".to_string())
+                .or_insert_with(|| Value::Object(Map::new()));
+            if !resume_from.is_object() {
+                *resume_from = Value::Object(Map::new());
+            }
+            if let Some(resume_from_map) = resume_from.as_object_mut() {
+                resume_from_map.insert(
+                    "previousResponseId".to_string(),
+                    Value::String(previous_response_id.clone()),
+                );
+            }
+        }
+    }
     let tools_node = semantics
         .entry("tools".to_string())
         .or_insert_with(|| Value::Object(Map::new()));
@@ -149,6 +176,12 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
     let mut raw_payload = Map::<String, Value>::new();
     raw_payload.insert("model".to_string(), Value::String(model));
     raw_payload.insert("messages".to_string(), Value::Array(messages));
+    if let Some(previous_response_id) = previous_response_id {
+        raw_payload.insert(
+            "previous_response_id".to_string(),
+            Value::String(previous_response_id),
+        );
+    }
     if let Some(tools_array) = tools {
         raw_payload.insert("tools".to_string(), Value::Array(tools_array));
     }

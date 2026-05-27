@@ -169,6 +169,7 @@ export interface NativeBridgeInputToChatInput {
   toolResultFallbackText?: string;
   normalizeFunctionName?: string;
   allowPendingTerminalToolCall?: boolean;
+  allowOrphanToolResult?: boolean;
 }
 
 export interface NativeBridgeInputToChatOutput {

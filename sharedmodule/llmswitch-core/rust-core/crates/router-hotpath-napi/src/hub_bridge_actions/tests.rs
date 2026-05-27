@@ -278,7 +278,6 @@ fn applies_bridge_normalize_history() {
         })],
         tools: None,
         allow_pending_terminal_tool_call: None,
-        allow_orphan_tool_result: None,
     })
     .unwrap_err();
     assert!(error.contains("dangling_tool_call"));

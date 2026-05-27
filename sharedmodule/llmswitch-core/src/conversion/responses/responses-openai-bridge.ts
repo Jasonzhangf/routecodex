@@ -344,7 +344,10 @@ export function buildChatRequestFromResponses(
     tools: toolsNormalized,
     normalizeFunctionName: 'responses',
     toolResultFallbackText: '',
-    allowDanglingToolCalls: true
+    allowDanglingToolCalls: true,
+    allowOrphanToolResult:
+      typeof (payload as Record<string, unknown>).previous_response_id === 'string'
+      && ((payload as Record<string, unknown>).previous_response_id as string).trim().length > 0
   });
   assertNoSyntheticAssistantMessages(
     messages,

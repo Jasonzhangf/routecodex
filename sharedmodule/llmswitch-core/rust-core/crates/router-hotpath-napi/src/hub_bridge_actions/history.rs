@@ -1085,6 +1085,7 @@ pub(crate) fn build_bridge_history(
     input: BuildBridgeHistoryInput,
 ) -> Result<BuildBridgeHistoryOutput, String> {
     let allow_pending_terminal_tool_call = input.allow_pending_terminal_tool_call.unwrap_or(false);
+    let allow_orphan_tool_result = input.allow_orphan_tool_result.unwrap_or(false);
     let mut items: Vec<Value> = Vec::new();
     let mut system_parts: Vec<String> = Vec::new();
     let mut original_system_messages: Vec<String> = Vec::new();
@@ -1136,6 +1137,25 @@ pub(crate) fn build_bridge_history(
                     .or_else(|| read_trimmed_string(row.get("id"))),
                 "missing_tool_call_id: tool message is missing tool_call_id/call_id",
             )?;
+            if allow_orphan_tool_result
+                && !known_tool_call_ids.contains(resolved_call_id.as_str())
+            {
+                let normalized_output_id = normalize_function_call_output_id(
+                    Some(resolved_call_id.as_str()),
+                    format!("fc_tool_{}", items.len() + 1).as_str(),
+                );
+                let output_payload = row
+                    .get("content")
+                    .map(normalize_tool_result_value)
+                    .unwrap_or_else(|| text.clone());
+                items.push(serde_json::json!({
+                    "type": "function_call_output",
+                    "id": normalized_output_id,
+                    "call_id": resolved_call_id,
+                    "output": output_payload
+                }));
+                continue;
+            }
             if !known_tool_call_ids.contains(resolved_call_id.as_str()) {
                 return Err(format!(
                     "orphan_tool_result: tool message references unknown tool_call_id: {}",
@@ -1361,6 +1381,7 @@ pub(crate) fn apply_bridge_normalize_history(
         messages: messages.clone(),
         tools: input.tools,
         allow_pending_terminal_tool_call: input.allow_pending_terminal_tool_call,
+        allow_orphan_tool_result: None,
     })?)
     .ok();
     Ok(ApplyBridgeNormalizeHistoryOutput {
