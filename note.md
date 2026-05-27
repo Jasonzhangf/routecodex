@@ -12278,3 +12278,24 @@ Using skills: coding-principals + rcc-dev-skills
   - `src/manager/modules/quota/quota-adapter.ts`：daemon-admin / control handler 的 mutation/query 桥；unified path 直接调 Rust mutator，但 legacy backend 分支还在。
   - `src/manager/modules/quota/provider-quota-daemon*.ts`：legacy quota daemon 第二状态机残余；仍维护 quotaStates、error event → quota state 映射、view 投影与 snapshot 迁移。
 - 结论：当前 closeout 的剩余主工作已不是再修 Rust route decision，而是 Phase E 对上述 quota family residue 的物理删除/彻底壳化。
+
+## 2026-05-27 Phase E 第一刀：host runtime 已与 legacy quota backend 断联
+- 本轮没有直接物理删除 `provider-quota-daemon*.ts`，先做风险更小的第一刀：把 host runtime 对 legacy quota backend 的运行时注入路径切掉。
+- 已修改：
+  - `src/manager/modules/quota/quota-adapter.ts`
+  - `src/server/runtime/http-server/daemon-admin/quota-handler.ts`
+  - `src/server/runtime/http-server/daemon-admin/control-handler.ts`
+- 当前 host/admin runtime 结论：
+  - `quota-adapter` 只接受 `coreManager + rustHostMutator`；
+  - 所有 legacy backend 分支（disable/recover/reset/setQuota/register/getQuotaView/getAdminSnapshot/refreshNow）都已从 adapter 运行时删除；
+  - daemon-admin 的 quota/control 两个入口不再把 `quotaModule` 当 legacy backend 注入 adapter。
+- 这一步的唯一正确性：
+  - 当前主线默认就是 `phase1UnifiedQuota=true`，而 unified contract 测试已证明 mutation/query 必须经 Rust host mutator / core snapshot；
+  - 因此 Phase E 的最小唯一修改点不是去碰 Rust 路由主链，也不是先删全部 legacy 文件，而是先切断 host runtime 对 legacy second-state backend 的可达性；
+  - 这样可以先消除“运行时仍可回落 legacy”的事实，再在下一刀安全删除遗留文件。
+- 定向验证已通过：
+  - `tests/manager/quota/quota-manager-module.spec.ts`
+  - `tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts`
+  - `tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts`
+  - `tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
+  - 结果：`4 suites / 12 tests` 全绿。

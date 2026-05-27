@@ -214,7 +214,6 @@ function getQuotaAdapter(options: DaemonAdminRouteOptions): any | null {
   return createQuotaManagerAdapter({
     coreManager: coreLike,
     rustHostMutator: virtualRouter,
-    legacyDaemon: coreLike ? null : quotaModule,
     quotaRoutingEnabled: true
   });
 }

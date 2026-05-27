@@ -32,9 +32,10 @@
   - 计划文档里提到的 `sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.ts` 与 `sharedmodule/llmswitch-core/src/router/virtual-router/engine/cooldown-manager.ts` 在当前仓库并不存在，不能继续把它们当作当前残余 owner。
   - 当前真实 residue inventory 逐文件判定：
     - `sharedmodule/llmswitch-core/src/quota/quota-manager.ts`：仍是活跃 TS quota state owner。它仍维护 `states`、处理 `onProviderError/onProviderSuccess`，并生成 `getQuotaView/getSnapshot`；虽已不再主导当前 Rust route decision，但仍属需要最终收缩/删除的第二状态机。
-    - `src/manager/modules/quota/quota-manager.ts`：Host 桥接 + hydration/persistence 壳。`phase1UnifiedQuota` 打开时读写优先经 Rust host mutator / `quotaHostSnapshot`；legacy delegate 仅在旧路径下启用。当前更接近桥接壳，但仍保留 core snapshot fallback 与 legacy 分支，尚未完成最终清场。
-    - `src/manager/modules/quota/quota-adapter.ts`：daemon-admin / control handler 桥接壳。unified path 下 mutation 直接转 Rust `disableProviderQuota/recoverProviderQuota/resetProviderQuota`；仍保留 legacy backend 分支，因此还不是“纯 Rust-only 无 residue”终态。
-    - `src/manager/modules/quota/provider-quota-daemon*.ts`：legacy quota daemon 真正的第二状态机残余。`provider-quota-daemon.ts`/`*.events.ts`/`*.view.ts`/`*.snapshot.ts` 仍在维护 quotaStates、错误事件判定、view 投影、snapshot 迁移；虽 unified path 下主入口已不走它，但这些文件仍是计划 Phase E 需要物理删除或彻底壳化的主要对象。
+    - `src/manager/modules/quota/quota-manager.ts`：Host 桥接 + hydration/persistence 壳。`phase1UnifiedQuota` 打开时读写优先经 Rust host mutator / `quotaHostSnapshot`；当前仍保留 `legacyDelegate` 分支，说明文件级清场尚未完成。
+    - `src/manager/modules/quota/quota-adapter.ts`：daemon-admin / control handler 桥接壳。当前 unified path 已进一步收紧为仅接受 `coreManager + rustHostMutator`，legacy backend 运行时分支已物理删除；它已更接近最终纯桥接壳。
+    - `src/server/runtime/http-server/daemon-admin/quota-handler.ts` 与 `control-handler.ts`：本轮已删除把 `quotaModule` 作为 legacy backend 注入 adapter 的路径，host/admin runtime 已与 legacy quota backend 断联。
+    - `src/manager/modules/quota/provider-quota-daemon*.ts`：legacy quota daemon 真正的第二状态机残余。`provider-quota-daemon.ts`/`*.events.ts`/`*.view.ts`/`*.snapshot.ts` 仍在维护 quotaStates、错误事件判定、view 投影、snapshot 迁移；虽 host runtime 已不再通过 adapter 命中它们，但这些文件仍是计划 Phase E 需要物理删除或彻底壳化的主要对象。
 - 结论：弱证，未完成。
 
 ### 2. route decision 不再依赖 TS 第二决策中心
@@ -137,7 +138,7 @@
 1. 当前 closeout 已非常接近 Done Definition，但仍不能宣称总目标完成。
 2. 当前最主要缺口不是新的运行时真源 bug，而是 completion audit 所需的最终强证据仍不完整：
    - 缺完整 replay/shadow 收敛报告；
-   - 缺 Phase E residue 的物理删除/最终清场，而不只是 inventory；
+   - 缺 Phase E residue 的物理删除/最终清场；当前只完成了“host runtime 与 legacy backend 断联”第一刀；
    - 缺 runtime smoke 中“有运行中 5555 服务并成功刷新”的当前态证据。
 3. 因此当前状态应定为：
    - 主链 focused 语义：大体已证；

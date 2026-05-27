@@ -2,15 +2,15 @@
  * QuotaManager SSOT Adapter (RouteCodex-X7E Phase 1)
  *
  * Provides a unified facade over the core QuotaManager for all quota operations.
- * - Routes all quota state mutations through a single selected backend
+ * - Routes all quota state mutations through Rust/core single path
  * - No per-call fallback switching between core and legacy
  * - Ensures admin snapshot reads return consistent unified view
  *
  * This is the **only** entry point for quota operations in the new path.
- * Legacy ProviderQuotaDaemonModule should not be used for new mutations.
+ * Legacy ProviderQuotaDaemonModule must not be used by host runtime mutations.
  */
 
-import type { QuotaState, StaticQuotaConfig } from '../../quota/provider-quota-center.js';
+import type { StaticQuotaConfig } from '../../quota/provider-quota-center.js';
 import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../../types/llmswitch-local-types.js';
 import { x7eGate } from '../../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 
@@ -84,24 +84,12 @@ export interface CoreQuotaManagerLike {
 export function createQuotaManagerAdapter(options: {
   coreManager: CoreQuotaManagerLike | null;
   rustHostMutator?: RustQuotaHostMutatorLike | null;
-  legacyDaemon?: {
-    disableProvider?(options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number }): Promise<unknown>;
-    recoverProvider?(providerKey: string): Promise<unknown>;
-    resetProvider?(providerKey: string): Promise<unknown>;
-    registerProviderStaticConfig?(providerKey: string, config: StaticQuotaConfig): void;
-    recordProviderUsage?(event: { providerKey: string; requestedTokens?: number | null; timestampMs?: number }): void;
-    getQuotaView?(): (providerKey: string) => QuotaViewEntry | null;
-    getAdminSnapshot?(): Record<string, QuotaState>;
-    refreshNow?(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }>;
-  } | null;
   quotaRoutingEnabled?: boolean;
 }): QuotaManagerAdapter {
   const core = options.coreManager;
   const rustHostMutator = options.rustHostMutator ?? null;
-  const legacy = options.legacyDaemon;
   const hasCore = core !== null && x7eGate.phase1UnifiedQuota;
-  const backend: 'core' | 'legacy' | 'none' =
-    hasCore ? 'core' : legacy ? 'legacy' : 'none';
+  const backend: 'core' | 'none' = hasCore ? 'core' : 'none';
   const quotaRoutingEnabled = options.quotaRoutingEnabled !== false;
 
   // Track provider static configs for bootstrap
@@ -149,10 +137,6 @@ export function createQuotaManagerAdapter(options: {
       return rustQuotaMutatorUnavailableResult();
     }
 
-    if (backend === 'legacy' && legacy?.disableProvider) {
-      return await legacy.disableProvider({ providerKey, mode, durationMs });
-    }
-
     return { ok: false, reason: 'no_quota_manager_available' };
   }
 
@@ -169,10 +153,6 @@ export function createQuotaManagerAdapter(options: {
       return rustQuotaMutatorUnavailableResult();
     }
 
-    if (backend === 'legacy' && legacy?.recoverProvider) {
-      return await legacy.recoverProvider(providerKey);
-    }
-
     return { ok: false, reason: 'no_quota_manager_available' };
   }
 
@@ -187,10 +167,6 @@ export function createQuotaManagerAdapter(options: {
         return { ok: true, providerKey, source: 'rust' };
       }
       return rustQuotaMutatorUnavailableResult();
-    }
-
-    if (backend === 'legacy' && legacy?.resetProvider) {
-      return await legacy.resetProvider(providerKey);
     }
 
     return { ok: false, reason: 'no_quota_manager_available' };
@@ -231,15 +207,6 @@ export function createQuotaManagerAdapter(options: {
       return rustQuotaMutatorUnavailableResult();
     }
 
-    if (backend === 'legacy' && legacy?.recoverProvider && quota > 0) {
-      const result = await legacy.recoverProvider(providerKey);
-      return { ok: true, providerKey, quota, inPool: true, reason: 'ok', source: 'legacy', result };
-    }
-    if (backend === 'legacy' && legacy?.disableProvider && quota <= 0) {
-      const result = await legacy.disableProvider({ providerKey, mode: 'cooldown', durationMs: 5 * 60_000 });
-      return { ok: true, providerKey, quota, inPool: false, reason: depletedReason, source: 'legacy', result };
-    }
-
     return { ok: false, reason: 'no_quota_manager_available' };
   }
 
@@ -259,9 +226,6 @@ export function createQuotaManagerAdapter(options: {
       return;
     }
 
-    if (backend === 'legacy' && legacy?.registerProviderStaticConfig) {
-      legacy.registerProviderStaticConfig(providerKey, config);
-    }
   }
 
   function recordProviderUsage(event: { providerKey: string; requestedTokens?: number | null; timestampMs?: number }): void {
@@ -275,9 +239,6 @@ export function createQuotaManagerAdapter(options: {
       return;
     }
 
-    if (backend === 'legacy' && legacy?.recordProviderUsage) {
-      legacy.recordProviderUsage(event);
-    }
   }
 
 
@@ -374,10 +335,6 @@ export function createQuotaManagerAdapter(options: {
 
     }
 
-    if (backend === 'legacy' && legacy?.getQuotaView) {
-      return legacy.getQuotaView();
-    }
-
     return () => null;
   }
 
@@ -419,32 +376,10 @@ export function createQuotaManagerAdapter(options: {
       }
     }
 
-    // Fall back to legacy
-    if (backend === 'legacy' && legacy?.getAdminSnapshot) {
-      const legacySnap = legacy.getAdminSnapshot();
-      for (const [key, state] of Object.entries(legacySnap)) {
-        result[key] = {
-          providerKey: state.providerKey ?? key,
-          inPool: state.inPool,
-          reason: state.reason,
-          priorityTier: state.priorityTier,
-          cooldownUntil: state.cooldownUntil,
-          blacklistUntil: state.blacklistUntil,
-          authIssue: state.authIssue,
-          authType: state.authType,
-          consecutiveErrorCount: state.consecutiveErrorCount ?? 0
-        };
-      }
-    }
-
     return result;
   }
 
   async function refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
-    if (backend === 'legacy' && legacy?.refreshNow) {
-      return await legacy.refreshNow();
-    }
-
     const snapshot = getAdminSnapshot();
     return {
       refreshedAt: Date.now(),

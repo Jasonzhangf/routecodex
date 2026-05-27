@@ -45,32 +45,9 @@ function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerAdapter |
   const coreLike = quotaModule && typeof (quotaModule as any).getCoreQuotaManager === 'function'
     ? (quotaModule as any).getCoreQuotaManager()
     : null;
-  const legacyLike =
-    !coreLike && quotaModule
-      ? ({
-          disableProvider: typeof (quotaModule as any).disableProvider === 'function' ? (quotaModule as any).disableProvider.bind(quotaModule) : undefined,
-          recoverProvider: typeof (quotaModule as any).recoverProvider === 'function' ? (quotaModule as any).recoverProvider.bind(quotaModule) : undefined,
-          resetProvider: typeof (quotaModule as any).resetProvider === 'function' ? (quotaModule as any).resetProvider.bind(quotaModule) : undefined,
-          registerProviderStaticConfig:
-            typeof (quotaModule as any).registerProviderStaticConfig === 'function'
-              ? (quotaModule as any).registerProviderStaticConfig.bind(quotaModule)
-              : undefined,
-          recordProviderUsage:
-            typeof (quotaModule as any).recordProviderUsage === 'function'
-              ? (quotaModule as any).recordProviderUsage.bind(quotaModule)
-              : undefined,
-          getQuotaView: typeof (quotaModule as any).getQuotaView === 'function' ? (quotaModule as any).getQuotaView.bind(quotaModule) : undefined,
-          getAdminSnapshot:
-            typeof (quotaModule as any).getAdminSnapshot === 'function'
-              ? (quotaModule as any).getAdminSnapshot.bind(quotaModule)
-              : undefined,
-          refreshNow: typeof (quotaModule as any).refreshNow === 'function' ? (quotaModule as any).refreshNow.bind(quotaModule) : undefined
-        } satisfies NonNullable<Parameters<typeof createQuotaManagerAdapter>[0]['legacyDaemon']>)
-      : null;
 
   return createQuotaManagerAdapter({
     coreManager: coreLike,
-    legacyDaemon: legacyLike,
     quotaRoutingEnabled: true
   });
 }
