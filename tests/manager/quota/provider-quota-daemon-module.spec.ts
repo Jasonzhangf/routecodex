@@ -505,17 +505,15 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
-  it('resets consecutive provider errors through the quota adapter success hook', async () => {
+  it('resets consecutive provider errors through the daemon success hook', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-05-15T20:09:00.000Z'));
     const baseNow = Date.now();
     const providerKey = 'mini27.key1.MiniMax-M2.7';
-    const { createQuotaManagerAdapter } = await import('../../../src/manager/modules/quota/quota-adapter.js');
 
     const mod = new ProviderQuotaDaemonModule();
     await mod.init({ serverId: 'test' });
     await mod.start();
-    const adapter = createQuotaManagerAdapter({ coreManager: null, legacyDaemon: mod as any });
 
     await emitProviderError(mod, {
       code: 'MALFORMED_RESPONSE',
@@ -537,7 +535,7 @@ describe('ProviderQuotaDaemonModule', () => {
       }
     } as any);
 
-    adapter.onProviderSuccess({
+    mod.onProviderSuccess({
       runtime: { requestId: 'req_adapter_success', providerKey },
       timestamp: baseNow + 1_000,
       details: { totalTokens: 10 }

@@ -10,7 +10,6 @@
  * Legacy ProviderQuotaDaemonModule should not be used for new mutations.
  */
 
-import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../../modules/llmswitch/bridge.js';
 import type { QuotaState, StaticQuotaConfig } from '../../quota/provider-quota-center.js';
 import { x7eGate } from '../../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 
@@ -24,6 +23,8 @@ export interface QuotaViewEntry {
   inPool: boolean;
   reason?: string;
   priorityTier?: number;
+  selectionPenalty?: number;
+  lastErrorAtMs?: number | null;
   cooldownUntil?: number | null;
   cooldownKeepsPool?: boolean;
   blacklistUntil?: number | null;
@@ -48,16 +49,19 @@ export interface QuotaManagerAdapter {
   restoreNow(providerKey: string): Promise<unknown>;
   setQuota(options: { providerKey: string; quota: number; reason?: string }): Promise<unknown>;
   registerProviderStaticConfig(providerKey: string, config: StaticQuotaConfig): void;
-
-  // Event handlers
-  onProviderError(event: ProviderErrorEvent): void;
-  onProviderSuccess(event: ProviderSuccessEvent): void;
   recordProviderUsage(event: { providerKey: string; requestedTokens?: number | null; timestampMs?: number }): void;
 
   // Queries
   getQuotaView(): (providerKey: string) => QuotaViewEntry | null;
   getAdminSnapshot(): Record<string, QuotaViewEntry>;
   refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }>;
+}
+
+export interface RustQuotaHostMutatorLike {
+  getStatus?(): { quotaHostSnapshot?: unknown } | null;
+  resetProviderQuota?(providerKey: string): unknown;
+  recoverProviderQuota?(providerKey: string): unknown;
+  disableProviderQuota?(providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number): unknown;
 }
 
 export interface CoreQuotaManagerLike {
@@ -75,20 +79,18 @@ export interface CoreQuotaManagerLike {
   disableProvider?(options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number; reason?: string }): void;
   recoverProvider?(providerKey: string): void;
   resetProvider?(providerKey: string): void;
-  getQuotaView?(): (providerKey: string) => unknown;
   getSnapshot?(): unknown;
   persistNow?(): Promise<void>;
 }
 
 export function createQuotaManagerAdapter(options: {
   coreManager: CoreQuotaManagerLike | null;
+  rustHostMutator?: RustQuotaHostMutatorLike | null;
   legacyDaemon?: {
     disableProvider?(options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number }): Promise<unknown>;
     recoverProvider?(providerKey: string): Promise<unknown>;
     resetProvider?(providerKey: string): Promise<unknown>;
     registerProviderStaticConfig?(providerKey: string, config: StaticQuotaConfig): void;
-    onProviderError?(event: ProviderErrorEvent): void;
-    onProviderSuccess?(event: ProviderSuccessEvent): void;
     recordProviderUsage?(event: { providerKey: string; requestedTokens?: number | null; timestampMs?: number }): void;
     getQuotaView?(): (providerKey: string) => QuotaViewEntry | null;
     getAdminSnapshot?(): Record<string, QuotaState>;
@@ -97,6 +99,7 @@ export function createQuotaManagerAdapter(options: {
   quotaRoutingEnabled?: boolean;
 }): QuotaManagerAdapter {
   const core = options.coreManager;
+  const rustHostMutator = options.rustHostMutator ?? null;
   const legacy = options.legacyDaemon;
   const hasCore = core !== null && x7eGate.phase1UnifiedQuota;
   const backend: 'core' | 'legacy' | 'none' =
@@ -140,14 +143,20 @@ export function createQuotaManagerAdapter(options: {
     const mode = options.mode;
     const durationMs = options.durationMs;
 
-    if (backend === 'core' && core?.disableProvider) {
-      core.disableProvider({ providerKey, mode, durationMs, reason: mode === 'blacklist' ? 'operator' : 'auto' });
-      if (core.persistNow) {
-        await core.persistNow().catch((error) => {
-          logQuotaAdapterNonBlockingError(`persistNow(disableProvider:${providerKey})`, error);
-        });
+    if (backend === 'core') {
+      if (typeof rustHostMutator?.disableProviderQuota === 'function') {
+        await Promise.resolve(rustHostMutator.disableProviderQuota(providerKey, mode, durationMs));
+        return { ok: true, providerKey, mode, source: 'rust' };
       }
-      return { ok: true, providerKey, mode, source: 'core' };
+      if (core?.disableProvider) {
+        core.disableProvider({ providerKey, mode, durationMs, reason: mode === 'blacklist' ? 'operator' : 'auto' });
+        if (core.persistNow) {
+          await core.persistNow().catch((error) => {
+            logQuotaAdapterNonBlockingError(`persistNow(disableProvider:${providerKey})`, error);
+          });
+        }
+        return { ok: true, providerKey, mode, source: 'core' };
+      }
     }
 
     if (backend === 'legacy' && legacy?.disableProvider) {
@@ -162,14 +171,20 @@ export function createQuotaManagerAdapter(options: {
       return { ok: false, reason: 'quota_routing_disabled' };
     }
 
-    if (backend === 'core' && core?.recoverProvider) {
-      core.recoverProvider(providerKey);
-      if (core.persistNow) {
-        await core.persistNow().catch((error) => {
-          logQuotaAdapterNonBlockingError(`persistNow(recoverProvider:${providerKey})`, error);
-        });
+    if (backend === 'core') {
+      if (typeof rustHostMutator?.recoverProviderQuota === 'function') {
+        await Promise.resolve(rustHostMutator.recoverProviderQuota(providerKey));
+        return { ok: true, providerKey, source: 'rust' };
       }
-      return { ok: true, providerKey, source: 'core' };
+      if (core?.recoverProvider) {
+        core.recoverProvider(providerKey);
+        if (core.persistNow) {
+          await core.persistNow().catch((error) => {
+            logQuotaAdapterNonBlockingError(`persistNow(recoverProvider:${providerKey})`, error);
+          });
+        }
+        return { ok: true, providerKey, source: 'core' };
+      }
     }
 
     if (backend === 'legacy' && legacy?.recoverProvider) {
@@ -184,14 +199,20 @@ export function createQuotaManagerAdapter(options: {
       return { ok: false, reason: 'quota_routing_disabled' };
     }
 
-    if (backend === 'core' && core?.resetProvider) {
-      core.resetProvider(providerKey);
-      if (core.persistNow) {
-        await core.persistNow().catch((error) => {
-          logQuotaAdapterNonBlockingError(`persistNow(resetProvider:${providerKey})`, error);
-        });
+    if (backend === 'core') {
+      if (typeof rustHostMutator?.resetProviderQuota === 'function') {
+        await Promise.resolve(rustHostMutator.resetProviderQuota(providerKey));
+        return { ok: true, providerKey, source: 'rust' };
       }
-      return { ok: true, providerKey, source: 'core' };
+      if (core?.resetProvider) {
+        core.resetProvider(providerKey);
+        if (core.persistNow) {
+          await core.persistNow().catch((error) => {
+            logQuotaAdapterNonBlockingError(`persistNow(resetProvider:${providerKey})`, error);
+          });
+        }
+        return { ok: true, providerKey, source: 'core' };
+      }
     }
 
     if (backend === 'legacy' && legacy?.resetProvider) {
@@ -225,6 +246,14 @@ export function createQuotaManagerAdapter(options: {
     }
 
     if (backend === 'core') {
+      if (quota > 0 && typeof rustHostMutator?.recoverProviderQuota === 'function') {
+        await Promise.resolve(rustHostMutator.recoverProviderQuota(providerKey));
+        return { ok: true, providerKey, quota, inPool: true, reason: 'active', source: 'rust' };
+      }
+      if (quota <= 0 && typeof rustHostMutator?.disableProviderQuota === 'function') {
+        await Promise.resolve(rustHostMutator.disableProviderQuota(providerKey, 'cooldown', 5 * 60_000));
+        return { ok: true, providerKey, quota, inPool: false, reason: depletedReason, source: 'rust' };
+      }
       if (core?.recoverProvider) {
         core.recoverProvider(providerKey);
       }
@@ -277,44 +306,6 @@ export function createQuotaManagerAdapter(options: {
     }
   }
 
-  function onProviderError(event: ProviderErrorEvent): void {
-    if (!quotaRoutingEnabled) {
-      return;
-    }
-
-    if (backend === 'core' && core?.onProviderError) {
-      try {
-        core.onProviderError(event);
-      } catch (error) {
-        logQuotaAdapterNonBlockingError('onProviderError', error);
-      }
-      return;
-    }
-
-    if (backend === 'legacy' && legacy?.onProviderError) {
-      legacy.onProviderError(event);
-    }
-  }
-
-  function onProviderSuccess(event: ProviderSuccessEvent): void {
-    if (!quotaRoutingEnabled) {
-      return;
-    }
-
-    if (backend === 'core' && core?.onProviderSuccess) {
-      try {
-        core.onProviderSuccess(event);
-      } catch (error) {
-        logQuotaAdapterNonBlockingError('onProviderSuccess', error);
-      }
-      return;
-    }
-
-    if (backend === 'legacy' && legacy?.onProviderSuccess) {
-      legacy.onProviderSuccess(event);
-    }
-  }
-
   function recordProviderUsage(event: { providerKey: string; requestedTokens?: number | null; timestampMs?: number }): void {
     if (!quotaRoutingEnabled) {
       return;
@@ -331,32 +322,97 @@ export function createQuotaManagerAdapter(options: {
     }
   }
 
+
+  function readRustHostSnapshot(): Record<string, QuotaViewEntry> | null {
+    if (typeof rustHostMutator?.getStatus !== 'function') {
+      return null;
+    }
+    try {
+      const status = rustHostMutator.getStatus();
+      const snapshot = Array.isArray(status?.quotaHostSnapshot) ? status.quotaHostSnapshot : null;
+      if (!snapshot || snapshot.length === 0) {
+        return null;
+      }
+      const out: Record<string, QuotaViewEntry> = {};
+      for (const entry of snapshot) {
+        if (!entry || typeof entry !== 'object') {
+          continue;
+        }
+        const v = entry as Record<string, unknown>;
+        const providerKey = typeof v.providerKey === 'string' ? v.providerKey : '';
+        if (!providerKey) {
+          continue;
+        }
+        out[providerKey] = {
+          providerKey,
+          inPool: Boolean(v.inPool),
+          reason: typeof v.reason === 'string' ? v.reason : undefined,
+          priorityTier: typeof v.priorityTier === 'number' ? v.priorityTier : undefined,
+          selectionPenalty: typeof v.selectionPenalty === 'number' ? v.selectionPenalty : undefined,
+          lastErrorAtMs: typeof v.lastErrorAtMs === 'number' ? v.lastErrorAtMs : null,
+          cooldownUntil: typeof v.cooldownUntil === 'number' ? v.cooldownUntil : null,
+          cooldownKeepsPool: v.cooldownKeepsPool === true ? true : undefined,
+          blacklistUntil: typeof v.blacklistUntil === 'number' ? v.blacklistUntil : null,
+          authIssue: v.authIssue,
+          authType: typeof v.authType === 'string' ? v.authType : undefined,
+          consecutiveErrorCount: typeof v.consecutiveErrorCount === 'number' ? v.consecutiveErrorCount : 0
+        };
+      }
+      return Object.keys(out).length > 0 ? out : null;
+    } catch (error) {
+      logQuotaAdapterNonBlockingError('readRustHostSnapshot', error);
+      return null;
+    }
+  }
+
   function getQuotaView(): (providerKey: string) => QuotaViewEntry | null {
     if (!quotaRoutingEnabled) {
       return () => null;
     }
 
-    if (backend === 'core' && core?.getQuotaView) {
-      const coreView = core.getQuotaView();
-      return (providerKey: string) => {
-        const raw = coreView(providerKey);
-        if (!raw || typeof raw !== 'object') {
-          return null;
-        }
-        const r = raw as Record<string, unknown>;
-        return {
-          providerKey: String(r.providerKey ?? providerKey),
-          inPool: Boolean(r.inPool),
-          reason: typeof r.reason === 'string' ? r.reason : undefined,
-          priorityTier: typeof r.priorityTier === 'number' ? r.priorityTier : undefined,
-          cooldownUntil: typeof r.cooldownUntil === 'number' ? r.cooldownUntil : null,
-          cooldownKeepsPool: r.cooldownKeepsPool === true ? true : undefined,
-          blacklistUntil: typeof r.blacklistUntil === 'number' ? r.blacklistUntil : null,
-          authIssue: r.authIssue,
-          authType: typeof r.authType === 'string' ? r.authType : undefined,
-          consecutiveErrorCount: typeof r.consecutiveErrorCount === 'number' ? r.consecutiveErrorCount : 0
+    if (backend === 'core') {
+      const rustSnapshot = readRustHostSnapshot();
+      if (rustSnapshot) {
+        return (providerKey: string) => {
+          const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+          if (!key) {
+            return null;
+          }
+          return rustSnapshot[key] ?? null;
         };
-      };
+      }
+
+      if (core?.getSnapshot) {
+        return (providerKey: string) => {
+          const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+          if (!key) {
+            return null;
+          }
+          const snap = core.getSnapshot();
+          const providers =
+            snap && typeof snap === 'object' && (snap as Record<string, unknown>).providers && typeof (snap as Record<string, unknown>).providers === 'object'
+              ? ((snap as Record<string, unknown>).providers as Record<string, unknown>)
+              : null;
+          const raw = providers?.[key];
+          if (!raw || typeof raw !== 'object') {
+            return null;
+          }
+          const r = raw as Record<string, unknown>;
+          return {
+            providerKey: String(r.providerKey ?? key),
+            inPool: Boolean(r.inPool),
+            reason: typeof r.reason === 'string' ? r.reason : undefined,
+            priorityTier: typeof r.priorityTier === 'number' ? r.priorityTier : undefined,
+            cooldownUntil: typeof r.cooldownUntil === 'number' ? r.cooldownUntil : null,
+            cooldownKeepsPool: r.cooldownKeepsPool === true ? true : undefined,
+            blacklistUntil: typeof r.blacklistUntil === 'number' ? r.blacklistUntil : null,
+            authIssue: r.authIssue,
+            authType: typeof r.authType === 'string' ? r.authType : undefined,
+            consecutiveErrorCount: typeof r.consecutiveErrorCount === 'number' ? r.consecutiveErrorCount : 0
+          };
+        };
+      }
+
     }
 
     if (backend === 'legacy' && legacy?.getQuotaView) {
@@ -368,6 +424,13 @@ export function createQuotaManagerAdapter(options: {
 
   function getAdminSnapshot(): Record<string, QuotaViewEntry> {
     const result: Record<string, QuotaViewEntry> = {};
+
+    if (backend === 'core') {
+      const rustSnapshot = readRustHostSnapshot();
+      if (rustSnapshot) {
+        return rustSnapshot;
+      }
+    }
 
     // Prefer core snapshot
     if (backend === 'core' && core?.getSnapshot) {
@@ -445,8 +508,6 @@ export function createQuotaManagerAdapter(options: {
     restoreNow,
     setQuota,
     registerProviderStaticConfig,
-    onProviderError,
-    onProviderSuccess,
     recordProviderUsage,
     getQuotaView,
     getAdminSnapshot,

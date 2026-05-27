@@ -10956,3 +10956,59 @@ Using skills: coding-principals + rcc-dev-skills
   1. 瞬时业务错误被过早提升为路由池移除/拉黑
   2. 最后一个 provider 也被排空，违反“最后一个 provider 永远不移除”约束
 - 当前先暂停 continuation 修复收尾，优先抓这条虚拟路由/错误分类红测与唯一修改点。
+
+
+[2026-05-27] 5555 图片请求空池审计（multimodal capability）
+- 运行态真配置证据：`~/.rcc/config.toml` 的 `gateway_priority_5555` 里 `thinking/default/multimodal` 都指向 `sdfv.key1.gpt-5.4`；`~/.rcc/provider/sdfv/config.v2.toml` 对 `gpt-5.4` 仅显式声明 `capabilities=["web_search"]`，未声明 `multimodal`。
+- 当前 Rust `ProviderRegistry::has_capability()` 先看显式 capability；一旦模型 capability map 存在且该模型缺少 `multimodal`，会直接返回 false，导致 `responses provider 默认支持 multimodal` 的新语义没有真正生效。
+- 这就是当前“带图请求直接 No available providers”的更精确真因：不是 selector 没兜住，而是 provider capability 判定仍把 `responses/gpt` 家族误判成非 multimodal。
+- 唯一正确修点仍在 `virtual_router_engine/provider_registry.rs`：把显式声明与家族默认能力做并集（至少对 `multimodal` / 需要的默认族能力），而不是让“显式但不完整”的 capability map 覆盖默认能力。
+
+[diag]
+- added unavailableProviders details for PROVIDER_NOT_AVAILABLE
+- test: single_provider_429_blackout_surfaces_unavailable_reason_details
+
+- [diag] red test added: http-error-mapper should preserve safe PROVIDER_NOT_AVAILABLE details (candidateProviderKeys/unavailableProviders) and strip internal __rt
+- [diag] red test added: sharedmodule normalizeNativeVirtualRouterError drops details when native throws object {code,message,details} instead of prefixed string
+
+
+[2026-05-27] 5555 mimo provider 接入
+- 用户提供 Anthropic 协议 endpoint: https://token-plan-cn.xiaomimimo.com/anthropic 与 token，要求把 mimo 作为 5555 内 MiniMax 的并联 provider，并让 longcontext 使用 mimo，coding/thinking 把 mimo 作为 priority backup。
+- 现状确认：`~/.rcc/provider/mimo/config.v2.toml` 已存在旧 mimo provider，但 baseURL 指向旧站点 `https://fufu.iqach.top/anthropic` 且 apiKey 走 `${MIMO_API_KEY}`；`~/.rcc/config.toml` 的 `gateway_priority_5555` 尚未引用 mimo。
+- 落盘策略：最小修改现有 mimo provider（只替换 baseURL/apiKey，补 longcontext capability），并只改 5555 路由组：tools/search/web_search 加入 `mini27 + mimo` 并联；longcontext 指向 mimo；coding/thinking 保持 sdfv 主路径，同时新增 mimo backup tier。
+- 只读探测：`GET https://token-plan-cn.xiaomimimo.com/anthropic` 返回 404；该结果只说明根路径非浏览入口，不足以否定 Anthropic messages 协议，正确验证需后续通过实际 `/messages` 请求或 5555 路由 smoke。
+
+[2026-05-27] mimo provider 实测能力校正
+- 路径真相：`https://token-plan-cn.xiaomimimo.com/anthropic/messages` 为假路径（404）；`https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages` 才是真实 Anthropic messages 入口，因此 provider `baseURL` 应为 `https://token-plan-cn.xiaomimimo.com/anthropic/v1`。
+- 文本能力：对 `mimo-v2.5-pro` 发 `POST /anthropic/v1/messages`，返回 200，说明基础文本/streaming/thinking 可用。
+- 多模态能力：同模型图片输入返回 404 `No endpoints found that support image input`，当前不能声明 `multimodal/vision`。
+- 联网搜索能力：带 `anthropic-beta: web-search-2025-03-05` 与 `web_search_20250305` 请求返回 200，但上游以文本 `<tool_call>/<tool_response>` 形式返回，说明当前至少可声明 `web_search` 能力；其是否完全原生 Anthropic tool block 仍应以后续经 RouteCodex 5555 链路验证为准。
+- 配置收口：物理删除重复 `[provider.models."mimo-v2.5-pro"]` 表，只保留单一 model block，避免 TOML 歧义。
+
+[diag] note append
+[2026-05-27] 5555 图片空池真红/真绿（TS ProviderRegistry）
+- 红测：sharedmodule/llmswitch-core/tests/router/responses-default-capabilities.test.ts 证明当 responses/crs provider 显式只声明 web_search 时，TS ProviderRegistry.hasCapability() 只看显式 capability，未并入默认族能力，导致 multimodal=false。
+- 真因：sharedmodule/llmswitch-core/src/router/virtual-router/provider-registry.ts 的 hasCapability() 仅返回 getModelCapabilities().has(capability)，没有并入 responses/crs 默认能力；这与 Rust provider_registry.rs 语义不一致，也直接解释了 5555 带图请求空池。
+- 最小修复：在 TS ProviderRegistry.hasCapability() 中，显式 capability 未命中时回退到 hasDefaultCapability(profile, capability)；默认规则与 Rust 对齐：responses/compatibility:responses/crs => multimodal，compatibility:crs => web_search。
+
+[2026-05-27] mimo 默认模型纠偏
+- Jason 明确规则：默认必须走 `mimo-v2.5-pro`；只有 `web_search` 和图片(multimodal) 走 `mimo-v2.5`。
+- 我上一轮把默认模型错误切成了 `mimo-v2.5`，属于把局部能力验证误扩散到默认主路径。已纠正：provider default 恢复 `mimo-v2.5-pro`，并保留 `mimo-v2.5` 作为专用能力模型；5555 路由改为 coding/thinking/longcontext 使用 `pro`，tools/search/web_search/multimodal 使用 `v2.5`。
+
+[2026-05-27] live 5555 multimodal audit
+- 实测当前 5555 带图请求已不再空池：非法 base64 图片命中 mimo multimodal 后正确返回上游 HTTP_400；合法 1x1 PNG 返回 200 ok。
+- 新抓到更严重真问题：src/server/utils/http-error-mapper.ts 当前把 provider error.details 大量内部结构直接透给客户端，包含 auth.value、metadata、__rt、requestContext、target 等，违反“内部 meta/id 不出客户端”约束。
+- 下一步唯一修点优先看 http-error-mapper 的 public details sanitize，补红测后收口为白名单。
+
+[2026-05-27] mimo 新 key 加入
+- Jason 要求把新 key `tp-caxwxfzyid12hz0h99a0ht9hj7xkl4vjoucgozw3lzhwwru1` 加入 mimo provider。
+- 已按 provider v2 多 key 真源改为 `provider.auth.entries`：保留原 key 为 `key1`，新增 key 为 `key2`；不改现有模型职责与 5555 路由语义。
+
+
+## 2026-05-27 mimo / 5555 审核与 build 门禁复核
+
+- `npm run build:dev` 当前首个阻塞已确认不是 mimo provider 配置，也不是这次新增跟踪的 5 个测试/运行时文件。
+- 真阻塞在 `scripts/ci/llmswitch-rustification-audit.mjs` 使用的基线文件 `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` 已过期。
+- 证据：audit 报的 12 个 `new prod TS files`（clock runtime bridge/side-effects、heartbeat runtime side-effects、request sanitizer bridge、native-followup-mainline-semantics、native-servertool-core-semantics、native-stop-message-auto-semantics、servertool/apply-patch、review、response-stage-orchestration-shell、stop-message-counter）都已经存在于当前 `HEAD`，且 `git diff --name-status HEAD -- sharedmodule/llmswitch-core/src` 不包含这些路径，说明不是本轮未提交新文件，而是 baseline 落后于仓库真相。
+- 当前 audit metrics 同时显示 `nonNativeLocTotal` 从 58341 降到 57352，整体是在收缩；只因旧 baseline 未更新，仍把后续已接纳文件当“新增 TS”拦截。
+- 处理策略：更新 rustification baseline 到当前仓库真相，再继续 build / restart / health 验证。

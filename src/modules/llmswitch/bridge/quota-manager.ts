@@ -18,7 +18,6 @@ type QuotaModule = {
     disableProvider?: (options: unknown) => void;
     recoverProvider?: (providerKey: string) => void;
     resetProvider?: (providerKey: string) => void;
-    getQuotaView?: () => unknown;
     getSnapshot?: () => unknown;
     persistNow?: () => Promise<void>;
   };
