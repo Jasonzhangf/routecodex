@@ -12468,3 +12468,13 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
   - 结果：`5 suites / 12 tests` 全绿。
 - 结论：quota module + adapter 的类型/接口层也已收敛到 Rust-only host contract，不再暴露 core 路径心智模型。
+
+## 2026-05-27 Phase E 延续10：删除 llmswitch-core.d.ts 中 quota 模块声明残留
+- 发现：`src/types/llmswitch-core.d.ts` 仍声明 `rcc-llmswitch-core/dist/quota/index.js`，而当前主链已去 quota core bridge 与对应 runtime 引用；该声明属于类型层死语义。
+- 本轮改动：
+  - `src/types/llmswitch-core.d.ts`
+    - 物理删除 `declare module 'rcc-llmswitch-core/dist/quota/index.js'` 整段类型声明。
+- 验证：
+  - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
+  - 结果：`3 suites / 9 tests` 全绿。
+- 结论：quota core 的类型入口残留已移除，避免后续在类型层误接入 TS quota 旧模块。
