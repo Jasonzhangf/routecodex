@@ -179,10 +179,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
   });
 
   it('keeps 402/resetAt state aligned across persist/hydrate/admin and clears it on success', async () => {
-    const { QuotaManager } = await import('../../../sharedmodule/llmswitch-core/src/quota/index.js');
-
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
-      createCoreQuotaManager: async (options?: { store?: unknown }) => new QuotaManager(options),
       setProviderRuntimeQuotaHooks: jest.fn(async () => true),
       setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
@@ -394,10 +391,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
   });
 
   it('sanitizes auth/fatal persisted state on restart and keeps admin projection aligned after success', async () => {
-    const { QuotaManager } = await import('../../../sharedmodule/llmswitch-core/src/quota/index.js');
-
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
-      createCoreQuotaManager: async (options?: { store?: unknown }) => new QuotaManager(options),
       setProviderRuntimeQuotaHooks: jest.fn(async () => true),
       setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));

@@ -12438,3 +12438,18 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
   - 结果：`4 suites / 6 tests` 全绿。
 - 结论：adapter API 与调用面都已去掉 core 注入语义，进一步压实 Rust-only host wiring。
+
+## 2026-05-27 Phase E 延续8：special-family/evidence 测试去 sharedmodule QuotaManager 依赖
+- 发现：`quota-unified-evidence-aggregator.spec.ts` 与 `quota-unified-special-family-consistency.spec.ts` 仍引用 `sharedmodule/llmswitch-core/src/quota/index.ts` 的 `QuotaManager`（以及桥接 mock 的 `createCoreQuotaManager`），与当前“host runtime Rust-only contract”目标不一致。
+- 本轮改动：
+  - `tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
+    - 删除 `VirtualRouterEngine` + `QuotaManager` 依赖。
+    - 将 route decision 证据改为 deterministic fixture（保持“TS poison 不影响主结论”的断言）。
+    - 删除 bridge mock 中 `createCoreQuotaManager` 注入。
+  - `tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
+    - 删除两处 `QuotaManager` 动态 import。
+    - 删除 bridge mock 中 `createCoreQuotaManager` 注入。
+- 验证：
+  - `npm run -s jest:run -- --runInBand --runTestsByPath tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts`
+  - 结果：`4 suites / 11 tests` 全绿。
+- 结论：关键 daemon-admin quota 证据测试已去掉 sharedmodule TS quota manager 依赖，继续向 Rust host contract-only 收敛。
