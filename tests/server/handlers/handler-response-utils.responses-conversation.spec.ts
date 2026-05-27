@@ -4,6 +4,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 
 const recordResponsesResponseForRequestMock = jest.fn(async () => undefined);
 const captureResponsesRequestContextForRequestMock = jest.fn(async () => undefined);
+const finalizeResponsesConversationRequestRetentionMock = jest.fn(async () => undefined);
 const convertResponseToJsonToSseMock = jest.fn(async () => Readable.from(['event: response.completed\n', 'data: {}\n\n']));
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
@@ -12,7 +13,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   createResponsesJsonToSseConverter: jest.fn(async () => ({
     convertResponseToJsonToSse: convertResponseToJsonToSseMock
   })),
-  finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
+  finalizeResponsesConversationRequestRetention: finalizeResponsesConversationRequestRetentionMock,
   importCoreDist: jest.fn(),
   requireCoreDist: jest.fn(),
   rebindResponsesConversationRequestId: jest.fn(async () => undefined),
@@ -96,6 +97,53 @@ describe('sendPipelineResponse responses conversation recording', () => {
     expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toEqual([
       'resp_response_id_only_fallback'
     ]);
+  });
+
+  it('releases non-tool response retention by canonical response-id (not stale router/provider ids)', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    finalizeResponsesConversationRequestRetentionMock.mockClear();
+
+    const res = new MockResponse();
+    await sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          id: 'resp_final_stop_1',
+          object: 'response',
+          status: 'completed',
+          output: [{ type: 'output_text', text: 'done' }]
+        },
+        usageLogInfo: {
+          finishReason: 'stop',
+          routeName: 'thinking',
+          timingRequestIds: [
+            'openai-responses-provider-a',
+            'openai-responses-router-b'
+          ]
+        }
+      } as any,
+      'openai-responses-router-b',
+      {
+        entryEndpoint: '/v1/responses',
+        responsesRequestContext: {
+          payload: { model: 'gpt-5.4', store: true, input: [], tools: [] },
+          context: { input: [], toolsRaw: [] }
+        }
+      }
+    );
+
+    expect(res.statusCode).toBe(200);
+    // non-tool finalization should resolve to canonical response id only
+    expect(
+      finalizeResponsesConversationRequestRetentionMock.mock.calls.map(([requestId]) => requestId)
+    ).toContain('resp_final_stop_1');
+    expect(
+      finalizeResponsesConversationRequestRetentionMock.mock.calls.map(([requestId]) => requestId)
+    ).not.toContain('openai-responses-provider-a');
+    expect(
+      finalizeResponsesConversationRequestRetentionMock.mock.calls.map(([requestId]) => requestId)
+    ).not.toContain('openai-responses-router-b');
   });
 
   it('records requires_action only under the client-visible response id', async () => {

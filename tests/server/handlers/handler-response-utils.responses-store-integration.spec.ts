@@ -2002,7 +2002,7 @@ describe("sendPipelineResponse responses store integration", () => {
       expect(
         (bridge.finalizeResponsesConversationRequestRetention as jest.Mock).mock
           .calls,
-      ).toContainEqual([requestId, { keepForSubmitToolOutputs: false }]);
+      ).toContainEqual(["resp_json_stop_release_1", { keepForSubmitToolOutputs: false }]);
       const after = store.responsesConversationStore.getDebugStats();
       expect(after.requestMapSize).toBeLessThanOrEqual(1);
       expect(after.retainedInputItems).toBeLessThanOrEqual(1);

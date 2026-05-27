@@ -89,6 +89,27 @@ codes = ["429.1000", "500.1000", "503.1000", "0.1000", "0.6000", "0.8200"]
 | `0.8100` | AUTO_RETRY_UPSTREAM_STATUS_1000 | 上游状态码 1000 |
 | `0.8200` | AUTO_RETRY_UPSTREAM_STATUS_2056 | 上游状态码 2056（用量超限） |
 
+### 2056 内部消化流程（MiniMax 偶发上游轮询）
+
+2056 不是真正的配额超限，而是 MiniMax 上游偶发轮询切换。必须由 **provider 内部 auto-retry** 吸收，不能暴露到客户端。
+
+完整链路：
+```
+MiniMax 返 base_resp.status_code=2056
+  → resolveProviderBusinessResponseError 抛 MALFORMED_RESPONSE（code=MALFORMED, upstream=PROVIDER_STATUS_2056）
+  → base-provider.ts auto-retry 拦截
+  → resolveAutoRetryErrorCode → '0.8200'
+  → autoRetryConfig.codes.includes('0.8200') → 命中
+  → provider 内部重试（不经过 request 级重试引擎）
+  → 重试成功 → 吸收 | 全部失败 → 自然走 error 上报
+```
+
+关键依赖：
+- `provider-request-shaping-utils.ts:87-99` — `resolveProviderBusinessResponseError` 检测 `base_resp.status_code`
+- `auto-retry-error-codes.ts:128-129` — `resolveAutoRetryErrorCode` 返回 `'0.8200'`（⚠️ 必须在 catalog 之前检查）
+- `base-provider.ts:249-266` — `sendRequest()` catch 块中的 auto-retry 逻辑
+- 该 provider 的 `config.v2.toml` 必须有 `codes = ["0.8200"]`
+
 ### 常见场景配置
 
 **MiniMax 用量超限（2056）+ 5 次阈值**（已配置在 mini27）：
@@ -117,7 +138,29 @@ codes = ["0.1000", "0.2000", "0.6000"]
 - `src/providers/core/api/provider-types.ts` — `ProviderRuntimeProfile.autoRetry` 类型定义
 - `src/providers/core/runtime/base-provider.ts` — `sendRequest()` catch 块中自动重试拦截逻辑
 
+### ⚠️ resolveAutoRetryErrorCode 查找顺序（踩坑记录）
+`resolveAutoRetryErrorCode()` 内部先调 `normalizeKnownProviderError()`（查 error catalog），再走精确匹配。
+**catalog 对 PROVIDER_STATUS_2056 返回 `'429.2056'`**（来自 `provider-error-catalog.ts` 第 23 行）。
+但 auto-retry 配置只认得 `'0.8200'`（`AUTO_RETRY_UPSTREAM_STATUS_2056`）。
+
+**修复**：2026-05-27 将 `PROVIDER_STATUS_2056` 的精确匹配移到 `normalizeKnownProviderError` 之前。
+否则 2056 永远命中 `'429.2056'` → 不在 `autoRetry.codes` 中 → auto-retry 静默失效。
+
+```typescript
+// 正确顺序：先精确匹配 2056，再查 catalog
+if (upstreamCode === 'PROVIDER_STATUS_2056' || code === 'PROVIDER_STATUS_2056') {
+  return AUTO_RETRY_UPSTREAM_STATUS_2056;  // '0.8200'
+}
+const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
+```
+
+同类的 `PROVIDER_STATUS_1000` 也需注意（目前 `0.8100` 不在 catalog 中，无冲突）。
+
 ## 2026-05-27 调试精华（5555 主备/health/stopless）
+
+0. TS→Rust JSON 序列化铁律：Rust enum 若要从 TS 接收小写值（如 `"idle"`、`"on"`、`"trigger"`），必须加 `#[serde(rename_all = "camelCase")]`，否则 serde 默认等 PascalCase（`"Idle"`、`"On"`、`"Trigger"`），反序列化直接炸。
+   - 2026-05-27 踩坑：`stop-message-core` 的 `StageMode`、`SnapshotSource`、`GoalStatus`、`SkipReason`、`Action` 五个枚举都缺这个 derive 属性。后果：`decideStopMessageActionWithNative` 每一次都悄无声息地 fallback skip（`native_returned_non_string: object`），stopless 完全不工作。
+   - 红测: `tests/servertool/stop-message-native-decision.spec.ts`（9 用例，不 mock native）
 
 1. 先黑盒后改代码（强制）
 - 先用 Rust 真源黑盒测试锁语义，再改实现；不要先在线乱试。

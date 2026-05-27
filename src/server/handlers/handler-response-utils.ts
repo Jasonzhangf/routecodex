@@ -447,6 +447,7 @@ async function recordResponsesConversationToolCallResponse(args: {
 async function finalizeResponsesConversationNonToolResponse(args: {
   entryEndpoint?: string;
   requestLabel: string;
+  timingRequestIds?: string[];
   body: unknown;
 }): Promise<void> {
   if (
@@ -459,11 +460,19 @@ async function finalizeResponsesConversationNonToolResponse(args: {
   if (isToolCallContinuationResponse(args.body) || finishReason === 'tool_calls') {
     return;
   }
-  await finalizeResponsesConversationRequestRetention(args.requestLabel, {
-    keepForSubmitToolOutputs: false,
-  }).catch((error) => {
-    logResponseNonBlockingError(`responses-conversation-finalize:${args.requestLabel}`, error);
-  });
+  const responseId = readResponsesConversationResponseId(args.body);
+  const retainRequestIds = resolveResponsesConversationRecordRequestIds(
+    args.requestLabel,
+    args.timingRequestIds,
+    responseId,
+  );
+  for (const retainRequestId of retainRequestIds) {
+    await finalizeResponsesConversationRequestRetention(retainRequestId, {
+      keepForSubmitToolOutputs: false,
+    }).catch((error) => {
+      logResponseNonBlockingError(`responses-conversation-finalize:${retainRequestId}`, error);
+    });
+  }
 }
 
 async function captureResponsesConversationToolCallRequestContext(args: {
@@ -1441,6 +1450,7 @@ export async function sendPipelineResponse(
         await finalizeResponsesConversationNonToolResponse({
           entryEndpoint,
           requestLabel,
+          timingRequestIds: result.usageLogInfo?.timingRequestIds,
           body: sanitizedProbeBody,
         });
       }
@@ -1866,6 +1876,7 @@ export async function sendPipelineResponse(
   await finalizeResponsesConversationNonToolResponse({
     entryEndpoint,
     requestLabel,
+    timingRequestIds: result.usageLogInfo?.timingRequestIds,
     body: sanitized,
   });
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
