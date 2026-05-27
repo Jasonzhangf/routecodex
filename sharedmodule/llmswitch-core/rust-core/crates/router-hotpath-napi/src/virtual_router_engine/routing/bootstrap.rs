@@ -8,6 +8,7 @@ use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::load_balancer::LoadBalancingPolicy;
 
 use super::config::RoutePoolTier;
+const PROVIDER_LEVEL_POOL_ALIAS: &str = "pool";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -191,10 +192,18 @@ fn expand_routing_table(
                 let aliases = if let Some(alias) = parsed.key_alias.clone() {
                     vec![alias]
                 } else {
-                    alias_index
+                    let all_aliases = alias_index
                         .get(&parsed.provider_id)
                         .cloned()
-                        .unwrap_or_default()
+                        .unwrap_or_default();
+                    if all_aliases
+                        .iter()
+                        .any(|alias| alias == PROVIDER_LEVEL_POOL_ALIAS)
+                    {
+                        vec![PROVIDER_LEVEL_POOL_ALIAS.to_string()]
+                    } else {
+                        all_aliases
+                    }
                 };
 
                 if aliases.is_empty() {

@@ -17,6 +17,7 @@ const CLAUDE_CODE_DEFAULT_USER_AGENT: &str = "claude-cli/2.0.76 (external, cli)"
 const CLAUDE_CODE_DEFAULT_X_APP: &str = "claude-cli";
 const CLAUDE_CODE_DEFAULT_ANTHROPIC_BETA: &str = "claude-code";
 const MULTI_TOKEN_OAUTH_PROVIDERS: &[&str] = &["qwen"];
+const PROVIDER_LEVEL_POOL_ALIAS: &str = "pool";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -433,14 +434,89 @@ fn build_provider_runtime_entries(
             continue;
         }
 
-        alias_index.insert(
-            provider_id.clone(),
-            auth_entries
-                .iter()
-                .map(|entry| entry.key_alias.clone())
-                .collect(),
-        );
+        let mut aliases: Vec<String> = auth_entries
+            .iter()
+            .map(|entry| entry.key_alias.clone())
+            .collect();
+        let provider_level_pool_alias = if auth_entries.len() > 1 {
+            let mut candidate = PROVIDER_LEVEL_POOL_ALIAS.to_string();
+            let mut index = 1;
+            while aliases.iter().any(|existing| existing == &candidate) {
+                candidate = format!("{}_{}", PROVIDER_LEVEL_POOL_ALIAS, index);
+                index += 1;
+            }
+            aliases.insert(0, candidate.clone());
+            Some(candidate)
+        } else {
+            None
+        };
+        alias_index.insert(provider_id.clone(), aliases);
         model_index.insert(provider_id.clone(), collected_models);
+
+        if let Some(pool_alias) = provider_level_pool_alias {
+            let selected_entry = auth_entries
+                .first()
+                .ok_or_else(|| format!("Provider {} requires at least one auth entry", provider_id))?;
+            let mut runtime_auth = selected_entry.auth.clone();
+            runtime_auth.entries = extract_raw_auth_entries(provider);
+            if runtime_auth.auth_type == "apiKey" && runtime_auth.secret_ref.is_none() {
+                runtime_auth.secret_ref = Some(format!("{}.{}", provider_id, pool_alias));
+            }
+            let runtime_key = build_runtime_key(provider_id, &pool_alias);
+            runtime_entries.insert(
+                runtime_key.clone(),
+                ProviderRuntimeProfileJson {
+                    runtime_key,
+                    provider_id: provider_id.clone(),
+                    key_alias: pool_alias,
+                    provider_type: normalized_provider.provider_type.clone(),
+                    provider_module: normalized_provider.provider_module.clone(),
+                    endpoint: normalized_provider.endpoint.clone(),
+                    headers: normalized_provider.headers.clone(),
+                    auth: runtime_auth,
+                    enabled: normalized_provider.enabled,
+                    outbound_profile: normalized_provider.outbound_profile.clone(),
+                    compatibility_profile: Some(normalized_provider.compatibility_profile.clone()),
+                    process_mode: Some(normalized_provider.process_mode.clone()),
+                    responses_config: normalized_provider.responses_config.clone(),
+                    streaming: normalized_provider.streaming.clone(),
+                    model_streaming: normalized_provider.model_streaming.clone(),
+                    model_output_tokens: normalized_provider.model_output_tokens.clone(),
+                    default_output_tokens: normalized_provider.default_output_tokens,
+                    model_context_tokens: normalized_provider.model_context_tokens.clone(),
+                    default_context_tokens: normalized_provider.default_context_tokens,
+                    model_anthropic_thinking_config: normalized_provider
+                        .model_anthropic_thinking_config
+                        .clone(),
+                    default_anthropic_thinking_config: normalized_provider
+                        .default_anthropic_thinking_config
+                        .clone(),
+                    model_anthropic_thinking: normalized_provider.model_anthropic_thinking.clone(),
+                    default_anthropic_thinking: normalized_provider
+                        .default_anthropic_thinking
+                        .clone(),
+                    model_anthropic_thinking_budgets: normalized_provider
+                        .model_anthropic_thinking_budgets
+                        .clone(),
+                    default_anthropic_thinking_budgets: normalized_provider
+                        .default_anthropic_thinking_budgets
+                        .clone(),
+                    deepseek: normalized_provider.deepseek.clone(),
+                    extensions: normalized_provider.extensions.clone(),
+                    server_tools_disabled: if normalized_provider.server_tools_disabled {
+                        Some(true)
+                    } else {
+                        None
+                    },
+                    model_capabilities: normalized_provider.model_capabilities.clone(),
+                    model_id: None,
+                    max_context_tokens: None,
+                    anthropic_thinking_config: None,
+                    anthropic_thinking: None,
+                    anthropic_thinking_budgets: None,
+                },
+            );
+        }
 
         for entry in auth_entries {
             let runtime_key = build_runtime_key(provider_id, &entry.key_alias);
