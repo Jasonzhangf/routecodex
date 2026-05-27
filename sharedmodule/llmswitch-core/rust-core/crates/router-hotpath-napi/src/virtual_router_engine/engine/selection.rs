@@ -322,6 +322,7 @@ impl VirtualRouterEngineCore {
                 .candidates
                 .iter()
                 .any(|candidate| candidate == "longcontext");
+        let mut unavailable_route_pools: Vec<Value> = Vec::new();
 
         for route_name in route_queue {
             let mut pools = if requires_remote_video {
@@ -414,6 +415,28 @@ impl VirtualRouterEngineCore {
                     }
                 }
                 if available.is_empty() {
+                    let filtered_candidates = filter_candidates_by_state(
+                        &pool.targets,
+                        routing_state,
+                        &self.provider_registry,
+                    )
+                    .into_iter()
+                    .filter(|key| !excluded_keys.contains(key))
+                    .collect::<Vec<String>>();
+                    if !filtered_candidates.is_empty() {
+                        if let Some(unavailable) = build_unavailable_providers_details(
+                            self,
+                            env,
+                            &filtered_candidates,
+                        ) {
+                            unavailable_route_pools.push(json!({
+                                "routeName": route_name,
+                                "poolId": pool.id,
+                                "poolTargets": pool.targets,
+                                "unavailableProviders": unavailable
+                            }));
+                        }
+                    }
                     continue;
                 }
                 let tier_load_balancing =
@@ -554,7 +577,8 @@ impl VirtualRouterEngineCore {
                         pool.targets.clone(),
                         Some(pool.id.clone()),
                     )
-                    .with_route_params(pool.route_params.clone()));
+                    .with_route_params(pool.route_params.clone())
+                    .with_unavailable_providers((!unavailable_route_pools.is_empty()).then_some(Value::Array(unavailable_route_pools))));
                 }
             }
         }
@@ -643,6 +667,54 @@ impl VirtualRouterEngineCore {
         singleton_rust_quota_recoverable_wait_ms(&state, now).is_none()
     }
 
+}
+
+fn build_unavailable_providers_details(
+    core: &VirtualRouterEngineCore,
+    env: Env,
+    candidate_keys: &[String],
+) -> Option<Value> {
+    if candidate_keys.is_empty() {
+        return None;
+    }
+    let now_ms = now_ms();
+    let mut blockers: Vec<ProviderUnavailableBlocker> = Vec::new();
+    let mut min_recoverable_cooldown_ms: Option<i64> = None;
+    let mut hints: Vec<RecoverableCooldownHint> = Vec::new();
+    for provider_key in candidate_keys {
+        collect_recoverable_cooldown_for_key(
+            core,
+            env,
+            provider_key,
+            now_ms,
+            candidate_keys.len(),
+            &mut min_recoverable_cooldown_ms,
+            &mut hints,
+            &mut blockers,
+        );
+    }
+    if blockers.is_empty() {
+        return None;
+    }
+    Some(json!({
+        "candidateProviderKeys": candidate_keys,
+        "minRecoverableCooldownMs": min_recoverable_cooldown_ms,
+        "recoverableCooldownHints": hints
+            .into_iter()
+            .map(|item| json!({
+                "providerKey": item.provider_key,
+                "waitMs": item.wait_ms,
+                "source": item.source
+            }))
+            .collect::<Vec<Value>>(),
+        "items": blockers
+            .into_iter()
+            .map(|item| json!({
+                "providerKey": item.provider_key,
+                "reasons": item.reasons
+            }))
+            .collect::<Vec<Value>>()
+    }))
 }
 
 fn build_primary_target_groups(

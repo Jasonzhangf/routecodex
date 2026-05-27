@@ -570,7 +570,8 @@ impl VirtualRouterEngineCore {
             "poolId": selection.pool_id,
             "reasoning": classification.reasoning,
             "fallback": did_fallback,
-            "confidence": classification.confidence
+            "confidence": classification.confidence,
+            "unavailableRoutePools": selection.unavailable_providers
         });
         Ok(json!({
             "target": target_obj,
