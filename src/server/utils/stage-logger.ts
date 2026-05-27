@@ -590,7 +590,8 @@ function shouldLogReleaseSummaryStage(stage: string): boolean {
   return normalized === 'hub.completed'
     || normalized === 'hub.response.completed'
     || normalized === 'response.completed'
-    || normalized === 'provider.send.completed';
+    || normalized === 'provider.send.completed'
+    || normalized === 'router-direct.send.completed';
 }
 
 function shouldTrackTimingBreakdownScope(stage: string): boolean {

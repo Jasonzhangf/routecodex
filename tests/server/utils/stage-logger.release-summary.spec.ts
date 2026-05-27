@@ -57,6 +57,28 @@ describe('stage logger release summary mode', () => {
     expect(String(logSpy.mock.calls[3]?.[0] ?? '')).toContain('\x1b[97mfinish_reason=tool_calls\x1b[0m');
   });
 
+  it('prints router-direct summaries in release mode', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await import('../../../src/server/utils/stage-logger.js');
+
+    logPipelineStage('router-direct.send.start', 'req_router_direct', { providerKey: 'mimo.pool.mimo-v2.5' });
+    logPipelineStage('router-direct.send.completed', 'req_router_direct', {
+      providerKey: 'mimo.pool.mimo-v2.5',
+      status: 200,
+      elapsedMs: 150,
+      finishReason: 'tool_calls'
+    });
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(String(logSpy.mock.calls[0]?.[0] ?? '')).toContain('[router-direct.send][req_router_direct] completed total=150ms');
+  });
+
   it('moves tracked scope timings when request id is rebound', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
     process.env.ROUTECODEX_USAGE_TIMING = '1';
