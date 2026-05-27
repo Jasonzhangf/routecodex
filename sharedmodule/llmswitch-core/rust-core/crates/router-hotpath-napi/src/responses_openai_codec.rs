@@ -78,6 +78,7 @@ fn build_request_from_responses_payload(
         tool_result_fallback_text: Some(String::new()),
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: Some(false),
     })?;
     let messages = append_local_images(converted.messages).map_err(|e| e.to_string())?;
     if messages.is_empty() {

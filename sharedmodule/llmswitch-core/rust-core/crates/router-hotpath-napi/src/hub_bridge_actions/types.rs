@@ -319,6 +319,8 @@ pub struct BridgeInputToChatInput {
     pub normalize_function_name: Option<String>,
     #[serde(default)]
     pub allow_pending_terminal_tool_call: Option<bool>,
+    #[serde(default)]
+    pub allow_orphan_tool_result: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]

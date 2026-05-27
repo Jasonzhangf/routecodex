@@ -190,6 +190,7 @@ fn builds_bridge_history_for_tool_turn() {
         ],
         tools: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
     let output = build_bridge_history(input).unwrap();
     assert_eq!(output.original_system_messages.len(), 1);
@@ -228,6 +229,7 @@ fn builds_bridge_history_uses_output_text_for_assistant_string_content() {
         })],
         tools: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
     let output = build_bridge_history(input).unwrap();
     assert_eq!(output.input.len(), 1);
@@ -250,6 +252,7 @@ fn builds_bridge_history_with_media_blocks() {
         })],
         tools: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
     let output = build_bridge_history(input).unwrap();
     assert_eq!(output.input.len(), 1);
@@ -275,6 +278,7 @@ fn applies_bridge_normalize_history() {
         })],
         tools: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     })
     .unwrap_err();
     assert!(error.contains("dangling_tool_call"));
@@ -1222,6 +1226,7 @@ fn convert_bridge_input_to_chat_messages_json_basic_user_text() {
         tool_result_fallback_text: None,
         normalize_function_name: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert_eq!(output.messages.len(), 1);
@@ -1300,6 +1305,7 @@ fn convert_bridge_input_preserves_tool_calls_with_content() {
         tool_result_fallback_text: None,
         normalize_function_name: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
     assert!(error.contains("dangling_tool_call"));
@@ -1326,6 +1332,7 @@ fn convert_bridge_input_rejects_missing_tool_call_id() {
         tool_result_fallback_text: None,
         normalize_function_name: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
     assert!(error.contains("missing_tool_call_id"));
@@ -1343,6 +1350,7 @@ fn convert_bridge_input_rejects_orphan_tool_result() {
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
     assert!(error.contains("orphan_tool_result"));
@@ -1357,6 +1365,7 @@ fn build_bridge_history_rejects_dangling_tool_call() {
         })],
         tools: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
     let error = build_bridge_history(input).unwrap_err();
     assert!(error.contains("dangling_tool_call"));
@@ -1371,6 +1380,7 @@ fn build_bridge_history_allows_terminal_pending_tool_call_when_enabled() {
         })],
         tools: None,
         allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
     };
     let output = build_bridge_history(input).unwrap();
     assert_eq!(output.input.len(), 1);
@@ -1401,6 +1411,7 @@ fn build_bridge_history_allows_terminal_pending_tool_call_suffix_when_enabled() 
         ],
         tools: None,
         allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
     };
     let output = build_bridge_history(input).unwrap();
     assert_eq!(output.input.len(), 2);
@@ -1429,6 +1440,7 @@ fn build_bridge_history_still_rejects_non_terminal_pending_tool_call_when_enable
         ],
         tools: None,
         allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
     };
     let error = build_bridge_history(input).unwrap_err();
     assert!(error.contains("dangling_tool_call"));
@@ -1456,6 +1468,7 @@ fn convert_bridge_input_allows_terminal_pending_tool_call_when_enabled() {
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
     };
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert_eq!(output.messages.len(), 1);
@@ -1497,6 +1510,7 @@ fn convert_bridge_input_still_rejects_non_terminal_pending_tool_call_when_enable
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
     };
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
     assert!(error.contains("dangling_tool_call"));
@@ -1523,6 +1537,7 @@ fn convert_bridge_input_allows_function_call_output_before_matching_function_cal
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
     };
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert_eq!(output.messages.len(), 2);
@@ -1575,6 +1590,7 @@ fn convert_bridge_input_rejects_duplicate_function_call_output_after_call_alread
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
     };
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
     assert!(error.contains("orphan_tool_result"));
@@ -1593,6 +1609,7 @@ fn convert_bridge_input_harvests_malformed_assistant_parameter_markup_into_tool_
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
 
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
@@ -1611,6 +1628,7 @@ fn convert_bridge_input_keeps_plain_assistant_text_without_tool_markup() {
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
 
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
@@ -1696,6 +1714,7 @@ fn responses_exec_command_roundtrip_preserves_structured_tool_result() {
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     })
     .unwrap();
 
@@ -1731,6 +1750,7 @@ fn responses_exec_command_roundtrip_preserves_structured_tool_result() {
         messages: chat.messages,
         tools: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     })
     .unwrap();
     let function_output = rebuilt
@@ -1782,6 +1802,7 @@ fn build_bridge_history_strips_tool_message_exec_transcript_wrapper() {
         ],
         tools: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     })
     .unwrap();
 
@@ -1828,6 +1849,7 @@ fn convert_bridge_input_preserves_mixed_media_order() {
         tool_result_fallback_text: None,
         normalize_function_name: None,
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert_eq!(output.messages.len(), 1);
@@ -1873,6 +1895,7 @@ fn convert_bridge_input_responses_reasoning_only_message_restores_assistant_reas
         normalize_function_name: Some("responses".to_string()),
         tool_result_fallback_text: Some(String::new()),
         allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
     })
     .unwrap();
 
@@ -2403,6 +2426,7 @@ fn convert_bridge_input_skips_overlong_responses_function_calls() {
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
         allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
     };
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert!(output.messages.is_empty());

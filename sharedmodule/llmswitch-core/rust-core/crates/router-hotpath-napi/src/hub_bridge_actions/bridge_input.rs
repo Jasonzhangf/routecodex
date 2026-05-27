@@ -568,6 +568,7 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
     let mut future_tool_call_counts: HashMap<String, usize> = HashMap::new();
     let mut deferred_tool_results: HashMap<String, VecDeque<DeferredToolResult>> = HashMap::new();
     let allow_pending_terminal_tool_call = input.allow_pending_terminal_tool_call.unwrap_or(false);
+    let allow_orphan_tool_result = input.allow_orphan_tool_result.unwrap_or(false);
     let fallback_text = input.tool_result_fallback_text.unwrap_or_default();
     let normalize_mode = input
         .normalize_function_name
@@ -856,6 +857,10 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                         call_id: tool_call_id.clone(),
                         message: Value::Object(tool_msg),
                     });
+                continue;
+            }
+            if allow_orphan_tool_result {
+                messages.push(Value::Object(tool_msg));
                 continue;
             }
             return Err(format!(
@@ -1166,6 +1171,9 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
         .values()
         .find_map(|queue| queue.front().cloned())
     {
+        if allow_orphan_tool_result {
+            return Ok(BridgeInputToChatOutput { messages });
+        }
         return Err(format!(
             "orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id: {}",
             first_deferred.call_id

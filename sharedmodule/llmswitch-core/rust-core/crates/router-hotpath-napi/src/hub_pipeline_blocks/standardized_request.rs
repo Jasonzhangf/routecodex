@@ -36,6 +36,13 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
                 tool_result_fallback_text: None,
                 normalize_function_name: Some("responses".to_string()),
                 allow_pending_terminal_tool_call: Some(true),
+                allow_orphan_tool_result: Some(
+                    payload
+                        .get("previous_response_id")
+                        .and_then(|v| v.as_str())
+                        .map(|v| !v.trim().is_empty())
+                        .unwrap_or(false),
+                ),
             })?
             .messages
         } else {

@@ -20,7 +20,7 @@ const ENTRIES: ProviderErrorCatalogEntry[] = [
 
   // recoverable/rate-limit/traffic
   { code: '429.1000', key: 'HTTP_429', class: 'recoverable', aliases: ['HTTP_429'], status: 429, description: 'Short lived rate limit' },
-  { code: '429.2056', key: 'PROVIDER_STATUS_2056', class: 'recoverable', aliases: ['HTTP_429_2056', 'PROVIDER_STATUS_2056', 'provider_status_2056'], status: 429, description: 'Provider business quota/rate status 2056' },
+  { code: '429.2056', key: 'PROVIDER_STATUS_2056', class: 'unrecoverable', aliases: ['HTTP_429_2056', 'PROVIDER_STATUS_2056', 'provider_status_2056'], status: 429, description: 'Provider business quota/rate status 2056' },
   { code: '429.3000', key: 'PROVIDER_TRAFFIC_SATURATED', class: 'recoverable', aliases: ['PROVIDER_TRAFFIC_SATURATED'], status: 429, description: 'Provider saturated' },
 
   // recoverable/http upstream
