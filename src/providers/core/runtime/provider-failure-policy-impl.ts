@@ -355,7 +355,10 @@ export function resolveProviderFailureClassification(args: {
       || reason.includes('usage limit exceeded')
     )
   ) {
-    return 'recoverable';
+    // 2056 = usage limit exceeded (MiniMax). This is a quota exhaustion signal.
+    // Trip the provider with cooldown so the router can switch to alternatives
+    // instead of retrying the same exhausted provider.
+    return 'unrecoverable';
   }
 
   if (

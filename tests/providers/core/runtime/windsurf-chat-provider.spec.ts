@@ -5876,6 +5876,37 @@ print(__import__('json').dumps(checks))
     expect(prompt).toContain('PATCH_APPLIED_OK');
   });
 
+  test('RED: preprocessRequest must project Responses input[] message blocks into chat messages for Windsurf semantic parser', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$responses-input-map', rawType: 'windsurf-devin-token' });
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'run pwd' }],
+          },
+        ],
+      },
+    });
+    expect(Array.isArray(mapped.body.messages)).toBe(true);
+    expect(mapped.body.messages).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'input_text', text: 'run pwd' }],
+      },
+    ]);
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    expect(semantic).toEqual([{ type: 'user', text: 'run pwd' }]);
+    expect(() => (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5.3-codex-medium',
+      [],
+    )).not.toThrow();
+  });
+
   test('RED: Responses submit function_call_output without name still resolves prior unsupported tool name', async () => {
     const provider = createProvider();
     const longOutput = [

@@ -1318,6 +1318,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const req = { ...request } as Record<string, unknown>;
     const body = (req.body as Record<string, unknown>) || req;
 
+    if (!Array.isArray(body.messages) && Array.isArray(body.input)) {
+      body.messages = this.convertResponsesInputToChatMessages(body.input);
+    }
+
     if (Array.isArray(body.tools as unknown[])) {
       const tools = body.tools as Array<Record<string, unknown>>;
       if (tools.length > 0) {
@@ -1341,6 +1345,34 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     if (typeof body.model === 'string' && body.model.length > 0) body.model = mergeReasoningEffortIntoModel(body.model, body);
 
     return req;
+  }
+
+  private convertResponsesInputToChatMessages(input: unknown[]): Array<Record<string, unknown>> {
+    const out: Array<Record<string, unknown>> = [];
+    for (const item of input) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      const rowType = typeof row.type === 'string' ? row.type.trim().toLowerCase() : '';
+      const role = typeof row.role === 'string' ? row.role.trim().toLowerCase() : '';
+
+      if (role === 'user' || role === 'assistant' || role === 'system') {
+        out.push({
+          role,
+          content: row.content,
+          ...(Array.isArray(row.tool_calls) ? { tool_calls: row.tool_calls } : {}),
+        });
+        continue;
+      }
+
+      if (rowType === 'message' && (role === 'user' || role === 'assistant' || role === 'system')) {
+        out.push({
+          role,
+          content: row.content,
+          ...(Array.isArray(row.tool_calls) ? { tool_calls: row.tool_calls } : {}),
+        });
+      }
+    }
+    return out;
   }
 
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
