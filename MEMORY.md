@@ -1654,5 +1654,6 @@ Tags: apply-patch, servertool-followup, responses, MISSING_REQUIRED_TOOL_CALL, 5
   3. `build:dev` + install:global + CLI E2E 可以独立证明安装态通过；若 `routecodex restart` 返回 `No RouteCodex server found on localhost:5555`，则不能把“managed restart 成功”继续当当前态证据。
   4. 进入 Phase E residue 审计时，先以当前仓库为准：计划文档里历史提到的 `virtual-router/health-manager.ts`、`engine/cooldown-manager.ts` 若已不存在，就不能继续把它们当残余 owner；当前真实 second-state residue 已收缩到 `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 与 `src/manager/modules/quota/provider-quota-daemon*.ts` 这一组 quota family 文件。
   5. Phase E 删除应分两刀推进：先切断 host runtime 对 legacy quota backend 的运行时可达性（adapter/daemon-admin 不再注入 legacy backend），再物理删除 `provider-quota-daemon*.ts` 等残余文件；这样能先消除“双真源仍可被运行时命中”的风险，再做文件级清场。
+  6. 当第二刀完成后，`provider-quota-daemon*.ts` 与对应 legacy tests 必须一起物理删除；删除后若定向 host/admin consistency tests + `build:dev/install:global/5555 restart` 仍全绿，说明 host 侧双真源已真正清场，后续唯一剩余 closeout 点就收敛到 `sharedmodule/llmswitch-core/src/quota/quota-manager.ts`。
 
 Tags: virtual-router, quota-health, second-center, same-shape-equivalence, quota-resetat, health-tripped, build-dev, runtime-smoke, 2026-05-27

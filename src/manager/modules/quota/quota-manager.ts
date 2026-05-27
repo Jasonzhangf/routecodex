@@ -10,7 +10,6 @@ import type {
 } from '../../../types/llmswitch-local-types.js';
 import { createCoreQuotaManager } from '../../../modules/llmswitch/bridge.js';
 import { x7eGate } from '../../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
-import { ProviderQuotaDaemonModule } from './provider-quota-daemon.js';
 import type { QuotaManagerAdapter, QuotaViewEntry } from './quota-adapter.js';
 import { loadProviderQuotaSnapshot, saveProviderQuotaSnapshot } from '../../quota/provider-quota-store.js';
 
@@ -266,44 +265,33 @@ async function persistRustQuotaHostSnapshotToStore(
 export class QuotaManagerModule implements ManagerModule {
   readonly id = 'quota';
 
-  private readonly legacyDelegate = new ProviderQuotaDaemonModule();
   private coreManager: CoreQuotaManagerLike | null = null;
-  private useCore = false;
   private context: ManagerContext | null = null;
   private readonly providerQuotaStore = new ProviderQuotaStoreAdapter();
 
   async init(context: ManagerContext): Promise<void> {
     this.context = context;
-    this.useCore = x7eGate.phase1UnifiedQuota;
-    if (this.useCore) {
-      const store = this.providerQuotaStore;
-      const core = (await createCoreQuotaManager({ store })) as CoreQuotaManagerLike | null;
-      this.coreManager = core;
-      const hydratedByRust = await hydrateRustQuotaHostSnapshotFromStore(this.context, store).catch(() => false);
-      if (!hydratedByRust) {
-        await this.coreManager?.hydrateFromStore?.();
-      }
-      return;
+    if (!x7eGate.phase1UnifiedQuota) {
+      throw new Error('legacy quota runtime mode has been removed; enable unified quota (ROUTECODEX_X7E_PHASE_1_UNIFIED_QUOTA=true)');
     }
-    await this.legacyDelegate.init(context);
+    const store = this.providerQuotaStore;
+    const core = (await createCoreQuotaManager({ store })) as CoreQuotaManagerLike | null;
+    this.coreManager = core;
+    const hydratedByRust = await hydrateRustQuotaHostSnapshotFromStore(this.context, store).catch(() => false);
+    if (!hydratedByRust) {
+      await this.coreManager?.hydrateFromStore?.();
+    }
   }
 
   async start(): Promise<void> {
-    if (this.useCore) {
-      return;
-    }
-    await this.legacyDelegate.start();
+    return;
   }
 
   async stop(): Promise<void> {
-    if (this.useCore) {
-      const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
-      if (!persistedByRust) {
-        await this.coreManager?.persistNow?.();
-      }
-      return;
+    const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
+    if (!persistedByRust) {
+      await this.coreManager?.persistNow?.();
     }
-    await this.legacyDelegate.stop();
   }
 
   async updateRoutingScope(_scope?: RoutingProviderScope): Promise<void> {
@@ -311,19 +299,11 @@ export class QuotaManagerModule implements ManagerModule {
   }
 
   async refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
-    if (this.useCore) {
-      const snapshot = this.coreManager?.getSnapshot?.();
-      return {
-        refreshedAt: Date.now(),
-        tokenCount: 0,
-        recordCount: Object.keys(snapshot?.providers ?? {}).length
-      };
-    }
-    const snapshot = this.legacyDelegate.getAdminSnapshot();
+    const snapshot = this.coreManager?.getSnapshot?.();
     return {
       refreshedAt: Date.now(),
       tokenCount: 0,
-      recordCount: Object.keys(snapshot).length
+      recordCount: Object.keys(snapshot?.providers ?? {}).length
     };
   }
 
@@ -332,7 +312,7 @@ export class QuotaManagerModule implements ManagerModule {
   }
 
   getCoreQuotaManager(): CoreQuotaManagerLike | null {
-    return this.useCore ? this.coreManager : null;
+    return this.coreManager;
   }
 
   registerProviderStaticConfig(
@@ -346,105 +326,79 @@ export class QuotaManagerModule implements ManagerModule {
         ? { authType: config.authType as QuotaAuthType }
         : {})
     };
-    if (this.useCore) {
-      this.coreManager?.registerProviderStaticConfig?.(providerKey, normalizedConfig);
-      return;
-    }
-    this.legacyDelegate.registerProviderStaticConfig(providerKey, normalizedConfig);
+    this.coreManager?.registerProviderStaticConfig?.(providerKey, normalizedConfig);
   }
 
-  getQuotaView():
-    | ReturnType<ProviderQuotaDaemonModule['getQuotaView']>
-    | ((providerKey: string) => QuotaViewEntry | null) {
-    if (this.useCore) {
-      return this.getQuotaViewReadOnly();
-    }
-    return this.legacyDelegate.getQuotaView();
+  getQuotaView(): (providerKey: string) => QuotaViewEntry | null {
+    return this.getQuotaViewReadOnly();
   }
 
-  getQuotaViewReadOnly():
-    | ReturnType<ProviderQuotaDaemonModule['getQuotaViewReadOnly']>
-    | ((providerKey: string) => QuotaViewEntry | null) {
-    if (this.useCore) {
-      const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
-      if (rustSnapshot) {
-        return (providerKey: string): QuotaViewEntry | null => {
-          const key = typeof providerKey === 'string' ? providerKey.trim() : '';
-          if (!key) {
-            return null;
-          }
-          const state = rustSnapshot[key];
-          if (!state) {
-            return null;
-          }
-          const nowMs = Date.now();
-          return {
-            providerKey: key,
-            inPool: Boolean(state.inPool),
-            reason: state.reason,
-            priorityTier: state.priorityTier,
-            selectionPenalty: normalizeSelectionPenalty(state, nowMs),
-            lastErrorAtMs: state.lastErrorAtMs,
-            consecutiveErrorCount: state.consecutiveErrorCount,
-            cooldownUntil: state.cooldownUntil,
-            blacklistUntil: state.blacklistUntil,
-            authIssue: state.authIssue,
-            authType: state.authType
-          };
+  getQuotaViewReadOnly(): (providerKey: string) => QuotaViewEntry | null {
+    const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
+    if (rustSnapshot) {
+      return (providerKey: string): QuotaViewEntry | null => {
+        const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+        if (!key) {
+          return null;
+        }
+        const state = rustSnapshot[key];
+        if (!state) {
+          return null;
+        }
+        const nowMs = Date.now();
+        return {
+          providerKey: key,
+          inPool: Boolean(state.inPool),
+          reason: state.reason,
+          priorityTier: state.priorityTier,
+          selectionPenalty: normalizeSelectionPenalty(state, nowMs),
+          lastErrorAtMs: state.lastErrorAtMs,
+          consecutiveErrorCount: state.consecutiveErrorCount,
+          cooldownUntil: state.cooldownUntil,
+          blacklistUntil: state.blacklistUntil,
+          authIssue: state.authIssue,
+          authType: state.authType
         };
-      }
-      return buildReadOnlyQuotaViewFromCore(this.coreManager) ?? (() => null);
+      };
     }
-    return this.legacyDelegate.getQuotaViewReadOnly();
+    return buildReadOnlyQuotaViewFromCore(this.coreManager) ?? (() => null);
   }
 
   getAdminSnapshot(): Record<string, QuotaState> {
-    if (this.useCore) {
-      const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
-      if (rustSnapshot) {
-        return rustSnapshot;
-      }
-      return this.coreManager?.getSnapshot?.()?.providers ?? {};
+    const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
+    if (rustSnapshot) {
+      return rustSnapshot;
     }
-    return this.legacyDelegate.getAdminSnapshot();
+    return this.coreManager?.getSnapshot?.()?.providers ?? {};
   }
 
   async persistNow(): Promise<void> {
-    if (this.useCore) {
-      const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
-      if (!persistedByRust) {
-        await this.coreManager?.persistNow?.();
-      }
-      return;
+    const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
+    if (!persistedByRust) {
+      await this.coreManager?.persistNow?.();
     }
   }
 
   async resetProvider(providerKey: string): Promise<{ providerKey: string; state: unknown } | null> {
-    if (this.useCore) {
-      const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
-      if (typeof rustMutator?.resetProviderQuota === 'function') {
-        await Promise.resolve(rustMutator.resetProviderQuota(providerKey));
-        const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
-        const state = rustSnapshot?.[providerKey] ?? null;
-        return state ? { providerKey, state } : { providerKey, state: null };
-      }
-      return { providerKey, state: null };
+    const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
+    if (typeof rustMutator?.resetProviderQuota === 'function') {
+      await Promise.resolve(rustMutator.resetProviderQuota(providerKey));
+      const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
+      const state = rustSnapshot?.[providerKey] ?? null;
+      return state ? { providerKey, state } : { providerKey, state: null };
     }
-    return await this.legacyDelegate.resetProvider(providerKey);
+    return { providerKey, state: null };
   }
 
   async recoverProvider(providerKey: string): Promise<{ providerKey: string; state: unknown } | null> {
-    if (this.useCore) {
-      const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
-      if (typeof rustMutator?.recoverProviderQuota === 'function') {
-        await Promise.resolve(rustMutator.recoverProviderQuota(providerKey));
-        const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
-        const state = rustSnapshot?.[providerKey] ?? null;
-        return state ? { providerKey, state } : { providerKey, state: null };
-      }
-      return { providerKey, state: null };
+    const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
+    if (typeof rustMutator?.recoverProviderQuota === 'function') {
+      await Promise.resolve(rustMutator.recoverProviderQuota(providerKey));
+      const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
+      const state = rustSnapshot?.[providerKey] ?? null;
+      return state ? { providerKey, state } : { providerKey, state: null };
     }
-    return await this.legacyDelegate.recoverProvider(providerKey);
+    return { providerKey, state: null };
   }
 
   async disableProvider(options: {
@@ -452,16 +406,13 @@ export class QuotaManagerModule implements ManagerModule {
     mode: 'cooldown' | 'blacklist';
     durationMs: number;
   }): Promise<{ providerKey: string; state: unknown } | null> {
-    if (this.useCore) {
-      const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
-      if (typeof rustMutator?.disableProviderQuota === 'function') {
-        await Promise.resolve(rustMutator.disableProviderQuota(options.providerKey, options.mode, options.durationMs));
-        const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
-        const state = rustSnapshot?.[options.providerKey] ?? null;
-        return state ? { providerKey: options.providerKey, state } : { providerKey: options.providerKey, state: null };
-      }
-      return { providerKey: options.providerKey, state: null };
+    const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
+    if (typeof rustMutator?.disableProviderQuota === 'function') {
+      await Promise.resolve(rustMutator.disableProviderQuota(options.providerKey, options.mode, options.durationMs));
+      const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
+      const state = rustSnapshot?.[options.providerKey] ?? null;
+      return state ? { providerKey: options.providerKey, state } : { providerKey: options.providerKey, state: null };
     }
-    return await this.legacyDelegate.disableProvider(options);
+    return { providerKey: options.providerKey, state: null };
   }
 }

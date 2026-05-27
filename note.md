@@ -12299,3 +12299,42 @@ Using skills: coding-principals + rcc-dev-skills
   - `tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts`
   - `tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
   - 结果：`4 suites / 12 tests` 全绿。
+
+## 2026-05-27 Phase E 第二刀：legacy quota daemon family 已物理删除
+- 继续沿着第一刀的唯一修改点推进：既然 host runtime 与 daemon-admin runtime 都已不再命中 legacy backend，那么 `provider-quota-daemon*.ts` 已经失去生产可达性，下一步唯一正确动作就是物理删除，而不是继续闲置。
+- 本轮已完成：
+  - `src/manager/modules/quota/quota-manager.ts`
+    - 删除 `legacyDelegate`
+    - 删除 phase1=false 旧路径，改为 fail-fast：legacy quota runtime mode 已移除
+    - 收缩为 Rust-only host hydration/persistence/query bridge
+  - `src/manager/modules/quota/index.ts`
+    - 删除 `ProviderQuotaDaemonModule` 导出
+  - 物理删除：
+    - `src/manager/modules/quota/provider-quota-daemon.ts`
+    - `src/manager/modules/quota/provider-quota-daemon.events.ts`
+    - `src/manager/modules/quota/provider-quota-daemon.snapshot.ts`
+    - `src/manager/modules/quota/provider-quota-daemon.view.ts`
+    - `src/manager/modules/quota/provider-quota-daemon.cooldown.ts`
+    - `src/manager/modules/quota/provider-quota-daemon.model-backoff.ts`
+    - `src/manager/modules/quota/provider-quota-daemon.error-helpers.ts`
+  - 同步物理删除对应 legacy tests：
+    - `tests/manager/quota/provider-quota-daemon-module.spec.ts`
+    - `tests/manager/modules/quota/provider-quota-daemon.events.google-verify.spec.ts`
+    - `tests/manager/modules/quota/provider-quota-daemon.events.windsurf-weekly.spec.ts`
+    - `tests/manager/modules/quota/provider-quota-daemon.snapshot.windsurf-weekly.spec.ts`
+- 删除后剩余真实 residue 已进一步收敛到：
+  - `sharedmodule/llmswitch-core/src/quota/quota-manager.ts`
+  - 也就是 sharedmodule 内仍有一个活跃 TS quota state owner，需要后续继续 Rust-only closeout。
+- 定向验证：
+  - `tests/manager/quota/quota-manager-module.spec.ts`
+  - `tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts`
+  - `tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts`
+  - `tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
+  - `tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
+  - `tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
+  - 结果：`6 suites / 15 tests` 全绿
+- 构建/安装/运行时验证：
+  - `npm run build:dev` 通过
+  - `install:global` 通过
+  - 全局 CLI E2E 通过
+  - `routecodex restart` 成功命中 `localhost:5555`
