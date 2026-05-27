@@ -12234,3 +12234,23 @@ Using skills: coding-principals + rcc-dev-skills
 - 唯一正确性:
   - 如果把这个 failure 误判成 second center 残留去动实现，会在错误真源上改代码；
   - 真正唯一修改点是测试基线隔离：换成唯一 providerKey，让 completion audit 比的是“干净 Rust-only vs TS-poisoned”等价性，而不是历史持久化噪声。
+
+## 2026-05-27 completion audit 再校正：quota resetAt multi-key baseline 的 health=healthy 断言已过时
+- 单独复现 `tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts` 后确认：当前 Rust 真相不是“quotaDepleted 时 health 仍必须 healthy”，而是 `quota freeze + health.tripped` 可以并存。
+- 真正必须守护的 invariant 是：
+  1. 只冻结当前 providerKey；
+  2. sibling key 仍可选；
+  3. route 会改到 sibling；
+  4. quota snapshot 记录 `reason=quotaDepleted/resetAt`。
+- 因此该 spec 原先把 `providerAState.state='healthy'` 写死属于过时断言，不是主链回退。
+- 唯一正确修正是把断言改成当前 Rust 真实语义：`providerAState.state='tripped'` 且 `failureCount>0`，同时继续锁 providerKey 隔离与 reroute 到 sibling。
+
+## 2026-05-27 full Rust gate blocker：health aggressive-ban threshold 内测失败
+- full Rust gate `cargo test -p router-hotpath-napi virtual_router_engine -- --nocapture` 当前唯一失败是：`virtual_router_engine::health::tests::test_aggressive_ban_auto_trip_on_threshold`。
+- 现象：测试期望 cooldown TTL 为 `93_000ms`，实际返回 `1_803_000ms`，说明 health.rs 的 429/aggressive-ban 策略与现测试叙事已发生漂移。
+- 下一步：直接在 Rust `health.rs` 定位 `record_http_429_failure` / aggressive-ban 阈值升级逻辑，确认是实现错还是测试错；禁止去改 TS/Host，因为 blocker 已收敛到 Rust 真源单点。
+
+## 2026-05-27 full Rust gate blocker closeout：aggressive-ban threshold 失败来自旧测试叙事，不是主链实现回退
+- 复核 `health.rs` 后确认：`record_failure()` 当前策略是“达到 failure_threshold 后进入固定 `DEFAULT_COOLDOWN_MS` 冷却”，并不存在“第三次失败 cooldown 自动按 3x 放大到 90_000ms”的实现。
+- 因而 `test_aggressive_ban_auto_trip_on_threshold` 原断言 `90_000ms` 属于过时测试叙事；当前真实语义是固定 cooldown window。
+- 唯一正确修改点是 Rust 内测断言本身：改为比较 `DEFAULT_COOLDOWN_MS`，而不是去改 health 真源实现迎合旧测试。

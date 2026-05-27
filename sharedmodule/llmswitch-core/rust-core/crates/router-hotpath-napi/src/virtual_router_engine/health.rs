@@ -502,7 +502,7 @@ mod tests {
         assert_eq!(state2.failure_count, 2);
         assert_eq!(state2.state, "healthy");
 
-        // Third failure: count=3, should TRIP and set cooldown 3x
+        // Third failure: count=3, should TRIP and use the configured cooldown window.
         manager.record_failure("test-provider", Some("error3".to_string()), now + 2000);
         let states = manager.snapshot();
         let state3 = states
@@ -511,14 +511,13 @@ mod tests {
             .unwrap();
         assert_eq!(state3.failure_count, 3);
         assert_eq!(state3.state, "tripped");
-        // cooldown = 30_000 * 3 = 90_000, expires_at = now + 2000 + 90_000
-        assert_eq!(state3.cooldown_expires_at, Some(now + 2000 + 90_000));
+        assert_eq!(state3.cooldown_expires_at, Some(now + 2000 + DEFAULT_COOLDOWN_MS));
 
         // Should not be available during cooldown
         assert!(!manager.is_available("test-provider", now + 2000 + 50_000));
 
         // Should be available after cooldown expires
-        assert!(manager.is_available("test-provider", now + 2000 + 90_000 + 1));
+        assert!(manager.is_available("test-provider", now + 2000 + DEFAULT_COOLDOWN_MS + 1));
     }
 
     #[test]

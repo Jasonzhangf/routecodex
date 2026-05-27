@@ -1647,3 +1647,10 @@ Tags: windsurf, 502, trajectory, errorText, WindsurfAPI-parity, no-retry-fix, 20
 
 - 2026-05-23: `apply_patch_flow` servertool followup 的 `MISSING_REQUIRED_TOOL_CALL` 502 根因是 `/v1/responses` nested followup 仍带 messages-only shape / stale requestSemantics，host contract 把 tool-result followup 误判为 required tool-call turn。唯一修复点在 `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts` 的 nested input 构造：responses followup 必须先 normalize 成 input shape，并基于 normalized `function_call_output` 同步 `toolOutputs` 到 body semantics 与 metadata requestSemantics；不是 provider/retry 问题。
 Tags: apply-patch, servertool-followup, responses, MISSING_REQUIRED_TOOL_CALL, 502, requestSemantics, 2026-05-23
+
+- 2026-05-27: Virtual Router unified quota/health closeout 审计新增两条可复用真相：
+  1. `same-shape Rust-only vs TS-poisoned equivalence` 才是 quotaView/second-center closeout 的正确 invariant；不要把“固定选 providerA”或“health 必须看起来 healthy”写成回归真相。
+  2. `QUOTA_DEPLETED + resetAt` 的 multi-key 场景下，当前 Rust 真相允许 `quota freeze + health.tripped` 并存；真正要锁的是 providerKey 隔离、quota snapshot 正确、route 改到 sibling，而不是把 providerA health 强写成 healthy。
+  3. `build:dev` + install:global + CLI E2E 可以独立证明安装态通过；若 `routecodex restart` 返回 `No RouteCodex server found on localhost:5555`，则不能把“managed restart 成功”继续当当前态证据。
+
+Tags: virtual-router, quota-health, second-center, same-shape-equivalence, quota-resetat, health-tripped, build-dev, runtime-smoke, 2026-05-27
