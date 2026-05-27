@@ -21,6 +21,11 @@ fn get_message_role(message: &Value) -> Option<String> {
 }
 
 fn get_responses_context_input(request: &Value) -> Vec<Value> {
+    if let Some(input) = request.get("input").and_then(|v| v.as_array()) {
+        if !input.is_empty() {
+            return input.clone();
+        }
+    }
     request
         .get("semantics")
         .and_then(|v| v.get("responses"))
@@ -155,6 +160,9 @@ fn get_responses_message_role(entry: &Value) -> Option<String> {
 
 fn get_responses_entry_role(entry: &Value) -> Option<String> {
     let entry_type = get_responses_entry_type(entry);
+    if entry_type == "input_text" || entry_type == "text" || entry_type == "output_text" {
+        return Some("user".to_string());
+    }
     if entry_type == "message" {
         return get_responses_message_role(entry);
     }
@@ -171,7 +179,16 @@ fn get_responses_entry_role(entry: &Value) -> Option<String> {
 }
 
 fn get_responses_context_message(entry: &Value, role: &str) -> Option<Value> {
-    if get_responses_entry_type(entry) != "message" {
+    let entry_type = get_responses_entry_type(entry);
+    if entry_type == "input_text" || entry_type == "text" || entry_type == "output_text" {
+        let text = entry
+            .as_object()
+            .and_then(|obj| obj.get("text"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        return Some(json!({ "role": role, "content": text }));
+    }
+    if entry_type != "message" {
         return None;
     }
     let content = entry.get("content")?;
@@ -858,6 +875,42 @@ mod tests {
             features.last_assistant_tool_category.as_deref(),
             Some("search")
         );
+    }
+
+    #[test]
+    fn responses_input_latest_user_turn_overrides_historical_semantics_continuation() {
+        let request = json!({
+            "model": "gpt-5.4",
+            "input": [
+                { "type": "input_text", "text": "现在解释一下这段日志，不要改代码" }
+            ],
+            "semantics": {
+                "responses": {
+                    "context": {
+                        "input": [
+                            { "type": "message", "role": "user", "content": "改一下文件" },
+                            {
+                                "type": "function_call",
+                                "id": "call_patch_1",
+                                "name": "apply_patch",
+                                "arguments": "{\"filePath\":\"a.ts\",\"patch\":\"-a\\n+b\"}"
+                            },
+                            {
+                                "type": "function_call_output",
+                                "call_id": "call_patch_1",
+                                "output": "ok"
+                            }
+                        ]
+                    }
+                }
+            }
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(features.latest_message_from_user);
+        assert_eq!(features.user_text_sample, "现在解释一下这段日志，不要改代码");
+        assert!(!features.has_tool_call_responses);
+        assert_eq!(features.last_assistant_tool_category, None);
     }
 
     #[test]
