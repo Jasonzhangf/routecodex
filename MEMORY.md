@@ -1652,5 +1652,6 @@ Tags: apply-patch, servertool-followup, responses, MISSING_REQUIRED_TOOL_CALL, 5
   1. `same-shape Rust-only vs TS-poisoned equivalence` 才是 quotaView/second-center closeout 的正确 invariant；不要把“固定选 providerA”或“health 必须看起来 healthy”写成回归真相。
   2. `QUOTA_DEPLETED + resetAt` 的 multi-key 场景下，当前 Rust 真相允许 `quota freeze + health.tripped` 并存；真正要锁的是 providerKey 隔离、quota snapshot 正确、route 改到 sibling，而不是把 providerA health 强写成 healthy。
   3. `build:dev` + install:global + CLI E2E 可以独立证明安装态通过；若 `routecodex restart` 返回 `No RouteCodex server found on localhost:5555`，则不能把“managed restart 成功”继续当当前态证据。
+  4. 进入 Phase E residue 审计时，先以当前仓库为准：计划文档里历史提到的 `virtual-router/health-manager.ts`、`engine/cooldown-manager.ts` 若已不存在，就不能继续把它们当残余 owner；当前真实 second-state residue 已收缩到 `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 与 `src/manager/modules/quota/provider-quota-daemon*.ts` 这一组 quota family 文件。
 
 Tags: virtual-router, quota-health, second-center, same-shape-equivalence, quota-resetat, health-tripped, build-dev, runtime-smoke, 2026-05-27

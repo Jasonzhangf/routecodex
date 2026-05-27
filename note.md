@@ -12254,3 +12254,27 @@ Using skills: coding-principals + rcc-dev-skills
 - 复核 `health.rs` 后确认：`record_failure()` 当前策略是“达到 failure_threshold 后进入固定 `DEFAULT_COOLDOWN_MS` 冷却”，并不存在“第三次失败 cooldown 自动按 3x 放大到 90_000ms”的实现。
 - 因而 `test_aggressive_ban_auto_trip_on_threshold` 原断言 `90_000ms` 属于过时测试叙事；当前真实语义是固定 cooldown window。
 - 唯一正确修改点是 Rust 内测断言本身：改为比较 `DEFAULT_COOLDOWN_MS`，而不是去改 health 真源实现迎合旧测试。
+
+## 2026-05-27 completion audit 补硬证：10-file focused 当前态一次性全绿
+- 已重新执行完整 focused 集合：
+  - `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-health-last-provider.spec.ts`
+  - `tests/servertool/virtual-router-quota-health-override.spec.ts`
+  - `tests/server/runtime/http-server/request-executor.spec.ts`
+  - `tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts`
+  - `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-last-provider-quota-resetat-native.spec.ts`
+- 当前态结果：`10 suites / 56 tests` 一次性全绿。
+- 尾部仍有 Jest open handles 提示，但不影响本轮 focused 断言结果；它是测试进程清理问题，不是 quota/health 主链语义回退。
+
+## 2026-05-27 completion audit residue inventory：真实 TS second-state owner 已收缩到 quota family
+- 计划文档里提到的 `sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.ts` 与 `.../engine/cooldown-manager.ts` 当前仓库并不存在，不能再把它们当 residue owner。
+- 当前逐文件判定：
+  - `sharedmodule/llmswitch-core/src/quota/quota-manager.ts`：仍是活跃 TS quota state owner；内部还维护 `states` / `onProviderError` / `onProviderSuccess` / `getQuotaView`。
+  - `src/manager/modules/quota/quota-manager.ts`：以 Rust host snapshot / mutator 为主的 host hydration/persistence 桥接壳，但仍带 core snapshot fallback 与 legacy delegate 分支。
+  - `src/manager/modules/quota/quota-adapter.ts`：daemon-admin / control handler 的 mutation/query 桥；unified path 直接调 Rust mutator，但 legacy backend 分支还在。
+  - `src/manager/modules/quota/provider-quota-daemon*.ts`：legacy quota daemon 第二状态机残余；仍维护 quotaStates、error event → quota state 映射、view 投影与 snapshot 迁移。
+- 结论：当前 closeout 的剩余主工作已不是再修 Rust route decision，而是 Phase E 对上述 quota family residue 的物理删除/彻底壳化。
