@@ -45,9 +45,15 @@ function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerAdapter |
   const coreLike = quotaModule && typeof (quotaModule as any).getCoreQuotaManager === 'function'
     ? (quotaModule as any).getCoreQuotaManager()
     : null;
+  const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
+  const getVirtualRouter = hubPipeline && typeof hubPipeline === 'object'
+    ? (hubPipeline as { getVirtualRouter?: () => unknown | null }).getVirtualRouter
+    : null;
+  const virtualRouter = typeof getVirtualRouter === 'function' ? getVirtualRouter() : null;
 
   return createQuotaManagerAdapter({
     coreManager: coreLike,
+    rustHostMutator: virtualRouter && typeof virtualRouter === 'object' ? (virtualRouter as any) : null,
     quotaRoutingEnabled: true
   });
 }

@@ -89,18 +89,14 @@ export function createQuotaManagerAdapter(options: {
   const core = options.coreManager;
   const rustHostMutator = options.rustHostMutator ?? null;
   const hasCore = core !== null && x7eGate.phase1UnifiedQuota;
-  const backend: 'core' | 'none' = hasCore ? 'core' : 'none';
+  const backend: 'rust' | 'none' = hasCore ? 'rust' : 'none';
   const quotaRoutingEnabled = options.quotaRoutingEnabled !== false;
 
   // Track provider static configs for bootstrap
   const staticConfigRegistry = new Map<string, StaticQuotaConfig>();
 
   async function init(): Promise<void> {
-    if (hasCore && core?.hydrateFromStore) {
-      await core.hydrateFromStore().catch((error) => {
-        logQuotaAdapterNonBlockingError('hydrateFromStore', error);
-      });
-    }
+    return;
   }
 
   async function start(): Promise<void> {
@@ -109,11 +105,7 @@ export function createQuotaManagerAdapter(options: {
   }
 
   async function stop(): Promise<void> {
-    if (hasCore && core?.persistNow) {
-      await core.persistNow().catch((error) => {
-        logQuotaAdapterNonBlockingError('persistNow(stop)', error);
-      });
-    }
+    return;
   }
 
   async function disableProvider(options: {
@@ -129,7 +121,7 @@ export function createQuotaManagerAdapter(options: {
     const mode = options.mode;
     const durationMs = options.durationMs;
 
-    if (backend === 'core') {
+    if (backend === 'rust') {
       if (typeof rustHostMutator?.disableProviderQuota === 'function') {
         await Promise.resolve(rustHostMutator.disableProviderQuota(providerKey, mode, durationMs));
         return { ok: true, providerKey, mode, source: 'rust' };
@@ -145,7 +137,7 @@ export function createQuotaManagerAdapter(options: {
       return { ok: false, reason: 'quota_routing_disabled' };
     }
 
-    if (backend === 'core') {
+    if (backend === 'rust') {
       if (typeof rustHostMutator?.recoverProviderQuota === 'function') {
         await Promise.resolve(rustHostMutator.recoverProviderQuota(providerKey));
         return { ok: true, providerKey, source: 'rust' };
@@ -161,7 +153,7 @@ export function createQuotaManagerAdapter(options: {
       return { ok: false, reason: 'quota_routing_disabled' };
     }
 
-    if (backend === 'core') {
+    if (backend === 'rust') {
       if (typeof rustHostMutator?.resetProviderQuota === 'function') {
         await Promise.resolve(rustHostMutator.resetProviderQuota(providerKey));
         return { ok: true, providerKey, source: 'rust' };
@@ -195,7 +187,7 @@ export function createQuotaManagerAdapter(options: {
       return { ok: false, reason: 'providerKey_and_quota_required' };
     }
 
-    if (backend === 'core') {
+    if (backend === 'rust') {
       if (quota > 0 && typeof rustHostMutator?.recoverProviderQuota === 'function') {
         await Promise.resolve(rustHostMutator.recoverProviderQuota(providerKey));
         return { ok: true, providerKey, quota, inPool: true, reason: 'active', source: 'rust' };
@@ -217,15 +209,7 @@ export function createQuotaManagerAdapter(options: {
 
     staticConfigRegistry.set(providerKey, config);
 
-    if (backend === 'core' && core?.registerProviderStaticConfig) {
-      try {
-        core.registerProviderStaticConfig(providerKey, config);
-      } catch (error) {
-        logQuotaAdapterNonBlockingError(`registerProviderStaticConfig:${providerKey}`, error);
-      }
-      return;
-    }
-
+    return;
   }
 
   function recordProviderUsage(event: { providerKey: string; requestedTokens?: number | null; timestampMs?: number }): void {
@@ -233,12 +217,7 @@ export function createQuotaManagerAdapter(options: {
       return;
     }
 
-    if (backend === 'core') {
-      // Core handles usage internally via success/error events
-      // This hook is for explicit usage tracking if needed
-      return;
-    }
-
+    return;
   }
 
 
@@ -289,7 +268,7 @@ export function createQuotaManagerAdapter(options: {
       return () => null;
     }
 
-    if (backend === 'core') {
+    if (backend === 'rust') {
       const rustSnapshot = readRustHostSnapshot();
       if (rustSnapshot) {
         return (providerKey: string) => {
@@ -332,7 +311,6 @@ export function createQuotaManagerAdapter(options: {
           };
         };
       }
-
     }
 
     return () => null;
@@ -341,15 +319,14 @@ export function createQuotaManagerAdapter(options: {
   function getAdminSnapshot(): Record<string, QuotaViewEntry> {
     const result: Record<string, QuotaViewEntry> = {};
 
-    if (backend === 'core') {
+    if (backend === 'rust') {
       const rustSnapshot = readRustHostSnapshot();
       if (rustSnapshot) {
         return rustSnapshot;
       }
     }
 
-    // Prefer core snapshot
-    if (backend === 'core' && core?.getSnapshot) {
+    if (backend === 'rust' && core?.getSnapshot) {
       const snap = core.getSnapshot();
       if (snap && typeof snap === 'object') {
         const providers = (snap as Record<string, unknown>).providers;
@@ -390,7 +367,7 @@ export function createQuotaManagerAdapter(options: {
 
   return {
     get isUnified() {
-      return backend === 'core';
+      return backend === 'rust';
     },
     init,
     start,

@@ -12338,3 +12338,17 @@ Using skills: coding-principals + rcc-dev-skills
   - `install:global` 通过
   - 全局 CLI E2E 通过
   - `routecodex restart` 成功命中 `localhost:5555`
+
+## 2026-05-27 Phase E 延续：quota-adapter 收口到 Rust host mutator 优先
+- 目标：继续压缩 TS quota 第二决策中心，确保 daemon-admin 读写路径优先走 Rust host snapshot/mutator，不再默认从 adapter 内部缺失 rustMutator。
+- 本轮改动：
+  - `src/server/runtime/http-server/daemon-admin/quota-handler.ts`
+    - `getQuotaModule()` 注入 `rustHostMutator`（来自 `hubPipeline.getVirtualRouter()`）到 `createQuotaManagerAdapter(...)`。
+    - 使 `/quota/providers`、reset/recover/disable 相关 adapter 操作在 unified 模式下直接对齐 Rust host contract。
+  - `src/manager/modules/quota/quota-adapter.ts`
+    - backend 判定收敛为 unified + core 可用时启用 rust 路径；mutate 仅走 rust mutator（无 legacy fallback）。
+    - read/admin snapshot 读取顺序保持：Rust host snapshot 优先；若测试环境未提供 host mutator，则回读 core snapshot（仅 bridge 读取壳，不引入第二策略中心）。
+- 验证：
+  - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
+  - 结果：`6 suites / 15 tests` 全绿。
+- 结论：daemon-admin quota host surface 已优先 Rust 真源；TS core snapshot 仅作为无 rust mutator 的测试桥接读壳。
