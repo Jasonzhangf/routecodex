@@ -368,7 +368,8 @@ describe('QuotaManagerModule', () => {
 
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
     const mod = new QuotaManagerModule();
-    await expect(mod.init({ serverId: 'test' })).rejects.toThrow(
+    await mod.init({ serverId: 'test' });
+    await expect(mod.start()).rejects.toThrow(
       'unified quota requires hubPipeline virtual router quota host mutator'
     );
   });

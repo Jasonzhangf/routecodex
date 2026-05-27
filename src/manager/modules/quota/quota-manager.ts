@@ -266,27 +266,46 @@ export class QuotaManagerModule implements ManagerModule {
 
   private context: ManagerContext | null = null;
   private readonly providerQuotaStore = new ProviderQuotaStoreAdapter();
+  private rustQuotaHostReady = false;
+
+  private async ensureRustQuotaHostHydrated(): Promise<boolean> {
+    if (this.rustQuotaHostReady) {
+      return true;
+    }
+    if (!getRustQuotaHostMutatorFromContext(this.context)) {
+      return false;
+    }
+    const hydratedByRust = await hydrateRustQuotaHostSnapshotFromStore(this.context, this.providerQuotaStore).catch(
+      () => false
+    );
+    if (!hydratedByRust) {
+      return false;
+    }
+    this.rustQuotaHostReady = true;
+    return true;
+  }
 
   async init(context: ManagerContext): Promise<void> {
     this.context = context;
     if (!x7eGate.phase1UnifiedQuota) {
       throw new Error('legacy quota runtime mode has been removed; enable unified quota (ROUTECODEX_X7E_PHASE_1_UNIFIED_QUOTA=true)');
     }
-    const store = this.providerQuotaStore;
-    if (!getRustQuotaHostMutatorFromContext(this.context)) {
-      throw new Error('unified quota requires hubPipeline virtual router quota host mutator');
-    }
-    const hydratedByRust = await hydrateRustQuotaHostSnapshotFromStore(this.context, store).catch(() => false);
-    if (!hydratedByRust) {
-      throw new Error('unified quota rust host hydrate contract unavailable');
-    }
+    // Hub pipeline may not be initialized during daemon module init.
+    // Defer hydration until start/runtime readiness when mutator becomes available.
+    await this.ensureRustQuotaHostHydrated();
   }
 
   async start(): Promise<void> {
+    if (!(await this.ensureRustQuotaHostHydrated())) {
+      throw new Error('unified quota requires hubPipeline virtual router quota host mutator');
+    }
     return;
   }
 
   async stop(): Promise<void> {
+    if (!(await this.ensureRustQuotaHostHydrated())) {
+      return;
+    }
     const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
     if (!persistedByRust) {
       throw new Error('unified quota rust host persist contract unavailable');
@@ -373,6 +392,9 @@ export class QuotaManagerModule implements ManagerModule {
   }
 
   async persistNow(): Promise<void> {
+    if (!(await this.ensureRustQuotaHostHydrated())) {
+      throw new Error('unified quota requires hubPipeline virtual router quota host mutator');
+    }
     const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
     if (!persistedByRust) {
       throw new Error('unified quota rust host persist contract unavailable');
