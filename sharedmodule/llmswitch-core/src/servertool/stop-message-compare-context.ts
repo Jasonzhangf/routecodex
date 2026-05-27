@@ -1,26 +1,5 @@
 import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtime-metadata.js';
-
-export interface StopMessageCompareContext {
-  armed: boolean;
-  mode: 'off' | 'on' | 'auto';
-  allowModeOnly: boolean;
-  textLength: number;
-  maxRepeats: number;
-  used: number;
-  remaining: number;
-  active: boolean;
-  stopEligible: boolean;
-  hasCapturedRequest: boolean;
-  compactionRequest: boolean;
-  hasSeed: boolean;
-  decision: 'trigger' | 'skip';
-  reason: string;
-  stage?: string;
-  bdWorkState?: string;
-  observationHash?: string;
-  observationStableCount?: number;
-  toolSignatureHash?: string;
-}
+import type { StopMessageCompareContext } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
 
 const STOP_MESSAGE_COMPARE_KEY = 'stopMessageCompareContext';
 

@@ -38,6 +38,28 @@ export interface BudgetDecision {
   max_repeats: number;
 }
 
+export interface StopMessageCompareContext {
+  armed: boolean;
+  mode: 'off' | 'on' | 'auto';
+  allowModeOnly: boolean;
+  textLength: number;
+  maxRepeats: number;
+  used: number;
+  remaining: number;
+  active: boolean;
+  stopEligible: boolean;
+  hasCapturedRequest: boolean;
+  compactionRequest: boolean;
+  hasSeed: boolean;
+  decision: 'trigger' | 'skip';
+  reason: string;
+  stage?: string;
+  bdWorkState?: string;
+  observationHash?: string;
+  observationStableCount?: number;
+  toolSignatureHash?: string;
+}
+
 export interface BudgetSnapshot {
   text: string;
   max_repeats: number;
