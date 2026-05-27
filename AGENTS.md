@@ -39,3 +39,10 @@
 ## 维护原则
 - 本文件保持短小：只保留入口、护栏、路径。
 - 细节写到 `docs/agent-routing/*` 或技能文档，不回灌本文件。
+
+## 当日事实更新（2026-05-27）
+1. 5555 主备问题当前已证实：Rust Virtual Router 的 priority 选路语义正常；“主 provider 未命中”优先排查 health/quota/runtime init 状态，不先改 selection。
+2. provider health 的 `__http_503_daily_cooldown__` 为 persisted 状态（canonical key 生效，`key1 -> 1`）；启动后应先重新校验可恢复性，若首个真实请求仍不可恢复（如 503）则再次冷却。
+3. 启动排障必须区分：`checkHealth=false`、`VR success hook 不可用`、`success 后再次失败重写冷却` 三个分支；不得混为“路由器错误”。
+4. 本项目该类问题调试先看 `.agents/skills/rcc-dev-skills/SKILL.md` 的“2026-05-27 调试精华（5555 主备/health/stopless）”章节，再执行改动。
+5. 错误处理主链真相：provider/local error 先归一到 `src/providers/core/runtime/provider-error-catalog.ts`，再进入 `provider-failure-policy-impl.ts` 分类；`request-retry-helpers` / `request-executor-retry-decision` / `request-executor-session-storm-backoff` / `retry-engine` 只消费统一码与分类结果，禁止新增 message-only 分叉。

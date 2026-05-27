@@ -117,6 +117,43 @@ codes = ["0.1000", "0.2000", "0.6000"]
 - `src/providers/core/api/provider-types.ts` — `ProviderRuntimeProfile.autoRetry` 类型定义
 - `src/providers/core/runtime/base-provider.ts` — `sendRequest()` catch 块中自动重试拦截逻辑
 
+## 2026-05-27 调试精华（5555 主备/health/stopless）
+
+1. 先黑盒后改代码（强制）
+- 先用 Rust 真源黑盒测试锁语义，再改实现；不要先在线乱试。
+- 本次有效黑盒：
+  - `persisted_503_daily_cooldown_is_cleared_by_provider_success_and_not_reimported`
+  - `priority_pool_picks_primary_provider_when_both_available`
+  - `priority_pool_falls_back_to_backup_when_primary_in_health_cooldown`
+- 结论：VR priority 选择器语义正常；“主不命中”先查外部状态（health/quota/runtime init），不是先改 selection。
+
+2. 503 持久冷却语义（已验证）
+- `provider-health.json` 的 `__http_503_daily_cooldown__` 是 persisted 状态，按 provider canonical key（`key1 -> 1`）生效。
+- 启动时必须重新校验：允许先恢复；若首个真实请求仍是不可恢复错误（如 503），再次进入冷却（重新拉黑），而不是沿用旧状态直接永封。
+
+3. 启动重探测（startup reprobe）排障顺序
+- 先区分三类分支再下结论：
+  1) `checkHealth()` 返回 false；
+  2) `handleProviderSuccess` hook 不可用（VR 未就绪）；
+  3) success 已发出但被后续错误重新写回冷却。
+- 未分支前，禁止把“仍命中备份”直接归因到路由器。
+
+4. 会话目录与 health 文件定位
+- server-scoped session dir 是主真源：`ROUTECODEX_SESSION_DIR` / `sessions/<serverId>/provider-health.json`。
+- 排障必须同时核对 server-scoped 与根 `sessions/provider-health.json`，避免误删错路径或读错文件。
+
+5. 配置与路由池排查要点（5555）
+- 先核对 `routingPolicyGroup` 实际 targets 顺序，再核对 provider runtime 可用集与初始化结果。
+- 若“第一跳直接备份”，先查：
+  - provider health 持久态；
+  - provider init/health probe 失败；
+  - runtime key 映射是否命中可用 handle；
+  - quota/blacklist 是否把主 provider 挡掉。
+
+6. stopless/stop_message 约束（复盘）
+- 默认开启不等于无条件触发；必须有 followup 上下文且 finish_reason 条件正确。
+- 禁止任何“把非 stop 改成 stop”的语义改写（仅允许既定例外：text harvest；stop -> tool_calls）。
+
 
 ## Windsurf 对齐固定参考（2026-05-21，强制）
 
@@ -1269,3 +1306,75 @@ codes = ["0.1000", "0.2000", "0.6000"]
 - Responses retention cleanup（2026-05-23）：`retainedInputItems` 与 `pendingNoResponseId` 同步增长时，唯一先查 `handler-response-utils.ts` 在拿到 client `resp_*` 后是否清掉 superseded router/provider requestId；释放 payload 只能保留工具定义与 pending tool-call ids 摘要，禁止保留完整 input prefix 伪装指标下降。
 - Windsurf RCC text-tool typed args（2026-05-23）：若 unsupported tool 经 RCC fence 后工具层报 `plan expected sequence` / 参数类型错，先查 `windsurf-chat-provider.ts` harvester 是否按 JSON schema 还原 array/object/boolean/number；禁止把所有 `<|RCC|parameter>` 都当 string。guidance 必须列出所有 required 参数，不能只示例第一个。
 - apply_patch samples 排查（2026-05-23）：若 codex-samples 里反复 `APPLY_PATCH_ERROR`，先看 provider-request history 是否有 synthetic `__APPLY_PATCH_ERROR__` tool_call；真源可能是 response governance 生成旧 `{input,patch}` guard + request inbound 未剪历史。当前 schema `{filePath,patch}` 必须原样保留，不能被归一成旧 `{input,patch}`。
+
+## Provider 错误统一码表与归一化指引（2026-05-27）
+
+### 目标（先统一后分类）
+- 所有 provider 原始错误（status/code/upstreamCode/message）必须先归一到统一错误码，再进入分类（recoverable/unrecoverable/special_400）与健康/重试/冷却状态机。
+- 禁止下游模块（retry/quota/http mapper/followup）再次按 message 临时猜测分支。
+
+### 已知错误表（v1 基线）
+
+#### A. 认证/权限/模型类（默认不可恢复，1 次进入长冷却）
+- `INVALID_API_KEY`
+- `INVALID_ACCESS_TOKEN`
+- `ACCESS_DENIED`
+- `FORBIDDEN`
+- `INSUFFICIENT_QUOTA`
+- `ACCOUNT_DISABLED`
+- `ACCOUNT_SUSPENDED`
+- `MODEL_NOT_SUPPORTED`
+- `MODEL_DISABLED`
+- `NO_SUCH_MODEL`
+
+#### B. 限流/容量/上游拥塞（可恢复，按连续计数策略）
+- `HTTP_429`
+- `HTTP_429_2056`
+- `PROVIDER_TRAFFIC_SATURATED`
+- `provider_status_2056`（上游业务码，常见于 usage limit exceeded）
+- `DAILY_LIMIT_EXCEEDED` / `daily usage limit exceeded`（429 日额度耗尽语义）
+
+#### C. 上游可恢复服务错误（可恢复）
+- `HTTP_500`
+- `HTTP_502`
+- `HTTP_503`
+- `HTTP_504`
+- `UPSTREAM_EMPTY_OUTPUT`
+
+#### D. 协议/解码类（可恢复，默认归入 provider 解码失败族）
+- `SSE_DECODE_ERROR`
+- `SSE_TO_JSON_ERROR`
+- `UPSTREAM_STREAM_TERMINATED`
+- `UPSTREAM_STREAM_INCOMPLETE`
+- `UPSTREAM_STREAM_TIMEOUT`
+- `UPSTREAM_HEADERS_TIMEOUT`
+- `UPSTREAM_STREAM_NO_CONTENT_TIMEOUT`
+- `UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT`
+
+#### E. 路由运行态错误（非 provider 本体错误，单独处理）
+- `PROVIDER_NOT_AVAILABLE`
+- `QUOTA_DEPLETED`
+
+### 与当前状态机的绑定规则（事实）
+- 可恢复错误：连续 3 次 -> 30 分钟冷却；冷却后再连续 3 次 -> 长冷却（到本地次日 0 点）。
+- 不可恢复错误：1 次 -> 长冷却（到本地次日 0 点）。
+- `HTTP_503` persisted 冷却可在 startup/probe success 后清理；再次真实失败可重新进入冷却。
+
+### 新错误接入流程（未来未知错误）
+1. **先取样本证据**：必须有 codex-samples + provider-error snapshot（含 status/code/upstreamCode/message/stage）。
+2. **先归一再分类**：在 provider 入口将新错误映射到统一码（不得在下游补丁判断）。
+3. **补红测**：新增“未知错误 -> 统一码 -> 分类 -> 冷却行为”红测。
+4. **补码表**：把新错误加入本节“已知错误表”，并标明归属类别与策略。
+5. **再放量**：未进入码表的新错误，默认落入“未知可恢复”并强制告警，不允许静默吞掉。
+
+### 标准执行流程（强制）
+1. **先样本**：先拿 codex-samples / provider-error 日志，确认 status/code/upstreamCode/message/stage。
+2. **先红测**：先写失败用例（至少覆盖 classification + retry + storm/backoff 之一）。
+3. **入口归一**：先改 `provider-error-catalog.ts`，不要在下游模块先打补丁。
+4. **统一消费**：`provider-failure-policy-impl.ts`、`request-retry-helpers.ts`、`request-executor-retry-decision.ts`、`retry-engine.ts` 等只消费 catalog/classification。
+5. **保留特殊语义优先级**：2013/context overflow、client tool args invalid、已确认 deterministic malformed 等必须在 policy owner 显式优先处理。
+6. **回归收口**：跑主链回归（request-executor + failure-policy + retry helpers + retry-engine），绿后再提交。
+
+### 当前真相边界（2026-05-27）
+- 主链错误语义已基本收口到 catalog + failure policy（classification / retry / storm/backoff）。
+- `provider-response-converter` 仍有局部 remap 逻辑依赖旧测试环境假设（core dist 模块加载），这部分要单独做 harness 后再完全收口，避免误回归。

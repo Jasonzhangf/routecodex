@@ -6,6 +6,7 @@
  */
 
 import { validateCanonicalClientToolCall } from './provider-response-tool-validation-blocks.js';
+import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -608,6 +609,21 @@ export function isContextLengthExceededError(
 }
 
 export function isRetryableNetworkSseWrapperError(message: string, upstreamCode?: string, statusCode?: number): boolean {
+  const known = normalizeKnownProviderError({
+    statusCode,
+    code: upstreamCode,
+    upstreamCode,
+    message,
+  });
+  if (known?.code === '429.2000') {
+    return false;
+  }
+  if (known?.class === 'recoverable') {
+    return true;
+  }
+  if (known?.class === 'unrecoverable' || known?.class === 'special_400') {
+    return false;
+  }
   if (typeof statusCode === 'number' && Number.isFinite(statusCode)) {
     if (statusCode === 408 || statusCode === 425 || statusCode === 502 || statusCode === 503 || statusCode === 504) {
       return true;
