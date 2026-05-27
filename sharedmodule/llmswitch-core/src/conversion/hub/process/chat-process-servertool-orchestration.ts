@@ -1,7 +1,6 @@
 import { applyHubOperations } from '../ops/operations.js';
 import { buildWebSearchOperations } from './chat-process-web-search.js';
 import { buildClockOperationsWithPlan } from './chat-process-clock-tools.js';
-import { buildReviewOperations } from './chat-process-review.js';
 import { maybeInjectClockRemindersAndApplyDirectives } from './chat-process-clock-reminders.js';
 import type { StandardizedRequest } from '../types/standardized.js';
 import { readRuntimeMetadata } from '../../runtime-metadata.js';
@@ -32,10 +31,6 @@ export async function applyServerToolOrchestration(
   request = applyHubOperations(
     request,
     buildClockOperationsWithPlan(options.metadata, clockPlan)
-  );
-  request = applyHubOperations(
-    request,
-    buildReviewOperations(options.metadata)
   );
   return sanitizeChatProcessRequest(
     await maybeInjectClockRemindersAndApplyDirectives(request, options.metadata, options.requestId)

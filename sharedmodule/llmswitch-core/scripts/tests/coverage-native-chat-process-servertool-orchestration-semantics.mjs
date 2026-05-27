@@ -50,10 +50,6 @@ exports.planChatWebSearchOperationsJson = () => JSON.stringify({ shouldInject: t
 exports.planChatClockOperationsJson = () => JSON.stringify({ shouldInject: true });
 exports.planContinueExecutionOperationsJson = () => JSON.stringify({ shouldInject: false });
 exports.detectProviderResponseShapeJson = () => JSON.stringify('openai-responses');
-exports.buildReviewOperationsJson = () => JSON.stringify([
-  { op: 'set_request_metadata_fields', fields: { reviewToolEnabled: true } },
-  { op: 'append_tool_if_missing', toolName: 'review', tool: { type: 'function' } }
-]);
 exports.buildContinueExecutionOperationsJson = (shouldInject) => JSON.stringify(
   shouldInject
     ? [
@@ -104,15 +100,6 @@ exports.injectContinueExecutionDirectiveJson = (messagesJson, marker, targetText
         'unknown'
       );
       assert.equal(responseShape, 'openai-responses');
-
-      const reviewOps = mod.buildReviewOperationsWithNative(
-        { __rt: { serverToolFollowup: false } },
-        () => []
-      );
-      assert.equal(Array.isArray(reviewOps), true);
-      assert.equal(reviewOps.length, 2);
-      assert.equal(reviewOps[0].op, 'set_request_metadata_fields');
-      assert.equal(reviewOps[1].toolName, 'review');
 
       const continueOps = mod.buildContinueExecutionOperationsWithNative(
         true,

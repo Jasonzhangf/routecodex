@@ -116,7 +116,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildPassthroughAuditJson",
   "buildGuardedClockScheduleItemJson",
   "buildImageAttachmentMetadataJson",
-  "buildReviewOperationsJson",
   "buildWebSearchToolAppendOperationsJson",
   "clampResponsesInputItemIdJson",
   "collectToolOutputsJson",

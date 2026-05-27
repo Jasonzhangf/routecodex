@@ -705,10 +705,6 @@ fn is_canonical_chat_completion_payload(payload: &Value) -> bool {
     first.get("message").and_then(|v| v.as_object()).is_some()
 }
 
-fn build_review_operations(_metadata: &Value) -> Value {
-    Value::Array(Vec::new())
-}
-
 fn build_continue_execution_operations(should_inject: bool) -> Value {
     let _ = should_inject;
     // continue_execution remains a server-side compatibility handler for historical/upstream tool calls,
@@ -1313,14 +1309,6 @@ pub fn is_canonical_chat_completion_payload_json(payload_json: String) -> NapiRe
     let payload: Value =
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = is_canonical_chat_completion_payload(&payload);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn build_review_operations_json(metadata_json: String) -> NapiResult<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = build_review_operations(&metadata);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

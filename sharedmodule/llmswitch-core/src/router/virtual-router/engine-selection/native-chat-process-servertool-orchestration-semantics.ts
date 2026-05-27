@@ -445,21 +445,6 @@ export function resolveHasActiveStopMessageForContinueExecutionWithNative(
   }
 }
 
-export function buildReviewOperationsWithNative(
-  metadata: Record<string, unknown>
-): Record<string, unknown>[] {
-  const capability = 'buildReviewOperationsJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>[]>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [metadata]);
-    const parsed = parseReviewOperations(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
 export function buildContinueExecutionOperationsWithNative(
   shouldInject: boolean
 ): Record<string, unknown>[] {
