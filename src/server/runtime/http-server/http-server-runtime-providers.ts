@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
 import { enforceWindsurfStartupProbeForHandle } from './windsurf-startup-probe.js';
+import { runStartupProviderReprobe } from './provider-startup-reprobe.js';
 import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from './types.js';
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
@@ -431,6 +432,13 @@ export async function createProviderHandle(
   const instance = ProviderFactory.createProviderFromRuntime(runtime, server.getModuleDependencies());
   await instance.initialize();
   await enforceWindsurfStartupProbeForHandle({ providerFamily, runtimeKey, instance });
+  await runStartupProviderReprobe({
+    server,
+    providerKey: runtime.providerKey || runtimeKey,
+    runtimeKey,
+    providerFamily,
+    instance
+  });
   const providerId = runtime.providerId || runtimeKey.split('.')[0];
   return {
     runtimeKey,
