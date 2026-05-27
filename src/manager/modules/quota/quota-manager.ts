@@ -296,9 +296,9 @@ export class QuotaManagerModule implements ManagerModule {
   }
 
   async start(): Promise<void> {
-    if (!(await this.ensureRustQuotaHostHydrated())) {
-      throw new Error('unified quota requires hubPipeline virtual router quota host mutator');
-    }
+    // Manager daemon starts before runtime setup/hub pipeline is fully ready.
+    // Do not fail server startup on ordering; hydrate lazily when mutator becomes available.
+    await this.ensureRustQuotaHostHydrated();
     return;
   }
 

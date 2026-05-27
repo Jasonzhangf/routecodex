@@ -345,7 +345,7 @@ describe('QuotaManagerModule', () => {
     });
   });
 
-  it('fails fast when unified quota starts without rust host mutator', async () => {
+  it('does not fail manager startup before rust host mutator is ready', async () => {
     const coreManager = {
       hydrateFromStore: async () => {},
       registerProviderStaticConfig: jest.fn(),
@@ -369,9 +369,7 @@ describe('QuotaManagerModule', () => {
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
     const mod = new QuotaManagerModule();
     await mod.init({ serverId: 'test' });
-    await expect(mod.start()).rejects.toThrow(
-      'unified quota requires hubPipeline virtual router quota host mutator'
-    );
+    await expect(mod.start()).resolves.toBeUndefined();
   });
 
   it('uses rust host snapshot as unified readOnly/admin source', async () => {
