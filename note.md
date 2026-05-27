@@ -12115,3 +12115,56 @@ Using skills: coding-principals + rcc-dev-skills
   - 已从主路由决策面后退，
   - 但仍是一个活着的 TS compat fallback state machine，
   - 需要下一阶段继续收缩成纯壳，而不是继续长期保留完整状态语义。
+
+## 2026-05-27 core quota manager writer closeout（updateProviderPoolState 物理删除）
+- 现状复核: `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 剩余 public 写入口里，`disableProvider/recoverProvider/resetProvider/onProviderError/onProviderSuccess` 都已有 Rust-first 桥接或 focused proof；`updateProviderPoolState()` 仍是唯一没有必要保留、且会形成 host-driven TS second center 的残余写口。
+- 调用链复核: `src/manager/modules/quota/quota-adapter.ts::setQuota()` 在 Rust mutator 缺席时，旧逻辑会先 `recoverProvider()` 再 `updateProviderPoolState()`，等价于允许 host 直接改写 TS core `inPool/reason`；这违反计划文档里“availability policy 只能落在 Rust / TS 只能桥接壳”的 closeout 方向。
+- 本轮修改: 物理删除 core `QuotaManager.updateProviderPoolState()`；同时删掉 host bridge / adapter 类型暴露，并把 `setQuota()` 的非 Rust 退路收缩为只走 core 现有语义写口：`quota>0 -> recoverProvider()`，`quota<=0 -> disableProvider(cooldown, 5m, depletedReason)`。
+- 唯一正确性: 当前目标不是保留一个“host 归一化快照注入口”，而是继续物理消灭 TS 可直接决定 availability 的第二入口。继续保留 `updateProviderPoolState()` 会让 host 无需 provider error/success / Rust mutator 也能直接改写 pool state，和 Rust-only 目标冲突；删它才是真正缩小 live TS writer surface 的唯一正确动作。
+- focused 证据:
+  - `tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts`
+  - `tests/manager/quota/quota-manager-module.spec.ts`
+  已绿，证明现有 unified path 不依赖这条 TS second center 写口。
+- 剩余 live TS writer 面:
+  1. `sharedmodule/quota/quota-manager.ts::onProviderError/onProviderSuccess` —— 仅作为 no-hubPipeline fallback；已有 runtime hooks focused proof 显示 hubPipeline 就绪后走 Rust mutator。
+  2. `disableProvider/recoverProvider/resetProvider` —— 仍作为 no-Rust fallback + store/admin 壳，后续需要继续审计是否还能进一步 Rust-only 化。
+
+## 2026-05-27 unified public quota mutate fallback closeout（Rust mutator 缺席即 fail-fast）
+- 审计结论: unified quota 模式下，`QuotaManagerAdapter.disable/recover/reset/setQuota` 以及 `QuotaManagerModule.disable/recover/reset` 仍保留“Rust mutator 不在时落回 TS core mutate”的兜底写路径；这会让 daemon-admin / unified control 在 hubPipeline 已缺位时继续改 TS quota state，属于 live TS second center。
+- 本轮收缩: 在 unified/core backend 下，public quota mutate 现在只允许走 Rust host mutator：
+  - `disableProviderQuota`
+  - `recoverProviderQuota`
+  - `resetProviderQuota`
+  - `setQuota -> recover/disableProviderQuota`
+  若 Rust mutator 缺席，则返回 `rust_quota_host_mutator_unavailable`，由 daemon-admin 路由统一转成 `503 not_ready`；不再落回 TS core mutate。
+- 同步修改:
+  - `src/manager/modules/quota/quota-adapter.ts`
+  - `src/manager/modules/quota/quota-manager.ts`
+  - `src/server/runtime/http-server/daemon-admin/control-handler.ts`
+  - `src/server/runtime/http-server/daemon-admin/quota-handler.ts`
+- 新 focused 证据:
+  1. `tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts`
+     - 已补“Rust mutator 缺席时 unified quota mutate 必须 503，且 TS core mutate 不得被调用”
+  2. `tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts`
+     - 已补 unified control `quota.setQuota/clearCooldown/restoreNow/disable/recover/reset` 在 mutator 缺席时全部 503
+  3. `tests/manager/quota/quota-manager-module.spec.ts`
+     - 已补 unified mode 下 public reset/recover/disable 不再打到 TS core manager
+- 唯一正确性: 既然计划文档要求 TS Host 只能是桥接/持久化/查询壳，那么在 unified 模式下 public mutate 继续回退到 TS core 写状态就违背“availability policy only in Rust”。真正正确的行为不是“保底继续写 TS”，而是 fail-fast 暴露 Rust mutator 不可用，让问题回到唯一真源 wiring 修复。
+- 现状推进: 这一步进一步缩掉了 unified public mutate 的 TS fallback 写面；剩余 TS core live writer 主要收敛到 no-hubPipeline 事件 fallback（`onProviderError/onProviderSuccess`）与 store/query shell。
+
+## 2026-05-27 runtime event ingress closeout（hubPipeline 就绪时不再走 quota runtime second ingress）
+- 复核结论: HubPipeline 已经通过 `setVirtualRouterPolicyRuntimeRouterHooks -> routerEngine.handleProviderError/Success` 直连 Rust router event ingestion；`QuotaManagerModule.start()` 再注册 `setProviderRuntimeQuotaHooks` 并在 hubPipeline 就绪时继续把相同 event 转给 `rustMutator.handleProviderError/Success`，会形成同一事件链的第二入口。
+- 本轮收缩: `QuotaManagerModule.start()` 的 runtime quota hooks 现在改为：
+  - 若存在 `rustMutator.handleProviderError/Success`，直接 `return`，不再重复转发；
+  - 若 hubPipeline 已存在但 quota hook 里拿不到 mutator，也 `return`，不再把事件落回 TS core；
+  - 只有真正 no-hubPipeline 的场景，才允许 `coreManager.onProviderError/onProviderSuccess` 作为 fallback。
+- 含义: unified runtime event 主链现在只保留 hubPipeline -> Rust router ingestion 这一条；quota runtime hooks 退化为“没有 hubPipeline 时的最小桥接壳”。
+- focused 证据:
+  1. `tests/manager/quota/quota-manager-module.spec.ts`
+     - 已更新：hubPipeline runtime mutator 存在时，quota hooks 不再直接再调一遍 Rust 或 TS core
+     - hubPipeline 运行中后续就绪时，也不再通过 quota hooks 打 second ingress
+  2. `tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
+  3. `tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
+  4. `tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
+     - 已改为显式使用 provider-runtime-ingress + router hook owner 模拟 hubPipeline 主链，而不是再依赖 quota hooks second ingress
+- 唯一正确性: 当前目标不是保留两条都能到 Rust 的“冗余保险丝”，而是把 provider event ingestion 收成唯一主链。只要 quota hooks 在 hubPipeline 已就绪时还能再次写入 Rust/TS，就仍属于 second ingress，可能导致重复计数、重复 cooldown、重复持久化或测试语义漂移。把它收成 no-hubPipeline fallback 才是与 Rust-only 主链一致的唯一正确动作。

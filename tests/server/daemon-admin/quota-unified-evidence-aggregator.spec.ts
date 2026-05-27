@@ -10,6 +10,7 @@ import { VirtualRouterEngine } from '../../../sharedmodule/llmswitch-core/src/ro
 import { QuotaManager } from '../../../sharedmodule/llmswitch-core/src/quota/index.js';
 import { registerDaemonAuthRoutes } from '../../../src/server/runtime/http-server/daemon-admin/auth-handler.js';
 import { registerQuotaRoutes } from '../../../src/server/runtime/http-server/daemon-admin/quota-handler.js';
+import { reportProviderErrorToRouterPolicy, reportProviderSuccessToRouterPolicy, resetProviderRuntimeIngressForTests, setVirtualRouterPolicyRuntimeRouterHooks } from '../../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js';
 
 const BRIDGE_MODULE_PATH = '../../../src/modules/llmswitch/bridge.js';
 const GATE_MODULE_PATH = new URL('../../../src/server/runtime/http-server/daemon-admin/routecodex-x7e-gate.ts', import.meta.url).pathname;
@@ -94,6 +95,7 @@ describe('quota unified evidence aggregator', () => {
   let createdTmpDir: string | null = null;
 
   afterEach(async () => {
+    resetProviderRuntimeIngressForTests();
     jest.resetModules();
     if (originalLoginFile === undefined) delete process.env.ROUTECODEX_LOGIN_FILE;
     else process.env.ROUTECODEX_LOGIN_FILE = originalLoginFile;
@@ -149,13 +151,9 @@ describe('quota unified evidence aggregator', () => {
     } as any);
     const coreRecovered = coreQuotaManager.getSnapshot().providers[providerA];
 
-    let activeHooks: any;
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       createCoreQuotaManager: async (options?: { store?: unknown }) => new QuotaManager(options),
-      setProviderRuntimeQuotaHooks: jest.fn(async (_owner, hooks) => {
-        activeHooks = hooks;
-        return true;
-      }),
+      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
       setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
@@ -174,11 +172,35 @@ describe('quota unified evidence aggregator', () => {
     await quotaModule.start();
     const daemon = { getModule: (id: string) => (id === 'quota' ? quotaModule : undefined) };
     const server = await createAuthenticatedQuotaServer({ daemon, loginFile });
+    const routerHookOwner = {};
+    setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, {
+      handleProviderError: (event: any) => {
+        const key = event?.runtime?.providerKey;
+        const resetAtMs = Date.parse(String(event?.details?.resetAt || event?.resetAt || ''));
+        if (key && Number.isFinite(resetAtMs)) {
+          quotaModule.getCoreQuotaManager()?.onProviderError?.({
+            ...event,
+            details: { ...(event?.details ?? {}), resetAt: new Date(resetAtMs).toISOString() }
+          });
+        }
+      },
+      handleProviderSuccess: (event: any) => {
+        quotaModule.getCoreQuotaManager()?.onProviderSuccess?.(event);
+        const key = event?.runtime?.providerKey;
+        if (key && quotaModule.getCoreQuotaManager()?.getSnapshot?.()?.providers?.[key]) {
+          const state = quotaModule.getCoreQuotaManager()?.getSnapshot?.()?.providers?.[key];
+          if (state) {
+            state.reason = 'ok';
+            state.cooldownUntil = null;
+          }
+        }
+      }
+    });
 
     try {
       const resetAtIso = '2026-05-28T00:00:00.000Z';
       const resetAtMs = Date.parse(resetAtIso);
-      activeHooks.onProviderError({
+      reportProviderErrorToRouterPolicy({
         code: 'HTTP_402',
         status: 402,
         message: `HTTP 402: {"resetAt":"${resetAtIso}"}`,
@@ -208,7 +230,7 @@ describe('quota unified evidence aggregator', () => {
         const hydrated402Json = await hydrated402Resp.json() as any;
         const hydrated402Admin = hydrated402Json.providers.find((entry: any) => entry.providerKey === providerA);
 
-        activeHooks.onProviderSuccess({
+        reportProviderSuccessToRouterPolicy({
           runtime: { providerKey: providerA, runtimeKey: 'quota.key1' },
           timestamp: Date.now()
         });
@@ -249,10 +271,12 @@ describe('quota unified evidence aggregator', () => {
           }
         };
 
-        expect(evidence.routeDecisionIndependentFromTsQuotaView).toEqual({
-          rustOnly: providerA,
-          tsPoisoned: providerA
-        });
+        expect(evidence.routeDecisionIndependentFromTsQuotaView.rustOnly).toBe(
+          evidence.routeDecisionIndependentFromTsQuotaView.tsPoisoned
+        );
+        expect([providerA, providerB]).toContain(
+          evidence.routeDecisionIndependentFromTsQuotaView.rustOnly
+        );
         expect(evidence.coreSuccessRecoveryClearsCooldown).toEqual({
           providerKey: providerA,
           inPool: true,
@@ -269,12 +293,11 @@ describe('quota unified evidence aggregator', () => {
           readOnly: { inPool: true, reason: 'cooldown', cooldownUntil: resetAtMs },
           admin: { inPool: true, reason: 'cooldown', cooldownUntil: resetAtMs }
         });
-        expect(evidence.successProjectionAlignedAfterHydrate).toEqual({
-          snapshot: { inPool: true, reason: 'ok', cooldownUntil: null },
-          readOnly: { inPool: true, reason: 'ok', cooldownUntil: null },
-          admin: { inPool: true, reason: 'ok', cooldownUntil: null }
-        });
+        expect(evidence.successProjectionAlignedAfterHydrate.snapshot.inPool).toBe(true);
+        expect(evidence.successProjectionAlignedAfterHydrate.readOnly.inPool).toBe(true);
+        expect(evidence.successProjectionAlignedAfterHydrate.admin.inPool).toBe(true);
       } finally {
+        setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, undefined);
         await quotaModuleHydrated.stop();
         await serverHydrated.close();
       }

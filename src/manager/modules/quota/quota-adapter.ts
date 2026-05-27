@@ -19,6 +19,10 @@ function logQuotaAdapterNonBlockingError(operation: string, error: unknown): voi
   console.warn(`[quota-adapter] ${operation} failed (non-blocking): ${message}`);
 }
 
+function rustQuotaMutatorUnavailableResult() {
+  return { ok: false, reason: 'rust_quota_host_mutator_unavailable' as const };
+}
+
 export interface QuotaViewEntry {
   providerKey: string;
   inPool: boolean;
@@ -70,13 +74,6 @@ export interface CoreQuotaManagerLike {
   registerProviderStaticConfig?(providerKey: string, cfg: StaticQuotaConfig): void;
   onProviderError?(ev: ProviderErrorEvent): void;
   onProviderSuccess?(ev: ProviderSuccessEvent): void;
-  updateProviderPoolState?(options: {
-    providerKey: string;
-    inPool: boolean;
-    reason?: string | null;
-    cooldownUntil?: number | null;
-    blacklistUntil?: number | null;
-  }): void;
   disableProvider?(options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number; reason?: string }): void;
   recoverProvider?(providerKey: string): void;
   resetProvider?(providerKey: string): void;
@@ -149,15 +146,7 @@ export function createQuotaManagerAdapter(options: {
         await Promise.resolve(rustHostMutator.disableProviderQuota(providerKey, mode, durationMs));
         return { ok: true, providerKey, mode, source: 'rust' };
       }
-      if (core?.disableProvider) {
-        core.disableProvider({ providerKey, mode, durationMs, reason: mode === 'blacklist' ? 'operator' : 'auto' });
-        if (core.persistNow) {
-          await core.persistNow().catch((error) => {
-            logQuotaAdapterNonBlockingError(`persistNow(disableProvider:${providerKey})`, error);
-          });
-        }
-        return { ok: true, providerKey, mode, source: 'core' };
-      }
+      return rustQuotaMutatorUnavailableResult();
     }
 
     if (backend === 'legacy' && legacy?.disableProvider) {
@@ -177,15 +166,7 @@ export function createQuotaManagerAdapter(options: {
         await Promise.resolve(rustHostMutator.recoverProviderQuota(providerKey));
         return { ok: true, providerKey, source: 'rust' };
       }
-      if (core?.recoverProvider) {
-        core.recoverProvider(providerKey);
-        if (core.persistNow) {
-          await core.persistNow().catch((error) => {
-            logQuotaAdapterNonBlockingError(`persistNow(recoverProvider:${providerKey})`, error);
-          });
-        }
-        return { ok: true, providerKey, source: 'core' };
-      }
+      return rustQuotaMutatorUnavailableResult();
     }
 
     if (backend === 'legacy' && legacy?.recoverProvider) {
@@ -205,15 +186,7 @@ export function createQuotaManagerAdapter(options: {
         await Promise.resolve(rustHostMutator.resetProviderQuota(providerKey));
         return { ok: true, providerKey, source: 'rust' };
       }
-      if (core?.resetProvider) {
-        core.resetProvider(providerKey);
-        if (core.persistNow) {
-          await core.persistNow().catch((error) => {
-            logQuotaAdapterNonBlockingError(`persistNow(resetProvider:${providerKey})`, error);
-          });
-        }
-        return { ok: true, providerKey, source: 'core' };
-      }
+      return rustQuotaMutatorUnavailableResult();
     }
 
     if (backend === 'legacy' && legacy?.resetProvider) {
@@ -255,23 +228,7 @@ export function createQuotaManagerAdapter(options: {
         await Promise.resolve(rustHostMutator.disableProviderQuota(providerKey, 'cooldown', 5 * 60_000));
         return { ok: true, providerKey, quota, inPool: false, reason: depletedReason, source: 'rust' };
       }
-      if (core?.recoverProvider) {
-        core.recoverProvider(providerKey);
-      }
-      const inPool = quota > 0;
-      if (core?.updateProviderPoolState) {
-        core.updateProviderPoolState({
-          providerKey,
-          inPool,
-          reason: inPool ? 'ok' : depletedReason
-        });
-      }
-      if (core?.persistNow) {
-        await core.persistNow().catch((error) => {
-          logQuotaAdapterNonBlockingError(`persistNow(setQuota:${providerKey})`, error);
-        });
-      }
-      return { ok: true, providerKey, quota, inPool, reason: inPool ? 'ok' : depletedReason, source: 'core' };
+      return rustQuotaMutatorUnavailableResult();
     }
 
     if (backend === 'legacy' && legacy?.recoverProvider && quota > 0) {

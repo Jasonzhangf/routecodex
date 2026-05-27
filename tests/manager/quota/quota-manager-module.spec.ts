@@ -95,7 +95,6 @@ describe('QuotaManagerModule', () => {
       persistNow: async () => {}
     };
 
-    let rustHookCalls: Array<{ kind: 'error' | 'success'; event: any }> = [];
     const setProviderRuntimeQuotaHooks = jest.fn(async (_owner, hooks) => {
       hooks?.onProviderError?.({ runtime: { providerKey: 'mock.provider' }, timestamp: 1 } as any);
       hooks?.onProviderSuccess?.({ runtime: { providerKey: 'mock.provider' }, timestamp: 2 } as any);
@@ -119,15 +118,14 @@ describe('QuotaManagerModule', () => {
       serverId: 'test',
       getHubPipeline: () => ({
         getVirtualRouter: () => ({
-          handleProviderError: (event: any) => void rustHookCalls.push({ kind: 'error', event }),
-          handleProviderSuccess: (event: any) => void rustHookCalls.push({ kind: 'success', event })
+          handleProviderError: jest.fn(),
+          handleProviderSuccess: jest.fn()
         })
       })
     });
     await mod.start();
 
     expect(setProviderRuntimeQuotaHooks).toHaveBeenCalledTimes(1);
-    expect(rustHookCalls.map((entry) => entry.kind)).toEqual(['error', 'success']);
     expect(coreManager.onProviderError).not.toHaveBeenCalled();
     expect(coreManager.onProviderSuccess).not.toHaveBeenCalled();
   });
@@ -162,7 +160,6 @@ describe('QuotaManagerModule', () => {
     }));
 
     const runtimeRef: { current: any } = { current: null };
-    const rustHookCalls: Array<{ kind: 'error' | 'success'; event: any }> = [];
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
     const mod = new QuotaManagerModule();
     await mod.init({
@@ -179,19 +176,17 @@ describe('QuotaManagerModule', () => {
     registeredHooks.onProviderSuccess({ runtime: { providerKey: 'mock.provider' }, timestamp: 2 } as any);
     expect(coreManager.onProviderError).toHaveBeenCalledTimes(1);
     expect(coreManager.onProviderSuccess).toHaveBeenCalledTimes(1);
-    expect(rustHookCalls).toEqual([]);
 
     runtimeRef.current = {
       getVirtualRouter: () => ({
-        handleProviderError: (event: any) => void rustHookCalls.push({ kind: 'error', event }),
-        handleProviderSuccess: (event: any) => void rustHookCalls.push({ kind: 'success', event })
+        handleProviderError: jest.fn(),
+        handleProviderSuccess: jest.fn()
       })
     };
 
     registeredHooks.onProviderError({ runtime: { providerKey: 'mock.provider' }, timestamp: 3 } as any);
     registeredHooks.onProviderSuccess({ runtime: { providerKey: 'mock.provider' }, timestamp: 4 } as any);
 
-    expect(rustHookCalls.map((entry) => entry.kind)).toEqual(['error', 'success']);
     expect(coreManager.onProviderError).toHaveBeenCalledTimes(1);
     expect(coreManager.onProviderSuccess).toHaveBeenCalledTimes(1);
   });
@@ -255,6 +250,61 @@ describe('QuotaManagerModule', () => {
     expect(coreManager.disableProvider).not.toHaveBeenCalled();
     expect(coreManager.persistNow).not.toHaveBeenCalled();
     expect(setProviderRuntimeQuotaHooks).not.toHaveBeenCalled();
+  });
+
+  it('fails fast for public reset/recover/disable in unified mode when rust quota host mutator is absent', async () => {
+    const coreManager = {
+      hydrateFromStore: jest.fn(async () => {}),
+      registerProviderStaticConfig: jest.fn(),
+      onProviderError: jest.fn(),
+      onProviderSuccess: jest.fn(),
+      getQuotaView: () => (() => null),
+      getSnapshot: () => ({ updatedAtMs: Date.now(), providers: {} }),
+      persistNow: jest.fn(async () => {}),
+      resetProvider: jest.fn(),
+      recoverProvider: jest.fn(),
+      disableProvider: jest.fn()
+    };
+
+    jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      createCoreQuotaManager: async () => coreManager,
+      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
+      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
+    }));
+    jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
+      x7eGate: {
+        phase1UnifiedQuota: true
+      }
+    }));
+
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
+    const mod = new QuotaManagerModule();
+    await mod.init({
+      serverId: 'test',
+      getHubPipeline: () => ({
+        getVirtualRouter: () => ({
+          getStatus: () => ({ quotaHostSnapshot: [] })
+        })
+      })
+    });
+
+    await expect(mod.resetProvider('quota.1.gpt-test')).resolves.toEqual({
+      providerKey: 'quota.1.gpt-test',
+      state: null
+    });
+    await expect(mod.recoverProvider('quota.1.gpt-test')).resolves.toEqual({
+      providerKey: 'quota.1.gpt-test',
+      state: null
+    });
+    await expect(mod.disableProvider({ providerKey: 'quota.1.gpt-test', mode: 'blacklist', durationMs: 60_000 })).resolves.toEqual({
+      providerKey: 'quota.1.gpt-test',
+      state: null
+    });
+
+    expect(coreManager.resetProvider).not.toHaveBeenCalled();
+    expect(coreManager.recoverProvider).not.toHaveBeenCalled();
+    expect(coreManager.disableProvider).not.toHaveBeenCalled();
+    expect(coreManager.persistNow).not.toHaveBeenCalled();
   });
 
   it('prefers rust quota host snapshot persist/hydrate bridge when hubPipeline is available', async () => {

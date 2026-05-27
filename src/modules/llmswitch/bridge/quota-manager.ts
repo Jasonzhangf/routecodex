@@ -14,7 +14,6 @@ type QuotaModule = {
     registerProviderStaticConfig?: (providerKey: string, cfg: unknown) => void;
     onProviderError?: (ev: ProviderErrorEvent) => void;
     onProviderSuccess?: (ev: ProviderSuccessEvent) => void;
-    updateProviderPoolState?: (options: unknown) => void;
     disableProvider?: (options: unknown) => void;
     recoverProvider?: (providerKey: string) => void;
     resetProvider?: (providerKey: string) => void;

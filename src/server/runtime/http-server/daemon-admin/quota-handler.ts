@@ -305,6 +305,10 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
         res.status(200).json({ ok: true, providerKey, action: 'reset', result: { ok: true, source: 'rust' } });
         return;
       }
+      if (x7eGate.phase1UnifiedQuota) {
+        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
+        return;
+      }
       const result = await mod.resetProvider(providerKey);
       res.status(200).json({ ok: true, providerKey, action: 'reset', result });
     } catch (error: unknown) {
@@ -330,6 +334,10 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       if (typeof rustMutator?.recoverProviderQuota === 'function') {
         await Promise.resolve(rustMutator.recoverProviderQuota(providerKey));
         res.status(200).json({ ok: true, providerKey, action: 'recover', result: { ok: true, source: 'rust' } });
+        return;
+      }
+      if (x7eGate.phase1UnifiedQuota) {
+        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
         return;
       }
       const result = await mod.recoverProvider(providerKey);
@@ -379,6 +387,10 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
           durationMs,
           result: { ok: true, source: 'rust' }
         });
+        return;
+      }
+      if (x7eGate.phase1UnifiedQuota) {
+        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
         return;
       }
       const result = await mod.disableProvider({ providerKey, mode, durationMs });

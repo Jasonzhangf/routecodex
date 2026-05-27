@@ -219,6 +219,15 @@ function getQuotaAdapter(options: DaemonAdminRouteOptions): any | null {
   });
 }
 
+function isRustQuotaMutatorUnavailableResult(result: unknown): boolean {
+  return Boolean(
+    result
+    && typeof result === 'object'
+    && (result as { ok?: unknown }).ok === false
+    && (result as { reason?: unknown }).reason === 'rust_quota_host_mutator_unavailable'
+  );
+}
+
 function readQuotaProviderSnapshot(quotaMod: any, providerKey: string): unknown {
   try {
     const snapshot = typeof quotaMod?.getAdminSnapshot === 'function' ? quotaMod.getAdminSnapshot() : null;
@@ -554,6 +563,10 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await quotaMod.disableProvider({ providerKey, mode, durationMs });
+      if (isRustQuotaMutatorUnavailableResult(result)) {
+        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
+        return;
+      }
       res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
       return;
     }
@@ -570,6 +583,10 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await quotaMod.recoverProvider(providerKey);
+      if (isRustQuotaMutatorUnavailableResult(result)) {
+        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
+        return;
+      }
       res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
       return;
     }
@@ -586,6 +603,10 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await quotaMod.resetProvider(providerKey);
+      if (isRustQuotaMutatorUnavailableResult(result)) {
+        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
+        return;
+      }
       res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
       return;
     }
@@ -602,6 +623,10 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await quotaMod.clearCooldown(providerKey);
+      if (isRustQuotaMutatorUnavailableResult(result)) {
+        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
+        return;
+      }
       const snapshot = readQuotaProviderSnapshot(quotaMod, providerKey);
       res.status(200).json({
         ok: true,
@@ -626,6 +651,10 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await quotaMod.restoreNow(providerKey);
+      if (isRustQuotaMutatorUnavailableResult(result)) {
+        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
+        return;
+      }
       const snapshot = readQuotaProviderSnapshot(quotaMod, providerKey);
       res.status(200).json({
         ok: true,
@@ -652,6 +681,10 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await quotaMod.setQuota({ providerKey, quota, ...(reason ? { reason } : {}) });
+      if (isRustQuotaMutatorUnavailableResult(result)) {
+        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
+        return;
+      }
       const snapshot = readQuotaProviderSnapshot(quotaMod, providerKey);
       res.status(200).json({
         ok: true,

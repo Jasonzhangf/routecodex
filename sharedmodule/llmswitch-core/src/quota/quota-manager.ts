@@ -355,36 +355,6 @@ export class QuotaManager {
     this.markDirty();
   }
 
-  /**
-   * External quota snapshot ingestion hook (host-driven).
-   * This API is intentionally small: the host adapter translates provider-specific
-   * quota responses into a normalized per-providerKey inPool/cooldown/blacklist update.
-   */
-  updateProviderPoolState(options: {
-    providerKey: string;
-    inPool: boolean;
-    reason?: string | null;
-    cooldownUntil?: number | null;
-    blacklistUntil?: number | null;
-  }): void {
-    const key = safeTrim(options.providerKey);
-    if (!key) return;
-    const nowMs = Date.now();
-    const state = this.ensureProvider(key);
-    const next: QuotaState = {
-      ...state,
-      inPool: Boolean(options.inPool),
-      reason: options.inPool ? 'ok' : state.reason,
-      cooldownUntil: typeof options.cooldownUntil === 'number' ? options.cooldownUntil : state.cooldownUntil,
-      blacklistUntil: typeof options.blacklistUntil === 'number' ? options.blacklistUntil : state.blacklistUntil,
-      ...(typeof options.reason === 'string' && options.reason.trim()
-        ? { reason: options.reason.trim() as any }
-        : {})
-    };
-    this.states.set(key, tickQuotaStateTime(next, nowMs));
-    this.markDirty();
-  }
-
   getQuotaView(): ProviderQuotaView {
     return (providerKey: string): ProviderQuotaViewEntry | null => {
       const key = safeTrim(providerKey);

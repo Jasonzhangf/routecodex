@@ -8,6 +8,7 @@ import type { AddressInfo } from 'node:net';
 
 import { registerDaemonAuthRoutes } from '../../../src/server/runtime/http-server/daemon-admin/auth-handler.js';
 import { registerQuotaRoutes } from '../../../src/server/runtime/http-server/daemon-admin/quota-handler.js';
+import { reportProviderErrorToRouterPolicy, reportProviderSuccessToRouterPolicy, resetProviderRuntimeIngressForTests, setVirtualRouterPolicyRuntimeRouterHooks } from '../../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js';
 
 const BRIDGE_MODULE_PATH = '../../../src/modules/llmswitch/bridge.js';
 const GATE_MODULE_PATH = new URL('../../../src/server/runtime/http-server/daemon-admin/routecodex-x7e-gate.ts', import.meta.url).pathname;
@@ -20,6 +21,7 @@ describe('daemon-admin quota unified host/rust consistency', () => {
   let createdTmpDir: string | null = null;
 
   afterEach(async () => {
+    resetProviderRuntimeIngressForTests();
     jest.resetModules();
     if (originalLoginFile === undefined) delete process.env.ROUTECODEX_LOGIN_FILE;
     else process.env.ROUTECODEX_LOGIN_FILE = originalLoginFile;
@@ -110,13 +112,9 @@ describe('daemon-admin quota unified host/rust consistency', () => {
       persistNow: async () => {}
     };
 
-    let registeredHooks: any;
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       createCoreQuotaManager: async () => coreManager,
-      setProviderRuntimeQuotaHooks: jest.fn(async (_owner, hooks) => {
-        registeredHooks = hooks;
-        return true;
-      }),
+      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
       setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
@@ -130,7 +128,18 @@ describe('daemon-admin quota unified host/rust consistency', () => {
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
 
     const quotaModule = new QuotaManagerModule();
-    await quotaModule.init({ serverId: 'test' });
+    const hubPipeline = {
+      getVirtualRouter: () => ({
+        handleProviderError: (event: any) => void coreManager.onProviderError(event),
+        handleProviderSuccess: (event: any) => void coreManager.onProviderSuccess(event)
+      })
+    };
+    const routerHookOwner = {};
+    setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, {
+      handleProviderError: (event: any) => void coreManager.onProviderError(event),
+      handleProviderSuccess: (event: any) => void coreManager.onProviderSuccess(event)
+    });
+    await quotaModule.init({ serverId: 'test', getHubPipeline: () => hubPipeline });
     quotaModule.registerProviderStaticConfig(providerKey, { authType: 'apikey', priorityTier: 100 });
     await quotaModule.start();
 
@@ -147,7 +156,8 @@ describe('daemon-admin quota unified host/rust consistency', () => {
     registerQuotaRoutes(app, {
       app,
       getManagerDaemon: () => daemon,
-      getServerId: () => 'test:0'
+      getServerId: () => 'test:0',
+      getHubPipeline: () => hubPipeline
     });
 
     const server = http.createServer(app);
@@ -165,7 +175,7 @@ describe('daemon-admin quota unified host/rust consistency', () => {
       const cookie = setup.headers.get('set-cookie');
       expect(typeof cookie).toBe('string');
 
-      registeredHooks.onProviderError({
+      reportProviderErrorToRouterPolicy({
         code: 'QUOTA_DEPLETED',
         message: 'HTTP 429: quota exhausted',
         status: 429,
@@ -211,7 +221,7 @@ describe('daemon-admin quota unified host/rust consistency', () => {
         updatedVia: 'unified_control'
       });
 
-      registeredHooks.onProviderSuccess({
+      reportProviderSuccessToRouterPolicy({
         runtime: {
           requestId: 'req-quota-host-admin-after',
           providerKey,
@@ -250,6 +260,7 @@ describe('daemon-admin quota unified host/rust consistency', () => {
         updatedVia: 'unified_control'
       });
     } finally {
+      setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, undefined);
       await quotaModule.stop();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

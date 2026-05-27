@@ -233,4 +233,101 @@ describe('daemon-admin quota rust host mutate contract', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+
+  it('fails fast in unified quota mode when rust host mutator is absent', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-daemon-admin-rust-quota-mutate-missing-'));
+    createdTmpDir = tmpDir;
+    createdLoginFile = path.join(tmpDir, 'login');
+    process.env.ROUTECODEX_LOGIN_FILE = createdLoginFile;
+
+    jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
+      x7eGate: {
+        phase1UnifiedQuota: true,
+        phase2UnifiedControl: true
+      },
+      getGateState: () => ({ phase1_unifiedQuota: true, phase2_unifiedControl: true })
+    }));
+
+    const providerKey = 'quota.key1.gpt-test';
+    const coreMutations = {
+      reset: jest.fn(() => ({ ok: true, source: 'ts-core' })),
+      recover: jest.fn(() => ({ ok: true, source: 'ts-core' })),
+      disable: jest.fn(() => ({ ok: true, source: 'ts-core' }))
+    };
+
+    const daemon = {
+      getModule: (id: string) => {
+        if (id !== 'quota') return undefined;
+        return {
+          id: 'quota',
+          getCoreQuotaManager: () => ({
+            getSnapshot: () => ({ updatedAtMs: Date.now(), providers: {} }),
+            getQuotaView: () => () => null,
+            resetProvider: coreMutations.reset,
+            recoverProvider: coreMutations.recover,
+            disableProvider: coreMutations.disable,
+            persistNow: jest.fn(async () => {})
+          })
+        };
+      }
+    };
+
+    const app = express();
+    app.use(express.json());
+    registerDaemonAuthRoutes(app);
+    registerQuotaRoutes(app, {
+      app,
+      getManagerDaemon: () => daemon,
+      getServerId: () => 'test:0',
+      getHubPipeline: () => ({
+        getVirtualRouter: () => ({
+          getStatus: () => ({ quotaHostSnapshot: [] })
+        })
+      })
+    } as any);
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${addr.port}`;
+
+    try {
+      const setup = await fetch(`${base}/daemon/auth/setup`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'password123' })
+      });
+      expect(setup.ok).toBe(true);
+      const cookie = setup.headers.get('set-cookie');
+      expect(typeof cookie).toBe('string');
+
+      const resetResp = await fetch(`${base}/quota/providers/${providerKey}/reset`, {
+        method: 'POST',
+        headers: { cookie: String(cookie) }
+      });
+      expect(resetResp.status).toBe(503);
+
+      const recoverResp = await fetch(`${base}/quota/providers/${providerKey}/recover`, {
+        method: 'POST',
+        headers: { cookie: String(cookie) }
+      });
+      expect(recoverResp.status).toBe(503);
+
+      const disableResp = await fetch(`${base}/quota/providers/${providerKey}/disable`, {
+        method: 'POST',
+        headers: {
+          cookie: String(cookie),
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ mode: 'blacklist', durationMs: 60_000 })
+      });
+      expect(disableResp.status).toBe(503);
+
+      expect(coreMutations.reset).not.toHaveBeenCalled();
+      expect(coreMutations.recover).not.toHaveBeenCalled();
+      expect(coreMutations.disable).not.toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });

@@ -32,13 +32,6 @@ type CoreQuotaManagerLike = {
   registerProviderStaticConfig?: (providerKey: string, cfg: StaticQuotaConfig) => void;
   onProviderError?: (ev: ProviderErrorEvent) => void;
   onProviderSuccess?: (ev: ProviderSuccessEvent) => void;
-  updateProviderPoolState?: (options: {
-    providerKey: string;
-    inPool: boolean;
-    reason?: string | null;
-    cooldownUntil?: number | null;
-    blacklistUntil?: number | null;
-  }) => void;
   disableProvider?: (options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number; reason?: string }) => void;
   recoverProvider?: (providerKey: string) => void;
   resetProvider?: (providerKey: string) => void;
@@ -304,7 +297,9 @@ export class QuotaManagerModule implements ManagerModule {
           onProviderError: (event: ProviderErrorEvent) => {
             const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
             if (typeof rustMutator?.handleProviderError === 'function') {
-              rustMutator.handleProviderError(event);
+              return;
+            }
+            if (typeof this.context?.getHubPipeline === 'function' && this.context.getHubPipeline()) {
               return;
             }
             this.coreManager?.onProviderError?.(event);
@@ -312,7 +307,9 @@ export class QuotaManagerModule implements ManagerModule {
           onProviderSuccess: (event: ProviderSuccessEvent) => {
             const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
             if (typeof rustMutator?.handleProviderSuccess === 'function') {
-              rustMutator.handleProviderSuccess(event);
+              return;
+            }
+            if (typeof this.context?.getHubPipeline === 'function' && this.context.getHubPipeline()) {
               return;
             }
             this.coreManager?.onProviderSuccess?.(event);
@@ -468,10 +465,7 @@ export class QuotaManagerModule implements ManagerModule {
         const state = rustSnapshot?.[providerKey] ?? null;
         return state ? { providerKey, state } : { providerKey, state: null };
       }
-      this.coreManager?.resetProvider?.(providerKey);
-      const state = this.coreManager?.getSnapshot?.()?.providers?.[providerKey] ?? null;
-      await this.coreManager?.persistNow?.();
-      return state ? { providerKey, state } : null;
+      return { providerKey, state: null };
     }
     return await this.legacyDelegate.resetProvider(providerKey);
   }
@@ -485,10 +479,7 @@ export class QuotaManagerModule implements ManagerModule {
         const state = rustSnapshot?.[providerKey] ?? null;
         return state ? { providerKey, state } : { providerKey, state: null };
       }
-      this.coreManager?.recoverProvider?.(providerKey);
-      const state = this.coreManager?.getSnapshot?.()?.providers?.[providerKey] ?? null;
-      await this.coreManager?.persistNow?.();
-      return state ? { providerKey, state } : null;
+      return { providerKey, state: null };
     }
     return await this.legacyDelegate.recoverProvider(providerKey);
   }
@@ -506,15 +497,7 @@ export class QuotaManagerModule implements ManagerModule {
         const state = rustSnapshot?.[options.providerKey] ?? null;
         return state ? { providerKey: options.providerKey, state } : { providerKey: options.providerKey, state: null };
       }
-      this.coreManager?.disableProvider?.({
-        providerKey: options.providerKey,
-        mode: options.mode,
-        durationMs: options.durationMs,
-        reason: options.mode === 'blacklist' ? 'operator' : 'auto'
-      });
-      const state = this.coreManager?.getSnapshot?.()?.providers?.[options.providerKey] ?? null;
-      await this.coreManager?.persistNow?.();
-      return state ? { providerKey: options.providerKey, state } : null;
+      return { providerKey: options.providerKey, state: null };
     }
     return await this.legacyDelegate.disableProvider(options);
   }

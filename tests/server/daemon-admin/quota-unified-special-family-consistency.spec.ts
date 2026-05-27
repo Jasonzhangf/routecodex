@@ -8,6 +8,7 @@ import type { AddressInfo } from 'node:net';
 
 import { registerDaemonAuthRoutes } from '../../../src/server/runtime/http-server/daemon-admin/auth-handler.js';
 import { registerQuotaRoutes } from '../../../src/server/runtime/http-server/daemon-admin/quota-handler.js';
+import { reportProviderErrorToRouterPolicy, reportProviderSuccessToRouterPolicy, resetProviderRuntimeIngressForTests, setVirtualRouterPolicyRuntimeRouterHooks } from '../../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js';
 
 const BRIDGE_MODULE_PATH = '../../../src/modules/llmswitch/bridge.js';
 const GATE_MODULE_PATH = new URL('../../../src/server/runtime/http-server/daemon-admin/routecodex-x7e-gate.ts', import.meta.url).pathname;
@@ -159,6 +160,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
   let createdTmpDir: string | null = null;
 
   afterEach(async () => {
+    resetProviderRuntimeIngressForTests();
     jest.resetModules();
     if (originalLoginFile === undefined) delete process.env.ROUTECODEX_LOGIN_FILE;
     else process.env.ROUTECODEX_LOGIN_FILE = originalLoginFile;
@@ -178,14 +180,10 @@ describe('daemon-admin quota unified special-family consistency', () => {
 
   it('keeps 402/resetAt state aligned across persist/hydrate/admin and clears it on success', async () => {
     const { QuotaManager } = await import('../../../sharedmodule/llmswitch-core/src/quota/index.js');
-    let activeHooks: any;
 
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       createCoreQuotaManager: async (options?: { store?: unknown }) => new QuotaManager(options),
-      setProviderRuntimeQuotaHooks: jest.fn(async (_owner, hooks) => {
-        activeHooks = hooks;
-        return true;
-      }),
+      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
       setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
@@ -224,6 +222,19 @@ describe('daemon-admin quota unified special-family consistency', () => {
       }
     };
     const hubPipeline = createMockHubPipeline(rustStateRef);
+    const routerHookOwner = {};
+    setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, {
+      handleProviderError: (event: any) => {
+        const router = hubPipeline.getVirtualRouter();
+        if (event?.code === 'HTTP_402') {
+          const resetAtMs = Date.parse(String(event?.details?.resetAt || event?.resetAt || ''));
+          router.applyKeepPoolCooldownQuota?.(providerKey, resetAtMs, 'HTTP_402');
+        }
+      },
+      handleProviderSuccess: (event: any) => {
+        hubPipeline.getVirtualRouter().recoverProviderQuota?.(event?.runtime?.providerKey);
+      }
+    });
 
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-resetat-special-'));
     createdTmpDir = tmpDir;
@@ -238,7 +249,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
     const server1 = await createAuthenticatedServer(daemon1, createdLoginFile, hubPipeline);
 
     try {
-      activeHooks.onProviderError({
+      reportProviderErrorToRouterPolicy({
         code: 'HTTP_402',
         status: 402,
         message: `HTTP 402: {"resetAt":"${resetAtIso}"}`,
@@ -325,7 +336,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
           cooldownUntil: resetAtMs
         });
 
-        activeHooks.onProviderSuccess({
+        reportProviderSuccessToRouterPolicy({
           runtime: { providerKey, runtimeKey },
           timestamp: Date.now()
         });
@@ -372,6 +383,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
         });
         expect(adminAfterSuccess?.cooldownUntil).toBeNull();
       } finally {
+        setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, undefined);
         await mod2.stop();
         await server2.close();
       }
@@ -383,14 +395,10 @@ describe('daemon-admin quota unified special-family consistency', () => {
 
   it('sanitizes auth/fatal persisted state on restart and keeps admin projection aligned after success', async () => {
     const { QuotaManager } = await import('../../../sharedmodule/llmswitch-core/src/quota/index.js');
-    let activeHooks: any;
 
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       createCoreQuotaManager: async (options?: { store?: unknown }) => new QuotaManager(options),
-      setProviderRuntimeQuotaHooks: jest.fn(async (_owner, hooks) => {
-        activeHooks = hooks;
-        return true;
-      }),
+      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
       setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
@@ -427,6 +435,31 @@ describe('daemon-admin quota unified special-family consistency', () => {
       }
     };
     const hubPipeline = createMockHubPipeline(rustStateRef);
+    const routerHookOwner = {};
+    setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, {
+      handleProviderError: (event: any) => {
+        const key = event?.runtime?.providerKey;
+        rustStateRef.current[key] = {
+          ...(rustStateRef.current[key] ?? { providerKey: key, authType: 'apikey', priorityTier: 100 }),
+          providerKey: key,
+          inPool: false,
+          reason: 'authVerify',
+          authIssue: event?.details?.authIssue ?? null,
+          cooldownUntil: null,
+          blacklistUntil: null,
+          resetAt: null,
+          lastErrorSeries: 'EFATAL',
+          lastErrorCode: event?.code ?? 'NEW_API_ERROR',
+          lastErrorAtMs: Date.now(),
+          consecutiveErrorCount: 1,
+          selectionPenalty: 1,
+          lastProviderGuardApplied: false
+        };
+      },
+      handleProviderSuccess: (event: any) => {
+        hubPipeline.getVirtualRouter().recoverProviderQuota?.(event?.runtime?.providerKey);
+      }
+    });
 
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-auth-special-'));
     createdTmpDir = tmpDir;
@@ -441,7 +474,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
     const server1 = await createAuthenticatedServer(daemon1, createdLoginFile, hubPipeline);
 
     try {
-      activeHooks.onProviderError({
+      reportProviderErrorToRouterPolicy({
         code: 'NEW_API_ERROR',
         status: 400,
         message: 'auth verify required',
@@ -534,7 +567,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
         });
         expect(hydratedAdmin?.authIssue ?? null).toBeNull();
 
-        activeHooks.onProviderSuccess({
+        reportProviderSuccessToRouterPolicy({
           runtime: { providerKey, runtimeKey },
           timestamp: Date.now()
         });
@@ -576,6 +609,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
           consecutiveErrorCount: 0
         });
       } finally {
+        setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, undefined);
         await mod2.stop();
         await server2.close();
       }
