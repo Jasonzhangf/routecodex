@@ -12200,3 +12200,37 @@ Using skills: coding-principals + rcc-dev-skills
 - 唯一正确性:
   - 这里不能继续把已兑现行为留在 `test.failing` 里，否则测试真相会倒挂：主链已经闭环，但测试仍把它叙述成缺口；
   - 正确动作不是去改实现迎合旧红测，而是承认当前唯一真相已经变成“Rust 主链通过该 case”，并把测试升级为正式回归资产。
+
+## 2026-05-27 completion audit 发现的测试真相漂移：shadow/bridge 断言要比“等价性”，不能硬编码固定 providerA
+- 在 completion audit 扩跑 shadow / quotaView bridge 资产时，发现 4 个失败都不是主链回退，而是旧断言把以下内容写死了：
+  1. healthy dual-provider baseline 一定选 `providerA`
+  2. quotaView bridge-only baseline 下 `status.health` 一定保持 `healthy`
+- 当前实际观察真相：
+  - Rust route decision 在这些健康双 key case 下可能稳定选 `providerB`；这本身不是 second center 回归，只是当前 native selection 的稳定结果。
+  - quotaView bridge-only baseline 的正确 invariant 不是“health status 看起来必须 healthy”，而是“TS quotaView 污染前后 route decision 语义等价、单 provider 不被 TS quotaView 错误清空”。
+- 因此把以下测试从“固定 providerA / 固定 healthy”改成“Rust-only vs TS-poisoned 等价比较”：
+  - `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts`
+  - `tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts`
+- 唯一正确性:
+  - completion audit 的目标是证明“TS 第二中心不能改变 Rust 主链语义”，不是证明“当前 Rust 一定选某个固定 key”；
+  - 如果继续把 `providerA` 写死，会把合法的 native selection 稳定结果误报成失败，反而掩盖真正应守护的 invariant；
+  - 所以唯一正确修正是把断言提升到“same-shape 等价 / second center 不得改变结果”，而不是去改实现迎合过时测试叙事。
+
+## 2026-05-27 completion audit 再定位：single-provider quotaView baseline 失败源自持久化 health 污染，不是 TS second center 回归
+- 现象: `tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts` 在 single-provider baseline 下失败，看起来像“TS quotaView 仍能清空最后一个 provider”。
+- 复核方法: 直接用最小脚本分别跑：
+  1. `rustOnly = new VirtualRouterEngine({})`
+  2. `polluted = new VirtualRouterEngine({ quotaView: ...quotaDepleted future cooldown... })`
+  同一个 single-provider config 下，两者都返回 `PROVIDER_NOT_AVAILABLE`。
+- 核心证据:
+  - `polluted.getStatus()` 显示该 provider 的 `health.state = tripped`
+  - 但 `quota.reason = active`
+  - 说明这次失败并不是 quotaView 把 provider 打空，而是初始化时从持久化 health store 导入了旧 tripped 状态。
+- 结论:
+  - 这条失败不是“TS 第二决策中心还活着”，而是测试基线没有隔离持久化 health 真相。
+  - 因此正确修复不是去改 route decision 或 quota logic，而是让该 single-provider baseline 使用唯一 providerKey，避免命中全局脏持久化状态。
+- 唯一正确性:
+  - 如果把这个 failure 误判成 second center 残留去动实现，会在错误真源上改代码；
+  - 真正唯一修改点是测试基线隔离：换成唯一 providerKey，让 completion audit 比的是“干净 Rust-only vs TS-poisoned”等价性，而不是历史持久化噪声。

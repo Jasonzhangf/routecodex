@@ -37,8 +37,10 @@ function buildSingleProviderConfig(providerKey = 'quota.key1.gpt-test'): any {
 
 describe('virtual router last-provider quotaView bridge-only baseline', () => {
   test('single-provider route is no longer emptied by TS quotaView when Rust has no blocker', () => {
-    const providerKey = 'quota.key1.gpt-test';
+    const providerKey = `quota.lastprovider.${Date.now()}.gpt-test`;
     const cooldownUntil = Date.now() + 5_000;
+    const rustOnly = new VirtualRouterEngine({} as any);
+    rustOnly.initialize(buildSingleProviderConfig(providerKey));
     const engine = new VirtualRouterEngine({
       quotaView: () => ({
         providerKey,
@@ -51,15 +53,16 @@ describe('virtual router last-provider quotaView bridge-only baseline', () => {
     } as any);
     engine.initialize(buildSingleProviderConfig(providerKey));
 
-    const status = engine.getStatus();
-    const providerState = status.health.find((entry) => entry.providerKey === providerKey || entry.providerKey === providerKey.replace('.key1.', '.1.'));
-    expect(providerState?.state).toBe('healthy');
-
+    const rustOnlyDecision = rustOnly.route(
+      { messages: [{ role: 'user', content: 'hello' }] } as any,
+      { requestId: 'req-last-provider-quota-view-rust' } as any
+    );
     const decision = engine.route(
       { messages: [{ role: 'user', content: 'hello' }] } as any,
       { requestId: 'req-last-provider-quota-view' } as any
     );
 
+    expect(rustOnlyDecision.target.providerKey).toBe(providerKey);
     expect(decision.target.providerKey).toBe(providerKey);
   });
 });

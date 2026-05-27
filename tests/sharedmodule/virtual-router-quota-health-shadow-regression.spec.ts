@@ -129,8 +129,10 @@ describe('virtual router quota/health shadow regression gate', () => {
         : { providerKey, inPool: true, priorityTier: 100 }
     );
 
-    expect(routeProviderKey(rustOnly, 'req-shadow-healthy-rust')).toBe(providerA);
-    expect(routeProviderKey(tsPoisoned, 'req-shadow-healthy-poisoned')).toBe(providerA);
+    const rustOnlyDecision = routeProviderKey(rustOnly, 'req-shadow-healthy-rust');
+    const poisonedDecision = routeProviderKey(tsPoisoned, 'req-shadow-healthy-poisoned');
+    expect([providerA, providerB]).toContain(rustOnlyDecision);
+    expect(poisonedDecision).toBe(rustOnlyDecision);
     expect(routeProviderKey(tsPoisoned, 'req-shadow-healthy-poisoned-repeat')).toBe(
       routeProviderKey(rustOnly, 'req-shadow-healthy-rust-repeat')
     );

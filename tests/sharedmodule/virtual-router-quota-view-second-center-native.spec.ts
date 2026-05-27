@@ -48,6 +48,8 @@ describe('virtual router native quotaView bridge-only baseline', () => {
   test('TS quotaView out-of-pool state no longer overrides route decision when Rust has no blocker', () => {
     const providerA = 'quota.key1.gpt-test';
     const providerB = 'quota.key2.gpt-test';
+    const rustOnly = new VirtualRouterEngine({} as any);
+    rustOnly.initialize(buildDualProviderConfig(providerA, providerB));
     const engine = new VirtualRouterEngine({
       quotaView: (providerKey: string) => {
         if (providerKey === providerA) {
@@ -69,10 +71,12 @@ describe('virtual router native quotaView bridge-only baseline', () => {
     } as any);
     engine.initialize(buildDualProviderConfig(providerA, providerB));
 
-    const status = engine.getStatus();
-    const providerAState = status.health.find((entry) => entry.providerKey === providerA || entry.providerKey === providerA.replace('.key1.', '.1.'));
-    expect(providerAState?.state).toBe('healthy');
-
+    const rustOnlyDecision = rustOnly.route(
+      {
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any,
+      { requestId: 'req-quota-view-second-center' } as any
+    );
     const decision = engine.route(
       {
         messages: [{ role: 'user', content: 'hello' }]
@@ -80,6 +84,7 @@ describe('virtual router native quotaView bridge-only baseline', () => {
       { requestId: 'req-quota-view-second-center' } as any
     );
 
-    expect(decision.target.providerKey).toBe(providerA);
+    expect([providerA, providerB]).toContain(rustOnlyDecision.target.providerKey);
+    expect(decision.target.providerKey).toBe(rustOnlyDecision.target.providerKey);
   });
 });

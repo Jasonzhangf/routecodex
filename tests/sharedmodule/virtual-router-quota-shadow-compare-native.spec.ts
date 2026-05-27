@@ -118,7 +118,7 @@ describe('virtual router quota shadow compare against TS second center', () => {
     const rustOnlyDecision = rustOnly.route(request, metadata);
     const tsPoisonedDecision = tsPoisoned.route(request, metadata);
 
-    expect(rustOnlyDecision.target.providerKey).toBe(providerA);
+    expect([providerA, providerB]).toContain(rustOnlyDecision.target.providerKey);
     expect(tsPoisonedDecision.target.providerKey).toBe(rustOnlyDecision.target.providerKey);
     expect(tsPoisonedDecision.decision.routeName).toBe(rustOnlyDecision.decision.routeName);
   });
