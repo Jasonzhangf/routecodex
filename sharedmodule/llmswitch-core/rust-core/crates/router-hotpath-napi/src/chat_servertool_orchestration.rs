@@ -2823,3 +2823,568 @@ pub fn read_followup_client_inject_source_json(
 
     Ok(String::new())
 }
+
+// ── Apply Patch ────────────────────────────────────────────────────────────
+
+/// Parse tool call arguments from raw JSON string with recovery for malformed input.
+fn parse_apply_patch_arguments(raw: &str) -> serde_json::Value {
+    if raw.trim().is_empty() {
+        return serde_json::json!({});
+    }
+    // Try standard JSON parse first
+    match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(v) if v.is_object() => v,
+        _ => {
+            // Recovery: regex-based field extraction for malformed JSON
+            let mut map = serde_json::Map::new();
+
+            let file_path = raw
+                .split('"')
+                .collect::<Vec<_>>()
+                .windows(3)
+                .find(|w| {
+                    let key = w[0].trim();
+                    let val = w[1].trim();
+                    (key == "filePath" || key == "file_path" || key == "path") && !val.is_empty()
+                })
+                .and_then(|w| {
+                    let v = w[1].to_string();
+                    if !v.is_empty() { Some(v) } else { None }
+                });
+            if let Some(fp) = file_path {
+                map.insert("filePath".to_string(), serde_json::Value::String(fp));
+            }
+
+            let patch = raw
+                .split('"')
+                .collect::<Vec<_>>()
+                .windows(3)
+                .find(|w| {
+                    let key = w[0].trim();
+                    let val = w[1].trim();
+                    (key == "patch" || key == "input" || key == "diff" || key == "changes") && !val.is_empty()
+                })
+                .and_then(|w| {
+                    let v = w[1].to_string();
+                    if !v.is_empty() { Some(v) } else { None }
+                });
+            if let Some(p) = patch {
+                map.insert("patch".to_string(), serde_json::Value::String(p));
+            }
+
+            serde_json::Value::Object(map)
+        }
+    }
+}
+
+/// Read patch text from parsed args — try `patch`, `input`, `diff`, `changes` fields.
+fn read_patch_text_from_args(args: &serde_json::Value) -> String {
+    for key in &["patch", "input", "diff", "changes"] {
+        if let Some(v) = args.get(*key) {
+            if let Some(s) = v.as_str() {
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+/// Strip outer quotes from a string.
+fn strip_outer_quotes(s: &str) -> String {
+    let trimmed = s.trim();
+    let chars: &[_] = &['"', '\'', '`'];
+    if trimmed.starts_with(chars) && trimmed.ends_with(chars) && trimmed.len() >= 2 {
+        trimmed[1..trimmed.len() - 1].trim().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Normalize a patch line: ensure `+` or `-` prefix is followed by space.
+fn normalize_patch_line(line: &str) -> String {
+    let trimmed = line.trim_end();
+    if trimmed.starts_with('+') && !trimmed.starts_with("+++") {
+        if trimmed.len() == 1 || !trimmed[1..].starts_with(' ') {
+            return format!("+ {}", &trimmed[1..]);
+        }
+    }
+    if trimmed.starts_with('-') && !trimmed.starts_with("---") {
+        if trimmed.len() == 1 || !trimmed[1..].starts_with(' ') {
+            return format!("- {}", &trimmed[1..]);
+        }
+    }
+    trimmed.to_string()
+}
+
+/// Check if text is a valid line-edit block (all lines start with `+ ` or `- `).
+fn is_line_edit_block(text: &str) -> bool {
+    let rows: Vec<&str> = text
+        .split('\n')
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+    if rows.is_empty() {
+        return false;
+    }
+    rows.iter().all(|l| l.starts_with("+ ") || l.starts_with("- ") || *l == "+" || *l == "-")
+}
+
+/// Extract fenced patch text from markdown ``` blocks.
+fn extract_fenced_patch_text(text: &str) -> Option<String> {
+    let re = regex::Regex::new(r"```(?:diff|patch|text)?\s*\n([\s\S]*?)\n```").ok()?;
+    let caps = re.captures(text)?;
+    let content = caps.get(1)?.as_str().to_string();
+    if content.trim().is_empty() {
+        None
+    } else {
+        Some(content)
+    }
+}
+
+/// Normalize a line-edit block, returning the normalized patch.
+fn normalize_line_edit_block(text: &str) -> Option<String> {
+    let normalized: Vec<String> = text
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .split('\n')
+        .filter(|l| !l.trim().is_empty())
+        .map(normalize_patch_line)
+        .collect();
+    if normalized.is_empty() {
+        return None;
+    }
+    let all_line_edit = normalized
+        .iter()
+        .all(|l| l == "+" || l == "-" || l.starts_with("+ ") || l.starts_with("- "));
+    if all_line_edit {
+        Some(normalized.join("\n"))
+    } else {
+        None
+    }
+}
+
+/// Convert a native patch (from model) to line-edit format.
+fn convert_native_patch_to_line_edit(raw_patch: &str, target_path: &str) -> String {
+    let text = raw_patch.replace("\r\n", "\n").replace('\r', "\n");
+
+    // Try direct line-edit block
+    if let Some(normalized) = normalize_line_edit_block(&text) {
+        return normalized;
+    }
+
+    // Try fenced block
+    if let Some(fenced) = extract_fenced_patch_text(&text) {
+        if let Some(normalized) = normalize_line_edit_block(&fenced) {
+            return normalized;
+        }
+    }
+
+    // Try /** Begin Patch ... End Patch **/ format
+    if text.contains("*** Begin Patch") {
+        let mut out = Vec::new();
+        let mut active = false;
+        let mut selected = target_path.trim().is_empty();
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("*** ") && trimmed.contains("File:") {
+                active = true;
+                let header_path = trimmed
+                    .split("File:")
+                    .nth(1)
+                    .map(|s| s.trim().trim_matches('"').trim_matches('\''))
+                    .unwrap_or("");
+                selected = target_path.trim().is_empty()
+                    || header_path == target_path
+                    || header_path.ends_with(&format!("/{}", target_path));
+                continue;
+            }
+            if trimmed.starts_with("*** End Patch") {
+                break;
+            }
+            if trimmed.starts_with("*** ") {
+                active = false;
+                selected = false;
+                continue;
+            }
+            if !active || !selected {
+                continue;
+            }
+            if trimmed.starts_with("@@") || trimmed.starts_with(' ') {
+                continue;
+            }
+            if (trimmed.starts_with('+') && !trimmed.starts_with("+++"))
+                || (trimmed.starts_with('-') && !trimmed.starts_with("---"))
+            {
+                out.push(normalize_patch_line(trimmed));
+            }
+        }
+        return out.join("\n");
+    }
+
+    // Fallback: normalize all lines
+    text.lines()
+        .map(normalize_patch_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Parse a line-edit patch into hunks (remove/add pairs).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LineEditHunk {
+    remove: Vec<String>,
+    add: Vec<String>,
+}
+
+fn parse_line_edit_patch(patch: &str) -> Result<ParsedPatch, String> {
+    let text = patch.replace("\r\n", "\n").replace('\r', "\n");
+    let rows: Vec<&str> = text
+        .split('\n')
+        .filter(|line| !(line.is_empty() && text.ends_with('\n') && rows_count(&text) == rows_count_before_split(&text, line)))
+        .collect();
+
+    // Actually, simpler: filter trailing empty
+    let rows: Vec<&str> = text.split('\n').collect();
+    let rows: Vec<&str> = if rows.last().map(|s| s.is_empty()).unwrap_or(false) {
+        rows[..rows.len() - 1].to_vec()
+    } else {
+        rows
+    }
+    .into_iter()
+    .filter(|l| !(l.is_empty()))
+    .collect();
+
+    if rows.is_empty() {
+        return Err("PATCH_EMPTY".to_string());
+    }
+
+    let mut hunks: Vec<LineEditHunk> = Vec::new();
+    let mut current = LineEditHunk {
+        remove: Vec::new(),
+        add: Vec::new(),
+    };
+
+    let mut removed = 0u32;
+    let mut added = 0u32;
+
+    for line in &rows {
+        let trimmed = line.trim_end();
+        if trimmed.starts_with("- ") || trimmed == "-" {
+            if !current.add.is_empty() {
+                hunks.push(current);
+                current = LineEditHunk {
+                    remove: Vec::new(),
+                    add: Vec::new(),
+                };
+            }
+            current.remove.push(if trimmed == "-" {
+                String::new()
+            } else {
+                trimmed[2..].to_string()
+            });
+            removed += 1;
+        } else if trimmed.starts_with("+ ") || trimmed == "+" {
+            current.add.push(if trimmed == "+" {
+                String::new()
+            } else {
+                trimmed[2..].to_string()
+            });
+            added += 1;
+        } else {
+            return Err(format!(
+                "PATCH_INVALID: patch line must begin with '- ' or '+ '"
+            ));
+        }
+    }
+    if !current.remove.is_empty() || !current.add.is_empty() {
+        hunks.push(current);
+    }
+
+    if removed == 0 && added == 0 {
+        return Err("PATCH_EMPTY".to_string());
+    }
+
+    Ok(ParsedPatch {
+        hunks,
+        removed,
+        added,
+    })
+}
+
+fn rows_count(s: &str) -> usize {
+    s.split('\n').count()
+}
+
+fn rows_count_before_split(s: &str, line: &str) -> usize {
+    // Not used, workaround for borrow checker
+    0
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ParsedPatch {
+    hunks: Vec<LineEditHunk>,
+    removed: u32,
+    added: u32,
+}
+
+/// Find a subsequence in a source vector.
+fn find_subsequence(source: &[String], needle: &[String]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(source.len());
+    }
+    if needle.len() > source.len() {
+        return None;
+    }
+    let end = source.len() - needle.len();
+    for start in 0..=end {
+        if source[start..start + needle.len()] == *needle {
+            return Some(start);
+        }
+    }
+    None
+}
+
+/// Apply line-edit hunks to target content.
+fn apply_line_edit_patch(
+    target_content: &str,
+    hunks: &[LineEditHunk],
+) -> Result<String, String> {
+    let lines: Vec<String> = target_content
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .split('\n')
+        .map(|s| s.to_string())
+        .collect();
+
+    let mut result = lines;
+
+    for hunk in hunks {
+        if hunk.remove.is_empty() {
+            // Append-only hunk
+            result.extend(hunk.add.iter().cloned());
+            continue;
+        }
+        let idx = find_subsequence(&result, &hunk.remove);
+        match idx {
+            Some(pos) => {
+                result.splice(pos..pos + hunk.remove.len(), hunk.add.iter().cloned());
+            }
+            None => {
+                return Err("PATCH_CONTEXT_NOT_FOUND".to_string());
+            }
+        }
+    }
+
+    let body = result.join("\n");
+    let final_content = if target_content.is_empty() || target_content.ends_with('\n') {
+        format!("{}\n", body)
+    } else {
+        body
+    };
+
+    Ok(final_content)
+}
+
+/// Apply patch main NAPI function.
+/// Input: { toolCall: {id, name, arguments}, workspace, fileContent? }
+/// Output: { ok, payload, patchedContent?, canonicalArgs }
+#[napi]
+pub fn run_apply_patch_json(input_json: String) -> NapiResult<String> {
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ApplyPatchInput {
+        tool_call_id: String,
+        tool_call_arguments: String,
+        workspace: String,
+        /// Optional file content — if absent, only parse/normalize is performed
+        file_content: Option<String>,
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ApplyPatchOutput {
+        ok: bool,
+        payload: serde_json::Value,
+        /// Patched content (only set when fileContent was provided and patch applied)
+        patched_content: Option<String>,
+        canonical_args: serde_json::Value,
+    }
+
+    let input: ApplyPatchInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize: {e}")))?;
+
+    // 1. Parse arguments (with recovery for malformed JSON)
+    let args = parse_apply_patch_arguments(&input.tool_call_arguments);
+
+    // 2. Read patch text
+    let raw_patch = read_patch_text_from_args(&args);
+
+    let mut canonical_args = serde_json::json!({
+        "filePath": "",
+        "patch": raw_patch
+    });
+
+    // 3. Resolve file path
+    let file_path = args
+        .get("filePath")
+        .and_then(|v| v.as_str())
+        .map(|s| strip_outer_quotes(s))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
+
+    let normalized_path = if file_path.starts_with('/') || file_path.starts_with("\\\\") {
+        // Absolute path — normalize to relative if inside workspace
+        let workspace = input.workspace.replace('\\', "/");
+        let ws_trimmed = workspace.trim_end_matches('/');
+        if let Some(rel) = file_path.strip_prefix(ws_trimmed) {
+            rel.trim_start_matches('/').to_string()
+        } else {
+            file_path.clone()
+        }
+    } else {
+        file_path.clone()
+    };
+
+    canonical_args["filePath"] = serde_json::json!(normalized_path);
+
+    // 4. Convert native patch to line-edit format
+    let line_edit_patch = convert_native_patch_to_line_edit(&raw_patch, &normalized_path);
+    canonical_args["patch"] = serde_json::json!(line_edit_patch);
+
+    // 5. If no patch text — return error
+    if line_edit_patch.trim().is_empty() {
+        let payload = serde_json::json!({
+            "status": "APPLY_PATCH_FAILED",
+            "ok": false,
+            "filePath": normalized_path,
+            "reason": "PATCH_EMPTY",
+            "message": if normalized_path.is_empty() {
+                "filePath and patch are required."
+            } else {
+                "patch is empty."
+            },
+            "nextAction": "Retry with valid patch entries."
+        });
+        let output = ApplyPatchOutput {
+            ok: false,
+            payload,
+            patched_content: None,
+            canonical_args,
+        };
+        return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
+    }
+
+    // 6. If file content is provided, parse and apply patch
+    if let Some(content) = &input.file_content {
+        let parsed = match parse_line_edit_patch(&line_edit_patch) {
+            Ok(p) => p,
+            Err(reason) => {
+                let (reason_code, message) = if reason.starts_with("PATCH_INVALID") {
+                    ("PATCH_INVALID", reason)
+                } else {
+                    ("PATCH_EMPTY", "patch has no edit entries.".to_string())
+                };
+                let payload = serde_json::json!({
+                    "status": "APPLY_PATCH_FAILED",
+                    "ok": false,
+                    "filePath": normalized_path,
+                    "reason": reason_code,
+                    "message": message,
+                    "nextAction": "Retry with only line-edit entries."
+                });
+                let output = ApplyPatchOutput {
+                    ok: false,
+                    payload,
+                    patched_content: None,
+                    canonical_args,
+                };
+                return serde_json::to_string(&output)
+                    .map_err(|e| napi::Error::from_reason(e.to_string()));
+            }
+        };
+
+        // Check for remove hunk against non-existent file
+        let has_remove = parsed.hunks.iter().any(|h| !h.remove.is_empty());
+        if has_remove && content.is_empty() {
+            let payload = serde_json::json!({
+                "status": "APPLY_PATCH_FAILED",
+                "ok": false,
+                "filePath": normalized_path,
+                "reason": "FILE_NOT_FOUND",
+                "message": "Target file does not exist for a removal/update patch.",
+                "nextAction": "Retry with a create-only patch."
+            });
+            let output = ApplyPatchOutput {
+                ok: false,
+                payload,
+                patched_content: None,
+                canonical_args,
+            };
+            return serde_json::to_string(&output)
+                .map_err(|e| napi::Error::from_reason(e.to_string()));
+        }
+
+        match apply_line_edit_patch(content, &parsed.hunks) {
+            Ok(patched) => {
+                let summary = format!(
+                    "Replaced {} removed line(s) with {} added line(s).",
+                    parsed.removed, parsed.added
+                );
+                let payload = serde_json::json!({
+                    "status": "APPLY_PATCH_APPLIED",
+                    "ok": true,
+                    "filePath": normalized_path,
+                    "summary": summary
+                });
+                let output = ApplyPatchOutput {
+                    ok: true,
+                    payload,
+                    patched_content: Some(patched),
+                    canonical_args,
+                };
+                serde_json::to_string(&output)
+                    .map_err(|e| napi::Error::from_reason(e.to_string()))
+            }
+            Err(reason) => {
+                let message = match reason.as_str() {
+                    "PATCH_CONTEXT_NOT_FOUND" => "Removed line sequence was not found in target file.".to_string(),
+                    _ => reason.clone(),
+                };
+                let payload = serde_json::json!({
+                    "status": "APPLY_PATCH_FAILED",
+                    "ok": false,
+                    "filePath": normalized_path,
+                    "reason": reason,
+                    "message": message,
+                    "nextAction": "Retry with patch entries that match the current target file."
+                });
+                let output = ApplyPatchOutput {
+                    ok: false,
+                    payload,
+                    patched_content: None,
+                    canonical_args,
+                };
+                serde_json::to_string(&output)
+                    .map_err(|e| napi::Error::from_reason(e.to_string()))
+            }
+        }
+    } else {
+        // No file content — just return normalized result (parse phase only)
+        let payload = serde_json::json!({
+            "status": "APPLY_PATCH_PLANNED",
+            "ok": true,
+            "filePath": normalized_path
+        });
+        let output = ApplyPatchOutput {
+            ok: true,
+            payload,
+            patched_content: None,
+            canonical_args,
+        };
+        serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+}

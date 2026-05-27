@@ -720,6 +720,41 @@ export function planServertoolFollowupRuntimeWithNative(
   }
 }
 
+export type NativeApplyPatchResult = {
+  ok: boolean;
+  payload: Record<string, unknown>;
+  patchedContent: string | null;
+  canonicalArgs: Record<string, unknown>;
+};
+
+export function runApplyPatchWithNative(input: {
+  toolCallId: string;
+  toolCallArguments: string;
+  workspace: string;
+  fileContent?: string;
+}): NativeApplyPatchResult {
+  const capability = 'runApplyPatchJson';
+  const fail = (reason?: string) => failNativeRequired<NativeApplyPatchResult>(capability, reason);
+  try {
+    if (isNativeDisabledByEnv()) {
+      return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+      return fail();
+    }
+    const inputJson = JSON.stringify(input);
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string') {
+      return fail('non-string result');
+    }
+    return JSON.parse(raw) as NativeApplyPatchResult;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function readFollowupClientInjectSourceWithNative(
   adapterContext: Record<string, unknown>
 ): string {
