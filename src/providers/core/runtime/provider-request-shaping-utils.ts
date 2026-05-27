@@ -91,11 +91,6 @@ export function resolveProviderBusinessResponseError(args: {
         ? baseResp.status_msg.trim()
         : `business error (status_code=${statusCode})`;
     if (typeof statusCode === 'number' && statusCode !== 0) {
-      // 2056 = upstream rotation/overload (MiniMax). Transient — don't throw,
-      // let the provider absorb it internally.
-      if (statusCode === 2056) {
-        return undefined;
-      }
       return Object.assign(
         new Error(`[provider] Upstream provider returned business error: ${statusMessage}`),
         {

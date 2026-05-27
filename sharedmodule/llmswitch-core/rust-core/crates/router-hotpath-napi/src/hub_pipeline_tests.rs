@@ -2361,6 +2361,45 @@ fn test_sync_responses_context_from_canonical_messages_allows_orphan_tool_result
 }
 
 #[test]
+fn test_sync_responses_context_from_canonical_messages_allows_orphan_tool_result_with_semantics_resume()
+{
+    let request = json!({
+        "messages": [
+            {
+                "role": "tool",
+                "tool_call_id": "native:run_command:3",
+                "content": "/Users/fanzhang/Documents/github/routecodex"
+            }
+        ],
+        "semantics": {
+            "continuation": {
+                "resumeFrom": {
+                    "previousResponseId": "resp_prev_semantic_1"
+                }
+            },
+            "responses": {
+                "context": {
+                    "existing": true
+                }
+            }
+        }
+    });
+
+    let output = sync_responses_context_from_canonical_messages(&request).unwrap();
+    let input = output
+        .get("semantics")
+        .and_then(|v| v.get("responses"))
+        .and_then(|v| v.get("context"))
+        .and_then(|v| v.get("input"))
+        .and_then(|v| v.as_array())
+        .expect("responses context input");
+
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0]["type"], "function_call_output");
+    assert_eq!(input[0]["call_id"], "native:run_command:3");
+}
+
+#[test]
 fn test_sync_responses_context_from_canonical_messages_strips_historical_goal_turns() {
     let request = json!({
         "messages": [

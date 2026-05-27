@@ -1,17 +1,17 @@
 /**
- * Red-test: MiniMax 2056 must be digested at the provider shaping layer.
+ * Red-test: MiniMax 2056 must be retried by provider internal auto-retry.
  *
- * resolveProviderBusinessResponseError should return undefined for 2056
- * (not throw MALFORMED_RESPONSE), so the error never reaches the
- * classification/retry layer. 2056 = transient upstream rotation.
+ * resolveAutoRetryErrorCode should return '0.8200' for 2056.
+ * resolveProviderBusinessResponseError should throw MALFORMED_RESPONSE
+ * (not swallow), so the auto-retry has an error to catch and retry on.
  */
 
 import { describe, test, expect } from '@jest/globals';
 import { resolveProviderBusinessResponseError } from '../../../../src/providers/core/runtime/provider-request-shaping-utils.js';
-import { resolveProviderFailureClassification } from '../../../../src/providers/core/runtime/provider-failure-policy-impl.js';
+import { resolveAutoRetryErrorCode } from '../../../../src/providers/core/runtime/auto-retry-error-codes.js';
 
-describe('MiniMax 2056 absorption', () => {
-  test('2056 returns undefined (no error = absorbed)', () => {
+describe('MiniMax 2056 auto-retry', () => {
+  test('2056 throws MALFORMED_RESPONSE (so auto-retry can catch it)', () => {
     const result = resolveProviderBusinessResponseError({
       response: {
         data: {
@@ -25,59 +25,31 @@ describe('MiniMax 2056 absorption', () => {
       }
     });
 
-    // RED: before fix, this threw MALFORMED_RESPONSE
-    // GREEN: after fix, returns undefined (digested)
-    expect(result).toBeUndefined();
-  });
-
-  test('non-zero non-2056 status_code still throws', () => {
-    const result = resolveProviderBusinessResponseError({
-      response: {
-        data: {
-          base_resp: {
-            status_code: 2013,
-            status_msg: 'context length exceeded'
-          },
-          choices: null
-        },
-        status: 200
-      }
-    });
-
-    // Other non-zero codes still throw
+    // Must throw, so base-provider.ts auto-retry catches it
     expect(result).toBeInstanceOf(Error);
     expect((result as Error).message).toContain('business error');
   });
 
-  test('zero status_code returns undefined (success)', () => {
-    const result = resolveProviderBusinessResponseError({
-      response: {
-        data: {
-          base_resp: {
-            status_code: 0,
-            status_msg: ''
-          },
-          choices: [{ finish_reason: 'stop', message: { content: 'ok' } }]
-        },
-        status: 200
-      }
+  test('resolveAutoRetryErrorCode returns 0.8200 for PROVIDER_STATUS_2056', () => {
+    const error = new Error('test');
+    Object.assign(error, {
+      code: 'MALFORMED_RESPONSE',
+      upstreamCode: 'PROVIDER_STATUS_2056',
     });
 
-    expect(result).toBeUndefined();
+    const code = resolveAutoRetryErrorCode(error);
+    expect(code).toBe('0.8200');
   });
 
-  test('2056 never reaches classification layer', () => {
-    // Since 2056 is absorbed at shaping layer, classification shouldn't see it.
-    // This tests that if it somehow still surfaces, it's classified correctly.
-    const result = resolveProviderFailureClassification({
-      errorCode: 'MALFORMED_RESPONSE',
-      upstreamCode: 'PROVIDER_STATUS_2056',
-      reason: 'usage limit exceeded',
-      statusCode: 200,
+  test('non-2056 status codes return different retry codes', () => {
+    const error = new Error('test');
+    Object.assign(error, {
+      code: 'MALFORMED_RESPONSE',
+      upstreamCode: 'PROVIDER_STATUS_2013',
     });
 
-    // Keep as recoverable — transient, not permanent
-    expect(result).toBe('recoverable');
-    expect(result).not.toBe('unrecoverable');
+    const code = resolveAutoRetryErrorCode(error);
+    // 2013 is not in auto-retry codes
+    expect(code).toBeUndefined();
   });
 });

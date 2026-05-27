@@ -90,6 +90,12 @@ export function resolveAutoRetryErrorCode(error: unknown): string | undefined {
   const message = typeof err.message === 'string' ? err.message.trim().toLowerCase() : '';
   const name = typeof err.name === 'string' ? err.name.trim() : '';
 
+  // 上游状态码 2056 必须在 catalog 查找之前检查，确保返回 '0.8200'
+  // （catalog 会返回 '429.2056'，auto-retry 配置不认得这个值）
+  if (upstreamCode === 'PROVIDER_STATUS_2056' || code === 'PROVIDER_STATUS_2056') {
+    return AUTO_RETRY_UPSTREAM_STATUS_2056;
+  }
+
   const known = normalizeKnownProviderError({
     statusCode,
     code,
@@ -121,12 +127,9 @@ export function resolveAutoRetryErrorCode(error: unknown): string | undefined {
     return AUTO_RETRY_UPSTREAM_GLM_514;
   }
 
-  // 上游状态码 1000 / 2056（泛化匹配 PROVIDER_STATUS_NNNN）
+  // 上游状态码 1000（泛化匹配 PROVIDER_STATUS_NNNN）
   if (upstreamCode === 'PROVIDER_STATUS_1000' || code === 'PROVIDER_STATUS_1000') {
     return AUTO_RETRY_UPSTREAM_STATUS_1000;
-  }
-  if (upstreamCode === 'PROVIDER_STATUS_2056' || code === 'PROVIDER_STATUS_2056') {
-    return AUTO_RETRY_UPSTREAM_STATUS_2056;
   }
 
   // SSE decode error
