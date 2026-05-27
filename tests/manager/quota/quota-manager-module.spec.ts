@@ -53,7 +53,14 @@ describe('QuotaManagerModule', () => {
 
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
     const mod = new QuotaManagerModule();
-    await mod.init({ serverId: 'test' });
+    await mod.init({
+      serverId: 'test',
+      getHubPipeline: () => ({
+        getVirtualRouter: () => ({
+          getStatus: () => ({ quotaHostSnapshot: Object.values(snapshot.providers) })
+        })
+      })
+    });
     await mod.start();
 
     expect(mod.getCoreQuotaManager()).toBe(coreManager);
@@ -67,7 +74,7 @@ describe('QuotaManagerModule', () => {
       inPool: true,
       reason: 'ok'
     });
-    expect(mod.getAdminSnapshot()).toEqual(snapshot.providers);
+    expect(mod.getAdminSnapshot()).toMatchObject(snapshot.providers);
     expect(coreManager.onProviderError).not.toHaveBeenCalled();
     expect(coreManager.onProviderSuccess).not.toHaveBeenCalled();
   });
@@ -338,32 +345,13 @@ describe('QuotaManagerModule', () => {
     });
   });
 
-  it('keeps core getSnapshot as the live fallback for unified readOnly/admin views when hubPipeline is absent', async () => {
-    const snapshot = {
-      updatedAtMs: 123,
-      providers: {
-        'mock.provider': {
-          providerKey: 'mock.provider',
-          inPool: false,
-          reason: 'cooldown',
-          authType: 'apikey',
-          authIssue: null,
-          priorityTier: 100,
-          cooldownUntil: 456,
-          blacklistUntil: null,
-          lastErrorSeries: 'E429',
-          lastErrorCode: 'QUOTA_DEPLETED',
-          lastErrorAtMs: 111,
-          consecutiveErrorCount: 2
-        }
-      }
-    };
+  it('fails fast when unified quota starts without rust host mutator', async () => {
     const coreManager = {
       hydrateFromStore: async () => {},
       registerProviderStaticConfig: jest.fn(),
       onProviderError: jest.fn(),
       onProviderSuccess: jest.fn(),
-      getSnapshot: jest.fn(() => snapshot),
+      getSnapshot: jest.fn(() => ({ updatedAtMs: Date.now(), providers: {} })),
       persistNow: async () => {}
     };
 
@@ -380,45 +368,18 @@ describe('QuotaManagerModule', () => {
 
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
     const mod = new QuotaManagerModule();
-    await mod.init({ serverId: 'test' });
-
-    expect(mod.getQuotaViewReadOnly()('mock.provider')).toMatchObject({
-      providerKey: 'mock.provider',
-      inPool: false,
-      reason: 'cooldown',
-      cooldownUntil: 456,
-      consecutiveErrorCount: 2
-    });
-    expect(mod.getAdminSnapshot()).toEqual(snapshot.providers);
-    expect(coreManager.getSnapshot).toHaveBeenCalled();
+    await expect(mod.init({ serverId: 'test' })).rejects.toThrow(
+      'unified quota requires hubPipeline virtual router quota host mutator'
+    );
   });
 
-  it('switches unified readOnly/admin views from core snapshot fallback to Rust host snapshot once hubPipeline becomes available', async () => {
-    const coreSnapshot = {
-      updatedAtMs: 123,
-      providers: {
-        'mock.provider': {
-          providerKey: 'mock.provider',
-          inPool: true,
-          reason: 'ok',
-          authType: 'apikey',
-          authIssue: null,
-          priorityTier: 100,
-          cooldownUntil: null,
-          blacklistUntil: null,
-          lastErrorSeries: null,
-          lastErrorCode: null,
-          lastErrorAtMs: null,
-          consecutiveErrorCount: 0
-        }
-      }
-    };
+  it('uses rust host snapshot as unified readOnly/admin source', async () => {
     const coreManager = {
       hydrateFromStore: async () => {},
       registerProviderStaticConfig: jest.fn(),
       onProviderError: jest.fn(),
       onProviderSuccess: jest.fn(),
-      getSnapshot: jest.fn(() => coreSnapshot),
+      getSnapshot: jest.fn(() => ({ updatedAtMs: Date.now(), providers: {} })),
       persistNow: async () => {}
     };
 
@@ -433,43 +394,36 @@ describe('QuotaManagerModule', () => {
       }
     }));
 
-    const runtimeRef: { current: any } = { current: null };
+    const runtimeRef: { current: any } = {
+      current: {
+        getVirtualRouter: () => ({
+          getStatus: () => ({
+            quotaHostSnapshot: [
+              {
+                providerKey: 'mock.provider',
+                inPool: false,
+                reason: 'cooldown',
+                authType: 'apikey',
+                authIssue: null,
+                priorityTier: 100,
+                cooldownUntil: 789,
+                blacklistUntil: null,
+                lastErrorSeries: 'E429',
+                lastErrorCode: 'QUOTA_DEPLETED',
+                lastErrorAtMs: 456,
+                consecutiveErrorCount: 3
+              }
+            ]
+          })
+        })
+      }
+    };
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
     const mod = new QuotaManagerModule();
     await mod.init({
       serverId: 'test',
       getHubPipeline: () => runtimeRef.current
     });
-
-    expect(mod.getAdminSnapshot()).toEqual(coreSnapshot.providers);
-    expect(mod.getQuotaViewReadOnly()('mock.provider')).toMatchObject({
-      providerKey: 'mock.provider',
-      inPool: true,
-      reason: 'ok'
-    });
-
-    runtimeRef.current = {
-      getVirtualRouter: () => ({
-        getStatus: () => ({
-          quotaHostSnapshot: [
-            {
-              providerKey: 'mock.provider',
-              inPool: false,
-              reason: 'cooldown',
-              authType: 'apikey',
-              authIssue: null,
-              priorityTier: 100,
-              cooldownUntil: 789,
-              blacklistUntil: null,
-              lastErrorSeries: 'E429',
-              lastErrorCode: 'QUOTA_DEPLETED',
-              lastErrorAtMs: 456,
-              consecutiveErrorCount: 3
-            }
-          ]
-        })
-      })
-    };
 
     expect(mod.getAdminSnapshot()).toMatchObject({
       'mock.provider': {

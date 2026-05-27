@@ -12366,3 +12366,20 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
   - 结果：`6 suites / 15 tests` 全绿。
 - 结论：daemon-admin quota adapter runtime surface 已不再读取 TS core snapshot；host read/admin 统一走 Rust host snapshot contract。
+
+## 2026-05-27 Phase E 延续3：QuotaManagerModule fail-fast 收口（移除 unified 下 core fallback）
+- 问题：`QuotaManagerModule` 在 unified 模式下仍存在 core fallback（init hydrate / stop persist / readOnly/admin snapshot），会保留 TS second-center 可达性。
+- 本轮变更：
+  - `src/manager/modules/quota/quota-manager.ts`
+    - `init()` 强制要求 `hubPipeline.getVirtualRouter()` 提供 rust quota host mutator；缺失即 fail-fast。
+    - 移除 unified 下 `hydrateFromStore()` core fallback；rust hydrate contract 缺失即 fail-fast。
+    - `stop()` / `persistNow()` 移除 core persist fallback；rust persist contract 缺失即 fail-fast。
+    - `getQuotaViewReadOnly()` / `getAdminSnapshot()` 移除 core snapshot fallback；仅消费 rust host snapshot。
+  - 测试对齐（全部改为显式 Rust contract）：
+    - `tests/manager/quota/quota-manager-module.spec.ts`
+      - 原“hubPipeline absent 时 fallback core snapshot”用例改为“缺 rust mutator 直接失败”。
+      - 保留并强化 rust host snapshot 作为 read/admin 唯一来源。
+- 验证：
+  - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
+  - 结果：`6 suites / 15 tests` 全绿。
+- 结论：QuotaManagerModule 在 unified 模式下已从“可读 core fallback”收口到“rust contract-only + fail-fast”。

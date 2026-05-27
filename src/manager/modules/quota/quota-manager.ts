@@ -277,9 +277,12 @@ export class QuotaManagerModule implements ManagerModule {
     const store = this.providerQuotaStore;
     const core = (await createCoreQuotaManager({ store })) as CoreQuotaManagerLike | null;
     this.coreManager = core;
+    if (!getRustQuotaHostMutatorFromContext(this.context)) {
+      throw new Error('unified quota requires hubPipeline virtual router quota host mutator');
+    }
     const hydratedByRust = await hydrateRustQuotaHostSnapshotFromStore(this.context, store).catch(() => false);
     if (!hydratedByRust) {
-      await this.coreManager?.hydrateFromStore?.();
+      throw new Error('unified quota rust host hydrate contract unavailable');
     }
   }
 
@@ -290,7 +293,7 @@ export class QuotaManagerModule implements ManagerModule {
   async stop(): Promise<void> {
     const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
     if (!persistedByRust) {
-      await this.coreManager?.persistNow?.();
+      throw new Error('unified quota rust host persist contract unavailable');
     }
   }
 
@@ -361,7 +364,7 @@ export class QuotaManagerModule implements ManagerModule {
         };
       };
     }
-    return buildReadOnlyQuotaViewFromCore(this.coreManager) ?? (() => null);
+    return () => null;
   }
 
   getAdminSnapshot(): Record<string, QuotaState> {
@@ -369,13 +372,13 @@ export class QuotaManagerModule implements ManagerModule {
     if (rustSnapshot) {
       return rustSnapshot;
     }
-    return this.coreManager?.getSnapshot?.()?.providers ?? {};
+    return {};
   }
 
   async persistNow(): Promise<void> {
     const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
     if (!persistedByRust) {
-      await this.coreManager?.persistNow?.();
+      throw new Error('unified quota rust host persist contract unavailable');
     }
   }
 
