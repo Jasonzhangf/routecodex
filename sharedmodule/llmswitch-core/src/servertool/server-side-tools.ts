@@ -10,11 +10,9 @@ import {
   listAutoServerToolHooks
 } from './registry.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
-import './handlers/memory/cache-auto.js';
 import './handlers/stop-message-auto.js';
 import './handlers/clock.js';
 import './handlers/clock-auto.js';
-import './handlers/gemini-empty-reply-continue.js';
 import './handlers/exec-command-guard.js';
 import './handlers/apply-patch.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
