@@ -67,13 +67,26 @@ function walkLatestMtime(entryPath) {
 }
 
 function getLatestSourceMtime() {
+  // Primary crate (router-hotpath-napi) + workspace root
   const candidates = [
     path.join(rustRoot, 'Cargo.toml'),
     path.join(rustRoot, 'Cargo.lock'),
     path.join(rustRoot, 'crates', 'router-hotpath-napi', 'Cargo.toml'),
     path.join(rustRoot, 'crates', 'router-hotpath-napi', 'build.rs'),
-    path.join(rustRoot, 'crates', 'router-hotpath-napi', 'src')
+    path.join(rustRoot, 'crates', 'router-hotpath-napi', 'src'),
   ];
+  // Dependency crates — changes in these also require a rebuild
+  const depCrates = [
+    'stop-message-core',
+    'servertool-core',
+    'followup-core',
+  ];
+  for (const crate of depCrates) {
+    const crateSrc = path.join(rustRoot, 'crates', crate, 'src');
+    if (fs.existsSync(crateSrc)) {
+      candidates.push(crateSrc);
+    }
+  }
   return candidates.reduce((latest, item) => Math.max(latest, walkLatestMtime(item)), 0);
 }
 
