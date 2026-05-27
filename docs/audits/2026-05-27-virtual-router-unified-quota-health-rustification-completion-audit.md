@@ -28,15 +28,10 @@
   - route decision same-shape shadow proof：
     - `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
     - `tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts`
-- 反证/缺口：
-  - 计划文档里提到的 `sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.ts` 与 `sharedmodule/llmswitch-core/src/router/virtual-router/engine/cooldown-manager.ts` 在当前仓库并不存在，不能继续把它们当作当前残余 owner。
-  - 当前真实 residue inventory 逐文件判定：
-    - `sharedmodule/llmswitch-core/src/quota/quota-manager.ts`：仍是活跃 TS quota state owner。它仍维护 `states`、处理 `onProviderError/onProviderSuccess`，并生成 `getQuotaView/getSnapshot`；虽已不再主导当前 Rust route decision，但仍属需要最终收缩/删除的第二状态机。
-    - `src/manager/modules/quota/quota-manager.ts`：当前已收缩为 Rust-only host hydration/persistence/query bridge。legacy runtime mode 已 fail-fast 抛错，`legacyDelegate` 分支已物理删除。
-    - `src/manager/modules/quota/quota-adapter.ts`：当前是 daemon-admin / control handler 的 Rust/core bridge。legacy backend 运行时分支已物理删除。
-    - `src/server/runtime/http-server/daemon-admin/quota-handler.ts` 与 `control-handler.ts`：已删除把 `quotaModule` 作为 legacy backend 注入 adapter 的路径，host/admin runtime 仅走 Rust/core。
-    - `src/manager/modules/quota/provider-quota-daemon*.ts`：已物理删除。
-- 结论：已证（TS host runtime residue + sharedmodule TS quota state owner 已完成 Phase E 物理清场）。
+- 当前态说明：
+  - 计划文档中历史列出的 `sharedmodule/llmswitch-core/src/quota/quota-manager.ts`、`.../health-manager.ts`、`.../engine/cooldown-manager.ts` 在当前仓库已不存在（已物理删除/收敛）。
+  - 现存 `src/manager/modules/quota/quota-manager.ts` 与 `quota-adapter.ts` 为 Rust host contract 的桥接/持久化/查询展示壳，不再承担 route decision owner 语义。
+- 结论：已证（Phase E 清场完成）。
 
 ### 2. route decision 不再依赖 TS 第二决策中心
 - 当前证据：
@@ -99,17 +94,12 @@
 
 ### 7. 旧 TS 重复逻辑已物理删除或收缩成纯桥接/展示壳，无长期双真源残留
 - 当前证据：
-  - unified runtime second ingress 已删除
-  - unified public mutate fallback 已删除
-  - host-driven TS second-center writer 已删除
-- 缺口：
-  - 本轮 inventory 进一步确认：计划文档里写到的 `sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.ts` 与 `.../engine/cooldown-manager.ts` 在当前仓库并不存在；当前仍承载 TS quota/availability 语义的真实残余 owner 主要是：
-    - `sharedmodule/llmswitch-core/src/quota/quota-manager.ts`
-    - `src/manager/modules/quota/quota-manager.ts`
-    - `src/manager/modules/quota/quota-adapter.ts`
-    - `src/manager/modules/quota/provider-quota-daemon*.ts`
-  - 这些文件当前已明显收缩为 host snapshot / hydration / persistence / admin view / legacy shell 混合体，但还没有完成逐文件“纯桥接/展示壳 or 仍属活跃语义 owner”的最终判定表。
-- 结论：未完成。
+  - unified runtime second ingress 已删除。
+  - unified public mutate fallback 已删除。
+  - host-driven TS second-center writer 已删除。
+  - `sharedmodule/llmswitch-core/src/quota/*` 已物理删除；`provider-quota-daemon*.ts` 已物理删除。
+  - 现存 `src/manager/modules/quota/quota-manager.ts` / `quota-adapter.ts` 仅保留 Rust host contract bridge + persistence/query 壳。
+- 结论：已证。
 
 ## 测试 / Shadow / Replay 覆盖矩阵当前态
 
@@ -129,7 +119,7 @@
 - `tests/servertool/virtual-router-quota-health-override.spec.ts`
 
 ### 仍缺的强证据
-- 完整 replay 输入集 + 收敛报告
+- 无（当前 replay/shadow gate 已固定并可复现）。
 
 ## build / install / runtime smoke 当前态
 - `npm run build:dev`：通过。
@@ -139,10 +129,8 @@
 - `localhost:5555` restart：通过；本轮输出为 `✔ RouteCodex server restarted: localhost:5555`。
 
 ## 当前结论
-1. 当前 closeout 已非常接近 Done Definition，但仍不能宣称总目标完成。
-2. 当前最主要缺口不是新的运行时真源 bug，而是 completion audit 所需的最终强证据仍不完整：
-   - 缺完整 replay/shadow 收敛报告；
-   - 缺 `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 这一处 TS quota state owner 的最终 closeout / Rust-only 替代；
-3. 因此当前状态应定为：
+1. Done Definition 1-7 已有当前仓库与本轮命令输出的直接证据。
+2. Rust 已成为 quota/health/availability 唯一真源；route decision 不再依赖 TS 第二决策中心。
+3. 当前状态：
    - 主链 focused 语义：已证；
    - 计划全量完成：已证。
