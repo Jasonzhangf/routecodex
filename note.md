@@ -12383,3 +12383,14 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
   - 结果：`6 suites / 15 tests` 全绿。
 - 结论：QuotaManagerModule 在 unified 模式下已从“可读 core fallback”收口到“rust contract-only + fail-fast”。
+
+## 2026-05-27 Phase E 延续4：daemon-admin adapter 删除 coreManager 注入
+- 发现：`quota-handler.ts` / `control-handler.ts` 的 `createQuotaManagerAdapter(...)` 仍注入 `coreManager`，虽当前 adapter 已不读 core snapshot，但该注入会保留“可回退心智模型”。
+- 本轮最小收口：
+  - `src/server/runtime/http-server/daemon-admin/quota-handler.ts`
+  - `src/server/runtime/http-server/daemon-admin/control-handler.ts`
+  - 两处统一改为 `coreManager: null`，只注入 `rustHostMutator`。
+- 验证：
+  - `npm run -s jest:run -- --runInBand --runTestsByPath tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
+  - 结果：`4 suites / 6 tests` 全绿。
+- 结论：daemon-admin adapter wiring 已显式 Rust-only，不再携带 coreManager 注入路径。

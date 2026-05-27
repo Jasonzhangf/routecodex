@@ -206,13 +206,12 @@ function getQuotaAdapter(options: DaemonAdminRouteOptions): any | null {
   if (!quotaModule) {
     return null;
   }
-  const coreLike = typeof quotaModule.getCoreQuotaManager === 'function' ? quotaModule.getCoreQuotaManager() : null;
   const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
   const virtualRouter = hubPipeline && typeof (hubPipeline as any).getVirtualRouter === 'function'
     ? (hubPipeline as any).getVirtualRouter()
     : null;
   return createQuotaManagerAdapter({
-    coreManager: coreLike,
+    coreManager: null,
     rustHostMutator: virtualRouter,
     quotaRoutingEnabled: true
   });
