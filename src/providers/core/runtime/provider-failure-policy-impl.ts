@@ -22,6 +22,7 @@ import {
   computeProviderFailureBackoffDelayMsBlock,
   resolveProviderFailureBackoffPlanBlock
 } from './provider-failure-policy-backoff.js';
+import { normalizeKnownProviderError } from './provider-error-catalog.js';
 
 const UNRECOVERABLE_CODE_SET = new Set([
   'INVALID_API_KEY',
@@ -346,6 +347,18 @@ export function resolveProviderFailureClassification(args: {
   }
 
   if (
+    (errorCode === 'MALFORMED_RESPONSE' || upstreamCode === 'MALFORMED_RESPONSE' || nestedCode === 'MALFORMED_RESPONSE')
+    && (
+      protocolUpstreamCode === 'PROVIDER_STATUS_2056'
+      || upstreamCode === 'PROVIDER_STATUS_2056'
+      || nestedCode === 'PROVIDER_STATUS_2056'
+      || reason.includes('usage limit exceeded')
+    )
+  ) {
+    return 'recoverable';
+  }
+
+  if (
     (errorCode === 'MALFORMED_RESPONSE'
       || upstreamCode === 'MALFORMED_RESPONSE'
       || nestedCode === 'MALFORMED_RESPONSE')
@@ -443,6 +456,22 @@ export function resolveProviderFailureClassification(args: {
     || reason.includes('blocked due to unauthorized requests')
   ) {
     return 'unrecoverable';
+  }
+
+  const known = normalizeKnownProviderError({
+    statusCode,
+    code: errorCode,
+    upstreamCode: protocolUpstreamCode || upstreamCode,
+    message: reason,
+  });
+  if (known?.class === 'unrecoverable') {
+    return 'unrecoverable';
+  }
+  if (known?.class === 'special_400') {
+    return 'special_400';
+  }
+  if (known?.class === 'recoverable') {
+    return 'recoverable';
   }
 
   // Final fallback: consume native Rust failure_policy for generic classification

@@ -244,6 +244,36 @@ describe('provider failure policy ssot', () => {
     })).toBe(true);
   });
 
+  it('classifies local network error ECONNRESET as recoverable via unified catalog', () => {
+    const error = Object.assign(new Error('fetch failed: socket hang up'), {
+      code: 'ECONNRESET'
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      errorCode: 'ECONNRESET',
+      reason: 'fetch failed: socket hang up'
+    });
+    expect(classification).toBe('recoverable');
+  });
+
+  it('classifies provider_status_2056 as recoverable via unified catalog', () => {
+    const error = Object.assign(new Error('usage limit exceeded'), {
+      code: 'MALFORMED_RESPONSE',
+      upstreamCode: 'provider_status_2056',
+      statusCode: 429
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 429,
+      errorCode: 'MALFORMED_RESPONSE',
+      upstreamCode: 'provider_status_2056',
+      reason: 'usage limit exceeded'
+    });
+    expect(classification).toBe('recoverable');
+  });
+
   it('classifies windsurf repeated tool call after tool_result as special_400', () => {
     const error = Object.assign(new Error('[windsurf] upstream repeated prior tool call after tool_result'), {
       code: 'WINDSURF_SERVICE_UNREACHABLE',

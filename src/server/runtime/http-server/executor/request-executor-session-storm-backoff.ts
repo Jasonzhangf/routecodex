@@ -2,6 +2,7 @@ import {
   readString,
   normalizeCodeKey
 } from './request-executor-error-shared.js';
+import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 import {
   extractStatusCodeFromError
 } from './utils.js';
@@ -160,6 +161,15 @@ export function isSessionStormBackoffCandidate(error: unknown): boolean {
         ? String((error as { message?: unknown }).message)
         : String(error ?? '');
   const normalized = message.trim().toLowerCase();
+  const known = normalizeKnownProviderError({
+    statusCode: status,
+    code: code,
+    upstreamCode: error && typeof error === 'object' ? (error as { upstreamCode?: unknown }).upstreamCode : undefined,
+    message,
+  });
+  if (known) {
+    return true;
+  }
   return (
     normalized.includes('fetch failed')
     || normalized.includes('all providers unavailable')

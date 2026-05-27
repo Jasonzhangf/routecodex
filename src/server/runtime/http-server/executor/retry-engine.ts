@@ -10,6 +10,7 @@ import {
   shouldRetryProviderError,
   waitBeforeRetry
 } from '../executor-provider.js';
+import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 
 // Re-export for backward compatibility
 export {
@@ -53,6 +54,23 @@ export function isRetryableSseWrapperError(
   errorCode?: string,
   status?: number
 ): boolean {
+  const known = normalizeKnownProviderError({
+    statusCode: typeof status === 'number' ? status : undefined,
+    code: errorCode,
+    upstreamCode: errorCode,
+    message,
+  });
+  if (known?.code === '429.2000') {
+    return false;
+  }
+  if (known) {
+    if (known.class === 'recoverable') {
+      return true;
+    }
+    if (known.class === 'unrecoverable' || known.class === 'special_400') {
+      return false;
+    }
+  }
   if (typeof status === 'number' && Number.isFinite(status)) {
     if (status === 408 || status === 425 || status === 429 || status >= 500) {
       return true;

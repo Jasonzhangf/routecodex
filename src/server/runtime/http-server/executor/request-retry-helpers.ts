@@ -1,6 +1,7 @@
 import { getSessionClientRegistry } from '../session-client-registry.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
 import { extractStatusCodeFromError } from './utils.js';
+import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 
 export {
   extractStatusCodeFromError
@@ -59,13 +60,23 @@ export function isRateLimitLikeError(message: string, ...codes: Array<string | u
 }
 
 export function isSseDecodeRateLimitError(error: unknown, status: number | undefined): boolean {
-  if (status !== 429 || !error || typeof error !== 'object') {
+  if (!error || typeof error !== 'object') {
     return false;
   }
   const record = error as Record<string, unknown>;
   const message = typeof record.message === 'string' ? record.message : '';
   const code = typeof record.code === 'string' ? record.code : '';
   const upstreamCode = typeof record.upstreamCode === 'string' ? record.upstreamCode : '';
+  const known = normalizeKnownProviderError({ statusCode: status, code, upstreamCode, message });
+  if (known?.code === '429.1000' || known?.code === '429.2056' || known?.code === '429.3000') {
+    return true;
+  }
+  if (known?.code === '429.2000') {
+    return false;
+  }
+  if (status !== 429) {
+    return false;
+  }
   const name = typeof record.name === 'string' ? record.name.toLowerCase() : '';
   const sseLike =
     code === 'SSE_DECODE_ERROR' ||
@@ -75,13 +86,20 @@ export function isSseDecodeRateLimitError(error: unknown, status: number | undef
 }
 
 export function isSseDecodeRetryableNetworkError(error: unknown, status: number | undefined): boolean {
-  if (status !== 502 || !error || typeof error !== 'object') {
+  if (!error || typeof error !== 'object') {
     return false;
   }
   const record = error as Record<string, unknown>;
   const message = typeof record.message === 'string' ? record.message.toLowerCase() : '';
   const code = typeof record.code === 'string' ? record.code : '';
   const upstreamCode = typeof record.upstreamCode === 'string' ? record.upstreamCode.toLowerCase() : '';
+  const known = normalizeKnownProviderError({ statusCode: status, code, upstreamCode, message });
+  if (known?.code === '0.1000' || known?.code === '0.2000' || known?.code === '0.3000' || known?.code === '0.4000' || known?.code === '0.6000') {
+    return true;
+  }
+  if (status !== 502) {
+    return false;
+  }
   const name = typeof record.name === 'string' ? record.name.toLowerCase() : '';
   const sseLike =
     code === 'HTTP_502' ||

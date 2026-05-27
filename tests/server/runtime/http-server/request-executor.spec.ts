@@ -1355,6 +1355,18 @@ describe('HubRequestExecutor failover', () => {
       }
     })).toBe(true);
 
+    expect(__requestExecutorTestables.isLastAvailableProvider429({
+      providerKey: 'mimo.key1.mimo-v2.5-pro',
+      routePool: ['mimo.key1.mimo-v2.5-pro'],
+      excludedProviderKeys: new Set<string>(),
+      retryError: {
+        statusCode: 429,
+        errorCode: 'MALFORMED_RESPONSE',
+        upstreamCode: 'provider_status_2056',
+        reason: 'usage limit exceeded'
+      }
+    })).toBe(true);
+
     const promptTooLongPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
       error: new Error('context exceeded'),
       retryError: { statusCode: 400, reason: 'context exceeded' },
@@ -1408,6 +1420,47 @@ describe('HubRequestExecutor failover', () => {
       },
       stage: 'provider.send'
     })).toBe('recoverable');
+
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('socket hang up'), {
+        code: 'ECONNRESET'
+      }),
+      retryError: {
+        errorCode: 'ECONNRESET',
+        reason: 'socket hang up'
+      },
+      stage: 'provider.send'
+    })).toBe('recoverable');
+
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('usage limit exceeded'), {
+        code: 'MALFORMED_RESPONSE',
+        upstreamCode: 'provider_status_2056',
+        statusCode: 429
+      }),
+      retryError: {
+        statusCode: 429,
+        errorCode: 'MALFORMED_RESPONSE',
+        upstreamCode: 'provider_status_2056',
+        reason: 'usage limit exceeded'
+      },
+      stage: 'provider.send'
+    })).toBe('recoverable');
+
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('daily usage limit exceeded'), {
+        code: 'HTTP_429',
+        upstreamCode: 'HTTP_429',
+        statusCode: 429
+      }),
+      retryError: {
+        statusCode: 429,
+        errorCode: 'HTTP_429',
+        upstreamCode: 'HTTP_429',
+        reason: 'daily usage limit exceeded'
+      },
+      stage: 'provider.send'
+    })).toBe('unrecoverable');
 
     expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
       error: Object.assign(new Error('HTTP 404: {"detail":"Not Found"}'), {
@@ -4000,6 +4053,15 @@ describe('HubRequestExecutor session storm backoff', () => {
     expect(
       __requestExecutorTestables.isSessionStormBackoffCandidate(new Error('boom'))
     ).toBe(false);
+  });
+
+  test('treats provider_status_2056 as storm candidate via unified catalog', () => {
+    const err = Object.assign(new Error('usage limit exceeded'), {
+      code: 'MALFORMED_RESPONSE',
+      upstreamCode: 'provider_status_2056',
+      statusCode: 429,
+    });
+    expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(true);
   });
 
   test('shares storm backoff across sessions through workdir scope for client tool args invalid storms', () => {

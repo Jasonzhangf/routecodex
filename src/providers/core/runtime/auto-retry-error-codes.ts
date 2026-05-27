@@ -90,6 +90,16 @@ export function resolveAutoRetryErrorCode(error: unknown): string | undefined {
   const message = typeof err.message === 'string' ? err.message.trim().toLowerCase() : '';
   const name = typeof err.name === 'string' ? err.name.trim() : '';
 
+  const known = normalizeKnownProviderError({
+    statusCode,
+    code,
+    upstreamCode,
+    message: typeof err.message === 'string' ? err.message : undefined,
+  });
+  if (known) {
+    return known.code;
+  }
+
   // --- 1. 精确错误码匹配 ---
 
   // ERR_HTTP2_STREAM_CANCEL
@@ -240,3 +250,4 @@ export function resolveAutoRetryErrorCode(error: unknown): string | undefined {
   // --- 3. 无匹配 ---
   return undefined;
 }
+import { normalizeKnownProviderError } from './provider-error-catalog.js';

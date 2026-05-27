@@ -14,22 +14,22 @@ import { resolveProviderBusinessResponseError } from '../../../../src/providers/
 
 describe('Auto-retry business error detection', () => {
   describe('resolveAutoRetryErrorCode maps provider_status_2056', () => {
-    it('maps MALFORMED_RESPONSE + upstreamCode=provider_status_2056 to 0.8200', () => {
+    it('maps MALFORMED_RESPONSE + upstreamCode=provider_status_2056 to 429.2056', () => {
       const error = Object.assign(new Error('[hub_response] Upstream provider returned structured business error at chat_process.response.entry: usage limit exceeded'), {
         code: 'MALFORMED_RESPONSE',
         upstreamCode: 'provider_status_2056',
       });
       const code = resolveAutoRetryErrorCode(error);
-      expect(code).toBe('0.8200');
+      expect(code).toBe('429.2056');
     });
 
-    it('maps MALFORMED_RESPONSE + upstreamCode=PROVIDER_STATUS_2056 (upper) to 0.8200', () => {
+    it('maps MALFORMED_RESPONSE + upstreamCode=PROVIDER_STATUS_2056 (upper) to 429.2056', () => {
       const error = Object.assign(new Error('business error'), {
         code: 'MALFORMED_RESPONSE',
         upstreamCode: 'PROVIDER_STATUS_2056',
       });
       const code = resolveAutoRetryErrorCode(error);
-      expect(code).toBe('0.8200');
+      expect(code).toBe('429.2056');
     });
 
     it('returns undefined for unrelated upstreamCode', () => {
@@ -43,6 +43,29 @@ describe('Auto-retry business error detection', () => {
   });
 
   describe('resolveProviderBusinessResponseError generically detects business errors', () => {
+    it('RED: detects provider errors wrapped in transport data envelope', () => {
+      const responseWithDataEnvelope = {
+        data: {
+          base_resp: {
+            status_code: 2056,
+            status_msg: 'usage limit exceeded'
+          },
+          choices: null
+        },
+        status: 200
+      };
+
+      const result = resolveProviderBusinessResponseError({
+        response: responseWithDataEnvelope,
+        runtimeMetadata: undefined,
+        familyProfile: undefined,
+      });
+
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Record<string, unknown>).upstreamCode).toBe('provider_status_2056');
+      expect((result as Record<string, unknown>).code).toBe('MALFORMED_RESPONSE');
+    });
+
     it('detects base_resp.status_code=2056 without family profile', () => {
       const responseWithBusinessError = {
         id: 'resp_123',

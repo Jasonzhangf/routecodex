@@ -6,6 +6,7 @@
  */
 
 import { readString } from './request-executor-error-shared.js';
+import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
@@ -59,6 +60,18 @@ export function isNetworkTransportLikeError(error: unknown): boolean {
     return false;
   }
   const record = error as { code?: unknown; message?: unknown; name?: unknown };
+  const statusCode = typeof (record as { statusCode?: unknown }).statusCode === 'number'
+    ? ((record as { statusCode?: number }).statusCode)
+    : undefined;
+  const known = normalizeKnownProviderError({
+    statusCode,
+    code: record.code,
+    upstreamCode: (record as { upstreamCode?: unknown }).upstreamCode,
+    message: record.message,
+  });
+  if (known?.code === '0.1000' || known?.code === '0.2000' || known?.code === '0.3000' || known?.code === '0.4000' || known?.code === '0.6000') {
+    return true;
+  }
   const code = typeof record.code === 'string' ? record.code.trim().toUpperCase() : '';
   if (
     code === 'ECONNRESET'

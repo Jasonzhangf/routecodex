@@ -8,6 +8,7 @@ import {
   normalizeCodeKey,
   normalizeRuntimeKey
 } from './request-executor-error-shared.js';
+import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 import {
   resolveRequestExecutorProviderErrorClassification
 } from './request-executor-provider-failure.js';
@@ -32,6 +33,18 @@ function isNetworkTransportLikeError(error: unknown): boolean {
     return false;
   }
   const record = error as { code?: unknown; message?: unknown; name?: unknown };
+  const statusCode = typeof (record as { statusCode?: unknown }).statusCode === 'number'
+    ? ((record as { statusCode?: number }).statusCode)
+    : undefined;
+  const known = normalizeKnownProviderError({
+    statusCode,
+    code: record.code,
+    upstreamCode: (record as { upstreamCode?: unknown }).upstreamCode,
+    message: record.message,
+  });
+  if (known?.code === '0.1000' || known?.code === '0.2000' || known?.code === '0.3000' || known?.code === '0.4000' || known?.code === '0.6000') {
+    return true;
+  }
   const code = typeof record.code === 'string' ? record.code.trim().toUpperCase() : '';
   if (
     code === 'ECONNRESET'
@@ -221,7 +234,13 @@ export function isLastAvailableProvider429(args: {
   const status = typeof args.retryError.statusCode === 'number' ? args.retryError.statusCode : undefined;
   const errorCode = normalizeCodeKey(args.retryError.errorCode);
   const upstreamCode = normalizeCodeKey(args.retryError.upstreamCode);
-  const is429 = status === 429 || errorCode === 'HTTP_429' || upstreamCode === 'HTTP_429';
+  const known = normalizeKnownProviderError({
+    statusCode: status,
+    code: errorCode,
+    upstreamCode,
+    message: args.retryError.reason,
+  });
+  const is429 = known?.code?.startsWith('429.') || status === 429 || errorCode === 'HTTP_429' || upstreamCode === 'HTTP_429';
   if (!is429 || !readString(args.providerKey)) {
     return false;
   }
