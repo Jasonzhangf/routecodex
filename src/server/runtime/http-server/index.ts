@@ -110,6 +110,41 @@ import {
   isLocalBaseUrl,
   disposeProviders
 } from './http-server-runtime-providers.js';
+
+function readApplyPatchModeFromMetadata(metadata: unknown): 'client' | 'servertool' {
+  const record = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown>
+    : undefined;
+  const rt = record?.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
+    ? record.__rt as Record<string, unknown>
+    : undefined;
+  const applyPatch = rt?.applyPatch && typeof rt.applyPatch === 'object' && !Array.isArray(rt.applyPatch)
+    ? rt.applyPatch as Record<string, unknown>
+    : undefined;
+  const mode = typeof applyPatch?.mode === 'string' ? applyPatch.mode.trim().toLowerCase() : '';
+  return mode === 'servertool' ? 'servertool' : 'client';
+}
+
+function hasDeclaredApplyPatchTool(body: unknown): boolean {
+  const record = body && typeof body === 'object' && !Array.isArray(body)
+    ? body as Record<string, unknown>
+    : undefined;
+  const tools = Array.isArray(record?.tools) ? record.tools : [];
+  for (const tool of tools) {
+    if (!tool || typeof tool !== 'object' || Array.isArray(tool)) continue;
+    const toolRow = tool as Record<string, unknown>;
+    const fn = toolRow.function && typeof toolRow.function === 'object' && !Array.isArray(toolRow.function)
+      ? toolRow.function as Record<string, unknown>
+      : undefined;
+    const name = typeof fn?.name === 'string'
+      ? fn.name
+      : (typeof toolRow.name === 'string' ? toolRow.name : '');
+    if (name.trim() === 'apply_patch') {
+      return true;
+    }
+  }
+  return false;
+}
 import {
   initializeHttpServer,
   restartRuntimeFromDisk,
@@ -981,6 +1016,17 @@ export class RouteCodexHttpServer {
       // For router-mode ports with sameProtocolBehavior='direct', check same-protocol
       // direct bypass before falling through to the full executor pipeline.
       if (portConfig?.mode === 'router' && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct') {
+        // apply_patch servertool mode requires Hub response-stage tool dispatch.
+        // Router direct bypass skips response conversion/servertool execution,
+        // so we must force relay when request declares apply_patch.
+        const applyPatchMode = readApplyPatchModeFromMetadata(nextInput.metadata);
+        if (applyPatchMode === 'servertool' && hasDeclaredApplyPatchTool(nextInput.body)) {
+          this.logStage('router-direct.skipped', input.requestId, {
+            reason: 'apply_patch_servertool_mode_requires_hub_response_stage',
+            mode: applyPatchMode,
+          });
+          return await this.executePipeline(nextInput);
+        }
         const directResult = await this.executeRouterDirectPipelineForPort(portConfig, nextInput);
         if (directResult.used) {
           return this.buildRouterDirectResult(directResult, input);

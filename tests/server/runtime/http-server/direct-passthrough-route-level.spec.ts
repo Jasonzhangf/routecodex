@@ -165,4 +165,53 @@ describe('direct passthrough route-level', () => {
     });
     expect((sentPayload as Record<string, unknown>).instructions).toBeUndefined();
   });
+
+  it('router same-protocol direct is skipped when apply_patch servertool mode is enabled', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { object: 'response', id: 'resp_relay' },
+      headers: {},
+      metadata: {},
+    } as any);
+    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: true,
+      response: { status: 200, body: { object: 'response', id: 'resp_direct' } },
+      providerHandle: {} as any,
+      auditContext: {} as any,
+    } as any);
+
+    const result = await (server as any).executePortAwarePipeline(
+      5520,
+      {
+        requestId: 'req_router_skip_direct_apply_patch_servertool',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'gpt-5.4',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'edit file' }] }],
+          tools: [{ type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } }],
+        },
+        metadata: {
+          __rt: { applyPatch: { mode: 'servertool' } },
+        },
+      },
+    );
+
+    expect(routerDirectSpy).not.toHaveBeenCalled();
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay' });
+  });
 });
