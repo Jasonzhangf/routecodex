@@ -171,11 +171,11 @@ describe('quota unified evidence aggregator', () => {
     const loginFile = path.join(createdTmpDir, 'login');
 
     const quotaModule = new QuotaManagerModule();
+    const quotaState: Record<string, any> = {};
     const virtualRouter = {
       getStatus: () => {
-        const providers = quotaModule.getCoreQuotaManager()?.getSnapshot?.()?.providers ?? {};
         return {
-          quotaHostSnapshot: Object.values(providers).map((state: any) => ({
+          quotaHostSnapshot: Object.values(quotaState).map((state: any) => ({
             providerKey: state?.providerKey,
             inPool: state?.inPool,
             reason: state?.reason,
@@ -190,22 +190,58 @@ describe('quota unified evidence aggregator', () => {
           }))
         };
       },
-      resetProviderQuota: (providerKey: string) => quotaModule.getCoreQuotaManager()?.resetProvider?.(providerKey),
-      recoverProviderQuota: (providerKey: string) => quotaModule.getCoreQuotaManager()?.recoverProvider?.(providerKey),
-      disableProviderQuota: (providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number) =>
-        quotaModule.getCoreQuotaManager()?.disableProvider?.({ providerKey, mode, durationMs }),
-      applyKeepPoolCooldownQuota: (providerKey: string, cooldownUntilMs: number, lastErrorCode?: string) => {
-        quotaModule.getCoreQuotaManager()?.onProviderError?.({
-          code: typeof lastErrorCode === 'string' && lastErrorCode.trim() ? lastErrorCode.trim() : 'HTTP_402',
-          status: 402,
-          message: `HTTP 402: {"resetAt":"${new Date(cooldownUntilMs).toISOString()}"}`,
-          runtime: { providerKey, runtimeKey: providerKey.split('.').slice(0, 2).join('.') },
-          timestamp: Date.now(),
-          details: { resetAt: new Date(cooldownUntilMs).toISOString() }
-        } as any);
+      resetProviderQuota: (providerKey: string) => {
+        const prev = quotaState[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+        quotaState[providerKey] = { ...prev, inPool: true, reason: 'ok', cooldownUntil: null, blacklistUntil: null, consecutiveErrorCount: 0 };
       },
-      handleProviderError: (event: any) => quotaModule.getCoreQuotaManager()?.onProviderError?.(event),
-      handleProviderSuccess: (event: any) => quotaModule.getCoreQuotaManager()?.onProviderSuccess?.(event)
+      recoverProviderQuota: (providerKey: string) => {
+        const prev = quotaState[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+        quotaState[providerKey] = { ...prev, inPool: true, reason: 'ok', cooldownUntil: null, blacklistUntil: null, consecutiveErrorCount: 0 };
+      },
+      disableProviderQuota: (providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number) => {
+        const prev = quotaState[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+        const until = Date.now() + Math.max(1, durationMs);
+        quotaState[providerKey] = mode === 'blacklist'
+          ? { ...prev, inPool: false, reason: 'blacklist', blacklistUntil: until }
+          : { ...prev, inPool: false, reason: 'cooldown', cooldownUntil: until };
+      },
+      applyKeepPoolCooldownQuota: (providerKey: string, cooldownUntilMs: number, lastErrorCode?: string) => {
+        const prev = quotaState[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+        quotaState[providerKey] = {
+          ...prev,
+          inPool: true,
+          reason: 'cooldown',
+          cooldownUntil: cooldownUntilMs,
+          cooldownKeepsPool: true,
+          lastErrorCode: typeof lastErrorCode === 'string' && lastErrorCode.trim() ? lastErrorCode.trim() : 'HTTP_402',
+          consecutiveErrorCount: typeof prev.consecutiveErrorCount === 'number' ? prev.consecutiveErrorCount : 0
+        };
+      },
+      handleProviderError: (event: any) => {
+        const providerKey = String(event?.runtime?.providerKey || '').trim();
+        if (!providerKey) return;
+        const status = Number(event?.status);
+        const resetAtIso = String(event?.details?.resetAt || event?.resetAt || '').trim();
+        const prev = quotaState[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+        if (status === 402 && resetAtIso) {
+          quotaState[providerKey] = {
+            ...prev,
+            inPool: true,
+            reason: 'cooldown',
+            cooldownUntil: Date.parse(resetAtIso),
+            cooldownKeepsPool: true,
+            lastErrorCode: 'HTTP_402'
+          };
+          return;
+        }
+        quotaState[providerKey] = { ...prev, inPool: false, reason: 'quotaDepleted', consecutiveErrorCount: 1 };
+      },
+      handleProviderSuccess: (event: any) => {
+        const providerKey = String(event?.runtime?.providerKey || '').trim();
+        if (!providerKey) return;
+        const prev = quotaState[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+        quotaState[providerKey] = { ...prev, inPool: true, reason: 'ok', cooldownUntil: null, blacklistUntil: null, consecutiveErrorCount: 0 };
+      }
     };
     const hubPipeline = { getVirtualRouter: () => virtualRouter };
     await quotaModule.init({ serverId: 'test', getHubPipeline: () => hubPipeline } as any);
@@ -219,22 +255,14 @@ describe('quota unified evidence aggregator', () => {
         const key = event?.runtime?.providerKey;
         const resetAtMs = Date.parse(String(event?.details?.resetAt || event?.resetAt || ''));
         if (key && Number.isFinite(resetAtMs)) {
-          quotaModule.getCoreQuotaManager()?.onProviderError?.({
+          virtualRouter.handleProviderError?.({
             ...event,
             details: { ...(event?.details ?? {}), resetAt: new Date(resetAtMs).toISOString() }
           });
         }
       },
       handleProviderSuccess: (event: any) => {
-        quotaModule.getCoreQuotaManager()?.onProviderSuccess?.(event);
-        const key = event?.runtime?.providerKey;
-        if (key && quotaModule.getCoreQuotaManager()?.getSnapshot?.()?.providers?.[key]) {
-          const state = quotaModule.getCoreQuotaManager()?.getSnapshot?.()?.providers?.[key];
-          if (state) {
-            state.reason = 'ok';
-            state.cooldownUntil = null;
-          }
-        }
+        virtualRouter.handleProviderSuccess?.(event);
       }
     });
 
@@ -258,11 +286,11 @@ describe('quota unified evidence aggregator', () => {
 
       await quotaModule.stop();
       const quotaModuleHydrated = new QuotaManagerModule();
+      const quotaStateHydrated: Record<string, any> = {};
       const virtualRouterHydrated = {
         getStatus: () => {
-          const providers = quotaModuleHydrated.getCoreQuotaManager()?.getSnapshot?.()?.providers ?? {};
           return {
-            quotaHostSnapshot: Object.values(providers).map((state: any) => ({
+            quotaHostSnapshot: Object.values(quotaStateHydrated).map((state: any) => ({
               providerKey: state?.providerKey,
               inPool: state?.inPool,
               reason: state?.reason,
@@ -277,22 +305,50 @@ describe('quota unified evidence aggregator', () => {
             }))
           };
         },
-        resetProviderQuota: (providerKey: string) => quotaModuleHydrated.getCoreQuotaManager()?.resetProvider?.(providerKey),
-        recoverProviderQuota: (providerKey: string) => quotaModuleHydrated.getCoreQuotaManager()?.recoverProvider?.(providerKey),
-        disableProviderQuota: (providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number) =>
-          quotaModuleHydrated.getCoreQuotaManager()?.disableProvider?.({ providerKey, mode, durationMs }),
-        applyKeepPoolCooldownQuota: (providerKey: string, cooldownUntilMs: number, lastErrorCode?: string) => {
-          quotaModuleHydrated.getCoreQuotaManager()?.onProviderError?.({
-            code: typeof lastErrorCode === 'string' && lastErrorCode.trim() ? lastErrorCode.trim() : 'HTTP_402',
-            status: 402,
-            message: `HTTP 402: {"resetAt":"${new Date(cooldownUntilMs).toISOString()}"}`,
-            runtime: { providerKey, runtimeKey: providerKey.split('.').slice(0, 2).join('.') },
-            timestamp: Date.now(),
-            details: { resetAt: new Date(cooldownUntilMs).toISOString() }
-          } as any);
+        resetProviderQuota: (providerKey: string) => {
+          const prev = quotaStateHydrated[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+          quotaStateHydrated[providerKey] = { ...prev, inPool: true, reason: 'ok', cooldownUntil: null, blacklistUntil: null, consecutiveErrorCount: 0 };
         },
-        handleProviderError: (event: any) => quotaModuleHydrated.getCoreQuotaManager()?.onProviderError?.(event),
-        handleProviderSuccess: (event: any) => quotaModuleHydrated.getCoreQuotaManager()?.onProviderSuccess?.(event)
+        recoverProviderQuota: (providerKey: string) => {
+          const prev = quotaStateHydrated[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+          quotaStateHydrated[providerKey] = { ...prev, inPool: true, reason: 'ok', cooldownUntil: null, blacklistUntil: null, consecutiveErrorCount: 0 };
+        },
+        disableProviderQuota: (providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number) => {
+          const prev = quotaStateHydrated[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+          const until = Date.now() + Math.max(1, durationMs);
+          quotaStateHydrated[providerKey] = mode === 'blacklist'
+            ? { ...prev, inPool: false, reason: 'blacklist', blacklistUntil: until }
+            : { ...prev, inPool: false, reason: 'cooldown', cooldownUntil: until };
+        },
+        applyKeepPoolCooldownQuota: (providerKey: string, cooldownUntilMs: number, lastErrorCode?: string) => {
+          const prev = quotaStateHydrated[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+          quotaStateHydrated[providerKey] = {
+            ...prev,
+            inPool: true,
+            reason: 'cooldown',
+            cooldownUntil: cooldownUntilMs,
+            cooldownKeepsPool: true,
+            lastErrorCode: typeof lastErrorCode === 'string' && lastErrorCode.trim() ? lastErrorCode.trim() : 'HTTP_402'
+          };
+        },
+        handleProviderError: (event: any) => {
+          const providerKey = String(event?.runtime?.providerKey || '').trim();
+          if (!providerKey) return;
+          const status = Number(event?.status);
+          const resetAtIso = String(event?.details?.resetAt || event?.resetAt || '').trim();
+          const prev = quotaStateHydrated[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+          if (status === 402 && resetAtIso) {
+            quotaStateHydrated[providerKey] = { ...prev, inPool: true, reason: 'cooldown', cooldownUntil: Date.parse(resetAtIso), cooldownKeepsPool: true, lastErrorCode: 'HTTP_402' };
+            return;
+          }
+          quotaStateHydrated[providerKey] = { ...prev, inPool: false, reason: 'quotaDepleted', consecutiveErrorCount: 1 };
+        },
+        handleProviderSuccess: (event: any) => {
+          const providerKey = String(event?.runtime?.providerKey || '').trim();
+          if (!providerKey) return;
+          const prev = quotaStateHydrated[providerKey] ?? { providerKey, authType: 'apikey', priorityTier: 100 };
+          quotaStateHydrated[providerKey] = { ...prev, inPool: true, reason: 'ok', cooldownUntil: null, blacklistUntil: null, consecutiveErrorCount: 0 };
+        }
       };
       const hubPipelineHydrated = { getVirtualRouter: () => virtualRouterHydrated };
       await quotaModuleHydrated.init({ serverId: 'test', getHubPipeline: () => hubPipelineHydrated } as any);

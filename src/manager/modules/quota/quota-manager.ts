@@ -8,7 +8,6 @@ import type {
   QuotaStoreSnapshot,
   StaticQuotaConfig
 } from '../../../types/llmswitch-local-types.js';
-import { createCoreQuotaManager } from '../../../modules/llmswitch/bridge.js';
 import { x7eGate } from '../../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 import type { QuotaManagerAdapter, QuotaViewEntry } from './quota-adapter.js';
 import { loadProviderQuotaSnapshot, saveProviderQuotaSnapshot } from '../../quota/provider-quota-store.js';
@@ -265,7 +264,6 @@ async function persistRustQuotaHostSnapshotToStore(
 export class QuotaManagerModule implements ManagerModule {
   readonly id = 'quota';
 
-  private coreManager: CoreQuotaManagerLike | null = null;
   private context: ManagerContext | null = null;
   private readonly providerQuotaStore = new ProviderQuotaStoreAdapter();
 
@@ -275,8 +273,6 @@ export class QuotaManagerModule implements ManagerModule {
       throw new Error('legacy quota runtime mode has been removed; enable unified quota (ROUTECODEX_X7E_PHASE_1_UNIFIED_QUOTA=true)');
     }
     const store = this.providerQuotaStore;
-    const core = (await createCoreQuotaManager({ store })) as CoreQuotaManagerLike | null;
-    this.coreManager = core;
     if (!getRustQuotaHostMutatorFromContext(this.context)) {
       throw new Error('unified quota requires hubPipeline virtual router quota host mutator');
     }
@@ -302,11 +298,11 @@ export class QuotaManagerModule implements ManagerModule {
   }
 
   async refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
-    const snapshot = this.coreManager?.getSnapshot?.();
+    const snapshot = this.getAdminSnapshot();
     return {
       refreshedAt: Date.now(),
       tokenCount: 0,
-      recordCount: Object.keys(snapshot?.providers ?? {}).length
+      recordCount: Object.keys(snapshot ?? {}).length
     };
   }
 
@@ -315,7 +311,7 @@ export class QuotaManagerModule implements ManagerModule {
   }
 
   getCoreQuotaManager(): CoreQuotaManagerLike | null {
-    return this.coreManager;
+    return null;
   }
 
   registerProviderStaticConfig(
@@ -329,7 +325,8 @@ export class QuotaManagerModule implements ManagerModule {
         ? { authType: config.authType as QuotaAuthType }
         : {})
     };
-    this.coreManager?.registerProviderStaticConfig?.(providerKey, normalizedConfig);
+    void providerKey;
+    void normalizedConfig;
   }
 
   getQuotaView(): (providerKey: string) => QuotaViewEntry | null {

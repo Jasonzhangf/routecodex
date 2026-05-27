@@ -63,7 +63,7 @@ describe('QuotaManagerModule', () => {
     });
     await mod.start();
 
-    expect(mod.getCoreQuotaManager()).toBe(coreManager);
+    expect(mod.getCoreQuotaManager()).toBeNull();
     expect(mod.getQuotaView()('mock.provider')).toMatchObject({
       providerKey: 'mock.provider',
       inPool: true,

@@ -12394,3 +12394,21 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
   - 结果：`4 suites / 6 tests` 全绿。
 - 结论：daemon-admin adapter wiring 已显式 Rust-only，不再携带 coreManager 注入路径。
+
+## 2026-05-27 Phase E 延续5：QuotaManagerModule 去 core manager（测试也去 core 依赖）
+- 问题：QuotaManagerModule 虽已 Rust contract-only，但内部仍创建并持有 `coreManager`；`quota-unified-evidence-aggregator.spec.ts` 仍通过 `getCoreQuotaManager()` 驱动状态，属于 TS second-center 残留。
+- 本轮改动：
+  - `src/manager/modules/quota/quota-manager.ts`
+    - 删除 `createCoreQuotaManager` 导入与 `this.coreManager` 存储。
+    - `getCoreQuotaManager()` 固定返回 `null`。
+    - `registerProviderStaticConfig(...)` 改为 no-op（不再写入 TS core）。
+    - `refreshNow()` 直接基于 `getAdminSnapshot()` 计数。
+  - `tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
+    - 删除通过 `quotaModule.getCoreQuotaManager()` 驱动 Rust host snapshot 的方式。
+    - 改为测试内 `quotaState` / `quotaStateHydrated` 明确模拟 virtualRouter host state，并通过 `handleProviderError/Success`、mutator 更新该状态。
+  - `tests/manager/quota/quota-manager-module.spec.ts`
+    - 断言改为 `getCoreQuotaManager() === null`，与新 contract 对齐。
+- 验证：
+  - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
+  - 结果：`7 suites / 16 tests` 全绿。
+- 结论：QuotaManagerModule 已不再创建/持有 TS core quota owner；测试链路也已去 core 依赖，统一对齐 Rust host contract。
