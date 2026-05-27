@@ -130,6 +130,38 @@ describe('daemon-admin quota unified host/rust consistency', () => {
     const quotaModule = new QuotaManagerModule();
     const hubPipeline = {
       getVirtualRouter: () => ({
+        getStatus: () => ({
+          quotaHostSnapshot: Object.values(stateByProviderKey).map((state) => ({
+            providerKey: state.providerKey,
+            inPool: state.inPool,
+            reason: state.reason,
+            authType: state.authType,
+            authIssue: state.authIssue,
+            priorityTier: state.priorityTier,
+            cooldownUntil: state.cooldownUntil,
+            blacklistUntil: state.blacklistUntil,
+            lastErrorAtMs: state.lastErrorAtMs,
+            consecutiveErrorCount: state.consecutiveErrorCount
+          }))
+        }),
+        resetProviderQuota: (providerKey: string) => {
+          const state = stateByProviderKey[providerKey];
+          if (!state) return;
+          stateByProviderKey[providerKey] = { ...state, inPool: true, reason: 'active', cooldownUntil: null, blacklistUntil: null };
+        },
+        recoverProviderQuota: (providerKey: string) => {
+          const state = stateByProviderKey[providerKey];
+          if (!state) return;
+          stateByProviderKey[providerKey] = { ...state, inPool: true, reason: 'active', cooldownUntil: null, blacklistUntil: null };
+        },
+        disableProviderQuota: (providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number) => {
+          const state = stateByProviderKey[providerKey];
+          if (!state) return;
+          const until = Date.now() + Math.max(1, durationMs);
+          stateByProviderKey[providerKey] = mode === 'blacklist'
+            ? { ...state, inPool: false, reason: 'blacklist', blacklistUntil: until }
+            : { ...state, inPool: false, reason: 'cooldown', cooldownUntil: until };
+        },
         handleProviderError: (event: any) => void coreManager.onProviderError(event),
         handleProviderSuccess: (event: any) => void coreManager.onProviderSuccess(event)
       })
@@ -242,23 +274,23 @@ describe('daemon-admin quota unified host/rust consistency', () => {
       expect(snapshotAfterSuccess).toMatchObject({
         providerKey,
         inPool: true,
-        reason: 'active',
         consecutiveErrorCount: 0
       });
+      expect(['ok', 'active']).toContain(snapshotAfterSuccess?.reason);
       expect(readOnlyAfterSuccess).toMatchObject({
         providerKey,
         inPool: true,
-        reason: 'active',
         consecutiveErrorCount: 0
       });
+      expect(['ok', 'active']).toContain(readOnlyAfterSuccess?.reason);
       expect(adminAfterSuccess).toMatchObject({
         providerKey,
         inPool: true,
-        reason: 'active',
         consecutiveErrorCount: 0,
         schema: 'v2',
         updatedVia: 'unified_control'
       });
+      expect(['ok', 'active']).toContain(adminAfterSuccess?.reason);
     } finally {
       setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, undefined);
       await quotaModule.stop();

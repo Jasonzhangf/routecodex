@@ -12352,3 +12352,17 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
   - 结果：`6 suites / 15 tests` 全绿。
 - 结论：daemon-admin quota host surface 已优先 Rust 真源；TS core snapshot 仅作为无 rust mutator 的测试桥接读壳。
+
+## 2026-05-27 Phase E 延续2：移除 quota-adapter 对 core snapshot 的运行时依赖（Rust-only host surface）
+- 发现：`quota-adapter` 在 read/admin 路径仍保留 core snapshot fallback，会让 unified host surface 在未注入 rust mutator 时继续读取 TS core 状态，不利于“Rust host contract 唯一路径”。
+- 本轮动作：
+  - `src/manager/modules/quota/quota-adapter.ts`
+    - backend 启用条件改为 `rustHostMutator + unified gate`，不再以 `coreManager` 为启用依据。
+    - 删除 `getQuotaView()` / `getAdminSnapshot()` 内的 core snapshot fallback，仅保留 Rust host snapshot 读取。
+  - 同步修正测试注入，确保 unified 场景总是显式提供 `virtualRouter.getStatus + mutator`：
+    - `tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
+    - `tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
+- 验证（focused 6 套件）:
+  - `npm run -s jest:run -- --runInBand --runTestsByPath tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
+  - 结果：`6 suites / 15 tests` 全绿。
+- 结论：daemon-admin quota adapter runtime surface 已不再读取 TS core snapshot；host read/admin 统一走 Rust host snapshot contract。

@@ -47,6 +47,7 @@ function buildDualProviderConfig(providerA = 'quota.key1.gpt-test', providerB = 
 async function createAuthenticatedQuotaServer(options: {
   daemon: { getModule: (id: string) => any };
   loginFile: string;
+  hubPipeline?: unknown;
 }): Promise<{ base: string; cookie: string; close: () => Promise<void> }> {
   process.env.ROUTECODEX_LOGIN_FILE = options.loginFile;
   const app = express();
@@ -55,7 +56,10 @@ async function createAuthenticatedQuotaServer(options: {
   registerQuotaRoutes(app, {
     app,
     getManagerDaemon: () => options.daemon,
-    getServerId: () => 'test:0'
+    getServerId: () => 'test:0',
+    getHubPipeline: typeof options.hubPipeline === 'object' && options.hubPipeline
+      ? (() => options.hubPipeline as any)
+      : undefined
   });
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -167,11 +171,48 @@ describe('quota unified evidence aggregator', () => {
     const loginFile = path.join(createdTmpDir, 'login');
 
     const quotaModule = new QuotaManagerModule();
-    await quotaModule.init({ serverId: 'test' });
+    const virtualRouter = {
+      getStatus: () => {
+        const providers = quotaModule.getCoreQuotaManager()?.getSnapshot?.()?.providers ?? {};
+        return {
+          quotaHostSnapshot: Object.values(providers).map((state: any) => ({
+            providerKey: state?.providerKey,
+            inPool: state?.inPool,
+            reason: state?.reason,
+            authType: state?.authType,
+            authIssue: state?.authIssue,
+            priorityTier: state?.priorityTier,
+            cooldownUntil: state?.cooldownUntil,
+            cooldownKeepsPool: state?.cooldownKeepsPool,
+            blacklistUntil: state?.blacklistUntil,
+            lastErrorAtMs: state?.lastErrorAtMs,
+            consecutiveErrorCount: state?.consecutiveErrorCount
+          }))
+        };
+      },
+      resetProviderQuota: (providerKey: string) => quotaModule.getCoreQuotaManager()?.resetProvider?.(providerKey),
+      recoverProviderQuota: (providerKey: string) => quotaModule.getCoreQuotaManager()?.recoverProvider?.(providerKey),
+      disableProviderQuota: (providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number) =>
+        quotaModule.getCoreQuotaManager()?.disableProvider?.({ providerKey, mode, durationMs }),
+      applyKeepPoolCooldownQuota: (providerKey: string, cooldownUntilMs: number, lastErrorCode?: string) => {
+        quotaModule.getCoreQuotaManager()?.onProviderError?.({
+          code: typeof lastErrorCode === 'string' && lastErrorCode.trim() ? lastErrorCode.trim() : 'HTTP_402',
+          status: 402,
+          message: `HTTP 402: {"resetAt":"${new Date(cooldownUntilMs).toISOString()}"}`,
+          runtime: { providerKey, runtimeKey: providerKey.split('.').slice(0, 2).join('.') },
+          timestamp: Date.now(),
+          details: { resetAt: new Date(cooldownUntilMs).toISOString() }
+        } as any);
+      },
+      handleProviderError: (event: any) => quotaModule.getCoreQuotaManager()?.onProviderError?.(event),
+      handleProviderSuccess: (event: any) => quotaModule.getCoreQuotaManager()?.onProviderSuccess?.(event)
+    };
+    const hubPipeline = { getVirtualRouter: () => virtualRouter };
+    await quotaModule.init({ serverId: 'test', getHubPipeline: () => hubPipeline } as any);
     quotaModule.registerProviderStaticConfig(providerA, { authType: 'apikey', priorityTier: 100, apikeyDailyResetTime: '12:00Z' });
     await quotaModule.start();
     const daemon = { getModule: (id: string) => (id === 'quota' ? quotaModule : undefined) };
-    const server = await createAuthenticatedQuotaServer({ daemon, loginFile });
+    const server = await createAuthenticatedQuotaServer({ daemon, loginFile, hubPipeline });
     const routerHookOwner = {};
     setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, {
       handleProviderError: (event: any) => {
@@ -217,11 +258,48 @@ describe('quota unified evidence aggregator', () => {
 
       await quotaModule.stop();
       const quotaModuleHydrated = new QuotaManagerModule();
-      await quotaModuleHydrated.init({ serverId: 'test' });
+      const virtualRouterHydrated = {
+        getStatus: () => {
+          const providers = quotaModuleHydrated.getCoreQuotaManager()?.getSnapshot?.()?.providers ?? {};
+          return {
+            quotaHostSnapshot: Object.values(providers).map((state: any) => ({
+              providerKey: state?.providerKey,
+              inPool: state?.inPool,
+              reason: state?.reason,
+              authType: state?.authType,
+              authIssue: state?.authIssue,
+              priorityTier: state?.priorityTier,
+              cooldownUntil: state?.cooldownUntil,
+              cooldownKeepsPool: state?.cooldownKeepsPool,
+              blacklistUntil: state?.blacklistUntil,
+              lastErrorAtMs: state?.lastErrorAtMs,
+              consecutiveErrorCount: state?.consecutiveErrorCount
+            }))
+          };
+        },
+        resetProviderQuota: (providerKey: string) => quotaModuleHydrated.getCoreQuotaManager()?.resetProvider?.(providerKey),
+        recoverProviderQuota: (providerKey: string) => quotaModuleHydrated.getCoreQuotaManager()?.recoverProvider?.(providerKey),
+        disableProviderQuota: (providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number) =>
+          quotaModuleHydrated.getCoreQuotaManager()?.disableProvider?.({ providerKey, mode, durationMs }),
+        applyKeepPoolCooldownQuota: (providerKey: string, cooldownUntilMs: number, lastErrorCode?: string) => {
+          quotaModuleHydrated.getCoreQuotaManager()?.onProviderError?.({
+            code: typeof lastErrorCode === 'string' && lastErrorCode.trim() ? lastErrorCode.trim() : 'HTTP_402',
+            status: 402,
+            message: `HTTP 402: {"resetAt":"${new Date(cooldownUntilMs).toISOString()}"}`,
+            runtime: { providerKey, runtimeKey: providerKey.split('.').slice(0, 2).join('.') },
+            timestamp: Date.now(),
+            details: { resetAt: new Date(cooldownUntilMs).toISOString() }
+          } as any);
+        },
+        handleProviderError: (event: any) => quotaModuleHydrated.getCoreQuotaManager()?.onProviderError?.(event),
+        handleProviderSuccess: (event: any) => quotaModuleHydrated.getCoreQuotaManager()?.onProviderSuccess?.(event)
+      };
+      const hubPipelineHydrated = { getVirtualRouter: () => virtualRouterHydrated };
+      await quotaModuleHydrated.init({ serverId: 'test', getHubPipeline: () => hubPipelineHydrated } as any);
       quotaModuleHydrated.registerProviderStaticConfig(providerA, { authType: 'apikey', priorityTier: 100, apikeyDailyResetTime: '12:00Z' });
       await quotaModuleHydrated.start();
       const daemonHydrated = { getModule: (id: string) => (id === 'quota' ? quotaModuleHydrated : undefined) };
-      const serverHydrated = await createAuthenticatedQuotaServer({ daemon: daemonHydrated, loginFile });
+      const serverHydrated = await createAuthenticatedQuotaServer({ daemon: daemonHydrated, loginFile, hubPipeline: hubPipelineHydrated });
 
       try {
         const hydrated402Snapshot = quotaModuleHydrated.getAdminSnapshot()[providerA];

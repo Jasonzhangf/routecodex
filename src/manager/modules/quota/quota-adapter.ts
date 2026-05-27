@@ -86,10 +86,10 @@ export function createQuotaManagerAdapter(options: {
   rustHostMutator?: RustQuotaHostMutatorLike | null;
   quotaRoutingEnabled?: boolean;
 }): QuotaManagerAdapter {
-  const core = options.coreManager;
+  void options.coreManager;
   const rustHostMutator = options.rustHostMutator ?? null;
-  const hasCore = core !== null && x7eGate.phase1UnifiedQuota;
-  const backend: 'rust' | 'none' = hasCore ? 'rust' : 'none';
+  const hasRustUnified = rustHostMutator !== null && x7eGate.phase1UnifiedQuota;
+  const backend: 'rust' | 'none' = hasRustUnified ? 'rust' : 'none';
   const quotaRoutingEnabled = options.quotaRoutingEnabled !== false;
 
   // Track provider static configs for bootstrap
@@ -280,37 +280,6 @@ export function createQuotaManagerAdapter(options: {
         };
       }
 
-      const getSnapshot = core?.getSnapshot;
-      if (typeof getSnapshot === 'function') {
-        return (providerKey: string) => {
-          const key = typeof providerKey === 'string' ? providerKey.trim() : '';
-          if (!key) {
-            return null;
-          }
-          const snap = getSnapshot();
-          const providers =
-            snap && typeof snap === 'object' && (snap as Record<string, unknown>).providers && typeof (snap as Record<string, unknown>).providers === 'object'
-              ? ((snap as Record<string, unknown>).providers as Record<string, unknown>)
-              : null;
-          const raw = providers?.[key];
-          if (!raw || typeof raw !== 'object') {
-            return null;
-          }
-          const r = raw as Record<string, unknown>;
-          return {
-            providerKey: String(r.providerKey ?? key),
-            inPool: Boolean(r.inPool),
-            reason: typeof r.reason === 'string' ? r.reason : undefined,
-            priorityTier: typeof r.priorityTier === 'number' ? r.priorityTier : undefined,
-            cooldownUntil: typeof r.cooldownUntil === 'number' ? r.cooldownUntil : null,
-            cooldownKeepsPool: r.cooldownKeepsPool === true ? true : undefined,
-            blacklistUntil: typeof r.blacklistUntil === 'number' ? r.blacklistUntil : null,
-            authIssue: r.authIssue,
-            authType: typeof r.authType === 'string' ? r.authType : undefined,
-            consecutiveErrorCount: typeof r.consecutiveErrorCount === 'number' ? r.consecutiveErrorCount : 0
-          };
-        };
-      }
     }
 
     return () => null;
@@ -323,33 +292,6 @@ export function createQuotaManagerAdapter(options: {
       const rustSnapshot = readRustHostSnapshot();
       if (rustSnapshot) {
         return rustSnapshot;
-      }
-    }
-
-    if (backend === 'rust' && core?.getSnapshot) {
-      const snap = core.getSnapshot();
-      if (snap && typeof snap === 'object') {
-        const providers = (snap as Record<string, unknown>).providers;
-        if (providers && typeof providers === 'object') {
-          for (const [key, value] of Object.entries(providers)) {
-            if (!value || typeof value !== 'object') {
-              continue;
-            }
-            const v = value as Record<string, unknown>;
-            result[key] = {
-              providerKey: String(v.providerKey ?? key),
-              inPool: Boolean(v.inPool),
-              reason: typeof v.reason === 'string' ? v.reason : undefined,
-              priorityTier: typeof v.priorityTier === 'number' ? v.priorityTier : undefined,
-              cooldownUntil: typeof v.cooldownUntil === 'number' ? v.cooldownUntil : null,
-              blacklistUntil: typeof v.blacklistUntil === 'number' ? v.blacklistUntil : null,
-              authIssue: v.authIssue,
-              authType: typeof v.authType === 'string' ? v.authType : undefined,
-              consecutiveErrorCount: typeof v.consecutiveErrorCount === 'number' ? v.consecutiveErrorCount : 0
-            };
-          }
-          return result;
-        }
       }
     }
 
