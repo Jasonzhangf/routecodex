@@ -32,7 +32,15 @@ function readPersistedStopMessageSnapshot(candidateKeys: string[]): StopMessageS
   return null;
 }
 
-function persistBudget(args: { stickyKey?: string | null; text: string; maxRepeats: number; used: number; source: string; stageMode?: string; aiMode?: string; }): void {
+function persistBudget(args: {
+  stickyKey?: string | null;
+  text: string;
+  maxRepeats: number;
+  used: number;
+  source: string;
+  stageMode?: 'on' | 'off' | 'auto';
+  aiMode?: 'on' | 'off';
+}): void {
   if (!isPersistentStickyKey(args.stickyKey)) return;
   const now = Date.now();
   const persistedState = loadRoutingInstructionStateSync(args.stickyKey) ?? null;
