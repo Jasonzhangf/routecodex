@@ -12478,3 +12478,12 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
   - 结果：`3 suites / 9 tests` 全绿。
 - 结论：quota core 的类型入口残留已移除，避免后续在类型层误接入 TS quota 旧模块。
+
+## 2026-05-27 验证补齐：Rust gate + build:dev + install/smoke
+- 执行：
+  - `cargo test -p router-hotpath-napi virtual_router_engine -- --nocapture`
+  - `npm run build:dev`
+- 结果：
+  - Rust gate：`100 passed / 0 failed`
+  - build:dev：完成（包含 `install:global` + 全局 CLI E2E + `restart@5555` 成功）
+- 备注：`build:dev` 过程中会自动改写 `package.json/package-lock.json/src/build-info.ts` 的版本号；本轮验证后已将三者回退到执行前状态，确保不把纯版本漂移混入提交。
