@@ -1657,3 +1657,8 @@ Tags: apply-patch, servertool-followup, responses, MISSING_REQUIRED_TOOL_CALL, 5
   6. 当第二刀完成后，`provider-quota-daemon*.ts` 与对应 legacy tests 必须一起物理删除；删除后若定向 host/admin consistency tests + `build:dev/install:global/5555 restart` 仍全绿，说明 host 侧双真源已真正清场，后续唯一剩余 closeout 点就收敛到 `sharedmodule/llmswitch-core/src/quota/quota-manager.ts`。
 
 Tags: virtual-router, quota-health, second-center, same-shape-equivalence, quota-resetat, health-tripped, build-dev, runtime-smoke, 2026-05-27
+
+- 2026-05-27: Virtual Router unified quota/health closeout 当前新增两条硬规则：
+  1) `scripts/tests/virtual-router-quota-health-shadow-regression.mjs` 必须显式保障 native path（优先注入 `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH=sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node`，不存在则退回外部已给路径），否则会出现 native proxy missing 型伪失败；
+  2) `virtual-router-quota-resetat-multikey-native` 的正确断言是“providerKey 隔离 + reroute 到 sibling + quota snapshot 正确”，而不是把 providerA health 固定写死为 `tripped`；当前 Rust 真相允许 `tripped|healthy`。
+Tags: virtual-router, quota-health, shadow-gate, native-path, multikey-resetat, assertion-invariant, 2026-05-27

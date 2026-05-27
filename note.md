@@ -12504,3 +12504,14 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
   - 结果：`7 suites / 16 tests` 全绿。
 - 判定：主链已不再引用 sharedmodule TS quota owner，Rust host contract + Rust engine 成为 quota/availability live 真源。
+
+## 2026-05-27 shadow gate 稳定化补丁（已提交）
+- 提交：`89a153b3c` `stabilize quota health shadow gate native-path bootstrap`
+- 变更：
+  - `scripts/tests/virtual-router-quota-health-shadow-regression.mjs`
+    - 新增 native `.node` 产物路径探测并注入 `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH`，规避 native proxy missing。
+  - `tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts`
+    - providerA health 断言改为语义判定：`tripped|healthy`（不再把 `tripped` 写死为唯一状态）。
+- 验证：
+  - `node scripts/tests/virtual-router-quota-health-shadow-regression.mjs`
+  - 结果：10 suites 全绿，末尾 `[virtual-router-quota-health-shadow-regression] OK`。

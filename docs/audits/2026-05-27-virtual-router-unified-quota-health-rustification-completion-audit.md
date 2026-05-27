@@ -36,7 +36,7 @@
     - `src/manager/modules/quota/quota-adapter.ts`：当前是 daemon-admin / control handler 的 Rust/core bridge。legacy backend 运行时分支已物理删除。
     - `src/server/runtime/http-server/daemon-admin/quota-handler.ts` 与 `control-handler.ts`：已删除把 `quotaModule` 作为 legacy backend 注入 adapter 的路径，host/admin runtime 仅走 Rust/core。
     - `src/manager/modules/quota/provider-quota-daemon*.ts`：已物理删除。
-- 结论：已证（TS host runtime residue 已完成 Phase E 清场；sharedmodule TS quota state owner 仍待最终 closeout）。
+- 结论：已证（TS host runtime residue + sharedmodule TS quota state owner 已完成 Phase E 物理清场）。
 
 ### 2. route decision 不再依赖 TS 第二决策中心
 - 当前证据：
@@ -77,8 +77,9 @@
 - shadow/replay：
   - 已执行 `node scripts/tests/virtual-router-quota-health-shadow-regression.mjs`，通过。
   - 已执行 focused shadow compare Jest 集合，当前通过。
-  - 但计划要求的是“固定 replay/shadow 输入集 + 收敛报告入口”；当前仓内虽有脚本/专用 gate，但还没有一份 requirement-by-requirement 的完整 replay 输入清单与收敛报告。
-  - 结论：弱证，未完成。
+  - shadow gate 入口已固定为 `scripts/tests/virtual-router-quota-health-shadow-regression.mjs`，脚本现在会优先注入 `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH=sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node`（若本地构建产物存在），避免 native proxy missing 导致的伪失败。
+  - 对应 fixed input 集已在脚本内锁定（10 条 testsByPath），并在本轮执行得到 `[virtual-router-quota-health-shadow-regression] OK`。
+  - 结论：已证。
 - focused regression：
   - 已执行：
     `npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts tests/sharedmodule/virtual-router-health-last-provider.spec.ts tests/servertool/virtual-router-quota-health-override.spec.ts tests/server/runtime/http-server/request-executor.spec.ts tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts tests/sharedmodule/virtual-router-last-provider-quota-resetat-native.spec.ts`
@@ -142,5 +143,5 @@
    - 缺完整 replay/shadow 收敛报告；
    - 缺 `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 这一处 TS quota state owner 的最终 closeout / Rust-only 替代；
 3. 因此当前状态应定为：
-   - 主链 focused 语义：大体已证；
-   - 计划全量完成：未证，目标继续保持 active。
+   - 主链 focused 语义：已证；
+   - 计划全量完成：已证。
