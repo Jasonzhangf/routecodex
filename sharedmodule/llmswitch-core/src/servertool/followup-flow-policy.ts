@@ -1,5 +1,6 @@
 import { planServertoolFollowupRuntimeWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import type { FollowupFlowDecision } from '../router/virtual-router/engine-selection/native-followup-mainline-semantics.js';
+export type { FollowupFlowDecision } from '../router/virtual-router/engine-selection/native-followup-mainline-semantics.js';
 
 function normalizeFlowId(flowId: unknown): string {
   return typeof flowId === 'string' ? flowId.trim() : '';

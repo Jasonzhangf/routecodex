@@ -5,6 +5,13 @@ declare module 'rcc-llmswitch-core/dist/router/virtual-router/provider-runtime-i
     stage: string;
     status?: number;
     recoverable?: boolean;
+    affectsHealth?: boolean;
+    fatal?: boolean;
+    cooldownOverrideMs?: number;
+    quotaScope?: string;
+    quotaReason?: string;
+    resetAt?: string;
+    errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
     runtime: ProviderErrorRuntimeMetadata;
     timestamp: number;
     details?: Record<string, unknown>;

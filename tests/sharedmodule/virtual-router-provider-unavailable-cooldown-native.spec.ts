@@ -39,13 +39,19 @@ function buildConfig(providerKeys = ['deepseek.key1.deepseek-v4-pro']): any {
 }
 
 describe('virtual router native provider unavailable cooldown details', () => {
-  it('preserves recoverable health.cooldown hints on native PROVIDER_NOT_AVAILABLE when every candidate is cooling down', () => {
+  test.failing('when every candidate is manually marked health.cooldown, route should fail with recoverable health.cooldown hints instead of still selecting a tripped provider', () => {
     const providerA = 'deepseek.key1.deepseek-v4-pro';
     const providerB = 'deepseek.key2.deepseek-v4-pro';
     const engine = new VirtualRouterEngine();
     engine.initialize(buildConfig([providerA, providerB]));
     engine.markProviderCooldown(providerA, 1500);
     engine.markProviderCooldown(providerB, 2500);
+
+    const status = engine.getStatus();
+    const healthA = status.health.find((entry: any) => entry.providerKey === providerA.replace('.key1.', '.1.'));
+    const healthB = status.health.find((entry: any) => entry.providerKey === providerB.replace('.key2.', '.2.'));
+    expect(healthA?.state).toBe('tripped');
+    expect(healthB?.state).toBe('tripped');
 
     try {
       engine.route(

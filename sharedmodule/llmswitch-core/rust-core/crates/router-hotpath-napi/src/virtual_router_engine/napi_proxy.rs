@@ -41,24 +41,10 @@ impl VirtualRouterEngineProxy {
     #[napi]
     pub fn update_deps(&self, env: Env, deps: JsUnknown) -> NapiResult<()> {
         if is_js_null_or_undefined(&deps) {
-            let mut core = self.core.write().expect("core write lock");
-            core.update_quota_view(None);
             return Ok(());
         }
-        let obj = deps.coerce_to_object()?;
-        let quota_view_value: JsUnknown = obj.get_named_property("quotaView")?;
-        let mut core = self.core.write().expect("core write lock");
-        if matches!(quota_view_value.get_type(), Ok(ValueType::Null)) {
-            core.update_quota_view(None);
-            return Ok(());
-        }
-        if matches!(quota_view_value.get_type(), Ok(ValueType::Undefined)) {
-            return Ok(());
-        }
-        if matches!(quota_view_value.get_type(), Ok(ValueType::Function)) {
-            let reference = env.create_reference(quota_view_value)?;
-            core.update_quota_view(Some(reference));
-        }
+        let _ = env;
+        let _ = deps.coerce_to_object()?;
         Ok(())
     }
 
@@ -126,8 +112,13 @@ impl VirtualRouterEngineProxy {
     pub fn handle_provider_failure(&self, _env: Env, event_json: String) -> NapiResult<()> {
         let event_value: Value = serde_json::from_str(&event_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let overrides = resolve_runtime_path_overrides(&event_value);
         let mut core = self.core.write().expect("core write lock");
-        core.handle_provider_failure(&event_value);
+        with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
+            with_session_dir_override(overrides.session_dir.as_deref(), || {
+                core.handle_provider_failure(&event_value);
+            })
+        });
         Ok(())
     }
 
@@ -135,17 +126,27 @@ impl VirtualRouterEngineProxy {
     pub fn handle_provider_error(&self, _env: Env, event_json: String) -> NapiResult<()> {
         let event_value: Value = serde_json::from_str(&event_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let overrides = resolve_runtime_path_overrides(&event_value);
         let mut core = self.core.write().expect("core write lock");
-        core.handle_provider_error(&event_value);
+        with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
+            with_session_dir_override(overrides.session_dir.as_deref(), || {
+                core.handle_provider_error(&event_value);
+            })
+        });
         Ok(())
     }
 
     #[napi]
-    pub fn handle_provider_success(&self, env: Env, event_json: String) -> NapiResult<()> {
+    pub fn handle_provider_success(&self, _env: Env, event_json: String) -> NapiResult<()> {
         let event_value: Value = serde_json::from_str(&event_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let overrides = resolve_runtime_path_overrides(&event_value);
         let mut core = self.core.write().expect("core write lock");
-        core.handle_provider_success(&event_value);
+        with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
+            with_session_dir_override(overrides.session_dir.as_deref(), || {
+                core.handle_provider_success(&event_value);
+            })
+        });
         Ok(())
     }
 
@@ -154,6 +155,54 @@ impl VirtualRouterEngineProxy {
         let core = self.core.read().expect("core read lock");
         serde_json::to_string(&core.get_status())
             .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    #[napi]
+    pub fn reset_provider_quota(&self, provider_key: String) -> NapiResult<()> {
+        let mut core = self.core.write().expect("core write lock");
+        core.quota_manager.reset_provider(&provider_key);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn recover_provider_quota(&self, provider_key: String) -> NapiResult<()> {
+        let mut core = self.core.write().expect("core write lock");
+        core.quota_manager.recover_provider(&provider_key);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn disable_provider_quota(
+        &self,
+        provider_key: String,
+        mode: String,
+        duration_ms: Option<i64>,
+    ) -> NapiResult<()> {
+        let mut core = self.core.write().expect("core write lock");
+        core.quota_manager.disable_provider(
+            &provider_key,
+            &mode,
+            duration_ms.unwrap_or(0),
+            super::time_utils::now_ms(),
+        );
+        Ok(())
+    }
+
+    #[napi]
+    pub fn apply_keep_pool_cooldown_quota(
+        &self,
+        provider_key: String,
+        cooldown_until_ms: i64,
+        last_error_code: Option<String>,
+    ) -> NapiResult<()> {
+        let mut core = self.core.write().expect("core write lock");
+        core.quota_manager.apply_http_402_resetat_cooldown(
+            &provider_key,
+            super::time_utils::now_ms(),
+            cooldown_until_ms,
+            last_error_code.as_deref().unwrap_or("HTTP_402"),
+        );
+        Ok(())
     }
 
     #[napi]

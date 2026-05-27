@@ -8,7 +8,6 @@ import type {
   RoutingDiagnostics,
   TargetMetadata,
   VirtualRouterHealthStore,
-  ProviderQuotaView,
 } from "../../../router/virtual-router/types.js";
 import { type HubProcessNodeResult } from "../process/chat-process.js";
 import {
@@ -30,7 +29,6 @@ export interface HubPipelineConfig {
     loadSync(key: string): unknown;
     saveAsync(key: string, state: unknown): void;
   };
-  quotaView?: ProviderQuotaView;
 }
 
 export interface HubPipelineRequestMetadata extends Record<string, unknown> {

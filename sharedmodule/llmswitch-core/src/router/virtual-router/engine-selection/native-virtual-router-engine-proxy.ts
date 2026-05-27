@@ -14,6 +14,10 @@ export interface NativeVirtualRouterEngineProxy {
   handleProviderError(eventJson: string): void;
   handleProviderSuccess(eventJson: string): void;
   getStatus(): string;
+  resetProviderQuota?(providerKey: string): void;
+  recoverProviderQuota?(providerKey: string): void;
+  disableProviderQuota?(providerKey: string, mode: string, durationMs?: number): void;
+  applyKeepPoolCooldownQuota?(providerKey: string, cooldownUntilMs: number, lastErrorCode?: string): void;
   markConcurrencyScopeBusy?(scopeKey: string): void;
   markConcurrencyScopeIdle?(scopeKey: string): void;
 }

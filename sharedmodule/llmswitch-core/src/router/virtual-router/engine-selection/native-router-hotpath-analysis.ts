@@ -75,8 +75,15 @@ export type ServertoolDispatchSkippedPayload = {
   reason: string;
 };
 
+export type ServertoolDispatchNoopPayload = {
+  id: string;
+  name: string;
+  arguments: string;
+};
+
 export type ServertoolDispatchPlanPayload = {
   executableToolCalls: ServertoolDispatchCandidatePayload[];
+  noopToolCalls: ServertoolDispatchNoopPayload[];
   skippedToolCalls: ServertoolDispatchSkippedPayload[];
 };
 
@@ -378,6 +385,7 @@ export function parseServertoolDispatchPlanPayload(raw: string): ServertoolDispa
   const parsed = parseJson('parseServertoolDispatchPlanPayload', raw) as
     | {
       executableToolCalls?: unknown;
+      noopToolCalls?: unknown;
       skippedToolCalls?: unknown;
     }
     | typeof JSON_PARSE_FAILED;
@@ -385,6 +393,7 @@ export function parseServertoolDispatchPlanPayload(raw: string): ServertoolDispa
     parsed === JSON_PARSE_FAILED ||
     !parsed ||
     !Array.isArray(parsed.executableToolCalls) ||
+    !Array.isArray(parsed.noopToolCalls) ||
     !Array.isArray(parsed.skippedToolCalls)
   ) {
     return null;
@@ -399,6 +408,14 @@ export function parseServertoolDispatchPlanPayload(raw: string): ServertoolDispa
       stripAfterExecute: entry.stripAfterExecute === true
     }))
     .filter((entry) => entry.id && entry.name && entry.executionMode);
+  const noopToolCalls = parsed.noopToolCalls
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)))
+    .map((entry) => ({
+      id: typeof entry.id === 'string' ? entry.id : '',
+      name: typeof entry.name === 'string' ? entry.name : '',
+      arguments: typeof entry.arguments === 'string' ? entry.arguments : ''
+    }))
+    .filter((entry) => entry.id && entry.name);
   const skippedToolCalls = parsed.skippedToolCalls
     .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)))
     .map((entry) => ({
@@ -409,6 +426,7 @@ export function parseServertoolDispatchPlanPayload(raw: string): ServertoolDispa
     .filter((entry) => entry.id && entry.name && entry.reason);
   return {
     executableToolCalls,
+    noopToolCalls,
     skippedToolCalls
   };
 }

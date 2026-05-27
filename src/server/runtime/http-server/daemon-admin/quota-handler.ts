@@ -4,9 +4,9 @@ import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import { x7eGate, getGateState } from './routecodex-x7e-gate.js';
 import type { ManagerModule } from '../../../../manager/types.js';
 import type { QuotaManagerModule, QuotaRecord, QuotaManagerAdapter } from '../../../../manager/modules/quota/index.js';
-import type { ProviderQuotaDaemonModule } from '../../../../manager/modules/quota/index.js';
 import { createQuotaManagerAdapter } from '../../../../manager/modules/quota/quota-adapter.js';
 import { formatUnknownError } from '../../../../utils/common-utils.js';
+import { canonicalizeProviderKey } from '../../../../manager/modules/quota/provider-key-normalization.js';
 
 const QUOTA_HANDLER_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const quotaHandlerNonBlockingLogState = new Map<string, number>();
@@ -41,17 +41,123 @@ function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerAdapter |
     return null;
   }
   const quotaModule = mod as unknown as QuotaManagerModule;
-  const providerQuotaModule = typeof daemon.getModule === 'function' ? (daemon.getModule('provider-quota') as ManagerModule | undefined) : undefined;
 
   const coreLike = quotaModule && typeof (quotaModule as any).getCoreQuotaManager === 'function'
     ? (quotaModule as any).getCoreQuotaManager()
     : null;
+  const legacyLike =
+    !coreLike && quotaModule
+      ? ({
+          disableProvider: typeof (quotaModule as any).disableProvider === 'function' ? (quotaModule as any).disableProvider.bind(quotaModule) : undefined,
+          recoverProvider: typeof (quotaModule as any).recoverProvider === 'function' ? (quotaModule as any).recoverProvider.bind(quotaModule) : undefined,
+          resetProvider: typeof (quotaModule as any).resetProvider === 'function' ? (quotaModule as any).resetProvider.bind(quotaModule) : undefined,
+          registerProviderStaticConfig:
+            typeof (quotaModule as any).registerProviderStaticConfig === 'function'
+              ? (quotaModule as any).registerProviderStaticConfig.bind(quotaModule)
+              : undefined,
+          recordProviderUsage:
+            typeof (quotaModule as any).recordProviderUsage === 'function'
+              ? (quotaModule as any).recordProviderUsage.bind(quotaModule)
+              : undefined,
+          getQuotaView: typeof (quotaModule as any).getQuotaView === 'function' ? (quotaModule as any).getQuotaView.bind(quotaModule) : undefined,
+          getAdminSnapshot:
+            typeof (quotaModule as any).getAdminSnapshot === 'function'
+              ? (quotaModule as any).getAdminSnapshot.bind(quotaModule)
+              : undefined,
+          refreshNow: typeof (quotaModule as any).refreshNow === 'function' ? (quotaModule as any).refreshNow.bind(quotaModule) : undefined
+        } satisfies NonNullable<Parameters<typeof createQuotaManagerAdapter>[0]['legacyDaemon']>)
+      : null;
 
   return createQuotaManagerAdapter({
     coreManager: coreLike,
-    legacyDaemon: providerQuotaModule as unknown as ProviderQuotaDaemonModule | null,
+    legacyDaemon: legacyLike,
     quotaRoutingEnabled: true
   });
+}
+
+type RustQuotaHostSnapshotEntry = {
+  providerKey?: unknown;
+  inPool?: unknown;
+  reason?: unknown;
+  authIssue?: unknown;
+  authType?: unknown;
+  priorityTier?: unknown;
+  cooldownUntil?: unknown;
+  blacklistUntil?: unknown;
+  consecutiveErrorCount?: unknown;
+};
+
+type RustQuotaHostMutator = {
+  resetProviderQuota?(providerKey: string): unknown;
+  recoverProviderQuota?(providerKey: string): unknown;
+  disableProviderQuota?(providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number): unknown;
+};
+
+function getRustQuotaHostMutator(options: DaemonAdminRouteOptions): RustQuotaHostMutator | null {
+  const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
+  if (!hubPipeline || typeof hubPipeline !== 'object') {
+    return null;
+  }
+  const getVirtualRouter = (hubPipeline as { getVirtualRouter?: () => unknown | null }).getVirtualRouter;
+  if (typeof getVirtualRouter !== 'function') {
+    return null;
+  }
+  const virtualRouter = getVirtualRouter();
+  if (!virtualRouter || typeof virtualRouter !== 'object') {
+    return null;
+  }
+  const mutator = virtualRouter as RustQuotaHostMutator;
+  if (
+    typeof mutator.resetProviderQuota !== 'function'
+    && typeof mutator.recoverProviderQuota !== 'function'
+    && typeof mutator.disableProviderQuota !== 'function'
+  ) {
+    return null;
+  }
+  return mutator;
+}
+
+function getRustQuotaHostSnapshot(options: DaemonAdminRouteOptions): Record<string, RustQuotaHostSnapshotEntry> | null {
+  const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
+  if (!hubPipeline || typeof hubPipeline !== 'object') {
+    return null;
+  }
+  const getVirtualRouter = (hubPipeline as { getVirtualRouter?: () => unknown | null }).getVirtualRouter;
+  if (typeof getVirtualRouter !== 'function') {
+    return null;
+  }
+  const virtualRouter = getVirtualRouter();
+  if (!virtualRouter || typeof virtualRouter !== 'object') {
+    return null;
+  }
+  const getStatus = (virtualRouter as { getStatus?: () => unknown }).getStatus;
+  if (typeof getStatus !== 'function') {
+    return null;
+  }
+  try {
+    const status = getStatus() as { quotaHostSnapshot?: unknown } | null;
+    const snapshot = Array.isArray(status?.quotaHostSnapshot) ? status?.quotaHostSnapshot : null;
+    if (!snapshot || snapshot.length === 0) {
+      return null;
+    }
+    const out: Record<string, RustQuotaHostSnapshotEntry> = {};
+    for (const entry of snapshot) {
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+      const providerKey = typeof (entry as { providerKey?: unknown }).providerKey === 'string'
+        ? canonicalizeProviderKey(String((entry as { providerKey?: unknown }).providerKey))
+        : '';
+      if (!providerKey) {
+        continue;
+      }
+      out[providerKey] = entry as RustQuotaHostSnapshotEntry;
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  } catch (error: unknown) {
+    logQuotaHandlerNonBlockingError('getRustQuotaHostSnapshot', error);
+    return null;
+  }
 }
 
 function getQuotaRefreshModule(options: DaemonAdminRouteOptions): (QuotaManagerModule & { refreshNow?: () => Promise<unknown> }) | null {
@@ -93,7 +199,7 @@ function getQuotaRawSnapshot(options: DaemonAdminRouteOptions): Record<string, Q
   }
 }
 
-function getProviderQuotaModule(options: DaemonAdminRouteOptions): ProviderQuotaDaemonModule | null {
+function getProviderQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerModule | null {
   const daemon = options.getManagerDaemon() as
     | {
         getModule?: (id: string) => ManagerModule | undefined;
@@ -105,13 +211,7 @@ function getProviderQuotaModule(options: DaemonAdminRouteOptions): ProviderQuota
   const modQuota = typeof daemon.getModule === 'function'
     ? (daemon.getModule('quota') as ManagerModule | undefined)
     : undefined;
-  if (modQuota) {
-    return modQuota as unknown as ProviderQuotaDaemonModule;
-  }
-  const legacy = typeof daemon.getModule === 'function'
-    ? (daemon.getModule('provider-quota') as ManagerModule | undefined)
-    : undefined;
-  return legacy ? (legacy as unknown as ProviderQuotaDaemonModule) : null;
+  return modQuota ? (modQuota as unknown as QuotaManagerModule) : null;
 }
 
 export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteOptions): void {
@@ -156,7 +256,8 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     try {
       const quotaAdapter = getQuotaModule(options);
-      const snapshot = quotaAdapter ? quotaAdapter.getAdminSnapshot() : {};
+      const rustQuotaHostSnapshot = x7eGate.phase1UnifiedQuota ? getRustQuotaHostSnapshot(options) : null;
+      const snapshot = rustQuotaHostSnapshot ?? (quotaAdapter ? quotaAdapter.getAdminSnapshot() : {});
 
       // Phase 2: Unified control plane DTO
       const unifiedDto = x7eGate.phase2UnifiedControl;
@@ -198,6 +299,12 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     try {
+      const rustMutator = x7eGate.phase1UnifiedQuota ? getRustQuotaHostMutator(options) : null;
+      if (typeof rustMutator?.resetProviderQuota === 'function') {
+        await Promise.resolve(rustMutator.resetProviderQuota(providerKey));
+        res.status(200).json({ ok: true, providerKey, action: 'reset', result: { ok: true, source: 'rust' } });
+        return;
+      }
       const result = await mod.resetProvider(providerKey);
       res.status(200).json({ ok: true, providerKey, action: 'reset', result });
     } catch (error: unknown) {
@@ -219,6 +326,12 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     try {
+      const rustMutator = x7eGate.phase1UnifiedQuota ? getRustQuotaHostMutator(options) : null;
+      if (typeof rustMutator?.recoverProviderQuota === 'function') {
+        await Promise.resolve(rustMutator.recoverProviderQuota(providerKey));
+        res.status(200).json({ ok: true, providerKey, action: 'recover', result: { ok: true, source: 'rust' } });
+        return;
+      }
       const result = await mod.recoverProvider(providerKey);
       res.status(200).json({ ok: true, providerKey, action: 'recover', result });
     } catch (error: unknown) {
@@ -255,6 +368,19 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     try {
+      const rustMutator = x7eGate.phase1UnifiedQuota ? getRustQuotaHostMutator(options) : null;
+      if (typeof rustMutator?.disableProviderQuota === 'function') {
+        await Promise.resolve(rustMutator.disableProviderQuota(providerKey, mode, durationMs));
+        res.status(200).json({
+          ok: true,
+          providerKey,
+          action: 'disable',
+          mode,
+          durationMs,
+          result: { ok: true, source: 'rust' }
+        });
+        return;
+      }
       const result = await mod.disableProvider({ providerKey, mode, durationMs });
       res.status(200).json({ ok: true, providerKey, action: 'disable', mode, durationMs, result });
     } catch (error: unknown) {

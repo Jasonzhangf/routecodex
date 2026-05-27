@@ -14,6 +14,12 @@ type ExtendedRuntimeMetadata = ProviderErrorRuntimeMetadata & {
 
 type ProviderErrorEventExtended = ProviderErrorEvent & {
   affectsHealth?: boolean;
+  fatal?: boolean;
+  cooldownOverrideMs?: number;
+  quotaScope?: string;
+  quotaReason?: string;
+  resetAt?: string;
+  errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
 };
 
 type ErrorWithMetadata = Error & {
@@ -118,12 +124,37 @@ function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtend
     mergedDetails = { ...(mergedDetails ?? {}), statusCode: status };
   }
 
+  const resetAt = (() => {
+    if (typeof (mergedDetails as Record<string, unknown> | undefined)?.resetAt === 'string') {
+      const value = String((mergedDetails as Record<string, unknown>).resetAt).trim();
+      if (value) return value;
+    }
+    return undefined;
+  })();
+  const errorClassification = (() => {
+    const raw = typeof (mergedDetails as Record<string, unknown> | undefined)?.errorClassification === 'string'
+      ? String((mergedDetails as Record<string, unknown>).errorClassification).trim()
+      : '';
+    return raw || undefined;
+  })();
+  const cooldownOverrideMs = typeof err.cooldownOverrideMs === 'number' && Number.isFinite(err.cooldownOverrideMs) && err.cooldownOverrideMs > 0
+    ? err.cooldownOverrideMs
+    : undefined;
+  const quotaScope = typeof err.quotaScope === 'string' && err.quotaScope.trim().length ? err.quotaScope.trim() : undefined;
+  const quotaReason = typeof err.quotaReason === 'string' && err.quotaReason.trim().length ? err.quotaReason.trim() : undefined;
+
   const event: ProviderErrorEventExtended = {
     code,
     message: err.message || code,
     stage: options.stage,
     status,
     recoverable,
+    fatal: recoverable ? false : true,
+    cooldownOverrideMs,
+    quotaScope,
+    quotaReason,
+    resetAt,
+    errorClassification,
     runtime: options.runtime,
     timestamp: Date.now(),
     details: mergedDetails
@@ -173,6 +204,18 @@ export async function emitProviderErrorAndWait(options: EmitOptions): Promise<vo
 }
 
 export function buildRuntimeFromProviderContext(ctx: ProviderContext): ExtendedRuntimeMetadata {
+  const rtMeta = ctx.runtimeMetadata?.metadata && typeof ctx.runtimeMetadata.metadata === 'object'
+    ? (ctx.runtimeMetadata.metadata as Record<string, unknown>)
+    : undefined;
+  const rtHints = rtMeta?.__rt && typeof rtMeta.__rt === 'object' && !Array.isArray(rtMeta.__rt)
+    ? (rtMeta.__rt as Record<string, unknown>)
+    : undefined;
+  const sessionDir = typeof rtHints?.sessionDir === 'string' && rtHints.sessionDir.trim()
+    ? rtHints.sessionDir.trim()
+    : undefined;
+  const rccUserDir = typeof rtHints?.rccUserDir === 'string' && rtHints.rccUserDir.trim()
+    ? rtHints.rccUserDir.trim()
+    : undefined;
   const runtime: ExtendedRuntimeMetadata = {
     requestId: ctx.requestId,
     providerKey: ctx.providerKey,
@@ -183,7 +226,9 @@ export function buildRuntimeFromProviderContext(ctx: ProviderContext): ExtendedR
     pipelineId: ctx.pipelineId,
     target: ctx.target,
     providerFamily: ctx.providerFamily,
-    runtimeKey: ctx.runtimeMetadata?.runtimeKey ?? ctx.target?.runtimeKey
+    runtimeKey: ctx.runtimeMetadata?.runtimeKey ?? ctx.target?.runtimeKey,
+    ...(sessionDir ? { sessionDir } : {}),
+    ...(rccUserDir ? { rccUserDir } : {})
   };
   return runtime;
 }

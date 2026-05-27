@@ -1,5 +1,6 @@
 mod classifier;
 pub(crate) mod config_bootstrap;
+mod context_weighted;
 mod engine;
 mod error;
 mod features;

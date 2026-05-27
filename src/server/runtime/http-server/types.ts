@@ -110,6 +110,9 @@ export interface HubPipeline {
   getVirtualRouter?(): {
     markConcurrencyScopeBusy(scopeKey: string): void;
     markConcurrencyScopeIdle(scopeKey: string): void;
+    resetProviderQuota?(providerKey: string): unknown;
+    recoverProviderQuota?(providerKey: string): unknown;
+    disableProviderQuota?(providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number): unknown;
   };
 }
 

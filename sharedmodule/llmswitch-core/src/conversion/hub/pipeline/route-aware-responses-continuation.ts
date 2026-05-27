@@ -84,18 +84,6 @@ function resolveContinuationResolutionMode(args: {
   ) {
     return 'consult_scope_store';
   }
-  if (metadata?.serverToolFollowup === true || runtime?.serverToolFollowup === true) {
-    return 'consult_scope_store';
-  }
-  if (typeof metadata?.serverToolFollowupSource === 'string' || typeof runtime?.serverToolFollowupSource === 'string') {
-    return 'consult_scope_store';
-  }
-  if (typeof metadata?.followupSource === 'string' || typeof runtime?.followupSource === 'string') {
-    return 'consult_scope_store';
-  }
-  if (typeof metadata?.clientInjectSource === 'string' || typeof runtime?.clientInjectSource === 'string') {
-    return 'consult_scope_store';
-  }
   if (requestRecord.previous_response_id !== undefined || rawRecord.previous_response_id !== undefined) {
     return 'passthrough_remote_direct';
   }

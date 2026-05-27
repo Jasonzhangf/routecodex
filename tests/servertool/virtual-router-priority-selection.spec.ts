@@ -57,41 +57,13 @@ describe('virtual-router priority pool selection', () => {
     }
   });
 
-  test('priority mode keeps strict group preference despite selectionPenalty', () => {
+  test('priority mode keeps strict group preference without depending on TS selectionPenalty', () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const primary = 'mock1.primary.gpt-5.2';
     const secondary = 'mock2.secondary.gpt-5.2';
 
     try {
-      const quotaView = (providerKey: string) => {
-        if (providerKey === primary) {
-          return {
-            providerKey,
-            inPool: true,
-            priorityTier: 100,
-            selectionPenalty: 50,
-            cooldownUntil: null,
-            blacklistUntil: null,
-            lastErrorAtMs: Date.now(),
-            consecutiveErrorCount: 50
-          };
-        }
-        if (providerKey === secondary) {
-          return {
-            providerKey,
-            inPool: true,
-            priorityTier: 100,
-            selectionPenalty: 0,
-            cooldownUntil: null,
-            blacklistUntil: null,
-            lastErrorAtMs: null,
-            consecutiveErrorCount: 0
-          };
-        }
-        return null;
-      };
-
-      const engine = new VirtualRouterEngine({ quotaView });
+      const engine = new VirtualRouterEngine();
       engine.initialize({
         routing: {
           default: [{ id: 'primary', targets: [primary, secondary], priority: 100, mode: 'priority' }]
@@ -134,7 +106,7 @@ describe('virtual-router priority pool selection', () => {
     }
   });
 
-  test('priority pools rotate within the selected provider+model group (aliases)', () => {
+  test('priority pools keep deterministic primary selection within the selected provider+model group (aliases)', () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const a = 'mock.key1.gpt-5.2';
@@ -182,7 +154,7 @@ describe('virtual-router priority pool selection', () => {
       const third = engine.route(request, metadata).target.providerKey;
 
       expect(first).toBe(a);
-      expect(second).toBe(b);
+      expect(second).toBe(a);
       expect(third).toBe(a);
     } finally {
       logSpy.mockRestore();

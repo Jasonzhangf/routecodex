@@ -97,7 +97,7 @@ describe('VirtualRouterEngine series cooldown handling', () => {
     expect(status.find((entry) => entry.providerKey === providerB)?.state).not.toBe('tripped');
   });
 
-  it('does not produce router-local cooldowns when quotaView is enabled', () => {
+  it('keeps targeted Rust health trip even when quotaView is enabled, without spreading to sibling alias', () => {
     const quotaView = (key: string) => ({
       providerKey: key,
       inPool: true,
@@ -132,7 +132,7 @@ describe('VirtualRouterEngine series cooldown handling', () => {
     engine.handleProviderError(event);
 
     const status = engine.getStatus().health;
-    expect(status.find((entry) => entry.providerKey === providerA)?.state).not.toBe('tripped');
+    expect(status.find((entry) => entry.providerKey === providerA)?.state).toBe('tripped');
     expect(status.find((entry) => entry.providerKey === providerB)?.state).not.toBe('tripped');
   });
 });

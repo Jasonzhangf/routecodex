@@ -46,6 +46,7 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_success(&mut self, event: &Value) {
+        self.refresh_provider_health_from_store();
         let provider_key = event
             .get("runtime")
             .and_then(|v| v.get("providerKey"))
@@ -68,10 +69,12 @@ impl VirtualRouterEngineCore {
                 self.health_manager.record_success(alias_key);
             }
         }
+        self.quota_manager.record_success(provider_key);
         self.persist_provider_health();
     }
 
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
+        self.refresh_provider_health_from_store();
         if !event_affects_health(event) {
             return;
         }
@@ -101,8 +104,28 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_error(&mut self, event: &Value) {
+        self.refresh_provider_health_from_store();
         if !event_affects_health(event) {
             return;
+        }
+        if self.apply_http_402_resetat_event(event) {
+            self.persist_provider_health();
+            return;
+        }
+        if self.apply_quota_depleted_event(event) {
+            self.persist_provider_health();
+            return;
+        }
+        if let Some(provider_key) = resolve_provider_key(event) {
+            if should_record_quota_error_signal(event) {
+                let event_now_ms = event
+                    .get("timestamp")
+                    .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|n| n as i64)))
+                    .filter(|value| *value > 0)
+                    .unwrap_or_else(now_ms);
+                self.quota_manager
+                    .record_error_signal(&provider_key, event_now_ms);
+            }
         }
         let classification = extract_provider_error_classification(event);
         if matches!(
@@ -243,6 +266,54 @@ impl VirtualRouterEngineCore {
             );
         }
     }
+
+    fn apply_http_402_resetat_event(&mut self, event: &Value) -> bool {
+        let status = extract_status_code(event);
+        let code = event
+            .get("code")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim())
+            .unwrap_or("");
+        if status != Some(402) && code != "HTTP_402" {
+            return false;
+        }
+        let Some(provider_key) = resolve_provider_key(event) else {
+            return false;
+        };
+        let Some(cooldown_until) = extract_reset_at_ms(event) else {
+            return false;
+        };
+        let now = now_ms();
+        self.quota_manager.apply_http_402_resetat_cooldown(
+            &provider_key,
+            now,
+            cooldown_until,
+            if code.is_empty() { "HTTP_402" } else { code },
+        );
+        true
+    }
+
+    fn apply_quota_depleted_event(&mut self, event: &Value) -> bool {
+        let code = event
+            .get("code")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim())
+            .unwrap_or("");
+        if code != "QUOTA_DEPLETED" {
+            return false;
+        }
+        let Some(provider_key) = resolve_provider_key(event) else {
+            return false;
+        };
+        let now = now_ms();
+        let reset_at = extract_reset_at_ms(event);
+        let cooldown_until = reset_at.or_else(|| {
+            extract_cooldown_override_ms(event).map(|ttl| now + ttl.max(1))
+        });
+        self.quota_manager
+            .freeze_quota_depleted(&provider_key, now, cooldown_until, reset_at);
+        true
+    }
 }
 
 const DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS: i64 = 5 * 60_000;
@@ -316,6 +387,31 @@ fn extract_cooldown_override_ms(event: &Value) -> Option<i64> {
         })
 }
 
+fn extract_reset_at_ms(event: &Value) -> Option<i64> {
+    event
+        .get("resetAt")
+        .and_then(as_timestamp_like)
+        .or_else(|| {
+            event
+                .get("details")
+                .and_then(|v| v.get("resetAt"))
+                .and_then(as_timestamp_like)
+        })
+}
+
+fn as_timestamp_like(value: &Value) -> Option<i64> {
+    if let Some(num) = as_i64_like(value) {
+        return Some(num);
+    }
+    let raw = value.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|dt| dt.timestamp_millis())
+}
+
 fn as_i64_like(value: &Value) -> Option<i64> {
     value
         .as_i64()
@@ -339,12 +435,33 @@ fn extract_error_reason(event: &Value) -> Option<String> {
         })
 }
 
+fn should_record_quota_error_signal(event: &Value) -> bool {
+    if !event_affects_health(event) {
+        return false;
+    }
+    let code = event
+        .get("code")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim())
+        .unwrap_or("");
+    if code == "QUOTA_DEPLETED" {
+        return false;
+    }
+    matches!(extract_provider_error_classification(event), Some(ProviderErrorClassification::Recoverable))
+}
+
 fn extract_provider_error_classification(event: &Value) -> Option<ProviderErrorClassification> {
     let value = event
-        .get("details")
-        .and_then(|v| v.get("errorClassification"))
+        .get("errorClassification")
         .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_lowercase())?;
+        .map(|v| v.trim().to_lowercase())
+        .or_else(|| {
+            event
+                .get("details")
+                .and_then(|v| v.get("errorClassification"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_lowercase())
+        })?;
     match value.as_str() {
         "unrecoverable" => Some(ProviderErrorClassification::Unrecoverable),
         "recoverable" => Some(ProviderErrorClassification::Recoverable),
@@ -622,6 +739,21 @@ mod tests {
         })
     }
 
+    fn build_top_level_error_event(provider_key: &str, classification: &str) -> Value {
+        json!({
+            "code": "HTTP_429",
+            "message": "quota exhausted",
+            "stage": "provider.send",
+            "status": 429,
+            "errorClassification": classification,
+            "cooldownOverrideMs": 4321,
+            "runtime": {
+                "requestId": "req-top-level",
+                "providerKey": provider_key
+            }
+        })
+    }
+
     fn provider_state(
         core: &VirtualRouterEngineCore,
         provider_key: &str,
@@ -767,6 +899,87 @@ mod tests {
 
         let state = provider_state(&core, "test.key1.model-a");
         assert_eq!(state.failure_count, 1);
+    }
+
+    #[test]
+    fn top_level_error_classification_is_consumed_without_details_fallback() {
+        let mut core = build_test_core_with_providers(&[
+            ("test.key1.model-a", "gpt-test"),
+            ("test.key1.model-b", "gpt-test"),
+        ]);
+
+        core.handle_provider_error(&build_top_level_error_event(
+            "test.key1.model-a",
+            "recoverable",
+        ));
+
+        let state = provider_state(&core, "test.key1.model-a");
+        assert_eq!(state.failure_count, 1);
+    }
+
+    #[test]
+    fn top_level_cooldown_override_ms_is_consumed_on_unrecoverable_error() {
+        let mut core = build_test_core_with_providers(&[
+            ("test.key1.model-a", "gpt-test"),
+            ("test.key1.model-b", "gpt-test"),
+        ]);
+
+        core.handle_provider_error(&build_top_level_error_event(
+            "test.key1.model-a",
+            "unrecoverable",
+        ));
+
+        let state = provider_state(&core, "test.key1.model-a");
+        assert_eq!(state.state, "tripped");
+        assert_eq!(state.failure_count, 3);
+        let now = now_ms();
+        let expiry = state.cooldown_expires_at.expect("cooldown expiry");
+        let ttl = expiry - now;
+        assert!(ttl > 0 && ttl <= 10_000, "unexpected ttl={ttl}");
+    }
+
+    #[test]
+    fn single_provider_429_blackout_surfaces_unavailable_reason_details() {
+        let provider_key = "test.key1.model-a";
+        let mut core = build_test_core(provider_key, "gpt-test");
+        let started_at = now_ms();
+
+        assert_eq!(
+            core.health_manager.record_http_429_failure(
+                provider_key,
+                Some("HTTP_429".to_string()),
+                started_at
+            ),
+            health::Http429ControlOutcome::None
+        );
+        assert_eq!(
+            core.health_manager.record_http_429_failure(
+                provider_key,
+                Some("HTTP_429".to_string()),
+                started_at + 1
+            ),
+            health::Http429ControlOutcome::None
+        );
+        assert_eq!(
+            core.health_manager.record_http_429_failure(
+                provider_key,
+                Some("HTTP_429".to_string()),
+                started_at + 2
+            ),
+            health::Http429ControlOutcome::CooldownApplied
+        );
+
+        let err = crate::virtual_router_engine::engine::selection::build_provider_not_available_error(
+            &core,
+            unsafe { napi::Env::from_raw(std::ptr::null_mut()) },
+            &vec![provider_key.to_string()],
+            "No available providers after applying routing instructions",
+        );
+
+        assert!(err.contains("PROVIDER_NOT_AVAILABLE"));
+        assert!(err.contains("unavailableProviders"));
+        assert!(err.contains("health_cooldown"));
+        assert!(err.contains(provider_key));
     }
 
     #[test]

@@ -15,6 +15,7 @@ export interface HttpErrorPayload {
       validation_reason?: string;
       validation_message?: string;
       missing_fields?: string[];
+      details?: Record<string, unknown>;
     };
   };
 }
@@ -142,6 +143,9 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     ...(missingFields?.length ? { missing_fields: missingFields } : {})
   };
 
+  const publicDetails = sanitizePublicErrorDetails(error.details);
+  const detailField = publicDetails ? { details: publicDetails } : {};
+
   // Protocol/shape errors produced by our bridge/pipeline should be treated as client errors.
   // (e.g. /v1/responses with invalid payload shape)
   const normalizedCode = String(effectiveCode || '').trim().toUpperCase();
@@ -156,7 +160,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
       upstream_message: effectiveUpstreamMessage,
-      ...validationFields
+      ...validationFields,
+      ...detailField
     });
   }
 
@@ -177,7 +182,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
       upstream_message: effectiveUpstreamMessage,
-      ...validationFields
+      ...validationFields,
+      ...detailField
     });
   }
 
@@ -192,7 +198,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
       upstream_message: effectiveUpstreamMessage,
-      ...validationFields
+      ...validationFields,
+      ...detailField
     });
   }
 
@@ -207,7 +214,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
       upstream_message: effectiveUpstreamMessage,
-      ...validationFields
+      ...validationFields,
+      ...detailField
     });
   }
 
@@ -222,7 +230,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
       upstream_message: effectiveUpstreamMessage,
-      ...validationFields
+      ...validationFields,
+      ...detailField
     });
   }
 
@@ -237,7 +246,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
       upstream_message: effectiveUpstreamMessage,
-      ...validationFields
+      ...validationFields,
+      ...detailField
     });
   }
 
@@ -251,7 +261,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     upstream_status: upstream.status,
     upstream_code: upstreamCode,
     upstream_message: effectiveUpstreamMessage,
-    ...validationFields
+    ...validationFields,
+    ...detailField
   });
 }
 
@@ -311,6 +322,185 @@ function extractUpstreamError(err: RawErrorPayload): {
 
 function extractString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function sanitizePublicErrorDetails(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const allowedTopLevelKeys = new Set([
+    'candidateProviderCount',
+    'candidateProviderKeys',
+    'unavailableProviders',
+    'recoverableCooldownHints',
+    'minRecoverableCooldownMs',
+    'status',
+    'statusCode',
+    'code',
+    'providerKey',
+    'providerType',
+    'routeName',
+    'endpoint',
+    'retryable',
+    'upstreamCode',
+    'upstreamMessage',
+    'validationReason',
+    'validationMessage',
+    'missingFields'
+  ]);
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    if (key.startsWith('__')) {
+      continue;
+    }
+    if (!allowedTopLevelKeys.has(key)) {
+      continue;
+    }
+    sanitized[key] = sanitizePublicErrorDetailValue(key, entry);
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
+function sanitizePublicErrorDetailValue(key: string, value: unknown): unknown {
+  switch (key) {
+    case 'candidateProviderKeys':
+      return normalizeStringArray(value) ?? [];
+    case 'recoverableCooldownHints':
+      return sanitizeRecoverableCooldownHints(value);
+    case 'unavailableProviders':
+      return sanitizeUnavailableProviders(value);
+    case 'missingFields':
+      return normalizeStringArray(value) ?? [];
+    case 'status':
+    case 'statusCode':
+    case 'minRecoverableCooldownMs':
+      return typeof value === 'number' ? value : undefined;
+    case 'retryable':
+      return typeof value === 'boolean' ? value : undefined;
+    default:
+      return value;
+  }
+}
+
+function sanitizeRecoverableCooldownHints(value: unknown): Array<Record<string, unknown>> | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return null;
+      }
+      const record = entry as Record<string, unknown>;
+      const providerKey = extractString(record.providerKey);
+      const source = extractString(record.source);
+      const waitMs = typeof record.waitMs === 'number' ? record.waitMs : undefined;
+      return {
+        ...(providerKey ? { providerKey } : {}),
+        ...(typeof waitMs === 'number' ? { waitMs } : {}),
+        ...(source ? { source } : {})
+      };
+    })
+    .filter((entry): entry is Record<string, unknown> => entry !== null && Object.keys(entry).length > 0);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function sanitizeUnavailableProviders(value: unknown): Array<Record<string, unknown>> | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = value
+    .map((entry) => sanitizeUnavailableProvider(entry))
+    .filter((entry): entry is Record<string, unknown> => entry !== undefined && Object.keys(entry).length > 0);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function sanitizeUnavailableProvider(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const providerKey = extractString(record.providerKey);
+  const reason = extractString(record.reason);
+  const reasons = sanitizeUnavailableProviderReasons(record.reasons);
+  const health = sanitizeUnavailableProviderHealth(record.health);
+  const result: Record<string, unknown> = {
+    ...(providerKey ? { providerKey } : {}),
+    ...(reason ? { reason } : {}),
+    ...(reasons ? { reasons } : {}),
+    ...(health ? { health } : {})
+  };
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function sanitizeUnavailableProviderReasons(value: unknown): Array<Record<string, unknown>> | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return null;
+      }
+      const record = entry as Record<string, unknown>;
+      const type = extractString(record.type);
+      const reason = extractString(record.reason);
+      const waitMs = typeof record.waitMs === 'number' ? record.waitMs : undefined;
+      const until = typeof record.until === 'number' ? record.until : undefined;
+      const cooldownUntil = typeof record.cooldownUntil === 'number' ? record.cooldownUntil : undefined;
+      const blacklistUntil = typeof record.blacklistUntil === 'number' ? record.blacklistUntil : undefined;
+      const cooldownKeepsPool = typeof record.cooldownKeepsPool === 'boolean' ? record.cooldownKeepsPool : undefined;
+      const state = sanitizeUnavailableProviderHealth(record.state);
+      const item: Record<string, unknown> = {
+        ...(type ? { type } : {}),
+        ...(reason ? { reason } : {}),
+        ...(typeof waitMs === 'number' ? { waitMs } : {}),
+        ...(typeof until === 'number' ? { until } : {}),
+        ...(typeof cooldownUntil === 'number' ? { cooldownUntil } : {}),
+        ...(typeof blacklistUntil === 'number' ? { blacklistUntil } : {}),
+        ...(typeof cooldownKeepsPool === 'boolean' ? { cooldownKeepsPool } : {}),
+        ...(state ? { state } : {})
+      };
+      return Object.keys(item).length > 0 ? item : null;
+    })
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function sanitizeUnavailableProviderHealth(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const sanitized: Record<string, unknown> = {};
+  const providerKey = extractString(record.providerKey);
+  const state = extractString(record.state);
+  const reason = extractString(record.reason);
+  const failureCount =
+    typeof record.failureCount === 'number'
+      ? record.failureCount
+      : typeof record.failure_count === 'number'
+        ? record.failure_count
+        : undefined;
+  const cooldownExpiresAt = typeof record.cooldownExpiresAt === 'number' ? record.cooldownExpiresAt : undefined;
+  const lastFailureAt = typeof record.lastFailureAt === 'number' ? record.lastFailureAt : undefined;
+  const consecutiveHttp502Failures =
+    typeof record.consecutiveHttp502Failures === 'number' ? record.consecutiveHttp502Failures : undefined;
+  const consecutiveHttp429Failures =
+    typeof record.consecutiveHttp429Failures === 'number' ? record.consecutiveHttp429Failures : undefined;
+  const http429CooldownCycles =
+    typeof record.http429CooldownCycles === 'number' ? record.http429CooldownCycles : undefined;
+  if (providerKey) sanitized.providerKey = providerKey;
+  if (state) sanitized.state = state;
+  if (reason) sanitized.reason = reason;
+  if (typeof failureCount === 'number') sanitized.failureCount = failureCount;
+  if (typeof cooldownExpiresAt === 'number') sanitized.cooldownExpiresAt = cooldownExpiresAt;
+  if (typeof lastFailureAt === 'number') sanitized.lastFailureAt = lastFailureAt;
+  if (typeof consecutiveHttp502Failures === 'number') sanitized.consecutiveHttp502Failures = consecutiveHttp502Failures;
+  if (typeof consecutiveHttp429Failures === 'number') sanitized.consecutiveHttp429Failures = consecutiveHttp429Failures;
+  if (typeof http429CooldownCycles === 'number') sanitized.http429CooldownCycles = http429CooldownCycles;
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
 function normalizeStringArray(value: unknown): string[] | undefined {

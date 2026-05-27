@@ -319,6 +319,57 @@ export class HubRequestExecutor implements RequestExecutor {
     });
   }
 
+  private shouldReenterFromSourceRequest(metadata: Record<string, unknown> | undefined): boolean {
+    if (!this.deps.executeNestedInput) {
+      return false;
+    }
+    const rt =
+      metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : undefined;
+    const depth =
+      typeof rt?.requestExecutorSourceReentryDepth === 'number'
+      && Number.isFinite(rt.requestExecutorSourceReentryDepth)
+        ? Math.max(0, Math.floor(rt.requestExecutorSourceReentryDepth))
+        : 0;
+    return depth < 1;
+  }
+
+  private async reenterFromSourceRequest(args: {
+    input: PipelineExecutionInput;
+    retryPayloadSeed: RetryPayloadSeed;
+    metadataForAttempt: Record<string, unknown>;
+    excludedProviderKeys: Set<string>;
+  }): Promise<PipelineExecutionResult> {
+    const restoredBody =
+      restoreRequestPayloadFromRetrySeed(args.retryPayloadSeed)
+      ?? (args.input.body && typeof args.input.body === 'object' ? args.input.body : {});
+    const metadataRt =
+      args.metadataForAttempt.__rt
+      && typeof args.metadataForAttempt.__rt === 'object'
+      && !Array.isArray(args.metadataForAttempt.__rt)
+        ? (args.metadataForAttempt.__rt as Record<string, unknown>)
+        : {};
+    const currentDepth =
+      typeof metadataRt.requestExecutorSourceReentryDepth === 'number'
+      && Number.isFinite(metadataRt.requestExecutorSourceReentryDepth)
+        ? Math.max(0, Math.floor(metadataRt.requestExecutorSourceReentryDepth))
+        : 0;
+    const nestedInput: PipelineExecutionInput = {
+      ...args.input,
+      body: restoredBody,
+      metadata: {
+        ...args.metadataForAttempt,
+        excludedProviderKeys: Array.from(args.excludedProviderKeys),
+        __rt: {
+          ...metadataRt,
+          requestExecutorSourceReentryDepth: currentDepth + 1
+        }
+      }
+    };
+    return await this.deps.executeNestedInput!(nestedInput);
+  }
+
   private logProviderRetrySwitch(args: {
     requestId: string;
     attempt: number;
@@ -675,6 +726,14 @@ export class HubRequestExecutor implements RequestExecutor {
           blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
           allowBlockingRecoverableRetryBeyondAttemptBudget =
             failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
+          if (this.shouldReenterFromSourceRequest(metadataForAttempt)) {
+            return await this.reenterFromSourceRequest({
+              input,
+              retryPayloadSeed,
+              metadataForAttempt,
+              excludedProviderKeys
+            });
+          }
           continue;
         }
         const previousRequestId = input.requestId;
@@ -1239,6 +1298,14 @@ export class HubRequestExecutor implements RequestExecutor {
               });
             }
             recordScopedErrorBackoff(scopedBackoffKey);
+          }
+          if (this.shouldReenterFromSourceRequest(metadataForAttempt)) {
+            return await this.reenterFromSourceRequest({
+              input,
+              retryPayloadSeed,
+              metadataForAttempt,
+              excludedProviderKeys
+            });
           }
           continue;
         } finally {

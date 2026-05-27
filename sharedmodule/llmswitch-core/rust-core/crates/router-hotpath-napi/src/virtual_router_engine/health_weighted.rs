@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::quota::QuotaViewEntry;
+use super::quota::ProviderQuotaState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,7 +65,7 @@ pub(crate) fn resolve_health_weighted_config(
 }
 
 fn compute_health_multiplier(
-    entry: Option<&QuotaViewEntry>,
+    entry: Option<&ProviderQuotaState>,
     now_ms: i64,
     cfg: &ResolvedHealthWeightedConfig,
 ) -> f64 {
@@ -73,7 +73,7 @@ fn compute_health_multiplier(
         return 1.0;
     };
     let last_error_at_ms = entry.last_error_at_ms;
-    let consecutive_error_count = entry.consecutive_error_count.unwrap_or(0).max(0) as f64;
+    let consecutive_error_count = entry.consecutive_error_count.max(0) as f64;
     if last_error_at_ms.is_none() || consecutive_error_count <= 0.0 {
         return 1.0;
     }
@@ -87,7 +87,7 @@ fn compute_health_multiplier(
 }
 
 pub(crate) fn compute_health_weight(
-    entry: Option<&QuotaViewEntry>,
+    entry: Option<&ProviderQuotaState>,
     now_ms: i64,
     cfg: &ResolvedHealthWeightedConfig,
 ) -> i64 {

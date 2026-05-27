@@ -49,6 +49,7 @@ export async function initializeHttpServer(server: any): Promise<void> {
       const daemon = new ManagerDaemon({
         serverId: canonicalizeServerId(server.config.server.host, server.config.server.port),
         configPath: server.config?.configPath,
+        getHubPipeline: () => server.hubPipeline,
         quotaRoutingEnabled: server.isQuotaRoutingEnabled()
       });
       daemon.registerModule(new TokenManagerModule());
@@ -90,6 +91,7 @@ export async function initializeHttpServer(server: any): Promise<void> {
         return key ? store.loadSync(key) : null;
       },
       getManagerDaemon: () => server.managerDaemon,
+      getHubPipeline: () => server.hubPipeline,
       getVirtualRouterArtifacts: () => server.currentRouterArtifacts,
       getStatsSnapshot: () => ({
         session: server.stats.snapshot(Math.round(process.uptime() * 1000)),

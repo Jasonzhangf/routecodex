@@ -9,6 +9,8 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', async () =>
   clearResponsesConversationByRequestId: jest.fn(async () => undefined),
   finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
   recordResponsesResponseForRequest: jest.fn(async () => undefined)
+  ,
+  rebindResponsesConversationRequestId: jest.fn(async () => undefined)
 }));
 
 jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({

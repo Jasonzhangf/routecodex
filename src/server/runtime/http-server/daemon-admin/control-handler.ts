@@ -188,6 +188,15 @@ function getQuotaModule(options: DaemonAdminRouteOptions): any | null {
   return daemon.getModule('quota') ?? null;
 }
 
+
+function canonicalizeQuotaSnapshotLookupKey(providerKey: string): string {
+  const lower = typeof providerKey === 'string' ? providerKey.trim().toLowerCase() : '';
+  if (!lower) {
+    return '';
+  }
+  return lower.replace(/\.key(\d+)(?=\.|$)/g, '.$1');
+}
+
 function getQuotaAdapter(options: DaemonAdminRouteOptions): any | null {
   const daemon = options.getManagerDaemon() as { getModule?: (id: string) => any } | null;
   if (!daemon || typeof daemon.getModule !== 'function') {
@@ -197,11 +206,15 @@ function getQuotaAdapter(options: DaemonAdminRouteOptions): any | null {
   if (!quotaModule) {
     return null;
   }
-  const providerQuotaModule = daemon.getModule('provider-quota') ?? null;
   const coreLike = typeof quotaModule.getCoreQuotaManager === 'function' ? quotaModule.getCoreQuotaManager() : null;
+  const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
+  const virtualRouter = hubPipeline && typeof (hubPipeline as any).getVirtualRouter === 'function'
+    ? (hubPipeline as any).getVirtualRouter()
+    : null;
   return createQuotaManagerAdapter({
     coreManager: coreLike,
-    legacyDaemon: providerQuotaModule,
+    rustHostMutator: virtualRouter,
+    legacyDaemon: coreLike ? null : quotaModule,
     quotaRoutingEnabled: true
   });
 }
@@ -212,7 +225,25 @@ function readQuotaProviderSnapshot(quotaMod: any, providerKey: string): unknown 
     if (!snapshot || typeof snapshot !== 'object') {
       return null;
     }
-    return (snapshot as Record<string, unknown>)[providerKey] ?? null;
+    const normalizedLookup = canonicalizeQuotaSnapshotLookupKey(providerKey);
+    const direct = (snapshot as Record<string, unknown>)[providerKey]
+      ?? (normalizedLookup ? (snapshot as Record<string, unknown>)[normalizedLookup] : null)
+      ?? null;
+    if (direct) {
+      return direct;
+    }
+    for (const [key, value] of Object.entries(snapshot as Record<string, unknown>)) {
+      if (key === providerKey || (normalizedLookup && canonicalizeQuotaSnapshotLookupKey(key) === normalizedLookup)) {
+        return value;
+      }
+      if (value && typeof value === 'object') {
+        const valueProviderKey = String((value as any).providerKey || '');
+        if (valueProviderKey === providerKey || (normalizedLookup && canonicalizeQuotaSnapshotLookupKey(valueProviderKey) === normalizedLookup)) {
+          return value;
+        }
+      }
+    }
+    return null;
   } catch (error) {
     logControlNonBlockingError('readQuotaProviderSnapshot', error, { providerKey });
     return null;

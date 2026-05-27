@@ -11,12 +11,13 @@ import type {
   ServerToolHandlerPlan,
   ServerToolHandlerResult,
   ServerToolExecution,
+  ServerToolFollowupPlan,
   ToolCall
 } from './types.js';
 import { executeVisionBackendPlan } from './handlers/vision.js';
 import { executeWebSearchBackendPlan } from './handlers/web-search.js';
 import { getServerToolHandler, listRegisteredServerToolHandlerRecords } from './registry.js';
-import { planServertoolOutcomeWithNative, planServertoolToolCallDispatchWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+import { planServertoolNoopOutcomeWithNative, planServertoolOutcomeWithNative, planServertoolToolCallDispatchWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import { runPreCommandHooks } from './pre-command-hooks.js';
 import {
   buildServertoolFollowupConfig,
@@ -415,6 +416,50 @@ export async function runToolCallExecutionLoop(args: {
         flowId: `${toolCall.name}_error`
       });
     }
+  }
+
+  // Process noop tool calls — acknowledged and auto-continued without handler execution.
+  // Rust produces the standard delta: tool_outputs entry + clientInjectOnly followup.
+  for (const toolCall of args.dispatchPlan.noopToolCalls ?? []) {
+    const preHookResult = runPreCommandHooks({
+      requestId: args.options.requestId,
+      entryEndpoint: args.options.entryEndpoint,
+      providerProtocol: args.options.providerProtocol,
+      toolName: toolCall.name,
+      toolCallId: toolCall.id,
+      toolArguments: toolCall.arguments,
+      preCommandState: args.runtimePreCommandState
+    });
+    for (const trace of preHookResult.traces) {
+      try {
+        args.options.onAutoHookTrace?.(trace);
+      } catch {
+        // best-effort
+      }
+    }
+
+    const noopResult = planServertoolNoopOutcomeWithNative({
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      base: args.baseForExecution as Record<string, unknown>
+    });
+
+    applyServertoolExecutionResult(
+      args.baseForExecution,
+      JSON.parse(JSON.stringify(noopResult.chatResponse)) as JsonObject
+    );
+
+    appendExecutedToolRecord(executionState, {
+      id: toolCall.id,
+      name: toolCall.name,
+      arguments: toolCall.arguments,
+      executionMode: 'noop',
+      stripAfterExecute: true
+    }, {
+      flowId: noopResult.flowId,
+      followup: noopResult.followup as unknown as ServerToolFollowupPlan,
+      context: { [toolCall.name]: { visibleSummary: '' } }
+    });
   }
 
   return executionState;

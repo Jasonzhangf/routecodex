@@ -83,6 +83,131 @@ describe('HubRequestExecutor failover', () => {
     setServerToolEnabled(previousServerToolState.enabled, previousServerToolState.updatedBy);
   });
 
+  test('RED: retryable provider reroute must re-enter from source entry rebuild instead of rerunning hub inline', async () => {
+    const providerA = 'tab.key1.gpt-5.2';
+    const providerB = 'tab.key2.gpt-5.2';
+
+    const failingProcess = jest.fn(async () => {
+      throw Object.assign(new Error('HTTP 429'), { statusCode: 429, code: 'HTTP_429' });
+    });
+    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
+
+    const handles = new Map<string, ProviderHandle>([
+      [providerA, buildHandle(providerA, failingProcess)],
+      [providerB, buildHandle(providerB, successProcess)]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+        );
+        const selected = excluded.has(providerA) ? providerB : providerA;
+        return {
+          requestId: input.id,
+          providerPayload: {
+            model: 'gpt-5.2',
+            previous_response_id: 'resp_inline_retry_leak',
+            stream: true,
+            store: false,
+            input: [
+              {
+                role: 'user',
+                type: 'message',
+                content: [{ type: 'input_text', text: 'continue' }]
+              }
+            ]
+          },
+          target: {
+            providerKey: selected,
+            providerType: 'responses',
+            outboundProfile: 'openai-responses',
+            runtimeKey: selected
+          },
+          routingDecision: {
+            routeName: 'default',
+            pool: [providerA, providerB]
+          },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const executeNestedInput = jest.fn(async (nestedInput: any) => ({
+      status: 200,
+      body: {
+        id: 'resp_nested_ok',
+        object: 'response',
+        output_text: 'ok-from-entry-rebuild'
+      },
+      metadata: {
+        nestedInput
+      }
+    }));
+
+    const executor = createRequestExecutor({
+      runtimeManager,
+      getHubPipeline: () => pipeline as any,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      executeNestedInput,
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    });
+
+    await executor.execute({
+      requestId: 'req-reroute-source-entry-rebuild',
+      entryEndpoint: '/v1/responses',
+      body: {
+        model: 'gpt-5.2',
+        previous_response_id: 'resp_original_entry',
+        stream: true,
+        store: false,
+        input: [
+          {
+            role: 'user',
+            type: 'message',
+            content: [{ type: 'input_text', text: 'continue' }]
+          }
+        ]
+      },
+      headers: {},
+      metadata: {
+        stream: true,
+        inboundStream: true,
+        responsesRequestContext: {
+          payload: {
+            model: 'gpt-5.2',
+            previous_response_id: 'resp_original_entry',
+            stream: true,
+            store: false
+          },
+          context: {
+            input: [
+              {
+                role: 'user',
+                type: 'message',
+                content: [{ type: 'input_text', text: 'continue' }]
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(executeNestedInput).toHaveBeenCalledTimes(1);
+    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+  });
+
 
   test('reselects alternative windsurf key when transport backoff is still active on newly selected target', async () => {
     const recordAttempt = () => undefined;

@@ -2,7 +2,6 @@ import { describe, expect, test } from '@jest/globals';
 
 import { ContextAdvisor } from '../../src/router/virtual-router/context-advisor.js';
 import { selectProviderImpl } from '../../src/router/virtual-router/engine/routing-pools/index.js';
-import { ProviderHealthManager } from '../../src/router/virtual-router/health-manager.js';
 import { RouteLoadBalancer } from '../../src/router/virtual-router/load-balancer.js';
 import { ProviderRegistry } from '../../src/router/virtual-router/provider-registry.js';
 import type {
@@ -69,8 +68,14 @@ describe('virtual-router sticky capability guard', () => {
   };
 
   function baseDeps() {
-    const healthManager = new ProviderHealthManager();
-    healthManager.registerProviders(providerRegistry.listKeys());
+    const healthManager = {
+      getSnapshot: () => providerRegistry.listKeys().map((providerKey) => ({
+        providerKey,
+        state: 'healthy',
+        failureCount: 0
+      })),
+      isAvailable: () => true
+    };
     return {
       routing,
       providerRegistry,

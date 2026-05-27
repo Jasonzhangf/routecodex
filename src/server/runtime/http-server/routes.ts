@@ -37,6 +37,7 @@ interface RouteOptions {
   getHealthSnapshot?: () => unknown | null;
   getRoutingState?: (sessionId: string) => unknown | null;
   getManagerDaemon?: () => unknown | null;
+  getHubPipeline?: () => unknown | null;
   getVirtualRouterArtifacts?: () => unknown | null;
   getServerId?: () => string;
   getStatsSnapshot?: () => {
@@ -408,6 +409,8 @@ export function registerHttpRoutes(options: RouteOptions): void {
     app,
     getManagerDaemon: () =>
       (typeof options.getManagerDaemon === 'function' ? (options.getManagerDaemon() as unknown) : null),
+    getHubPipeline: () =>
+      (typeof options.getHubPipeline === 'function' ? (options.getHubPipeline() as unknown) : null),
     getVirtualRouterArtifacts: () =>
       (typeof options.getVirtualRouterArtifacts === 'function'
         ? options.getVirtualRouterArtifacts()

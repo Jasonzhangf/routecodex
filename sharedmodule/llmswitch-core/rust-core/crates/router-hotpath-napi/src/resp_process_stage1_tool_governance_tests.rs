@@ -433,10 +433,19 @@ fn test_govern_response_apply_patch_current_schema_preserves_filepath_and_patch_
         .as_str()
         .unwrap_or("");
     let parsed: Value = serde_json::from_str(args).unwrap();
-    assert_eq!(parsed["filePath"], "tmp/apply-patch-smoke.txt");
-    assert_eq!(parsed["patch"], "+ alpha\n+ beta");
-    assert!(parsed.get("input").is_none());
-    assert!(!args.contains("__APPLY_PATCH_ERROR__/"));
+    // Servertool {filePath, patch} → canonical {patch, input}
+    let patch_value = parsed["patch"].as_str().unwrap_or("");
+    assert!(
+        patch_value.starts_with("*** Begin Patch"),
+        "servertool filePath+patch should convert to canonical format"
+    );
+    assert!(patch_value.contains("*** Add File: tmp/apply-patch-smoke.txt"));
+    assert!(patch_value.contains("+ alpha"));
+    assert!(patch_value.contains("+ beta"));
+    assert!(patch_value.contains("*** End Patch"));
+    assert_eq!(parsed["input"], parsed["patch"], "input should mirror patch");
+    assert!(parsed.get("filePath").is_none(), "filePath should be removed after conversion");
+    assert!(parsed.get("fileContent").is_none());
 }
 
 #[test]
@@ -4011,6 +4020,39 @@ fn test_govern_response_preserves_allowed_multi_tool_calls() {
         result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
         "apply_patch"
     );
+}
+
+#[test]
+fn test_remap_tool_calls_for_client_protocol_reverses_write_stdin_args() {
+    // Red test: write_stdin args are normalized on req side (sessionId → session_id, text → chars)
+    // but response side doesn't reverse. This test confirms the fix works.
+    let mut payload = serde_json::json!({
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "write_1",
+                    "type": "function",
+                    "function": {
+                        "name": "write_stdin",
+                        "arguments": "{\"session_id\":123,\"chars\":\"echo hello\"}"
+                    }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    });
+    remap_tool_calls_for_client_protocol(&mut payload, "openai-chat");
+    let tool_call = &payload["choices"][0]["message"]["tool_calls"][0];
+    let args: serde_json::Value = serde_json::from_str(
+        tool_call["function"]["arguments"].as_str().unwrap()
+    ).unwrap();
+    // After fix: session_id → sessionId, chars → text
+    assert_eq!(args.get("sessionId").and_then(|v| v.as_i64()), Some(123));
+    assert_eq!(args.get("session_id"), None);
+    assert_eq!(args.get("text").and_then(|v| v.as_str()), Some("echo hello"));
+    assert_eq!(args.get("chars"), None);
+    assert_eq!(tool_call["function"]["name"], "write_stdin");
 }
 
 #[test]

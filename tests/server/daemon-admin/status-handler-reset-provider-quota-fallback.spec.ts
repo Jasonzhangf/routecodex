@@ -97,4 +97,79 @@ describe('daemon-admin module reset fallback', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+
+  it('prefers rust quota reset-all fallback when unified quota host snapshot is available', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-daemon-admin-rust-reset-'));
+    createdTmpDir = tmpDir;
+    createdLoginFile = path.join(tmpDir, 'login');
+    process.env.ROUTECODEX_LOGIN_FILE = createdLoginFile;
+
+    const calls: { rustReset: string[]; tsReset: string[]; refresh: number } = { rustReset: [], tsReset: [], refresh: 0 };
+    const quotaModule = {
+      getAdminSnapshot: () => ({ 'quota.key1.gpt-test': {}, 'quota.key2.gpt-test': {} }),
+      resetProvider: (providerKey: string) => void calls.tsReset.push(providerKey),
+      refreshNow: async () => {
+        calls.refresh += 1;
+        return { ok: true, refreshedAt: Date.now() };
+      }
+    };
+    const daemon = {
+      getModule: (id: string) => {
+        if (id === 'quota') return quotaModule as any;
+        return undefined;
+      }
+    };
+
+    const app = express();
+    app.use(express.json());
+    registerDaemonAuthRoutes(app);
+    registerStatusRoutes(app, {
+      app,
+      getManagerDaemon: () => daemon,
+      getServerId: () => 'test:0',
+      getHubPipeline: () => ({
+        getVirtualRouter: () => ({
+          getStatus: () => ({
+            quotaHostSnapshot: [
+              { providerKey: 'quota.1.gpt-test' },
+              { providerKey: 'quota.2.gpt-test' }
+            ]
+          }),
+          resetProviderQuota: (providerKey: string) => void calls.rustReset.push(providerKey)
+        })
+      })
+    } as any);
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${addr.port}`;
+
+    try {
+      const setup = await fetch(`${base}/daemon/auth/setup`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'password123' })
+      });
+      expect(setup.ok).toBe(true);
+      const cookie = setup.headers.get('set-cookie');
+      expect(typeof cookie).toBe('string');
+
+      const resp = await fetch(`${base}/daemon/modules/provider-quota/reset`, {
+        method: 'POST',
+        headers: { cookie: String(cookie) }
+      });
+      expect(resp.status).toBe(200);
+      const json = (await resp.json()) as any;
+      expect(json?.ok).toBe(true);
+      expect(json?.fallback?.kind).toBe('rust-quota.reset-all');
+      expect(json?.fallback?.providerCount).toBe(2);
+
+      expect(calls.rustReset.sort()).toEqual(['quota.1.gpt-test', 'quota.2.gpt-test'].sort());
+      expect(calls.tsReset).toEqual([]);
+      expect(calls.refresh).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });

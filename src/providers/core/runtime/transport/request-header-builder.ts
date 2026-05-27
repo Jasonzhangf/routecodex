@@ -2,7 +2,6 @@ import type { ProviderRuntimeMetadata } from '../provider-runtime-metadata.js';
 import type { ProviderFamilyProfile } from '../../../profile/profile-contracts.js';
 import { HeaderUtils } from './header-utils.js';
 import { ProviderPayloadUtils } from './provider-payload-utils.js';
-import { SessionHeaderUtils } from './session-header-utils.js';
 
 export interface RequestHeaderBuildContext {
   baseHeaders: Record<string, string>;
@@ -251,42 +250,14 @@ export class RequestHeaderBuilder {
       }
     }
 
-    if (!isOpenCodeZen && context.normalizedClientHeaders) {
-      const conversationId = HeaderUtils.findHeaderValue(context.normalizedClientHeaders, 'conversation_id');
-      if (conversationId) {
-        HeaderUtils.assignHeader(finalHeaders, 'conversation_id', conversationId);
-      }
-      const sessionId = HeaderUtils.findHeaderValue(context.normalizedClientHeaders, 'session_id');
-      if (sessionId) {
-        HeaderUtils.assignHeader(finalHeaders, 'session_id', sessionId);
-      }
-    }
-
-    if (!isOpenCodeZen && context.inboundMetadata && typeof context.inboundMetadata === 'object') {
-      const meta = context.inboundMetadata as Record<string, unknown>;
-      const metaSessionId =
-        typeof meta.sessionId === 'string' && meta.sessionId.trim() ? meta.sessionId.trim() : '';
-      const metaConversationId =
-        typeof meta.conversationId === 'string' && meta.conversationId.trim() ? meta.conversationId.trim() : '';
-      const resolvedSessionId = metaSessionId || metaConversationId;
-      const resolvedConversationId = metaConversationId || metaSessionId;
-      if (resolvedSessionId && !HeaderUtils.findHeaderValue(finalHeaders, 'session_id')) {
-        HeaderUtils.assignHeader(finalHeaders, 'session_id', resolvedSessionId);
-      }
-      if (resolvedConversationId && !HeaderUtils.findHeaderValue(finalHeaders, 'conversation_id')) {
-        HeaderUtils.assignHeader(finalHeaders, 'conversation_id', resolvedConversationId);
-      }
-    }
-
-    if (!isOpenCodeZen && context.codexUaMode) {
-      SessionHeaderUtils.ensureCodexSessionHeaders(finalHeaders, context.runtimeMetadata);
-    }
-
     if (isOpenCodeZen) {
       HeaderUtils.deleteHeader(finalHeaders, 'session_id');
       HeaderUtils.deleteHeader(finalHeaders, 'conversation_id');
       HeaderUtils.deleteHeader(finalHeaders, 'originator');
     }
+
+    HeaderUtils.deleteHeader(finalHeaders, 'session_id');
+    HeaderUtils.deleteHeader(finalHeaders, 'conversation_id');
 
     if (isOpenCodeZen) {
       RequestHeaderBuilder.applyOpenCodeZenRoutingHeaders(finalHeaders, context);

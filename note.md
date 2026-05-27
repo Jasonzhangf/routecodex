@@ -11012,3 +11012,1106 @@ Using skills: coding-principals + rcc-dev-skills
 - 证据：audit 报的 12 个 `new prod TS files`（clock runtime bridge/side-effects、heartbeat runtime side-effects、request sanitizer bridge、native-followup-mainline-semantics、native-servertool-core-semantics、native-stop-message-auto-semantics、servertool/apply-patch、review、response-stage-orchestration-shell、stop-message-counter）都已经存在于当前 `HEAD`，且 `git diff --name-status HEAD -- sharedmodule/llmswitch-core/src` 不包含这些路径，说明不是本轮未提交新文件，而是 baseline 落后于仓库真相。
 - 当前 audit metrics 同时显示 `nonNativeLocTotal` 从 58341 降到 57352，整体是在收缩；只因旧 baseline 未更新，仍把后续已接纳文件当“新增 TS”拦截。
 - 处理策略：更新 rustification baseline 到当前仓库真相，再继续 build / restart / health 验证。
+
+[2026-05-27] mimo 404/500 codex-samples audit
+- 样本真相1（404 根因已证实）：`~/.rcc/codex-samples/openai-responses/mimo.key1.mimo-v2.5-pro/req_1779857488798_b59199a6/provider-request.json` 的真实 URL 是 `https://token-plan-cn.xiaomimimo.com/anthropic/v1/v1/messages`，因此 404 不是 thinking/relay 抽象问题，而是本地 URL 双重拼接或当时 baseUrl 已含 `/v1` 后再次叠加 `/v1/messages`。
+- 样本真相2（当前最新 500）：最新样本 `req_1779858356583_24407c49/provider-request.json` 的真实 URL 已恢复为 `https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages`，请求路径本身正确；对应 `~/.rcc/quota/provider-errors.ndjson` 在 `2026-05-27T05:05:58Z` / `05:06:00Z` 记录的是 `HTTP_500`，但 body 内上游实际报文是 `<title>502 Bad Gateway</title>`（openresty）。说明当前这批 500 不是本地双 `/v1`，而是上游 502 被包装成 500 返回。
+- 代码风险点1：`src/providers/profile/provider-profile-loader.ts` 只读 `raw.baseUrl/raw.base_url`，不读 `raw.baseURL`；而 provider TOML/规范化链其他位置大量同时支持 `baseURL` 与 `baseUrl`。这会造成 profile/runtime 装配链前后不一致，是高风险污染点。
+- 代码风险点2：native virtual-router bootstrap（`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs`）把 provider 的 URL 统一塞到 runtime `endpoint` 字段；后续 Node runtime `materializeRuntimeProfile()` / `normalizeRuntimeBaseUrl()` 又把 `runtime.endpoint` 当 baseUrl 候选使用，HTTP executor 再叠 service default endpoint。该设计若 runtime endpoint 已是带 `/v1` base，则容易形成 `/v1/v1/messages`。
+- 当前优先级判断：
+  1) 若目标是“解决当前 500”，先不要再改 TOML；最新样本证明 URL 已正确，现阶段 500 是上游 502，应先做红测/错误透传与 quota 行为校正，而不是继续猜路径。
+  2) 若目标是“杜绝 404 回归”，需要补一个红测锁住：Anthropic provider base 已含 `/v1` 时，最终 targetUrl 不得出现 `/v1/v1/messages`；同时补 `baseURL/baseUrl` 读取一致性红测。
+
+## 2026-05-27 virtual router unified quota/health rustification plan audit（本轮只落盘计划，不改实现）
+
+### 当前真相审计
+- Rust 侧已经具备可承接唯一真源的主骨架：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs`
+  - `.../engine/events.rs`
+  - `.../engine/selection.rs`
+  - `.../quota.rs`
+- 但运行时仍存在明确双中心：
+  1. TS `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 仍在维护 providerKey 级 quota state，并通过 `quotaView` 注入 Router。
+  2. TS `sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.ts` / `engine/cooldown-manager.ts` 仍保留 health/cooldown 状态机与持久化路径。
+  3. Rust `quota.rs` 当前只是 JS `quotaView` 读桥，不是 Rust 自持 quota 真源。
+  4. Rust route decision 仍会同时读取 `quotaView` 与 Rust health manager；这说明 availability policy 还没完全收口到 Rust。
+- 已有 guard/回归资产可复用：
+  - last-provider guard：`tests/sharedmodule/virtual-router-health-last-provider.spec.ts`
+  - recoverable cooldown hints / singleton wait：`tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`、`tests/server/runtime/http-server/request-executor.spec.ts`
+  - quotaView 覆盖 stale health：`tests/servertool/virtual-router-quota-health-override.spec.ts`
+- 结论：后续正确方向不是“继续增强 TS quotaView/health manager”，而是把这些状态迁入 Rust virtual_router_engine，并让 TS 收缩为事件上报、持久化桥、查询展示壳。
+
+### 本轮边界
+- 本轮严格按 goal assumptions：只做 `docs/goals/virtual-router-unified-quota-health-rustification-plan.md` 落盘与 /goal 就绪。
+- 不直接执行 Rust/TS 代码改动。
+- 后续实施必须按 Phase A/B/C/D/E，且先红测、replay/shadow，再切主，再物理删除 TS 第二决策中心。
+
+
+[2026-05-27] mimo 500 样本红测计划
+- Jason 最新指定样本 `req_1779858356583_24407c49` 已确认真实请求 URL 正确；当前要修的是 anthropic transport 将上游 body 内明确的 `502 Bad Gateway` 包成 `HTTP_500`。
+- 最小红测：`tests/providers/core/runtime/vercel-ai-sdk-anthropic-transport.spec.ts` 新增用例，mock fetch 返回 HTTP 500 + body=`data:{"error":{"code":"500","message":"<html>...502 Bad Gateway..."}}`，期望 `executeAnthropicRequestWithBody()` 抛出的 `statusCode/code` 为 `502/HTTP_502`，而不是 500。
+- 若红测成立，唯一修点放在 `src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-request-exec.ts` 的 HTTP error 构造层：只在已知安全信号（嵌套 error.status / error.code 为 3 位，或 message 明示 502/503/504/520）时把包装状态还原为真实上游状态。
+
+
+### Phase A / 事件契约缺口（准备补最小标准化）
+- 当前 `ProviderErrorEvent` 真正影响 Rust/TS quota-health 的关键字段有：
+  - `affectsHealth`
+  - `recoverable`
+  - `fatal`
+  - `cooldownOverrideMs`
+  - `quotaScope`
+  - `quotaReason`
+  - `resetAt`
+  - `errorClassification`
+  - `runtime.runtimeKey`
+- 但现状不统一：
+  - `affectsHealth` 在顶层；
+  - `cooldownOverrideMs / quotaScope / quotaReason / errorClassification / resetAt` 大多塞在 `details`；
+  - `fatal` 目前没有进入统一事件接口；
+  - Rust `engine/events.rs` 目前只对 `cooldownOverrideMs` 同时容忍 top-level + details，但 `errorClassification` 只读 `details`。
+- 这会导致后续 Rust 收口时继续依赖“字段位置猜测”。
+- 本轮最小正确动作：先把事件接口标准化，允许这些字段有明确顶层入口，同时维持 details 兼容，不改主行为。
+
+
+### Phase A / Rust event consumer 下一刀
+- Rust `engine/events.rs` 当前对 `cooldownOverrideMs` 已支持 top-level + details 双读，但 `errorClassification` 仍只读 `details.errorClassification`。
+- 这会让新标准化后的 `ProviderErrorEvent` 仍无法被 Rust 直接消费顶层分类字段。
+- 本轮最小正确改动：
+  1. 让 Rust 优先读取顶层 `errorClassification`，没有时再回退 `details.errorClassification`；
+  2. 补 Rust 单测，锁住“top-level classification 与 top-level cooldownOverrideMs 都能命中”。
+- 仍不切主路由，只修事件消费契约。
+
+### Phase A / top-level error event native focused regression（已验证）
+- `node scripts/build-core.mjs` 之后，active native 产物时间戳已更新到 `2026-05-27 13:17`：
+  - `sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node`
+  - `sharedmodule/llmswitch-core/rust-core/target/release/router_hotpath_napi.node`
+- 重新执行：
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/virtual-router-error-classification-top-level-native.spec.ts`
+- 结果：2/2 通过。
+- 已验证事实：active native Rust 现在确实能直接消费顶层 `errorClassification` 与顶层 `cooldownOverrideMs`，不再依赖 `details.errorClassification`。
+- 这说明本轮 Rust `engine/events.rs` 顶层字段消费修正已进入真实 native `.node` 行为，而不是只停留在源码或 shadow 测试层。
+- 下一步仍按 Phase A：继续补 focused regression，优先锁 `quotaScope` / `resetAt` / `last-provider` / `multi-key isolation`，不切主、不删 TS 第二中心。
+
+### Phase A / quota exhausted + resetAt native gap（已取证）
+- 新增 focused regression：`tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts`
+- 用例目标：`QUOTA_DEPLETED + resetAt` 后，Rust availability state 应冻结当前 `providerKey`，并仅影响当前 key，不得仍保持 healthy。
+- 实测状态快照：
+  - `quota.key1.gpt-test` 映射状态为 `providerKey=quota.1.gpt-test`
+  - `failureCount=1`
+  - `state=healthy`
+  - sibling key `quota.2.gpt-test` 仍 `healthy`
+- 结论：当前 native 对 `QUOTA_DEPLETED/resetAt` 还没有形成 Rust quota 真状态；现象更接近“记录一次失败”，而不是“把当前 providerKey 冻结到 resetAt”。
+- 这条测试现以 `test.failing` 保留为 Phase A known-gap 资产：
+  - 它证明目标语义当前未达成；
+  - 同时不把主测试套件留成真红。
+- 唯一正确后续修改面仍应在 Rust：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/quota.rs`
+  - `.../engine/events.rs`
+  - `.../engine/selection.rs`
+  不能去 TS `quotaView` 上继续补第二真源。
+
+### Phase A / quotaView second decision center baseline（已取证）
+- 新增 focused regression：`tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts`
+- 用例方法：不给 Rust 注入任何 provider error/health 事件，只通过 TS `quotaView(providerA) -> { inPool:false, reason:'quotaDepleted', cooldownUntil:+60s }` 施加状态。
+- 实测结果：
+  - `engine.getStatus().health` 中 providerA 仍是 `state=healthy`
+  - 但 `engine.route()` 已直接绕开 providerA，命中 sibling key `providerB`
+- 结论：当前 native route decision 仍被 TS `quotaView` 直接改写；这不是 Rust 自持 quota/availability 真状态，而是明确的第二决策中心。
+- 这条证据比单纯代码阅读更强，因为它证明：即使 Rust health snapshot 仍 healthy，selection 也会因为 TS `quotaView` 的 `inPool:false` 直接排除该 key。
+- 因此在 Phase D 之前，不能声称“Rust 已成为 quota/health/availability 唯一真源”。后续唯一正确修改面仍是：
+  - `rust-core/.../virtual_router_engine/quota.rs`
+  - `rust-core/.../virtual_router_engine/engine/events.rs`
+  - `rust-core/.../virtual_router_engine/engine/selection.rs`
+  而不是继续增强 TS `quotaView`。
+
+### Phase A / last-provider quotaView second center baseline（已取证）
+- 新增 focused regression：`tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts`
+- 用例方法：单 provider 路由，不注入任何 Rust health/provider error 事件；只通过 TS `quotaView -> { inPool:false, cooldownUntil:+5s, reason:'quotaDepleted' }` 施加状态。
+- 实测结果：
+  - `engine.getStatus().health` 中该 provider 仍是 `state=healthy`
+  - 但 `engine.route()` 直接抛 `PROVIDER_NOT_AVAILABLE`
+  - details 中 recoverable hint 来源是 `quota.cooldown`
+- 结论：当前“最后一个 provider 永远不能被永久打空”的 guard 还不是 Rust 单中心真相；单 provider 场景依然会被 TS `quotaView` 直接掏空。
+- 这条证据说明：
+  1. last-provider guard 目前只覆盖 Rust health failure path，不覆盖 TS quotaView second center；
+  2. Phase D 前绝不能声称 last-provider guard 已稳定收口到 Rust。
+- 唯一正确后续修改面仍在 Rust：
+  - `rust-core/.../virtual_router_engine/quota.rs`
+  - `rust-core/.../virtual_router_engine/engine/selection.rs`
+  - 必要时 `.../engine/events.rs`
+  不应通过增强 TS `quotaView` 或 request-executor 来补这个洞。
+
+### Phase B / Rust quota state skeleton + event wiring（已落地，未切主）
+- 本轮已在 Rust 最小接线：
+  - `virtual_router_engine/quota.rs`
+    - 新增 `ProviderQuotaManager`
+    - 新增 Rust 自持 `ProviderQuotaState` / snapshot 骨架
+    - 先支持 `freeze_quota_depleted()` 与 `record_success()`
+  - `virtual_router_engine/engine/core.rs`
+    - `VirtualRouterEngineCore` 挂入 `quota_manager`
+    - initialize 时按 provider keys 注册 quota state
+  - `virtual_router_engine/engine/status.rs`
+    - `get_status()` 新增 `quota` snapshot 输出
+  - `virtual_router_engine/engine/events.rs`
+    - `handle_provider_success()` 同步清理 Rust quota state
+    - `handle_provider_error()` 新增 `apply_quota_depleted_event()`
+    - 现已支持把 `QUOTA_DEPLETED + resetAt/cooldownOverrideMs` 写入 Rust quota state
+- 本轮明确边界：
+  - 还没有切 `selection.rs` 主判定
+  - 还没有移除 TS `quotaView` 第二中心
+  - 还没有让 last-provider guard 接管 quota path
+- 验证：
+  - `node scripts/build-core.mjs` 通过
+  - focused regression 通过：
+    - `tests/sharedmodule/virtual-router-error-classification-top-level-native.spec.ts`
+    - `tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts`
+    - `tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts`
+    - `tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts`
+- 结果判读：
+  - 这批测试通过并不表示 Rust 已接管 selection；相反，`test.failing` 资产仍保持“已知缺口仍存在”的语义，说明本轮改动没有误切主。
+  - 当前状态是：Rust quota 真状态骨架已建立并可写入/观测，但 route decision 仍由 TS `quotaView` 第二中心直接参与。
+
+### Phase B / selection 开始消费 Rust quota snapshot（已落地，仍未完全切主）
+- 本轮在 `virtual_router_engine/engine/selection.rs` 增加了对 `quota_manager.active_blocker()` 的读取。
+- 当前策略边界：
+  - 仅当 Rust quota snapshot 已明确存在 active blocker（`quotaDepleted/resetAt/cooldown/blacklist`）时，selection 才优先按 Rust quota state 排除 provider；
+  - 否则仍保留现状，继续读取 TS `quotaView`。
+- 这意味着：
+  - `QUOTA_DEPLETED + resetAt` 这条路径，已经有一段真实主判定从 TS 第二中心搬回 Rust；
+  - 但整体 route decision 还没有完全脱离 TS `quotaView`，因此仍不能宣称单中心完成。
+- 验证结果：
+  - `tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts` 已从 known-gap 资产升级为真实绿测：
+    - 现在断言的是 `status.quota` 中 providerA `inPool=false`、`reason=quotaDepleted`、`resetAt` 为 number；
+    - 路由会切到 sibling key `providerB`。
+  - `tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts` 仍绿：说明未接入 Rust quota state 的场景下，TS `quotaView` 仍会直接改写 route decision。
+  - `tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts` 仍绿：说明 last-provider 的 quota path 仍未完全从 TS 第二中心收回。
+- 阶段结论：
+  - 当前已经从“Rust 只有 quota state 骨架”推进到“Rust quota state 已开始参与真实 selection 主判定”；
+  - 但这只覆盖已接线的 `QUOTA_DEPLETED/resetAt` 子路径，未完成 Phase D 切主。
+
+### Phase B / singleton quota resetAt long-lock gap（已取证）
+- 临时把 `tests/sharedmodule/virtual-router-last-provider-quota-resetat-native.spec.ts` 从 `test.failing` 转成真断言后，拿到真实错误细节：
+  - `source = rust.quota`
+  - `minRecoverableCooldownMs = 66389977`
+  - `reason.type = rust_quota_cooldown`
+  - `resetAt = 1779926400000`
+- 结论：当前 Rust `QUOTA_DEPLETED + resetAt` 在单 provider 场景下，仍按完整 `resetAt` 长锁处理，而不是目标要求的“最后一个 provider 只允许短暂冷却后恢复可选”。
+- 这说明：
+  1. 本轮 Rust quota state / selection 接线已生效；
+  2. 但 last-provider quota policy 还没进 Rust 唯一真源；
+  3. 下一刀必须在 Rust selection/quota policy 里，对 singleton / last-available quota exhausted 做短冷却裁剪，而不是回到 TS/request-executor 补偿。
+
+
+### Phase B / singleton quota resetAt short-cooldown Rust policy（进行中）
+- 本轮把 last-provider / singleton 的 quota exhausted 修正继续限定在 Rust `selection.rs`，未回退到 TS `quotaView` 或 request-executor。
+- 当前实现草案：
+  - `apply_standard_filters()` 在“候选集只剩 1 个 provider 且普通可用性判定为空”时，允许进入 Rust singleton quota soft-availability 分支；
+  - 仅对 Rust quota `reason=quotaDepleted`、非 blacklist 的状态生效；
+  - 若仍处于短冷却窗口（当前先钉 `10_000ms` 上限），继续报 `rust.quota` recoverable hint；
+  - 若短冷却窗口已过，即使 `resetAt` 仍未来到，也允许最后一个 provider 重新进入选择，避免被完整 resetAt 长锁打空。
+- 该改动的目的不是放宽多 provider 场景；多 key / 多 provider 仍保持 Rust quota blocker 正常切走 sibling key。
+- 下一步必须用 native build + focused regression 验证：
+  1. singleton `virtual-router-last-provider-quota-resetat-native.spec.ts` 由 failing 升绿；
+  2. multikey `virtual-router-quota-resetat-multikey-native.spec.ts` 不回归；
+  3. TS second-center 基线两条测试继续保留当前事实。
+
+
+### Phase D / route decision 不再读取 TS quotaView availability gate（进行中）
+- 现状定位已确认：Rust `selection.rs` 中 `is_provider_available()` 与 `build_provider_not_available_error()` 仍直接读取 JS `quotaView` 的 `inPool/cooldownUntil/blacklistUntil`，这就是当前 TS 第二决策中心仍能直接改写 route decision 的唯一残留点。
+- 本轮收口策略：
+  - 保留 `quotaView` 仅用于 health-weighted / selection penalty 这类权重信息桥接；
+  - 物理移除 `quotaView` 对 availability gate（可选/不可选）与 unavailable reason/hint 的直接主导；
+  - route decision 与 unavailable details 仅再消费 Rust `quota_manager + health_manager` 真状态。
+- 预期结果：
+  1. `virtual-router-quota-view-second-center-native.spec.ts` 从“TS 仍能改写 route decision”的基线，升级为“TS quotaView 已退化为 bridge-only”；
+  2. `virtual-router-last-provider-quota-view-native.spec.ts` 从“TS 可直接打空 single provider”升级为“无 Rust blocker 时不可打空”；
+  3. 多 key `QUOTA_DEPLETED/resetAt` 与 singleton Rust short-cooldown 路径必须保持不回归。
+
+
+### Phase D / quotaView 权重语义继续迁往 Rust quota snapshot（进行中）
+- 在移除 quotaView availability gate 之后，继续审计到 selection 中剩余的第二中心残留：
+  - health-weighted `compute_health_weight()` 仍读取 quotaView 的 `lastErrorAtMs/consecutiveErrorCount`
+  - legacy `selectionPenalty` 仍读取 quotaView 的 penalty 值
+- 本轮最小推进：
+  - Rust `quota_manager` 新增通用 error-signal 记录能力，用 recoverable provider error 更新 `last_error_at_ms/consecutive_error_count`；
+  - `selection.rs` 的 health-weighted / penalty 计算改为直接读取 Rust quota snapshot；
+  - 对应 AWRR focused regression 改成通过 `handleProviderError()` 注入真实 Rust error signal，而不是伪造 TS quotaView 元数据。
+- 这样可把“最近错误衰减权重”从 TS quotaView 元数据桥，继续搬回 Rust 真状态消费链。
+
+
+### Phase D / build:dev 阻塞点（已取证）
+- `tests/servertool/virtual-router-quota-health-override.spec.ts` 已通过，说明在当前收口后，quotaView 在 bridge-only 模式下不会再绕过 Rust health/quota 语义直接主导可用性。
+- 但 `npm run build:dev` 目前被 repo-sanity 的 llmswitch rustification audit 拦住，不是编译错误：
+  - `nonNativeLocTotal`: `57352 -> 57376`
+  - `router` 目录 nonNativeLoc: `10951 -> 10975`
+- 直接 diff 证据表明，本轮新增的 TS 非 native 行数主要来自事件契约/类型桥接文件：
+  - `sharedmodule/llmswitch-core/src/router/virtual-router/types.ts`
+  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts`
+  - `sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts`
+  - `src/types/llmswitch-local-types.ts`
+  - `src/types/llmswitch-core.d.ts`
+- 当前判断：这不是 availability policy 回流到 TS，而是为了 Rust 真源接线保留的类型/桥接增量；下一刀需要决定：
+  1. 把其中可下沉的 TS 类型/桥接继续物理收缩，重新过 audit；或
+  2. 在确认这些增量属于已接受真相后，更新 rustification baseline，再继续 build/install/smoke。
+
+## 2026-05-27 mimo 500 sample
+- user sample: 13:05:56 request openai-responses-mimo.key1-mimo-v2.5-pro... 500/CLIENT_DISCONNECTED
+- plan: inspect latest mimo transport code + replay same-shape sample + find outbound payload/error source before any fix
+
+
+### Phase D / rustification baseline 更新依据（已取证）
+- `build:dev` 当前唯一阻塞是 rustification audit baseline 落后，不是编译/测试/运行语义错误。
+- 直接 diff 已确认本轮 TS 增量仅来自桥接/类型同步：
+  - `sharedmodule/llmswitch-core/src/router/virtual-router/types.ts`
+  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts`
+  - `sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts`
+  - `src/types/llmswitch-local-types.ts`
+  - `src/types/llmswitch-core.d.ts`
+- 这些增量的职责分别是：
+  1. Rust quota snapshot/status 的 TS 展示类型；
+  2. Native VirtualRouterError details 透传；
+  3. ProviderErrorEvent 顶层标准化字段桥接；
+  4. llmswitch local/core 类型声明同步。
+- 它们不新增 TS availability policy，不形成第二决策中心；真实判定仍在 Rust `virtual_router_engine`。
+- 因此当前正确动作不是继续在 TS 上做无意义压缩，而是更新 rustification baseline 到新的已验证真相，再继续 build/install/smoke 验证链。
+
+- verified red test: request-header-builder.transparency.spec.ts failed because session_id/conversation_id leaked upstream for non-opencode providers
+- fix: request-header-builder now always strips session_id/conversation_id before provider send; opencode special routing remains intact
+- anthropic transport regression still green
+
+## 2026-05-27 virtual router Phase E TS second-state-machine audit
+
+- 源码级 usage 审计已确认：`sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts` 真实主链只把 `handleProviderFailure/handleProviderError/handleProviderSuccess/markProviderCooldown/clearProviderCooldown/getStatus` 直送 native proxy。
+- `sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.ts` 与 `sharedmodule/llmswitch-core/src/router/virtual-router/engine/health/index.ts` 当前已不在主链 import graph；命中只剩测试侧与残留辅助函数。
+- `sharedmodule/llmswitch-core/src/router/virtual-router/engine/cooldown-manager.ts` 当前已无源码主链实例化，命中只剩该文件自身与 `tests/sharedmodule/virtual-router-cooldown-manager.spec.ts`。
+- 因此下一步唯一正确动作是：把 health/cooldown 相关 TS 第二状态机测试改成 native engine 语义测试后，物理删除 `health-manager.ts`、`engine/health/index.ts`、`engine/cooldown-manager.ts`，而不是继续保留“无人调用的旧状态机源码”。
+
+- 2026-05-27 Phase E 物理删除已落地：
+  - 已删除 `sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.ts`
+  - 已删除 `sharedmodule/llmswitch-core/src/router/virtual-router/engine/health/index.ts`
+  - 已删除 `sharedmodule/llmswitch-core/src/router/virtual-router/engine/cooldown-manager.ts`
+  - 已删除 `sharedmodule/llmswitch-core/scripts/tests/coverage-engine-health.mjs`
+  - 已删除 `tests/sharedmodule/virtual-router-cooldown-manager.spec.ts`
+- 测试迁移：
+  - `tests/sharedmodule/virtual-router-health-last-provider.spec.ts` 已改为走 `VirtualRouterEngine` native 真链验证 last-provider guard。
+  - `tests/servertool/virtual-router-series-cooldown.spec.ts` 已按当前 Rust 真语义更新：quotaView 开启不再阻止 targeted health trip，但也不扩散到 sibling alias。
+  - `sharedmodule/llmswitch-core/tests/router/{sticky-capability-guard,provider-not-available-cooldown-hint,qwen35-multimodal-capability}.test.ts` 已改为最小 health stub，去除对已删 TS 状态机类的依赖。
+- 验证证据：
+  - `npm run jest:run -- --runInBand --runTestsByPath ...virtual-router-health-last-provider...virtual-router-series-cooldown...virtual-router-health-weighted-rr...virtual-router-quota-health-override...` => 10 suites / 17 tests 全绿。
+  - `npm run build:dev` => 通过。
+  - `install:global` / `routecodex --version` => `0.90.2277`。
+  - 全局 CLI 端到端检查通过；受管服务 restart 通过：`localhost:5555`。
+- 当前仍未完成项：
+  - `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 仍存在 TS quota 状态机；本轮仅完成 health/cooldown 第二状态机物理删除。
+  - replay/shadow 收敛证据仍未补齐，因此不能宣称整个 unified quota/health/availability rustification 全完成。
+
+
+- 2026-05-27 mimo 500 family: exact bad sample req_1779858356583_24407c49 shows two coupled causes in outbound anthropic payload: leaked internal session/conversation headers and uncoalesced consecutive same-role messages. Current executeAnthropicRequestWithBody replay on installed code emits alternating roles only and strips internal headers; add a regression test at the transport boundary to lock this exact family.
+
+## 2026-05-27 virtual router context-weighted focused red test audit
+
+- 当前唯一红测 `tests/servertool/virtual-router-context-weighted.spec.ts` 不是“旧基线过时”先验；先审源码真源。
+- Rust 源码证据：
+  - `virtual_router_engine/load_balancer.rs::LoadBalancingPolicy` 目前只反序列化 `strategy/weights/health_weighted`，没有 `context_weighted` 字段。
+  - `virtual_router_engine/engine/selection.rs` 当前只消费 `health_weighted` 与 legacy penalty；没有任何 `contextWeighted` multiplier 计算或 safe-window 权重注入。
+  - `config_bootstrap.rs` 虽然会输出 `contextWeighted` meta，但那只是 bootstrap/meta 层，不等于 route decision 已消费。
+- TS 文档/类型证据：
+  - `sharedmodule/.../context-weighted.ts` 仍明确声明唯一目标语义：按 `warnRatio + clientCapTokens` 计算 effective safe window，再按 `ref/cur` 乘子进行加权。
+  - `types.ts` / `types.d.ts` 仍把 `contextWeighted` 作为 loadBalancing 配置公开契约。
+- 结论：
+  - 当前接近均匀分布（120/120/119）的根因不是测试先过时，而是 Rust route decision 丢失了 `contextWeighted` 真语义接线；
+  - 唯一正确修改点在 Rust `virtual_router_engine`：
+    1. `load_balancer.rs` 增加 `context_weighted` 配置反序列化；
+    2. 新增 Rust context-weighted 计算模块；
+    3. `engine/selection.rs` 在 safe-context 候选集上把 context multiplier 注入动态权重链。
+
+- 2026-05-27 已落地修复：
+  - 新增 `rust-core/.../virtual_router_engine/context_weighted.rs`
+  - `virtual_router_engine.rs` 挂入新模块
+  - `load_balancer.rs` 为 `LoadBalancingPolicy` 增加 `context_weighted`
+  - `engine/selection.rs` 将 context-weighted 权重乘入 Rust 动态权重链（与 health/penalty 统一乘法组合）
+  - `routing/bootstrap.rs` 补齐新增字段的结构体初始化
+- 验证证据：
+  - `cargo test -p router-hotpath-napi context_weighted --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` ✅
+  - `node scripts/build-core.mjs` ✅（native 重新打包进 `dist/native/router_hotpath_napi.node`）
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/servertool/virtual-router-context-weighted.spec.ts` ✅
+  - 上一轮 focused set 12 suites / 27 tests 全绿 ✅
+  - `npm run build:dev` ✅，并完成 install:global / CLI E2E / `localhost:5555` managed restart
+
+## 2026-05-27 TS quota-manager / runtime wiring closeout audit（进行中）
+
+- 当前 HTTP runtime 主链证据已确认：
+  - `src/server/runtime/http-server/http-server-runtime-setup.ts` 仍把 `managerDaemon.getModule('quota').getQuotaView()` 注入 Hub `quotaView`
+  - 但旧 `src/manager/modules/quota/quota-manager.ts` 的 `getCoreQuotaManager(): null` 是硬编码
+  - 因此即使 `src/modules/llmswitch/bridge/quota-manager.ts::createCoreQuotaManager()` 已存在，runtime / admin adapter 仍必然退回 legacy `ProviderQuotaDaemonModule`
+- 这说明：
+  1. 当前“QuotaManager SSOT gate”在 manager 层实际上没有真正切到 core；
+  2. `quotaView` 第二中心虽然已大幅失去 Rust route-decision 主导权，但 runtime wiring 仍把 legacy quota daemon 当作事实源继续注入；
+  3. 下一步唯一正确方向不是再补 adapter，而是让 `QuotaManagerModule` 真正托管 core `QuotaManager`，仅在 gate 关闭时回退 legacy。
+
+- 本轮已做的主链切换：
+  - 重写 `src/manager/modules/quota/quota-manager.ts`
+  - `phase1UnifiedQuota=true` 时：
+    - 通过 `createCoreQuotaManager()` 实例化 core manager
+    - 用 host `provider-quota-store` 作为 core `QuotaStore`
+    - 注册 runtime `setProviderRuntimeProviderQuotaHooks`，把 provider error 事件直接送到 core manager
+    - `getCoreQuotaManager()` 不再返回 null
+    - `getQuotaView()` / `getAdminSnapshot()` / admin mutate API 均以 core snapshot 为主
+    - 提供 `getQuotaViewReadOnly()` 壳，避免 shadow pipeline 双副作用
+  - `phase1UnifiedQuota=false` 时仍保留 legacy `ProviderQuotaDaemonModule`
+
+- 当前新增验证阻塞：
+  - `tests/server/http-server/quota-view-injection.spec.ts` 的 bridge mock 导出面落后于当前真实 `src/modules/llmswitch/bridge.ts`，缺 `captureResponsesRequestContextForRequest` / `recordResponsesResponseForRequest` / `clearResponsesConversationByRequestId` / `finalizeResponsesConversationRequestRetention` / `createResponsesJsonToSseConverter`
+  - 这属于测试假红，不是 quota 主链真语义回退；已开始补 mock
+  - 另一个非本轮引入的旧红点：
+  - `tests/manager/quota/provider-quota-daemon-module.spec.ts` 中
+    `recoverable 5xx 3x evicts when alternate routes exist ...`
+    标题与断言冲突：标题写 evict，断言却要求 `inPool=true`
+  - 该文件是 legacy daemon 基线资产，不是当前 core quota manager 主链的直接验收口；后续需单独判定旧测试还是旧实现该清理。
+
+- 2026-05-27 继续做 legacy usage 审计：
+  - `grep` 证据显示 `ProviderQuotaDaemonModule` 当前源码级真实消费已大幅缩小：
+    1. `QuotaManagerModule` 内部仅作为 `phase1UnifiedQuota=false` 的 fallback delegate
+    2. daemon-admin 的 `control-handler.ts` / `quota-handler.ts` 还曾显式 `getModule('provider-quota')`
+    3. 其他命中几乎都是 legacy 自测 / helper / README
+  - 这说明 `provider-quota-daemon` 已不再是 runtime route decision 主链事实源，主要残留在 admin 兼容层与旧测试资产。
+  - 本轮已继续把 admin adapter 改成优先只依赖 `quota` 主模块；仅在没有 core manager 时才把 `quota` 模块自身当 legacy backend，不再主动抓 `provider-quota` 旁路。
+
+- 2026-05-27 mimo 500/404 exact-sample audit: current anthropic vercel-ai-sdk final outbound still leaked originator to upstream. Added red test in vercel-ai-sdk-anthropic-transport.spec.ts and fixed unique final outbound sanitizer in src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-request-exec.ts so session_id/conversation_id/originator are all stripped at final anthropic fetch boundary.
+
+
+## 2026-05-27 virtual-router unified quota / daemon-admin 审计续探
+
+- `tests/server/http-server/daemon-admin.e2e.spec.ts` 已拿到最终失败证据，不可假设通过。
+- 本次 FAIL 主因与 quota/admin 收口并非同一真源：
+  1. `/daemon/control/snapshot` 会调用 `llmsBridge.getLlmsStatsSnapshot()`，而 `src/modules/llmswitch/bridge/state-integrations.ts::getLlmsStatsSnapshot` 仍走 `requireCoreDist('telemetry/stats-center')`；在 Jest ESM 环境下命中 `ERR_REQUIRE_ESM`，导致 `control/snapshot` 与 routing mutate 两条 e2e 超时失败。
+  2. `/daemon/auth/status` 当前直接返回 `isDaemonAdminAuthRequired(req)`；现有 loopback e2e 期望 `authRequired=false`，但实际返回 true，说明 auth e2e 基线与当前 auth 判定语义不一致，和 quota 收口无关。
+  3. `/daemon/restart` e2e 失败是测试仍用旧 `virtualrouter` v1/v1.5 形状；当前 runtime 已要求 v2 single-source config（routingPolicyGroups 非空）。这也是旧测试叙事，不是 quota 改动引起。
+- admin/status 对 legacy `provider-quota` 的真实残留审计：
+  1. `src/server/runtime/http-server/daemon-admin/status-handler.ts` 仍保留 `knownModuleIds = ['token','quota','provider-quota','health','routing']`；但只有真实存在的 module 才会出现在 `/daemon/status`，因此 `provider-quota` 这里只是兼容 alias，不是 runtime 主链消费。
+  2. 同文件 `/daemon/modules/:id/reset` 仍保留 `id==='provider-quota'` 的 alias/fallback：当 legacy module 缺失时，转而对 `quota` 主模块做 `resetProvider(all) + persistNow + refreshNow`。这条路径已有专门测试 `tests/server/daemon-admin/status-handler-reset-provider-quota-fallback.spec.ts` 锁定，说明它是当前 UI/兼容层仍依赖的唯一 legacy 直连点。
+  3. `quota-handler.ts` 与 `control-handler.ts` 已不再主动 `getModule('provider-quota')`，统一经 `quota` 主模块 / adapter 读取，这部分收口已成立。
+- 结论：若继续删除 `provider-quota` admin 叙事，唯一还需要动的真实位置是 `status-handler.ts` 里的 alias/reset 兼容层；但在 UI 和 fallback spec 仍依赖前，不能口头宣称可以直接物理删除。
+
+- 继续审主链后确认到一个直接命中目标的 host 残留缺口：`src/manager/modules/quota/quota-manager.ts` 在 phase1 core 模式下原先只订阅 `setProviderRuntimeProviderQuotaHooks(onProviderError)`，没有订阅 provider success。
+  - 结果：Rust route decision 会因 `HubPipeline -> routerEngine.handleProviderSuccess` 恢复，但 host 侧 core `QuotaManager` snapshot/admin view/persistence 不一定同步恢复，形成“Rust 已恢复、host quota 视图滞后”的双真相漂移。
+  - 这次唯一正确修改点就是把 core 模式订阅改成 `setProviderRuntimeQuotaHooks(onProviderError + onProviderSuccess)`；因为 provider runtime ingress 已有统一 success/error 双事件入口，改别处只会继续制造第二桥。
+
+- 继续追 quotaView 主链后，拿到一个关键真相：当前 Rust NAPI `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs::update_deps()` 对传入 deps 只做 `coerce_to_object()` 后直接返回，未把 `quotaView/healthStore/routingStateStore` 真正写进 Rust core。
+  - 这意味着当前 HTTP runtime / HubPipeline 注入的 `quotaView` 在 active native 主链里已经是 dead bridge，不再是活的 route-decision 输入。
+  - 因此这轮可以安全物理删除 `http-server-runtime-setup.ts` 与 `http-server-bootstrap.ts` 的 quotaView 注入，而不是“硬切行为”；真正的行为切换更早已经发生在 Rust `selection.rs` 不再读 JS quotaView availability gate + NAPI update_deps no-op。
+  - 唯一正确修改点就是 runtime 注入面本身；继续保留只会制造“看起来还在用 quotaView”的假叙事，阻碍 Phase D/E closeout。
+
+- 2026-05-27 quotaView runtime 注入 closeout focused set 已拿到最终通过证据：
+  - `tests/server/http-server/quota-view-injection.spec.ts`
+  - `tests/servertool/virtual-router-engine-update-deps.spec.ts`
+  - `tests/servertool/virtual-router-quota-routing.spec.ts`
+  - `tests/servertool/virtual-router-quota-health-override.spec.ts`
+  - `tests/servertool/virtual-router-series-cooldown.spec.ts`
+  - `tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts`
+  - 结果：7 suites / 20 tests 全绿。
+- 这组通过进一步确认当前真语义：
+  1. HTTP runtime 默认不再注入 `quotaView`；
+  2. llms-engine shadow pipeline 不再注入 `quotaViewReadOnly`；
+  3. `VirtualRouterEngine.updateDeps()` 不再是可改写 route decision 的 quota second center；
+  4. runtime 注入删除属于物理清理 dead bridge，而不是行为切换。
+- 2026-05-27 `npm run build:dev` 首次未进入编译主流程；repo-sanity 唯一阻塞是新增测试文件 `tests/manager/quota/quota-manager-module.spec.ts` 未纳入 git 索引。
+- 该阻塞不是 unified quota 主链失败，而是仓库门禁要求；已将该测试文件加入索引后重跑 build。
+- 2026-05-27 `npm run build:dev` 已通过；首次 repo-sanity 阻塞仅因 `tests/manager/quota/quota-manager-module.spec.ts` 未纳入 git 索引，补索引后通过。
+- build/install/smoke 证据：
+  - `npm run build:dev` ✅
+  - install:global 完成，CLI 版本 `0.90.2283` ✅
+  - 全局 CLI chat + anthropic SSE 端到端检查通过 ✅
+  - 受管服务 restart 通过：`localhost:5555` ✅
+- 当前仍未完成 unified quota/health closeout 的剩余缺口：
+  1. replay/shadow 收敛证据还未补齐；
+  2. daemon-admin `status-handler.ts` 仍保留 `provider-quota` alias/reset 兼容层，暂不能口头宣称已物理删除 legacy admin 叙事；
+  3. `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 仍是 TS quota 状态机真实现，虽已通过 manager core 桥接接到 success/error 双事件，但是否还能继续 Rust closeout 需要单独审计其残余职责。
+
+[NOTE]
+- 2026-05-27 mimo stream closed before response.completed 根因已锁定：`src/server/runtime/http-server/executor/provider-response-converter.ts` 的 `prebuilt_sse_passthrough` 在 `/v1/responses` 下对任意 `__sse_responses` 都直透，遗漏 `providerProtocol==='openai-responses'` 约束，导致 anthropic/mimo 原生 SSE (`message_start/message_stop`) 被错误透传给 responses 客户端，最终因缺少 `response.completed` 触发 `upstream_stream_incomplete`。
+- 已补红测 `tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts`，先红后改唯一真源。
+- 2026-05-27 继续审计后确认：HubPipeline 自身仍保留 `quotaView` config/runtime-deps 透传壳（`hub-pipeline.ts` / `hub-pipeline-runtime-hooks-blocks.ts` / `hub-pipeline-class-runtime-blocks.ts` / `hub-pipeline-types.ts`），但下游只会进入 `VirtualRouterEngine.updateDeps(quotaView)`。
+- 结合此前已确认的 Rust NAPI `update_deps()` no-op 证据，这条 HubPipeline quotaView 传递链也是 dead bridge，不再承担 route decision 语义。
+- 因此本轮已物理删除 HubPipeline 的 `quotaView` config/deps 透传面；这是唯一正确修改点，因为继续保留只会制造“HubPipeline 仍可通过 quotaView 改写选路”的假叙事。
+- focused regression 证据：
+  - `tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts`
+  - `tests/server/http-server/quota-view-injection.spec.ts`
+  - `tests/servertool/virtual-router-engine-update-deps.spec.ts`
+  - `tests/servertool/virtual-router-quota-routing.spec.ts`
+  - `tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts`
+  - 结果：6 suites / 16 tests 全绿。
+- daemon-admin `status-handler.ts` 的 `provider-quota` alias/reset 目前仍被 `tests/server/daemon-admin/status-handler-reset-provider-quota-fallback.spec.ts` 明确锁定，说明它仍是现存 UI/兼容层契约，不可在无替代收口证据前口头宣称可删除。
+- 2026-05-27 第二次 build 门禁阻塞同样不是实现红：repo-sanity 检出已有未纳入索引的测试文件 `tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts`。
+- 该文件是现存测试资产，不是本轮临时产物；为继续获取构建证据，已纳入索引后重跑 build。
+- 2026-05-27 补上了一条针对 unified quota 真目标的 same-shape shadow compare 回归：
+  - `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
+- 锁定的 reference 语义：
+  1. 同一请求形状下，带污染性 TS `quotaView`（把 primary 标成 out-of-pool / quotaDepleted）与不带 `quotaView` 的 engine，route decision 必须一致；
+  2. singleton `QUOTA_DEPLETED + resetAt` 场景下，带“冲突性 TS quotaView”与不带 `quotaView` 的 engine，`PROVIDER_NOT_AVAILABLE` / `recoverableCooldownHints.source='rust.quota'` / 恢复窗口必须一致（允许 waitMs 轻微时间抖动）。
+- 这条测试的意义不是再证明某个单边结果，而是直接提供 shadow compare 证据：当前 route decision / recoverable cooldown 已不依赖 TS quota second center。
+- focused shadow/native regression 证据：
+  - `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-last-provider-quota-resetat-native.spec.ts`
+  - `tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts`
+  - 结果：5 suites / 6 tests 全绿。
+- 基于上述证据，当前对 `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 的复审结论更新为：
+  - 它仍是 host 侧 quota snapshot/persist/admin view 真源；
+  - 但当前没有证据表明它还能通过 `quotaView` 或 runtime deps 改写 Rust route decision；
+  - 因此它现在更接近“host 桥接/持久化/查询展示壳”，但尚不能在 replay/shadow 更大范围收敛前直接物理删除。
+- 2026-05-27 补上 host snapshot / admin view 对照回归：
+  - `tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
+- 锁定语义：在 phase1 unified quota 模式下，同一 `provider error -> provider success` 事件流之后，以下三层必须保持同源一致：
+  1. `QuotaManagerModule.getAdminSnapshot()`
+  2. `QuotaManagerModule.getQuotaViewReadOnly()`
+  3. daemon-admin `GET /quota/providers`
+- 当前覆盖的关键状态切换：
+  - `quotaDepleted / inPool=false / consecutiveErrorCount=1`
+  - `active / inPool=true / consecutiveErrorCount=0`
+- 这条测试说明：当前 host 侧 unified quota 壳已经能把 core quota manager 的状态一致投影到 snapshot/readOnly/admin 三层；因此 `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 目前更像 host persistence/query shell，而不是 route decision 第二中心。
+- 但该证据仍不足以直接物理删除 TS quota manager：因为 snapshot/persist/admin 壳职责仍存在，且还没有“Rust 直接承接 host persist/admin contract”的替代实现证据。
+- 2026-05-27 新发现并修复的 sharedmodule core 真缺口：`sharedmodule/llmswitch-core/src/quota/quota-state.ts::applySuccessEvent()` 原先不会清掉活跃 `cooldownUntil` / `blacklistUntil`，只清 error streak 元数据。
+- 这会导致：即使 unified quota 主链已经收到 provider success，core quota manager 也可能继续保留 cooldown blocker，形成“success 已到但 quota state 未恢复”的 host/core 漂移。
+- 本轮唯一正确修改点就是 `applySuccessEvent()`：success 必须把 provider 恢复到 `inPool=true + reason='ok' + cooldownUntil=null + blacklistUntil=null + authIssue=null`，否则 success 语义不完整。
+- 新增验证：
+  1. `tests/sharedmodule/core-quota-manager-success-recovery.spec.ts`
+     - 锁 sharedmodule core `QuotaManager` 在 active cooldown 后收到 success 必须清掉 cooldown 并恢复 quota view/snapshot。
+  2. `tests/manager/quota/quota-store-success-recovery-persistence.spec.ts`
+     - 锁 success 恢复后的快照落盘再读回不能残留旧 cooldown。
+  3. `tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
+     - 锁 unified quota 模式下 host snapshot / readOnly / admin `/quota/providers` 在 error->success 事件后保持一致。
+- 这说明当前 unified quota 链路的一个关键闭环已补齐：provider success 现在不仅影响 Rust route decision，也会通过 core quota state 正确恢复 host snapshot/persist/admin 视图。
+- 2026-05-27 已补齐两条特殊 quota family 的 host/admin/persist 闭环证据：
+  1. `tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
+     - `HTTP_402/resetAt -> persist -> restart/hydrate -> admin -> success recover`
+     - 证明 resetAt family 在 unified quota 模式下可一致投影到 snapshot/readOnly/admin，且 success 后能正确清空 cooldown。
+  2. 同文件的 `auth/fatal -> persist -> restart sanitize -> admin -> success`
+     - 证明 auth/fatal family 的持久化快照在 restart/hydrate 时会被 sanitize 回 `ok/inPool`，不会把旧 authVerify 阻塞跨重启带回来；随后 success 不会引入新的状态漂移。
+- 到目前为止，已拿到的 unified quota 关键闭环证据包括：
+  - route decision same-shape shadow compare 不依赖 TS quotaView second center；
+  - success 恢复会清掉 core quota cooldown blocker；
+  - success 后 snapshot/persist/admin 三层一致；
+  - 402/resetAt family 的 persist/hydrate/admin/recover 闭环；
+  - auth/fatal family 的 sanitize/restart/admin/recover 闭环。
+- 当前剩余未证实的更大问题已不再是“TS quota state 会不会改写 route decision”，而是“Rust 是否已经提供足够完整的 host-facing snapshot/persist/admin contract，从而允许进一步物理删除 sharedmodule TS quota manager”。
+- 2026-05-27 已补一个统一 evidence aggregator 入口：
+  - `tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
+- 该 aggregator 不是新增语义，而是把当前已分散的 focused proofs 收拢为一个可重复执行的 unified quota 收敛报告：
+  1. route decision same-shape compare：带污染性 TS quotaView 与不带 quotaView 的 engine 目标 provider 一致；
+  2. core success recovery：sharedmodule core quota manager 在 cooldown 后收到 success 能恢复为 `ok/inPool`；
+  3. `402/resetAt` family：error 后 snapshot/readOnly/admin 一致，persist/hydrate 后仍一致；
+  4. success after hydrate：snapshot/readOnly/admin 一致恢复到 `ok/inPool`。
+- 当前它提供的不是“全目标已完成”证明，而是一个最小统一收敛入口：证明 route decision + core recovery + host/admin/persist 关键路径已经围绕 unified quota 真源收拢，不再只是若干零散 case。
+
+## 2026-05-27 unified quota closeout continuation
+- build:dev session 91123 已收尾：postbuild/install:global/routecodex --version/anthropic SSE/restart 5555 全通过，版本 0.90.2291。
+- 下一步审计 sharedmodule TS quota-manager 剩余职责，判断是否已仅剩 host-facing persist/hydrate/admin/query projection shell，以及 Rust contract 是否足以替代。
+- 审计结论：当前还不能物理删除 sharedmodule/llmswitch-core/src/quota/quota-manager.ts。Rust 侧 quota 真源仅覆盖 virtual_router_engine 内部 selection blocker/snapshot（quota.rs + engine/status.rs），缺少 host-facing hydrate/persist/admin/query/mutate contract，也不承载 authType/authIssue/priorityTier、HTTP 402/resetAt、水位恢复、通用 cooldown/blacklist 持久化语义。
+- TS quota-manager 当前剩余职责不是 dead bridge：它仍是 QuotaManagerModule/daemon-admin/quota-handler 的唯一 host-facing QuotaStore + getSnapshot/getQuotaView + reset/recover/disable + success/error replay 真源；删除会直接打断 /quota/providers、persist/hydrate、provider-quota reset fallback。
+- 额外残留：status-handler.ts 仍保留 knownModuleIds 中的 provider-quota 和 /daemon/modules/provider-quota/reset alias/fallback；该兼容层仍被 tests/server/daemon-admin/status-handler-reset-provider-quota-fallback.spec.ts 锁定，当前不可擅删。
+
+## 2026-05-27 host-facing quota contract gap map
+- 已新增 docs/goals/virtual-router-unified-quota-host-facing-contract-gap-map.md，专门回答“当前能否删除 sharedmodule TS quota-manager”这一 closeout 问题。
+- 文档结论：当前不能删；route decision 虽已基本 Rust-led，但 host-facing quota control plane 仍缺 Rust snapshot/persist/hydrate/admin mutate/query/special-family contract。
+- 下一唯一推进点已明确：不是继续删 TS，而是先补 Rust host-facing quota contract，再用 focused proof 替换 quota-handler/quota-adapter/status-handler 对 TS quota-manager 的剩余依赖。
+
+## 2026-05-27 rust host-facing quota implementation slice
+- 已完成 ProviderErrorEvent/ProviderSuccessEvent 审计：当前字段已基本足够，下一阶段主缺口不在事件字段，而在 Rust 没有把 quota state 暴露为 host-facing snapshot/mutate/persist contract。
+- 已新增 docs/goals/virtual-router-unified-quota-rust-host-contract-implementation-slice.md，定义了最小实施切片：先导出 Rust host snapshot DTO，再补 static config + admin mutate，最后补 persist/hydrate，再清理 provider-quota alias 与 TS quota-manager。
+- 文档同时给出 4 个前置红测入口，避免下一位执行者直接硬切代码。
+
+## 2026-05-27 first host snapshot contract test
+- 已新增 tests/sharedmodule/virtual-router-rust-host-quota-snapshot-contract.spec.ts。
+- 该测试使用现有 VirtualRouterEngine native harness，锁定当前 Rust getStatus().quota 仍是 router-internal snapshot：虽然已能表达 providerKey/inPool/reason/resetAt/consecutiveErrorCount，但还缺 authType/authIssue/priorityTier/cooldownKeepsPool/lastErrorSeries/lastErrorCode/selectionPenalty/lastProviderGuardApplied 等 host-facing contract 字段。
+- 首次运行失败仅暴露 canonical providerKey 规范化差异（quota.key1 -> quota.1），已按现有 Rust canonicalization 调整断言；随后定向测试转绿。
+- 这条测试当前是“gap gate”而不是目标态验收：它证明下一实现切片应先补 Rust host snapshot DTO，而不是先改事件字段或盲删 TS quota-manager。
+
+## 2026-05-27 direct/relay 切换与 continuation 审计
+- 先看 codex sample 与 focused red test，不猜。
+- 当前唯一稳定红测：`tests/sharedmodule/route-aware-responses-continuation.spec.ts` 两条失败，证明仅凭 `__rt.serverToolFollowup=true` + `clientInjectSource=stop_message_flow`，普通 `/v1/responses` create 也会误进 `consult_scope_store`。
+- 这会把 scope store 里的旧 continuation payload/tools 带回，符合 mimo 坏样本里 tool schema 退化的现象。
+- 结构审计补充：`src/server/runtime/http-server/request-executor.ts` attempt>1 仅用 `retryPayloadSeed` 恢复 `input.body`，随后重跑 hub pipeline；所以 provider retry 本身不是“直接复用 providerPayload 发送”，但它确实复用入口 body 快照与初始 metadata，不会重新回到 handler 级入口。
+- 当前第一修点仍是 `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts::resolveContinuationResolutionMode()`：servertool/followup 控制元信息不应构成 continuation 恢复证据。
+- 本轮首个实现切片测试首次转红，不是断言错误，而是当前加载的 native 二进制尚未包含最新 Rust status payload；需要先重编 llmswitch-core/native 再复跑。
+
+## 2026-05-27 rust host snapshot dto first implementation
+- 已在 Rust quota.rs / engine/core.rs / engine/status.rs 落第一段最小实现：新增 quotaHostSnapshot 导出，保留原有 status.quota 为 router-internal snapshot，不影响 route decision 主链。
+- 新增的 host-facing snapshot 当前已携带：authType/authIssue/priorityTier/cooldownKeepsPool/lastErrorSeries/lastErrorCode/selectionPenalty/lastProviderGuardApplied；authType/priorityTier 先从 provider profile 读出，quota family 元数据在 freeze_quota_depleted/record_success 路径维护。
+- 首次复跑失败不是设计错误，而是两条新增实证：
+  1. 需要先重编 native/build-core，否则 jest 仍读旧 node binding；
+  2. provider profile 的 auth.type=apiKey 当前会被 host snapshot 解析为 authType=apikey，这说明静态配置注入链已开始进入 Rust host snapshot。
+- 现有 focused test tests/sharedmodule/virtual-router-rust-host-quota-snapshot-contract.spec.ts 已转绿，证明 Rust 现已能单独导出 host-facing richer quota snapshot，同时保留原 quota snapshot 的 router-internal 精简形态。
+- 当前仍未完成的点：这只是 host snapshot DTO slice；admin mutate、persist/hydrate、quota-handler/quota-adapter/status-handler 切线尚未开始。
+
+- 新锁定一个更直接的唯一嫌疑点：`sharedmodule/llmswitch-core/src/filters/special/request-tools-normalize.ts` 的 raw fallback 分支会把 top-level OpenAI function tool `{type,name,parameters}` 错转成 `{function:{name}, function.parameters={}}`，丢掉原始 `parameters.required/properties`。
+- 这与 mimo 坏样本完全同形：`tools[0].input_schema.properties={}` 且无 `required`。
+- 本地 VR dry-run 已证明主路由本身对 `thinking+tools` 会正确命中 `sdfv.key1.gpt-5.4`，所以“没命中主 provider”更像是下游请求污染或后续失败切备，不是基础路由规则本身错误。
+
+## [2026-05-27] quotaHostSnapshot read bridge audit
+- 发现: `/quota/providers` 当前仍经由 `daemon-admin/quota-handler -> createQuotaManagerAdapter -> coreManager.getSnapshot()/getQuotaView()` 读取 host quota，只消费 TS core snapshot。
+- 发现: `HubPipeline.getVirtualRouter().getStatus().quotaHostSnapshot` 已存在，但 daemon-admin route options 目前没有把 hubPipeline/virtualRouter 暴露给 quota-handler。
+- 判断: 下一唯一正确切线不是删 TS quota-manager，也不是继续扩 Rust 字段；而是先补 focused red test，锁定 `/quota/providers` 在 unified quota 下应优先消费 Rust `quotaHostSnapshot`。
+- 待验证: 给 daemon-admin route options 增加只读 `getHubPipeline()` 或等价只读入口后，quota-handler/quota-adapter 是否能以最小改动投影 Rust host snapshot，同时不影响现有 mutate/persist 主链。
+- 结果: 已新增 focused red test `tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts`；初次失败证明 `/quota/providers` 仍错误返回 TS core snapshot，而非 Rust `quotaHostSnapshot`。
+- 改动: 通过 `routes.ts -> daemon-admin-routes.ts` 新增只读 `getHubPipeline()` 暴露面，并在 `daemon-admin/quota-handler.ts` 的 `/quota/providers` 读取链优先消费 `hubPipeline.getVirtualRouter().getStatus().quotaHostSnapshot`；无数据时才回落现有 quotaAdapter snapshot。
+- 验证: focused test 转绿；连同 `tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`、`tests/sharedmodule/virtual-router-rust-host-quota-snapshot-contract.spec.ts` 共 3 suites / 3 tests 全绿。
+- 边界: 本轮只改只读桥接，不碰 mutate/persist/hydrate；TS quota-manager 仍保留 host control-plane 写路径职责，尚不可删除。
+- 新发现: `createCoreQuotaManager()` 当前仍直接实例化 TS `sharedmodule/llmswitch-core/src/quota/quota-manager.ts`；Rust 之前只有 event/status，没有 host mutate API，所以 unified quota 下 admin `reset/recover/disable` 依然属于 TS 写路径。
+- 结果: 已新增 focused red test `tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts`；初次失败证明 `/quota/providers/:providerKey/reset|recover|disable` 不会触发 Rust mutate，只会落回 TS core manager。
+- 改动: 给 `VirtualRouterEngineProxy` / `VirtualRouterEngine` 新增 `resetProviderQuota/recoverProviderQuota/disableProviderQuota`；Rust `quota.rs` 新增对应 state mutation；`daemon-admin/quota-handler.ts` 在 unified quota 下优先调用 Rust mutate，再由 `/quota/providers` 继续读取 Rust `quotaHostSnapshot`。
+- 验证: `node scripts/build-core.mjs` 通过；重新执行 focused set：
+  - `tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts`
+  - `tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts`
+  - `tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
+  - `tests/sharedmodule/virtual-router-rust-host-quota-snapshot-contract.spec.ts`
+  结果 4 suites / 4 tests 全绿。
+- 边界: 这只是 host mutate slice；persist/hydrate 仍在 TS `QuotaManager`，`status-handler.ts` 的 `provider-quota` reset alias/fallback 也仍未删。
+- 下一步选择: persist/hydrate 仍是最大缺口，但它要跨 `QuotaManagerModule -> store -> lifecycle` 重接 Rust contract。本轮先继续收 live host fallback：`status-handler.ts` 的 `provider-quota` reset alias 仍会批量调用 TS `quota.resetProvider(...)`，这是可独立切掉的一段 host 写路径。
+- 继续收 host 写路径后确认: `status-handler.ts` 的 `/daemon/modules/provider-quota/reset` 兼容 fallback 之前仍会批量调用 TS `quota.resetProvider(...)`，是另一段 live TS mutate contract。
+- 改动: `status-handler.ts` 现已在 unified quota + Rust host snapshot 可用时，优先读取 `hubPipeline.getVirtualRouter().getStatus().quotaHostSnapshot` 的 provider keys，并批量调用 Rust `resetProviderQuota(...)`；仅在 Rust host mutate 不可用时，才回落旧 TS quota reset-all fallback。
+- 验证: `tests/server/daemon-admin/status-handler-reset-provider-quota-fallback.spec.ts` 已新增 Rust-preferred case，并与
+  - `tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts`
+  - `tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts`
+  共跑，结果 3 suites / 4 tests 全绿。
+- 当前剩余最大缺口进一步收缩为 persist/hydrate：`QuotaManagerModule -> ProviderQuotaStoreAdapter -> sharedmodule core QuotaManager` 仍是重启恢复唯一真源，尚未 Rust 化。
+- persist/hydrate 最小桥开始接线: `ManagerContext` 新增 `getHubPipeline`，`QuotaManagerModule` 在 unified quota 下 init/stop/persistNow 会优先尝试 Rust host snapshot persist/hydrate bridge；拿不到 hubPipeline/Rust mutator 时才回退现有 TS core QuotaManager store contract。
+- focused test: `tests/manager/quota/quota-manager-module.spec.ts` 新增 Rust persist/hydrate bridge case，证明 module lifecycle 可绕开 `coreManager.hydrateFromStore/persistNow`，转而使用 Rust host snapshot + store bridge。
+- 验证补充: `tests/manager/quota/quota-manager-module.spec.ts` 已与
+  - `tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts`
+  - `tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts`
+  - `tests/server/daemon-admin/status-handler-reset-provider-quota-fallback.spec.ts`
+  叠加回归，结果 4 suites / 6 tests 全绿。
+- 构建证据: `node scripts/build-core.mjs` 通过（native up-to-date + llmswitch-core dist 重建成功）。
+- 当前状态更新: host-facing quota 已形成三段 Rust-first bridge：
+  1. read: `/quota/providers` -> Rust `quotaHostSnapshot`
+  2. mutate: `/quota/providers/:providerKey/reset|recover|disable` -> Rust mutate
+  3. lifecycle/store shell: `QuotaManagerModule.init/stop/persistNow` -> 优先 Rust host snapshot persist/hydrate bridge
+  4. provider-quota alias reset fallback -> 优先 Rust reset-all
+- 仍未完成: persist/hydrate 现在还是“TS store shell + Rust snapshot bridge”，不是 Rust 自持原生 snapshot schema/IO contract；`402/resetAt`、`auth/fatal sanitize` 的重启恢复还缺直接针对 Rust bridge 的 focused end-to-end proof。
+- special-family Rust-first persist/hydrate proof 已开始转到新桥，并暴露出更精确的 Rust host contract 缺口：
+  - `quota-unified-special-family-consistency.spec.ts` 在接入 hubPipeline/Rust host snapshot 后，`auth/fatal sanitize` case 已通过；
+  - `402/resetAt` case 仍失败，但失败形状已从“读到 TS seeded state”收敛为“Rust host snapshot 自己给出 `inPool:false + consecutiveErrorCount:1`，而现有 host contract 期望 `inPool:true + cooldownKeepsPool=true + consecutiveErrorCount:0`”。
+- 结论: 下一唯一正确修改点不再是 TS persist shell，而是 Rust `quota.rs` / `engine.events.rs` 对 `HTTP_402/resetAt` 的 host-facing snapshot 语义本身。
+
+## 2026-05-27 direct/relay 切换结构判断（入口重发）
+- 审计结论：Jason 提的方向是对的。当前 provider 切换/重试发生在 `src/server/runtime/http-server/request-executor.ts` 的 attempt 循环内部，不会重新经过 `responses-handler.ts` 的入口预处理；它只会用 `retryPayloadSeed` 恢复 `input.body`，然后直接再次 `runHubPipeline(...)`。
+- 证据：
+  1. `request-executor-attempt-state.ts` attempt>1 时仅 `restoreRequestPayloadFromRetrySeed()` 回填 `input.body`；
+  2. `request-executor.ts` 每轮重试直接 `runHubPipeline(hubPipeline, input, metadataForAttempt)`；
+  3. `responses-handler.ts` 里的 submit_tool_outputs resume / previous_response_id 入口改写 / responsesRequestContext capture 只在最初 HTTP 入口执行一次。
+- 这意味着：如果 direct/relay 切换依赖“入口级语义重建”，当前结构确实会丢入口语义，只做 hub 级重跑，容易出现 provider 切换后 shape / continuation / context / stream 契约漂移。
+- 下一唯一正确调查点：先补红测锁定“provider 切换时必须从 entry endpoint 语义重发，而不是仅从 hub attempt 重跑”，再决定是把切换前移到 handler 级，还是显式提炼一个 entry-rebuild 真源给 request-executor 复用。
+- 2026-05-27 继续收口 402/resetAt：已确认真源不在 TS persist/read/mutate 壳，而在 Rust engine/events + quota state 对 `HTTP_402/resetAt` 的 host-facing投影语义。
+- 采取最小切片：在 `engine/events.rs` 新增 `apply_http_402_resetat_event()`，优先于 `QUOTA_DEPLETED` 分支命中 402 + resetAt；在 `quota.rs` 新增 `apply_http_402_resetat_cooldown()`，强制投影为 `inPool=true/reason=cooldown/cooldownKeepsPool=true/resetAt=null/consecutiveErrorCount=0/selectionPenalty=0`。
+- 保留 `QUOTA_DEPLETED` 既有 Rust 语义不变，避免打坏 multikey/singleton route-decision native proof；本刀只修 host-facing `HTTP_402/resetAt` contract。
+- 重启红测继续收缩：在线事件已命中 Rust `HTTP_402/resetAt` 分支，但 `QuotaManagerModule.hydrateRustQuotaHostSnapshotFromStore()` 仍把 keep-pool cooldown 统一恢复成 `disableProviderQuota('cooldown')`，导致重启后退化为 `inPool:false`。
+- 因此继续沿单一路径补 Rust hydrate mutator：新增 `applyKeepPoolCooldownQuota(providerKey, cooldownUntilMs, lastErrorCode?)`，只用于 store->Rust 恢复 `cooldownKeepsPool=true` 的 host-facing 402 contract；不改 `QUOTA_DEPLETED` route/internal blocker 语义。
+
+## 2026-05-27 mimo / source-entry resend red test
+- 继续按 Jason 要求先锁结构红测，不猜。
+- 代码审计再次确认：
+  - servertool followup / transparent replay 走 `reenterPipeline({ entryEndpoint, body, metadata })`，属于入口级重发；
+  - `responses-handler.ts` 首次处理 `submit_tool_outputs` 时，先 `resumeResponsesConversation(...)` 再进入 pipeline，也属于入口级重建；
+  - `request-executor.ts` provider retry/reroute 则仍是 attempt>1 时 `restoreRequestPayloadFromRetrySeed()` + 直接 `runHubPipeline(...)`，不是源头入口重发。
+- 下一步唯一红测：锁定“当存在 executeNestedInput/入口重发能力时，retryable provider failure 不应继续在 request-executor 内部二次 runHubPipeline，而应从源头入口重发”。
+- mimo 现有 transport focused evidence：`tests/providers/core/runtime/vercel-ai-sdk-anthropic-transport.spec.ts` 已锁 `targetUrl=https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages`；因此当前 500 更像上游 wrapped 502 / 请求形状问题，不是 baseURL 拼接真源。
+
+- 继续收 live TS second center：已补 focused 红测 `quota-rust-host-setquota-control-contract.spec.ts`，证明 control mutate 的 `quota.setQuota` 仍绕过 Rust host mutate，直接写 TS core `updateProviderPoolState`。
+- 最小修复：给 quota-adapter 注入可选 `rustHostMutator`，在 unified core 路径下让 `setQuota(quota<=0)` 优先走 Rust `disableProviderQuota(..., cooldown)`，`setQuota(quota>0)` 优先走 Rust `recoverProviderQuota()`；control-handler `getQuotaAdapter()` 同步把 hubPipeline.getVirtualRouter() 注入 adapter。
+- control mutate readback 继续收口：发现 adapter.getAdminSnapshot() 在 unified core 路径仍优先吃 TS core snapshot，导致 control-handler 即使写已走 Rust，返回 snapshot 仍可能读到 TS `ok` 第二中心。已补 `readRustHostSnapshot()`，让 unified adapter getAdminSnapshot 优先消费 Rust host snapshot，再回落 core/legacy。
+- control-handler readback 最后一刀：`readQuotaProviderSnapshot()` 原先只按请求 key 精确索引，统一切 Rust host snapshot 后在 canonical key（如 `quota.1.gpt-test`）场景返回 null。已补最小展示壳兼容：direct miss 时回退扫描 snapshot value.providerKey。
+- 补 canonical lookup：control mutate 的 readback 需要把 host 请求 key `quota.keyN.*` 与 Rust host snapshot canonical key `quota.N.*` 视为等价；已在 control-handler 增加最小 lookup canonicalization，仅用于查询壳，不引入第二业务语义。
+- 继续收 control mutate 第二中心：adapter 的 `disableProvider/recoverProvider/resetProvider` 在 unified core 路径下原先仍直写 TS core。已改为优先走 Rust host mutator，对应 `quota.disable / quota.recover / quota.reset / clearCooldown / restoreNow` 一并转为 Rust-first。
+- `clearCooldown` focused 取证完成：control mutate 已返回 Rust result + Rust host snapshot，recover mock 实际只应累计 1 次（clearCooldown）→ 2 次（quota.recover）→ 3 次（quota.setQuota quota>0）。已恢复测试为真实序列断言。
+- runtime 双写真源红测/实现：已在 QuotaManagerModule focused spec 补一条用例，锁定 unified quota + hubPipeline runtime mutator 可用时，provider error/success hooks 必须优先打到 Rust `virtualRouter.handleProviderError/Success`，不能再同时/优先写 TS core `onProviderError/onProviderSuccess`。
+
+## [2026-05-27] quota manager live writer audit
+- 发现: QuotaManagerModule.useCore 路径下 public resetProvider/recoverProvider/disableProvider 仍直接调用 coreManager reset/recover/disable + persistNow；这不是之前已收口的 quota-adapter/control-handler/status-handler 路径。
+- 待验证: 这些 public 方法是否仍有真实调用链；若有，就是新的 live TS second center，应先补 focused red test 再改 Rust-first。
+
+## [2026-05-27] QuotaManagerModule public mutate rust-first closeout
+- 红测: 已在 tests/manager/quota/quota-manager-module.spec.ts 新增 public reset/recover/disable contract，锁定 unified path 下这 3 个 public mutate 必须优先打 Rust host mutator，而不是 TS core QuotaManager。
+- 失败证据: 初次红测显示 reset 走到错误 key readback，recover/disable 未触发 Rust mutator，证明 QuotaManagerModule public mutate 仍是 live TS second center。
+- 修复: src/manager/modules/quota/quota-manager.ts 的 public resetProvider/recoverProvider/disableProvider 现已在 useCore 下优先调用 Rust resetProviderQuota/recoverProviderQuota/disableProviderQuota，并优先从 Rust host snapshot 回读结果；只有拿不到 Rust mutator 时才回落 coreManager。
+- 验证: tests/manager/quota/quota-manager-module.spec.ts 已转绿。
+
+## [2026-05-27] quota-adapter event path audit
+- 待确认: createQuotaManagerAdapter 的 onProviderError/onProviderSuccess 在 unified path 下仍直打 coreManager；若存在真实 runtime 调用链，则这会是另一段 live TS second center。
+
+## [2026-05-27] quota event path runtime audit
+- 结论: quota-adapter 的 onProviderError/onProviderSuccess 虽仍可直打 coreManager，但当前未发现真实 runtime 调用链；全仓 grep 仅见定义与测试，没有运行时入口直接调用 adapter 事件方法。
+- 结论: unified path 的真实 runtime event 写入口已收口到 QuotaManagerModule.start() -> setProviderRuntimeQuotaHooks -> Rust handleProviderError/handleProviderSuccess。
+- 结论: ProviderQuotaDaemonModule 的 setProviderRuntimeProviderQuotaHooks 只在 legacyDelegate.start() 注册；QuotaManagerModule.useCore=true 时不会启动 legacy daemon，因此它不是 unified path live writer。
+- 下一步: 既然新的 live second center 暂未再命中，开始冲更高门槛验证：build:dev + shadow/quota 相关 proof。
+
+## 2026-05-27 源头入口重发骨架核对（本轮）
+
+- 已直接核对 `src/server/runtime/http-server/request-executor.ts`、`src/server/runtime/http-server/index.ts`、`src/server/handlers/responses-handler.ts`。
+- 结论分层：
+  1. `RequestExecutor` 内部的 provider retry / reroute 失败路径，不是在 executor 内联重放 provider，而是通过 `shouldReenterFromSourceRequest()` + `reenterFromSourceRequest()` 调 `deps.executeNestedInput(...)`，再回到 `index.ts::executePortAwarePipeline(...)`。这属于“从服务入口骨架重发”，不是 provider 内局部补发。
+  2. `submit_tool_outputs` 入口在 `responses-handler.ts` 先保持 synthetic endpoint `/v1/responses.submit_tool_outputs`，resume 后仍作为新的 `pipelineInput` 重新进入 `ctx.executePipeline(...)`；不是在 handler 内直接续 provider。
+  3. servertool followup 的 nested request 也走 `executeNestedInput -> executePortAwarePipeline`，属于同一入口骨架重发。
+- 但要注意一个边界：
+  - 端口级 `sameProtocolBehavior='direct'` 时，`index.ts::executePortAwarePipeline()` 会优先走 `executeRouterDirectPipelineForPort()` / `executeProviderDirectPipelineForPort()`；这条 direct 主链本身不是经过完整 executor/provider-response-converter 的 relay 链，而是“重新回到端口入口后，再按 direct 规则短路到 provider-direct / router-direct”。
+  - 所以“源头入口重发”当前成立的准确表述应该是：先回到 `executePortAwarePipeline` 这一统一入口，再由入口根据当前 port mode / sameProtocolBehavior 决定 direct 还是 relay，而不是保证每次都走完整 relay。
+- 这也意味着：如果 Jason 目标是“无论 direct/relay 切换，followup/retry 都必须像全新客户端请求一样重新从端口入口判路”，当前骨架基本满足；但如果目标是“重发后绝不能被 same-protocol direct 短路”，那是另一条语义要求，需要单独改入口策略，而不是现在骨架没回入口。
+
+## [2026-05-27] higher-gate verification follow-up
+- 结果: test:unified-hub-shadow 已通过，说明统一 Hub shadow compare 主入口当前收敛。
+- 新发现: npm script smoke:protocol 当前指向缺失文件 scripts/protocol-smoke.mjs，失败原因为脚本路径失效（MODULE_NOT_FOUND），不是当前 quota/health Rust 主链回归。
+- 下一步: 改用 install-global 链自带 smoke 证据 + 5555 实机 health/admin 入口取证，避免被失效脚本误导。
+
+## [2026-05-27] replay gate evidence
+- control replay: npm run test:unified-hub-shadow 已通过，作为 unified hub shadow/control replay 证据。
+- 准备补 failing-shape replay: 选择 tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts 中显式命名的 \"failing-shape replay\" 用例，避免跑偏到无关 replay。
+
+## [2026-05-27] failing-shape replay evidence correction
+- 发现: provider-response-converter.unified-semantics.spec.ts 的 \"failing-shape replay\" 当前失败原因是测试 mock 的 bridge 导出不全（缺 importCoreDist），不是 quota/health Rust 主链回归。
+- 决策: 不在无关测试壳上打转，改用 tests/sharedmodule/real-sample-hub-io-compare.spec.ts 作为更贴近 Hub/route 主链的 real-sample replay 证据。
+
+## [2026-05-27] route-decision closeout audit
+- 新发现: sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.ts 与 engine/cooldown-manager.ts 已不存在，说明对应 TS 第二中心已被物理删除。
+- 待确认: 当前 HTTP server / HubPipeline / VirtualRouter 主链是否仍会把 quotaView 注入 route decision；若测试和 wiring 已证明默认不注入，则 route decision closeout 已进一步接近完成。
+
+## [2026-05-27] core quota manager closeout audit
+- 审计结论(代码面): sharedmodule core QuotaManager 仍保留完整 quota 状态机（hydrate/persist/error/success/updateProviderPoolState/getQuotaView/getSnapshot），但当前已找到的消费面集中在 host-facing persist/admin/query 与 focused tests；route decision 主链已被 quota-view-injection + virtual-router-quota-routing + engine-update-deps 证明不再依赖它。
+- 待补证据: 用 core-quota-manager-success-recovery + quota-store-success-recovery-persistence + quota-unified-host-rust-consistency 三组 focused proof，确认它当前更像 host-facing bridge/compat state，而不是 route decision 真源。
+## 2026-05-27 core QuotaManager live consumer audit
+- 目标：区分 sharedmodule core QuotaManager 当前哪些消费面仍可能影响 availability policy，哪些只是 host-facing persist/admin/query/compat。
+- 执行动作：先 grep 消费链，再核对 unified/runtime wiring，再决定是否补红测或收口删除候选。
+## [2026-05-27] core QuotaManager live consumer audit conclusion
+- 代码链确认：`sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 当前 live 消费面集中在 host-facing bridge：`QuotaManagerModule.getQuotaView()/getQuotaViewReadOnly()/getAdminSnapshot()/persistNow()` 与 daemon-admin `quota-handler/control-handler/status-handler` 的读写壳；其事件写入 fallback 只在拿不到 Rust host mutator / runtime hooks 时才落到 core。
+- 已有 wiring 证据继续成立：`RouteCodexHttpServer` 默认不再向 HubPipeline 注入 `quotaView/quotaViewReadOnly`，`VirtualRouterEngine.updateDeps({ quotaView })` 也不再改写 route decision；因此 core `getQuotaView()` 目前不在 route decision 主链，只服务 admin/query/compat read model。
+- focused proof 再确认：`core-quota-manager-success-recovery` + `quota-store-success-recovery-persistence` + `quota-unified-host-rust-consistency` 全绿，说明 core QuotaManager 当前可证明角色是 host-facing persist/admin/query/compat bridge，而不是 availability policy 真源。
+- 当前未再命中新 live availability writer；下一步若继续 closeout，应转为列删除候选：哪些 core 读模型/API 仍被 daemon-admin/compat 使用，哪些 fallback 分支在 Rust host mutator 已强制可用后可物理删除。
+
+## 2026-05-27 继续排查：5555 主 provider 未命中的更强根因
+
+- 新证据链：`route()` 虽然按 metadata.__rt/session_dir 做了 `with_session_dir_override(...)`，但 `handleProviderError/handleProviderFailure/handleProviderSuccess` 没有任何 session_dir / port 级 override，直接作用在同一个 `VirtualRouterEngineCore` 的共享 `health_manager/quota_manager` 上。
+- 关键文件：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs`
+    - `route(...)` 有 `with_session_dir_override(...)`
+    - `handle_provider_error(...) / handle_provider_failure(...) / handle_provider_success(...)` 没有 override
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs`
+    - provider 错误会直接 `health_manager.record_failure / record_http_429_failure / cooldown_provider_until_midnight_persisted`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs`
+    - `is_provider_available()` 先看共享 `health_manager`
+- 这意味着：
+  1. 多端口（5520/5555）虽然 route 时能按 session_dir 读不同持久文件；
+  2. 但 provider error/success 事件仍污染同一个进程内共享 router engine 状态；
+  3. 一个端口上 sdfv 的 503/429/失败，会把另一个端口的同 provider 一起判成 unavailable；
+  4. 于是 5555 thinking 首选 `sdfv.key1.gpt-5.4` 会在 selection 前就被共享 health 状态过滤，直接落到 backup mimo。
+- 这比“没从源头入口重发”更贴近现象，因为日志里一开始就直接选中 backup mimo，而不是先打 sdfv 再 reroute。
+- 现阶段推论：主 provider 未命中的 top-one 通用问题，不是 routing config，不是 target expansion，不是 capability default，而是 `VirtualRouterEngine` 的 provider health/quota 事件没有按端口/会话隔离，导致 direct/relay/多端口共享污染。
+## [2026-05-27] host-facing closeout candidate inventory
+- 已把当前 closeout 删除候选/保留面落盘到 `docs/goals/virtual-router-unified-quota-host-facing-contract-gap-map.md`。
+- 结论分层：
+  1. `health-manager.ts` / `cooldown-manager.ts` 已是已删且不可回流的旧第二中心；
+  2. `sharedmodule core QuotaManager` 仍是 host-facing state machine，不是 route decision 真源，但当前也不是可删死代码；
+  3. `QuotaManagerModule.init/stop/persistNow/start/reset/recover/disable` 里的 Rust->core fallback 仍是 live host contract，不可口头视为已 closeout；
+  4. `status-handler.ts` 的 `provider-quota` alias/reset fallback 仍是 live UI/admin 兼容契约；
+  5. 最接近可删的残留是 quota-adapter 的 `onProviderError/onProviderSuccess` dead bridge 候选，以及后续可从 admin/compat 侧逐步替掉的 `getQuotaView()` 暴露面。
+- 下一步唯一正确方向：不要盲删 TS quota-manager，而是先把 Rust host snapshot + mutate + persist/hydrate contract 补成强制主链，再逐段删这些 fallback。
+## [2026-05-27] quota-adapter event bridge dead-bridge audit
+- 目标：确认 createQuotaManagerAdapter 的 onProviderError/onProviderSuccess 是否只有 legacy test 在用，是否可物理删除。
+## [2026-05-27] quota-adapter event bridge closeout
+- grep 结果确认：`createQuotaManagerAdapter().onProviderError/onProviderSuccess` 当前真实消费面只剩 legacy/单测侧；unified runtime 主链事件写入口仍是 `QuotaManagerModule.start() -> setProviderRuntimeQuotaHooks -> Rust handleProviderError/handleProviderSuccess`。
+- 因此本轮做最小物理收口：从 `QuotaManagerAdapter` 接口与 `createQuotaManagerAdapter` 实现中删除 `onProviderError/onProviderSuccess` 事件桥；`quota-handler` 构造 legacy adapter 时不再传递这两个事件回调。
+- 对应 focused proof：原先通过 adapter success hook 验证 legacy daemon success-reset 的测试，已改为直接验证 `ProviderQuotaDaemonModule.onProviderSuccess()`；目标不是保留 adapter 第二入口，而是证明 legacy 行为本身仍可单独覆盖。
+- 验证结果：`tests/manager/quota/provider-quota-daemon-module.spec.ts -t "resets consecutive provider errors through the daemon success hook"` 通过；`tests/manager/quota/quota-manager-module.spec.ts` 与 `tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts` 通过。
+- 宽套件复跑时命中 `recoverable 5xx 3x evicts when alternate routes exist...` 既有失败，形态与本轮 adapter 事件桥删除无关；本轮不在该无关旧失败上偏航。
+## [2026-05-27] core getQuotaView exposure closeout
+- 审计确认：`QuotaManagerModule.getQuotaView()` 在 unified 模式下当前没有 route decision 消费面，主要只剩测试/兼容暴露面；真正的 admin/query 主路径已更偏向 `getQuotaViewReadOnly()` / Rust host snapshot。
+- 因此本轮做最小收口：`QuotaManagerModule.getQuotaView()` 在 `useCore` 下不再直接暴露 `coreManager.getQuotaView()`，统一改回 `getQuotaViewReadOnly()`；等价于把 unified host 观察面继续收口到 Rust snapshot/readOnly bridge。
+- 同时 `createQuotaManagerAdapter().getQuotaView()` 在 `backend=core` 时改为优先读 Rust host snapshot，其次读 `core.getSnapshot()`，只有最后才回退 `core.getQuotaView()`；这样继续降低对 core quotaView 暴露面的依赖。
+- focused proof：更新 `tests/manager/quota/quota-manager-module.spec.ts`，不再断言 unified mode 返回原始 `quotaView` 函数引用，而是断言返回的 view 行为与 readOnly/Rust-consistent；`quota-unified-host-rust-consistency` 与 `quota-rust-host-snapshot-read-bridge` 继续通过。
+
+## 2026-05-27 cross-session health pollution red test
+
+- 新增红测 `tests/sharedmodule/virtual-router-cross-session-health-pollution.red.spec.ts`。
+- 现象已用红测钉死：同一个 `VirtualRouterEngine` 实例里，A sessionDir 上对 `sdfv.key1.gpt-5.4` 记录一次 `HTTP_503` 后，B sessionDir 的后续 thinking 路由会从主 `sdfv` 直接降到 backup `mimo.key1.mimo-v2.5-pro`。
+- 测试日志证据：
+  - `req-a1 -> thinking/thinking-primary -> sdfv.key1.gpt-5.4`
+  - `req-b1 -> thinking/thinking-backup -> mimo.key1.mimo-v2.5-pro`
+- 这证明“请求骨架回入口”不是当前主因；真正问题是 provider health event 写回没有按 `sessionDir` / 端口隔离。
+- 关键触发条件：502 不足以复现，因为当前 native health 对 502 不直接硬冷却；503 会走 persisted cooldown，因此能稳定暴露跨 session 污染。
+## [2026-05-27] core.getQuotaView final fallback removal in adapter
+- 审计确认：在 unified host 路径上，`quota-adapter.getQuotaView()` 的 `core.getQuotaView()` 最后一层回退已无必要；当前 live 证明集中在 Rust host snapshot 与 `core.getSnapshot()`，没有 focused proof 依赖 `core.getQuotaView()` 作为最后兜底。
+- 因此本轮物理删除 `createQuotaManagerAdapter().getQuotaView()` 中 `core.getQuotaView()` fallback，仅保留：Rust host snapshot -> core.getSnapshot() -> legacy.getQuotaView()`。
+- focused 回归通过：
+  - `tests/manager/quota/quota-manager-module.spec.ts`
+  - `tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts`
+  - `tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts`
+  - `tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts`
+  - `tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts`
+- 结论：`core.getQuotaView()` 现在已不再是 unified host path 的 live adapter fallback；剩余保留面主要还在 bridge type surface / test mock / core compat 本体，不再是本层运行时读取真源。
+## [2026-05-27] core.getSnapshot fallback audit
+- 结论：当前 unified host/admin/query live path 仍以 Rust host snapshot 为首选，`core.getSnapshot()` 仍是 live fallback；本轮先不误删它，避免打断 persist/hydrate/admin query 契约。
+## [2026-05-27] core.getQuotaView bridge/type surface cleanup
+- 审计确认：`core.getSnapshot()` 当前在 unified host/admin/query 路径仍是 live fallback，暂不能误删；但 `core.getQuotaView()` 已不再是 unified live path 必需面。
+- 因此本轮没有去动 `core.getSnapshot()`，而是继续做无风险收口：从 bridge/core-like type surface 中删掉 `getQuotaView` 声明，包含：
+  - `src/modules/llmswitch/bridge/quota-manager.ts`
+  - `src/manager/modules/quota/quota-manager.ts` 的 `CoreQuotaManagerLike`
+  - `src/manager/modules/quota/quota-adapter.ts` 的 `CoreQuotaManagerLike`
+- focused 回归通过，说明 unified path 当前不再依赖这层 type/bridge surface；剩余 `getQuotaView` 主要只存在于 legacy path、测试 mock、以及 `QuotaManagerModule` 对 legacyDelegate 的 API 兼容面。
+## [2026-05-27] core.getSnapshot live-fallback proof
+- 本轮没有误删 `core.getSnapshot()`；先补 focused proof 锁定它在 no-hubPipeline unified 场景仍是 live contract。
+- 新增/更新证据：`tests/manager/quota/quota-manager-module.spec.ts` 现在明确断言：当 unified quota 开启但 `getHubPipeline()` 缺失时，`getQuotaViewReadOnly()` 与 `getAdminSnapshot()` 仍必须回落到 `core.getSnapshot()` 投影；否则无 Rust host snapshot 可读，admin/readOnly 直接失真。
+- 验证通过：`tests/manager/quota/quota-manager-module.spec.ts` + `quota-unified-host-rust-consistency` + `quota-rust-host-snapshot-read-bridge` 全绿。
+- 结论：`core.getSnapshot()` 目前不是“想删没删”的残留，而是已被 focused proof 证明的 live fallback；下一删除前置门槛必须是补齐 no-hubPipeline unified 场景下的 Rust host snapshot/readOnly contract，而不是直接删 fallback。
+
+
+[2026-05-27] unified quota runtime hook late-hubPipeline gap（已证实并修正）
+- 红测证据：`tests/manager/quota/quota-manager-module.spec.ts` 新增用例证明，`QuotaManagerModule.start()` 若发生在 `hubPipeline` 建立之前，旧实现会把 provider runtime quota hooks 一次性固化到 `coreManager.onProviderError/onProviderSuccess`；即使后续 `getHubPipeline()` 开始返回 Rust virtual router，后续 error/success 事件仍继续走 TS core fallback，不会自动切到 Rust。
+- 根因：`src/manager/modules/quota/quota-manager.ts` 在 `start()` 时提前解析一次 `rustMutator`，然后把闭包永久绑定到当时的对象；这与真实 runtime 时序（manager daemon 先 start，`setupRuntime()` 后建 `server.hubPipeline`）冲突。
+- 唯一正确修点：仍在 `QuotaManagerModule.start()` 注册同一组 runtime hooks，但 hook 内每次事件触发时动态重新读取 `getRustQuotaHostMutatorFromContext(this.context)`；若 Rust `handleProviderError/handleProviderSuccess` 已可用，就即时切到 Rust，否则才回退 TS core。
+- 为什么这是唯一正确修改点：问题不在 handler/admin/query 层，也不在读桥 `getQuotaViewReadOnly/getAdminSnapshot`；缺口只发生在 provider runtime event bridge 的绑定时机。如果去改其它层，只会保留“事件写路径仍可永久黏在 TS core”的第二中心，无法根除 unified runtime late-bind 缺口。
+- 验证：focused regression `tests/manager/quota/quota-manager-module.spec.ts` 新红测转绿；并与 host-facing read/mutate focused suites 一起通过。
+
+
+[2026-05-27] route-decision TS second-center re-audit（selection.rs）
+- 当前源码审计结果：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs` 的 availability gate 已不再直接读取 TS `quotaView`；`is_provider_available()` 只看：concurrency busy / provider enabled / Rust `quota_manager.active_blocker()` / Rust `health_manager.is_available()`。
+- `build_provider_not_available_error()` 当前 recoverable cooldown hints / unavailable reasons 也只消费 Rust quota/health/concurrency 状态，不再引用 TS `quotaView`。
+- 这说明 route decision 主链里最关键的 TS 第二中心已从 selection 可见代码面退出；剩余 `quotaView` 主要还存在于：
+  1. JS engine/types surface 的桥接类型；
+  2. 测试基线/compat 输入；
+  3. daemon-admin/status 等 host-facing 展示或兼容壳。
+- 下一验证门槛不是继续 grep，而是跑更广 focused regression，证明：
+  - poisoned TS `quotaView` 不再改写 route decision；
+  - Rust quota resetAt / singleton short cooldown 仍成立；
+  - updateDeps({ quotaView }) 不会回流第二中心。
+
+
+[2026-05-27] native health status vs route decision mismatch（已固化 red asset）
+- 新复现证据：对双 provider 路由手动调用 `markProviderCooldown(providerA, 1500)` 与 `markProviderCooldown(providerB, 2500)` 后，`engine.getStatus().health` 明确显示两个 provider 都是 `state=tripped`，但 `route()` 仍直接命中 `providerA`。
+- 这不是 TS `quotaView` 第二中心回流；当前 route decision 仍是在 Rust native path 上做出与 `health snapshot` 不一致的选择。
+- 已把该现象固化为 focused red asset：`tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts` 的第一条用例改为 `test.failing(...)`，明确要求“所有 candidate 都 health.cooldown 时，route 应抛 `PROVIDER_NOT_AVAILABLE` 并带 `health.cooldown` recoverable hints，而不是继续选中 tripped provider”。
+- 为什么这是唯一正确下一刀：该缺口直接破坏 `provider error/success -> availability state -> route decision` Rust 单真源闭环；若 health snapshot 与 route decision 在 native 内部都不一致，就不能宣称完成标准成立。
+
+
+[2026-05-27] build:dev compile gate + focused cleanup
+- `build:dev` 第一次失败不是 Rust 主链逻辑错误，而是 TS 编译门槛：`src/manager/modules/quota/quota-adapter.ts` 缺少 `ProviderErrorEvent/ProviderSuccessEvent` import，且 `core.getSnapshot` 被 TS 判为可能未定义调用。
+- 最小修正：
+  1. 给 `quota-adapter.ts` 补 `../../../types/llmswitch-local-types.js` 的事件类型导入；
+  2. 把 `core?.getSnapshot` 先提取到局部 `getSnapshot` 并以 `typeof getSnapshot === 'function'` 收窄后再调用。
+- 相关 host-facing focused suites 复跑已绿，说明这是纯编译口子，不是行为回归。
+- 另外，legacy focused `recoverable 5xx 3x evicts when alternate routes exist...` 的断言此前与标题/真源冲突：标题明确是“有 alternate routes 时第 3 次 5xx 应踢出池子”，但断言却写成 `inPool=true/cooldownKeepsPool=true`。已改为与真源一致：`inPool=false`、`cooldownKeepsPool=undefined`。
+
+[2026-05-27] build gate unblock + native cooldown red asset
+- `build:dev` 最先被 `verify:repo-sanity` 拦住的原因，是未跟踪文件 `tests/sharedmodule/virtual-router-cross-session-health-pollution.red.spec.ts`；已纳入 git 跟踪，repo-sanity 已过。
+- `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts` 原旧断言“单 provider markProviderCooldown 后应报 PROVIDER_NOT_AVAILABLE”已不再符合当前目标，因为 last-provider guard 现在会保住单 provider。
+- 但在把测试改成“双 provider 都 markProviderCooldown 后应报 health.cooldown”时，又发现更强真缺口：`getStatus().health` 明明显示两个 provider 都 `state=tripped`，`route()` 却仍选中 `providerA`。
+- 已把该现象固化成 `test.failing(...)` focused red asset，避免被口头忽略；它证明当前 native 内部仍存在 health snapshot 与 route decision 不一致的问题。
+
+
+[2026-05-27] build:dev / install-global / health check gate（已通过）
+- `npm run build:dev` 已完整通过：repo-sanity → build → build:webui → install:global → 全局 CLI 校验 → 5555 managed restart 全部完成。
+- 关键证据：
+  - `repo-sanity ok`
+  - `vite build` 完成
+  - `npm global install` 成功
+  - `0.90.2297`
+  - `全局 CLI 端到端检查通过`
+  - `受管服务已重启: 5555`
+- 因此完成标准里的 `npm run build:dev` 与至少一层 installed-binary/runtime smoke 已拿到硬证据，不再是未验证状态。
+
+
+[2026-05-27] native health snapshot vs route decision mismatch root cause（已修正）
+- 根因已证实：`VirtualRouterEngineCore::route()` 入口会调用 `refresh_provider_health_from_store()`；旧实现先 `health_manager.clear_runtime_state()`，把内存里的 transient runtime health（例如 `markProviderCooldown()`、recoverable/fatal runtime cooldown）全部清空，然后只从 store 回灌“可持久化的 503 daily cooldown”。
+- 结果：
+  1. `getStatus().health` 在 route 前还能看到 runtime `tripped`；
+  2. 一旦进入 `route()`，transient runtime health 被清掉；
+  3. selection 看到的 availability 又变回 healthy，于是 route 命中本应被 cooldown 的 provider；
+  4. 形成了“health snapshot 与 route decision 同属 Rust/native 却彼此矛盾”的主链缺口。
+- 唯一正确修点：
+  - `health.rs` 新增 `clear_imported_persisted_state()`，只清理由 persisted `__http_503_daily_cooldown__` 导入的状态；
+  - `engine/core.rs::refresh_provider_health_from_store()` 改为只调用 `clear_imported_persisted_state()`，不再抹掉 transient runtime health。
+- 为什么这是唯一正确修改点：问题发生在“store refresh 覆盖内存 runtime health”的 Rust core 刷新逻辑；不是 selection 公式错误，也不是 TS bridge 层。若去改 selection/handler/test 只会掩盖 refresh 把 runtime state 擦掉的真源缺口。
+- 验证：
+  1. `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts` 从 red asset 变为真实绿测；
+  2. `tests/sharedmodule/virtual-router-cross-session-health-pollution.red.spec.ts` 也转绿，说明 route 前 refresh 不再错误污染/清空 session 相关 health 行为；
+  3. 一组 route-decision focused suites 共 `9 suites / 12 tests` 全绿。
+
+## 2026-05-27 virtual-router unified quota/health closeout audit（replay/shadow + TS inventory）
+
+### 一、已确认主链真相（有现行代码/测试证据）
+
+1. `VirtualRouterEngine.route()` 当前直接调用 native proxy；route decision 主链已经不再经过 TS health-manager/cooldown-manager。
+   - 证据：`sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts`
+
+2. `quotaView` 默认已不再注入 HubPipeline / llms-engine shadow pipeline。
+   - 证据：`tests/server/http-server/quota-view-injection.spec.ts`
+   - 当前测试明确锁定：
+     - `does not inject quotaView into HubPipeline config by default after Rust closeout`
+     - `does not inject quotaViewReadOnly into llms-engine shadow pipeline after Rust closeout`
+
+3. `request-executor` 当前对 `PROVIDER_NOT_AVAILABLE` / `recoverableCooldownHints` 的处理是“消费 Rust router 结果后等待/重试”，不是再自行计算第二套 availability policy。
+   - 证据：
+     - `src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts`
+     - `tests/server/runtime/http-server/request-executor.spec.ts` 中 singleton cooldown/concurrency wait 用例
+   - 结论：request-executor 仍有 retry/wait 编排，但 waitMs/source 已来自 router error details。
+
+4. daemon-admin unified quota 路径当前优先读/写 Rust `quotaHostSnapshot` / mutate contract，TS core snapshot 仅作 stale fallback read shell。
+   - 证据：
+     - `tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts`
+     - `tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts`
+     - `src/server/runtime/http-server/daemon-admin/quota-handler.ts`
+
+### 二、当前仍活着的 TS 路径分类（不是一刀全删）
+
+#### A. 可接受桥接 / 持久化 / 展示壳
+1. `src/manager/modules/quota/quota-manager.ts`
+   - 当前职责：
+     - provider success/error runtime hook bridge
+     - Rust quotaHostSnapshot <-> store hydration/persist bridge
+     - 管理层 facade / admin shell
+   - 本轮结论：仍有 live 价值，但不应再承载 route decision。
+
+2. `src/manager/modules/quota/quota-adapter.ts`
+   - 当前职责：统一 host facade；优先走 Rust host mutator / snapshot；TS core/legacy 仅作兼容壳。
+   - 结论：属于 host-facing shell，不是 route decision 第二中心。
+
+3. `src/server/runtime/http-server/daemon-admin/{quota,status,control}-handler.ts`
+   - 当前职责：admin read/write contract；已优先读/写 Rust snapshot/mutator。
+   - 结论：属于展示/控制壳，不属于 availability policy 真源。
+
+#### B. 仍需后续 closeout / 继续盘点的 TS 真源残留
+1. `sharedmodule/llmswitch-core/src/quota/quota-manager.ts`
+   - 仍在维护 TS quota state、persist、`getQuotaView()`。
+   - 虽然当前默认不再注入主链，但它依旧是一个“可形成第二中心”的存活状态机。
+   - 后续必须明确：
+     - 仅保留 host persistence/query shell，还是继续物理删除状态判定职责。
+
+2. 旧 TS 文件删除/收缩状态仍需最终确认：
+   - `sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.ts`
+   - `sharedmodule/llmswitch-core/src/router/virtual-router/engine/cooldown-manager.ts`
+   - 这些文件在当前工作树里已出现删除迹象，但本轮尚未以完成态审计整个 closeout 是否稳定。
+
+### 三、replay/shadow 当前证据现状
+
+#### 已有
+1. `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
+   - 已能证明 poisoned TS `quotaView` 不再改写 route decision / singleton unavailable 语义。
+   - 这是 focused shadow-compare proof，不是完整 replay harness。
+
+2. repo 内存在通用 replay/shadow 基础设施：
+   - `scripts/replay-codex-sample.mjs`
+   - `scripts/replay-recorded-toolcall.mjs`
+   - `scripts/virtual-router-shadow-v2.mjs`
+   - `scripts/virtual-router-shadow-v2-real.mjs`
+
+#### 仍缺
+1. 还没有发现一个“专门针对 virtual-router quota/health/availability”的 replay harness 或固定样本集，能覆盖计划文档要求的：
+   - 429 short-lived
+   - 429 quota exhausted
+   - 503 daily/unavailable
+   - auth fatal
+   - transport recoverable
+   - success after cooldown
+   - same provider family multi key rotation
+   - singleton route pool / last provider wait-and-recover
+
+2. 当前更像是：
+   - focused regression 已较强
+   - 局部 shadow compare 已有
+   - 但 Phase A / C 要求的“固定 replay/shadow 输入集 + 收敛报告入口”还未成套
+
+### 四、这轮 completion-audit 结论
+
+1. 可以继续确认：
+   - route decision 主链基本已从 TS `quotaView` 退场；
+   - request-executor 当前主要消费 Rust cooldown hints；
+   - daemon-admin host-facing contract 已优先收口到 Rust。
+
+2. 还不能确认完成：
+   - `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 是否已被完全壳化；
+   - replay/shadow 是否已达到 plan 要求的专用收敛闭环；
+   - TS 第二中心是否已物理删除到可宣称 Rust-only closeout。
+
+3. 下一步最值钱动作：
+   - 做一个 virtual-router quota/health 专用 replay/shadow gate（优先复用现有 script/harness）
+   - 然后再对 `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 做职责收缩/删除审计
+
+## 2026-05-27 virtual-router quota/health shadow regression gate 落盘
+
+- 已新增专用 shadow/regression spec：
+  - `tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts`
+- 已新增专用 gate script：
+  - `scripts/tests/virtual-router-quota-health-shadow-regression.mjs`
+
+### 本轮新增 gate 覆盖的核心 closeout 语义
+1. poisoned TS `quotaView` 不能改写 healthy dual-provider pool 的 Rust route decision
+2. `QUOTA_DEPLETED + resetAt` 只能冻结当前 providerKey，并继续稳定 reroute 到 sibling key
+3. singleton / last-provider 场景下，即便 TS `quotaView` 伪装成 inPool=true，仍必须输出 Rust `recoverableCooldownHints` / `minRecoverableCooldownMs`
+
+### 实际验证结果
+- `node scripts/tests/virtual-router-quota-health-shadow-regression.mjs`
+  - 9 suites passed
+  - 13 tests passed
+- `npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts`
+  - 1 suite passed
+  - 3 tests passed
+
+### 当前意义
+- 这不是完整 replay harness，但已经把“virtual-router quota/health 专用 shadow closeout gate”补成一个可执行入口；
+- 后续可继续往这个 gate 里加：503 daily/unavailable、auth fatal、transport recoverable、success after cooldown 等计划文档列出的剩余场景；
+- 相比只有散落 focused spec，现在已有一个专门面向 quota/health/availability closeout 的统一 gate。
+
+## 2026-05-27 virtual-router quota/health shadow gate 扩场景
+
+- 在 `tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts` 继续补了 2 类场景：
+  1. auth fatal blocker：401/unrecoverable + cooldownOverrideMs 后，TS quotaView 伪装 inPool=true 也不能抢回 route decision；路由必须切到 sibling key。
+  2. transport recoverable + success recovery：503/recoverable + short cooldown 后，路由先切到 sibling key；收到 `handleProviderSuccess()` 后，原 providerKey 必须重新恢复可选，且不重新打开 TS second center。
+
+### 新验证结果
+- `npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts`
+  - 1 suite passed
+  - 5 tests passed
+- `node scripts/tests/virtual-router-quota-health-shadow-regression.mjs`
+  - 应继续保持整组 gate 绿
+
+### 当前 closeout 意义
+- 专用 gate 已不只覆盖 quota exhausted / singleton，而开始覆盖 health fatal / transport recoverable / success recovery；
+- 距计划文档的 replay/shadow 收敛还差更贴近 503 daily 与 request-executor recoverable wait 的统一回放，但 quota/health/availability 核心 Rust-owned 决策面已形成可执行 closeout 入口。
+
+## 2026-05-27 sharedmodule/quota/quota-manager.ts live/residue inventory
+
+### 一、当前代码事实
+
+目标文件：`sharedmodule/llmswitch-core/src/quota/quota-manager.ts`
+
+它当前仍然完整保留了一个 TS providerKey 状态机，包含：
+1. `states: Map<string, QuotaState>`
+2. 事件写入口：
+   - `onProviderError()`
+   - `onProviderSuccess()`
+   - `updateProviderPoolState()`
+3. 人工控制入口：
+   - `disableProvider()`
+   - `recoverProvider()`
+   - `resetProvider()`
+4. 读出口：
+   - `getQuotaView()`
+   - `getSnapshot()`
+5. 持久化链：
+   - `hydrateFromStore()`
+   - `persistNow()`
+
+也就是说，它不是只剩一个空壳类型面；它仍是一个完整可运行的 TS quota state machine。
+
+### 二、但它当前是否仍影响 route decision 主链
+
+当前证据显示：原则上“不再直接影响 route decision 主链”，原因如下：
+
+1. `VirtualRouterEngine.route()` 已直接走 native proxy。
+   - 证据：`sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts`
+
+2. `quotaView` 默认不再注入 HubPipeline / llms-engine shadow pipeline。
+   - 证据：`tests/server/http-server/quota-view-injection.spec.ts`
+
+3. `src/manager/modules/quota/quota-adapter.ts`
+   - unified core path 下 `getQuotaView()` / `getAdminSnapshot()` 当前优先顺序是：
+     - Rust host snapshot
+     - `core.getSnapshot()`
+     - legacy path
+   - 已不再走 `core.getQuotaView()` live fallback。
+
+4. `src/manager/modules/quota/quota-manager.ts`
+   - unified mode 下：
+     - `getQuotaView()` 实际转 `getQuotaViewReadOnly()`
+     - `getQuotaViewReadOnly()` 优先 Rust host snapshot，其次 `core.getSnapshot()`
+     - `getAdminSnapshot()` 优先 Rust host snapshot，其次 `core.getSnapshot()`
+   - 即便 core `QuotaManager` 还活着，host-facing read path 也已尽量绕过它的 `getQuotaView()`。
+
+结论：
+- 这个 TS `QuotaManager` 当前更像 unified host path 的“fallback core state store / persist shell / compat state machine”，
+- 而不是 route decision 正在直接消费的第二中心。
+
+### 三、它当前仍然被谁真实使用
+
+#### 1. bridge/createCoreQuotaManager 仍会实例化它
+- `src/modules/llmswitch/bridge/quota-manager.ts`
+- `createCoreQuotaManager()` 现在仍 `new QuotaManager(...)`
+- 所以只要 unified quota 开启，这个 TS core quota manager 仍是 live runtime object，不是死代码。
+
+#### 2. QuotaManagerModule unified path 仍把它当 core fallback backend
+- `src/manager/modules/quota/quota-manager.ts`
+- 用途包括：
+  - no-hubPipeline 场景下的 read-only fallback
+  - Rust host snapshot persist fallback
+  - provider runtime hooks 在 Rust mutator 不可用时的写回 fallback
+
+#### 3. daemon-admin / special-family focused tests 仍直接依赖它
+- `tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
+- `tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
+- 这些测试明确通过 `createCoreQuotaManager -> new QuotaManager()` 跑 402/resetAt/success-recovery/persist-hydrate/admin alignment。
+
+#### 4. 还有独立 focused tests 直接测它本体
+- `tests/sharedmodule/core-quota-manager-success-recovery.spec.ts`
+- `tests/manager/quota/quota-store-success-recovery-persistence.spec.ts`
+- `sharedmodule/llmswitch-core/scripts/tests/quota-manager-402-reset.mjs`
+
+### 四、因此它当前的职责分类
+
+#### A. 当前可以认定为 live 的壳 / fallback 职责
+1. no-hubPipeline unified 场景的 fallback read model（`getSnapshot()`）
+2. host/admin/query 的 compat persistence shell
+3. Rust host snapshot 不可用时的短期 fallback state store
+4. provider runtime hooks 在 Rust mutator 未就绪时的 fallback write sink
+
+#### B. 当前仍然危险的“第二中心残留”
+1. 它依旧自行解释 provider error/success，维护 cooldown/blacklist/quota/resetAt 语义
+2. 它依旧有 `updateProviderPoolState()` / `disableProvider()` / `recoverProvider()` / `resetProvider()` 这种完整状态改写面
+3. 它依旧能产出 `QuotaState` 快照，语义上仍是另一套 availability/quota model
+
+也就是说：
+- 它虽然大概率已经退出 route decision 主链，
+- 但尚未被收缩成“纯桥接 + 持久化 + 查询展示壳”。
+- 现在更准确的定义是：`live compat fallback state machine`，还不是最终目标要求的薄壳。
+
+### 五、当前不能直接删的部分
+
+基于现有证据，以下部分当前还不能直接物理删除：
+1. `getSnapshot()`
+   - 已有 focused proof 证明 no-hubPipeline unified 场景仍需要它做 read fallback。
+2. `hydrateFromStore()` / `persistNow()`
+   - 当前仍承担 core fallback persist/hydrate。
+3. bridge `createCoreQuotaManager()` 整体
+   - 仍被 QuotaManagerModule unified path 实时使用。
+
+### 六、下一步唯一正确 closeout 方向
+
+不是直接删整个 `QuotaManager`，而是分两段：
+
+#### Phase 1：先把 live fallback contract 显式钉死/缩边
+1. 证明哪些 unified 场景已经不再需要 `onProviderError/onProviderSuccess/updateProviderPoolState` 的 TS 语义写入
+2. 证明哪些只需要：
+   - 持久化载体
+   - Rust snapshot read-through
+   - 极小 fallback projection
+
+#### Phase 2：再物理删除状态机职责
+优先考虑删除/壳化：
+1. `updateProviderPoolState()`
+2. `onProviderError()` / `onProviderSuccess()` 内的 TS 语义判定
+3. `disableProvider()` / `recoverProvider()` / `resetProvider()` 的本地状态写逻辑
+
+最终目标应收敛到：
+- Rust 是唯一 quota/health/availability 状态机
+- TS core quota manager 若仍保留，只能是：
+  - store codec / persistence adapter
+  - admin/query projection shell
+  - no-hubPipeline 场景的只读桥
+
+### 七、当前结论
+
+- `sharedmodule/llmswitch-core/src/quota/quota-manager.ts` 现在还不是可直接删除的死代码；
+- 但它也不是 route decision 主链仍在直接消费的第二中心；
+- 它的真实状态是：
+  - 已从主路由决策面后退，
+  - 但仍是一个活着的 TS compat fallback state machine，
+  - 需要下一阶段继续收缩成纯壳，而不是继续长期保留完整状态语义。

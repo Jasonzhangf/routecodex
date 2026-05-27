@@ -12,20 +12,18 @@ import type {
   ServerToolHandlerRegistrationSpec,
   ServerToolRegisteredHandlerRecord,
 } from '../router/virtual-router/engine-selection/native-followup-mainline-semantics.js';
-        flowOnlyLoopLimit?: boolean;
-        stickyProvider?: boolean;
-        clientInjectOnly?: boolean;
-        clearStateOnFollowupFailure?: boolean;
-        seedLoopPayload?: boolean;
-        retryEmptyFollowupOnce?: boolean;
-        clientInjectSource?: string;
-        transparentReplayRequestSuffix?: string;
-        ignoreRequiresActionFollowup?: boolean;
-        contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
-      }>;
-    };
-  };
-}
+export type {
+  ServertoolTriggerMode,
+  ServertoolAutoHookPhase,
+  ServertoolExecutionMode,
+  ServertoolSkeletonStageConfig,
+  ServertoolSkeletonConfig,
+  ServertoolStateConfig,
+  ServertoolToolSpec,
+  ServertoolSkeletonDocument,
+  ServerToolHandlerRegistrationSpec,
+  ServerToolRegisteredHandlerRecord,
+} from '../router/virtual-router/engine-selection/native-followup-mainline-semantics.js';
 
 // Types moved to native-followup-mainline-semantics.ts
 

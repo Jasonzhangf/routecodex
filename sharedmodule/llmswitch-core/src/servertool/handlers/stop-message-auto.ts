@@ -5,6 +5,7 @@ import type {
   ServerToolHandlerPlan
 } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
+import type { ServerToolFollowupPlan } from '../types.js';
 import { isCompactionRequest } from './compaction-detect.js';
 import { extractCapturedChatSeed } from '../followup-seed.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
@@ -35,6 +36,7 @@ import type {
   StopMessageDecisionContext,
   StopMessageDecision
 } from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
+import { runStopMessageAutoHandlerWithNative } from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
 import {
   applyStopMessageSnapshotToState,
   clearStopMessageState,
@@ -202,54 +204,6 @@ function debugLog(message: string, extra?: JsonObject): void {
   }
 }
 
-function emitStopFollowupPinLog(args: {
-  adapterContext: unknown;
-  pinnedTarget: { providerKey?: string; modelId?: string; routecodexPortMode?: string };
-  followupText: string;
-}): void {
-  try {
-    const record =
-      args.adapterContext && typeof args.adapterContext === 'object' && !Array.isArray(args.adapterContext)
-        ? (args.adapterContext as Record<string, unknown>)
-        : {};
-    const metadata =
-      record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
-        ? (record.metadata as Record<string, unknown>)
-        : {};
-    const runtime = readRuntimeMetadata(record) ?? {};
-    const target =
-      record.target && typeof record.target === 'object' && !Array.isArray(record.target)
-        ? (record.target as Record<string, unknown>)
-        : {};
-    const runtimeTarget =
-      runtime.target && typeof runtime.target === 'object' && !Array.isArray(runtime.target)
-        ? (runtime.target as Record<string, unknown>)
-        : {};
-    const metadataTarget =
-      metadata.target && typeof metadata.target === 'object' && !Array.isArray(metadata.target)
-        ? (metadata.target as Record<string, unknown>)
-        : {};
-    console.log('[servertool.followup.pin.stop_handler]', JSON.stringify({
-      requestId:
-        (typeof record.requestId === 'string' && record.requestId)
-        || (typeof runtime.requestId === 'string' && runtime.requestId)
-        || (typeof metadata.requestId === 'string' && metadata.requestId)
-        || undefined,
-      pinnedProviderKey: args.pinnedTarget.providerKey,
-      pinnedModelId: args.pinnedTarget.modelId,
-      routecodexPortMode: args.pinnedTarget.routecodexPortMode,
-      followupText: args.followupText
-    }));
-  } catch {
-    // ignore logging failure
-  }
-}
-
-function enforceStopMessageExecutionFollowupText(text: string): string {
-  const rawBase = sanitizeFollowupText(text);
-  return sanitizeFollowupText(rawBase) || STOP_MESSAGE_EXECUTION_APPEND;
-}
-
 function hasResponsesSubmitToolOutputsResume(adapterContext: unknown): boolean {
   if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
     return false;
@@ -294,77 +248,6 @@ function isStopMessageDisabledByPort(adapterContext: unknown): boolean {
     runtime.routecodexPortStopMessageEnabled
   ];
   return candidates.some((value) => value === false);
-}
-
-function readPinnedTargetFromAdapterContext(adapterContext: unknown): {
-  providerKey?: string;
-  modelId?: string;
-  routecodexPortMode?: string;
-} {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return {};
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const metadata =
-    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
-      ? (record.metadata as Record<string, unknown>)
-      : undefined;
-  const runtime = readRuntimeMetadata(record);
-  const metadataTarget =
-    metadata?.target && typeof metadata.target === 'object' && !Array.isArray(metadata.target)
-      ? (metadata.target as Record<string, unknown>)
-      : undefined;
-  const runtimeTarget =
-    runtime?.target && typeof runtime.target === 'object' && !Array.isArray(runtime.target)
-      ? (runtime.target as Record<string, unknown>)
-      : undefined;
-  const target =
-    record.target && typeof record.target === 'object' && !Array.isArray(record.target)
-      ? (record.target as Record<string, unknown>)
-      : undefined;
-  const providerKey =
-    (typeof record.__shadowCompareForcedProviderKey === 'string' && record.__shadowCompareForcedProviderKey.trim()
-      ? record.__shadowCompareForcedProviderKey.trim()
-      : '')
-    || (typeof runtime?.__shadowCompareForcedProviderKey === 'string' && runtime.__shadowCompareForcedProviderKey.trim()
-      ? runtime.__shadowCompareForcedProviderKey.trim()
-      : '')
-    || (typeof target?.providerKey === 'string' && target.providerKey.trim() ? target.providerKey.trim() : '')
-    || (typeof metadataTarget?.providerKey === 'string' && metadataTarget.providerKey.trim() ? metadataTarget.providerKey.trim() : '')
-    || (typeof runtimeTarget?.providerKey === 'string' && runtimeTarget.providerKey.trim() ? runtimeTarget.providerKey.trim() : '')
-    || (typeof target?.providerId === 'string' && target.providerId.trim() ? target.providerId.trim() : '')
-    || (typeof metadataTarget?.providerId === 'string' && metadataTarget.providerId.trim() ? metadataTarget.providerId.trim() : '')
-    || (typeof runtimeTarget?.providerId === 'string' && runtimeTarget.providerId.trim() ? runtimeTarget.providerId.trim() : '')
-    || (typeof record.targetProviderKey === 'string' && record.targetProviderKey.trim() ? record.targetProviderKey.trim() : '')
-    || (typeof metadata?.targetProviderKey === 'string' && metadata.targetProviderKey.trim() ? metadata.targetProviderKey.trim() : '')
-    || (typeof runtime?.targetProviderKey === 'string' && runtime.targetProviderKey.trim() ? runtime.targetProviderKey.trim() : '')
-    || (typeof record.providerKey === 'string' && record.providerKey.trim() ? record.providerKey.trim() : '')
-    || (typeof metadata?.providerKey === 'string' && metadata.providerKey.trim() ? metadata.providerKey.trim() : '')
-    || (typeof runtime?.providerKey === 'string' && runtime.providerKey.trim() ? runtime.providerKey.trim() : '')
-    || undefined;
-  const modelId =
-    (typeof target?.modelId === 'string' && target.modelId.trim() ? target.modelId.trim() : '')
-    || (typeof metadataTarget?.modelId === 'string' && metadataTarget.modelId.trim() ? metadataTarget.modelId.trim() : '')
-    || (typeof runtimeTarget?.modelId === 'string' && runtimeTarget.modelId.trim() ? runtimeTarget.modelId.trim() : '')
-    || (typeof record.assignedModelId === 'string' && record.assignedModelId.trim() ? record.assignedModelId.trim() : '')
-    || (typeof metadata?.assignedModelId === 'string' && metadata.assignedModelId.trim() ? metadata.assignedModelId.trim() : '')
-    || (typeof runtime?.assignedModelId === 'string' && runtime.assignedModelId.trim() ? runtime.assignedModelId.trim() : '')
-    || (typeof record.modelId === 'string' && record.modelId.trim() ? record.modelId.trim() : '')
-    || (typeof metadata?.modelId === 'string' && metadata.modelId.trim() ? metadata.modelId.trim() : '')
-    || (typeof runtime?.modelId === 'string' && runtime.modelId.trim() ? runtime.modelId.trim() : '')
-    || (typeof record.originalModelId === 'string' && record.originalModelId.trim() ? record.originalModelId.trim() : '')
-    || (typeof metadata?.originalModelId === 'string' && metadata.originalModelId.trim() ? metadata.originalModelId.trim() : '')
-    || (typeof runtime?.originalModelId === 'string' && runtime.originalModelId.trim() ? runtime.originalModelId.trim() : '')
-    || undefined;
-  const routecodexPortMode =
-    typeof record.routecodexPortMode === 'string' && record.routecodexPortMode.trim()
-      ? record.routecodexPortMode.trim()
-      : undefined;
-  return {
-    ...(providerKey ? { providerKey } : {}),
-    ...(modelId ? { modelId } : {}),
-    ...(routecodexPortMode ? { routecodexPortMode } : {})
-  };
 }
 
 function isDirectStoplessGoalStateSnapshot(value: unknown): value is {
@@ -524,73 +407,47 @@ const handler: ServerToolHandler = async (
       return null;
     }
 
-    // ── Persist used counter ──
+    // ── Call native handler result assembler ──
     const stickyKey = persistedLookupPlan.stickyKey || undefined;
     const strictSessionScope = persistedLookupPlan.strictSessionScope || undefined;
-    // Always use the standard execution text for stop_message followup.
-    // The snapshot text is only used for persistence/counter, not for the followup message.
-    const text = STOP_MESSAGE_EXECUTION_APPEND;
+    const handlerResult = runStopMessageAutoHandlerWithNative({
+      decision: decision as any,
+      adapterContext: record,
+      base: { ...ctx.base } as Record<string, unknown>,
+      candidateKeys,
+      stickyKey,
+      strictSessionScope,
+      followupFlowId: followupFlowId || undefined,
+    });
+
+    // ── Execute persist I/O (TS writes state files) ──
     const usedAt = Date.now();
-    const persistStickyKeys = Array.from(new Set([
-      ...(stickyKey && isPersistentStickyKey(stickyKey) ? [stickyKey] : []),
-      ...candidateKeys.filter((key) => isPersistentStickyKey(key)),
-      ...(strictSessionScope && isPersistentStickyKey(strictSessionScope) ? [strictSessionScope] : [])
-    ]));
-    for (const key of persistStickyKeys) {
+    const stateUpdate = handlerResult.stateUpdate || {};
+    const snapInput = {
+      text: String(stateUpdate.text ?? STOP_MESSAGE_EXECUTION_APPEND),
+      maxRepeats: typeof stateUpdate.maxRepeats === 'number' ? stateUpdate.maxRepeats : decision.max_repeats,
+      used: typeof stateUpdate.used === 'number' ? stateUpdate.used : decision.used + 1,
+      source: typeof stateUpdate.source === 'string' ? stateUpdate.source : 'default',
+      stageMode: typeof stateUpdate.stageMode === 'string' ? stateUpdate.stageMode as any : 'on' as any,
+      aiMode: 'off' as any,
+      updatedAt: usedAt,
+      lastUsedAt: usedAt
+    };
+    for (const key of handlerResult.persistKeys) {
       const persistedState = loadRoutingInstructionStateSync(key) ?? null;
-      const nextState = applyStopMessageSnapshotToState(persistedState, {
-        text,
-        maxRepeats: decision.max_repeats,
-        used: decision.used + 1,
-        source: 'default',
-        stageMode: 'on',
-        aiMode: 'off',
-        updatedAt: usedAt,
-        lastUsedAt: usedAt
-      });
+      const nextState = applyStopMessageSnapshotToState(persistedState, snapInput);
       persistStopMessageState(key, nextState);
     }
-
-    // ── Build followup plan ──
-    const connectionState = resolveClientConnectionState(record.clientConnectionState);
-    const pinnedTarget = readPinnedTargetFromAdapterContext(ctx.adapterContext);
-    emitStopFollowupPinLog({ adapterContext: ctx.adapterContext, pinnedTarget, followupText: text });
 
     return {
       flowId: FLOW_ID,
       finalize: async () => {
-        const followupText = STOP_MESSAGE_EXECUTION_APPEND;
         return {
           chatResponse: ctx.base,
           execution: {
             flowId: FLOW_ID,
             ...(stickyKey ? { stopMessageReservation: { stickyKey, previousState: null } } : {}),
-            followup: {
-              requestIdSuffix: ':stop_followup',
-              injection: {
-                ops: [
-                  { op: 'append_assistant_message', required: false },
-                  { op: 'append_user_text', text: followupText }
-                ]
-              },
-              metadata: {
-                ...(connectionState ? { clientConnectionState: connectionState as JsonObject } : {}),
-                ...(pinnedTarget.providerKey ? {
-                  __shadowCompareForcedProviderKey: pinnedTarget.providerKey,
-                  providerKey: pinnedTarget.providerKey,
-                  targetProviderKey: pinnedTarget.providerKey
-                } : {}),
-                ...(pinnedTarget.modelId ? {
-                  assignedModelId: pinnedTarget.modelId,
-                  modelId: pinnedTarget.modelId,
-                  target: {
-                    ...(pinnedTarget.providerKey ? { providerKey: pinnedTarget.providerKey } : {}),
-                    modelId: pinnedTarget.modelId
-                  }
-                } : {}),
-                ...(pinnedTarget.routecodexPortMode ? { routecodexPortMode: pinnedTarget.routecodexPortMode } : {})
-              } as JsonObject
-            }
+            followup: handlerResult.followup as unknown as ServerToolFollowupPlan
           }
         };
       }

@@ -44,18 +44,98 @@ export function applyProviderStreamModeHeaders(args: {
   return normalized;
 }
 
+/**
+ * 检测上游返回的常见业务错误模式（`base_resp.status_code`、`error_code`、`error.code` 等）。
+ * 优先使用 family profile 的专用检测；无 profile 时使用通用检测。
+ *
+ * 检测到的错误会被 `http-request-executor.ts` 在 `sendRequestInternal` 内部抛出，
+ * 从而被 `BaseProvider.sendRequest()` 的自动重试拦截器捕获。
+ */
 export function resolveProviderBusinessResponseError(args: {
   response: unknown;
   runtimeMetadata?: ProviderRuntimeMetadata;
   familyProfile?: ProviderFamilyProfile;
 }): Error | undefined {
-  if (!args.familyProfile?.resolveBusinessResponseError) {
+  // 1. 优先使用 family profile 的专用检测
+  if (args.familyProfile?.resolveBusinessResponseError) {
+    const profileError = args.familyProfile.resolveBusinessResponseError({
+      response: args.response,
+      runtimeMetadata: args.runtimeMetadata
+    });
+    if (profileError) {
+      return profileError;
+    }
+  }
+
+  // 2. 通用业务错误检测（不依赖 family profile）
+  const responseRecord = args.response && typeof args.response === 'object' && !Array.isArray(args.response)
+    ? (args.response as Record<string, unknown>)
+    : undefined;
+  if (!responseRecord) {
     return undefined;
   }
-  return args.familyProfile.resolveBusinessResponseError({
-    response: args.response,
-    runtimeMetadata: args.runtimeMetadata
-  });
+
+  // 格式 A: { base_resp: { status_code: NNNN, status_message: "..." } }
+  // 常见于 MiniMax、GLM 等中国 provider
+  const baseResp = responseRecord.base_resp as Record<string, unknown> | undefined;
+  if (baseResp && typeof baseResp === 'object') {
+    const statusCode = baseResp.status_code;
+    const statusMessage = typeof baseResp.status_message === 'string'
+      ? baseResp.status_message.trim()
+      : typeof baseResp.status_msg === 'string'
+        ? baseResp.status_msg.trim()
+        : `business error (status_code=${statusCode})`;
+    if (typeof statusCode === 'number' && statusCode !== 0) {
+      return Object.assign(
+        new Error(`[provider] Upstream provider returned business error: ${statusMessage}`),
+        {
+          upstreamCode: `provider_status_${statusCode}`,
+          code: 'MALFORMED_RESPONSE',
+          statusCode: 200,
+        }
+      );
+    }
+  }
+
+  // 格式 B: { error: { code: NNNN, message: "..." } }
+  const errorNode = responseRecord.error as Record<string, unknown> | undefined;
+  if (errorNode && typeof errorNode === 'object') {
+    const errorCode = errorNode.code;
+    const errorMessage = typeof errorNode.message === 'string'
+      ? errorNode.message.trim()
+      : `business error (code=${errorCode})`;
+    if (typeof errorCode === 'number' && errorCode > 0) {
+      return Object.assign(
+        new Error(`[provider] Upstream provider returned business error: ${errorMessage}`),
+        {
+          upstreamCode: `provider_status_${errorCode}`,
+          code: 'MALFORMED_RESPONSE',
+          statusCode: 200,
+        }
+      );
+    }
+  }
+
+  // 格式 C: { error_code: NNNN, error_msg: "..." }
+  // 常见于部分中国 provider 的顶层字段
+  const topLevelErrorCode = responseRecord.error_code;
+  if (typeof topLevelErrorCode === 'number' && topLevelErrorCode > 0) {
+    const errorMessage = typeof responseRecord.error_msg === 'string'
+      ? (responseRecord.error_msg as string).trim()
+      : typeof responseRecord.message === 'string'
+        ? (responseRecord.message as string).trim()
+        : `business error (error_code=${topLevelErrorCode})`;
+    return Object.assign(
+      new Error(`[provider] Upstream provider returned business error: ${errorMessage}`),
+      {
+        upstreamCode: `provider_status_${topLevelErrorCode}`,
+        code: 'MALFORMED_RESPONSE',
+        statusCode: 200,
+      }
+    );
+  }
+
+  return undefined;
 }
 
 export function resolveProviderRequestEndpoint(args: {

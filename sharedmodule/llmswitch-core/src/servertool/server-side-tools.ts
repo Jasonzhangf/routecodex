@@ -16,7 +16,6 @@ import './handlers/clock.js';
 import './handlers/clock-auto.js';
 import './handlers/gemini-empty-reply-continue.js';
 import './handlers/exec-command-guard.js';
-import './handlers/continue-execution.js';
 import './handlers/apply-patch.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { loadRoutingInstructionStateSync } from '../router/virtual-router/sticky-session-store.js';

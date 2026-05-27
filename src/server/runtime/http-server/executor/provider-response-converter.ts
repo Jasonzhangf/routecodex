@@ -914,6 +914,7 @@ export async function convertProviderResponseIfNeeded(
       && !Array.isArray(bridgeProviderResponse)
       && '__sse_responses' in (bridgeProviderResponse as Record<string, unknown>)
       && (options.entryEndpoint || entry).toLowerCase().includes('/v1/responses')
+      && options.providerProtocol === 'openai-responses'
     ) {
       logPipelineStage('convert.bridge.prebuilt_sse_passthrough', options.requestId, {
         entryEndpoint: options.entryEndpoint || entry,

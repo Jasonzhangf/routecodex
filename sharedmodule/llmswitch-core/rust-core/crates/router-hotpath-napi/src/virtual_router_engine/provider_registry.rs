@@ -61,13 +61,15 @@ impl ProviderRegistry {
         if model_id.is_empty() {
             return false;
         }
-        let Some(model_capabilities) = profile.model_capabilities.as_ref() else {
-            return false;
-        };
-        let Some(capabilities) = model_capabilities.get(&model_id) else {
-            return false;
-        };
-        capabilities.iter().any(|item| item == capability)
+        let explicit = profile
+            .model_capabilities
+            .as_ref()
+            .and_then(|model_capabilities| model_capabilities.get(&model_id))
+            .map(|capabilities| capabilities.iter().any(|item| item == capability));
+        if explicit == Some(true) {
+            return true;
+        }
+        self.has_default_capability(profile, capability)
     }
 
     pub(crate) fn resolve_runtime_key_by_index(
@@ -268,6 +270,88 @@ impl ProviderRegistry {
             server_tools_disabled,
             provider_specific_config,
         })
+    }
+}
+
+impl ProviderRegistry {
+    fn has_default_capability(&self, profile: &ProviderProfile, capability: &str) -> bool {
+        let provider_type = profile.provider_type.trim().to_ascii_lowercase();
+        let outbound = profile
+            .outbound_profile
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        let compatibility = profile
+            .compatibility_profile
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        match capability {
+            "multimodal" => {
+                provider_type == "responses"
+                    || outbound.contains("responses")
+                    || compatibility.contains("responses")
+                    || compatibility.contains("crs")
+            }
+            "web_search" => compatibility.contains("crs"),
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn responses_provider_defaults_to_multimodal_without_explicit_capabilities() {
+        let mut registry = ProviderRegistry::default();
+        let providers = json!({
+            "sdfv.key1.gpt-5.4": {
+                "providerKey": "sdfv.key1.gpt-5.4",
+                "providerType": "responses",
+                "modelId": "gpt-5.4"
+            }
+        });
+        registry.load(providers.as_object().unwrap());
+        assert!(registry.has_capability("sdfv.key1.gpt-5.4", "multimodal"));
+    }
+
+    #[test]
+    fn explicit_web_search_capability_does_not_disable_responses_multimodal_default() {
+        let mut registry = ProviderRegistry::default();
+        let providers = json!({
+            "sdfv.key1.gpt-5.4": {
+                "providerKey": "sdfv.key1.gpt-5.4",
+                "providerType": "responses",
+                "modelId": "gpt-5.4",
+                "modelCapabilities": {
+                    "gpt-5.4": ["web_search"]
+                }
+            }
+        });
+        registry.load(providers.as_object().unwrap());
+        assert!(registry.has_capability("sdfv.key1.gpt-5.4", "web_search"));
+        assert!(registry.has_capability("sdfv.key1.gpt-5.4", "multimodal"));
+    }
+
+    #[test]
+    fn crs_compatibility_defaults_to_web_search_and_multimodal() {
+        let mut registry = ProviderRegistry::default();
+        let providers = json!({
+            "dibittai.crsa.gpt-5.4": {
+                "providerKey": "dibittai.crsa.gpt-5.4",
+                "providerType": "openai",
+                "compatibilityProfile": "responses-crs",
+                "modelId": "gpt-5.4"
+            }
+        });
+        registry.load(providers.as_object().unwrap());
+        assert!(registry.has_capability("dibittai.crsa.gpt-5.4", "multimodal"));
+        assert!(registry.has_capability("dibittai.crsa.gpt-5.4", "web_search"));
     }
 }
 

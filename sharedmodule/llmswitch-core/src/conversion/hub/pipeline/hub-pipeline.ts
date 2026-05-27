@@ -60,7 +60,7 @@ function unregisterProviderRuntimeHooks(owner: unknown): void {
 }
 
 function updateRouterRuntimeDeps(args: {
-  deps: { healthStore?: HubPipelineConfig["healthStore"] | null; routingStateStore?: HubPipelineConfig["routingStateStore"] | null; quotaView?: HubPipelineConfig["quotaView"] | null; };
+  deps: { healthStore?: HubPipelineConfig["healthStore"] | null; routingStateStore?: HubPipelineConfig["routingStateStore"] | null; };
   config: HubPipelineConfig;
   routerEngine: VirtualRouterEngine;
 }): void {
@@ -68,9 +68,8 @@ function updateRouterRuntimeDeps(args: {
   if (!deps || typeof deps !== "object") return;
   if ("healthStore" in deps) config.healthStore = deps.healthStore ?? undefined;
   if ("routingStateStore" in deps) config.routingStateStore = (deps.routingStateStore ?? undefined) as any;
-  if ("quotaView" in deps) config.quotaView = deps.quotaView ?? undefined;
   try {
-    routerEngine.updateDeps({ healthStore: config.healthStore ?? null, routingStateStore: (config.routingStateStore ?? null) as any, quotaView: config.quotaView ?? null });
+    routerEngine.updateDeps({ healthStore: config.healthStore ?? null, routingStateStore: (config.routingStateStore ?? null) as any });
   } catch (updateDepsError) {
     logHubPipelineNonBlockingError("updateRuntimeDeps.routerEngine.updateDeps", updateDepsError);
   }
@@ -80,7 +79,6 @@ function createHubPipelineRouterEngine(config: HubPipelineConfig): VirtualRouter
   const routerEngine = new VirtualRouterEngine({
     healthStore: config.healthStore,
     routingStateStore: config.routingStateStore as any,
-    quotaView: config.quotaView,
   });
   routerEngine.initialize(config.virtualRouter);
   setHubPolicyRuntimePolicy(config.policy);
@@ -99,7 +97,6 @@ function applyHubPipelineRuntimeDeps(args: {
   deps: {
     healthStore?: HubPipelineConfig["healthStore"] | null;
     routingStateStore?: HubPipelineConfig["routingStateStore"] | null;
-    quotaView?: HubPipelineConfig["quotaView"] | null;
   };
   config: HubPipelineConfig;
   routerEngine: VirtualRouterEngine;
@@ -160,7 +157,6 @@ export class HubPipeline {
   updateRuntimeDeps(deps: {
     healthStore?: HubPipelineConfig["healthStore"] | null;
     routingStateStore?: HubPipelineConfig["routingStateStore"] | null;
-    quotaView?: HubPipelineConfig["quotaView"] | null;
   }): void {
     applyHubPipelineRuntimeDeps({
       deps,

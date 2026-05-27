@@ -8,19 +8,7 @@ describe('virtual-router context-weighted selection (safe window compensation)',
       const claude = 'claude.key1.claude';
       const gpt = 'openai.key1.gpt';
       const gemini = 'gemini.key1.gemini';
-
-      const quotaView = (providerKey: string) => ({
-        providerKey,
-        inPool: true,
-        priorityTier: 100,
-        selectionPenalty: 0,
-        cooldownUntil: null,
-        blacklistUntil: null,
-        lastErrorAtMs: null,
-        consecutiveErrorCount: 0
-      });
-
-      const engine = new VirtualRouterEngine({ quotaView });
+      const engine = new VirtualRouterEngine();
       engine.initialize({
         routing: {
           default: [{ id: 'rr', targets: [claude, gpt, gemini], priority: 100, mode: 'round-robin' }]
@@ -90,4 +78,3 @@ describe('virtual-router context-weighted selection (safe window compensation)',
     }
   });
 });
-

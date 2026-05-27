@@ -144,6 +144,28 @@ fn maybe_repair_malformed_exec_command_name(function: &mut Map<String, Value>) -
     true
 }
 
+fn normalize_write_stdin_args_for_client(args: &mut Map<String, Value>) {
+    // Reverse of req-side normalization (hub_req_inbound_tool_call_normalization.rs):
+    // server format: session_id, chars → client format: sessionId, text
+    if let Some(session_id) = args.remove("session_id") {
+        args.insert("sessionId".to_string(), session_id);
+    }
+    if let Some(chars) = args.remove("chars") {
+        args.insert("text".to_string(), chars);
+    }
+    // Also handle the case where only one field was normalized
+    if args.contains_key("session_id") && !args.contains_key("sessionId") {
+        if let Some(sid) = args.remove("session_id") {
+            args.insert("sessionId".to_string(), sid);
+        }
+    }
+    if args.contains_key("chars") && !args.contains_key("text") {
+        if let Some(ch) = args.remove("chars") {
+            args.insert("text".to_string(), ch);
+        }
+    }
+}
+
 pub(crate) fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_protocol: &str) {
     let protocol = client_protocol.trim().to_ascii_lowercase();
     let wants_anthropic_shell = protocol == "anthropic-messages";
@@ -172,6 +194,27 @@ pub(crate) fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_p
             else {
                 continue;
             };
+            // write_stdin is a standard client tool, not a malformed shell alias
+            // Req-side normalizes sessionId→session_id, text→chars; resp side reverses
+            {
+                let is_write_stdin = read_trimmed_string(function.get("name"))
+                    .map(|n| matches!(n.to_ascii_lowercase().as_str(), "write_stdin" | "write.stdin"))
+                    .unwrap_or(false);
+                if is_write_stdin {
+                    if let Some(arguments) = function.get("arguments").and_then(|v| v.as_str()) {
+                        if let Ok(mut parsed) = serde_json::from_str::<Value>(arguments) {
+                            if let Some(obj) = parsed.as_object_mut() {
+                                normalize_write_stdin_args_for_client(obj);
+                            }
+                            if let Ok(serialized) = serde_json::to_string(&parsed) {
+                                function.insert("arguments".to_string(), Value::String(serialized));
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+
             let _ = maybe_repair_malformed_exec_command_name(function);
             let Some(name) = read_trimmed_string(function.get("name")) else {
                 continue;

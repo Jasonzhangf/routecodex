@@ -139,4 +139,23 @@ describe('buildProviderProfiles with entries', () => {
     expect(auth.entries![0].apiKey).toBe('${API_KEY_1}');
     expect(auth.entries![1].env).toBe('API_KEY_2');
   });
+
+  it('应该兼容 v2 TOML 常用的 baseURL 字段', () => {
+    const config = {
+      providers: {
+        mimo: {
+          type: 'anthropic',
+          baseURL: 'https://token-plan-cn.xiaomimimo.com/anthropic',
+          auth: {
+            type: 'apikey',
+            apiKey: 'tp-demo'
+          }
+        }
+      }
+    };
+
+    const result = buildProviderProfiles(config);
+    expect(result.byId.mimo.transport.baseUrl).toBe('https://token-plan-cn.xiaomimimo.com/anthropic');
+  });
+
 });

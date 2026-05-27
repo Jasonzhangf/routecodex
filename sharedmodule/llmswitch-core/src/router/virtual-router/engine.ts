@@ -189,6 +189,22 @@ export class VirtualRouterEngine {
   getStatus(): RoutingStatusSnapshot {
     return JSON.parse(this.nativeProxy.getStatus()) as RoutingStatusSnapshot;
   }
+
+  resetProviderQuota(providerKey: string): void {
+    this.nativeProxy.resetProviderQuota?.(providerKey);
+  }
+
+  recoverProviderQuota(providerKey: string): void {
+    this.nativeProxy.recoverProviderQuota?.(providerKey);
+  }
+
+  disableProviderQuota(providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number): void {
+    this.nativeProxy.disableProviderQuota?.(providerKey, mode, durationMs);
+  }
+
+  applyKeepPoolCooldownQuota(providerKey: string, cooldownUntilMs: number, lastErrorCode?: string): void {
+    this.nativeProxy.applyKeepPoolCooldownQuota?.(providerKey, cooldownUntilMs, lastErrorCode);
+  }
 }
 
 function normalizeNativeVirtualRouterError(error: unknown): Error {
@@ -201,9 +217,14 @@ function normalizeNativeVirtualRouterError(error: unknown): Error {
   }
   const message = extractVirtualRouterNativeErrorMessage(error);
   if (isVirtualRouterErrorLike(error)) {
+    const details =
+      (error as { details?: unknown }).details && typeof (error as { details?: unknown }).details === 'object' && !Array.isArray((error as { details?: unknown }).details)
+        ? ((error as { details?: unknown }).details as Record<string, unknown>)
+        : undefined;
     return new VirtualRouterError(
       typeof error.message === 'string' && error.message.trim() ? error.message : 'Virtual router error',
-      error.code
+      error.code,
+      details
     );
   }
   return error instanceof Error ? error : new Error(message || 'Virtual router error');
@@ -287,19 +308,33 @@ function isVirtualRouterErrorLike(
 function injectRuntimeNowMs(metadata: RouterMetadataInput): RouterMetadataInput {
   const nowMs = Date.now();
   const rt = (metadata as { __rt?: unknown }).__rt;
-  const sessionDir = String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
+  const existingRt = rt && typeof rt === 'object' && !Array.isArray(rt)
+    ? (rt as Record<string, unknown>)
+    : undefined;
   const runtimeOverrides: Record<string, unknown> = { nowMs };
-  if (sessionDir) {
-    runtimeOverrides.sessionDir = sessionDir;
+
+  // Keep caller-provided runtime path overrides as highest priority.
+  // These are required for cross-port/session isolation during route + event lifecycle.
+  const hasSessionDir = typeof existingRt?.sessionDir === 'string' && existingRt.sessionDir.trim().length > 0;
+  if (!hasSessionDir) {
+    const sessionDir = String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
+    if (sessionDir) {
+      runtimeOverrides.sessionDir = sessionDir;
+    }
   }
-  const rccUserDir = resolveRccUserDir();
-  if (rccUserDir) {
-    runtimeOverrides.rccUserDir = rccUserDir;
+
+  const hasRccUserDir = typeof existingRt?.rccUserDir === 'string' && existingRt.rccUserDir.trim().length > 0;
+  if (!hasRccUserDir) {
+    const rccUserDir = resolveRccUserDir();
+    if (rccUserDir) {
+      runtimeOverrides.rccUserDir = rccUserDir;
+    }
   }
-  if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
+
+  if (existingRt) {
     return {
       ...metadata,
-      __rt: { ...(rt as Record<string, unknown>), ...runtimeOverrides }
+      __rt: { ...existingRt, ...runtimeOverrides }
     } as RouterMetadataInput;
   }
   return { ...metadata, __rt: runtimeOverrides } as RouterMetadataInput;

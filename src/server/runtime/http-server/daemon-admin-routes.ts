@@ -29,6 +29,10 @@ export interface DaemonAdminRouteOptions {
    */
   getVirtualRouterArtifacts: () => unknown | null;
   /**
+   * 返回当前 HubPipeline；quota/admin 只读面可借此读取 Virtual Router runtime status。
+   */
+  getHubPipeline?: () => unknown | null;
+  /**
    * Return the config path used to bootstrap this server instance (best-effort).
    * Control-plane mutate uses this path as the single write target.
    */

@@ -76,7 +76,14 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       }
     }));
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({}),
+      resolveImplForSubpath: () => null,
       getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+      getLlmsStatsSnapshot: () => null,
+      syncStoplessGoalStateFromRequest: () => {},
+      persistStoplessGoalStateSnapshot: async () => {},
+      readStoplessGoalState: () => null,
       extractSessionIdentifiersFromMetadata: () => ({}),
       extractAntigravityGeminiSessionId: () => undefined,
       cacheAntigravitySessionSignature: () => {},
@@ -135,6 +142,12 @@ describe('RouteCodexHttpServer quotaView injection', () => {
         }
       }),
       convertProviderResponse: async (value: any) => value,
+      createCoreQuotaManager: async () => null,
+      preloadCriticalBridgeRuntimeModules: async () => {},
+      captureResponsesRequestContextForRequest: async () => {},
+      recordResponsesResponseForRequest: async () => {},
+      clearResponsesConversationByRequestId: async () => {},
+      finalizeResponsesConversationRequestRetention: async () => {},
       createSnapshotRecorder: () => ({}) as any,
       rebindResponsesConversationRequestId: async () => {},
       resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
@@ -143,6 +156,9 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       ensureResponsesInstructions: async () => {},
       createResponsesSseToJsonConverter: async () => ({
         convertSseToJson: async () => ({})
+      }),
+      createResponsesJsonToSseConverter: async () => ({
+        convertResponseToJsonToSse: async () => ({})
       }),
       resolveClockConfigSnapshot: async () => null,
       reserveClockDueTasks: async () => ({ reservation: null }),
@@ -206,7 +222,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
     expect(oauthCall!.cfg.apikeyDailyResetTime).toBeNull();
   });
 
-  it('injects quotaView into HubPipeline config by default', async () => {
+  it('does not inject quotaView into HubPipeline config by default after Rust closeout', async () => {
     tempConfigPath = await createTempUserConfig();
 
     const captured: { quotaView?: unknown; quotaViewReadOnly?: unknown } = {};
@@ -214,7 +230,14 @@ describe('RouteCodexHttpServer quotaView injection', () => {
 
     jest.resetModules();
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({}),
+      resolveImplForSubpath: () => null,
       getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+      getLlmsStatsSnapshot: () => null,
+      syncStoplessGoalStateFromRequest: () => {},
+      persistStoplessGoalStateSnapshot: async () => {},
+      readStoplessGoalState: () => null,
       extractSessionIdentifiersFromMetadata: () => ({}),
       extractAntigravityGeminiSessionId: () => undefined,
       cacheAntigravitySessionSignature: () => {},
@@ -253,6 +276,12 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       }),
       bootstrapVirtualRouterConfig: async (input: any) => ({ config: input, targetRuntime: {} }),
       convertProviderResponse: async (value: any) => value,
+      createCoreQuotaManager: async () => null,
+      preloadCriticalBridgeRuntimeModules: async () => {},
+      captureResponsesRequestContextForRequest: async () => {},
+      recordResponsesResponseForRequest: async () => {},
+      clearResponsesConversationByRequestId: async () => {},
+      finalizeResponsesConversationRequestRetention: async () => {},
       createSnapshotRecorder: () => ({}) as any,
       rebindResponsesConversationRequestId: async () => {},
       resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
@@ -261,6 +290,9 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       ensureResponsesInstructions: async () => {},
       createResponsesSseToJsonConverter: async () => ({
         convertSseToJson: async () => ({})
+      }),
+      createResponsesJsonToSseConverter: async () => ({
+        convertResponseToJsonToSse: async () => ({})
       }),
       resolveClockConfigSnapshot: async () => null,
       reserveClockDueTasks: async () => ({ reservation: null }),
@@ -321,8 +353,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
     const userConfigRaw = JSON.parse(await fs.readFile(tempConfigPath, 'utf8'));
     await server.initializeWithUserConfig(userConfigRaw);
 
-    expect(typeof captured.quotaView).toBe('function');
-    expect(captured.quotaView).toBe(quotaView);
+    expect(captured.quotaView).toBeUndefined();
     expect(captured.quotaViewReadOnly).toBeUndefined();
   });
 
@@ -334,7 +365,14 @@ describe('RouteCodexHttpServer quotaView injection', () => {
 
     jest.resetModules();
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({}),
+      resolveImplForSubpath: () => null,
       getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+      getLlmsStatsSnapshot: () => null,
+      syncStoplessGoalStateFromRequest: () => {},
+      persistStoplessGoalStateSnapshot: async () => {},
+      readStoplessGoalState: () => null,
       extractSessionIdentifiersFromMetadata: () => ({}),
       extractAntigravityGeminiSessionId: () => undefined,
       cacheAntigravitySessionSignature: () => {},
@@ -373,6 +411,12 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       }),
       bootstrapVirtualRouterConfig: async (input: any) => ({ config: input, targetRuntime: {} }),
       convertProviderResponse: async (value: any) => value,
+      createCoreQuotaManager: async () => null,
+      preloadCriticalBridgeRuntimeModules: async () => {},
+      captureResponsesRequestContextForRequest: async () => {},
+      recordResponsesResponseForRequest: async () => {},
+      clearResponsesConversationByRequestId: async () => {},
+      finalizeResponsesConversationRequestRetention: async () => {},
       createSnapshotRecorder: () => ({}) as any,
       rebindResponsesConversationRequestId: async () => {},
       resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
@@ -381,6 +425,9 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       ensureResponsesInstructions: async () => {},
       createResponsesSseToJsonConverter: async () => ({
         convertSseToJson: async () => ({})
+      }),
+      createResponsesJsonToSseConverter: async () => ({
+        convertResponseToJsonToSse: async () => ({})
       }),
       resolveClockConfigSnapshot: async () => null,
       reserveClockDueTasks: async () => ({ reservation: null }),
@@ -445,7 +492,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
     expect(captured.quotaViewReadOnly).toBeUndefined();
   });
 
-  it('uses quotaViewReadOnly for llms-engine shadow pipeline to avoid double side effects', async () => {
+  it('does not inject quotaViewReadOnly into llms-engine shadow pipeline after Rust closeout', async () => {
     tempConfigPath = await createTempUserConfig();
 
     process.env.ROUTECODEX_SNAPSHOT = '0';
@@ -459,7 +506,14 @@ describe('RouteCodexHttpServer quotaView injection', () => {
 
     jest.resetModules();
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({}),
+      resolveImplForSubpath: () => null,
       getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+      getLlmsStatsSnapshot: () => null,
+      syncStoplessGoalStateFromRequest: () => {},
+      persistStoplessGoalStateSnapshot: async () => {},
+      readStoplessGoalState: () => null,
       extractSessionIdentifiersFromMetadata: () => ({}),
       extractAntigravityGeminiSessionId: () => undefined,
       cacheAntigravitySessionSignature: () => {},
@@ -498,6 +552,12 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       }),
       bootstrapVirtualRouterConfig: async (input: any) => ({ config: input, targetRuntime: {} }),
       convertProviderResponse: async (value: any) => value,
+      createCoreQuotaManager: async () => null,
+      preloadCriticalBridgeRuntimeModules: async () => {},
+      captureResponsesRequestContextForRequest: async () => {},
+      recordResponsesResponseForRequest: async () => {},
+      clearResponsesConversationByRequestId: async () => {},
+      finalizeResponsesConversationRequestRetention: async () => {},
       createSnapshotRecorder: () => ({}) as any,
       rebindResponsesConversationRequestId: async () => {},
       resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
@@ -506,6 +566,9 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       ensureResponsesInstructions: async () => {},
       createResponsesSseToJsonConverter: async () => ({
         convertSseToJson: async () => ({})
+      }),
+      createResponsesJsonToSseConverter: async () => ({
+        convertResponseToJsonToSse: async () => ({})
       }),
       resolveClockConfigSnapshot: async () => null,
       reserveClockDueTasks: async () => ({ reservation: null }),
@@ -571,6 +634,6 @@ describe('RouteCodexHttpServer quotaView injection', () => {
 
     await (server as any).ensureHubPipelineEngineShadow();
 
-    expect(captured.engineQuotaView).toBe(quotaViewReadOnly);
+    expect(captured.engineQuotaView).toBeUndefined();
   });
 });

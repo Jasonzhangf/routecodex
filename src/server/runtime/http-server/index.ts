@@ -958,15 +958,19 @@ export class RouteCodexHttpServer {
       allowedProviders = extractProviderKeysForRoutingGroup(this.userConfig, portConfig.routingPolicyGroup);
     }
 
+    // stopMessage 默认启用（true），除非端口显式配置 enabled=false
+    const effectiveStopMessageEnabled = typeof portConfig?.stopMessage?.enabled === 'boolean'
+      ? portConfig.stopMessage.enabled
+      : true;
+
     const metadata = {
       ...(input.metadata ?? {}),
       routecodexLocalPort: localPort,
       routecodexPortMode: portConfig?.mode ?? 'router',
       routecodexPortBinding: portConfig?.providerBinding,
       routecodexRoutingPolicyGroup: portConfig?.routingPolicyGroup,
-      ...(typeof portConfig?.stopMessage?.enabled === 'boolean'
-        ? { stopMessageEnabled: portConfig.stopMessage.enabled, routecodexPortStopMessageEnabled: portConfig.stopMessage.enabled }
-        : {}),
+      stopMessageEnabled: effectiveStopMessageEnabled,
+      routecodexPortStopMessageEnabled: effectiveStopMessageEnabled,
       ...(allowedProviders ? { allowedProviders } : {}),
     };
     const nextInput: PipelineExecutionInput = {

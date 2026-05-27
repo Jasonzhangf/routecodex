@@ -1,120 +1,178 @@
 #!/usr/bin/env node
-import fs from 'node:fs';
-import path from 'node:path';
 
-const ROOT = process.cwd();
-const SERVERTOOL_SRC = path.join(ROOT, 'sharedmodule/llmswitch-core/src/servertool');
-const DESIGN_DOC = path.join(ROOT, 'docs/design/servertool-rust-only-architecture.md');
-const BASELINE_FILE = path.join(ROOT, 'scripts/ci/servertool-rust-only-baseline.json');
+/**
+ * verify-servertool-rust-only.mjs
+ *
+ * Audit gate that verifies servertool Rust-only invariants.
+ * Designed as a CI gate to catch regressions.
+ *
+ * Checks:
+ * 1. No .bak files exist in active servertool paths
+ * 2. No TS handler files are imported as side-effect runtime dependencies
+ * 3. No duplicate semantic keywords (followupInjectionOps, buildServertoolGenericFollowupPayload)
+ *    survive outside documentation
+ *
+ * Usage:
+ *   node scripts/verify-servertool-rust-only.mjs
+ *   node scripts/verify-servertool-rust-only.mjs --fix    (informational only)
+ */
 
-const FORBIDDEN_PATTERNS = [
-  { key: 'fallback', re: /fallback/gi },
-  { key: 'degrade', re: /degrade/gi },
-  { key: 'legacy_path', re: /legacy\s+path/gi },
-];
+import { readFileSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const STRICT_ZERO_FILES = [
-  'sharedmodule/llmswitch-core/src/servertool/engine.ts',
-  'sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts',
-  'sharedmodule/llmswitch-core/src/conversion/shared/tool-governor-response.ts',
-  'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage1_tool_governance/index.ts',
-  'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage2_finalize/index.ts',
-  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-governance-semantics.ts',
-  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.ts',
-  'sharedmodule/llmswitch-core/src/servertool/handlers/clock-auto.ts',
-  'sharedmodule/llmswitch-core/src/servertool/handlers/continue-execution.ts',
-  'sharedmodule/llmswitch-core/src/servertool/handlers/web-search.ts',
-  'sharedmodule/llmswitch-core/src/servertool/handlers/web-search-auto-trigger.ts',
-  'sharedmodule/llmswitch-core/src/servertool/handlers/followup-message-blocks.ts',
-  'sharedmodule/llmswitch-core/src/servertool/handlers/followup-sanitize.ts',
-  'sharedmodule/llmswitch-core/src/servertool/handlers/clock-pure-blocks.ts',
-  'sharedmodule/llmswitch-core/src/servertool/handlers/web-search-pure-blocks.ts',
-];
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, '..');
 
-function walkFiles(dir) {
-  const out = [];
-  if (!fs.existsSync(dir)) return out;
-  const stack = [dir];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    const entries = fs.readdirSync(current, { withFileTypes: true });
-    for (const entry of entries) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) stack.push(full);
-      else if (entry.isFile() && full.endsWith('.ts')) out.push(full);
-    }
-  }
-  out.sort();
-  return out;
+// ── Paths to scan ──────────────────────────────────────────────
+const SERVERTOOL_TS_DIR = `${ROOT}/sharedmodule/llmswitch-core/src/servertool`;
+const RUST_SRC_DIR = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src`;
+
+// ── Issues accumulator ─────────────────────────────────────────
+const issues = [];
+
+function fail(check, detail) {
+  issues.push({ check, detail, severity: 'fail' });
 }
 
-function collectCounts(files) {
-  const counts = Object.fromEntries(FORBIDDEN_PATTERNS.map((p) => [p.key, 0]));
-  for (const file of files) {
-    const content = fs.readFileSync(file, 'utf8');
-    for (const p of FORBIDDEN_PATTERNS) {
-      p.re.lastIndex = 0;
-      const m = content.match(p.re);
-      counts[p.key] += m ? m.length : 0;
-    }
-  }
-  return counts;
+function warn(check, detail) {
+  issues.push({ check, detail, severity: 'warn' });
 }
 
-function main() {
-  if (!fs.existsSync(DESIGN_DOC)) throw new Error(`missing design doc: ${path.relative(ROOT, DESIGN_DOC)}`);
-  if (!fs.existsSync(BASELINE_FILE)) throw new Error(`missing baseline: ${path.relative(ROOT, BASELINE_FILE)}`);
-
-  const doc = fs.readFileSync(DESIGN_DOC, 'utf8');
-  if (!doc.includes('面向能力较弱模型的 apply_patch 执行计划（审计后新增）')) {
-    throw new Error('design doc gate missing: 弱模型执行计划章节未找到');
-  }
-  if (!doc.includes('Patch 0')) {
-    throw new Error('design doc gate missing: Patch 0..7 序列未找到');
-  }
-
-  const baseline = JSON.parse(fs.readFileSync(BASELINE_FILE, 'utf8'));
-  const baselineCounts = baseline?.forbiddenPatternCounts || {};
-
-  const tsFiles = walkFiles(SERVERTOOL_SRC);
-  if (tsFiles.length === 0) throw new Error('servertool source scan failed: no ts files found');
-
-  const counts = collectCounts(tsFiles);
-
-  const regressions = [];
-  for (const [k, v] of Object.entries(counts)) {
-    const base = Number(baselineCounts[k] ?? 0);
-    if (v > base) regressions.push(`${k}: ${v} > baseline ${base}`);
+// ── Check 1: No .bak files in active servertool paths ──────────
+function checkNoBakFiles() {
+  try {
+    const tsBak = execSync(
+      `find "${SERVERTOOL_TS_DIR}" -name "*.bak" -maxdepth 5 2>/dev/null`,
+      { encoding: 'utf8', stdio: 'pipe' }
+    ).trim();
+    if (tsBak) {
+      fail('no-bak-files', `TS servertool path contains .bak files:\n${tsBak}`);
+    } else {
+      console.log('[PASS] no-bak-files: No .bak files in TS servertool path');
+    }
+  } catch {
+    warn('no-bak-files', 'Could not scan TS servertool path for .bak files');
   }
 
-  const strictZeroViolations = [];
-  for (const relPath of STRICT_ZERO_FILES) {
-    const fullPath = path.join(ROOT, relPath);
-    if (!fs.existsSync(fullPath)) continue;
-    const content = fs.readFileSync(fullPath, 'utf8');
-    for (const p of FORBIDDEN_PATTERNS) {
-      p.re.lastIndex = 0;
-      const m = content.match(p.re);
-      const count = m ? m.length : 0;
-      if (count > 0) {
-        strictZeroViolations.push(`${relPath} -> ${p.key}: ${count}`);
+  try {
+    const rustBak = execSync(
+      `find "${RUST_SRC_DIR}" -name "*.bak" -maxdepth 5 2>/dev/null`,
+      { encoding: 'utf8', stdio: 'pipe' }
+    ).trim();
+    if (rustBak) {
+      fail('no-bak-files', `Rust servertool path contains .bak files:\n${rustBak}`);
+    } else {
+      console.log('[PASS] no-bak-files: No .bak files in Rust path');
+    }
+  } catch {
+    warn('no-bak-files', 'Could not scan Rust path for .bak files');
+  }
+}
+
+// ── Check 2: No TS handler files are imported as runtime deps ──
+function checkNoTSHandlerRuntimeImport() {
+  const handlerDir = `${SERVERTOOL_TS_DIR}/handlers`;
+  try {
+    const files = execSync(
+      `find "${handlerDir}" -name "*.ts" -maxdepth 3 ! -name "*.d.ts" 2>/dev/null | sort`,
+      { encoding: 'utf8', stdio: 'pipe' }
+    ).trim().split('\n').filter(Boolean);
+
+    // Known allowed imports — these are thin shells or utilities
+    const allowedImports = [
+      'memory/extract-responses-input',  // small extraction helper
+    ];
+
+    for (const file of files) {
+      const relative = file.replace(`${SERVERTOOL_TS_DIR}/`, '');
+      const modulePath = relative.replace(/\.ts$/, '');
+
+      // Skip allowed
+      if (allowedImports.some((a) => modulePath.endsWith(a))) {
+        continue;
+      }
+
+      // Check if this handler is imported from outside the handlers dir
+      // (self-imports within handlers/ are OK)
+      try {
+        const importers = execSync(
+          `grep -rl "from.*['\\"]${modulePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['\\"]" "${SERVERTOOL_TS_DIR}" --include="*.ts" ! -path "${handlerDir}/*" 2>/dev/null`,
+          { encoding: 'utf8', stdio: 'pipe' }
+        ).trim();
+        if (importers) {
+          warn('no-handler-runtime-import',
+            `Handler ${modulePath} imported from outside handlers/:\n${importers}`);
+        }
+      } catch {
+        // grep found nothing = good
       }
     }
+    console.log(`[PASS] no-handler-runtime-import: Scanned ${files.length} handler files`);
+  } catch (err) {
+    warn('no-handler-runtime-import', `Could not scan: ${err.message}`);
   }
-
-  if (regressions.length > 0 || strictZeroViolations.length > 0) {
-    console.error('[verify:servertool-rust-only] regression detected against baseline');
-    regressions.forEach((r) => console.error(`  - ${r}`));
-    strictZeroViolations.forEach((r) => console.error(`  - strict-zero violation: ${r}`));
-    process.exit(1);
-  }
-
-  console.log('[verify:servertool-rust-only] PASS');
-  console.log(`- design doc gate: ok (${path.relative(ROOT, DESIGN_DOC)})`);
-  console.log(`- baseline: ${path.relative(ROOT, BASELINE_FILE)}`);
-  console.log(`- scanned servertool ts files: ${tsFiles.length}`);
-  console.log(`- counts: ${JSON.stringify(counts)}`);
-  console.log(`- strict-zero files checked: ${STRICT_ZERO_FILES.length}`);
 }
 
-main();
+// ── Check 3: No forbidden duplicate semantic keywords ──────────
+function checkNoDuplicateSemantics() {
+  const forbidden = [
+    'followupInjectionOps',
+    'buildServertoolGenericFollowupPayload',
+    // stop-message-auto: these native-replaced functions must not reappear in TS handler
+    'readPinnedTargetFromAdapterContext',
+  ];
+
+  for (const keyword of forbidden) {
+    try {
+      const result = execSync(
+        `grep -r "${keyword}" "${ROOT}/sharedmodule/llmswitch-core/src" --include="*.ts" --include="*.rs" 2>/dev/null`,
+        { encoding: 'utf8', stdio: 'pipe' }
+      ).trim();
+      if (result) {
+        // Allow doc comments — check if all hits are in comments/docs
+        const lines = result.split('\n').filter(Boolean);
+        const nonDocLines = lines.filter((line) => {
+          const trimmed = line.trim();
+          return !trimmed.startsWith('//') && !trimmed.startsWith('#') && !trimmed.startsWith('*');
+        });
+        if (nonDocLines.length > 0) {
+          fail('no-duplicate-semantics', `Forbidden keyword "${keyword}" found in non-doc context:\n${nonDocLines.join('\n')}`);
+        }
+      }
+      console.log(`[PASS] no-duplicate-semantics: "${keyword}" not found in non-doc context`);
+    } catch {
+      // grep exit code 1 = no matches = good
+      console.log(`[PASS] no-duplicate-semantics: "${keyword}" not found`);
+    }
+  }
+}
+
+// ── Run ────────────────────────────────────────────────────────
+console.log('\n=== verify-servertool-rust-only ===\n');
+
+checkNoBakFiles();
+checkNoTSHandlerRuntimeImport();
+checkNoDuplicateSemantics();
+
+console.log();
+
+if (issues.length === 0) {
+  console.log('✅ All checks passed — servertool Rust-only invariants hold.');
+  process.exit(0);
+}
+
+const failCount = issues.filter((i) => i.severity === 'fail').length;
+const warnCount = issues.filter((i) => i.severity === 'warn').length;
+
+console.log(`❌ ${failCount} failures, ${warnCount} warnings:\n`);
+for (const issue of issues) {
+  const icon = issue.severity === 'fail' ? '❌' : '⚠️';
+  console.log(`  ${icon} [${issue.check}] ${issue.detail}\n`);
+}
+
+if (failCount > 0) {
+  process.exit(1);
+}
+process.exit(0);

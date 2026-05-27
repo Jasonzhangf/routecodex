@@ -5,7 +5,10 @@ import {
   resolveAnthropicRemoteImagePolicy,
   shouldRetryWithInlineRemoteImage
 } from '../../../../src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-transport.js';
-import { restoreAnthropicThinkingHistoryFromRawBody } from '../../../../src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-request-exec.js';
+import {
+  executeAnthropicRequestWithBody,
+  restoreAnthropicThinkingHistoryFromRawBody
+} from '../../../../src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-request-exec.js';
 
 describe('buildAnthropicSdkCallOptions', () => {
   it('maps top-level assistant reasoning_content into AI SDK reasoning parts', () => {
@@ -170,12 +173,7 @@ describe('buildAnthropicSdkCallOptions', () => {
       {
         role: 'assistant',
         content: [
-          { type: 'thinking', thinking: '我已经确认工作目录，接下来继续分析锁恢复链路。' }
-        ]
-      },
-      {
-        role: 'assistant',
-        content: [
+          { type: 'thinking', thinking: '我已经确认工作目录，接下来继续分析锁恢复链路。' },
           { type: 'thinking', thinking: '最终结论：继续排查 provider busy 恢复逻辑。' }
         ]
       }
@@ -219,6 +217,133 @@ describe('buildAnthropicSdkCallOptions', () => {
             id: 'call_1',
             name: 'echo_json',
             input: { message: 'ping' }
+          }
+        ]
+      }
+    ]);
+  });
+
+
+  it('coalesces consecutive user messages into a single anthropic user message with mixed text and tool_result blocks', () => {
+    const rawBody = {
+      model: 'mimo-v2.5-pro',
+      messages: [
+        { role: 'user', content: 'system-like prompt chunk' },
+        { role: 'user', content: 'user asks to continue' },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call_1',
+              name: 'exec_command',
+              input: { cmd: 'pwd' }
+            }
+          ],
+          reasoning_content: '.'
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'call_1',
+              content: 'ok'
+            }
+          ]
+        },
+        { role: 'user', content: '继续' }
+      ]
+    };
+
+    const restored = restoreAnthropicThinkingHistoryFromRawBody(rawBody as any, {
+      model: 'mimo-v2.5-pro',
+      messages: []
+    } as any) as any;
+
+    expect(restored.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'system-like prompt chunk' },
+          { type: 'text', text: 'user asks to continue' }
+        ]
+      },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '.' },
+          {
+            type: 'tool_use',
+            id: 'call_1',
+            name: 'exec_command',
+            input: { cmd: 'pwd' }
+          }
+        ]
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'call_1',
+            content: 'ok'
+          },
+          { type: 'text', text: '继续' }
+        ]
+      }
+    ]);
+  });
+
+  it('coalesces consecutive restored assistant reasoning turns into one anthropic assistant message', () => {
+    const rawBody = {
+      model: 'mimo-v2.5-pro',
+      thinking: { type: 'adaptive' },
+      messages: [
+        { role: 'user', content: '继续' },
+        {
+          role: 'assistant',
+          content: '',
+          reasoning_content: '先测试 WebSocket 节点。'
+        },
+        {
+          role: 'assistant',
+          content: '',
+          reasoning_content: '再检查 shunt 规则是否生效。'
+        },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call_1',
+              name: 'exec_command',
+              input: { cmd: 'pwd' }
+            }
+          ],
+          reasoning_content: '.'
+        }
+      ]
+    };
+
+    const restored = restoreAnthropicThinkingHistoryFromRawBody(rawBody as any, {
+      model: 'mimo-v2.5-pro',
+      messages: []
+    } as any) as any;
+
+    expect(restored.messages).toEqual([
+      { role: 'user', content: '继续' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '先测试 WebSocket 节点。' },
+          { type: 'thinking', thinking: '再检查 shunt 规则是否生效。' },
+          { type: 'thinking', thinking: '.' },
+          {
+            type: 'tool_use',
+            id: 'call_1',
+            name: 'exec_command',
+            input: { cmd: 'pwd' }
           }
         ]
       }
@@ -556,5 +681,122 @@ describe('hasRemoteAnthropicImageUrls', () => {
         }
       ]
     })).toBe(false);
+  });
+});
+
+describe('executeAnthropicRequestWithBody exact bad-sample family regression', () => {
+  it('strips internal session headers and coalesces consecutive anthropic roles before upstream send', async () => {
+    const originalFetch = global.fetch;
+    let capturedHeaders: Record<string, string> | undefined;
+    let capturedBody: Record<string, unknown> | undefined;
+
+    global.fetch = (async (_url, init) => {
+      capturedHeaders = { ...((init?.headers as Record<string, string>) || {}) };
+      capturedBody = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>;
+      return new Response(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', content: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }) as typeof fetch;
+
+    try {
+      await executeAnthropicRequestWithBody(
+        {
+          model: 'mimo-v2.5-pro',
+          stream: true,
+          thinking: { type: 'adaptive' },
+          tool_choice: { type: 'auto' },
+          messages: [
+            { role: 'user', content: 'u1' },
+            { role: 'user', content: 'u2' },
+            { role: 'user', content: 'u3' },
+            { role: 'assistant', content: '', reasoning_content: 'r1' },
+            { role: 'assistant', content: '', reasoning_content: 'r2' },
+            { role: 'user', content: '继续' }
+          ]
+        } as any,
+        {
+          endpoint: '/v1/messages',
+          headers: {
+            'content-type': 'application/json',
+            'anthropic-version': '2023-06-01',
+            'anthropic-beta': 'claude-code',
+            'x-api-key': 'test-key',
+            session_id: 'sess-internal',
+            conversation_id: 'conv-internal',
+            originator: 'codex-tui'
+          },
+          targetUrl: 'https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages',
+          body: {},
+          wantsSse: true
+        } as any
+      );
+
+      expect(capturedHeaders?.session_id).toBeUndefined();
+      expect(capturedHeaders?.conversation_id).toBeUndefined();
+      expect(capturedHeaders?.originator).toBeUndefined();
+      expect(Array.isArray(capturedBody?.messages)).toBe(true);
+      const roles = ((capturedBody?.messages as Array<Record<string, unknown>>) || []).map((entry) => entry.role);
+      expect(roles).toEqual(['user', 'assistant', 'user']);
+      expect((capturedBody?.messages as Array<Record<string, unknown>>)[0]?.content).toEqual([
+        { type: 'text', text: 'u1' },
+        { type: 'text', text: 'u2' },
+        { type: 'text', text: 'u3' }
+      ]);
+      expect((capturedBody?.messages as Array<Record<string, unknown>>)[1]?.content).toEqual([
+        { type: 'thinking', thinking: 'r1' },
+        { type: 'thinking', thinking: 'r2' }
+      ]);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+});
+
+describe('executeAnthropicRequestWithBody', () => {
+  it('reclassifies wrapped upstream 502 html from http 500 envelope to HTTP_502', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = (async () => new Response(
+      'data:{"error":{"code":"500","message":"<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>openresty</center></body></html>","param":"","type":"Internal Server Error"}}\n\n',
+      {
+        status: 500,
+        headers: { 'content-type': 'text/event-stream' }
+      }
+    )) as typeof fetch;
+
+    try {
+      await expect(
+        executeAnthropicRequestWithBody(
+          {
+            model: 'mimo-v2.5-pro',
+            max_tokens: 64,
+            messages: [{ role: 'user', content: 'hi' }]
+          } as any,
+          {
+            endpoint: '/v1/messages',
+            headers: {
+              'content-type': 'application/json',
+              'anthropic-version': '2023-06-01'
+            },
+            targetUrl: 'https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages',
+            body: {},
+            wantsSse: true
+          } as any
+        )
+      ).rejects.toMatchObject({
+        statusCode: 502,
+        status: 502,
+        response: {
+          status: 502,
+          data: {
+            error: {
+              code: 'HTTP_502'
+            }
+          }
+        }
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 });

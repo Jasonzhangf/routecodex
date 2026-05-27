@@ -63,6 +63,47 @@ const mockBridgeModule = () => ({
       return cloned;
     },
   })),
+  importCoreDist: jest.fn(async () => ({
+    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown, toolsRaw: unknown[]) => {
+      const toolName =
+        Array.isArray(toolsRaw) && toolsRaw[0] && typeof toolsRaw[0] === 'object'
+          ? String((((toolsRaw[0] as any).function || (toolsRaw[0] as any)).name) || '')
+          : '';
+      if (!payload || typeof payload !== 'object' || toolName !== 'exec_command') {
+        return payload as Record<string, unknown>;
+      }
+      const cloned = JSON.parse(JSON.stringify(payload));
+      const normalizeArgs = (holder: any) => {
+        if (!holder || typeof holder !== 'object') {
+          return;
+        }
+        try {
+          const parsed = typeof holder.arguments === 'string' ? JSON.parse(holder.arguments) : holder.arguments;
+          if (parsed && typeof parsed === 'object' && typeof parsed.command === 'string' && !parsed.cmd) {
+            holder.arguments = JSON.stringify({ cmd: parsed.command });
+          }
+        } catch {
+          // keep original shape on parse failure
+        }
+        if (holder.function && typeof holder.function === 'object') {
+          holder.function.arguments = holder.arguments;
+        }
+      };
+      const output = Array.isArray((cloned as any).output) ? (cloned as any).output : [];
+      for (const item of output) {
+        if (item && typeof item === 'object' && item.type === 'function_call') {
+          normalizeArgs(item);
+        }
+      }
+      const toolCalls = Array.isArray((cloned as any)?.required_action?.submit_tool_outputs?.tool_calls)
+        ? (cloned as any).required_action.submit_tool_outputs.tool_calls
+        : [];
+      for (const toolCall of toolCalls) {
+        normalizeArgs(toolCall);
+      }
+      return cloned;
+    },
+  })),
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
   syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
   persistStoplessGoalStateSnapshot: mockPersistStoplessGoalStateSnapshot,

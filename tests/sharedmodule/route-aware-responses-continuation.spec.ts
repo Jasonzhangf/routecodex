@@ -235,7 +235,125 @@ describe('route-aware responses continuation', () => {
     expect(result.input).toEqual(request.input);
   });
 
-  test('consults continuation store when submit_tool_outputs/responsesResume provide explicit continuation evidence', async () => {
+
+
+  test('RED: servertool followup metadata alone must not consult scope continuation store for plain responses create', async () => {
+    mockResumeLatestResponsesContinuationByScope.mockReturnValue({
+      payload: {
+        previous_response_id: 'resp_scope_should_not_win',
+        input: [{ type: 'function_call_output', call_id: 'call_scope_should_not_win', output: 'bad' }],
+        tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }],
+      },
+      meta: {
+        previousResponseId: 'resp_scope_should_not_win',
+        restoredFromScopeKey: `session:${sessionId}`,
+      },
+    });
+
+    const { resolveRouteAwareResponsesContinuation } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js');
+
+    const request = {
+      model: 'gpt-5.4',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '继续执行' }],
+        },
+      ],
+      tools: [
+        {
+          type: 'function',
+          name: 'exec_command',
+          parameters: {
+            type: 'object',
+            properties: { cmd: { type: 'string' } },
+            required: ['cmd'],
+            additionalProperties: false,
+          },
+        },
+      ],
+    } as Record<string, unknown>;
+
+    const result = resolveRouteAwareResponsesContinuation({
+      request: request as any,
+      rawRequest: request as any,
+      normalizedMetadata: {
+        sessionId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        __rt: {
+          serverToolFollowup: true,
+          clientInjectSource: 'stop_message_flow',
+        },
+      },
+      requestId: 'req_route_aware_servertool_followup_plain_create',
+      entryProtocol: 'openai-responses',
+      outboundProtocol: 'openai-responses',
+    }) as Record<string, unknown>;
+
+    expect(mockResumeLatestResponsesContinuationByScope).not.toHaveBeenCalled();
+    expect(result.previous_response_id).toBeUndefined();
+    expect(result.input).toEqual(request.input);
+    expect(result.tools).toEqual(request.tools);
+  });
+
+  test('RED: servertool followup metadata alone must not materialize local relay continuation across protocol boundary', async () => {
+    mockMaterializeLatestResponsesContinuationByScope.mockReturnValue({
+      payload: {
+        input: [{ type: 'function_call_output', call_id: 'call_scope_materialized', output: 'bad' }],
+        tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }],
+      },
+      meta: {
+        previousResponseId: 'resp_scope_materialized',
+        restoredFromScopeKey: `session:${sessionId}`,
+      },
+    });
+
+    const { resolveRouteAwareResponsesContinuation } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.js');
+
+    const request = {
+      model: 'gpt-5.4',
+      messages: [{ role: 'user', content: '继续执行' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: {
+              type: 'object',
+              properties: { cmd: { type: 'string' } },
+              required: ['cmd'],
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+    } as Record<string, unknown>;
+
+    const result = resolveRouteAwareResponsesContinuation({
+      request: request as any,
+      rawRequest: request as any,
+      normalizedMetadata: {
+        sessionId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        __rt: {
+          serverToolFollowup: true,
+          clientInjectSource: 'stop_message_flow',
+        },
+      },
+      requestId: 'req_route_aware_servertool_followup_cross_protocol_plain_create',
+      entryProtocol: 'openai-responses',
+      outboundProtocol: 'anthropic-messages',
+    }) as Record<string, unknown>;
+
+    expect(mockMaterializeLatestResponsesContinuationByScope).not.toHaveBeenCalled();
+    expect(result.messages).toEqual(request.messages);
+    expect(result.tools).toEqual(request.tools);
+  });
+
+    test('consults continuation store when submit_tool_outputs/responsesResume provide explicit continuation evidence', async () => {
     mockResumeLatestResponsesContinuationByScope.mockReturnValue({
       payload: {
         previous_response_id: 'resp_explicit_resume_ok',

@@ -17,6 +17,8 @@ impl VirtualRouterEngineCore {
         json!({
             "routes": routes,
             "health": self.health_manager.snapshot(),
+            "quota": self.quota_manager.snapshot(),
+            "quotaHostSnapshot": self.quota_manager.host_snapshot(),
         })
     }
 }

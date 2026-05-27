@@ -10,9 +10,55 @@ interface ModuleStatusView {
   details?: Record<string, unknown>;
 }
 
+type RustQuotaHostSnapshotEntry = {
+  providerKey?: unknown;
+};
+
+type RustQuotaHostMutator = {
+  getStatus?(): { quotaHostSnapshot?: unknown } | null;
+  resetProviderQuota?(providerKey: string): unknown;
+};
+
 function logDaemonStatusNonBlockingError(operation: string, error: unknown): void {
   const reason = error instanceof Error ? error.message : String(error);
   console.warn(`[daemon-status] ${operation} failed (non-blocking): ${reason}`);
+}
+
+function getRustQuotaHostMutator(options: DaemonAdminRouteOptions): RustQuotaHostMutator | null {
+  const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
+  if (!hubPipeline || typeof hubPipeline !== 'object') {
+    return null;
+  }
+  const getVirtualRouter = (hubPipeline as { getVirtualRouter?: () => unknown | null }).getVirtualRouter;
+  if (typeof getVirtualRouter !== 'function') {
+    return null;
+  }
+  const virtualRouter = getVirtualRouter();
+  if (!virtualRouter || typeof virtualRouter !== 'object') {
+    return null;
+  }
+  return virtualRouter as RustQuotaHostMutator;
+}
+
+function readRustQuotaHostSnapshotProviderKeys(mutator: RustQuotaHostMutator | null): string[] {
+  if (!mutator || typeof mutator.getStatus !== 'function') {
+    return [];
+  }
+  try {
+    const status = mutator.getStatus();
+    const snapshot = Array.isArray(status?.quotaHostSnapshot) ? status?.quotaHostSnapshot : [];
+    return snapshot
+      .map((entry) => {
+        const providerKey = typeof (entry as RustQuotaHostSnapshotEntry | null)?.providerKey === 'string'
+          ? String((entry as RustQuotaHostSnapshotEntry).providerKey).trim()
+          : '';
+        return providerKey;
+      })
+      .filter((providerKey) => providerKey.length > 0);
+  } catch (error: unknown) {
+    logDaemonStatusNonBlockingError('readRustQuotaHostSnapshotProviderKeys', error);
+    return [];
+  }
 }
 
 export function registerStatusRoutes(app: Application, options: DaemonAdminRouteOptions): void {
@@ -182,6 +228,40 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
       // - When "provider-quota" module is absent, provide an explicit fallback that clears quotaView cooldown/blacklist
       //   by calling quota.resetProvider(...) on all known providerKeys.
       if (id === 'provider-quota') {
+        const rustMutator = getRustQuotaHostMutator(options);
+        const rustProviderKeys = readRustQuotaHostSnapshotProviderKeys(rustMutator);
+        if (rustMutator && typeof rustMutator.resetProviderQuota === 'function' && rustProviderKeys.length > 0) {
+          try {
+            for (const providerKey of rustProviderKeys) {
+              await Promise.resolve(rustMutator.resetProviderQuota(providerKey));
+            }
+            const quotaMod = daemon.getModule('quota') as
+              | (ManagerModule & {
+                  refreshNow?: () => Promise<unknown>;
+                })
+              | undefined;
+            const quotaRefresh = await quotaMod?.refreshNow?.().catch((error: unknown) => {
+              logDaemonStatusNonBlockingError('provider-quota.reset.refreshNow', error);
+              return null;
+            });
+            res.status(200).json({
+              ok: true,
+              id,
+              action: 'reset',
+              resetAt: Date.now(),
+              fallback: {
+                kind: 'rust-quota.reset-all',
+                providerCount: rustProviderKeys.length,
+                ...(quotaRefresh ? { quotaRefresh } : {})
+              }
+            });
+            return;
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            res.status(500).json({ error: { message, code: 'module_reset_failed' } });
+            return;
+          }
+        }
         const quotaMod = daemon.getModule('quota') as
           | (ManagerModule & {
               getAdminSnapshot?: () => Record<string, unknown>;

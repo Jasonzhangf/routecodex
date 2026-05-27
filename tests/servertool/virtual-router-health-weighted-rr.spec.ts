@@ -16,35 +16,8 @@ describe('virtual-router health-weighted round-robin (AWRR)', () => {
     const b = 'mockB.key1.gpt-5.2';
 
     const now = Date.now();
-    const quotaView = (providerKey: string) => {
-      if (providerKey === a) {
-        return {
-          providerKey,
-          inPool: true,
-          priorityTier: 100,
-          selectionPenalty: 0,
-          lastErrorAtMs: now,
-          consecutiveErrorCount: 5,
-          cooldownUntil: null,
-          blacklistUntil: null
-        };
-      }
-      if (providerKey === b) {
-        return {
-          providerKey,
-          inPool: true,
-          priorityTier: 100,
-          selectionPenalty: 0,
-          lastErrorAtMs: null,
-          consecutiveErrorCount: 0,
-          cooldownUntil: null,
-          blacklistUntil: null
-        };
-      }
-      return null;
-    };
 
-    const engine = new VirtualRouterEngine({ quotaView });
+    const engine = new VirtualRouterEngine();
     engine.initialize({
       routing: { default: [{ id: 'rr', targets: [a, b], priority: 100, mode: 'round-robin' }] },
       providers: {
@@ -71,8 +44,46 @@ describe('virtual-router health-weighted round-robin (AWRR)', () => {
         healthWeighted: { enabled: true, baseWeight: 100, minMultiplier: 0.5, beta: 0.1, halfLifeMs: 10 * 60_000 }
       },
       contextRouting: { warnRatio: 0.9, hardLimit: false },
-      health: { failureThreshold: 3, cooldownMs: 5_000, fatalCooldownMs: 10_000 }
+      health: { failureThreshold: 999, cooldownMs: 5_000, fatalCooldownMs: 10_000 }
     } as any);
+
+    engine.handleProviderError({
+      code: 'HTTP_502',
+      status: 502,
+      errorClassification: 'recoverable',
+      runtime: { providerKey: a, runtimeKey: 'mockA.key1' },
+      timestamp: now
+    } as any);
+    engine.handleProviderError({
+      code: 'HTTP_502',
+      status: 502,
+      errorClassification: 'recoverable',
+      runtime: { providerKey: a, runtimeKey: 'mockA.key1' },
+      timestamp: now
+    } as any);
+    engine.handleProviderError({
+      code: 'HTTP_502',
+      status: 502,
+      errorClassification: 'recoverable',
+      runtime: { providerKey: a, runtimeKey: 'mockA.key1' },
+      timestamp: now
+    } as any);
+    engine.handleProviderError({
+      code: 'HTTP_502',
+      status: 502,
+      errorClassification: 'recoverable',
+      runtime: { providerKey: a, runtimeKey: 'mockA.key1' },
+      timestamp: now
+    } as any);
+    engine.handleProviderError({
+      code: 'HTTP_502',
+      status: 502,
+      errorClassification: 'recoverable',
+      runtime: { providerKey: a, runtimeKey: 'mockA.key1' },
+      timestamp: now
+    } as any);
+
+
 
     const request: any = { model: 'gpt-5.2', messages: [{ role: 'user', content: 'hi' }], tools: [], parameters: {} };
     const metadata: any = {
@@ -107,35 +118,8 @@ describe('virtual-router health-weighted round-robin (AWRR)', () => {
 
     const now = Date.now();
     const oldErrorAt = now - 60 * 60_000;
-    const quotaView = (providerKey: string) => {
-      if (providerKey === a) {
-        return {
-          providerKey,
-          inPool: true,
-          priorityTier: 100,
-          selectionPenalty: 0,
-          lastErrorAtMs: oldErrorAt,
-          consecutiveErrorCount: 5,
-          cooldownUntil: null,
-          blacklistUntil: null
-        };
-      }
-      if (providerKey === b) {
-        return {
-          providerKey,
-          inPool: true,
-          priorityTier: 100,
-          selectionPenalty: 0,
-          lastErrorAtMs: null,
-          consecutiveErrorCount: 0,
-          cooldownUntil: null,
-          blacklistUntil: null
-        };
-      }
-      return null;
-    };
 
-    const engine = new VirtualRouterEngine({ quotaView });
+    const engine = new VirtualRouterEngine();
     engine.initialize({
       routing: { default: [{ id: 'rr', targets: [a, b], priority: 100, mode: 'round-robin' }] },
       providers: {
@@ -159,7 +143,43 @@ describe('virtual-router health-weighted round-robin (AWRR)', () => {
       classifier: { longContextThresholdTokens: 180000, thinkingKeywords: [], backgroundKeywords: [] },
       loadBalancing: { strategy: 'round-robin', healthWeighted: { enabled: true } },
       contextRouting: { warnRatio: 0.9, hardLimit: false },
-      health: { failureThreshold: 3, cooldownMs: 5_000, fatalCooldownMs: 10_000 }
+      health: { failureThreshold: 999, cooldownMs: 5_000, fatalCooldownMs: 10_000 }
+    } as any);
+
+    engine.handleProviderError({
+      code: 'HTTP_502',
+      status: 502,
+      errorClassification: 'recoverable',
+      runtime: { providerKey: a, runtimeKey: 'mockA.key1' },
+      timestamp: oldErrorAt
+    } as any);
+    engine.handleProviderError({
+      code: 'HTTP_502',
+      status: 502,
+      errorClassification: 'recoverable',
+      runtime: { providerKey: a, runtimeKey: 'mockA.key1' },
+      timestamp: oldErrorAt
+    } as any);
+    engine.handleProviderError({
+      code: 'HTTP_502',
+      status: 502,
+      errorClassification: 'recoverable',
+      runtime: { providerKey: a, runtimeKey: 'mockA.key1' },
+      timestamp: oldErrorAt
+    } as any);
+    engine.handleProviderError({
+      code: 'HTTP_502',
+      status: 502,
+      errorClassification: 'recoverable',
+      runtime: { providerKey: a, runtimeKey: 'mockA.key1' },
+      timestamp: oldErrorAt
+    } as any);
+    engine.handleProviderError({
+      code: 'HTTP_502',
+      status: 502,
+      errorClassification: 'recoverable',
+      runtime: { providerKey: a, runtimeKey: 'mockA.key1' },
+      timestamp: oldErrorAt
     } as any);
 
     const request: any = { model: 'gpt-5.2', messages: [{ role: 'user', content: 'hi' }], tools: [], parameters: {} };

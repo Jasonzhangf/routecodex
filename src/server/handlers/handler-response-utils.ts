@@ -65,6 +65,14 @@ type StreamContractProbeEnvelope = {
   emitted?: boolean;
 };
 
+function isResponsesTerminalProbeStatus(status: unknown): boolean {
+  if (typeof status !== 'string') {
+    return false;
+  }
+  const normalized = status.trim().toLowerCase();
+  return normalized === 'completed' || normalized === 'requires_action';
+}
+
 function updateContractProbeFromSseChunk(
   chunk: unknown,
   contractProbe: StreamContractProbeEnvelope
@@ -126,7 +134,12 @@ function updateContractProbeFromSseChunk(
     if (response) {
       if (typeof response.id === 'string' && response.id.trim()) probe.id = response.id;
       if (typeof response.object === 'string' && response.object.trim()) probe.object = response.object;
-      if (typeof response.status === 'string' && response.status.trim()) probe.status = response.status;
+      if (typeof response.status === 'string' && response.status.trim()) {
+        const nextStatus = response.status;
+        if (!isResponsesTerminalProbeStatus(probe.status) || isResponsesTerminalProbeStatus(nextStatus)) {
+          probe.status = nextStatus;
+        }
+      }
     }
     if ((eventName === 'response.required_action' || parsed.type === 'response.required_action') && requiredAction) {
       probe.required_action = requiredAction;
@@ -175,9 +188,14 @@ function buildResponsesTerminalSseFramesFromProbe(probe: Record<string, unknown>
   const frames: string[] = [];
   if (requiredAction) {
     frames.push(`event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response: responsePayload, required_action: requiredAction })}\n\n`);
+    frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
+    frames.push('data: [DONE]\n\n');
+    return frames;
   }
-  frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
-  frames.push('data: [DONE]\n\n');
+  if (status === 'completed') {
+    frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
+    frames.push('data: [DONE]\n\n');
+  }
   return frames;
 }
 
@@ -1368,6 +1386,7 @@ export async function sendPipelineResponse(
     let totalTimer: NodeJS.Timeout | null = null;
     let keepaliveTimer: NodeJS.Timeout | null = null;
     let terminalFlushTimer: NodeJS.Timeout | null = null;
+    let terminalAutoCloseTimer: NodeJS.Timeout | null = null;
     const terminalWatch: SseTerminalWatch = {
       sawTerminalChunk: false,
     };
@@ -1465,6 +1484,14 @@ export async function sendPipelineResponse(
       3_000
     );
 
+    const detachOutboundStream = () => {
+      try {
+        outboundStream.unpipe(res);
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.unpipe:${requestLabel}`, error);
+      }
+    };
+
     const clearTimers = () => {
       if (totalTimer) {
         clearTimeout(totalTimer);
@@ -1478,6 +1505,10 @@ export async function sendPipelineResponse(
         clearTimeout(terminalFlushTimer);
         terminalFlushTimer = null;
       }
+      if (terminalAutoCloseTimer) {
+        clearTimeout(terminalAutoCloseTimer);
+        terminalAutoCloseTimer = null;
+      }
     };
 
     const endWithSseError = (code: string, message: string) => {
@@ -1486,6 +1517,7 @@ export async function sendPipelineResponse(
       }
       ended = true;
       clearTimers();
+      detachOutboundStream();
       logPipelineStage('response.sse.stream.timeout', requestLabel, { code, message });
       try {
         const payload = { type: 'error', status: 504, error: { message, code } };
@@ -1543,6 +1575,7 @@ export async function sendPipelineResponse(
       }
       cleanupLogged = true;
       clearTimers();
+      detachOutboundStream();
       try {
         stream.destroy?.();
       } catch (error) {
@@ -1605,12 +1638,47 @@ export async function sendPipelineResponse(
         void persistNativeSseConversationState().catch((error) => {
           logResponseNonBlockingError(`responses-conversation-native-sse-terminal:${requestLabel}`, error);
         });
+        if (terminalWatch.terminalSource === 'response.required_action' && !terminalAutoCloseTimer) {
+          terminalAutoCloseTimer = setTimeout(() => {
+            terminalAutoCloseTimer = null;
+            if (ended || streamEnded || res.writableEnded || res.destroyed) {
+              return;
+            }
+            const repairedFrames = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe);
+            if (repairedFrames.length > 0) {
+              try {
+                for (const frame of repairedFrames) {
+                  res.write(frame);
+                }
+                finishTracker.seenTerminalEvent = true;
+                finishTracker.finishReason = finishTracker.finishReason ?? 'tool_calls';
+                contractProbe.emitted = true;
+              } catch (repairWriteError) {
+                logResponseNonBlockingError(`response.sse.required_action.auto_close.write_terminal:${requestLabel}`, repairWriteError);
+              }
+            }
+            try {
+              stream.destroy?.();
+            } catch (destroyError) {
+              logResponseNonBlockingError(`response.sse.required_action.auto_close.destroy_stream:${requestLabel}`, destroyError);
+            }
+            if (!res.writableEnded && !res.destroyed) {
+              try {
+                res.end();
+              } catch (endError) {
+                logResponseNonBlockingError(`response.sse.required_action.auto_close.end:${requestLabel}`, endError);
+              }
+            }
+          }, 120);
+          terminalAutoCloseTimer.unref?.();
+        }
       }, 25);
       terminalFlushTimer.unref?.();
     });
     stream.on('error', (error: Error) => {
       ended = true;
       clearTimers();
+      detachOutboundStream();
       getSessionExecutionStateTracker().recordSseClientClose(requestLabel, {
         finishReason: finishTracker.finishReason,
         terminal: finishTracker.seenTerminalEvent,

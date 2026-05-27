@@ -17,6 +17,27 @@ function mergePreservedRequestFields(rawBody: UnknownRecord, builtBody: UnknownR
   return next;
 }
 
+function sanitizeAnthropicOutboundHeaders(headers: Record<string, string>): Record<string, string> {
+  const next = { ...headers };
+  delete next.session_id;
+  delete next.conversation_id;
+  delete next.originator;
+  delete next.Session_Id;
+  delete next.Conversation_Id;
+  delete next.Originator;
+  for (const key of Object.keys(next)) {
+    const lowered = key.toLowerCase();
+    if (
+      lowered === 'session_id'
+      || lowered === 'conversation_id'
+      || lowered === 'originator'
+    ) {
+      delete next[key];
+    }
+  }
+  return next;
+}
+
 function responseHeadersToRecord(headers: unknown): Record<string, string> | undefined {
   if (!headers || typeof headers !== 'object') {
     return undefined;
@@ -29,24 +50,64 @@ function responseHeadersToRecord(headers: unknown): Record<string, string> | und
   return Object.fromEntries(entries);
 }
 
+function parseWrappedUpstreamStatus(responseText: string): number | undefined {
+  const trimmed = responseText.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const candidates: string[] = [trimmed];
+  if (trimmed.startsWith('data:')) {
+    candidates.push(trimmed.slice('data:'.length).trim());
+  }
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as Record<string, unknown>;
+      const errorBag =
+        parsed?.error && typeof parsed.error === 'object' && !Array.isArray(parsed.error)
+          ? (parsed.error as Record<string, unknown>)
+          : undefined;
+      const directStatus = typeof errorBag?.status === 'number' ? errorBag.status : undefined;
+      if (directStatus && directStatus >= 100 && directStatus <= 599) {
+        return directStatus;
+      }
+      const message = typeof errorBag?.message === 'string' ? errorBag.message : '';
+      const code = typeof errorBag?.code === 'string' ? errorBag.code.trim() : '';
+      const text = `${message}\n${code}`;
+      const statusMatch =
+        text.match(/\b(502|503|504|520)\b/) ??
+        text.match(/\b(429|408|425)\b/);
+      if (statusMatch) {
+        const parsedStatus = Number.parseInt(statusMatch[1], 10);
+        if (Number.isFinite(parsedStatus)) {
+          return parsedStatus;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
 function buildHttpError(status: number, responseText: string): Error & {
   statusCode: number;
   status: number;
   response: { status: number; data: { error: { message: string; code: string } } };
 } {
-  const error = new Error(`HTTP ${status}: ${responseText}`) as Error & {
+  const effectiveStatus = parseWrappedUpstreamStatus(responseText) ?? status;
+  const error = new Error(`HTTP ${effectiveStatus}: ${responseText}`) as Error & {
     statusCode: number;
     status: number;
     response: { status: number; data: { error: { message: string; code: string } } };
   };
-  error.statusCode = status;
-  error.status = status;
+  error.statusCode = effectiveStatus;
+  error.status = effectiveStatus;
   error.response = {
-    status,
+    status: effectiveStatus,
     data: {
       error: {
         message: responseText,
-        code: `HTTP_${status}`
+        code: `HTTP_${effectiveStatus}`
       }
     }
   };
@@ -174,6 +235,61 @@ function toAnthropicAssistantContent(rawMessage: UnknownRecord): unknown {
   return cloneUnknown(rawContent);
 }
 
+function toAnthropicAssistantContentBlocks(content: unknown): unknown[] {
+  if (Array.isArray(content)) {
+    return cloneUnknown(content);
+  }
+  if (typeof content === 'string') {
+    return content.trim() ? [{ type: 'text', text: content }] : [];
+  }
+  if (content == null) {
+    return [];
+  }
+  return [cloneUnknown(content)];
+}
+
+function toAnthropicUserContentBlocks(content: unknown): unknown[] {
+  if (Array.isArray(content)) {
+    return cloneUnknown(content);
+  }
+  if (typeof content === 'string') {
+    return content.trim() ? [{ type: 'text', text: content }] : [];
+  }
+  if (content == null) {
+    return [];
+  }
+  return [cloneUnknown(content)];
+}
+
+function coalesceConsecutiveAnthropicMessages(messages: UnknownRecord[]): UnknownRecord[] {
+  const out: UnknownRecord[] = [];
+  for (const message of messages) {
+    const role = pickString(message.role)?.toLowerCase();
+    const previous = out[out.length - 1];
+    const previousRole = previous ? pickString(previous.role)?.toLowerCase() : undefined;
+    if (!previous || previousRole !== role) {
+      out.push(message);
+      continue;
+    }
+    if (role === 'assistant') {
+      previous.content = [
+        ...toAnthropicAssistantContentBlocks(previous.content),
+        ...toAnthropicAssistantContentBlocks(message.content)
+      ];
+      continue;
+    }
+    if (role === 'user') {
+      previous.content = [
+        ...toAnthropicUserContentBlocks(previous.content),
+        ...toAnthropicUserContentBlocks(message.content)
+      ];
+      continue;
+    }
+    out.push(message);
+  }
+  return out;
+}
+
 export function restoreAnthropicThinkingHistoryFromRawBody(
   rawBody: UnknownRecord,
   builtBody: UnknownRecord
@@ -201,7 +317,7 @@ export function restoreAnthropicThinkingHistoryFromRawBody(
     return builtBody;
   }
 
-  const restoredMessages = rawMessages
+  const restoredMessages = coalesceConsecutiveAnthropicMessages(rawMessages
     .filter((message): message is UnknownRecord => Boolean(message && typeof message === 'object'))
     .map((message) => {
       const role = pickString(message.role)?.toLowerCase();
@@ -216,7 +332,7 @@ export function restoreAnthropicThinkingHistoryFromRawBody(
       delete next.reasoningContent;
       delete next.reasoning;
       return next;
-    });
+    }));
 
   return {
     ...builtBody,
@@ -250,7 +366,9 @@ export async function executeAnthropicRequestWithBody(
   const args = asRecord(argsResult.args);
   const betas = argsResult.betas instanceof Set ? argsResult.betas : new Set<string>();
   const url = model.buildRequestUrl(requestInfo.wantsSse);
-  const headers = await model.getHeaders({ betas, headers: callOptions.headers });
+  const headers = sanitizeAnthropicOutboundHeaders(
+    await model.getHeaders({ betas, headers: callOptions.headers })
+  );
   const body = restoreAnthropicThinkingHistoryFromRawBody(
     rawBody,
     asRecord(model.transformRequestBody(args, betas))

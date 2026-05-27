@@ -8,6 +8,8 @@ export interface ProviderErrorRuntimeMetadata {
   pipelineId?: string;
   target?: Record<string, unknown> | null;
   runtimeKey?: string;
+  sessionDir?: string;
+  rccUserDir?: string;
 }
 
 export interface ProviderErrorEvent {
@@ -16,6 +18,13 @@ export interface ProviderErrorEvent {
   stage: string;
   status?: number;
   recoverable?: boolean;
+  affectsHealth?: boolean;
+  fatal?: boolean;
+  cooldownOverrideMs?: number;
+  quotaScope?: string;
+  quotaReason?: string;
+  resetAt?: string;
+  errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
   runtime: ProviderErrorRuntimeMetadata;
   timestamp: number;
   details?: Record<string, unknown>;
@@ -31,6 +40,8 @@ export interface ProviderSuccessRuntimeMetadata {
   pipelineId?: string;
   target?: Record<string, unknown> | null;
   runtimeKey?: string;
+  sessionDir?: string;
+  rccUserDir?: string;
 }
 
 export interface ProviderSuccessEvent {
@@ -88,6 +99,7 @@ export interface QuotaState {
   authIssue?: QuotaAuthIssue;
   priorityTier: number;
   cooldownUntil: number | null;
+  cooldownKeepsPool?: boolean;
   blacklistUntil: number | null;
   lastErrorSeries: 'E429' | 'E5XX' | 'ENET' | 'EFATAL' | 'EOTHER' | null;
   lastErrorCode: string | null;

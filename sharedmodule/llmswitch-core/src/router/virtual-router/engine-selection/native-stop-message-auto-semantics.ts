@@ -2,6 +2,7 @@
 // Types defined inline — no self-import.
 
 import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
+import { failNativeRequired } from './native-router-hotpath-policy.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,43 @@ function fallbackSkip(reason: string): StopMessageDecision {
 }
 
 // ── Native bridge ───────────────────────────────────────────────────────────
+
+type StopMessageHandlerResult = {
+  chatResponse: Record<string, unknown>;
+  flowId: string;
+  followup: Record<string, unknown> | null;
+  persistKeys: string[];
+  stateUpdate: Record<string, unknown> | null;
+};
+
+export function runStopMessageAutoHandlerWithNative(input: {
+  decision: StopMessageDecision;
+  adapterContext: Record<string, unknown>;
+  base: Record<string, unknown>;
+  candidateKeys: string[];
+  stickyKey?: string;
+  strictSessionScope?: string;
+  followupFlowId?: string;
+}): StopMessageHandlerResult {
+  const capability = 'runStopMessageAutoHandlerJson';
+  const fail = (reason?: string) => failNativeRequired<StopMessageHandlerResult>(capability, reason);
+  try {
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+      return fail('native_unavailable');
+    }
+    const inputJson = JSON.stringify(input);
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string') {
+      return fail(`native_returned_non_string: ${typeof raw}`);
+    }
+    const parsed = JSON.parse(raw) as StopMessageHandlerResult;
+    return parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
 
 export function decideStopMessageActionWithNative(ctx: StopMessageDecisionContext): StopMessageDecision {
   const capability = 'decideStopMessageAction';

@@ -109,6 +109,16 @@ export interface ProviderProfile {
     windsurf?: Partial<WindsurfProviderRuntimeOptions>;
     concurrency?: ProviderConcurrencyConfig;
     rpm?: ProviderRpmConfig;
+    /**
+     * Provider 内部自动重试配置。
+     * 配置文件中使用 autoRetry 字段。
+     */
+    autoRetry?: {
+      /** 连续自动重试阈值，超过此值才上报 health impact。默认 3 */
+      threshold?: number;
+      /** 要自动重试的错误码列表（全局统一编号 XXXX.YYYY 格式） */
+      codes?: string[];
+    };
   };
 }
 

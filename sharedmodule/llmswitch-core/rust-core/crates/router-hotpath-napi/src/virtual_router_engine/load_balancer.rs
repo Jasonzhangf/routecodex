@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+use super::context_weighted::ContextWeightedConfig;
 use super::health_weighted::HealthWeightedConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,6 +10,7 @@ pub(crate) struct LoadBalancingPolicy {
     pub strategy: Option<String>,
     pub weights: Option<HashMap<String, i64>>,
     pub health_weighted: Option<HealthWeightedConfig>,
+    pub context_weighted: Option<ContextWeightedConfig>,
 }
 
 impl Default for LoadBalancingPolicy {
@@ -17,6 +19,7 @@ impl Default for LoadBalancingPolicy {
             strategy: Some("round-robin".to_string()),
             weights: None,
             health_weighted: None,
+            context_weighted: None,
         }
     }
 }
@@ -41,6 +44,7 @@ impl RouteLoadBalancer {
                 strategy: Some("round-robin".to_string()),
                 weights: None,
                 health_weighted: None,
+                context_weighted: None,
             }),
             states: HashMap::new(),
         }

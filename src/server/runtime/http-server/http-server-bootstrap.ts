@@ -500,10 +500,6 @@ export async function ensureHubPipelineEngineShadow(server: any): Promise<HubPip
     };
   }
 
-  const quotaViewReadOnly = baseConfig.quotaViewReadOnly as ((providerKey: string) => unknown) | undefined;
-  if (typeof quotaViewReadOnly === 'function') {
-    shadowConfig.quotaView = quotaViewReadOnly;
-  }
 
   const bridge = (await import('../../../modules/llmswitch/bridge.js')) as {
     getHubPipelineCtorForImpl?: (impl: 'engine') => Promise<unknown>;

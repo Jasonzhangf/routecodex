@@ -12,7 +12,11 @@ import { registerQuotaRoutes } from '../../../src/server/runtime/http-server/dae
 const BRIDGE_MODULE_PATH = '../../../src/modules/llmswitch/bridge.js';
 const GATE_MODULE_PATH = new URL('../../../src/server/runtime/http-server/daemon-admin/routecodex-x7e-gate.ts', import.meta.url).pathname;
 
-async function createAuthenticatedServer(daemon: { getModule: (id: string) => any }, loginFile: string): Promise<{
+async function createAuthenticatedServer(
+  daemon: { getModule: (id: string) => any },
+  loginFile: string,
+  hubPipeline?: unknown
+): Promise<{
   base: string;
   cookie: string;
   close: () => Promise<void>;
@@ -25,7 +29,8 @@ async function createAuthenticatedServer(daemon: { getModule: (id: string) => an
   registerQuotaRoutes(app, {
     app,
     getManagerDaemon: () => daemon,
-    getServerId: () => 'test:0'
+    getServerId: () => 'test:0',
+    getHubPipeline: () => hubPipeline ?? null
   });
 
   const server = http.createServer(app);
@@ -59,6 +64,89 @@ async function createAuthenticatedServer(daemon: { getModule: (id: string) => an
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  };
+}
+
+function createMockHubPipeline(rustStateRef: { current: Record<string, any> }) {
+  return {
+    getVirtualRouter: () => ({
+      getStatus: () => ({
+        quotaHostSnapshot: Object.values(rustStateRef.current)
+      }),
+      resetProviderQuota: (providerKey: string) => {
+        const state = rustStateRef.current[providerKey];
+        rustStateRef.current[providerKey] = {
+          ...(state ?? { providerKey, authType: 'unknown', priorityTier: 100 }),
+          providerKey,
+          inPool: true,
+          reason: 'active',
+          authIssue: null,
+          cooldownUntil: null,
+          blacklistUntil: null,
+          resetAt: null,
+          lastErrorSeries: null,
+          lastErrorCode: null,
+          lastErrorAtMs: null,
+          consecutiveErrorCount: 0,
+          selectionPenalty: 0,
+          lastProviderGuardApplied: false
+        };
+      },
+      recoverProviderQuota: (providerKey: string) => {
+        const state = rustStateRef.current[providerKey];
+        rustStateRef.current[providerKey] = {
+          ...(state ?? { providerKey, authType: 'unknown', priorityTier: 100 }),
+          providerKey,
+          inPool: true,
+          reason: 'active',
+          authIssue: null,
+          cooldownUntil: null,
+          blacklistUntil: null,
+          resetAt: null,
+          consecutiveErrorCount: 0,
+          selectionPenalty: 0,
+          lastProviderGuardApplied: false
+        };
+      },
+      disableProviderQuota: (providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number) => {
+        const nowMs = Date.now();
+        const state = rustStateRef.current[providerKey];
+        const until = nowMs + durationMs;
+        rustStateRef.current[providerKey] = {
+          ...(state ?? { providerKey, authType: 'unknown', priorityTier: 100 }),
+          providerKey,
+          inPool: false,
+          reason: mode === 'blacklist' ? 'blacklist' : 'cooldown',
+          authIssue: null,
+          cooldownUntil: mode === 'cooldown' ? until : null,
+          blacklistUntil: mode === 'blacklist' ? until : null,
+          resetAt: null,
+          consecutiveErrorCount: Math.max(Number(state?.consecutiveErrorCount ?? 0), 1),
+          selectionPenalty: Math.max(Number(state?.selectionPenalty ?? 0), 1),
+          lastProviderGuardApplied: false
+        };
+      },
+      applyKeepPoolCooldownQuota: (providerKey: string, cooldownUntilMs: number, lastErrorCode = 'HTTP_402') => {
+        const state = rustStateRef.current[providerKey];
+        rustStateRef.current[providerKey] = {
+          ...(state ?? { providerKey, authType: 'unknown', priorityTier: 100 }),
+          providerKey,
+          inPool: true,
+          reason: 'cooldown',
+          authIssue: null,
+          cooldownUntil: cooldownUntilMs,
+          cooldownKeepsPool: true,
+          blacklistUntil: null,
+          resetAt: null,
+          lastErrorSeries: 'EOTHER',
+          lastErrorCode,
+          lastErrorAtMs: Date.now(),
+          consecutiveErrorCount: 0,
+          selectionPenalty: 0,
+          lastProviderGuardApplied: false
+        };
+      }
+    })
   };
 }
 
@@ -113,6 +201,29 @@ describe('daemon-admin quota unified special-family consistency', () => {
     const runtimeKey = 'quota.key1';
     const resetAtIso = '2026-05-28T00:00:00.000Z';
     const resetAtMs = Date.parse(resetAtIso);
+    const rustStateRef = {
+      current: {
+        [providerKey]: {
+          providerKey,
+          inPool: true,
+          reason: 'active',
+          authType: 'apikey',
+          authIssue: null,
+          priorityTier: 100,
+          cooldownUntil: null,
+          cooldownKeepsPool: undefined,
+          blacklistUntil: null,
+          resetAt: null,
+          lastErrorSeries: null,
+          lastErrorCode: null,
+          lastErrorAtMs: null,
+          consecutiveErrorCount: 0,
+          selectionPenalty: 0,
+          lastProviderGuardApplied: false
+        }
+      }
+    };
+    const hubPipeline = createMockHubPipeline(rustStateRef);
 
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-resetat-special-'));
     createdTmpDir = tmpDir;
@@ -120,11 +231,11 @@ describe('daemon-admin quota unified special-family consistency', () => {
     process.env.ROUTECODEX_QUOTA_DIR = path.join(tmpDir, 'quota');
 
     const mod1 = new QuotaManagerModule();
-    await mod1.init({ serverId: 'test' });
+    await mod1.init({ serverId: 'test', getHubPipeline: () => hubPipeline });
     mod1.registerProviderStaticConfig(providerKey, { authType: 'apikey', priorityTier: 100, apikeyDailyResetTime: '12:00Z' });
     await mod1.start();
     const daemon1 = { getModule: (id: string) => (id === 'quota' ? mod1 : undefined) };
-    const server1 = await createAuthenticatedServer(daemon1, createdLoginFile);
+    const server1 = await createAuthenticatedServer(daemon1, createdLoginFile, hubPipeline);
 
     try {
       activeHooks.onProviderError({
@@ -135,6 +246,19 @@ describe('daemon-admin quota unified special-family consistency', () => {
         timestamp: Date.now(),
         details: { resetAt: resetAtIso }
       });
+      rustStateRef.current[providerKey] = {
+        ...rustStateRef.current[providerKey],
+        inPool: true,
+        reason: 'cooldown',
+        cooldownUntil: resetAtMs,
+        cooldownKeepsPool: true,
+        resetAt: null,
+        lastErrorSeries: 'EOTHER',
+        lastErrorCode: 'HTTP_402',
+        lastErrorAtMs: Date.now(),
+        consecutiveErrorCount: 0,
+        selectionPenalty: 0
+      };
 
       const snapshotAfterError = mod1.getAdminSnapshot()[providerKey];
       const readOnlyAfterError = mod1.getQuotaViewReadOnly()(providerKey);
@@ -168,11 +292,11 @@ describe('daemon-admin quota unified special-family consistency', () => {
       await server1.close();
 
       const mod2 = new QuotaManagerModule();
-      await mod2.init({ serverId: 'test' });
+      await mod2.init({ serverId: 'test', getHubPipeline: () => hubPipeline });
       mod2.registerProviderStaticConfig(providerKey, { authType: 'apikey', priorityTier: 100, apikeyDailyResetTime: '12:00Z' });
       await mod2.start();
       const daemon2 = { getModule: (id: string) => (id === 'quota' ? mod2 : undefined) };
-      const server2 = await createAuthenticatedServer(daemon2, createdLoginFile);
+      const server2 = await createAuthenticatedServer(daemon2, createdLoginFile, hubPipeline);
 
       try {
         const hydratedSnapshot = mod2.getAdminSnapshot()[providerKey];
@@ -205,6 +329,20 @@ describe('daemon-admin quota unified special-family consistency', () => {
           runtime: { providerKey, runtimeKey },
           timestamp: Date.now()
         });
+        rustStateRef.current[providerKey] = {
+          ...rustStateRef.current[providerKey],
+          inPool: true,
+          reason: 'active',
+          cooldownUntil: null,
+          blacklistUntil: null,
+          authIssue: null,
+          resetAt: null,
+          lastErrorSeries: null,
+          lastErrorCode: null,
+          lastErrorAtMs: null,
+          consecutiveErrorCount: 0,
+          selectionPenalty: 0
+        };
 
         const snapshotAfterSuccess = mod2.getAdminSnapshot()[providerKey];
         const readOnlyAfterSuccess = mod2.getQuotaViewReadOnly()(providerKey);
@@ -229,7 +367,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
         expect(adminAfterSuccess).toMatchObject({
           providerKey,
           inPool: true,
-          reason: 'ok',
+          reason: 'active',
           consecutiveErrorCount: 0
         });
         expect(adminAfterSuccess?.cooldownUntil).toBeNull();
@@ -266,6 +404,29 @@ describe('daemon-admin quota unified special-family consistency', () => {
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
     const providerKey = 'auth.key1.gpt-test';
     const runtimeKey = 'auth.key1';
+    const rustStateRef = {
+      current: {
+        [providerKey]: {
+          providerKey,
+          inPool: true,
+          reason: 'active',
+          authType: 'apikey',
+          authIssue: null,
+          priorityTier: 100,
+          cooldownUntil: null,
+          cooldownKeepsPool: undefined,
+          blacklistUntil: null,
+          resetAt: null,
+          lastErrorSeries: null,
+          lastErrorCode: null,
+          lastErrorAtMs: null,
+          consecutiveErrorCount: 0,
+          selectionPenalty: 0,
+          lastProviderGuardApplied: false
+        }
+      }
+    };
+    const hubPipeline = createMockHubPipeline(rustStateRef);
 
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-auth-special-'));
     createdTmpDir = tmpDir;
@@ -273,11 +434,11 @@ describe('daemon-admin quota unified special-family consistency', () => {
     process.env.ROUTECODEX_QUOTA_DIR = path.join(tmpDir, 'quota');
 
     const mod1 = new QuotaManagerModule();
-    await mod1.init({ serverId: 'test' });
+    await mod1.init({ serverId: 'test', getHubPipeline: () => hubPipeline });
     mod1.registerProviderStaticConfig(providerKey, { authType: 'apikey', priorityTier: 100 });
     await mod1.start();
     const daemon1 = { getModule: (id: string) => (id === 'quota' ? mod1 : undefined) };
-    const server1 = await createAuthenticatedServer(daemon1, createdLoginFile);
+    const server1 = await createAuthenticatedServer(daemon1, createdLoginFile, hubPipeline);
 
     try {
       activeHooks.onProviderError({
@@ -293,6 +454,22 @@ describe('daemon-admin quota unified special-family consistency', () => {
           }
         }
       });
+      rustStateRef.current[providerKey] = {
+        ...rustStateRef.current[providerKey],
+        inPool: false,
+        reason: 'authVerify',
+        authIssue: {
+          kind: 'google_account_verification',
+          url: 'https://example.invalid/verify'
+        },
+        cooldownUntil: null,
+        blacklistUntil: null,
+        lastErrorSeries: 'EFATAL',
+        lastErrorCode: 'NEW_API_ERROR',
+        lastErrorAtMs: Date.now(),
+        consecutiveErrorCount: 1,
+        selectionPenalty: 1
+      };
 
       const snapshotAfterError = mod1.getAdminSnapshot()[providerKey];
       const readOnlyAfterError = mod1.getQuotaViewReadOnly()(providerKey);
@@ -323,11 +500,11 @@ describe('daemon-admin quota unified special-family consistency', () => {
       await server1.close();
 
       const mod2 = new QuotaManagerModule();
-      await mod2.init({ serverId: 'test' });
+      await mod2.init({ serverId: 'test', getHubPipeline: () => hubPipeline });
       mod2.registerProviderStaticConfig(providerKey, { authType: 'apikey', priorityTier: 100 });
       await mod2.start();
       const daemon2 = { getModule: (id: string) => (id === 'quota' ? mod2 : undefined) };
-      const server2 = await createAuthenticatedServer(daemon2, createdLoginFile);
+      const server2 = await createAuthenticatedServer(daemon2, createdLoginFile, hubPipeline);
 
       try {
         const hydratedSnapshot = mod2.getAdminSnapshot()[providerKey];
@@ -352,7 +529,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
         expect(hydratedAdmin).toMatchObject({
           providerKey,
           inPool: true,
-          reason: 'ok',
+          reason: 'active',
           consecutiveErrorCount: 0
         });
         expect(hydratedAdmin?.authIssue ?? null).toBeNull();
@@ -361,6 +538,19 @@ describe('daemon-admin quota unified special-family consistency', () => {
           runtime: { providerKey, runtimeKey },
           timestamp: Date.now()
         });
+        rustStateRef.current[providerKey] = {
+          ...rustStateRef.current[providerKey],
+          inPool: true,
+          reason: 'active',
+          authIssue: null,
+          cooldownUntil: null,
+          blacklistUntil: null,
+          lastErrorSeries: null,
+          lastErrorCode: null,
+          lastErrorAtMs: null,
+          consecutiveErrorCount: 0,
+          selectionPenalty: 0
+        };
 
         const snapshotAfterSuccess = mod2.getAdminSnapshot()[providerKey];
         const readOnlyAfterSuccess = mod2.getQuotaViewReadOnly()(providerKey);
@@ -382,7 +572,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
         expect(adminAfterSuccess).toMatchObject({
           providerKey,
           inPool: true,
-          reason: 'ok',
+          reason: 'active',
           consecutiveErrorCount: 0
         });
       } finally {

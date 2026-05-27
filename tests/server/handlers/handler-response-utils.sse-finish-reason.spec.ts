@@ -77,6 +77,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       clearResponsesConversationByRequestId: async () => undefined,
       finalizeResponsesConversationRequestRetention: async () => undefined,
       recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -137,6 +138,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       clearResponsesConversationByRequestId: async () => undefined,
       finalizeResponsesConversationRequestRetention: async () => undefined,
       recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -188,6 +190,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       clearResponsesConversationByRequestId: async () => undefined,
       finalizeResponsesConversationRequestRetention: async () => undefined,
       recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -244,6 +247,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       clearResponsesConversationByRequestId: async () => undefined,
       finalizeResponsesConversationRequestRetention: async () => undefined,
       recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -298,6 +302,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       clearResponsesConversationByRequestId: async () => undefined,
       finalizeResponsesConversationRequestRetention: async () => undefined,
       recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -349,6 +354,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       clearResponsesConversationByRequestId: async () => undefined,
       finalizeResponsesConversationRequestRetention: async () => undefined,
       recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -402,6 +408,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       clearResponsesConversationByRequestId: async () => undefined,
       finalizeResponsesConversationRequestRetention: async () => undefined,
       recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       importCoreDist: async () => ({}),
@@ -452,5 +459,84 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(output).toContain(': trailing-tail-after-terminal');
     expect(output).toContain('data: [DONE]');
     expect(responseErrors).toEqual([]);
+  });
+
+  it('RED: synthesizes response.completed when stream closes without terminal but contractProbe already carries completed response fact', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = new PassThrough();
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream,
+          __routecodex_stream_finish_reason: 'stop',
+          __routecodex_stream_contract_probe_body: {
+            id: 'resp_probe_completed_1',
+            object: 'response',
+            status: 'completed',
+            output: [
+              {
+                id: 'msg_probe_completed_1',
+                type: 'message',
+                role: 'assistant',
+                status: 'completed',
+                content: [
+                  {
+                    type: 'output_text',
+                    text: 'ok'
+                  }
+                ]
+              }
+            ],
+            output_text: 'ok'
+          }
+        }
+      } as any,
+      'req-stream-probe-completed-no-terminal',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    stream.write('event: response.created\n');
+    stream.write(
+      'data: {"type":"response.created","response":{"id":"resp_probe_completed_1","object":"response","status":"in_progress"}}\n\n'
+    );
+    stream.write('event: response.output_text.delta\n');
+    stream.write('data: {"type":"response.output_text.delta","delta":"ok"}\n\n');
+    stream.end();
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output).toContain('event: response.completed');
+    expect(output).toContain('"status":"completed"');
+    expect(output).toContain('"output_text":"ok"');
+    expect(output).toContain('data: [DONE]');
+    expect(output).not.toContain('upstream_stream_incomplete');
+    expect(output).not.toContain('event: error');
   });
 });

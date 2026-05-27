@@ -325,6 +325,7 @@ fn normalize_route_pool_entry(
                 strategy: Some("weighted".to_string()),
                 weights: Some(HashMap::from([(target, weight)])),
                 health_weighted: None,
+                context_weighted: None,
             }),
             route_params,
             thinking: normalize_thinking(record),
@@ -418,6 +419,7 @@ fn normalize_simplified_weighted_route(
             strategy: Some("weighted".to_string()),
             weights: Some(weights),
             health_weighted: None,
+            context_weighted: None,
         }),
         route_params,
         thinking,
@@ -566,6 +568,7 @@ fn normalize_route_pool_load_balancing(input: Option<&Value>) -> Option<LoadBala
             Some(weights)
         },
         health_weighted: None,
+        context_weighted: None,
     })
 }
 

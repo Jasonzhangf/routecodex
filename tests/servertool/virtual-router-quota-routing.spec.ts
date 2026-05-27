@@ -1,5 +1,4 @@
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
-import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
 describe('virtual-router quotaView routing', () => {
   const providerA = 'mock.providerA.model';
@@ -64,7 +63,7 @@ describe('virtual-router quotaView routing', () => {
     expect(result.target.providerKey).toBe(providerA);
   });
 
-  it('excludes providers that are not inPool according to quotaView', () => {
+  it('does not let TS quotaView out-of-pool state override Rust route decision', () => {
     const engine = createEngine((key: string) => ({
       providerKey: key,
       inPool: key !== providerA,
@@ -72,10 +71,10 @@ describe('virtual-router quotaView routing', () => {
       priorityTier: 100
     }));
     const result = route(engine);
-    expect(result.target.providerKey).toBe(providerB);
+    expect(result.target.providerKey).toBe(providerA);
   });
 
-  it('keeps providers selectable during transient cooldown when quota keeps them in pool', () => {
+  it('ignores TS quotaView transient keep-pool cooldown for route selection when Rust has no blocker', () => {
     const now = Date.now();
     const engine = createEngine((key: string) => {
       if (key === providerA) {
@@ -102,7 +101,7 @@ describe('virtual-router quotaView routing', () => {
     expect(result.target.providerKey).toBe(providerA);
   });
 
-  it('excludes providers in hard cooldown when quota removes them from pool', () => {
+  it('ignores TS quotaView hard cooldown for route selection when Rust has no blocker', () => {
     const now = Date.now();
     const engine = createEngine((key: string) => {
       if (key === providerA) {
@@ -126,10 +125,10 @@ describe('virtual-router quotaView routing', () => {
       };
     });
     const result = route(engine);
-    expect(result.target.providerKey).toBe(providerB);
+    expect(result.target.providerKey).toBe(providerA);
   });
 
-  it('does not empty the route when the only provider is in transient keep-pool cooldown', () => {
+  it('does not empty the route when the only provider has only TS quotaView keep-pool cooldown metadata', () => {
     const now = Date.now();
     const engine = new VirtualRouterEngine({
       quotaView: (key: string) => ({
@@ -172,7 +171,7 @@ describe('virtual-router quotaView routing', () => {
     expect(result.target.providerKey).toBe(providerA);
   });
 
-  it('does not empty the route for the only provider after automatic quota keep-pool cooldown', () => {
+  it('does not empty the route for the only provider when TS quotaView only reports error-decay metadata', () => {
     const now = Date.now();
     const engine = new VirtualRouterEngine({
       quotaView: (key: string) => ({
@@ -216,7 +215,7 @@ describe('virtual-router quotaView routing', () => {
     expect(result.target.providerKey).toBe(providerA);
   });
 
-  it('does not empty a single-provider route on stale cooldown without active cooldownUntil', () => {
+  it('does not empty a single-provider route on stale TS quotaView cooldown residue', () => {
     const engine = createEngine((key: string) => ({
       providerKey: key,
       inPool: false,
@@ -256,30 +255,6 @@ describe('virtual-router quotaView routing', () => {
 
     const result = route(engine);
     expect(result.target.providerKey).toBe(providerA);
-  });
-
-  it('fails fast with cooldown hints when quotaView empties the route', () => {
-    const now = Date.now();
-    const engine = createEngine((key: string) => ({
-      providerKey: key,
-      inPool: false,
-      reason: 'cooldown',
-      priorityTier: 100,
-      cooldownUntil: now + 1500,
-      blacklistUntil: null
-    }));
-
-    try {
-      route(engine);
-      throw new Error('expected route to fail');
-    } catch (error) {
-      expect(error).toBeInstanceOf(VirtualRouterError);
-      const err = error as VirtualRouterError & { details?: Record<string, unknown> };
-      expect(err.code).toBe('PROVIDER_NOT_AVAILABLE');
-      expect(typeof err.details?.minRecoverableCooldownMs).toBe('number');
-      expect((err.details?.minRecoverableCooldownMs as number) > 0).toBe(true);
-      expect(Array.isArray(err.details?.recoverableCooldownHints)).toBe(true);
-    }
   });
 
   it('does not empty gateway 10000 when mini27 is keep-pool cooldown and mimo is healthy', () => {

@@ -67,6 +67,7 @@ const config: OpenAIStandardConfig = {
   }
 };
 
+
 const noopLogger: PipelineDebugLogger = {
   logModule: () => {},
   logError: () => {},

@@ -1,5 +1,6 @@
 import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import type { StopMessageCompareContext } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
+export type { StopMessageCompareContext } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
 
 const STOP_MESSAGE_COMPARE_KEY = 'stopMessageCompareContext';
 

@@ -484,4 +484,24 @@ mod tests {
 
         assert_eq!(queue, vec!["coding".to_string(), "default".to_string()]);
     }
+
+    #[test]
+    fn image_attachment_without_multimodal_targets_still_keeps_default_route_available() {
+        let routing = parse_routing(&Map::from_iter([(
+            "default".to_string(),
+            Value::Array(vec![serde_json::json!({
+                "id": "default",
+                "priority": 100,
+                "targets": ["provider.default"]
+            })]),
+        )]));
+        let features = RoutingFeatures {
+            has_image_attachment: true,
+            ..Default::default()
+        };
+
+        let queue = build_route_queue("thinking", &["default".to_string()], &features, &routing);
+
+        assert_eq!(queue, vec!["thinking".to_string(), "default".to_string()]);
+    }
 }

@@ -27,6 +27,96 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 3. 只有在需要核对运行时合并结果时，才把 `~/config/merged-config.<port>.json` 当作派生快照；它不是首要真源。
 4. 若本次任务暴露出 agent 先查错配置源，必须先纠正到 `~/.rcc`，再继续分析 provider/token/router 问题。
 
+## Provider 自动重试 (Auto-Retry) 配置（2026-05-27）
+
+### 功能说明
+每个 Provider 可以在内部自动重试某些可恢复错误，不触发 health impact 上报。
+- 错误码匹配 `autoRetry.codes` 列表 → 静默重试 + `console.warn` 打印
+- 连续失败次数 ≥ `threshold` → 放行到正常错误上报（`handleRequestError`）
+- 中间有一次成功 → 连续计数清零
+
+### Provider 配置目录
+所有 Provider 的 `config.v2.toml` 文件存储在 `~/.rcc/provider/<providerId>/config.v2.toml`。
+
+```
+~/.rcc/provider/
+├── mini27/
+│   └── config.v2.toml          # MiniMax 配置（含 autoRetry 示例）
+├── windsurf/
+│   └── config.v2.toml
+├── deepseek/
+│   └── config.v2.toml
+└── ...
+```
+
+### TOML 配置格式
+在 `[provider]` 下增加 `[provider.autoRetry]` 段：
+
+```toml
+[provider.autoRetry]
+threshold = 5
+codes = ["429.1000", "500.1000", "503.1000", "0.1000", "0.6000", "0.8200"]
+```
+
+参数说明：
+- `threshold`（可选，默认 3）：连续失败次数阈值。达到此值后才上报 health impact。
+- `codes`（必选，非空数组才生效）：全局统一错误码列表，只有匹配的错误码才参与自动重试。
+
+### 全局错误码表（src/providers/core/runtime/auto-retry-error-codes.ts）
+
+| 错误码 | 常量名 | 语义 |
+|---|---|---|
+| `429.1000` | AUTO_RETRY_429_SHORT_LIVED | 短期 Rate Limit |
+| `429.2000` | AUTO_RETRY_429_DAILY_LIMIT | 日额度耗尽（一般不建议配置） |
+| `429.3000` | AUTO_RETRY_429_SATURATED | 流量饱和 |
+| `408.1000` | AUTO_RETRY_408_TIMEOUT | 请求超时 |
+| `425.1000` | AUTO_RETRY_425_TOO_EARLY | Too Early |
+| `500.1000` | AUTO_RETRY_500_INTERNAL | Internal Server Error |
+| `502.1000` | AUTO_RETRY_502_BAD_GATEWAY | Bad Gateway |
+| `503.1000` | AUTO_RETRY_503_UNAVAILABLE | Service Unavailable |
+| `504.1000` | AUTO_RETRY_504_GATEWAY_TIMEOUT | Gateway Timeout |
+| `520.1000` | AUTO_RETRY_520_UNKNOWN | Cloudflare / upstream unknown error |
+| `0.1000` | AUTO_RETRY_NET_CONNECT | 连接失败 (ECONNRESET/ECONNREFUSED/ENOTFOUND) |
+| `0.2000` | AUTO_RETRY_NET_TIMEOUT | 网络超时 (ETIMEDOUT) |
+| `0.3000` | AUTO_RETRY_NET_PIPE | 管道断开 (EPIPE) |
+| `0.4000` | AUTO_RETRY_NET_DNS | DNS 解析失败 (EAI_AGAIN) |
+| `0.5000` | AUTO_RETRY_NET_ABORT | AbortError（非客户端主动取消） |
+| `0.6000` | AUTO_RETRY_NET_CANCEL | HTTP2 流取消 (ERR_HTTP2_STREAM_CANCEL) |
+| `0.7100` | AUTO_RETRY_PROTO_SSE_DECODE | SSE 解码失败 |
+| `0.7200` | AUTO_RETRY_PROTO_EMPTY_RESPONSE | 上游空响应 |
+| `0.7300` | AUTO_RETRY_PROTO_SSE_TO_JSON | SSE→JSON 转换失败 |
+| `0.8000` | AUTO_RETRY_UPSTREAM_GLM_514 | GLM 业务错误 514 |
+| `0.8100` | AUTO_RETRY_UPSTREAM_STATUS_1000 | 上游状态码 1000 |
+| `0.8200` | AUTO_RETRY_UPSTREAM_STATUS_2056 | 上游状态码 2056（用量超限） |
+
+### 常见场景配置
+
+**MiniMax 用量超限（2056）+ 5 次阈值**（已配置在 mini27）：
+```toml
+[provider.autoRetry]
+threshold = 5
+codes = ["429.1000", "500.1000", "503.1000", "0.1000", "0.6000", "0.8200"]
+```
+
+**通用网络瞬断 + 3 次默认阈值**：
+```toml
+[provider.autoRetry]
+codes = ["0.1000", "0.2000", "0.6000"]
+```
+
+### 调试日志特征
+自动重试命中时打印 `[auto-retry]` 前缀的 warn 日志：
+```
+[auto-retry] provider:openai-responses-mini27 code=0.8200 attempt=1/5 - retrying
+[auto-retry] provider:openai-responses-mini27 code=0.8200 attempt=2/5 - retrying
+```
+超过阈值后不再出现 `[auto-retry]`，转为正常 `request-error` 上报。
+
+### 实现文件
+- `src/providers/core/runtime/auto-retry-error-codes.ts` — 错误码枚举 + `resolveAutoRetryErrorCode()` 映射函数
+- `src/providers/core/api/provider-types.ts` — `ProviderRuntimeProfile.autoRetry` 类型定义
+- `src/providers/core/runtime/base-provider.ts` — `sendRequest()` catch 块中自动重试拦截逻辑
+
 
 ## Windsurf 对齐固定参考（2026-05-21，强制）
 

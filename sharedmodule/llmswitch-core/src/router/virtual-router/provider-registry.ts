@@ -90,7 +90,34 @@ listKeys(): string[] {
   }
 
   hasCapability(providerKey: string, capability: ModelCapability): boolean {
-    return this.getModelCapabilities(providerKey).has(capability);
+    const explicit = this.getModelCapabilities(providerKey);
+    if (explicit.has(capability)) {
+      return true;
+    }
+    const profile = this.providers.get(providerKey);
+    if (!profile) {
+      return false;
+    }
+    return this.hasDefaultCapability(profile, capability);
+  }
+
+  private hasDefaultCapability(profile: ProviderProfile, capability: ModelCapability): boolean {
+    const providerType = (profile.providerType ?? '').trim().toLowerCase();
+    const outbound = (profile.outboundProfile ?? '').trim().toLowerCase();
+    const compatibility = (profile.compatibilityProfile ?? '').trim().toLowerCase();
+    switch (capability) {
+      case 'multimodal':
+        return (
+          providerType === 'responses' ||
+          outbound.includes('responses') ||
+          compatibility.includes('responses') ||
+          compatibility.includes('crs')
+        );
+      case 'web_search':
+        return compatibility.includes('crs');
+      default:
+        return false;
+    }
   }
 
   resolveRuntimeKeyByAlias(providerId: string, keyAlias: string): string | null {

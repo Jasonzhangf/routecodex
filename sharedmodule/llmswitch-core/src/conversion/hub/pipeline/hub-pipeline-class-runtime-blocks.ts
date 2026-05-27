@@ -22,7 +22,6 @@ export function createHubPipelineRouterEngine(
   const routerEngine = new VirtualRouterEngine({
     healthStore: config.healthStore,
     routingStateStore: config.routingStateStore as any,
-    quotaView: config.quotaView,
   });
   routerEngine.initialize(config.virtualRouter);
   setHubPolicyRuntimePolicy(config.policy);
@@ -44,7 +43,6 @@ export function applyHubPipelineRuntimeDeps(args: {
   deps: {
     healthStore?: HubPipelineConfig["healthStore"] | null;
     routingStateStore?: HubPipelineConfig["routingStateStore"] | null;
-    quotaView?: HubPipelineConfig["quotaView"] | null;
   };
   config: HubPipelineConfig;
   routerEngine: VirtualRouterEngine;

@@ -224,6 +224,9 @@ impl VirtualRouterEngineCore {
         request: &Value,
         metadata: &Value,
     ) -> Result<Value, String> {
+        // Keep health selection state scoped to the current runtime override context
+        // (sessionDir/rccUserDir). This prevents cross-port/session pollution.
+        self.refresh_provider_health_from_store();
         let mut request_working = request.clone();
         clean_malformed_routing_instruction_markers(&mut request_working);
         let sticky_key = resolve_sticky_key(metadata);

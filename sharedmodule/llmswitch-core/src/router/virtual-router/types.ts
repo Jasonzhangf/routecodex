@@ -673,6 +673,8 @@ export interface RoutingStatusSnapshot {
     }
   >;
   health: ProviderHealthState[];
+  quota?: ProviderQuotaState[];
+  quotaHostSnapshot?: ProviderQuotaHostSnapshotState[];
 }
 
 export interface ProviderHealthState {
@@ -681,6 +683,36 @@ export interface ProviderHealthState {
   failureCount: number;
   cooldownExpiresAt?: number;
   reason?: string;
+}
+
+export interface ProviderQuotaState {
+  providerKey: string;
+  inPool: boolean;
+  reason: string;
+  cooldownUntil?: number;
+  blacklistUntil?: number;
+  resetAt?: number;
+  lastErrorAtMs?: number;
+  consecutiveErrorCount: number;
+}
+
+export interface ProviderQuotaHostSnapshotState {
+  providerKey: string;
+  inPool: boolean;
+  reason: string;
+  authType: string;
+  authIssue?: Record<string, unknown> | null;
+  priorityTier: number;
+  cooldownUntil?: number;
+  cooldownKeepsPool?: boolean;
+  blacklistUntil?: number;
+  resetAt?: number;
+  lastErrorSeries?: string;
+  lastErrorCode?: string;
+  lastErrorAtMs?: number;
+  consecutiveErrorCount: number;
+  selectionPenalty: number;
+  lastProviderGuardApplied: boolean;
 }
 
 export interface ProviderFailureEvent {
@@ -705,6 +737,8 @@ export interface ProviderErrorRuntimeMetadata {
   providerProtocol?: string;
   pipelineId?: string;
   target?: TargetMetadata | Record<string, unknown>;
+  sessionDir?: string;
+  rccUserDir?: string;
 }
 
 export interface ProviderErrorEvent {
@@ -714,6 +748,12 @@ export interface ProviderErrorEvent {
   status?: number;
   recoverable?: boolean;
   affectsHealth?: boolean;
+  fatal?: boolean;
+  cooldownOverrideMs?: number;
+  quotaScope?: string;
+  quotaReason?: string;
+  resetAt?: string;
+  errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
   runtime: ProviderErrorRuntimeMetadata;
   timestamp: number;
   details?: Record<string, unknown>;
@@ -728,6 +768,8 @@ export interface ProviderSuccessRuntimeMetadata {
   providerProtocol?: string;
   pipelineId?: string;
   target?: TargetMetadata | Record<string, unknown>;
+  sessionDir?: string;
+  rccUserDir?: string;
 }
 
 export interface ProviderSuccessEvent {

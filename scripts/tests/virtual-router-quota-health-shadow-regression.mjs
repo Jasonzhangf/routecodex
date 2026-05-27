@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -16,23 +18,32 @@ const testPaths = [
   'tests/servertool/virtual-router-engine-update-deps.spec.ts'
 ];
 
-const result = spawnSync(
-  process.execPath,
-  [
-    '--experimental-vm-modules',
-    './node_modules/jest/bin/jest.js',
-    '--runInBand',
-    '--runTestsByPath',
-    ...testPaths
-  ],
-  {
-    cwd: repoRoot,
-    stdio: 'inherit'
+for (const testPath of testPaths) {
+  const isolatedSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vr-quota-health-shadow-'));
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--experimental-vm-modules',
+      './node_modules/jest/bin/jest.js',
+      '--runInBand',
+      '--runTestsByPath',
+      testPath
+    ],
+    {
+      cwd: repoRoot,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        ROUTECODEX_SESSION_DIR: isolatedSessionDir
+      }
+    }
+  );
+  try {
+    fs.rmSync(isolatedSessionDir, { recursive: true, force: true });
+  } catch {}
+  if (result.status !== 0) {
+    throw new Error(`virtual-router quota/health shadow regression failed: ${testPath}`);
   }
-);
-
-if (result.status !== 0) {
-  throw new Error('virtual-router quota/health shadow regression failed');
 }
 
 console.log('[virtual-router-quota-health-shadow-regression] OK');

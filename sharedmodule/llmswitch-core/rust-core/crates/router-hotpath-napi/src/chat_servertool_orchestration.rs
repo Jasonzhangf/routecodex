@@ -14,6 +14,10 @@ use crate::virtual_router_engine::routing::{
 };
 use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 
+/// Tool names treated as pure noop — acknowledged and auto-continued without handler execution.
+/// Outcome is a standard delta: tool_outputs entry + clientInjectOnly followup.
+const NOOP_SERVERTOOL_NAMES: [&str; 1] = ["continue_execution"];
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ChatWebSearchPlanOutput {
@@ -98,6 +102,14 @@ struct ServertoolDispatchCandidateOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ServertoolDispatchNoopOutput {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ServertoolDispatchSkippedOutput {
     id: String,
     name: String,
@@ -108,6 +120,7 @@ struct ServertoolDispatchSkippedOutput {
 #[serde(rename_all = "camelCase")]
 struct ServertoolDispatchPlanOutput {
     executable_tool_calls: Vec<ServertoolDispatchCandidateOutput>,
+    noop_tool_calls: Vec<ServertoolDispatchNoopOutput>,
     skipped_tool_calls: Vec<ServertoolDispatchSkippedOutput>,
 }
 
@@ -1429,6 +1442,7 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
         .collect::<std::collections::HashMap<_, _>>();
 
     let mut executable_tool_calls = Vec::new();
+    let mut noop_tool_calls = Vec::new();
     let mut skipped_tool_calls = Vec::new();
 
     for tool_call in input.tool_calls {
@@ -1458,6 +1472,14 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
             });
             continue;
         }
+        if NOOP_SERVERTOOL_NAMES.contains(&normalized_name.as_str()) {
+            noop_tool_calls.push(ServertoolDispatchNoopOutput {
+                id: tool_call.id,
+                name: normalized_name,
+                arguments: tool_call.arguments,
+            });
+            continue;
+        }
         let Some(registered_entry) = registered.get(normalized_name.as_str()) else {
             skipped_tool_calls.push(ServertoolDispatchSkippedOutput {
                 id: tool_call.id,
@@ -1477,8 +1499,362 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
 
     let output = ServertoolDispatchPlanOutput {
         executable_tool_calls,
+        noop_tool_calls,
         skipped_tool_calls,
     };
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<String> {
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct NoopInput {
+        tool_call_id: String,
+        tool_name: String,
+        /// The base chat response payload to inject the tool_output into.
+        base: Value,
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct NoopOutput {
+        /// Updated chat response with tool_outputs appended.
+        chat_response: Value,
+        flow_id: String,
+        /// The injected tool output content.
+        tool_content: Value,
+        followup: Value,
+    }
+
+    let input: NoopInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+
+    // Build the standard noop tool output content
+    let tool_content = serde_json::json!({
+        "ok": true,
+        "executed": true,
+        "noop": true,
+        "action": "continue_execution"
+    });
+
+    // Append tool_outputs entry
+    let mut chat_response = input.base;
+    let existing_outputs = chat_response
+        .get("tool_outputs")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut new_outputs = existing_outputs.clone();
+    new_outputs.push(serde_json::json!({
+        "tool_call_id": input.tool_call_id,
+        "name": input.tool_name,
+        "content": tool_content.to_string()
+    }));
+    if let Some(obj) = chat_response.as_object_mut() {
+        obj.insert("tool_outputs".to_string(), Value::Array(new_outputs));
+    }
+
+    let followup = serde_json::json!({
+        "requestIdSuffix": ":continue_execution_followup",
+        "injection": {
+            "ops": [
+                {"op": "preserve_tools"},
+                {"op": "ensure_standard_tools"},
+                {"op": "append_assistant_message", "required": true},
+                {"op": "append_tool_messages_from_tool_outputs", "required": true}
+            ]
+        },
+        "metadata": {
+            "clientInjectOnly": true,
+            "clientInjectText": "继续执行",
+            "clientInjectSource": "servertool.continue_execution"
+        }
+    });
+
+    let output = NoopOutput {
+        chat_response,
+        flow_id: "continue_execution_flow".to_string(),
+        tool_content,
+        followup,
+    };
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+/// Extract a string field from multiple candidate sources in priority order.
+/// Each source is checked in the order given — first non-empty wins.
+fn extract_priority_string(
+    adapter: &Value,
+    runtime: &Value,
+    metadata: &Value,
+    fields: &[&str],
+) -> Option<String> {
+    for source in &[adapter, runtime, metadata] {
+        if !source.is_object() {
+            continue;
+        }
+        let obj = source.as_object().unwrap();
+        for field in fields {
+            if let Some(v) = obj.get(*field) {
+                if let Some(s) = v.as_str() {
+                    let trimmed = s.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract a nested target object's field from multiple sources.
+fn extract_target_field(
+    adapter: &Value,
+    runtime: &Value,
+    metadata: &Value,
+    field: &str,
+) -> Option<String> {
+    let candidates = [
+        adapter.get("target").and_then(|t| t.get(field)),
+        metadata
+            .get("target")
+            .and_then(|t| t.get(field)),
+        runtime
+            .get("target")
+            .and_then(|t| t.get(field)),
+    ];
+    for v in candidates.into_iter().flatten() {
+        if let Some(s) = v.as_str() {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extract runtime metadata from adapter context (reads `runtime` then `metadata.runtime`).
+fn extract_runtime(adapter_context: &Value) -> Value {
+    // Try adapter.runtime first, then adapter.metadata.runtime
+    if let Some(r) = adapter_context.get("runtime") {
+        if r.is_object() {
+            return r.clone();
+        }
+    }
+    if let Some(m) = adapter_context.get("metadata") {
+        if let Some(r) = m.get("runtime") {
+            return r.clone();
+        }
+    }
+    Value::Null
+}
+
+/// Extract metadata object from adapter context.
+fn extract_metadata(adapter_context: &Value) -> Value {
+    adapter_context
+        .get("metadata")
+        .filter(|m| m.is_object())
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// Check if a key matches persistent sticky key pattern.
+fn is_persistent_sticky_key(key: &str) -> bool {
+    key.starts_with("tmux:") || key.starts_with("session:") || key.starts_with("conversation:")
+}
+
+/// Build the handler result for stop_message_auto.
+///
+/// Rust produces the complete followup plan + persistence metadata.
+/// TS keeps I/O (loading/saving routing state files).
+#[napi]
+pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<String> {
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct StopMessageHandlerInput {
+        /// The decision from decideStopMessageAction.
+        decision: Value,
+        /// Adapter context for extracting pinnedTarget, connectionState, runtime metadata.
+        adapter_context: Value,
+        /// Base chat response (passthrough).
+        base: Value,
+        /// Candidate keys for persistence scope lookup.
+        candidate_keys: Vec<String>,
+        /// Optional sticky key from persisted lookup.
+        sticky_key: Option<String>,
+        /// Optional strict session scope from persisted lookup.
+        strict_session_scope: Option<String>,
+        /// Followup flow id (e.g. "stop_message_flow").
+        followup_flow_id: Option<String>,
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct StopMessageHandlerOutput {
+        chat_response: Value,
+        flow_id: String,
+        followup: Value,
+        persist_keys: Vec<String>,
+        state_update: Value,
+    }
+
+    let input: StopMessageHandlerInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize StopMessageHandlerInput: {e}")))?;
+
+    // 1. Check decision action
+    let action = input
+        .decision
+        .get("action")
+        .and_then(|a| a.as_str())
+        .unwrap_or("Skip");
+
+    if action != "Trigger" {
+        // Not triggering — return empty result
+        let output = StopMessageHandlerOutput {
+            chat_response: input.base,
+            flow_id: String::new(),
+            followup: Value::Null,
+            persist_keys: Vec::new(),
+            state_update: Value::Null,
+        };
+        return serde_json::to_string(&output)
+            .map_err(|e| napi::Error::from_reason(e.to_string()));
+    }
+
+    // 2. Extract values from decision
+    let used = input.decision.get("used").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let max_repeats = input
+        .decision
+        .get("maxRepeats")
+        .and_then(|v| v.as_u64())
+        .or_else(|| input.decision.get("max_repeats").and_then(|v| v.as_u64()))
+        .unwrap_or(0) as u32;
+    let provider_pin = input.decision.get("provider_pin").cloned();
+
+    // 3. Extract runtime metadata and metadata for field lookups
+    let runtime = extract_runtime(&input.adapter_context);
+    let metadata = extract_metadata(&input.adapter_context);
+
+    // 4. Extract pinnedTarget (priority-based lookup matching TS readPinnedTargetFromAdapterContext)
+    let provider_key = extract_target_field(&input.adapter_context, &runtime, &metadata, "providerKey")
+        .or_else(|| extract_target_field(&input.adapter_context, &runtime, &metadata, "providerId"))
+        .or_else(|| extract_priority_string(&input.adapter_context, &runtime, &metadata, &[
+            "__shadowCompareForcedProviderKey",
+            "targetProviderKey",
+            "providerKey",
+        ]))
+        .or_else(|| {
+            // Fallback: provider_pin from decision
+            provider_pin
+                .as_ref()
+                .and_then(|p| p.get("provider_key"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        });
+
+    let model_id = extract_target_field(&input.adapter_context, &runtime, &metadata, "modelId")
+        .or_else(|| extract_priority_string(&input.adapter_context, &runtime, &metadata, &[
+            "assignedModelId",
+            "modelId",
+            "originalModelId",
+        ]))
+        .or_else(|| {
+            provider_pin
+                .as_ref()
+                .and_then(|p| p.get("model_id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        });
+
+    let routecodex_port_mode = input
+        .adapter_context
+        .get("routecodexPortMode")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    // 5. Extract connection state
+    let connection_state = (|| -> Option<Value> {
+        let cs = input.adapter_context.get("clientConnectionState")?;
+        if cs.is_object() {
+            Some(cs.clone())
+        } else {
+            None
+        }
+    })();
+
+    // 6. Build metadata object for followup
+    let mut metadata_obj = Map::new();
+    if let Some(cs) = connection_state {
+        metadata_obj.insert("clientConnectionState".to_string(), cs);
+    }
+    if let Some(ref pk) = provider_key {
+        metadata_obj.insert("__shadowCompareForcedProviderKey".to_string(), Value::String(pk.clone()));
+        metadata_obj.insert("providerKey".to_string(), Value::String(pk.clone()));
+        metadata_obj.insert("targetProviderKey".to_string(), Value::String(pk.clone()));
+    }
+    if let Some(ref mid) = model_id {
+        metadata_obj.insert("assignedModelId".to_string(), Value::String(mid.clone()));
+        metadata_obj.insert("modelId".to_string(), Value::String(mid.clone()));
+        let mut target_obj = Map::new();
+        if let Some(ref pk) = provider_key {
+            target_obj.insert("providerKey".to_string(), Value::String(pk.clone()));
+        }
+        target_obj.insert("modelId".to_string(), Value::String(mid.clone()));
+        metadata_obj.insert("target".to_string(), Value::Object(target_obj));
+    }
+    if let Some(ref rpm) = routecodex_port_mode {
+        metadata_obj.insert("routecodexPortMode".to_string(), Value::String(rpm.clone()));
+    }
+
+    // 7. Build followup plan
+    let followup = serde_json::json!({
+        "requestIdSuffix": ":stop_followup",
+        "injection": {
+            "ops": [
+                { "op": "append_assistant_message", "required": false },
+                { "op": "append_user_text", "text": "继续执行" }
+            ]
+        },
+        "metadata": Value::Object(metadata_obj)
+    });
+
+    // 8. Compute persist keys (deduplicated union)
+    let mut persist_keys_set: Vec<String> = Vec::new();
+    let raw_keys: Vec<&str> = [
+        input.sticky_key.as_deref(),
+        input.strict_session_scope.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .chain(input.candidate_keys.iter().map(|s| s.as_str()))
+    .collect();
+
+    for key in raw_keys {
+        if is_persistent_sticky_key(key) && !persist_keys_set.contains(&key.to_string()) {
+            persist_keys_set.push(key.to_string());
+        }
+    }
+
+    // 9. Build state update
+    let state_update = serde_json::json!({
+        "text": "继续执行",
+        "maxRepeats": max_repeats,
+        "used": used + 1,
+        "source": "default",
+        "stageMode": "on"
+    });
+
+    let output = StopMessageHandlerOutput {
+        chat_response: input.base,
+        flow_id: "stop_message_flow".to_string(),
+        followup,
+        persist_keys: persist_keys_set,
+        state_update,
+    };
+
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -2287,6 +2663,98 @@ mod tests {
                 .and_then(|v| v.as_array())
                 .map(|v| v.len()),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn test_plan_servertool_dispatch_and_outcome_for_apply_patch_servertool_mode() {
+        // Red test: verify servertool apply_patch dispatch + outcome + followup
+        // Part 1: dispatch - apply_patch should be executable
+        let dispatch_input = serde_json::json!({
+            "toolCalls": [
+                { "id": "ap_1", "name": "apply_patch", "arguments": "{\"filePath\":\"src/main.ts\",\"patch\":\"+new line\"}" }
+            ],
+            "disableToolCallHandlers": false,
+            "registeredToolCallHandlers": [
+                {
+                    "name": "apply_patch",
+                    "trigger": "tool_call",
+                    "executionMode": "reenter",
+                    "stripAfterExecute": true
+                }
+            ],
+            "runtimeMetadata": {
+                "__rt": { "applyPatch": { "mode": "servertool" } }
+            }
+        });
+        let dispatch_out = plan_servertool_tool_call_dispatch_json(dispatch_input.to_string()).unwrap();
+        let dispatch_parsed: serde_json::Value = serde_json::from_str(dispatch_out.as_str()).unwrap();
+        assert_eq!(
+            dispatch_parsed["executableToolCalls"][0]["name"],
+            "apply_patch",
+            "apply_patch should be executable when mode=servertool"
+        );
+        assert_eq!(
+            dispatch_parsed["executableToolCalls"][0]["executionMode"],
+            "reenter",
+            "apply_patch should use reenter execution mode"
+        );
+        assert_eq!(
+            dispatch_parsed["executableToolCalls"][0]["stripAfterExecute"],
+            true,
+            "apply_patch should be stripped after execute"
+        );
+
+        // Part 2: outcome - after execution, outcomeMode should be servertool_only
+        let outcome_input = serde_json::json!({
+            "toolCalls": [
+                { "id": "ap_1", "name": "apply_patch", "arguments": "{}" }
+            ],
+            "executedToolCalls": [
+                {
+                    "id": "ap_1",
+                    "name": "apply_patch",
+                    "arguments": "{\"filePath\":\"src/main.ts\",\"patch\":\"+new line\"}",
+                    "executionMode": "reenter",
+                    "stripAfterExecute": true
+                }
+            ],
+            "executedFlowIds": [],
+            "lastExecutionFlowId": "",
+            "hasLastExecutionFollowup": false,
+            "toolOutputs": [{
+                "tool_call_id": "ap_1",
+                "name": "apply_patch",
+                "content": "{\"ok\":true,\"summary\":\"Applied patch\"}"
+            }],
+            "sessionId": "sess_1",
+            "conversationId": "conv_1"
+        });
+        let outcome_out = plan_servertool_outcome_json(outcome_input.to_string()).unwrap();
+        let outcome_parsed: serde_json::Value = serde_json::from_str(outcome_out.as_str()).unwrap();
+
+        // All tool_calls were consumed → servertool_only
+        assert_eq!(
+            outcome_parsed["outcomeMode"],
+            "servertool_only",
+            "single servertool-only call should produce servertool_only outcome"
+        );
+        // remining_tool_call_ids should be empty
+        assert!(
+            outcome_parsed["remainingToolCallIds"].as_array().map(|a| a.is_empty()).unwrap_or(false),
+            "all tool calls were executed → no remaining"
+        );
+        // followup should be via generic_tool_outputs (no last execution followup)
+        assert_eq!(
+            outcome_parsed["followupStrategy"],
+            "generic_tool_outputs",
+            "no last followup → generic_tool_outputs strategy"
+        );
+        // pending_injection should NOT be needed for servertool_only mode
+        assert_eq!(
+            outcome_parsed["requiresPendingInjection"],
+            false,
+            "servertool_only mode should not require pending injection"
         );
     }
 

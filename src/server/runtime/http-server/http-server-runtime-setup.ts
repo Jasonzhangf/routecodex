@@ -220,33 +220,22 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   if (routingStateStore) {
     hubConfig.routingStateStore = routingStateStore;
   }
-  const quotaModule = server.managerDaemon?.getModule('quota') as
-    | { getQuotaView?: () => unknown; getQuotaViewReadOnly?: () => unknown }
-    | undefined;
-  if (server.isQuotaRoutingEnabled() && quotaModule && typeof quotaModule.getQuotaView === 'function') {
-    hubConfig.quotaView = quotaModule.getQuotaView() as any;
-    if (typeof quotaModule.getQuotaViewReadOnly === 'function') {
-      (hubConfig as Record<string, unknown>).quotaViewReadOnly = quotaModule.getQuotaViewReadOnly();
-    }
-  }
   if (!server.hubPipeline) {
     server.hubPipeline = new hubCtor(hubConfig);
   } else {
     const existing = server.hubPipeline as {
-      updateRuntimeDeps?: (deps: { healthStore?: unknown; routingStateStore?: unknown; quotaView?: unknown }) => void;
+      updateRuntimeDeps?: (deps: { healthStore?: unknown; routingStateStore?: unknown }) => void;
       updateVirtualRouterConfig?: (config: unknown) => void;
     };
     try {
       existing.updateRuntimeDeps?.({
         ...(healthStore ? { healthStore } : {}),
-        ...(routingStateStore ? { routingStateStore } : {}),
-        ...('quotaView' in hubConfig ? { quotaView: hubConfig.quotaView } : {})
+        ...(routingStateStore ? { routingStateStore } : {})
       });
     } catch (error) {
       logRuntimeSetupNonBlockingError('setupRuntime.updateRuntimeDeps', error, {
         hasHealthStore: Boolean(healthStore),
-        hasRoutingStateStore: Boolean(routingStateStore),
-        hasQuotaView: 'quotaView' in hubConfig
+        hasRoutingStateStore: Boolean(routingStateStore)
       });
     }
     server.hubPipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);

@@ -13,6 +13,23 @@ use crate::resp_process_stage1_tool_governance_blocks::json_args::{
 };
 use crate::shared_json_utils::read_trimmed_string;
 
+fn convert_servertool_line_edit_to_canonical_patch(file_path: &str, patch: &str) -> String {
+    // servertool line-edit format: "- old\n+ new" → canonical apply_patch format
+    let mut out = vec!["*** Begin Patch".to_string()];
+    let has_removals = patch.lines().any(|l| l.starts_with('-'));
+    if has_removals {
+        out.push(format!("*** Update File: {}", file_path));
+    } else {
+        out.push(format!("*** Add File: {}", file_path));
+    }
+    out.push("@@".to_string());
+    for line in patch.lines() {
+        out.push(line.to_string());
+    }
+    out.push("*** End Patch".to_string());
+    out.join("\n")
+}
+
 fn build_current_apply_patch_schema_args(args: &Map<String, Value>) -> Option<(String, bool)> {
     if args.contains_key("fileContent") || args.contains_key("file_content") {
         return None;
@@ -30,6 +47,22 @@ fn build_current_apply_patch_schema_args(args: &Map<String, Value>) -> Option<(S
     {
         return None;
     }
+    // Detect servertool line-edit format: {filePath, patch} with -/+ lines
+    // Convert to canonical {patch, input} format for client compatibility
+    let is_line_edit = patch_source
+        .lines()
+        .any(|l| l.starts_with('-') || l.starts_with('+'));
+    if is_line_edit {
+        let canonical_patch = convert_servertool_line_edit_to_canonical_patch(&file_path, &patch_source);
+        let mut out = Map::new();
+        out.insert("patch".to_string(), Value::String(canonical_patch.clone()));
+        out.insert("input".to_string(), Value::String(canonical_patch));
+        return Some((
+            serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
+            true,
+        ));
+    }
+    // Fallback: keep raw filePath + patch for pure text content (passthrough)
     let mut out = Map::new();
     out.insert("filePath".to_string(), Value::String(file_path));
     out.insert("patch".to_string(), Value::String(patch_source));

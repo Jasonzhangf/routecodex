@@ -222,10 +222,9 @@ export function applySuccessEvent(
 ): QuotaState {
   const next: QuotaState = {
     ...state,
-    lastErrorSeries: null,
-    lastErrorCode: null,
-    lastErrorAtMs: null,
-    consecutiveErrorCount: 0
+    inPool: true, reason: 'ok',
+    cooldownUntil: null, cooldownKeepsPool: undefined, blacklistUntil: null, authIssue: null,
+    lastErrorSeries: null, lastErrorCode: null, lastErrorAtMs: null, consecutiveErrorCount: 0
   };
   return tickQuotaStateTime(next, nowMs);
 }

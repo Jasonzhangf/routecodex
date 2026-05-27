@@ -67,7 +67,6 @@ export function updateRouterRuntimeDeps(args: {
   deps: {
     healthStore?: HubPipelineConfig["healthStore"] | null;
     routingStateStore?: HubPipelineConfig["routingStateStore"] | null;
-    quotaView?: HubPipelineConfig["quotaView"] | null;
   };
   config: HubPipelineConfig;
   routerEngine: VirtualRouterEngine;
@@ -82,14 +81,10 @@ export function updateRouterRuntimeDeps(args: {
   if ("routingStateStore" in deps) {
     config.routingStateStore = (deps.routingStateStore ?? undefined) as any;
   }
-  if ("quotaView" in deps) {
-    config.quotaView = deps.quotaView ?? undefined;
-  }
   try {
     routerEngine.updateDeps({
       healthStore: config.healthStore ?? null,
       routingStateStore: (config.routingStateStore ?? null) as any,
-      quotaView: config.quotaView ?? null,
     });
   } catch (updateDepsError) {
     logHubPipelineNonBlockingError(

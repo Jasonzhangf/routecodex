@@ -3,7 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
 import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
-function buildDualProviderConfig(providerA = 'quota.key1.gpt-test', providerB = 'quota.key2.gpt-test'): any {
+function buildDualProviderConfig(providerA = 'shadowgate.key1.gpt-test', providerB = 'shadowgate.key2.gpt-test'): any {
   return {
     routing: {
       default: [
@@ -22,7 +22,7 @@ function buildDualProviderConfig(providerA = 'quota.key1.gpt-test', providerB = 
         endpoint: 'http://example.invalid',
         auth: { type: 'apiKey', value: 'test-key' },
         outboundProfile: 'openai-chat',
-        runtimeKey: 'quota.key1',
+        runtimeKey: 'shadowgate.key1',
         modelId: 'gpt-test'
       },
       [providerB]: {
@@ -31,7 +31,7 @@ function buildDualProviderConfig(providerA = 'quota.key1.gpt-test', providerB = 
         endpoint: 'http://example.invalid',
         auth: { type: 'apiKey', value: 'test-key' },
         outboundProfile: 'openai-chat',
-        runtimeKey: 'quota.key2',
+        runtimeKey: 'shadowgate.key2',
         modelId: 'gpt-test'
       }
     },
@@ -45,7 +45,7 @@ function buildDualProviderConfig(providerA = 'quota.key1.gpt-test', providerB = 
   };
 }
 
-function buildSingleProviderConfig(providerKey = 'quota.key1.gpt-test'): any {
+function buildSingleProviderConfig(providerKey = 'shadowgate.key1.gpt-test'): any {
   return {
     routing: {
       default: [
@@ -64,7 +64,7 @@ function buildSingleProviderConfig(providerKey = 'quota.key1.gpt-test'): any {
         endpoint: 'http://example.invalid',
         auth: { type: 'apiKey', value: 'test-key' },
         outboundProfile: 'openai-chat',
-        runtimeKey: 'quota.key1',
+        runtimeKey: 'shadowgate.key1',
         modelId: 'gpt-test'
       }
     },
@@ -110,8 +110,8 @@ function readProviderNotAvailable(engine: VirtualRouterEngine, requestId: string
 
 describe('virtual router quota/health shadow regression gate', () => {
   test('poisoned TS quotaView cannot override Rust route decision for healthy dual-provider pool', () => {
-    const providerA = 'quota.key1.gpt-test';
-    const providerB = 'quota.key2.gpt-test';
+    const providerA = 'shadowgate.key1.gpt-test';
+    const providerB = 'shadowgate.key2.gpt-test';
     const config = buildDualProviderConfig(providerA, providerB);
 
     const rustOnly = new VirtualRouterEngine({} as any);
@@ -137,8 +137,8 @@ describe('virtual router quota/health shadow regression gate', () => {
   });
 
   test('quota exhausted with resetAt remains providerKey-isolated even when TS quotaView lies about pool state', () => {
-    const providerA = 'quota.key1.gpt-test';
-    const providerB = 'quota.key2.gpt-test';
+    const providerA = 'shadowgate.key1.gpt-test';
+    const providerB = 'shadowgate.key2.gpt-test';
     const config = buildDualProviderConfig(providerA, providerB);
     const quotaError = {
       code: 'QUOTA_DEPLETED',
@@ -151,7 +151,7 @@ describe('virtual router quota/health shadow regression gate', () => {
         requestId: 'req-shadow-quota-resetat-source',
         routeName: 'default',
         providerKey: providerA,
-        runtimeKey: 'quota.key1'
+        runtimeKey: 'shadowgate.key1'
       },
       timestamp: Date.now(),
       details: {}
@@ -182,7 +182,7 @@ describe('virtual router quota/health shadow regression gate', () => {
   });
 
   test('singleton last-provider quota exhaustion still fails with Rust recoverable hint, not TS quotaView fiction', () => {
-    const providerKey = 'quota.key1.gpt-test';
+    const providerKey = 'shadowgate.key1.gpt-test';
     const config = buildSingleProviderConfig(providerKey);
     const quotaError = {
       code: 'QUOTA_DEPLETED',
@@ -195,7 +195,7 @@ describe('virtual router quota/health shadow regression gate', () => {
         requestId: 'req-shadow-singleton-source',
         routeName: 'default',
         providerKey,
-        runtimeKey: 'quota.key1'
+        runtimeKey: 'shadowgate.key1'
       },
       timestamp: Date.now(),
       details: {}
@@ -232,8 +232,8 @@ describe('virtual router quota/health shadow regression gate', () => {
 
 
   test('auth fatal health blocker remains Rust-owned even when TS quotaView pretends provider is still in pool', () => {
-    const providerA = 'quota.key1.gpt-test';
-    const providerB = 'quota.key2.gpt-test';
+    const providerA = 'shadowgate.key1.gpt-test';
+    const providerB = 'shadowgate.key2.gpt-test';
     const config = buildDualProviderConfig(providerA, providerB);
     const fatalEvent = {
       code: 'INVALID_API_KEY',
@@ -246,7 +246,7 @@ describe('virtual router quota/health shadow regression gate', () => {
         requestId: 'req-shadow-auth-fatal',
         routeName: 'default',
         providerKey: providerA,
-        runtimeKey: 'quota.key1'
+        runtimeKey: 'shadowgate.key1'
       },
       timestamp: Date.now(),
       details: {}
@@ -273,8 +273,8 @@ describe('virtual router quota/health shadow regression gate', () => {
   });
 
   test('recoverable transport cooldown stays Rust-owned and success clears it without reopening TS second center', () => {
-    const providerA = 'quota.key1.gpt-test';
-    const providerB = 'quota.key2.gpt-test';
+    const providerA = 'shadowgate.key1.gpt-test';
+    const providerB = 'shadowgate.key2.gpt-test';
     const config = buildDualProviderConfig(providerA, providerB);
     const transportEvent = {
       code: 'HTTP_503',
@@ -287,7 +287,7 @@ describe('virtual router quota/health shadow regression gate', () => {
         requestId: 'req-shadow-transport-cooldown',
         routeName: 'default',
         providerKey: providerA,
-        runtimeKey: 'quota.key1'
+        runtimeKey: 'shadowgate.key1'
       },
       timestamp: Date.now(),
       details: {}
@@ -297,7 +297,7 @@ describe('virtual router quota/health shadow regression gate', () => {
         requestId: 'req-shadow-transport-recover',
         routeName: 'default',
         providerKey: providerA,
-        runtimeKey: 'quota.key1'
+        runtimeKey: 'shadowgate.key1'
       },
       timestamp: Date.now()
     } as any;
@@ -322,5 +322,46 @@ describe('virtual router quota/health shadow regression gate', () => {
 
     expect(routeProviderKey(rustOnly, 'req-shadow-transport-rust-recovered')).toBe(providerA);
     expect(routeProviderKey(tsPoisoned, 'req-shadow-transport-poisoned-recovered')).toBe(providerA);
+  });
+
+
+  test('503 daily unavailable health cooldown remains Rust-owned even when TS quotaView advertises provider as active', () => {
+    const providerA = 'shadowgate.key1.gpt-test';
+    const providerB = 'shadowgate.key2.gpt-test';
+    const config = buildDualProviderConfig(providerA, providerB);
+    const daily503Event = {
+      code: 'HTTP_503',
+      message: 'provider unavailable',
+      stage: 'provider.send',
+      status: 503,
+      errorClassification: 'recoverable',
+      runtime: {
+        requestId: 'req-shadow-503-daily',
+        routeName: 'default',
+        providerKey: providerA,
+        runtimeKey: 'shadowgate.key1'
+      },
+      timestamp: Date.now(),
+      details: {}
+    } as any;
+
+    const rustOnly = new VirtualRouterEngine({} as any);
+    rustOnly.initialize(config);
+    rustOnly.handleProviderError(daily503Event);
+
+    const tsPoisoned = createEngineWithPoisonedQuotaView(config, (providerKey) => ({
+      providerKey,
+      inPool: true,
+      reason: 'ok',
+      priorityTier: 100
+    }));
+    tsPoisoned.handleProviderError(daily503Event);
+
+    expect(routeProviderKey(rustOnly, 'req-shadow-503-rust')).toBe(providerB);
+    expect(routeProviderKey(tsPoisoned, 'req-shadow-503-poisoned')).toBe(providerB);
+
+    const rustHealth = rustOnly.getStatus().health.find((entry) => entry.providerKey === providerA || entry.providerKey === providerA.replace('.key1.', '.1.'));
+    expect(rustHealth?.state).toBe('tripped');
+    expect(typeof rustHealth?.cooldownExpiresAt).toBe('number');
   });
 });

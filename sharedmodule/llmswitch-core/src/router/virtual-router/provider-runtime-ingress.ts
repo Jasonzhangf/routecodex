@@ -109,6 +109,12 @@ function normalizeProviderErrorEvent(event: ProviderErrorEvent): ProviderErrorEv
     status: event.status,
     recoverable: event.recoverable,
     affectsHealth: event.affectsHealth,
+    fatal: event.fatal,
+    cooldownOverrideMs: event.cooldownOverrideMs,
+    quotaScope: event.quotaScope,
+    quotaReason: event.quotaReason,
+    resetAt: event.resetAt,
+    errorClassification: event.errorClassification,
     runtime,
     timestamp,
     details: event.details
