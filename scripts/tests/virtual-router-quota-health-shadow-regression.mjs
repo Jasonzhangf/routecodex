@@ -5,6 +5,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+const nativeNodePath = path.join(
+  repoRoot,
+  'sharedmodule',
+  'llmswitch-core',
+  'dist',
+  'native',
+  'router_hotpath_napi.node'
+);
 
 const testPaths = [
   'tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts',
@@ -34,7 +42,10 @@ for (const testPath of testPaths) {
       stdio: 'inherit',
       env: {
         ...process.env,
-        ROUTECODEX_SESSION_DIR: isolatedSessionDir
+        ROUTECODEX_SESSION_DIR: isolatedSessionDir,
+        ROUTECODEX_LLMS_ROUTER_NATIVE_PATH: fs.existsSync(nativeNodePath)
+          ? nativeNodePath
+          : (process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH || '')
       }
     }
   );
