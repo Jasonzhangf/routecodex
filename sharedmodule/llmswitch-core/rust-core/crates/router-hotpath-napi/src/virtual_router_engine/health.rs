@@ -265,8 +265,54 @@ impl ProviderHealthManager {
         Some(expiry - now_ms)
     }
 
+    pub(crate) fn describe_state(&self, provider_key: &str) -> Option<Value> {
+        let canonical = Self::canonicalize_provider_key(provider_key);
+        let state = self.states.get(&canonical)?;
+        Some(json!({
+            "providerKey": state.provider_key,
+            "state": state.state,
+            "failureCount": state.failure_count,
+            "cooldownExpiresAt": state.cooldown_expires_at,
+            "lastFailureAt": state.last_failure_at,
+            "reason": state.reason,
+            "consecutiveHttp502Failures": state.consecutive_http_502_failures,
+            "consecutiveHttp429Failures": state.consecutive_http_429_failures,
+            "http429CooldownCycles": state.http_429_cooldown_cycles,
+        }))
+    }
+
     pub(crate) fn config(&self) -> ProviderHealthConfigNormalized {
         self.config.clone()
+    }
+
+
+    pub(crate) fn clear_runtime_state(&mut self) {
+        for state in self.states.values_mut() {
+            state.state = "healthy".to_string();
+            state.failure_count = 0;
+            state.cooldown_expires_at = None;
+            state.last_failure_at = None;
+            state.reason = None;
+            state.consecutive_http_502_failures = 0;
+            state.consecutive_http_429_failures = 0;
+            state.http_429_cooldown_cycles = 0;
+        }
+    }
+
+    pub(crate) fn clear_imported_persisted_state(&mut self) {
+        for state in self.states.values_mut() {
+            if state.reason.as_deref() != Some(PERSIST_REASON_HTTP_503_DAILY) {
+                continue;
+            }
+            state.state = "healthy".to_string();
+            state.failure_count = 0;
+            state.cooldown_expires_at = None;
+            state.last_failure_at = None;
+            state.reason = None;
+            state.consecutive_http_502_failures = 0;
+            state.consecutive_http_429_failures = 0;
+            state.http_429_cooldown_cycles = 0;
+        }
     }
 
     pub(crate) fn export_persistable_state(&self, now_ms: i64) -> Value {

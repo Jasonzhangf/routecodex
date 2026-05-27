@@ -11,6 +11,7 @@
  */
 
 import type { QuotaState, StaticQuotaConfig } from '../../quota/provider-quota-center.js';
+import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../../types/llmswitch-local-types.js';
 import { x7eGate } from '../../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 
 function logQuotaAdapterNonBlockingError(operation: string, error: unknown): void {
@@ -382,13 +383,14 @@ export function createQuotaManagerAdapter(options: {
         };
       }
 
-      if (core?.getSnapshot) {
+      const getSnapshot = core?.getSnapshot;
+      if (typeof getSnapshot === 'function') {
         return (providerKey: string) => {
           const key = typeof providerKey === 'string' ? providerKey.trim() : '';
           if (!key) {
             return null;
           }
-          const snap = core.getSnapshot();
+          const snap = getSnapshot();
           const providers =
             snap && typeof snap === 'object' && (snap as Record<string, unknown>).providers && typeof (snap as Record<string, unknown>).providers === 'object'
               ? ((snap as Record<string, unknown>).providers as Record<string, unknown>)

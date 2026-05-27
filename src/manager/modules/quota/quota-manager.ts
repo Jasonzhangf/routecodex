@@ -300,25 +300,24 @@ export class QuotaManagerModule implements ManagerModule {
   async start(): Promise<void> {
     if (this.useCore) {
       try {
-        const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
-        const runtimeHooks =
-          rustMutator && (typeof rustMutator.handleProviderError === 'function' || typeof rustMutator.handleProviderSuccess === 'function')
-            ? {
-                onProviderError: (event: ProviderErrorEvent) => {
-                  rustMutator.handleProviderError?.(event);
-                },
-                onProviderSuccess: (event: ProviderSuccessEvent) => {
-                  rustMutator.handleProviderSuccess?.(event);
-                }
-              }
-            : {
-                onProviderError: (event: ProviderErrorEvent) => {
-                  this.coreManager?.onProviderError?.(event);
-                },
-                onProviderSuccess: (event: ProviderSuccessEvent) => {
-                  this.coreManager?.onProviderSuccess?.(event);
-                }
-              };
+        const runtimeHooks = {
+          onProviderError: (event: ProviderErrorEvent) => {
+            const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
+            if (typeof rustMutator?.handleProviderError === 'function') {
+              rustMutator.handleProviderError(event);
+              return;
+            }
+            this.coreManager?.onProviderError?.(event);
+          },
+          onProviderSuccess: (event: ProviderSuccessEvent) => {
+            const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
+            if (typeof rustMutator?.handleProviderSuccess === 'function') {
+              rustMutator.handleProviderSuccess(event);
+              return;
+            }
+            this.coreManager?.onProviderSuccess?.(event);
+          }
+        };
         this.hooksRegistered = await setProviderRuntimeQuotaHooks(this.providerRuntimeHookOwner, runtimeHooks);
       } catch {
         this.hooksRegistered = false;

@@ -133,6 +133,70 @@ describe('QuotaManagerModule', () => {
   });
 
 
+  it('switches provider runtime event hooks from TS core fallback to Rust mutator once hubPipeline becomes available after start', async () => {
+    const coreManager = {
+      hydrateFromStore: async () => {},
+      registerProviderStaticConfig: jest.fn(),
+      onProviderError: jest.fn(),
+      onProviderSuccess: jest.fn(),
+      getQuotaView: () => (() => null),
+      getSnapshot: () => ({ updatedAtMs: Date.now(), providers: {} }),
+      persistNow: async () => {}
+    };
+
+    let registeredHooks: any = null;
+    const setProviderRuntimeQuotaHooks = jest.fn(async (_owner, hooks) => {
+      registeredHooks = hooks;
+      return true;
+    });
+
+    jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      createCoreQuotaManager: async () => coreManager,
+      setProviderRuntimeQuotaHooks,
+      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
+    }));
+    jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
+      x7eGate: {
+        phase1UnifiedQuota: true
+      }
+    }));
+
+    const runtimeRef: { current: any } = { current: null };
+    const rustHookCalls: Array<{ kind: 'error' | 'success'; event: any }> = [];
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
+    const mod = new QuotaManagerModule();
+    await mod.init({
+      serverId: 'test',
+      getHubPipeline: () => runtimeRef.current
+    });
+    await mod.start();
+
+    expect(setProviderRuntimeQuotaHooks).toHaveBeenCalledTimes(1);
+    expect(typeof registeredHooks?.onProviderError).toBe('function');
+    expect(typeof registeredHooks?.onProviderSuccess).toBe('function');
+
+    registeredHooks.onProviderError({ runtime: { providerKey: 'mock.provider' }, timestamp: 1 } as any);
+    registeredHooks.onProviderSuccess({ runtime: { providerKey: 'mock.provider' }, timestamp: 2 } as any);
+    expect(coreManager.onProviderError).toHaveBeenCalledTimes(1);
+    expect(coreManager.onProviderSuccess).toHaveBeenCalledTimes(1);
+    expect(rustHookCalls).toEqual([]);
+
+    runtimeRef.current = {
+      getVirtualRouter: () => ({
+        handleProviderError: (event: any) => void rustHookCalls.push({ kind: 'error', event }),
+        handleProviderSuccess: (event: any) => void rustHookCalls.push({ kind: 'success', event })
+      })
+    };
+
+    registeredHooks.onProviderError({ runtime: { providerKey: 'mock.provider' }, timestamp: 3 } as any);
+    registeredHooks.onProviderSuccess({ runtime: { providerKey: 'mock.provider' }, timestamp: 4 } as any);
+
+    expect(rustHookCalls.map((entry) => entry.kind)).toEqual(['error', 'success']);
+    expect(coreManager.onProviderError).toHaveBeenCalledTimes(1);
+    expect(coreManager.onProviderSuccess).toHaveBeenCalledTimes(1);
+  });
+
+
   it('routes public reset/recover/disable through rust host mutator instead of TS core manager in unified mode', async () => {
     const coreManager = {
       hydrateFromStore: jest.fn(async () => {}),

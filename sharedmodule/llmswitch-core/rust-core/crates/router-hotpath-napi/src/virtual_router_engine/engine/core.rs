@@ -1,4 +1,3 @@
-use napi::Ref;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
@@ -7,6 +6,7 @@ use super::super::health::{ProviderHealthConfig, ProviderHealthManager};
 use super::super::instructions::RoutingInstructionState;
 use super::super::load_balancer::{LoadBalancingPolicy, RouteLoadBalancer};
 use super::super::provider_registry::ProviderRegistry;
+use super::super::quota::ProviderQuotaManager;
 use super::super::routing::{parse_routing, RoutingPools};
 use super::super::routing_state_store::{
     load_provider_health_state, persist_provider_health_state,
@@ -22,11 +22,11 @@ pub(crate) struct VirtualRouterEngineCore {
     pub routing: RoutingPools,
     pub provider_registry: ProviderRegistry,
     pub health_manager: ProviderHealthManager,
+    pub quota_manager: ProviderQuotaManager,
     pub load_balancer: RouteLoadBalancer,
     pub classifier: RoutingClassifier,
     pub routing_instruction_state: HashMap<String, RoutingInstructionState>,
     pub web_search_force: bool,
-    pub quota_view: Option<Ref<()>>,
     pub context_warn_ratio: f64,
     pub context_hard_limit: bool,
     pub(crate) concurrency_busy_keys: HashMap<String, i64>, // key -> expires_at_ms
@@ -38,11 +38,11 @@ impl VirtualRouterEngineCore {
             routing: RoutingPools::default(),
             provider_registry: ProviderRegistry::default(),
             health_manager: ProviderHealthManager::new(),
+            quota_manager: ProviderQuotaManager::new(),
             load_balancer: RouteLoadBalancer::new(None),
             classifier: RoutingClassifier::new(&Value::Object(Map::new())),
             routing_instruction_state: HashMap::new(),
             web_search_force: false,
-            quota_view: None,
             context_warn_ratio: DEFAULT_CONTEXT_WARN_RATIO,
             context_hard_limit: false,
             concurrency_busy_keys: HashMap::new(),
@@ -68,9 +68,13 @@ impl VirtualRouterEngineCore {
         self.health_manager.configure(health_config);
         let provider_keys = self.provider_registry.list_keys();
         self.health_manager.register_providers(&provider_keys);
-        if let Some(raw) = load_provider_health_state() {
-            self.health_manager.import_persistable_state(&raw, now_ms());
+        self.quota_manager.register_providers(&provider_keys);
+        for provider_key in provider_keys.iter() {
+            if let Some(profile) = self.provider_registry.get(provider_key) {
+                self.quota_manager.register_provider_profile(profile);
+            }
         }
+        self.refresh_provider_health_from_store();
         let load_balancing = config
             .get("loadBalancing")
             .cloned()
@@ -104,13 +108,16 @@ impl VirtualRouterEngineCore {
         Ok(())
     }
 
+    pub(crate) fn refresh_provider_health_from_store(&mut self) {
+        self.health_manager.clear_imported_persisted_state();
+        if let Some(raw) = load_provider_health_state() {
+            self.health_manager.import_persistable_state(&raw, now_ms());
+        }
+    }
+
     pub(crate) fn persist_provider_health(&self) {
         let raw = self.health_manager.export_persistable_state(now_ms());
         persist_provider_health_state(&raw);
-    }
-
-    pub(crate) fn update_quota_view(&mut self, quota_view: Option<Ref<()>>) {
-        self.quota_view = quota_view;
     }
 
     pub(crate) fn mark_concurrency_scope_busy(&mut self, scope_key: &str) {

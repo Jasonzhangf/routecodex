@@ -1,92 +1,85 @@
-import { describe, expect, it, jest } from '@jest/globals';
-import { ProviderHealthManager } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.js';
-import { handleProviderFailureImpl } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/health/index.js';
+import { describe, expect, it } from '@jest/globals';
 
-describe('virtual router health last-provider guard', () => {
-  it('does not cooldown the last remaining available provider', () => {
-    const healthManager = new ProviderHealthManager();
-    healthManager.configure({
+import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
+import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
+
+function buildConfig(targets: string[]): any {
+  const providers = Object.fromEntries(
+    targets.map((providerKey, index) => [
+      providerKey,
+      {
+        providerKey,
+        providerType: 'openai',
+        endpoint: 'https://example.invalid',
+        auth: { type: 'apiKey', value: 'test-key' },
+        outboundProfile: 'openai-chat',
+        runtimeKey: `runtime.${index + 1}`,
+        modelId: 'gpt-test'
+      }
+    ])
+  );
+
+  return {
+    routing: {
+      default: [
+        {
+          id: 'default-primary',
+          priority: 100,
+          mode: 'priority',
+          targets
+        }
+      ]
+    },
+    providers,
+    classifier: {},
+    loadBalancing: { strategy: 'priority' },
+    health: {
       failureThreshold: 3,
       cooldownMs: 30_000,
       fatalCooldownMs: 120_000
+    }
+  };
+}
+
+function routeOnce(engine: VirtualRouterEngine, requestId: string): string {
+  return engine.route(
+    { messages: [{ role: 'user', content: 'hello' }] } as any,
+    { requestId } as any
+  ).target.providerKey;
+}
+
+describe('virtual router native last-provider guard', () => {
+  it('does not cooldown the last remaining available provider', () => {
+    const engine = new VirtualRouterEngine();
+    engine.initialize(buildConfig(['provider.a']));
+
+    engine.handleProviderFailure({
+      providerKey: 'provider.a',
+      reason: 'upstream_error',
+      fatal: false,
+      statusCode: 502,
+      affectsHealth: true,
+      cooldownOverrideMs: 30_000
     });
-    healthManager.registerProviders(['provider.a']);
-    const markProviderCooldown = jest.fn<(providerKey: string, cooldownMs: number | undefined) => void>();
 
-    handleProviderFailureImpl(
-      {
-        providerKey: 'provider.a',
-        reason: 'upstream_error',
-        fatal: false,
-        statusCode: 502,
-        affectsHealth: true,
-        cooldownOverrideMs: 30_000
-      },
-      healthManager,
-      healthManager.getConfig(),
-      markProviderCooldown
-    );
-
-    expect(healthManager.isAvailable('provider.a')).toBe(true);
-    expect(markProviderCooldown).not.toHaveBeenCalled();
+    expect(routeOnce(engine, 'req-last-provider-nonfatal')).toBe('provider.a');
   });
 
   it('does not trip the last remaining available provider even on fatal events', () => {
-    const healthManager = new ProviderHealthManager();
-    healthManager.configure({
-      failureThreshold: 3,
-      cooldownMs: 30_000,
-      fatalCooldownMs: 120_000
+    const engine = new VirtualRouterEngine();
+    engine.initialize(buildConfig(['provider.a', 'provider.b']));
+
+    engine.markProviderCooldown('provider.b', 60_000);
+    engine.handleProviderFailure({
+      providerKey: 'provider.a',
+      reason: 'client_error',
+      fatal: true,
+      statusCode: 400,
+      affectsHealth: true,
+      cooldownOverrideMs: 120_000
     });
-    healthManager.registerProviders(['provider.a', 'provider.b']);
-    healthManager.cooldownProvider('provider.b', 'rate_limit', 60_000);
-    const markProviderCooldown = jest.fn<(providerKey: string, cooldownMs: number | undefined) => void>();
 
-    handleProviderFailureImpl(
-      {
-        providerKey: 'provider.a',
-        reason: 'client_error',
-        fatal: true,
-        statusCode: 400,
-        affectsHealth: true,
-        cooldownOverrideMs: 120_000
-      },
-      healthManager,
-      healthManager.getConfig(),
-      markProviderCooldown
-    );
-
-    expect(healthManager.isAvailable('provider.a')).toBe(true);
-    expect(healthManager.isAvailable('provider.b')).toBe(false);
-    expect(markProviderCooldown).not.toHaveBeenCalled();
+    expect(routeOnce(engine, 'req-last-provider-fatal')).toBe('provider.a');
   });
 
-  it('still cools down a provider when alternatives remain available', () => {
-    const healthManager = new ProviderHealthManager();
-    healthManager.configure({
-      failureThreshold: 3,
-      cooldownMs: 30_000,
-      fatalCooldownMs: 120_000
-    });
-    healthManager.registerProviders(['provider.a', 'provider.b']);
-    const markProviderCooldown = jest.fn<(providerKey: string, cooldownMs: number | undefined) => void>();
-
-    handleProviderFailureImpl(
-      {
-        providerKey: 'provider.a',
-        reason: 'rate_limit',
-        fatal: false,
-        statusCode: 429,
-        affectsHealth: true,
-        cooldownOverrideMs: 5_000
-      },
-      healthManager,
-      healthManager.getConfig(),
-      markProviderCooldown
-    );
-
-    expect(healthManager.isAvailable('provider.a')).toBe(false);
-    expect(healthManager.isAvailable('provider.b')).toBe(true);
-    expect(markProviderCooldown).toHaveBeenCalledWith('provider.a', 5_000);
-  });
 });

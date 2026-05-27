@@ -1,7 +1,7 @@
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
 
 describe('virtual-router engine updateDeps', () => {
-  it('applies quotaView updates after initialization', () => {
+  it('does not let runtime quotaView updates override Rust route decision after initialization', () => {
     const providerA = 'mock.providerA.gpt-5.2';
     const providerB = 'mock.providerB.gpt-5.2';
 
@@ -70,7 +70,7 @@ describe('virtual-router engine updateDeps', () => {
 
     engine.initialize(config);
     const second = engine.route(request, metadata);
-    expect(second.target.providerKey).toBe(providerB);
+    expect(second.target.providerKey).toBe(providerA);
   });
 });
 
