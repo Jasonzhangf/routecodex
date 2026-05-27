@@ -88,7 +88,12 @@ function normalizeSelectionPenalty(state: QuotaState, nowMs: number): number {
 }
 
 function getRustQuotaHostMutatorFromContext(context: ManagerContext | null | undefined): RustQuotaHydrationMutator | null {
-  const hubPipeline = typeof context?.getHubPipeline === 'function' ? context.getHubPipeline() : null;
+  let hubPipeline: unknown = null;
+  try {
+    hubPipeline = typeof context?.getHubPipeline === 'function' ? context.getHubPipeline() : null;
+  } catch {
+    return null;
+  }
   if (!hubPipeline || typeof hubPipeline !== 'object') {
     return null;
   }
@@ -96,7 +101,12 @@ function getRustQuotaHostMutatorFromContext(context: ManagerContext | null | und
   if (typeof getVirtualRouter !== 'function') {
     return null;
   }
-  const virtualRouter = getVirtualRouter();
+  let virtualRouter: unknown = null;
+  try {
+    virtualRouter = getVirtualRouter();
+  } catch {
+    return null;
+  }
   if (!virtualRouter || typeof virtualRouter !== 'object') {
     return null;
   }
