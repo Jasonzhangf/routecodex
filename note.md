@@ -12412,3 +12412,16 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
   - 结果：`7 suites / 16 tests` 全绿。
 - 结论：QuotaManagerModule 已不再创建/持有 TS core quota owner；测试链路也已去 core 依赖，统一对齐 Rust host contract。
+
+## 2026-05-27 Phase E 延续6：物理删除 bridge/quota-manager.ts（去除无用桥）
+- 发现：`QuotaManagerModule` 已不再创建 core quota manager，但 bridge 仍保留 `createCoreQuotaManager` 出口与 `bridge/quota-manager.ts` 文件，属于重复/死语义。
+- 本轮动作：
+  - 删除导出：
+    - `src/modules/llmswitch/bridge.ts` 中 `createCoreQuotaManager`
+    - `src/modules/llmswitch/bridge/index.ts` 中 `createCoreQuotaManager`
+  - 物理删除文件：
+    - `src/modules/llmswitch/bridge/quota-manager.ts`
+- 验证：
+  - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts`
+  - 结果：`7 suites / 16 tests` 全绿。
+- 结论：quota bridge 层已去除 core manager 入口，避免后续回流 TS owner。

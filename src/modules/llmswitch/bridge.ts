@@ -43,7 +43,6 @@ export {
 export { convertProviderResponse } from './bridge/response-converter.js';
 
 // Newly factored bridge modules.
-export { createCoreQuotaManager } from './bridge/quota-manager.js';
 export {
   writeSnapshotViaHooks,
   preloadCriticalBridgeRuntimeModules,

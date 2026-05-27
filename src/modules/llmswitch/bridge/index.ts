@@ -18,7 +18,6 @@ export {
 
 export { createSnapshotRecorder, resetSnapshotRecorderErrorsampleStateForTests, type SnapshotRecorder } from './snapshot-recorder.js';
 export { convertProviderResponse } from './response-converter.js';
-export { createCoreQuotaManager } from './quota-manager.js';
 export {
   writeSnapshotViaHooks,
   preloadCriticalBridgeRuntimeModules,
