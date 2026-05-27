@@ -11,7 +11,6 @@
  */
 
 import type { StaticQuotaConfig } from '../../quota/provider-quota-center.js';
-import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../../types/llmswitch-local-types.js';
 import { x7eGate } from '../../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 
 function logQuotaAdapterNonBlockingError(operation: string, error: unknown): void {
@@ -69,20 +68,7 @@ export interface RustQuotaHostMutatorLike {
   disableProviderQuota?(providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number): unknown;
 }
 
-export interface CoreQuotaManagerLike {
-  hydrateFromStore?(): Promise<void>;
-  registerProviderStaticConfig?(providerKey: string, cfg: StaticQuotaConfig): void;
-  onProviderError?(ev: ProviderErrorEvent): void;
-  onProviderSuccess?(ev: ProviderSuccessEvent): void;
-  disableProvider?(options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number; reason?: string }): void;
-  recoverProvider?(providerKey: string): void;
-  resetProvider?(providerKey: string): void;
-  getSnapshot?(): unknown;
-  persistNow?(): Promise<void>;
-}
-
 export function createQuotaManagerAdapter(options: {
-  coreManager?: CoreQuotaManagerLike | null;
   rustHostMutator?: RustQuotaHostMutatorLike | null;
   quotaRoutingEnabled?: boolean;
 }): QuotaManagerAdapter {

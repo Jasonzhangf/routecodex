@@ -12453,3 +12453,18 @@ Using skills: coding-principals + rcc-dev-skills
   - `npm run -s jest:run -- --runInBand --runTestsByPath tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts tests/server/daemon-admin/quota-unified-special-family-consistency.spec.ts tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts`
   - 结果：`4 suites / 11 tests` 全绿。
 - 结论：关键 daemon-admin quota 证据测试已去掉 sharedmodule TS quota manager 依赖，继续向 Rust host contract-only 收敛。
+
+## 2026-05-27 Phase E 延续9：删除 quota module/adapter 中残余 core 类型语义
+- 发现：虽运行时已 Rust-only，但 `quota-manager.ts` / `quota-adapter.ts` 仍保留 core 相关类型与参数形态（`CoreQuotaManagerLike` / `coreManager?`），形成“伪双真源接口”。
+- 本轮改动：
+  - `src/manager/modules/quota/quota-manager.ts`
+    - 删除 `CoreQuotaManagerLike` 类型与 `buildReadOnlyQuotaViewFromCore(...)` 死代码。
+    - `getCoreQuotaManager()` 返回类型收紧为 `null`。
+  - `src/manager/modules/quota/quota-adapter.ts`
+    - 删除 `CoreQuotaManagerLike` 类型定义。
+    - `createQuotaManagerAdapter(...)` 参数移除 `coreManager` 字段（API 级彻底去 core 语义）。
+    - 清理不再使用的 `ProviderErrorEvent/ProviderSuccessEvent` import。
+- 验证：
+  - `npm run -s jest:run -- --runInBand --runTestsByPath tests/manager/quota/quota-manager-module.spec.ts tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts tests/server/daemon-admin/quota-unified-host-rust-consistency.spec.ts tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
+  - 结果：`5 suites / 12 tests` 全绿。
+- 结论：quota module + adapter 的类型/接口层也已收敛到 Rust-only host contract，不再暴露 core 路径心智模型。

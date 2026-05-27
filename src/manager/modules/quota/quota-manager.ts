@@ -25,18 +25,6 @@ type RoutingProviderScope = {
   oauthProviderIds?: string[];
 };
 
-type CoreQuotaManagerLike = {
-  hydrateFromStore?: () => Promise<void>;
-  registerProviderStaticConfig?: (providerKey: string, cfg: StaticQuotaConfig) => void;
-  onProviderError?: (ev: ProviderErrorEvent) => void;
-  onProviderSuccess?: (ev: ProviderSuccessEvent) => void;
-  disableProvider?: (options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number; reason?: string }) => void;
-  recoverProvider?: (providerKey: string) => void;
-  resetProvider?: (providerKey: string) => void;
-  getSnapshot?: () => { updatedAtMs: number; providers: Record<string, QuotaState> };
-  persistNow?: () => Promise<void>;
-};
-
 type RustQuotaHostSnapshotEntry = {
   providerKey?: unknown;
   inPool?: unknown;
@@ -97,37 +85,6 @@ function normalizeSelectionPenalty(state: QuotaState, nowMs: number): number {
     return 0;
   }
   return Math.max(0, Math.floor(state.consecutiveErrorCount));
-}
-
-function buildReadOnlyQuotaViewFromCore(
-  core: CoreQuotaManagerLike | null
-): ((providerKey: string) => QuotaViewEntry | null) | null {
-  if (!core || typeof core.getSnapshot !== 'function') {
-    return null;
-  }
-  return (providerKey: string): QuotaViewEntry | null => {
-    const key = typeof providerKey === 'string' ? providerKey.trim() : '';
-    if (!key) {
-      return null;
-    }
-    const snapshot = core.getSnapshot?.();
-    const state = snapshot?.providers?.[key];
-    if (!state) {
-      return null;
-    }
-    const nowMs = Date.now();
-    return {
-      providerKey: key,
-      inPool: Boolean(state.inPool),
-      reason: state.reason,
-      priorityTier: state.priorityTier,
-      selectionPenalty: normalizeSelectionPenalty(state, nowMs),
-      lastErrorAtMs: state.lastErrorAtMs,
-      consecutiveErrorCount: state.consecutiveErrorCount,
-      cooldownUntil: state.cooldownUntil,
-      blacklistUntil: state.blacklistUntil
-    };
-  };
 }
 
 function getRustQuotaHostMutatorFromContext(context: ManagerContext | null | undefined): RustQuotaHydrationMutator | null {
@@ -329,7 +286,7 @@ export class QuotaManagerModule implements ManagerModule {
     return {};
   }
 
-  getCoreQuotaManager(): CoreQuotaManagerLike | null {
+  getCoreQuotaManager(): null {
     return null;
   }
 
