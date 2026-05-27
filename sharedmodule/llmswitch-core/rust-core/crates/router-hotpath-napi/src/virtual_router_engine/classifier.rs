@@ -76,10 +76,19 @@ impl RoutingClassifier {
         // Jason 规则：thinking 只看当前轮是否为 fresh user input。
         // 历史轮（包括上一轮 assistant thinking/tool 延续）不得继承 thinking 命中。
         let thinking_from_user = latest_message_from_user;
-        let coding_continuation = last_tool_category == "coding";
-        let search_continuation = last_tool_category == "search";
-        let tools_continuation = last_tool_category == "other";
-        let web_search_tool_intent = !latest_message_from_user && last_tool_category == "websearch";
+        // Coding route must be based on current-turn continuation signal only.
+        // If this turn does not contain tool-call response activity, do not inherit
+        // historical "last tool was coding" into the new request.
+        let has_current_turn_continuation_signal =
+            !latest_message_from_user && features.has_tool_call_responses;
+        let coding_continuation =
+            has_current_turn_continuation_signal && last_tool_category == "coding";
+        let search_continuation =
+            has_current_turn_continuation_signal && last_tool_category == "search";
+        let tools_continuation =
+            has_current_turn_continuation_signal && last_tool_category == "other";
+        let web_search_tool_intent =
+            has_current_turn_continuation_signal && last_tool_category == "websearch";
         let user_text_lower = features.user_text_sample.to_lowercase();
         // Keep web-search intent strict to avoid over-routing:
         // only explicit web-search phrases should trigger web_search route.
@@ -355,6 +364,69 @@ mod tests {
         assert_ne!(result.route_name, "coding");
         assert!(result.reasoning.contains("tools:tool-request-detected"));
         assert!(!result.reasoning.contains("coding:last-tool-coding"));
+    }
+
+    #[test]
+    fn historical_coding_label_without_current_tool_followup_does_not_route_to_coding() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: true,
+            has_tool_call_responses: false,
+            last_assistant_tool_category: Some("coding".to_string()),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_ne!(result.route_name, "coding");
+        assert!(!result.reasoning.contains("coding:last-tool-coding"));
+    }
+
+    #[test]
+    fn historical_search_label_without_current_tool_followup_does_not_route_to_search() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: true,
+            has_tool_call_responses: false,
+            last_assistant_tool_category: Some("search".to_string()),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_ne!(result.route_name, "search");
+        assert!(!result.reasoning.contains("search:last-tool-search"));
+    }
+
+    #[test]
+    fn historical_other_label_without_current_tool_followup_does_not_route_to_tools_by_continuation() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: true,
+            has_tool_call_responses: false,
+            last_assistant_tool_category: Some("other".to_string()),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert!(!result.reasoning.contains("tools:last-tool-other"));
+    }
+
+    #[test]
+    fn historical_websearch_label_without_current_tool_followup_does_not_route_to_web_search() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: true,
+            has_tool_call_responses: false,
+            last_assistant_tool_category: Some("websearch".to_string()),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_ne!(result.route_name, "web_search");
+        assert!(!result.reasoning.contains("web_search:tool-intent"));
     }
 
     #[test]
