@@ -8,23 +8,21 @@ import {
 } from '../followup-seed.js';
 import { reenterServerToolBackend } from '../reenter-backend.js';
 import {
-  resolveWebSearchToolName,
-  parseToolArguments,
-  isGeminiWebSearchEngine,
-  isQwenWebSearchEngine,
-  isIflowRetrieveWebSearchEngine,
-  normalizeResultCount,
-  extractAssistantMessage,
-  buildToolMessages,
-  findWebSearchArray,
-  collectWebSearchHits,
-  limitHits,
-  formatHitsSummary,
-  getArray,
-  sanitizeBackendError,
-  buildWebSearchSystemPrompt,
-  type WebSearchItem
-} from './web-search-pure-blocks.js';
+  webSearchResolveToolNameWithNative,
+  webSearchParseToolArgumentsWithNative,
+  webSearchIsGeminiEngineWithNative,
+  webSearchIsQwenEngineWithNative,
+  webSearchIsIflowRetrieveEngineWithNative,
+  webSearchNormalizeResultCountWithNative,
+  webSearchExtractAssistantMessageWithNative,
+  webSearchBuildToolMessagesWithNative,
+  webSearchCollectHitsWithNative,
+  webSearchLimitHitsWithNative,
+  webSearchFormatHitsSummaryWithNative,
+  webSearchSanitizeBackendErrorWithNative,
+  webSearchBuildSystemPromptWithNative,
+  webSearchFindArrayWithNative,
+} from '../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 interface WebSearchEngineConfig {
   id: string;
@@ -38,6 +36,16 @@ interface WebSearchEngineConfig {
   serverToolsDisabled?: boolean;
   searchEngineList?: string[];
 }
+
+interface WebSearchItem {
+  title?: string;
+  link: string;
+  media?: string;
+  publish_date?: string;
+  content?: string;
+  refer?: string;
+}
+
 interface WebSearchConfig {
   engines: WebSearchEngineConfig[];
   injectPolicy?: 'always' | 'selective';
@@ -51,6 +59,71 @@ interface WebSearchBackendResult {
 const FLOW_ID = 'web_search_flow';
 const LEGACY_TOOL_NAME = 'web_search';
 const SERVERTOOL_TOOL_NAME = 'websearch';
+
+// ── Native adapter wrappers (mirror web-search-pure-blocks signatures) ──
+
+function resolveWebSearchToolName(raw: unknown): string {
+  return webSearchResolveToolNameWithNative(typeof raw === 'string' ? raw : null);
+}
+
+function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
+  const raw = webSearchParseToolArgumentsWithNative(typeof toolCall.arguments === 'string' ? toolCall.arguments : '');
+  try { return JSON.parse(raw) as Record<string, unknown>; } catch { return {}; }
+}
+
+function isGeminiWebSearchEngine(engine: WebSearchEngineConfig): boolean {
+  return webSearchIsGeminiEngineWithNative(engine.providerKey);
+}
+
+function isQwenWebSearchEngine(engine: WebSearchEngineConfig): boolean {
+  return webSearchIsQwenEngineWithNative(engine.providerKey);
+}
+
+function isIflowRetrieveWebSearchEngine(engine: WebSearchEngineConfig): boolean {
+  return webSearchIsIflowRetrieveEngineWithNative(JSON.stringify(engine.searchEngineList ?? []));
+}
+
+function normalizeResultCount(value: unknown): number {
+  return webSearchNormalizeResultCountWithNative(JSON.stringify(value));
+}
+
+function sanitizeBackendError(message: string): string {
+  return webSearchSanitizeBackendErrorWithNative(message);
+}
+
+function buildWebSearchSystemPrompt(targetCount: number): string {
+  return webSearchBuildSystemPromptWithNative(targetCount);
+}
+
+function extractAssistantMessage(chatResponse: JsonObject): JsonObject | null {
+  const raw = webSearchExtractAssistantMessageWithNative(JSON.stringify(chatResponse));
+  if (raw === 'null' || !raw) return null;
+  try { return JSON.parse(raw) as JsonObject; } catch { return null; }
+}
+
+function buildToolMessages(chatResponse: JsonObject): JsonObject[] {
+  const raw = webSearchBuildToolMessagesWithNative(JSON.stringify(chatResponse));
+  try { return JSON.parse(raw) as JsonObject[]; } catch { return []; }
+}
+
+function collectWebSearchHits(chatResponse: JsonObject, targetCount: number): WebSearchItem[] {
+  const raw = webSearchCollectHitsWithNative(JSON.stringify(chatResponse), targetCount);
+  try { return JSON.parse(raw) as WebSearchItem[]; } catch { return []; }
+}
+
+function formatHitsSummary(hits: WebSearchItem[]): string {
+  return webSearchFormatHitsSummaryWithNative(JSON.stringify(hits));
+}
+
+function limitHits(hits: WebSearchItem[]): WebSearchItem[] {
+  const raw = webSearchLimitHitsWithNative(JSON.stringify(hits));
+  try { return JSON.parse(raw) as WebSearchItem[]; } catch { return []; }
+}
+
+function getArray(value: unknown): JsonValue[] {
+  return Array.isArray(value) ? (value as JsonValue[]) : [];
+}
+
 const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
   const toolCall = ctx.toolCall;
   if (!toolCall) {

@@ -755,6 +755,98 @@ export function runApplyPatchWithNative(input: {
   }
 }
 
+// ── Web Search Pure Blocks ────────────────────────────────────────────
+
+function invokeWebSearchNative(capability: string, args: unknown[]): string {
+  if (isNativeDisabledByEnv()) {
+    return '';
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return '';
+  }
+  try {
+    const encoded = args.map((a) => safeStringify(a) ?? 'null');
+    const raw = fn(...encoded);
+    if (typeof raw !== 'string') return '';
+    return raw;
+  } catch {
+    return '';
+  }
+}
+
+export function webSearchResolveToolNameWithNative(raw: string | null): string {
+  return invokeWebSearchNative('webSearchResolveToolName', [raw]);
+}
+
+export function webSearchParseToolArgumentsWithNative(argumentsJson: string): string {
+  return invokeWebSearchNative('webSearchParseToolArgumentsJson', [argumentsJson]);
+}
+
+export function webSearchIsGeminiEngineWithNative(providerKey: string): boolean {
+  return invokeWebSearchNative('webSearchIsGeminiEngine', [providerKey]) === 'true';
+}
+
+export function webSearchIsQwenEngineWithNative(providerKey: string): boolean {
+  return invokeWebSearchNative('webSearchIsQwenEngine', [providerKey]) === 'true';
+}
+
+export function webSearchIsIflowRetrieveEngineWithNative(searchEngineListJson: string): boolean {
+  return invokeWebSearchNative('webSearchIsIflowRetrieveEngine', [searchEngineListJson]) === 'true';
+}
+
+export function webSearchNormalizeResultCountWithNative(valueJson: string): number {
+  const raw = invokeWebSearchNative('webSearchNormalizeResultCountJson', [valueJson]);
+  const n = parseInt(raw, 10);
+  return isNaN(n) ? 10 : n;
+}
+
+export function webSearchBuildSystemPromptWithNative(targetCount: number): string {
+  const fn = readNativeFunction('webSearchBuildSystemPrompt');
+  if (!fn) return '';
+  try {
+    const raw = fn(targetCount);
+    return typeof raw === 'string' ? raw : '';
+  } catch {
+    return '';
+  }
+}
+
+export function webSearchSanitizeBackendErrorWithNative(message: string): string {
+  const fn = readNativeFunction('webSearchSanitizeBackendError');
+  if (!fn) return message;
+  try {
+    const raw = fn(message);
+    return typeof raw === 'string' ? raw : message;
+  } catch {
+    return message;
+  }
+}
+
+export function webSearchCollectHitsWithNative(chatResponseJson: string, targetCount: number): string {
+  return invokeWebSearchNative('webSearchCollectHitsJson', [chatResponseJson, targetCount]);
+}
+
+export function webSearchFormatHitsSummaryWithNative(hitsJson: string): string {
+  return invokeWebSearchNative('webSearchFormatHitsSummaryJson', [hitsJson]);
+}
+
+export function webSearchLimitHitsWithNative(hitsJson: string): string {
+  return invokeWebSearchNative('webSearchLimitHitsJson', [hitsJson]);
+}
+
+export function webSearchExtractAssistantMessageWithNative(chatResponseJson: string): string {
+  return invokeWebSearchNative('webSearchExtractAssistantMessageJson', [chatResponseJson]);
+}
+
+export function webSearchBuildToolMessagesWithNative(chatResponseJson: string): string {
+  return invokeWebSearchNative('webSearchBuildToolMessagesJson', [chatResponseJson]);
+}
+
+export function webSearchFindArrayWithNative(chatResponseJson: string): string {
+  return invokeWebSearchNative('webSearchFindArrayJson', [chatResponseJson]);
+}
+
 export function readFollowupClientInjectSourceWithNative(
   adapterContext: Record<string, unknown>
 ): string {
