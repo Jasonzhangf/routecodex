@@ -1,43 +1,17 @@
 import type { ServerToolHandler } from './types.js';
 import { getDefaultServertoolSkeletonDocumentWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
-
-export type ServertoolTriggerMode = 'tool_call' | 'auto';
-export type ServertoolAutoHookPhase = 'pre' | 'default' | 'post';
-export type ServertoolExecutionMode =
-  | 'guarded'
-  | 'client_inject_only'
-  | 'auto_hook'
-  | 'reenter'
-  | 'backend'
-  | 'passthrough';
-
-export interface ServertoolSkeletonStageConfig {
-  enabled: boolean;
-  requireFinalizedMarker?: boolean;
-}
-
-export interface ServertoolSkeletonConfig {
-  requestPrepare: ServertoolSkeletonStageConfig;
-  internalDispatch: ServertoolSkeletonStageConfig;
-  finalizeStrip: ServertoolSkeletonStageConfig;
-  autoHooks: {
-    optionalPrimaryOrder: string[];
-    mandatoryOrder: string[];
-  };
-  pendingInjection: {
-    messageKinds: string[];
-  };
-  progress: {
-    toolNameByFlowId: Record<string, string>;
-    goldHighlightFlowIds: string[];
-  };
-  followup: {
-    genericInjectionOps: string[];
-    nativeSupportedOps: string[];
-    flowPolicy: {
-      profilesByFlowId: Record<string, {
-        noFollowup?: boolean;
-        autoLimit?: boolean;
+import type {
+  ServertoolTriggerMode,
+  ServertoolAutoHookPhase,
+  ServertoolExecutionMode,
+  ServertoolSkeletonStageConfig,
+  ServertoolSkeletonConfig,
+  ServertoolStateConfig,
+  ServertoolToolSpec,
+  ServertoolSkeletonDocument,
+  ServerToolHandlerRegistrationSpec,
+  ServerToolRegisteredHandlerRecord,
+} from '../router/virtual-router/engine-selection/native-followup-mainline-semantics.js';
         flowOnlyLoopLimit?: boolean;
         stickyProvider?: boolean;
         clientInjectOnly?: boolean;
@@ -53,57 +27,13 @@ export interface ServertoolSkeletonConfig {
   };
 }
 
-export interface ServertoolStateConfig {
-  scopePriority: string[];
-  pendingInjection: {
-    enabled: boolean;
-    strictContract: boolean;
-  };
-}
+// Types moved to native-followup-mainline-semantics.ts
 
-export interface ServertoolToolSpec {
-  name: string;
-  enabled: boolean;
-  kind: 'internal';
-  trigger: {
-    type: ServertoolTriggerMode;
-    canonicalName: string;
-    phase?: ServertoolAutoHookPhase;
-    priority?: number;
-  };
-  execution: {
-    mode: ServertoolExecutionMode;
-    stripAfterExecute: boolean;
-  };
-}
 
-export interface ServertoolSkeletonDocument {
-  version: 1;
-  servertool: {
-    enabled: boolean;
-    internalTools: Record<string, ServertoolToolSpec>;
-    skeleton: ServertoolSkeletonConfig;
-    state: ServertoolStateConfig;
-  };
-}
 
-export interface ServerToolHandlerRegistrationSpec {
-  name: string;
-  enabled: boolean;
-  trigger: ServertoolTriggerMode;
-  executionMode: ServertoolExecutionMode;
-  stripAfterExecute: boolean;
-  autoHook?: {
-    id: string;
-    phase: ServertoolAutoHookPhase;
-    priority: number;
-  };
-}
 
-export interface ServerToolRegisteredHandlerRecord {
-  registration: ServerToolHandlerRegistrationSpec;
-  handler: ServerToolHandler;
-}
+
+
 
 function normalizeServerToolName(value: unknown): string {
   const key = typeof value === 'string' ? value.trim().toLowerCase() : '';

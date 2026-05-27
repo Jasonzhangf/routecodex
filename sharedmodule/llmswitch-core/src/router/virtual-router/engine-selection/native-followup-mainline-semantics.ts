@@ -100,3 +100,99 @@ export function decideBudgetResetWithNative(
     return { should_reset: false, next_used: currentUsed };
   }
 }
+
+// ── Skeleton config types ───────────────────────────────────────────────────
+// Truth source: servertool_skeleton_config.rs (Rust).
+
+export type ServertoolTriggerMode = 'tool_call' | 'auto';
+export type ServertoolAutoHookPhase = 'pre' | 'default' | 'post';
+export type ServertoolExecutionMode =
+  | 'guarded'
+  | 'client_inject_only'
+  | 'auto_hook'
+  | 'reenter'
+  | 'backend'
+  | 'passthrough';
+
+export interface ServertoolSkeletonStageConfig {
+  enabled: boolean;
+  requireFinalizedMarker?: boolean;
+}
+
+export interface ServertoolSkeletonConfig {
+  requestPrepare: ServertoolSkeletonStageConfig;
+  internalDispatch: ServertoolSkeletonStageConfig;
+  finalizeStrip: ServertoolSkeletonStageConfig;
+  autoHooks: { optionalPrimaryOrder: string[]; mandatoryOrder: string[] };
+  pendingInjection: { messageKinds: string[] };
+  progress: {
+    toolNameByFlowId: Record<string, string>;
+    goldHighlightFlowIds: string[];
+  };
+  followup: {
+    genericInjectionOps: string[];
+    nativeSupportedOps: string[];
+    flowPolicy: {
+      profilesByFlowId: Record<string, {
+        noFollowup?: boolean;
+        autoLimit?: boolean;
+        flowOnlyLoopLimit?: boolean;
+        stickyProvider?: boolean;
+        clientInjectOnly?: boolean;
+        clearStateOnFollowupFailure?: boolean;
+        seedLoopPayload?: boolean;
+        retryEmptyFollowupOnce?: boolean;
+        clientInjectSource?: string;
+        transparentReplayRequestSuffix?: string;
+        ignoreRequiresActionFollowup?: boolean;
+        contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
+      }>;
+    };
+  };
+}
+
+export interface ServertoolStateConfig {
+  scopePriority: string[];
+  pendingInjection: { enabled: boolean; strictContract: boolean };
+}
+
+export interface ServertoolToolSpec {
+  name: string;
+  enabled: boolean;
+  kind: 'internal';
+  trigger: {
+    type: ServertoolTriggerMode;
+    canonicalName: string;
+    phase?: ServertoolAutoHookPhase;
+    priority?: number;
+  };
+  execution: { mode: ServertoolExecutionMode; stripAfterExecute: boolean };
+}
+
+export interface ServertoolSkeletonDocument {
+  version: 1;
+  servertool: {
+    enabled: boolean;
+    internalTools: Record<string, ServertoolToolSpec>;
+    skeleton: ServertoolSkeletonConfig;
+    state: ServertoolStateConfig;
+  };
+}
+
+export interface ServerToolHandlerRegistrationSpec {
+  name: string;
+  enabled: boolean;
+  trigger: ServertoolTriggerMode;
+  executionMode: ServertoolExecutionMode;
+  stripAfterExecute: boolean;
+  autoHook?: {
+    id: string;
+    phase: ServertoolAutoHookPhase;
+    priority: number;
+  };
+}
+
+export interface ServerToolRegisteredHandlerRecord {
+  registration: ServerToolHandlerRegistrationSpec;
+  handler: (...args: unknown[]) => unknown;
+}
