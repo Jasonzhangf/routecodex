@@ -229,4 +229,98 @@ describe('virtual router quota/health shadow regression gate', () => {
       source: 'rust.quota'
     });
   });
+
+
+  test('auth fatal health blocker remains Rust-owned even when TS quotaView pretends provider is still in pool', () => {
+    const providerA = 'quota.key1.gpt-test';
+    const providerB = 'quota.key2.gpt-test';
+    const config = buildDualProviderConfig(providerA, providerB);
+    const fatalEvent = {
+      code: 'INVALID_API_KEY',
+      message: 'invalid auth',
+      stage: 'provider.send',
+      status: 401,
+      errorClassification: 'unrecoverable',
+      cooldownOverrideMs: 4321,
+      runtime: {
+        requestId: 'req-shadow-auth-fatal',
+        routeName: 'default',
+        providerKey: providerA,
+        runtimeKey: 'quota.key1'
+      },
+      timestamp: Date.now(),
+      details: {}
+    } as any;
+
+    const rustOnly = new VirtualRouterEngine({} as any);
+    rustOnly.initialize(config);
+    rustOnly.handleProviderError(fatalEvent);
+
+    const tsPoisoned = createEngineWithPoisonedQuotaView(config, (providerKey) => ({
+      providerKey,
+      inPool: true,
+      reason: 'ok',
+      priorityTier: 100
+    }));
+    tsPoisoned.handleProviderError(fatalEvent);
+
+    expect(routeProviderKey(rustOnly, 'req-shadow-auth-fatal-rust')).toBe(providerB);
+    expect(routeProviderKey(tsPoisoned, 'req-shadow-auth-fatal-poisoned')).toBe(providerB);
+
+    const rustHealth = rustOnly.getStatus().health.find((entry) => entry.providerKey === providerA || entry.providerKey === providerA.replace('.key1.', '.1.'));
+    expect(rustHealth?.state).toBe('tripped');
+    expect((rustHealth?.failureCount ?? 0) >= 3).toBe(true);
+  });
+
+  test('recoverable transport cooldown stays Rust-owned and success clears it without reopening TS second center', () => {
+    const providerA = 'quota.key1.gpt-test';
+    const providerB = 'quota.key2.gpt-test';
+    const config = buildDualProviderConfig(providerA, providerB);
+    const transportEvent = {
+      code: 'HTTP_503',
+      message: 'transport unavailable',
+      stage: 'provider.send',
+      status: 503,
+      errorClassification: 'recoverable',
+      cooldownOverrideMs: 1500,
+      runtime: {
+        requestId: 'req-shadow-transport-cooldown',
+        routeName: 'default',
+        providerKey: providerA,
+        runtimeKey: 'quota.key1'
+      },
+      timestamp: Date.now(),
+      details: {}
+    } as any;
+    const successEvent = {
+      runtime: {
+        requestId: 'req-shadow-transport-recover',
+        routeName: 'default',
+        providerKey: providerA,
+        runtimeKey: 'quota.key1'
+      },
+      timestamp: Date.now()
+    } as any;
+
+    const rustOnly = new VirtualRouterEngine({} as any);
+    rustOnly.initialize(config);
+    rustOnly.handleProviderError(transportEvent);
+
+    const tsPoisoned = createEngineWithPoisonedQuotaView(config, (providerKey) => ({
+      providerKey,
+      inPool: true,
+      reason: 'ok',
+      priorityTier: 100
+    }));
+    tsPoisoned.handleProviderError(transportEvent);
+
+    expect(routeProviderKey(rustOnly, 'req-shadow-transport-rust-reroute')).toBe(providerB);
+    expect(routeProviderKey(tsPoisoned, 'req-shadow-transport-poisoned-reroute')).toBe(providerB);
+
+    rustOnly.handleProviderSuccess(successEvent);
+    tsPoisoned.handleProviderSuccess(successEvent);
+
+    expect(routeProviderKey(rustOnly, 'req-shadow-transport-rust-recovered')).toBe(providerA);
+    expect(routeProviderKey(tsPoisoned, 'req-shadow-transport-poisoned-recovered')).toBe(providerA);
+  });
 });
