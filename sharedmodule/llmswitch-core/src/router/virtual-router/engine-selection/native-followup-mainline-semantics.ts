@@ -16,6 +16,23 @@ export interface BudgetResetDecision {
   next_used: number;
 }
 
+export interface FollowupFlowDecision {
+  flowId?: string;
+  outcomeMode: 'skip' | 'client_inject_only' | 'reenter';
+  noFollowup: boolean;
+  autoLimit: boolean;
+  flowOnlyLoopLimit: boolean;
+  stickyProvider: boolean;
+  clientInjectOnly: boolean;
+  clearStateOnFollowupFailure: boolean;
+  seedLoopPayload: boolean;
+  retryEmptyFollowupOnce: boolean;
+  clientInjectSource?: string;
+  transparentReplayRequestSuffix?: string;
+  ignoreRequiresActionFollowup: boolean;
+  contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
+}
+
 // ── Followup request ID builder ─────────────────────────────────────────────
 
 export function buildFollowupRequestIdWithNative(base: string, suffix?: string | null): string {

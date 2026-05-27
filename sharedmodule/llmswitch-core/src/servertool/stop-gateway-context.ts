@@ -1,15 +1,6 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtime-metadata.js';
-import { inspectStopGatewaySignalWithNative } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
-
-export interface StopGatewayContext {
-  observed: boolean;
-  eligible: boolean;
-  source: 'chat' | 'responses' | 'none';
-  reason: string;
-  choiceIndex?: number;
-  hasToolCalls?: boolean;
-}
+import { inspectStopGatewaySignalWithNative, type StopGatewayContext } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
 
 // ── Main ────────────────────────────────────────────────────────────────────
 

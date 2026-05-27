@@ -1,27 +1,11 @@
 import { planServertoolFollowupRuntimeWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+import type { FollowupFlowDecision } from '../router/virtual-router/engine-selection/native-followup-mainline-semantics.js';
 
 function normalizeFlowId(flowId: unknown): string {
   return typeof flowId === 'string' ? flowId.trim() : '';
 }
 
 type FlowRuntimePlan = ReturnType<typeof planServertoolFollowupRuntimeWithNative>;
-
-export type FollowupFlowDecision = {
-  flowId?: string;
-  outcomeMode: 'skip' | 'client_inject_only' | 'reenter';
-  noFollowup: boolean;
-  autoLimit: boolean;
-  flowOnlyLoopLimit: boolean;
-  stickyProvider: boolean;
-  clientInjectOnly: boolean;
-  clearStateOnFollowupFailure: boolean;
-  seedLoopPayload: boolean;
-  retryEmptyFollowupOnce: boolean;
-  clientInjectSource?: string;
-  transparentReplayRequestSuffix?: string;
-  ignoreRequiresActionFollowup: boolean;
-  contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
-};
 
 function resolveFlowRuntimePlan(flowId: unknown): FlowRuntimePlan | undefined {
   const normalized = normalizeFlowId(flowId);

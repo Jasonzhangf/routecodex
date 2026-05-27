@@ -1,4 +1,4 @@
-import { evaluateLoopGuardWithNative } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
+import { evaluateLoopGuardWithNative, type LoopGuardOutput, type LoopGuardInput } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
 
 type StopMessageLoopStateLike = {
   startedAtMs?: number;
