@@ -25,7 +25,7 @@ function buildRequest(): StandardizedRequest {
 }
 
 describe('apply_patch provider-facing schema guidance', () => {
-  test('describes exact create, append, replace JSON forms without native patch or shell fallback', async () => {
+  test('aligns schema guidance with handler capabilities for weak-model compatibility', async () => {
     const result = await runReqProcessStage1ToolGovernance({
       request: buildRequest(),
       rawPayload: {},
@@ -41,13 +41,15 @@ describe('apply_patch provider-facing schema guidance', () => {
     const patchDescription = String(applyPatch.function.parameters.properties.patch.description || '');
     const schemaText = JSON.stringify(applyPatch);
 
-    expect(applyPatch.function.parameters.required).toEqual(['filePath', 'patch']);
-    expect(description).toContain('{ "filePath": "tmp/new.txt", "patch": "+ first line\\n+ second line" }');
-    expect(description).toContain('{ "filePath": "tmp/existing.txt", "patch": "+ appended line" }');
-    expect(description).toContain('{ "filePath": "src/main.ts", "patch": "- old line\\n+ new line" }');
-    expect(patchDescription).toContain('Create file');
-    expect(patchDescription).toContain('Update existing file');
-    expect(schemaText).not.toContain('*** Begin Patch');
+    expect(applyPatch.function.parameters.required).toEqual(['patch']);
+    expect(applyPatch.function.parameters.additionalProperties).toBe(true);
+    expect(description).toContain('`filePath` is optional');
+    expect(description).toContain('*** Add File:');
+    expect(description).toContain('--- a/');
+    expect(description).toContain('```diff');
+    expect(patchDescription).toContain('line-edit');
+    expect(patchDescription).toContain('unified diff');
+    expect(patchDescription).toContain('Markdown fenced code block');
     expect(schemaText).not.toContain('fileContent');
     expect(schemaText).not.toContain('input');
     expect(schemaText).not.toContain('cat');

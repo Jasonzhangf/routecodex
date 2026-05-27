@@ -65,31 +65,28 @@ pub(crate) fn ensure_apply_patch_chat_process_contract(
             "filePath".to_string(),
             json!({
                 "type": "string",
-                "description": "Required. Workspace-relative target path only, for example `src/main.ts` or `tmp/example.txt`."
+                "description": "Optional. Workspace-relative target path, for example `src/main.ts` or `tmp/example.txt`. If omitted, the runtime will try to resolve path from patch headers (for example `*** Add File: ...` or unified diff `---/+++`)."
             }),
         );
         properties.insert(
             "patch".to_string(),
             json!({
                 "type": "string",
-                "description": "Required. Line-edit operations only. Create file: `+ first line\n+ second line`. Append to existing file: `+ appended line`. Update existing file: `- old line\n+ new line`. Removed lines must exactly match the current file."
+                "description": "Required. Patch payload. Supported formats: line-edit operations (`+ line` / `- line`), unified diff (`---` / `+++`), or Markdown fenced code block (for example ```diff ... ```)."
             }),
         );
 
         parameters.insert(
             "required".to_string(),
-            Value::Array(vec![
-                Value::String("filePath".to_string()),
-                Value::String("patch".to_string()),
-            ]),
+            Value::Array(vec![Value::String("patch".to_string())]),
         );
         parameters.insert("type".to_string(), Value::String("object".to_string()));
-        parameters.insert("additionalProperties".to_string(), Value::Bool(false));
+        parameters.insert("additionalProperties".to_string(), Value::Bool(true));
         function_obj.insert("strict".to_string(), Value::Bool(false));
         function_obj.insert(
             "description".to_string(),
             Value::String(
-                r#"Call apply_patch directly for workspace-relative file edits. Provide exactly JSON fields `filePath` and `patch`. Create file: `{ "filePath": "tmp/new.txt", "patch": "+ first line\n+ second line" }`. Append to existing file: `{ "filePath": "tmp/existing.txt", "patch": "+ appended line" }`. Update existing file: `{ "filePath": "src/main.ts", "patch": "- old line\n+ new line" }`. Use this tool call itself for file edits."#.to_string(),
+                r#"Call apply_patch directly for file edits. `patch` is required; `filePath` is optional. You may provide line-edit patch (`+ line` / `- line`), unified diff (`--- a/...` / `+++ b/...`), or fenced diff block (```diff ... ```). If `filePath` is omitted, path can be inferred from patch headers such as `*** Add File:` or unified diff headers."#.to_string(),
             ),
         );
     }
