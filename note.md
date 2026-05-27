@@ -12168,3 +12168,35 @@ Using skills: coding-principals + rcc-dev-skills
   4. `tests/server/daemon-admin/quota-unified-evidence-aggregator.spec.ts`
      - 已改为显式使用 provider-runtime-ingress + router hook owner 模拟 hubPipeline 主链，而不是再依赖 quota hooks second ingress
 - 唯一正确性: 当前目标不是保留两条都能到 Rust 的“冗余保险丝”，而是把 provider event ingestion 收成唯一主链。只要 quota hooks 在 hubPipeline 已就绪时还能再次写入 Rust/TS，就仍属于 second ingress，可能导致重复计数、重复 cooldown、重复持久化或测试语义漂移。把它收成 no-hubPipeline fallback 才是与 Rust-only 主链一致的唯一正确动作。
+
+## 2026-05-27 no-hubPipeline quota runtime fallback 审计 closeout（unified second ingress 物理删除）
+- 审计范围: `src/manager/modules/quota/quota-manager.ts::start()` 注册的 `setProviderRuntimeQuotaHooks`，以及 `sharedmodule/quota/quota-manager.ts::onProviderError/onProviderSuccess` 在 unified 模式下是否仍有真实运行时必要性。
+- 证据链:
+  1. `src/server/runtime/http-server/request-executor.ts` 入口在 `ensureHubPipeline(this.deps.getHubPipeline)` 处直接 fail-fast；`tests/server/runtime/http-server/request-executor.spec.ts` 已有 `getHubPipeline: () => null` -> 抛 `Hub pipeline runtime is not initialized` 的 proof。
+  2. 非测试代码里 `setProviderRuntimeQuotaHooks(...)` 的唯一注册点只剩 `QuotaManagerModule.start()`；`rg` 结果表明没有第二个生产注册方。
+  3. 真实 provider 事件上报入口 `reportProviderErrorToRouterPolicy/reportProviderSuccessToRouterPolicy` 会同时 fanout 到 router hooks 和 quota hooks；在 hubPipeline 已注册 router hooks 的前提下，quota hooks 只会构成 second ingress，而不是主链必需入口。
+- 结论:
+  - unified 模式不存在“无 hubPipeline 但仍需正常运行 provider runtime ingress”的主路径；
+  - 因而 `QuotaManagerModule` 里那层 no-hubPipeline fallback 在 unified phase 下属于不可达历史残留，而不是必要保底；
+  - 继续保留它只会让 `provider error/success -> availability state` 链路仍有 TS second ingress 叙事。
+- 本轮动作:
+  - 物理删除 unified `QuotaManagerModule.start()/stop()` 里对 `setProviderRuntimeQuotaHooks` 的注册与解绑；
+  - focused test 改成明确证明“phase1 unified quota 不再注册 quota runtime second ingress hooks”。
+- 含义:
+  - unified 运行态下，provider event -> availability mutation 现在唯一主链只剩 `reportProvider* -> hubPipeline router hooks -> Rust virtual_router_engine`；
+  - `sharedmodule/quota/quota-manager.ts::onProviderError/onProviderSuccess` 继续仅作为 core manager 本地状态机/脚本/legacy 资产，不再由 unified runtime 主链触发。
+- 唯一正确性:
+  - 真正要删除的是 unified 运行态里“还能把 provider event 再打一遍到 TS quota manager”的 wiring；只改断言、不删 hook 注册，第二入口还活着；
+  - 只有把 `QuotaManagerModule` 的 quota runtime 注册物理删掉，才能证明 unified 主链不再依赖 TS event fallback，这就是当前剩余 second ingress 的唯一真源修改点。
+
+## 2026-05-27 focused regression 收敛：health.cooldown 全候选不可用 case 已从红测转绿
+- 在计划要求的 focused regression 中，`tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts` 原先保留了一个 `test.failing(...)`：
+  - “所有候选都被手工标记为 `health.cooldown` 时，应返回 `PROVIDER_NOT_AVAILABLE` + recoverable cooldown hints，而不是仍选中已 tripped provider”
+- 本轮扩大回归时，该用例实际已通过，说明 Rust `virtual_router_engine` 当前已经正确做到：
+  - 不会在所有候选都处于 cooldown 时错误继续选中 provider；
+  - 会给出 `minRecoverableCooldownMs` 与 `recoverableCooldownHints[source=health.cooldown]`。
+- 因此把该 case 正式从 `test.failing` 升格为普通绿测，含义是：
+  - 这不再是“已知缺口等待修复”，而是 Rust 主链已经稳定兑现的行为资产。
+- 唯一正确性:
+  - 这里不能继续把已兑现行为留在 `test.failing` 里，否则测试真相会倒挂：主链已经闭环，但测试仍把它叙述成缺口；
+  - 正确动作不是去改实现迎合旧红测，而是承认当前唯一真相已经变成“Rust 主链通过该 case”，并把测试升级为正式回归资产。

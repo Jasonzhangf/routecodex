@@ -8,7 +8,7 @@ import type {
   QuotaStoreSnapshot,
   StaticQuotaConfig
 } from '../../../types/llmswitch-local-types.js';
-import { createCoreQuotaManager, setProviderRuntimeQuotaHooks } from '../../../modules/llmswitch/bridge.js';
+import { createCoreQuotaManager } from '../../../modules/llmswitch/bridge.js';
 import { x7eGate } from '../../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 import { ProviderQuotaDaemonModule } from './provider-quota-daemon.js';
 import type { QuotaManagerAdapter, QuotaViewEntry } from './quota-adapter.js';
@@ -271,8 +271,6 @@ export class QuotaManagerModule implements ManagerModule {
   private useCore = false;
   private context: ManagerContext | null = null;
   private readonly providerQuotaStore = new ProviderQuotaStoreAdapter();
-  private readonly providerRuntimeHookOwner = Symbol('quota-manager-module');
-  private hooksRegistered = false;
 
   async init(context: ManagerContext): Promise<void> {
     this.context = context;
@@ -292,33 +290,6 @@ export class QuotaManagerModule implements ManagerModule {
 
   async start(): Promise<void> {
     if (this.useCore) {
-      try {
-        const runtimeHooks = {
-          onProviderError: (event: ProviderErrorEvent) => {
-            const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
-            if (typeof rustMutator?.handleProviderError === 'function') {
-              return;
-            }
-            if (typeof this.context?.getHubPipeline === 'function' && this.context.getHubPipeline()) {
-              return;
-            }
-            this.coreManager?.onProviderError?.(event);
-          },
-          onProviderSuccess: (event: ProviderSuccessEvent) => {
-            const rustMutator = getRustQuotaHostMutatorFromContext(this.context);
-            if (typeof rustMutator?.handleProviderSuccess === 'function') {
-              return;
-            }
-            if (typeof this.context?.getHubPipeline === 'function' && this.context.getHubPipeline()) {
-              return;
-            }
-            this.coreManager?.onProviderSuccess?.(event);
-          }
-        };
-        this.hooksRegistered = await setProviderRuntimeQuotaHooks(this.providerRuntimeHookOwner, runtimeHooks);
-      } catch {
-        this.hooksRegistered = false;
-      }
       return;
     }
     await this.legacyDelegate.start();
@@ -326,14 +297,6 @@ export class QuotaManagerModule implements ManagerModule {
 
   async stop(): Promise<void> {
     if (this.useCore) {
-      if (this.hooksRegistered) {
-        try {
-          await setProviderRuntimeQuotaHooks(this.providerRuntimeHookOwner, undefined);
-        } catch {
-          // best-effort
-        }
-        this.hooksRegistered = false;
-      }
       const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
       if (!persistedByRust) {
         await this.coreManager?.persistNow?.();

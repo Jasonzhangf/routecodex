@@ -39,7 +39,7 @@ function buildConfig(providerKeys = ['deepseek.key1.deepseek-v4-pro']): any {
 }
 
 describe('virtual router native provider unavailable cooldown details', () => {
-  test.failing('when every candidate is manually marked health.cooldown, route should fail with recoverable health.cooldown hints instead of still selecting a tripped provider', () => {
+  it('fails with recoverable health.cooldown hints when every candidate is manually marked health.cooldown', () => {
     const providerA = 'deepseek.key1.deepseek-v4-pro';
     const providerB = 'deepseek.key2.deepseek-v4-pro';
     const engine = new VirtualRouterEngine();
