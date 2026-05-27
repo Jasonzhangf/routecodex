@@ -201,19 +201,16 @@ impl VirtualRouterEngineCore {
                     return true;
                 }
                 self.health_manager
-                    .record_failure(provider_key, reason, now);
+                    .record_recoverable_failure(provider_key, reason, now);
                 self.apply_series_cooldown(event);
                 self.persist_provider_health();
                 true
             }
             ProviderErrorClassification::Unrecoverable => {
-                if let Some(cooldown_ms) = extract_cooldown_override_ms(event) {
-                    self.health_manager
-                        .trip_provider(provider_key, reason, Some(cooldown_ms), now);
-                } else {
-                    self.health_manager
-                        .record_failure(provider_key, reason, now);
-                }
+                let default_unrecoverable_ttl = compute_cooldown_until_next_local_midnight_ms(now);
+                let cooldown_ms = extract_cooldown_override_ms(event).unwrap_or(default_unrecoverable_ttl);
+                self.health_manager
+                    .trip_provider(provider_key, reason, Some(cooldown_ms), now);
                 let _ = self.apply_qwen_auth_family_blacklist(event);
                 self.persist_provider_health();
                 true
@@ -683,7 +680,13 @@ const ANTIGRAVITY_AUTH_VERIFY_BAN_MS: i64 = 24 * 60 * 60_000;
 mod tests {
     use super::*;
     use crate::virtual_router_engine::health;
+    use crate::virtual_router_engine::routing_state_store::{
+        load_provider_health_state, with_session_dir_override,
+    };
     use serde_json::{json, Map, Value};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn build_test_core(provider_key: &str, model_id: &str) -> VirtualRouterEngineCore {
         let mut core = VirtualRouterEngineCore::new();
@@ -1003,13 +1006,15 @@ mod tests {
             ("test.key1.model-a", "gpt-test"),
             ("test.key1.model-b", "gpt-test"),
         ]);
-        let started_at = now_ms();
         core.handle_provider_error(&build_error_event("test.key1.model-a", "unrecoverable"));
 
         let state = provider_state(&core, "test.key1.model-a");
-        assert_eq!(state.state, "healthy");
-        assert_eq!(state.failure_count, 1);
-        assert!(state.cooldown_expires_at.is_none(), "unexpected cooldown on first unrecoverable error");
+        assert_eq!(state.state, "tripped");
+        assert_eq!(state.failure_count, 3);
+        let expires = state
+            .cooldown_expires_at
+            .expect("expected unrecoverable error to enter cooldown");
+        assert!(expires > now_ms());
     }
 
     #[test]
@@ -1045,5 +1050,174 @@ mod tests {
         assert!(qwen2.cooldown_expires_at.is_some());
         assert_eq!(qwenchat.state, "healthy");
         assert_eq!(qwenchat.cooldown_expires_at, None);
+    }
+
+    #[test]
+    fn recoverable_non_429_three_strikes_cooldown_then_second_cycle_blacklist() {
+        let provider_key = "test.key1.model-a";
+        let mut core = build_test_core_with_providers(&[
+            (provider_key, "gpt-test"),
+            ("test.key1.model-b", "gpt-test"),
+        ]);
+
+        let mk = |request_id: &str| {
+            json!({
+                "code": "HTTP_500",
+                "message": "upstream internal error",
+                "stage": "provider.send",
+                "status": 500,
+                "runtime": { "requestId": request_id, "providerKey": provider_key },
+                "details": { "errorClassification": "recoverable", "routePoolSize": 2 }
+            })
+        };
+
+        core.handle_provider_error(&mk("req-1"));
+        core.handle_provider_error(&mk("req-2"));
+        core.handle_provider_error(&mk("req-3"));
+        let first_cycle = provider_state(&core, provider_key);
+        assert_eq!(first_cycle.state, "tripped");
+        let first_expiry = first_cycle.cooldown_expires_at.expect("cooldown expiry");
+        assert!(core.health_manager.is_available(provider_key, first_expiry + 1));
+
+        core.handle_provider_error(&mk("req-4"));
+        core.handle_provider_error(&mk("req-5"));
+        core.handle_provider_error(&mk("req-6"));
+        let second_cycle = provider_state(&core, provider_key);
+        assert_eq!(second_cycle.state, "blacklisted");
+        assert!(second_cycle.cooldown_expires_at.is_some());
+    }
+
+    #[test]
+    fn unrecoverable_single_strike_enters_until_midnight_blacklist() {
+        let provider_key = "test.key1.model-a";
+        let mut core = build_test_core_with_providers(&[
+            (provider_key, "gpt-test"),
+            ("test.key1.model-b", "gpt-test"),
+        ]);
+
+        core.handle_provider_error(&json!({
+            "code": "HTTP_500",
+            "message": "fatal upstream failure",
+            "stage": "provider.send",
+            "status": 500,
+            "runtime": { "requestId": "req-fatal", "providerKey": provider_key },
+            "details": { "errorClassification": "unrecoverable", "routePoolSize": 2 }
+        }));
+
+        let state = provider_state(&core, provider_key);
+        assert_eq!(state.state, "tripped");
+        let expiry = state.cooldown_expires_at.expect("expiry");
+        let now = now_ms();
+        // Should be long cooldown (towards local midnight), not a short 30min retry window.
+        assert!(expiry - now > 30 * 60_000);
+    }
+
+    #[test]
+    fn persisted_503_daily_cooldown_is_cleared_by_provider_success_and_not_reimported() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("rcc-provider-health-reprobe-{unique}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        with_session_dir_override(temp_dir.to_str(), || {
+            let provider_key = "sdfv.key1.gpt-5.4";
+            let backup_key = "mimo.key1.mimo-v2.5-pro";
+            let mut core =
+                build_test_core_with_providers(&[(provider_key, "gpt-5.4"), (backup_key, "mimo-v2.5-pro")]);
+
+            // Step-1: simulate HTTP 503 on primary with routePoolSize=2 -> persisted daily cooldown.
+            core.handle_provider_failure(&json!({
+                "code": "HTTP_503",
+                "message": "upstream unavailable",
+                "stage": "provider.send",
+                "status": 503,
+                "runtime": {
+                    "requestId": "req-503",
+                    "providerKey": provider_key
+                },
+                "details": {
+                    "routePoolSize": 2
+                }
+            }));
+
+            let tripped = provider_state(&core, provider_key);
+            assert_eq!(tripped.state, "tripped");
+            assert!(tripped.cooldown_expires_at.is_some());
+
+            let persisted = load_provider_health_state().expect("provider-health persisted");
+            let persisted_entries = persisted
+                .get("providerCooldowns")
+                .and_then(|v| v.as_array())
+                .expect("providerCooldowns array");
+            assert!(
+                persisted_entries.iter().any(|entry| {
+                    entry
+                        .get("providerKey")
+                        .and_then(|v| v.as_str())
+                        == Some("sdfv.1.gpt-5.4")
+                        && entry
+                            .get("reason")
+                            .and_then(|v| v.as_str())
+                            == Some("__http_503_daily_cooldown__")
+                }),
+                "persisted cooldown for canonical primary key not found"
+            );
+
+            // Step-2: simulate startup reprobe success -> should clear persisted cooldown.
+            core.handle_provider_success(&json!({
+                "runtime": {
+                    "requestId": "startup_reprobe",
+                    "providerKey": provider_key,
+                    "runtimeKey": provider_key
+                },
+                "timestamp": now_ms()
+            }));
+
+            let healed = provider_state(&core, provider_key);
+            assert_eq!(healed.state, "healthy");
+            assert_eq!(healed.cooldown_expires_at, None);
+
+            let persisted_after_success =
+                load_provider_health_state().expect("provider-health persisted after success");
+            let entries_after_success = persisted_after_success
+                .get("providerCooldowns")
+                .and_then(|v| v.as_array())
+                .expect("providerCooldowns array after success");
+            assert!(
+                entries_after_success.is_empty(),
+                "persisted cooldown should be cleared after provider success"
+            );
+
+            // Step-3: simulate a new engine restart/import cycle: no persisted cooldown should come back.
+            let mut restarted =
+                build_test_core_with_providers(&[(provider_key, "gpt-5.4"), (backup_key, "mimo-v2.5-pro")]);
+            restarted.refresh_provider_health_from_store();
+            let restarted_state = provider_state(&restarted, provider_key);
+            assert_eq!(restarted_state.state, "healthy");
+            assert_eq!(restarted_state.cooldown_expires_at, None);
+
+            // Step-4: if first live request after restart still hits unrecoverable 503,
+            // it must be re-cooled-down again (no sticky restore of old state; re-evaluate by latest failure).
+            restarted.handle_provider_failure(&json!({
+                "code": "HTTP_503",
+                "message": "upstream unavailable again",
+                "stage": "provider.send",
+                "status": 503,
+                "runtime": {
+                    "requestId": "req-503-again",
+                    "providerKey": provider_key
+                },
+                "details": {
+                    "routePoolSize": 2
+                }
+            }));
+            let retripped = provider_state(&restarted, provider_key);
+            assert_eq!(retripped.state, "tripped");
+            assert!(retripped.cooldown_expires_at.is_some());
+        });
+
+        let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
     }
 }

@@ -5829,6 +5829,53 @@ print(__import__('json').dumps(checks))
     expect(latestHuman).not.toContain('Tool result for apply_patch:');
   });
 
+  test('RED: bridge-only submit continuation must use bridge tool_result as latest cascade text instead of throwing missing terminal user text', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$bridge-only-submit', rawType: 'windsurf-devin-token' });
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [],
+        semantics: {
+          responses: {
+            context: {
+              toolHistory: {
+                version: 1,
+                pairs: [
+                  {
+                    callId: 'call_bridge_only_submit_1',
+                    name: 'apply_patch',
+                    arguments: { patch: '*** Begin Patch\\n*** End Patch\\n' },
+                    output: 'PATCH_APPLIED_OK',
+                    status: 'completed',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    (provider as any).appendBridgeToolHistoryToSemanticConversation(
+      semantic,
+      (provider as any).readBridgeToolHistoryPairs(mapped.body),
+    );
+    expect(() => (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5.4-medium',
+      mapped.body.windsurf_custom_tools,
+    )).not.toThrow();
+    const prompt = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5.4-medium',
+      mapped.body.windsurf_custom_tools,
+    );
+    expect(prompt).toContain('Tool result for apply_patch:');
+    expect(prompt).toContain('PATCH_APPLIED_OK');
+  });
+
   test('RED: Responses submit function_call_output without name still resolves prior unsupported tool name', async () => {
     const provider = createProvider();
     const longOutput = [

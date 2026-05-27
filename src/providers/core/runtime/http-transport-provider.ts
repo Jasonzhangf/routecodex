@@ -385,6 +385,13 @@ export class HttpTransportProvider extends BaseProvider {
       const response = await this.httpClient.get(url, headers);
       return response.status === 200 || response.status === 404;
     } catch (error) {
+      const statusCode =
+        typeof (error as { statusCode?: unknown })?.statusCode === 'number'
+          ? Number((error as { statusCode?: number }).statusCode)
+          : undefined;
+      if (statusCode === 404) {
+        return true;
+      }
       this.logNonBlockingError('performHealthCheck', error, { url });
       return false;
     }

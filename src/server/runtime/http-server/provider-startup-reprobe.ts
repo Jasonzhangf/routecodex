@@ -72,11 +72,20 @@ export async function runStartupProviderReprobe(args: {
       return;
     }
     if (healthy !== true) {
+      logStartupReprobeNonBlocking('check_health_not_healthy', 'provider health check returned false', {
+        providerKey: args.providerKey,
+        runtimeKey: args.runtimeKey,
+        providerFamily: args.providerFamily
+      });
       return;
     }
 
     const virtualRouter = args.server.hubPipeline?.getVirtualRouter?.() ?? null;
     if (!virtualRouter || typeof virtualRouter.handleProviderSuccess !== 'function') {
+      logStartupReprobeNonBlocking('virtual_router_unavailable', 'virtual router handleProviderSuccess unavailable', {
+        providerKey: args.providerKey,
+        runtimeKey: args.runtimeKey
+      });
       return;
     }
 

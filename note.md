@@ -12522,3 +12522,9 @@ Using skills: coding-principals + rcc-dev-skills
 - 复验命令（通过）：
   - `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH=/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node npm run -s jest:run -- --runInBand --runTestsByPath tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts tests/sharedmodule/virtual-router-health-last-provider.spec.ts tests/servertool/virtual-router-quota-health-override.spec.ts tests/server/runtime/http-server/request-executor.spec.ts tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts tests/sharedmodule/virtual-router-last-provider-quota-resetat-native.spec.ts`
 - 结果：`10 suites / 56 tests` 全绿。
+
+## 2026-05-27 Windsurf 400 missing terminal user text
+- 证据: /Volumes/extension/.rcc/logs/server-5520.log 在 22:12:15 记录 request_id=openai-responses-router-gpt-5.4-20260527T221215161-229438-1046 失败，错误为 [windsurf] cascade semantic conversation missing terminal user text。
+- 代码真源: extractLatestCascadeUserText() 仅接受 terminal tool_result，且显式排除 bridge_tool_history；当 submit continuation 只带 Rust bridge toolHistory 而无 user turn 时会抛 400。
+- 修复: 允许在无 terminal tool_result 时回退使用 bridge_tool_history 的 tool_result 作为 latest text，保持 fail-fast（只有两者都没有时才抛错）。
+- 新增回归: bridge-only submit continuation 场景，断言不再抛 missing terminal user text，且 prompt 包含 tool result。

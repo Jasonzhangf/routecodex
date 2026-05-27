@@ -316,6 +316,9 @@ export function applyProviderProfileOverrides(server: any, runtime: ProviderRunt
   if (!patched.rpm && profile.metadata?.rpm) {
     patched.rpm = profile.metadata.rpm;
   }
+  if (!patched.autoRetry && profile.metadata?.autoRetry) {
+    patched.autoRetry = profile.metadata.autoRetry;
+  }
   if (profile.metadata?.windsurf) {
     const nextExtensions: Record<string, unknown> =
       patched.extensions && typeof patched.extensions === 'object' && !Array.isArray(patched.extensions)

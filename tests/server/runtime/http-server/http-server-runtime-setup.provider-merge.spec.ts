@@ -280,6 +280,44 @@ describe('http server runtime setup provider merge', () => {
     });
   });
 
+  it('RED: applies provider profile autoRetry metadata into runtime', async () => {
+    const { applyProviderProfileOverrides } = await import('../../../../src/server/runtime/http-server/http-server-bootstrap.ts');
+
+    const server: any = {
+      providerProfileIndex: new Map([
+        ['minimax', {
+          id: 'minimax',
+          protocol: 'openai',
+          transport: {},
+          auth: { kind: 'apikey' },
+          metadata: {
+            autoRetry: {
+              threshold: 3,
+              codes: ['0.8200']
+            }
+          }
+        }]
+      ])
+    };
+
+    const runtime: any = {
+      runtimeKey: 'minimax.key1',
+      providerId: 'minimax',
+      providerType: 'openai',
+      endpoint: 'https://api.minimax.example/v1',
+      auth: {
+        type: 'apikey',
+        value: 'mock-key'
+      }
+    };
+
+    const patched = applyProviderProfileOverrides(server, runtime);
+    expect(patched.autoRetry).toEqual({
+      threshold: 3,
+      codes: ['0.8200']
+    });
+  });
+
   it('preserves already materialized virtualrouter.providers when routingPolicyGroups exist', async () => {
     const { resolveVirtualRouterInput } = await import(BOOTSTRAP_MODULE_PATH);
 

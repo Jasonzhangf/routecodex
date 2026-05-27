@@ -3389,6 +3389,45 @@ pub fn run_apply_patch_json(input_json: String) -> NapiResult<String> {
     }
 }
 
+// ── Followup Sanitize ───────────────────────────────────────────────────
+
+#[napi]
+pub fn sanitize_followup_text(raw: Option<String>) -> String {
+    let text = match raw {
+        Some(s) => s,
+        None => return String::new(),
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    // Remove stopmessage markers <** ... **>
+    let re_stop = regex::Regex::new(r"<\*\*[\s\S]*?\*\*>").unwrap();
+    let cleaned = re_stop.replace_all(trimmed, " ");
+
+    // Remove [Time/Date]: markers
+    let re_time = regex::Regex::new(r"\[Time/Date\]:.*?(?=(?:\\n|\n|$))").unwrap();
+    let cleaned = re_time.replace_all(&cleaned, " ");
+
+    // Remove [Image omitted]
+    let cleaned = cleaned.replace("[Image omitted]", " ");
+
+    // Clean trailing whitespace before newlines
+    let re_trail = regex::Regex::new(r"[ \t]+\n").unwrap();
+    let cleaned = re_trail.replace_all(&cleaned, "\n");
+
+    // Clean leading whitespace after newlines
+    let re_lead = regex::Regex::new(r"\n[ \t]+").unwrap();
+    let cleaned = re_lead.replace_all(&cleaned, "\n");
+
+    // Collapse 3+ newlines into 2
+    let re_blanks = regex::Regex::new(r"\n{3,}").unwrap();
+    let result = re_blanks.replace_all(&cleaned, "\n\n");
+
+    result.trim().to_string()
+}
+
 // ── Vision Pure Blocks ──────────────────────────────────────────────────
 
 /// Build the complete vision analysis payload from a captured request.

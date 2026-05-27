@@ -1073,3 +1073,107 @@ pub(crate) fn build_provider_not_available_error(
 
     format_virtual_router_error("PROVIDER_NOT_AVAILABLE", message)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::virtual_router_engine::engine::VirtualRouterEngineCore;
+    use crate::virtual_router_engine::features::RoutingFeatures;
+    use crate::virtual_router_engine::routing::parse_routing;
+    use serde_json::{json, Map, Value};
+
+    fn build_priority_test_core() -> VirtualRouterEngineCore {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "sdfv.key1.gpt-5.4".to_string(),
+            json!({
+                "providerKey": "sdfv.key1.gpt-5.4",
+                "providerType": "openai",
+                "modelId": "gpt-5.4",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "mimo.key1.mimo-v2.5-pro".to_string(),
+            json!({
+                "providerKey": "mimo.key1.mimo-v2.5-pro",
+                "providerType": "openai",
+                "modelId": "mimo-v2.5-pro",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+
+        let routing = Map::from_iter([(
+            "thinking".to_string(),
+            Value::Array(vec![json!({
+                "id": "gateway-priority-5555-thinking",
+                "priority": 100,
+                "mode": "priority",
+                "targets": ["sdfv.key1.gpt-5.4", "mimo.key1.mimo-v2.5-pro"]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+        core
+    }
+
+    #[test]
+    fn priority_pool_picks_primary_provider_when_both_available() {
+        let mut core = build_priority_test_core();
+        let classification = ClassificationResult {
+            route_name: "thinking".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["thinking".to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let routing_state = RoutingInstructionState::default();
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({}),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("selection should succeed");
+        assert_eq!(selected.provider_key, "sdfv.key1.gpt-5.4");
+    }
+
+    #[test]
+    fn priority_pool_falls_back_to_backup_when_primary_in_health_cooldown() {
+        let mut core = build_priority_test_core();
+        let now = now_ms();
+        core.health_manager
+            .cooldown_provider_until_midnight_persisted("sdfv.key1.gpt-5.4", now, now + 60_000);
+
+        let classification = ClassificationResult {
+            route_name: "thinking".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["thinking".to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let routing_state = RoutingInstructionState::default();
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({}),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("selection should succeed");
+        assert_eq!(selected.provider_key, "mimo.key1.mimo-v2.5-pro");
+    }
+}

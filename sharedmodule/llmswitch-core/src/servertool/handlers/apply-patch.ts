@@ -120,6 +120,30 @@ function fail(filePath: string | undefined, reason: string, message: string, nex
   };
 }
 
+function extractFilePathFromNativePatchInput(rawArgs: string): string | undefined {
+  try {
+    const parsed = JSON.parse(rawArgs);
+    const input = typeof parsed?.input === 'string' ? parsed.input : '';
+    if (!input) return undefined;
+    const match = input.match(/\*\*\*\s+Update\s+File:\s+(.+)$/m)
+      || input.match(/\*\*\*\s+Add\s+File:\s+(.+)$/m);
+    return match?.[1]?.trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function extractCanonicalArgsFromMalformedText(raw: string): CanonicalApplyPatchArgs {
+  const text = String(raw || '');
+  const filePathMatch = text.match(/"filePath"\s*:\s*"([^"]+)"/i);
+  const patchMatch = text.match(/"patch"\s*:\s*"([\s\S]*?)"(?=\s*,\s*"|\s*\}$|\s*,\s*$)/i);
+  const decode = (v: string) => v.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+  return {
+    ...(filePathMatch?.[1] ? { filePath: filePathMatch[1] } : {}),
+    ...(patchMatch?.[1] ? { patch: decode(patchMatch[1]) } : {})
+  };
+}
+
 async function executeApplyPatch(ctx: ServerToolHandlerContext, toolCall: ToolCall): Promise<ApplyPatchExecutionResult> {
   const workspace = resolveWorkingDirectoryFromAdapterContextOrFallback(ctx.adapterContext as Record<string, unknown>);
   if (!workspace) {
@@ -139,7 +163,21 @@ async function executeApplyPatch(ctx: ServerToolHandlerContext, toolCall: ToolCa
   };
 
   if (!canonicalArgs.filePath) {
-    return { payload: fail(undefined, 'PATH_MISSING', 'filePath is required.', 'Retry with workspace-relative filePath.'), canonicalArgs };
+    const fallbackPath = extractFilePathFromNativePatchInput(
+      typeof toolCall.arguments === 'string' ? toolCall.arguments : '{}'
+    );
+    if (fallbackPath) {
+      canonicalArgs.filePath = fallbackPath;
+    }
+  }
+  if ((!canonicalArgs.filePath || canonicalArgs.filePath === ':') && typeof toolCall.arguments === 'string') {
+    const repaired = extractCanonicalArgsFromMalformedText(toolCall.arguments);
+    if (repaired.filePath) canonicalArgs.filePath = repaired.filePath;
+    if (repaired.patch) canonicalArgs.patch = repaired.patch;
+  }
+
+  if (!canonicalArgs.filePath) {
+    return { payload: fail(undefined, 'PATH_MISSING', 'filePath is required.', `Retry with workspace-relative filePath. Create file: ${JSON.stringify({ filePath: 'tmp/example.txt', patch: '+ hello' })}`), canonicalArgs };
   }
 
   // Phase 2: TS path safety check
@@ -167,21 +205,35 @@ async function executeApplyPatch(ctx: ServerToolHandlerContext, toolCall: ToolCa
   }
 
   // Phase 4: Native apply patch (pure logic)
+  const canonicalToolArgs = JSON.stringify({
+    filePath: canonicalArgs.filePath,
+    patch: canonicalArgs.patch
+  });
   const applyResult = runApplyPatchWithNative({
     toolCallId: toolCall.id,
-    toolCallArguments: typeof toolCall.arguments === 'string' ? toolCall.arguments : '{}',
+    toolCallArguments: canonicalToolArgs,
     workspace,
     fileContent: current
   });
 
   if (!applyResult.ok) {
-    return { payload: applyResult.payload as unknown as ApplyPatchPayload, canonicalArgs };
+    const payload = applyResult.payload as unknown as ApplyPatchPayload;
+    if (payload.reason === 'FILE_NOT_FOUND') {
+      payload.nextAction = `Create file: ${JSON.stringify({ filePath: resolved.relPath, patch: '+ hello' })}; Update existing file: ${JSON.stringify({ filePath: resolved.relPath, patch: '- old\\n+ new' })}`;
+    }
+    return { payload, canonicalArgs };
   }
 
   // Phase 5: Write file (I/O)
   try {
     await fsp.mkdir(path.dirname(resolved.absPath), { recursive: true });
-    await fsp.writeFile(resolved.absPath, applyResult.patchedContent ?? '', 'utf8');
+    let patchedContent = exists
+      ? (applyResult.patchedContent ?? '')
+      : String(applyResult.patchedContent ?? '').replace(/^\n/, '');
+    if (patchedContent.endsWith('\n\n')) {
+      patchedContent = patchedContent.replace(/\n+$/g, '\n');
+    }
+    await fsp.writeFile(resolved.absPath, patchedContent, 'utf8');
   } catch (error) {
     return { payload: fail(resolved.relPath, 'IO_ERROR', String((error as Error)?.message || error), 'Fix filesystem error and retry.'), canonicalArgs };
   }
@@ -216,7 +268,8 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext) => {
             entryEndpoint: ctx.entryEndpoint,
             injection: {
               ops: [
-                { op: 'append_tool_messages_from_tool_outputs', required: true }
+                { op: 'append_tool_messages_from_tool_outputs', required: true },
+                { op: 'drop_tool_by_name', name: 'apply_patch' }
               ]
             }
           }

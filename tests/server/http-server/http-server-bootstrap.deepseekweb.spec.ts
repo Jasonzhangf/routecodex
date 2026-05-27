@@ -4,6 +4,47 @@ import { ProviderFactory } from '../../../src/providers/core/runtime/provider-fa
 import type { ProviderRuntimeProfile } from '../../../src/providers/core/api/provider-types.js';
 
 describe('http-server bootstrap provider profile overrides', () => {
+  test('RED: propagates profile autoRetry into runtime overrides', () => {
+    const server = {
+      providerProfileIndex: new Map<string, unknown>()
+    } as any;
+
+    updateProviderProfiles(server, undefined, {
+      providers: {
+        minimax: {
+          type: 'openai',
+          auth: {
+            type: 'apikey',
+            apiKey: '${MINIMAX_API_KEY}'
+          },
+          autoRetry: {
+            threshold: 3,
+            codes: ['0.8200']
+          },
+          models: ['MiniMax-M2.7']
+        }
+      }
+    } as Record<string, unknown>);
+
+    const runtime = {
+      runtimeKey: 'minimax.key1',
+      providerId: 'minimax',
+      providerType: 'openai',
+      providerKey: 'minimax.key1.MiniMax-M2.7',
+      endpoint: 'https://api.minimax.chat/v1/chat/completions',
+      auth: {
+        type: 'apikey',
+        value: 'sk-test-minimax'
+      }
+    } as unknown as ProviderRuntimeProfile;
+
+    const patched = applyProviderProfileOverrides(server, runtime);
+    expect((patched as any).autoRetry).toEqual({
+      threshold: 3,
+      codes: ['0.8200']
+    });
+  });
+
   test('deepseek-web keeps implicit deepseek provider module when profile type is generic openai', () => {
     const server = {
       providerProfileIndex: new Map<string, unknown>()

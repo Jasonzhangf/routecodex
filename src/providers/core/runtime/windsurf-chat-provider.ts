@@ -3009,10 +3009,16 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       .map((part) => part.trim());
     let latestUserText = '';
     const terminalToolResults: string[] = [];
+    const bridgeToolResults: string[] = [];
     for (let index = semanticConversation.length - 1; index >= 0; index -= 1) {
       const turn = semanticConversation[index];
-      if (turn?.type === 'function_call_output' && turn.source !== 'bridge_tool_history' && typeof turn.output === 'string' && turn.output.trim()) {
-        terminalToolResults.unshift(`Tool result for ${turn.name || turn.call_id}:\n${turn.output}`);
+      if (turn?.type === 'function_call_output' && typeof turn.output === 'string' && turn.output.trim()) {
+        const rendered = `Tool result for ${turn.name || turn.call_id}:\n${turn.output}`;
+        if (turn.source === 'bridge_tool_history') {
+          bridgeToolResults.unshift(rendered);
+        } else {
+          terminalToolResults.unshift(rendered);
+        }
         continue;
       }
       if (turn?.type === 'assistant' && terminalToolResults.length > 0) {
@@ -3026,7 +3032,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         break;
       }
     }
-    const baseParts = [...(latestUserText ? [latestUserText] : []), ...terminalToolResults];
+    const effectiveToolResults = terminalToolResults.length > 0 ? terminalToolResults : bridgeToolResults;
+    const baseParts = [...(latestUserText ? [latestUserText] : []), ...effectiveToolResults];
     if (baseParts.length > 0) {
       return [...baseParts, ...normalizedTailParts].join('\n\n');
     }

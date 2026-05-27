@@ -10,6 +10,7 @@ use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_rec
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_extract::looks_like_exec_command_candidate;
 use crate::resp_process_stage1_tool_governance_blocks::tool_args::normalize_tool_args_preserving_raw_shape;
 use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 
 pub(crate) fn maybe_harvest_empty_tool_calls_from_json_content(payload: &mut Value) -> i64 {
     harvest_explicit_wrapper_only_tool_calls_from_payload(payload)
@@ -113,6 +114,13 @@ fn maybe_repair_malformed_exec_command_name(function: &mut Map<String, Value>) -
         return false;
     };
     let lowered = raw_name.to_ascii_lowercase();
+    // Guard: keep canonical snake_case tool identifiers untouched.
+    if !raw_name.contains(char::is_whitespace)
+        && raw_name.contains('_')
+        && normalize_routecodex_tool_name(Some(raw_name.as_str())).is_some()
+    {
+        return false;
+    }
     if matches!(
         lowered.as_str(),
         "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
@@ -307,4 +315,3 @@ pub(crate) fn count_normalized_tool_calls(payload: &Value) -> i64 {
         })
         .unwrap_or(0)
 }
-

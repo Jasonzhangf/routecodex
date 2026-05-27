@@ -34,6 +34,8 @@ struct ProviderInternalState {
     consecutive_http_502_failures: i64,
     consecutive_http_429_failures: i64,
     http_429_cooldown_cycles: i64,
+    consecutive_recoverable_failures: i64,
+    recoverable_cooldown_cycles: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +121,8 @@ impl ProviderHealthManager {
                         consecutive_http_502_failures: 0,
                         consecutive_http_429_failures: 0,
                         http_429_cooldown_cycles: 0,
+                        consecutive_recoverable_failures: 0,
+                        recoverable_cooldown_cycles: 0,
                     },
                 );
             }
@@ -140,6 +144,8 @@ impl ProviderHealthManager {
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures = 0;
         state.http_429_cooldown_cycles = 0;
+        state.consecutive_recoverable_failures = 0;
+        state.recoverable_cooldown_cycles = 0;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
             state.reason = Some(reason);
@@ -165,6 +171,8 @@ impl ProviderHealthManager {
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures = 0;
         state.http_429_cooldown_cycles = 0;
+        state.consecutive_recoverable_failures = 0;
+        state.recoverable_cooldown_cycles = 0;
         state.state = "tripped".to_string();
         state.reason = reason;
         state.cooldown_expires_at = Some(now_ms + ttl);
@@ -183,6 +191,8 @@ impl ProviderHealthManager {
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures = 0;
         state.http_429_cooldown_cycles = 0;
+        state.consecutive_recoverable_failures = 0;
+        state.recoverable_cooldown_cycles = 0;
         state.state = "tripped".to_string();
         state.reason = Some(PERSIST_REASON_HTTP_503_DAILY.to_string());
         state.cooldown_expires_at = Some(now_ms + ttl);
@@ -195,6 +205,8 @@ impl ProviderHealthManager {
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures = 0;
         state.http_429_cooldown_cycles = 0;
+        state.consecutive_recoverable_failures = 0;
+        state.recoverable_cooldown_cycles = 0;
         state.state = "healthy".to_string();
         state.cooldown_expires_at = None;
         state.last_failure_at = None;
@@ -215,6 +227,8 @@ impl ProviderHealthManager {
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures = 0;
         state.http_429_cooldown_cycles = 0;
+        state.consecutive_recoverable_failures = 0;
+        state.recoverable_cooldown_cycles = 0;
         state.state = "tripped".to_string();
         state.reason = reason;
         state.cooldown_expires_at = Some(now_ms + ttl);
@@ -235,10 +249,11 @@ impl ProviderHealthManager {
                 state.cooldown_expires_at = None;
                 state.last_failure_at = None;
                 state.reason = None;
-                state.consecutive_http_502_failures = 0;
-                state.consecutive_http_429_failures = 0;
-                return true;
-            }
+            state.consecutive_http_502_failures = 0;
+            state.consecutive_http_429_failures = 0;
+            state.consecutive_recoverable_failures = 0;
+            return true;
+        }
         }
         false
     }
@@ -296,6 +311,8 @@ impl ProviderHealthManager {
             state.consecutive_http_502_failures = 0;
             state.consecutive_http_429_failures = 0;
             state.http_429_cooldown_cycles = 0;
+            state.consecutive_recoverable_failures = 0;
+            state.recoverable_cooldown_cycles = 0;
         }
     }
 
@@ -312,6 +329,8 @@ impl ProviderHealthManager {
             state.consecutive_http_502_failures = 0;
             state.consecutive_http_429_failures = 0;
             state.http_429_cooldown_cycles = 0;
+            state.consecutive_recoverable_failures = 0;
+            state.recoverable_cooldown_cycles = 0;
         }
     }
 
@@ -369,6 +388,7 @@ impl ProviderHealthManager {
         let state = self.get_state_mut(provider_key);
         state.failure_count += 1;
         state.consecutive_http_502_failures += 1;
+        state.consecutive_recoverable_failures += 1;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
             state.reason = Some(reason);
@@ -393,6 +413,7 @@ impl ProviderHealthManager {
         state.failure_count += 1;
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures += 1;
+        state.consecutive_recoverable_failures += 1;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
             state.reason = Some(reason);
@@ -432,10 +453,47 @@ impl ProviderHealthManager {
                     consecutive_http_502_failures: 0,
                     consecutive_http_429_failures: 0,
                     http_429_cooldown_cycles: 0,
+                    consecutive_recoverable_failures: 0,
+                    recoverable_cooldown_cycles: 0,
                 },
             );
         }
         self.states.get_mut(&canonical).expect("state exists")
+    }
+
+    pub(crate) fn record_recoverable_failure(
+        &mut self,
+        provider_key: &str,
+        reason: Option<String>,
+        now_ms: i64,
+    ) -> Http429ControlOutcome {
+        const RECOVERABLE_THRESHOLD: i64 = 3;
+        const RECOVERABLE_BLACKLIST_AFTER_COOLDOWN_CYCLES: i64 = 1;
+        let cooldown_ms = self.config.cooldown_ms;
+        let state = self.get_state_mut(provider_key);
+        state.failure_count += 1;
+        state.consecutive_http_502_failures = 0;
+        state.consecutive_http_429_failures = 0;
+        state.consecutive_recoverable_failures += 1;
+        state.last_failure_at = Some(now_ms);
+        if let Some(reason) = reason {
+            state.reason = Some(reason);
+        }
+        if state.consecutive_recoverable_failures < RECOVERABLE_THRESHOLD {
+            return Http429ControlOutcome::None;
+        }
+        state.consecutive_recoverable_failures = 0;
+        if state.recoverable_cooldown_cycles >= RECOVERABLE_BLACKLIST_AFTER_COOLDOWN_CYCLES {
+            let blacklist_ttl = compute_cooldown_until_next_local_midnight_ms(now_ms);
+            state.state = "blacklisted".to_string();
+            state.cooldown_expires_at = Some(now_ms + blacklist_ttl);
+            state.recoverable_cooldown_cycles = 0;
+            return Http429ControlOutcome::Blacklisted;
+        }
+        state.state = "tripped".to_string();
+        state.cooldown_expires_at = Some(now_ms + cooldown_ms);
+        state.recoverable_cooldown_cycles += 1;
+        Http429ControlOutcome::CooldownApplied
     }
 }
 

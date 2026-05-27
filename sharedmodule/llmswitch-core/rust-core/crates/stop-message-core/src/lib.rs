@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 // ── Types ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum StageMode {
     On,
     Off,
@@ -21,6 +22,7 @@ impl StageMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum SnapshotSource {
     /// Explicitly persisted via `<**stopMessage:on**>` or session state
     Persisted,
@@ -31,6 +33,7 @@ pub enum SnapshotSource {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum GoalStatus {
     Idle,
     Active,
@@ -50,6 +53,7 @@ impl GoalStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum SkipReason {
     PortDisabled,
     ServertoolFollowupHop,
@@ -151,6 +155,7 @@ pub struct StopMessageDecision {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum Action {
     Skip,
     Trigger,
@@ -196,7 +201,7 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
         Some(s) => s,
         None => {
             // 5a. Default exhausted tombstone?
-            if ctx.followup_flow_id.is_some() && !ctx.goal_status.is_active() && !ctx.empty_reply_continue_local
+            if !ctx.goal_status.is_active() && !ctx.empty_reply_continue_local
                 && ctx.persisted_default_exhausted
             {
                 return skip(SkipReason::GoalDefaultExhausted);
@@ -274,12 +279,9 @@ fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnaps
     }
 
     // 4. Try default snapshot
-    //    Only create default when we're in a servertool followup context
-    //    AND no managed active goal
-    //    AND NOT an empty-reply-continue scenario
-    let should_use_default = ctx.followup_flow_id.is_some()
-        && !ctx.goal_status.is_active()
-        && !ctx.empty_reply_continue_local;
+    //    Create default when no snapshot exists, goal is not active,
+    //    and current request is not an empty-reply-continue scenario.
+    let should_use_default = !ctx.goal_status.is_active() && !ctx.empty_reply_continue_local;
 
     if should_use_default {
         if ctx.persisted_default_exhausted {
@@ -390,14 +392,14 @@ mod tests {
     }
 
     #[test]
-    fn skips_when_no_followup_context_and_no_persisted_snapshot() {
+    fn triggers_when_no_followup_context_and_default_enabled() {
         let mut ctx = base_ctx();
         ctx.followup_flow_id = None;  // NOT a followup context
         ctx.default_enabled = true;   // Default is ON
         let result = decide(&ctx);
-        // No followup flow → should_use_default is false → no snapshot → skip
-        assert_eq!(result.action, Action::Skip);
-        assert_eq!(result.skip_reason.unwrap(), "skip_no_stopmessage_snapshot");
+        // Default now applies even without followup flow context.
+        assert_eq!(result.action, Action::Trigger);
+        assert_eq!(result.followup_text, Some("继续执行".to_string()));
     }
 
     #[test]
@@ -508,7 +510,7 @@ mod tests {
         ctx.stop_eligible = false;
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
-        assert_eq!(result.skip_reason.unwrap(), "skip_no_stopmessage_snapshot");
+        assert_eq!(result.skip_reason.unwrap(), "skip_not_stop_finish_reason");
     }
 
     #[test]

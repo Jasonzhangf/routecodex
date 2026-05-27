@@ -444,6 +444,58 @@ fn detect_narrative_tool_intent(payload: &Value) -> bool {
     false
 }
 
+fn detect_plaintext_invalid_tool_calls_markup(payload: &Value) -> bool {
+    let Some(choices) = payload.get("choices").and_then(Value::as_array) else {
+        return false;
+    };
+    let rcc_truncated_re = Regex::new(r"(?is)<<\s*RCC_TOOL_CALLS_JSON\b(?![\s\S]*RCC_TOOL_CALLS_JSON)").ok();
+    let quote_wrapped_re = Regex::new(r#"(?is)<\s*quote\s*>[\s\S]*?"tool_calls"[\s\S]*?<\s*/\s*quote\s*>"#).ok();
+    let plain_tool_calls_re = Regex::new(r#"(?is)\{[\s\S]*?"tool_calls"[\s\S]*?\}"#).ok();
+    let wrapper_re = Regex::new(
+        r"(?is)<\s*tool_call\s*>|<\s*/\s*tool_call\s*>|<\s*function_calls\s*>|<\s*/\s*function_calls\s*>|<<\s*RCC_TOOL_CALLS_JSON\b[\s\S]*?RCC_TOOL_CALLS_JSON",
+    )
+    .ok();
+
+    for choice in choices {
+        let Some(message) = choice.get("message").and_then(Value::as_object) else {
+            continue;
+        };
+        let Some(content) = message.get("content").and_then(Value::as_str) else {
+            continue;
+        };
+        let text = content.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if rcc_truncated_re
+            .as_ref()
+            .map(|re| re.is_match(text))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        if quote_wrapped_re
+            .as_ref()
+            .map(|re| re.is_match(text))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        let has_plain_tool_calls = plain_tool_calls_re
+            .as_ref()
+            .map(|re| re.is_match(text))
+            .unwrap_or(false);
+        let has_wrapper = wrapper_re
+            .as_ref()
+            .map(|re| re.is_match(text))
+            .unwrap_or(false);
+        if has_plain_tool_calls && !has_wrapper {
+            return true;
+        }
+    }
+    false
+}
+
 fn attach_requested_tool_names(payload: &mut Value, adapter_context: &AdapterContext) {
     let requested: Vec<Value> = adapter_context
         .captured_chat_request
@@ -548,6 +600,8 @@ pub(crate) fn apply_deepseek_web_response_compat(
         resolve_effective_declared_tools_present(adapter_context, strict_tool_required);
     let hidden_transport_detected_before_governance =
         detect_forbidden_hidden_tool_transport_payload(&normalized);
+    let plaintext_invalid_markup_before_governance =
+        detect_plaintext_invalid_tool_calls_markup(&normalized);
 
     let request_id = adapter_context
         .request_id
@@ -627,6 +681,12 @@ pub(crate) fn apply_deepseek_web_response_compat(
     let strict_tools_missing =
         strict_tool_required && effective_declared_tools_present && after_count <= 0;
     if strict_tools_missing {
+        return Err(format!(
+            "DeepSeek declared tools present but no valid tool call was produced (toolChoiceRequired={}, fallbackEnabled={}, strictToolRequired={})",
+            tool_choice_required, text_tool_fallback, strict_tool_required
+        ));
+    }
+    if (declared_tools_present || tool_choice_required) && plaintext_invalid_markup_before_governance {
         return Err(format!(
             "DeepSeek declared tools present but no valid tool call was produced (toolChoiceRequired={}, fallbackEnabled={}, strictToolRequired={})",
             tool_choice_required, text_tool_fallback, strict_tool_required

@@ -204,7 +204,22 @@ pub(crate) fn harvest_explicit_wrapper_only_tool_calls_from_payload(payload: &mu
         }
 
         let mut recovered: Vec<Value> = Vec::new();
-        for text in read_message_text_candidates(message) {
+        let text_candidates = read_message_text_candidates(message);
+        let had_wrapper_marker = text_candidates.iter().any(|text| {
+            let lowered = text.to_ascii_lowercase();
+            lowered.contains("<<rcc_tool_calls_json")
+                || lowered.contains("<tool_call>")
+                || lowered.contains("</tool_call>")
+                || lowered.contains("<function_calls>")
+                || lowered.contains("</function_calls>")
+                || lowered.contains("<tool_calls>")
+                || lowered.contains("</tool_calls>")
+                || lowered.contains("<invoke ")
+                || lowered.contains("</invoke>")
+                || lowered.contains("tool_calls")
+        });
+
+        for text in text_candidates {
             for harvest_input in collect_stage1_harvest_input_texts(&text) {
                 for candidate in collect_harvest_text_variants(&harvest_input) {
                     recovered = extract_tool_calls_from_text_candidate(
@@ -226,8 +241,11 @@ pub(crate) fn harvest_explicit_wrapper_only_tool_calls_from_payload(payload: &mu
 
         let _dropped = retain_allowed_tool_calls(&mut recovered, &requested_tool_name_keys);
         if recovered.is_empty() {
-            // Harvest failed but markers were present: clean content to prevent leakage
-            sanitize_textual_marker_field_in_message_with_policy(message, "content", true);
+            // Harvest failed: keep original content for non-wrapper plain text;
+            // enforce fail-fast wrapper-only semantics for wrapper/marker payloads.
+            if had_wrapper_marker {
+                sanitize_textual_marker_field_in_message_with_policy(message, "content", true);
+            }
             continue;
         }
 

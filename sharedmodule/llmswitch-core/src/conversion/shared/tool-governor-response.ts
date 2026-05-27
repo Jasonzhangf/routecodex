@@ -44,11 +44,24 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
     const choices = Array.isArray((out as any)?.choices) ? ((out as any).choices as any[]) : [];
     for (const choice of choices) {
       const message = choice && choice.message ? choice.message : undefined;
-      const toolCalls = Array.isArray(message?.tool_calls) ? (message.tool_calls as any[]) : [];
+      let toolCalls = Array.isArray(message?.tool_calls) ? (message.tool_calls as any[]) : [];
+      if (!toolCalls.length && typeof message?.content === 'string') {
+        const recovered = recoverToolCallsFromContent(message.content);
+        if (recovered.length > 0) {
+          message.tool_calls = recovered;
+          toolCalls = recovered;
+        }
+      }
       if (!toolCalls.length) continue;
       for (const toolCall of toolCalls) {
         try {
           const fn = toolCall && toolCall.function ? toolCall.function : undefined;
+          if (isObject(fn)) {
+            repairCommandNameAsExecToolCall(fn as Record<string, unknown>, validationOptions);
+            if (typeof (fn as any).name === 'string' && String((fn as any).name).toLowerCase() === 'execute_command') {
+              (fn as any).name = 'exec_command';
+            }
+          }
           const name = typeof fn?.name === 'string' ? String(fn.name).toLowerCase() : '';
           const repaired = repairArgumentsToString(fn?.arguments);
           let finalStr = repaired;
@@ -80,6 +93,57 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
     logToolGovernorNonBlocking('enhance_response_tool_arguments', error);
     return chat;
   }
+}
+
+function recoverToolCallsFromContent(content: string): any[] {
+  const text = String(content || '');
+  const candidates: string[] = [];
+  const rcc = text.match(/<<RCC_TOOL_CALLS_JSON\s*\n([\s\S]*?)\nRCC_TOOL_CALLS_JSON/i);
+  if (rcc?.[1]) candidates.push(rcc[1].trim());
+  const rawJson = text.match(/\{[\s\S]*"tool_calls"[\s\S]*\}/);
+  if (rawJson?.[0]) candidates.push(rawJson[0].trim());
+  for (const raw of candidates) {
+    let parsed: any;
+    try { parsed = JSON.parse(raw); } catch { parsed = parseLenient(raw); }
+    const rows = Array.isArray(parsed?.tool_calls) ? parsed.tool_calls : [];
+    const out: any[] = [];
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i] || {};
+      const name = typeof row.name === 'string'
+        ? row.name
+        : (typeof row?.function?.name === 'string' ? row.function.name : '');
+      if (!name) continue;
+      const args = row.input ?? row.arguments ?? row?.function?.arguments ?? {};
+      out.push({
+        id: row.id || `call_recovered_${i + 1}`,
+        type: 'function',
+        function: {
+          name,
+          arguments: typeof args === 'string' ? args : JSON.stringify(args)
+        }
+      });
+    }
+    if (out.length > 0) return out;
+  }
+
+  // Last-resort regex recovery for malformed JSON segments containing
+  // repeated {"name":"...","input":{...}} entries.
+  const recovered: any[] = [];
+  const re = /"name"\s*:\s*"([^"]+)"\s*,\s*"input"\s*:\s*(\{[\s\S]*?\})(?=\s*,\s*\{\s*"name"|\s*\]\s*\}|$)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const name = String(match[1] || '').trim();
+    const inputRaw = String(match[2] || '{}').trim();
+    if (!name) continue;
+    recovered.push({
+      id: `call_recovered_${recovered.length + 1}`,
+      type: 'function',
+      function: { name, arguments: inputRaw }
+    });
+  }
+  if (recovered.length > 0) return recovered;
+
+  return [];
 }
 
 function normalizeShellArguments(repaired: string): string {

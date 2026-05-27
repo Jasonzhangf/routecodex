@@ -198,4 +198,90 @@ describe('resp_process_stage1_tool_governance: request tool allowlist contract',
     expect(String((result.governedPayload as any).__responses_output_text_meta?.value ?? '')).toContain('request_user_input');
     expect(String((result.governedPayload as any).__responses_output_text_meta?.value ?? '')).toContain('保留正文');
   });
+
+  it('harvests update_plan tool calls when declared and preserves plan shape', async () => {
+    const result = await runRespProcessStage1ToolGovernance({
+      payload: {
+        object: 'response',
+        id: 'resp-allowlist-update-plan-1',
+        model: 'gpt-test',
+        status: 'completed',
+        output_text:
+          '<function_calls>{"tool_calls":[{"name":"update_plan","input":{"plan":[{"step":"A","status":"pending"},{"step":"B","status":"in_progress"}]}}]}</function_calls>',
+        output: []
+      } as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-allowlist-update-plan-1',
+      clientProtocol: 'openai-responses',
+      requestSemantics: {
+        tools: {
+          clientToolsRaw: [
+            {
+              type: 'function',
+              function: {
+                name: 'update_plan',
+                parameters: {
+                  type: 'object',
+                  properties: { plan: { type: 'array' } },
+                  required: ['plan'],
+                  additionalProperties: false
+                }
+              }
+            }
+          ]
+        }
+      } as any
+    });
+
+    const choice = (result.governedPayload as any).choices?.[0];
+    expect(choice?.finish_reason).toBe('tool_calls');
+    expect(choice?.message?.tool_calls ?? []).toHaveLength(1);
+    expect(choice?.message?.tool_calls?.[0]?.function?.name).toBe('update_plan');
+    const args = JSON.parse(String(choice?.message?.tool_calls?.[0]?.function?.arguments || '{}'));
+    expect(args.plan?.[0]?.step).toBe('A');
+    expect(args.plan?.[0]?.status).toBe('pending');
+    expect(args.plan?.[1]?.status).toBe('in_progress');
+  });
+
+  it('drops harvested update_plan calls when not declared and preserves original text', async () => {
+    const rawContent =
+      '<function_calls>{"tool_calls":[{"name":"update_plan","input":{"plan":[{"step":"A","status":"pending"}]}}]}</function_calls>\n保留正文';
+    const result = await runRespProcessStage1ToolGovernance({
+      payload: {
+        object: 'response',
+        id: 'resp-allowlist-update-plan-drop-1',
+        model: 'gpt-test',
+        status: 'completed',
+        output_text: rawContent,
+        output: []
+      } as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-allowlist-update-plan-drop-1',
+      clientProtocol: 'openai-responses',
+      requestSemantics: {
+        tools: {
+          clientToolsRaw: [
+            {
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                parameters: {
+                  type: 'object',
+                  properties: { cmd: { type: 'string' } },
+                  required: ['cmd'],
+                  additionalProperties: false
+                }
+              }
+            }
+          ]
+        }
+      } as any
+    });
+
+    const choice = (result.governedPayload as any).choices?.[0];
+    expect(choice?.finish_reason).toBe('stop');
+    expect(choice?.message?.tool_calls ?? []).toHaveLength(0);
+    expect(String((result.governedPayload as any).__responses_output_text_meta?.value ?? '')).toContain('update_plan');
+    expect(String((result.governedPayload as any).__responses_output_text_meta?.value ?? '')).toContain('保留正文');
+  });
 });

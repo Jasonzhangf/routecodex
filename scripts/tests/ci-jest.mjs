@@ -65,6 +65,7 @@ const routingInstructionTests = [
   'tests/servertool/hub-pipeline-session-headers.spec.ts',
   'tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts',
   'tests/servertool/servertool-progress-logging.spec.ts',
+  'tests/servertool/stop-message-native-decision.spec.ts',
   'tests/sharedmodule/anthropic-tool-schema-stability.spec.ts',
   'tests/sharedmodule/goal-request-user-input-sample-regression.spec.ts',
   'tests/sharedmodule/responses-cross-protocol-audit-matrix.spec.ts',

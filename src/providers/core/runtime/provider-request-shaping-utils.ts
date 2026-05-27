@@ -75,9 +75,14 @@ export function resolveProviderBusinessResponseError(args: {
     return undefined;
   }
 
+  const payloadRecord =
+    responseRecord.data && typeof responseRecord.data === 'object' && !Array.isArray(responseRecord.data)
+      ? (responseRecord.data as Record<string, unknown>)
+      : responseRecord;
+
   // 格式 A: { base_resp: { status_code: NNNN, status_message: "..." } }
   // 常见于 MiniMax、GLM 等中国 provider
-  const baseResp = responseRecord.base_resp as Record<string, unknown> | undefined;
+  const baseResp = payloadRecord.base_resp as Record<string, unknown> | undefined;
   if (baseResp && typeof baseResp === 'object') {
     const statusCode = baseResp.status_code;
     const statusMessage = typeof baseResp.status_message === 'string'
@@ -98,7 +103,7 @@ export function resolveProviderBusinessResponseError(args: {
   }
 
   // 格式 B: { error: { code: NNNN, message: "..." } }
-  const errorNode = responseRecord.error as Record<string, unknown> | undefined;
+  const errorNode = payloadRecord.error as Record<string, unknown> | undefined;
   if (errorNode && typeof errorNode === 'object') {
     const errorCode = errorNode.code;
     const errorMessage = typeof errorNode.message === 'string'
@@ -118,12 +123,12 @@ export function resolveProviderBusinessResponseError(args: {
 
   // 格式 C: { error_code: NNNN, error_msg: "..." }
   // 常见于部分中国 provider 的顶层字段
-  const topLevelErrorCode = responseRecord.error_code;
+  const topLevelErrorCode = payloadRecord.error_code;
   if (typeof topLevelErrorCode === 'number' && topLevelErrorCode > 0) {
-    const errorMessage = typeof responseRecord.error_msg === 'string'
-      ? (responseRecord.error_msg as string).trim()
-      : typeof responseRecord.message === 'string'
-        ? (responseRecord.message as string).trim()
+    const errorMessage = typeof payloadRecord.error_msg === 'string'
+      ? (payloadRecord.error_msg as string).trim()
+      : typeof payloadRecord.message === 'string'
+        ? (payloadRecord.message as string).trim()
         : `business error (error_code=${topLevelErrorCode})`;
     return Object.assign(
       new Error(`[provider] Upstream provider returned business error: ${errorMessage}`),

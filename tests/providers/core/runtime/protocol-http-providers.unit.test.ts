@@ -33,6 +33,31 @@ afterEach(async () => {
 });
 
 describe('Protocol HTTP providers (V2) - basic behavior', () => {
+  test('RED: HttpTransportProvider health check treats HTTP 404 as healthy without startup failure', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-health-404',
+      type: 'openai-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'test-health-404',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid', endpoint: '/chat/completions' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new HttpTransportProvider(config, emptyDeps, 'openai-http-provider') as any;
+    provider.isInitialized = true;
+    provider.buildRequestHeaders = async () => ({});
+    provider.httpClient = {
+      get: async () => {
+        const err = Object.assign(new Error('HTTP 404: Not Found'), { statusCode: 404, code: 'HTTP_404' });
+        throw err;
+      }
+    };
+
+    await expect(provider.checkHealth()).resolves.toBe(true);
+  });
+
   test('HttpTransportProvider with openai moduleType', () => {
     const config: OpenAIStandardConfig = {
       id: 'test-openai',
