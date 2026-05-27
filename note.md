@@ -12515,3 +12515,10 @@ Using skills: coding-principals + rcc-dev-skills
 - 验证：
   - `node scripts/tests/virtual-router-quota-health-shadow-regression.mjs`
   - 结果：10 suites 全绿，末尾 `[virtual-router-quota-health-shadow-regression] OK`。
+
+## 2026-05-27 focused regression 环境约束复验
+- 现象：直接跑 10 suites focused 集时，若不注入 `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH`，会批量报 `missing native proxy constructor`。
+- 判定：这是 native required gate 的环境前置条件，不是 quota/health 语义回归。
+- 复验命令（通过）：
+  - `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH=/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node npm run -s jest:run -- --runInBand --runTestsByPath tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts tests/sharedmodule/virtual-router-health-last-provider.spec.ts tests/servertool/virtual-router-quota-health-override.spec.ts tests/server/runtime/http-server/request-executor.spec.ts tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts tests/sharedmodule/virtual-router-last-provider-quota-resetat-native.spec.ts`
+- 结果：`10 suites / 56 tests` 全绿。

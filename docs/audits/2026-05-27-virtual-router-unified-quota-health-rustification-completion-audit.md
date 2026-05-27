@@ -81,9 +81,10 @@
   - 对应 fixed input 集已在脚本内锁定（10 条 testsByPath），并在本轮执行得到 `[virtual-router-quota-health-shadow-regression] OK`。
   - 结论：已证。
 - focused regression：
-  - 已执行：
-    `npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts tests/sharedmodule/virtual-router-health-last-provider.spec.ts tests/servertool/virtual-router-quota-health-override.spec.ts tests/server/runtime/http-server/request-executor.spec.ts tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts tests/sharedmodule/virtual-router-last-provider-quota-resetat-native.spec.ts`
+  - 已执行（native required，需显式注入路径）：
+    `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH=/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts tests/sharedmodule/virtual-router-health-last-provider.spec.ts tests/servertool/virtual-router-quota-health-override.spec.ts tests/server/runtime/http-server/request-executor.spec.ts tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts tests/sharedmodule/virtual-router-quota-view-second-center-native.spec.ts tests/sharedmodule/virtual-router-last-provider-quota-view-native.spec.ts tests/sharedmodule/virtual-router-quota-resetat-multikey-native.spec.ts tests/sharedmodule/virtual-router-last-provider-quota-resetat-native.spec.ts`
   - 结果：`10 suites / 56 tests` 全绿。
+  - 备注：同一 testsByPath 集合在未注入 `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH` 时会触发 `missing native proxy constructor`，属于 gate 入口环境缺失而非语义回归。
   - 补充说明：Jest 进程尾部仍提示 open handles，但测试断言结果本身已全绿。
   - 结论：已证。
 - `npm run build:dev`：

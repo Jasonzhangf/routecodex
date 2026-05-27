@@ -1662,3 +1662,6 @@ Tags: virtual-router, quota-health, second-center, same-shape-equivalence, quota
   1) `scripts/tests/virtual-router-quota-health-shadow-regression.mjs` 必须显式保障 native path（优先注入 `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH=sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node`，不存在则退回外部已给路径），否则会出现 native proxy missing 型伪失败；
   2) `virtual-router-quota-resetat-multikey-native` 的正确断言是“providerKey 隔离 + reroute 到 sibling + quota snapshot 正确”，而不是把 providerA health 固定写死为 `tripped`；当前 Rust 真相允许 `tripped|healthy`。
 Tags: virtual-router, quota-health, shadow-gate, native-path, multikey-resetat, assertion-invariant, 2026-05-27
+
+- 2026-05-27: focused native regression（10 suites / 56 tests）在当前仓库是 `native required` 形态，执行时必须显式提供 `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH` 指向 `sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node`；否则会统一报 `missing native proxy constructor`，这属于执行入口环境缺失，不应误判为 quota/health 语义回归。
+Tags: virtual-router, native-required, focused-regression, router-hotpath, env-contract, 2026-05-27
