@@ -27,35 +27,14 @@ fn resolve_legacy_responses_request_chain_key(metadata: &Value) -> Option<String
         .and_then(|resume| read_trimmed_string(resume.get("previousRequestId")))
 }
 
+pub(crate) fn is_continuation_request(metadata: &Value) -> bool {
+    resolve_continuation_request_chain_key(metadata).is_some()
+        || resolve_legacy_responses_request_chain_key(metadata).is_some()
+}
+
 pub(crate) fn resolve_sticky_key(metadata: &Value) -> String {
     if let Some(request_chain_key) = resolve_continuation_request_chain_key(metadata) {
         return request_chain_key;
-    }
-
-    match read_trimmed_string(
-        metadata
-            .get("continuation")
-            .and_then(|v| v.as_object())
-            .and_then(|continuation| continuation.get("stickyScope")),
-    )
-    .as_deref()
-    {
-        Some("session") => {
-            return resolve_session_scope(metadata)
-                .or_else(|| read_trimmed_string(metadata.get("requestId")))
-                .unwrap_or_else(|| "default".to_string())
-        }
-        Some("conversation") => {
-            return read_conversation_scope(metadata)
-                .or_else(|| resolve_session_scope(metadata))
-                .or_else(|| read_trimmed_string(metadata.get("requestId")))
-                .unwrap_or_else(|| "default".to_string())
-        }
-        Some("request") => {
-            return read_trimmed_string(metadata.get("requestId"))
-                .unwrap_or_else(|| "default".to_string())
-        }
-        _ => {}
     }
 
     if let Some(protocol) = metadata.get("providerProtocol").and_then(|v| v.as_str()) {
@@ -69,8 +48,7 @@ pub(crate) fn resolve_sticky_key(metadata: &Value) -> String {
             }
         }
     }
-    resolve_session_scope(metadata)
-        .or_else(|| read_trimmed_string(metadata.get("requestId")))
+    read_trimmed_string(metadata.get("requestId"))
         .unwrap_or_else(|| "default".to_string())
 }
 
@@ -163,7 +141,7 @@ pub(crate) fn extract_runtime_now_ms(metadata: &Value) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_sticky_key, resolve_stop_message_scope};
+    use super::{is_continuation_request, resolve_sticky_key, resolve_stop_message_scope};
     use serde_json::json;
 
     #[test]
@@ -199,7 +177,7 @@ mod tests {
 
         assert_eq!(
             resolve_sticky_key(&metadata),
-            "session:session_should_win".to_string()
+            "req_session_scope".to_string()
         );
     }
 
@@ -241,10 +219,27 @@ mod tests {
             "sessionId": "session_1"
         });
 
-        assert_eq!(
-            resolve_sticky_key(&metadata),
-            "session:session_1".to_string()
-        );
+        assert_eq!(resolve_sticky_key(&metadata), "req_chat_1".to_string());
+    }
+
+    #[test]
+    fn non_continuation_request_is_not_sticky() {
+        let metadata = json!({
+            "providerProtocol": "openai-responses",
+            "requestId": "req_1",
+            "sessionId": "session_1"
+        });
+        assert_eq!(is_continuation_request(&metadata), false);
+    }
+
+    #[test]
+    fn responses_resume_is_continuation_request() {
+        let metadata = json!({
+            "providerProtocol": "openai-responses",
+            "requestId": "req_2",
+            "responsesResume": { "previousRequestId": "req_1" }
+        });
+        assert_eq!(is_continuation_request(&metadata), true);
     }
 
     #[test]

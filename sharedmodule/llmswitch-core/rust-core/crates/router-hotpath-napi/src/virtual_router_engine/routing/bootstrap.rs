@@ -259,6 +259,43 @@ fn expand_routing_table(
                     .collect::<Vec<String>>()
             };
 
+            // Remap weight keys: when a config target like "mimo.mimo-v2.5" is
+            // expanded to "mimo.pool.mimo-v2.5", the weight key must also use
+            // the expanded target name so it matches at selection time.
+            let mut load_balancing = pool.load_balancing.clone();
+            if let Some(ref mut lb) = load_balancing {
+                if let Some(ref mut weights) = lb.weights {
+                    let mut needs_remap = false;
+                    let mut remapped: HashMap<String, i64> = HashMap::new();
+                    for (config_key, weight) in weights.iter() {
+                        let parsed = parse_route_entry(config_key, alias_index);
+                        let has_key_alias = parsed.as_ref().and_then(|p| p.key_alias.as_ref()).is_some();
+                        if !has_key_alias {
+                            let prefix = format!("{}.", config_key);
+                            let pattern = prefix.as_str();
+                            let matching: Vec<String> = sorted_targets
+                                .iter()
+                                .filter(|t| t.as_str().starts_with(pattern) || t.as_str() == config_key.as_str())
+                                .cloned()
+                                .collect();
+                            if !matching.is_empty() {
+                                for matched in matching {
+                                    remapped.insert(matched, *weight);
+                                }
+                                needs_remap = true;
+                            } else {
+                                remapped.insert(config_key.clone(), *weight);
+                            }
+                        } else {
+                            remapped.insert(config_key.clone(), *weight);
+                        }
+                    }
+                    if needs_remap {
+                        *weights = remapped;
+                    }
+                }
+            }
+
             expanded_pools.push(RoutePoolTier {
                 id: pool.id.clone(),
                 priority: pool.priority,
@@ -266,7 +303,7 @@ fn expand_routing_table(
                 mode: pool.mode.clone(),
                 backup: Some(pool.backup),
                 force: pool.force,
-                load_balancing: pool.load_balancing.clone(),
+                load_balancing,
                 route_params: pool.route_params.clone(),
                 thinking: pool.thinking.clone(),
             });
@@ -588,7 +625,6 @@ fn normalize_weighted_strategy(value: Option<&Value>) -> Option<String> {
     }
     match normalized.as_str() {
         "weighted" => Some("weighted".to_string()),
-        "sticky" => Some("sticky".to_string()),
         "round-robin" | "round_robin" | "roundrobin" | "rr" => Some("round-robin".to_string()),
         _ => None,
     }

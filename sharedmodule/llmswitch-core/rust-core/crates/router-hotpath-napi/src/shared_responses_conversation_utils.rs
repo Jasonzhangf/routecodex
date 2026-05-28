@@ -127,7 +127,6 @@ fn pick_responses_persisted_fields(payload: &Value) -> Value {
         "attachments",
         "input_audio",
         "output_audio",
-        "routeHint",
     ];
     let mut next = Map::new();
     for key in fields {
@@ -475,14 +474,6 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
     if let Some(tool_values) = tools.clone() {
         base_payload.insert("tools".to_string(), Value::Array(tool_values));
     }
-    if let Some(route_hint) = read_trimmed_string(
-        context
-            .as_object()
-            .and_then(|row| row.get("routeHint"))
-            .or_else(|| payload.as_object().and_then(|row| row.get("routeHint"))),
-    ) {
-        base_payload.insert("routeHint".to_string(), Value::String(route_hint));
-    }
     if let Some(provider_key) = read_trimmed_string(
         context
             .as_object()
@@ -492,10 +483,6 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
         base_payload.insert("providerKey".to_string(), Value::String(provider_key));
     }
 
-    let route_hint_value = base_payload
-        .get("routeHint")
-        .cloned()
-        .unwrap_or(Value::Null);
     let provider_key_value = base_payload
         .get("providerKey")
         .cloned()
@@ -505,7 +492,6 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
         "basePayload": Value::Object(base_payload),
         "input": Value::Array(input),
         "tools": tools.map(Value::Array).unwrap_or(Value::Null),
-        "routeHint": route_hint_value,
         "providerKey": provider_key_value,
     })
 }
@@ -575,9 +561,6 @@ fn resume_responses_conversation_payload(
             payload.insert("tools".to_string(), Value::Array(tools));
         }
     }
-    if let Some(route_hint) = read_trimmed_string(entry_obj.get("routeHint")) {
-        payload.insert("routeHint".to_string(), Value::String(route_hint.clone()));
-    }
     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
     if let Some(provider_key) = provider_key.clone() {
         payload.insert("providerKey".to_string(), Value::String(provider_key));
@@ -613,7 +596,6 @@ fn resume_responses_conversation_payload(
         "meta": {
             "restoredFromResponseId": response_id,
             "previousRequestId": entry_obj.get("requestId").cloned().unwrap_or(Value::Null),
-            "routeHint": entry_obj.get("routeHint").cloned().unwrap_or(Value::Null),
             "providerKey": provider_key.map(Value::String).unwrap_or(Value::Null),
             "toolOutputs": tool_outputs.len(),
             "toolOutputsDetailed": submitted_details,
@@ -921,9 +903,6 @@ fn restore_responses_continuation_payload(
             payload.insert("tools".to_string(), Value::Array(tools));
         }
     }
-    if let Some(route_hint) = read_trimmed_string(entry_obj.get("routeHint")) {
-        payload.insert("routeHint".to_string(), Value::String(route_hint.clone()));
-    }
     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
     if let Some(provider_key) = provider_key.clone() {
         payload.insert("providerKey".to_string(), Value::String(provider_key));
@@ -946,7 +925,6 @@ fn restore_responses_continuation_payload(
         "meta": {
             "restoredFromResponseId": response_id,
             "previousRequestId": entry_obj.get("requestId").cloned().unwrap_or(Value::Null),
-            "routeHint": entry_obj.get("routeHint").cloned().unwrap_or(Value::Null),
             "providerKey": provider_key.map(Value::String).unwrap_or(Value::Null),
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
@@ -1019,9 +997,6 @@ fn materialize_responses_continuation_payload(
             payload.insert("tools".to_string(), Value::Array(tools));
         }
     }
-    if let Some(route_hint) = read_trimmed_string(entry_obj.get("routeHint")) {
-        payload.insert("routeHint".to_string(), Value::String(route_hint.clone()));
-    }
     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
     if let Some(provider_key) = provider_key.clone() {
         payload.insert("providerKey".to_string(), Value::String(provider_key));
@@ -1035,7 +1010,6 @@ fn materialize_responses_continuation_payload(
         "meta": {
             "restoredFromResponseId": last_response_id.map(Value::String).unwrap_or(Value::Null),
             "previousRequestId": entry_obj.get("requestId").cloned().unwrap_or(Value::Null),
-            "routeHint": entry_obj.get("routeHint").cloned().unwrap_or(Value::Null),
             "providerKey": provider_key.map(Value::String).unwrap_or(Value::Null),
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),

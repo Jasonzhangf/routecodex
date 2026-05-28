@@ -1,6 +1,46 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 describe('executor-metadata binding fallback', () => {
+  it('does not trust body metadata routeHint from restored old responses sessions', async () => {
+    jest.resetModules();
+    const { buildRequestMetadata } = await import('../../../../src/server/runtime/http-server/executor-metadata.js');
+
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-routehint-body-poison-1',
+      headers: {},
+      query: {},
+      body: {
+        metadata: {
+          routeHint: 'coding',
+          responsesResume: { previousRequestId: 'req-old-fin-session' }
+        },
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'read only question' }] }]
+      },
+      metadata: {}
+    } as any);
+
+    expect(metadata.routeHint).toBeUndefined();
+  });
+
+  it('still honors explicit x-route-hint header for internal retry overrides', async () => {
+    jest.resetModules();
+    const { buildRequestMetadata } = await import('../../../../src/server/runtime/http-server/executor-metadata.js');
+
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-routehint-header-1',
+      headers: { 'x-route-hint': 'longcontext' },
+      query: {},
+      body: { metadata: { routeHint: 'coding' }, input: [] },
+      metadata: {}
+    } as any);
+
+    expect(metadata.routeHint).toBe('longcontext');
+  });
+
   it('restores client inject scope from conversation binding when api-key carries session scope only', async () => {
     jest.resetModules();
     await jest.unstable_mockModule('../../../../src/server/runtime/http-server/tmux-session-probe.js', () => ({

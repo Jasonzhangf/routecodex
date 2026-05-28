@@ -79,6 +79,22 @@
 3. **RequestExecutor** 消费该 decision 并执行实际 retry / reroute / sleep / fail。
 4. **servertool followup** 的 provider 类错误也走同一套 Router policy；只有 payload 缺失、reenter 不可用、client inject dispatcher 缺失等编排前/internal error 保留在 servertool 自身边界。
 
+## 1.1 三分类硬约束（2026-05-28）
+
+Provider 执行期错误只允许归一到以下三类，禁止新增第四类语义分支：
+
+- `recoverable`
+- `unrecoverable`
+- `special_400`
+
+约束：
+
+1. 所有具体错误（网络、502、2056、限流、协议异常等）只能先归一到三分类之一，不能在执行链路新增“某错误专用处理通道”。
+2. 分类唯一入口：`resolveProviderFailureClassification(...)`（provider failure policy）。
+3. 执行唯一出口：`resolveProviderFailureActionPlan(...)` / Router policy decision（retry/reroute/cooldown/fail）。
+4. RequestExecutor / ServerTool / Converter 不得绕过分类直接按具体错误码各自发明重试/冷却策略。
+5. followup / host contract 等非 provider 执行期错误可在边界层短路，但不得污染 provider health 处理主链。
+
 ## 2. 分层职责
 
 | 层 | 职责 | 不该做什么 |

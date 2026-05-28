@@ -20,7 +20,7 @@ use crate::virtual_router_engine::instructions::{
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
     extract_excluded_provider_keys, extract_key_alias, filter_candidates_by_state,
-    is_server_tool_followup_request, parse_direct_provider_model,
+    is_continuation_request, is_server_tool_followup_request, parse_direct_provider_model,
     resolve_instruction_process_mode_for_selection, resolve_instruction_target,
     resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
     should_fallback_direct_model_for_media,
@@ -229,10 +229,15 @@ impl VirtualRouterEngineCore {
         self.refresh_provider_health_from_store();
         let mut request_working = request.clone();
         clean_malformed_routing_instruction_markers(&mut request_working);
+        let is_continuation = is_continuation_request(metadata);
         let sticky_key = resolve_sticky_key(metadata);
         let session_scope = resolve_session_scope(metadata);
         let stop_message_scope = resolve_stop_message_scope(metadata);
-        let routing_state_key = session_scope.clone().unwrap_or_else(|| sticky_key.clone());
+        let routing_state_key = if is_continuation {
+            session_scope.clone().unwrap_or_else(|| sticky_key.clone())
+        } else {
+            sticky_key.clone()
+        };
         let base_state = self.load_routing_state_for_scope(&routing_state_key);
         let mut persisted_routing_state = strip_stop_message_fields(&base_state);
         let mut selection_routing_state = strip_stop_message_fields(&base_state);
@@ -245,6 +250,11 @@ impl VirtualRouterEngineCore {
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
         {
+            selection_routing_state.forced_target = None;
+            selection_routing_state.sticky_target = None;
+            selection_routing_state.prefer_target = None;
+        }
+        if !is_continuation {
             selection_routing_state.forced_target = None;
             selection_routing_state.sticky_target = None;
             selection_routing_state.prefer_target = None;
@@ -659,6 +669,74 @@ mod tests {
         assert!(state.forced_target.is_none());
         assert!(state.sticky_target.is_none());
         assert!(state.prefer_target.is_none());
+    }
+
+    #[test]
+    fn non_continuation_request_clears_selection_sticky_targets() {
+        let mut state = RoutingInstructionState::default();
+        let target = InstructionTarget {
+            provider: Some("deepseek-web".to_string()),
+            key_alias: Some("3".to_string()),
+            key_index: None,
+            model: Some("deepseek-r1-search".to_string()),
+            path_length: Some(3),
+            process_mode: None,
+        };
+        state.forced_target = Some(target.clone());
+        state.sticky_target = Some(target.clone());
+        state.prefer_target = Some(target);
+
+        let metadata = json!({
+            "providerProtocol": "openai-responses",
+            "requestId": "req_current_turn",
+            "sessionId": "session_1"
+        });
+        let is_continuation =
+            crate::virtual_router_engine::routing::is_continuation_request(&metadata);
+        assert!(!is_continuation);
+        if !is_continuation {
+            state.forced_target = None;
+            state.sticky_target = None;
+            state.prefer_target = None;
+        }
+
+        assert!(state.forced_target.is_none());
+        assert!(state.sticky_target.is_none());
+        assert!(state.prefer_target.is_none());
+    }
+
+    #[test]
+    fn continuation_request_keeps_selection_sticky_targets() {
+        let mut state = RoutingInstructionState::default();
+        let target = InstructionTarget {
+            provider: Some("deepseek-web".to_string()),
+            key_alias: Some("3".to_string()),
+            key_index: None,
+            model: Some("deepseek-r1-search".to_string()),
+            path_length: Some(3),
+            process_mode: None,
+        };
+        state.forced_target = Some(target.clone());
+        state.sticky_target = Some(target.clone());
+        state.prefer_target = Some(target);
+
+        let metadata = json!({
+            "providerProtocol": "openai-responses",
+            "requestId": "req_current_turn",
+            "responsesResume": { "previousRequestId": "req_prev" }
+        });
+        let is_continuation =
+            crate::virtual_router_engine::routing::is_continuation_request(&metadata);
+        assert!(is_continuation);
+        if !is_continuation {
+            state.forced_target = None;
+            state.sticky_target = None;
+            state.prefer_target = None;
+        }
+
+        assert!(state.forced_target.is_some());
+        assert!(state.sticky_target.is_some());
+        assert!(state.prefer_target.is_some());
     }
 
     #[test]

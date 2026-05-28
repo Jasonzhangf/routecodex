@@ -323,7 +323,7 @@ fn normalize_load_balancing(value: Option<&Value>) -> Option<LoadBalancingConfig
     }
 
     let strategy = match strategy_raw.as_str() {
-        "weighted" | "sticky" => strategy_raw,
+        "weighted" => strategy_raw,
         _ => "round-robin".to_string(),
     };
 

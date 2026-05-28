@@ -82,9 +82,6 @@ impl VirtualRouterEngineCore {
         if provider_key.is_empty() {
             return;
         }
-        if !self.event_has_route_alternative_provider(event, &provider_key) {
-            return;
-        }
         let reason = extract_error_reason(event);
         let now = now_ms();
         let status_code = extract_status_code(event);
@@ -177,9 +174,6 @@ impl VirtualRouterEngineCore {
         let Some(provider_key) = provider_key.as_deref() else {
             return false;
         };
-        if !self.event_has_route_alternative_provider(event, provider_key) {
-            return true;
-        }
         let reason = extract_error_reason(event);
         let now = now_ms();
         match classification {
@@ -872,8 +866,41 @@ mod tests {
 
         let state = provider_state(&core, "test.key1.model-a");
         assert_eq!(state.state, "healthy");
-        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.failure_count, 1);
         assert_eq!(state.cooldown_expires_at, None);
+    }
+
+    #[test]
+    fn route_pool_size_one_still_enters_cooldown_after_three_502_for_priority_failover() {
+        let mut core = build_test_core_with_providers(&[
+            ("test.key1.model-a", "gpt-test"),
+            ("test.key1.model-b", "gpt-test"),
+        ]);
+        let mk = |request_id: &str| {
+            json!({
+                "code": "HTTP_502",
+                "message": "upstream failed",
+                "stage": "provider.send",
+                "status": 502,
+                "runtime": {
+                    "requestId": request_id,
+                    "providerKey": "test.key1.model-a"
+                },
+                "details": {
+                    "errorClassification": "recoverable",
+                    "routePoolSize": 1
+                }
+            })
+        };
+
+        core.handle_provider_error(&mk("req-a1"));
+        core.handle_provider_error(&mk("req-a2"));
+        core.handle_provider_error(&mk("req-a3"));
+
+        let state = provider_state(&core, "test.key1.model-a");
+        assert_eq!(state.state, "tripped");
+        let ttl = state.cooldown_expires_at.expect("cooldown expiry") - now_ms();
+        assert!(ttl > 9 * 60_000 && ttl <= 11 * 60_000, "expected ~10m ttl, got {ttl}");
     }
 
     #[test]
@@ -1053,7 +1080,7 @@ mod tests {
     }
 
     #[test]
-    fn recoverable_non_429_three_strikes_cooldown_then_second_cycle_blacklist() {
+    fn recoverable_non_429_three_strikes_cooldown_ladder_10m_30m_5h() {
         let provider_key = "test.key1.model-a";
         let mut core = build_test_core_with_providers(&[
             (provider_key, "gpt-test"),
@@ -1077,14 +1104,37 @@ mod tests {
         let first_cycle = provider_state(&core, provider_key);
         assert_eq!(first_cycle.state, "tripped");
         let first_expiry = first_cycle.cooldown_expires_at.expect("cooldown expiry");
+        let first_ttl = first_expiry - now_ms();
+        assert!(
+            first_ttl > 9 * 60_000 && first_ttl <= 11 * 60_000,
+            "first cooldown should be ~10m, ttl={first_ttl}"
+        );
         assert!(core.health_manager.is_available(provider_key, first_expiry + 1));
 
         core.handle_provider_error(&mk("req-4"));
         core.handle_provider_error(&mk("req-5"));
         core.handle_provider_error(&mk("req-6"));
         let second_cycle = provider_state(&core, provider_key);
-        assert_eq!(second_cycle.state, "blacklisted");
-        assert!(second_cycle.cooldown_expires_at.is_some());
+        assert_eq!(second_cycle.state, "tripped");
+        let second_expiry = second_cycle.cooldown_expires_at.expect("second cooldown expiry");
+        let second_ttl = second_expiry - now_ms();
+        assert!(
+            second_ttl > 29 * 60_000 && second_ttl <= 31 * 60_000,
+            "second cooldown should be ~30m, ttl={second_ttl}"
+        );
+
+        assert!(core.health_manager.is_available(provider_key, second_expiry + 1));
+        core.handle_provider_error(&mk("req-7"));
+        core.handle_provider_error(&mk("req-8"));
+        core.handle_provider_error(&mk("req-9"));
+        let third_cycle = provider_state(&core, provider_key);
+        assert_eq!(third_cycle.state, "tripped");
+        let third_expiry = third_cycle.cooldown_expires_at.expect("third cooldown expiry");
+        let third_ttl = third_expiry - now_ms();
+        assert!(
+            third_ttl > (5 * 60 * 60_000 - 60_000) && third_ttl <= (5 * 60 * 60_000 + 60_000),
+            "third cooldown should be ~5h, ttl={third_ttl}"
+        );
     }
 
     #[test]

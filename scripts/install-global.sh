@@ -160,6 +160,47 @@ link_global_llms_dev() {
     node scripts/link-global-llms-local.mjs --package routecodex --require-target
 }
 
+refresh_rcc_install_current_snapshots() {
+    echo "📦 刷新 RCC install/current runtime snapshot..."
+    local roots=()
+    if [ -n "${RCC_HOME:-}" ]; then
+        roots+=("$RCC_HOME")
+    fi
+    if [ -n "${ROUTECODEX_HOME:-}" ]; then
+        roots+=("$ROUTECODEX_HOME")
+    fi
+    if [ -n "${ROUTECODEX_USER_DIR:-}" ]; then
+        roots+=("$ROUTECODEX_USER_DIR")
+    fi
+    roots+=("$HOME/.rcc")
+    if [ -d "/Volumes/extension/.rcc" ]; then
+        roots+=("/Volumes/extension/.rcc")
+    fi
+
+    local seen=""
+    local refreshed=0
+    for root in "${roots[@]}"; do
+        if [ -z "$root" ]; then
+            continue
+        fi
+        case "$root" in
+            ~/*) root="$HOME/${root#~/}" ;;
+        esac
+        root="$(cd "$(dirname "$root")" 2>/dev/null && pwd)/$(basename "$root")"
+        case " $seen " in
+            *" $root "*) continue ;;
+        esac
+        seen="$seen $root"
+        mkdir -p "$root"
+        echo "   -> $root"
+        RCC_HOME="$root" ROUTECODEX_HOME="$root" ROUTECODEX_USER_DIR="$root" node scripts/install-release-snapshot.mjs
+        refreshed=$((refreshed + 1))
+    done
+    if [ "$refreshed" -eq 0 ]; then
+        echo "⚠️  未找到可刷新的 RCC home"
+    fi
+}
+
 # 验证安装
 verify_install() {
     echo "🔍 验证全局安装..."
@@ -250,6 +291,7 @@ main() {
     node scripts/cleanup-stale-server-pids.mjs --quiet || true
     build_project
     global_install
+    refresh_rcc_install_current_snapshots
     link_global_llms_dev
     verify_install
     verify_server_health

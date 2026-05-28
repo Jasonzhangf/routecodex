@@ -14,7 +14,7 @@ import {
   mergePipelineMetadata,
   readRequestBodyMetadata
 } from './handler-utils.js';
-import { captureResponsesRequestContextForRequest, recordResponsesResponseForRequest, resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
+import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, recordResponsesResponseForRequest, resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
@@ -340,9 +340,6 @@ export async function handleResponses(
         clientStream: acceptsSse || undefined,
         inboundStream: wantsStream,
         outboundStream,
-        ...(typeof resumeMeta?.routeHint === 'string' && resumeMeta.routeHint.trim()
-          ? { routeHint: resumeMeta.routeHint.trim() }
-          : {}),
         providerProtocol: 'openai-responses',
         __raw_request_body: isSubmitToolOutputs
           ? buildResponsesResumeRawRequestBody(originalPayload, typeof payload.previous_response_id === 'string' ? payload.previous_response_id : options.responseIdFromPath)
@@ -376,7 +373,6 @@ export async function handleResponses(
           toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
         },
         sessionId: readResponsesSessionId(requestBodyMetadata),
-        routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined,
         providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
       }).catch((error) => {
         logResponsesHandlerNonBlockingError('responses_context.capture_inbound', error, { requestId });
@@ -434,8 +430,14 @@ export async function handleResponses(
           } catch (endError) {
             logResponsesHandlerNonBlockingError('timeout.response_end', endError, { requestId });
           }
+          void clearResponsesConversationByRequestId(requestId).catch((error) => {
+            logResponsesHandlerNonBlockingError('responses_context.clear_on_timeout_started', error, { requestId });
+          });
           return;
         }
+        void clearResponsesConversationByRequestId(requestId).catch((error) => {
+          logResponsesHandlerNonBlockingError('responses_context.clear_on_timeout', error, { requestId });
+        });
         void respondWithPipelineError(res, ctx, err, entryEndpoint, requestId, { forceSse: wantsStreamForError });
       }, activeRequestTimeoutMs);
       // Let Node exit even if a client hangs; this timer is per-request and should not keep the process alive.
@@ -506,14 +508,12 @@ export async function handleResponses(
               context: requestContext.context,
               sessionId: requestContext.sessionId,
               conversationId: requestContext.conversationId,
-              routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined,
               providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
             });
             if (result.body && typeof result.body === 'object' && !Array.isArray(result.body)) {
               await recordResponsesResponseForRequest({
                 requestId: responseId,
                 response: result.body as Record<string, unknown>,
-                routeHint: typeof resumeMeta?.routeHint === 'string' ? resumeMeta.routeHint : undefined,
                 providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined,
                 sessionId: requestContext.sessionId,
                 conversationId: requestContext.conversationId
@@ -538,6 +538,9 @@ export async function handleResponses(
     });
   } catch (error: unknown) {
     clearTimeoutHandle();
+    void clearResponsesConversationByRequestId(requestId).catch((clearError) => {
+      logResponsesHandlerNonBlockingError('responses_context.clear_on_error', clearError, { requestId });
+    });
     if (timedOut) {
       return;
     }

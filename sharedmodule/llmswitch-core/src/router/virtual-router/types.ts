@@ -30,7 +30,7 @@ export interface RoutePoolLoadBalancingPolicy {
    * Optional pool-level override for provider selection strategy.
    * When omitted, Virtual Router falls back to the global loadBalancing.strategy.
    */
-  strategy?: "round-robin" | "weighted" | "sticky";
+  strategy?: "round-robin" | "weighted";
   /**
    * Optional pool-local weights. Keys may target runtime keys, provider.model groups, or provider ids.
    */
@@ -200,7 +200,7 @@ export interface VirtualRouterClassifierConfig {
 }
 
 export interface LoadBalancingPolicy {
-  strategy: "round-robin" | "weighted" | "sticky";
+  strategy: "round-robin" | "weighted";
   weights?: Record<string, number>;
   /**
    * Alias-level selection strategy (provider auth aliases).

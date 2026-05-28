@@ -27,7 +27,6 @@ impl Default for LoadBalancingPolicy {
 #[derive(Debug, Default, Clone)]
 struct RouteState {
     pointer: usize,
-    sticky_map: HashMap<String, String>,
     weighted_current: HashMap<String, i64>,
 }
 
@@ -64,7 +63,7 @@ impl RouteLoadBalancer {
         &mut self,
         route_name: &str,
         candidates: &[String],
-        sticky_key: Option<&str>,
+        _sticky_key: Option<&str>,
         weights: Option<&HashMap<String, i64>>,
         availability_check: impl Fn(&str) -> bool,
         strategy_override: Option<&str>,
@@ -84,9 +83,6 @@ impl RouteLoadBalancer {
         let default_weights = self.policy.weights.clone();
         let resolved_weights = weights.or(default_weights.as_ref());
         match strategy {
-            "sticky" => {
-                Some(self.select_sticky(route_name, &available, sticky_key, resolved_weights))
-            }
             "weighted" => Some(self.select_weighted(route_name, &available, resolved_weights)),
             _ => {
                 if let Some(custom_weights) = weights {
@@ -157,7 +153,7 @@ impl RouteLoadBalancer {
         route_name: &str,
         ordered_group_ids: &[String],
         groups: &HashMap<String, Vec<String>>,
-        sticky_key: Option<&str>,
+        _sticky_key: Option<&str>,
         weights: Option<&HashMap<String, i64>>,
         availability_check: impl Fn(&str) -> bool,
         strategy_override: Option<&str>,
@@ -185,7 +181,6 @@ impl RouteLoadBalancer {
             .unwrap_or("round-robin");
         let group_route = format!("{}:group", route_name);
         let selected_group = match strategy {
-            "sticky" => self.select_sticky(&group_route, &available_groups, sticky_key, weights),
             "weighted" => self.select_weighted(&group_route, &available_groups, weights),
             _ => self.select_round_robin(&group_route, &available_groups),
         };
@@ -268,36 +263,6 @@ impl RouteLoadBalancer {
         selected_key
     }
 
-    fn select_sticky(
-        &mut self,
-        route_name: &str,
-        candidates: &[String],
-        sticky_key: Option<&str>,
-        weights: Option<&HashMap<String, i64>>,
-    ) -> String {
-        if let Some(sticky_key) = sticky_key {
-            if let Some(pinned) = self
-                .states
-                .get(route_name)
-                .and_then(|state| state.sticky_map.get(sticky_key))
-            {
-                if candidates.contains(pinned) {
-                    return pinned.clone();
-                }
-            }
-            let choice = if weights.is_some() {
-                self.select_weighted(&format!("{}:sticky", route_name), candidates, weights)
-            } else {
-                self.select_round_robin(route_name, candidates)
-            };
-            self.get_state_mut(route_name)
-                .sticky_map
-                .insert(sticky_key.to_string(), choice.clone());
-            return choice;
-        }
-        self.select_round_robin(route_name, candidates)
-    }
-
     fn get_state_mut(&mut self, route_name: &str) -> &mut RouteState {
         self.states
             .entry(route_name.to_string())
@@ -308,6 +273,28 @@ impl RouteLoadBalancer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    #[test]
+    fn sticky_strategy_is_treated_as_round_robin_for_non_continuation_requests() {
+        let mut lb = RouteLoadBalancer::new(Some(LoadBalancingPolicy {
+            strategy: Some("sticky".to_string()),
+            weights: None,
+            health_weighted: None,
+            context_weighted: None,
+        }));
+        let candidates = vec!["provider-a".to_string(), "provider-b".to_string()];
+
+        let first = lb
+            .select("thinking", &candidates, Some("session:same"), None, |_| true, None)
+            .expect("first selection");
+        let second = lb
+            .select("thinking", &candidates, Some("session:same"), None, |_| true, None)
+            .expect("second selection");
+
+        assert_eq!(first, "provider-a");
+        assert_eq!(second, "provider-b", "non-continuation requests must not be pinned by sticky load balancing");
+    }
 
     #[test]
     fn round_robin_covers_all_aliases_in_single_model_pool() {

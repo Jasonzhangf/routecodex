@@ -539,4 +539,56 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(output).not.toContain('upstream_stream_incomplete');
     expect(output).not.toContain('event: error');
   });
+
+  it('RED: treats event: message with bare data.type=response.completed as terminal to avoid false upstream_stream_incomplete', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = new PassThrough();
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream
+        }
+      } as any,
+      'req-stream-message-event-terminal',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    stream.write('event: message\n');
+    stream.write('data: {"type":"response.completed"}\n\n');
+    stream.end();
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output).toContain('event: message');
+    expect(output).toContain('"type":"response.completed"');
+    expect(output).not.toContain('upstream_stream_incomplete');
+    expect(output).not.toContain('event: error');
+  });
 });

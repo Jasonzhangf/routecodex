@@ -12528,3 +12528,27 @@ Using skills: coding-principals + rcc-dev-skills
 - 代码真源: extractLatestCascadeUserText() 仅接受 terminal tool_result，且显式排除 bridge_tool_history；当 submit continuation 只带 Rust bridge toolHistory 而无 user turn 时会抛 400。
 - 修复: 允许在无 terminal tool_result 时回退使用 bridge_tool_history 的 tool_result 作为 latest text，保持 fail-fast（只有两者都没有时才抛错）。
 - 新增回归: bridge-only submit continuation 场景，断言不再抛 missing terminal user text，且 prompt 包含 tool result。
+## Windsurf health false-positive investigation 2026-05-28 12:46:23 CST
+- User log shows repeated `/v1/responses` router gpt-5.4 Windsurf failures after health appears available; need trace request/response chain, remove slow/incorrect checks, add black-box red test.
+
+## 2026-05-28 13xx direct 503 no fallback live issue
+- 现象：5555 /v1/responses 连续 HTTP_503，只打印 port-resolve/start/fail/http.error.meta，没有 virtual-router-hit/provider-switch/router-direct.reenter 证据。
+- 用户要求：黑盒红测 -> 唯一入口修复 -> build/install -> restart -> 在线证据证明。
+- 当前假设：direct provider 5xx 没有进入统一 executor retry/failure policy，或运行 snapshot 未更新，或可恢复错误没有在同一入口触发 reroute/cooldown。
+
+## 2026-05-28 HTTP 黑盒测试规则更新
+- 纠正：只调用 private method 或 mock executePipeline 的测试不是黑盒。
+- 新规则：黑盒必须从 HTTP 请求入口发起，断言实际 HTTP status/body，并覆盖线上真实失败形态（throw vs return vs SSE）。
+- 本次 direct 503 真因：sameProtocol direct 的 processIncomingDirect throw 503 直接冒泡；必须捕获 thrown 5xx 后禁用本请求 direct 并交给统一 executor。
+
+
+## 2026-05-28 sticky 残留审计
+- 用户确认：sticky 只允许 continuation，其余普通请求/工具/followup 不 sticky。
+- 初步真源：Rust selection.rs 仍无条件 `resolve_sticky_key(metadata)` 并传 `Some(sticky_for_lb)` 到 load_balancer；load_balancer 仍支持全局/pool `strategy=sticky` 与 sticky_map。route.rs 仅清 instruction state，不影响 LB 层 sticky。
+- 下一步：先加 Rust/HTTP 可复现红测，再删除/禁用非 continuation LB sticky 与配置策略入口。
+
+
+## 2026-05-28 fin session sticky to sdfv 进一步判断
+- 用户观察：新 session 不 sticky，fin 老 session sticky 到 sdfv；更符合旧 meta 污染，而不是 classifier/LB 全局问题。
+- 查证：tmux-rcc-fin.json 没有 routeHint/forcedTarget/stickyTarget，只保留 stopless/chatProcess state；说明污染更可能来自 responses conversation store 恢复 payload/basePayload 内的 routeHint 或请求 body metadata.routeHint。
+- 修复点：handler mergePipelineMetadata 丢弃客户端/恢复态 routeHint；executor metadata 只信 x-route-hint；responses conversation store 不再记录/恢复 routeHint，只保留 providerKey 用于真正 continuation ownership。

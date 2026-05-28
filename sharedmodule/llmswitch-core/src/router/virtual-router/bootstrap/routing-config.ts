@@ -337,7 +337,7 @@ function normalizeRoutePoolLoadBalancing(input: unknown): RoutePoolLoadBalancing
   };
 }
 
-function normalizeWeightedStrategy(value: unknown): 'round-robin' | 'weighted' | 'sticky' | undefined {
+function normalizeWeightedStrategy(value: unknown): 'round-robin' | 'weighted' | undefined {
   if (typeof value !== 'string') {
     return undefined;
   }
@@ -347,9 +347,6 @@ function normalizeWeightedStrategy(value: unknown): 'round-robin' | 'weighted' |
   }
   if (normalized === 'weighted') {
     return 'weighted';
-  }
-  if (normalized === 'sticky') {
-    return 'sticky';
   }
   if (normalized === 'round-robin' || normalized === 'round_robin' || normalized === 'roundrobin' || normalized === 'rr') {
     return 'round-robin';

@@ -414,7 +414,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     typeof userMeta.clientOriginator === 'string' && userMeta.clientOriginator.trim()
       ? userMeta.clientOriginator.trim()
       : inboundOriginator;
-  const routeHint = extractRouteHint(input) ?? userMeta.routeHint;
+  const routeHint = extractRouteHint(input);
   const processMode = (userMeta.processMode as string) || 'chat';
   let resolvedSessionDaemonId = extractSessionDaemonId(userMeta, headers);
   const inferredClientType = inferSessionClientType(userMeta);

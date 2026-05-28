@@ -213,6 +213,11 @@ export class ApiKeyRotator {
 
   constructor(entries: ApiKeyEntry[]) {
     this.entries = entries;
+    if (entries.length > 1) {
+      try {
+        console.log(`[key-rotator] initialized providerKey=${entries.map(e => e.alias || '?').join(',')}`);
+      } catch { /* best-effort */ }
+    }
   }
 
 

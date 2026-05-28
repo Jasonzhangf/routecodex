@@ -372,7 +372,6 @@ async function recordResponsesConversationToolCallResponse(args: {
   entryEndpoint?: string;
   requestLabel: string;
   timingRequestIds?: string[];
-  routeHint?: string;
   providerKey?: string;
   sessionId?: unknown;
   conversationId?: unknown;
@@ -418,7 +417,6 @@ async function recordResponsesConversationToolCallResponse(args: {
     await recordResponsesResponseForRequest({
       requestId: recordRequestId,
       response: recordBody,
-      routeHint: args.routeHint,
       sessionId: effectiveSessionId,
       conversationId: effectiveConversationId,
     }).catch((error) => {
@@ -479,7 +477,6 @@ async function captureResponsesConversationToolCallRequestContext(args: {
   entryEndpoint?: string;
   requestLabel: string;
   timingRequestIds?: string[];
-  routeHint?: string;
   providerKey?: string;
   body: unknown;
   requestContext?: DispatchOptions['responsesRequestContext'];
@@ -511,7 +508,6 @@ async function captureResponsesConversationToolCallRequestContext(args: {
       context: args.requestContext.context,
       sessionId: args.requestContext.sessionId,
       conversationId: args.requestContext.conversationId,
-      routeHint: args.routeHint,
     }).catch((error) => {
       logResponseNonBlockingError(`responses-conversation-capture:${requestId}`, error);
     });
@@ -894,6 +890,19 @@ function updateSseTerminalTrackerFromChunk(
     }
     try {
       const parsed = JSON.parse(dataText) as unknown;
+      const parsedType =
+        parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? (typeof (parsed as Record<string, unknown>).type === 'string'
+            ? ((parsed as Record<string, unknown>).type as string).trim()
+            : '')
+          : '';
+      if (
+        parsedType === 'response.completed'
+        || parsedType === 'response.done'
+        || parsedType === 'response.required_action'
+      ) {
+        terminalWatch.pendingTerminalEvent = parsedType as SseTerminalWatch['pendingTerminalEvent'];
+      }
       const derived = deriveFinishReason(parsed);
       if (!derived) {
         continue;
@@ -1104,13 +1113,11 @@ function streamResponsesJsonAsSse(args: {
         })();
       const normalizedResponsesPayload = await normalizeResponsesToolCallsForClientBody(responsesPayload, args.entryEndpoint) as Record<string, unknown>;
       const sanitizedResponsesPayload = stripInternalKeysDeep(normalizedResponsesPayload);
-      const conversationRouteHint = args.result.usageLogInfo?.routeName;
       const conversationProviderKey = deriveResponsesConversationProviderKey(args.result.usageLogInfo);
       await captureResponsesConversationToolCallRequestContext({
         entryEndpoint: args.entryEndpoint,
         requestLabel: args.requestLabel,
         timingRequestIds: args.result.usageLogInfo?.timingRequestIds,
-        routeHint: conversationRouteHint,
         providerKey: conversationProviderKey,
         body: sanitizedResponsesPayload,
         requestContext:
@@ -1121,7 +1128,6 @@ function streamResponsesJsonAsSse(args: {
         entryEndpoint: args.entryEndpoint,
         requestLabel: args.requestLabel,
         timingRequestIds: args.result.usageLogInfo?.timingRequestIds,
-        routeHint: conversationRouteHint,
         providerKey: conversationProviderKey,
         sessionId: args.result.usageLogInfo?.sessionId,
         conversationId: args.result.usageLogInfo?.conversationId,
@@ -1423,14 +1429,12 @@ export async function sendPipelineResponse(
         return;
       }
       nativeSseConversationPersisted = true;
-      const conversationRouteHint = result.usageLogInfo?.routeName;
       const conversationProviderKey = deriveResponsesConversationProviderKey(result.usageLogInfo);
       const sanitizedProbeBody = stripInternalKeysDeep(contractProbe.probe as Record<string, unknown>);
       await captureResponsesConversationToolCallRequestContext({
         entryEndpoint,
         requestLabel,
         timingRequestIds: result.usageLogInfo?.timingRequestIds,
-        routeHint: conversationRouteHint,
         providerKey: conversationProviderKey,
         body: sanitizedProbeBody,
         requestContext: effectiveResponsesRequestContext,
@@ -1439,7 +1443,6 @@ export async function sendPipelineResponse(
         entryEndpoint,
         requestLabel,
         timingRequestIds: result.usageLogInfo?.timingRequestIds,
-        routeHint: conversationRouteHint,
         providerKey: conversationProviderKey,
         sessionId: result.usageLogInfo?.sessionId,
         conversationId: result.usageLogInfo?.conversationId,
@@ -1851,13 +1854,11 @@ export async function sendPipelineResponse(
   const clientBody = usageNormalized.payload;
   const sanitized = stripInternalKeysDeep(clientBody);
   const jsonFinishReason = deriveFinishReason(clientBody);
-  const conversationRouteHint = result.usageLogInfo?.routeName;
   const conversationProviderKey = deriveResponsesConversationProviderKey(result.usageLogInfo);
   await captureResponsesConversationToolCallRequestContext({
     entryEndpoint,
     requestLabel,
     timingRequestIds: result.usageLogInfo?.timingRequestIds,
-    routeHint: conversationRouteHint,
     providerKey: conversationProviderKey,
     body: sanitized,
     requestContext: options?.responsesRequestContext,
@@ -1866,7 +1867,6 @@ export async function sendPipelineResponse(
     entryEndpoint,
     requestLabel,
     timingRequestIds: result.usageLogInfo?.timingRequestIds,
-    routeHint: conversationRouteHint,
     providerKey: conversationProviderKey,
     sessionId: result.usageLogInfo?.sessionId,
     conversationId: result.usageLogInfo?.conversationId,

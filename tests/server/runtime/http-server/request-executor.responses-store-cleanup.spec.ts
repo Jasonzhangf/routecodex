@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../../src/server/runtime/handlers/types.js';
 import type { HubPipeline, ProviderHandle } from '../../../../src/server/runtime/http-server/types.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
-import { HubRequestExecutor } from '../../../../src/server/runtime/http-server/request-executor.js';
+import {
+  HubRequestExecutor,
+  __requestExecutorTestables,
+} from '../../../../src/server/runtime/http-server/request-executor.js';
 import {
   captureResponsesRequestContext,
   clearResponsesConversationByRequestId,
@@ -85,6 +88,10 @@ function createExecutor(converted: PipelineExecutionResult) {
 
 describe('HubRequestExecutor responses conversation retention cleanup', () => {
   const requestId = 'req_responses_store_cleanup_400';
+
+  beforeEach(() => {
+    __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
+  });
 
   afterEach(() => {
     clearResponsesConversationByRequestId(requestId);
@@ -207,6 +214,75 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
     expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
   });
 
+  it('clears captured responses request on provider 502 error responses to avoid orphan pending entries', async () => {
+    const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    const previousLogicalLimit = process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
+    const previousBackoffMaxMs = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+    process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = '1';
+    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '1';
+    captureResponsesRequestContext({
+      requestId,
+      sessionId: 'sess-cleanup-502',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+    });
+
+    expect(responsesConversationStore.getDebugStats().requestMapSize).toBeGreaterThan(0);
+
+    const { executor } = createExecutor({
+      status: 502,
+      body: {
+        error: {
+          code: 'HTTP_502',
+          message: 'Upstream request failed',
+        },
+      },
+    });
+
+    try {
+      await expect(executor.execute({
+        requestId,
+        entryEndpoint: '/v1/responses',
+        headers: {},
+        body: {
+          model: 'gpt-5.3-codex',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+        },
+        metadata: { stream: false, inboundStream: false },
+      } as PipelineExecutionInput)).rejects.toBeTruthy();
+      expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
+      expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+    } finally {
+      if (previousMaxAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousMaxAttempts;
+      }
+      if (previousLogicalLimit === undefined) {
+        delete process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
+      } else {
+        process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = previousLogicalLimit;
+      }
+      if (previousBackoffMaxMs === undefined) {
+        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
+      } else {
+        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = previousBackoffMaxMs;
+      }
+    }
+  }, 15000);
+
 
 
   it('RED: does not auto-restore same-session continuation for a plain create request after prior tool-call state exists', async () => {
@@ -284,10 +360,10 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
 
     const handle = createRuntimeHandle(async () => {
       throw Object.assign(new Error('windsurf raw stream ended with no content'), {
-        code: 'WINDSURF_SERVICE_UNREACHABLE',
-        upstreamCode: 'WINDSURF_SERVICE_UNREACHABLE',
-        status: 502,
-        statusCode: 502,
+        code: 'MALFORMED_REQUEST',
+        upstreamCode: 'MALFORMED_REQUEST',
+        status: 400,
+        statusCode: 400,
         retryable: false,
       });
     });
@@ -348,8 +424,8 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
       },
       metadata: { stream: false, inboundStream: false },
     } as PipelineExecutionInput)).rejects.toMatchObject({
-      code: 'WINDSURF_SERVICE_UNREACHABLE',
-      statusCode: 502,
+      code: 'MALFORMED_REQUEST',
+      statusCode: 400,
     });
 
     expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);

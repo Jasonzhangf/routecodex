@@ -392,6 +392,11 @@ export async function respondWithPipelineError(
     normalizedError,
     onReportError: (reportError) => logHandlerNonBlockingError(`reportRouteError:${effectiveRequestId}`, reportError)
   });
+  const suppressSnapshotForRoutineError =
+    mapped.status === 408
+    || mapped.status === 425
+    || mapped.status === 429
+    || mapped.status >= 500;
   if (options?.forceSse) {
     // For streaming clients, return an SSE error event so the client can surface the failure.
     // Use the mapped HTTP status so clients can fail fast; embed the status in the event payload as well.
@@ -412,7 +417,7 @@ export async function respondWithPipelineError(
     } catch (error) {
       logHandlerNonBlockingError(`sseErrorEnd:${effectiveRequestId}`, error);
     }
-    if (isSnapshotsEnabled()) {
+    if (isSnapshotsEnabled() && !suppressSnapshotForRoutineError) {
       void writeServerSnapshot({
         phase: 'client-response.error',
         requestId: effectiveRequestId,
@@ -424,7 +429,7 @@ export async function respondWithPipelineError(
     }
     return;
   }
-  if (isSnapshotsEnabled()) {
+  if (isSnapshotsEnabled() && !suppressSnapshotForRoutineError) {
     void writeServerSnapshot({
       phase: 'client-response.error',
       requestId: effectiveRequestId,
@@ -470,6 +475,11 @@ export async function writeStartedSsePipelineError(
     normalizedError,
     onReportError: (reportError) => logHandlerNonBlockingError(`reportRouteErrorStartedSse:${effectiveRequestId}`, reportError)
   });
+  const suppressSnapshotForRoutineError =
+    mapped.status === 408
+    || mapped.status === 425
+    || mapped.status === 429
+    || mapped.status >= 500;
   const payload = mapped.body?.error
     ? { type: 'error', status: mapped.status, error: mapped.body.error }
     : { type: 'error', status: mapped.status, error: mapped.body };
@@ -483,7 +493,7 @@ export async function writeStartedSsePipelineError(
   } catch (endError) {
     logHandlerNonBlockingError(`startedSseErrorEnd:${effectiveRequestId}`, endError);
   }
-  if (isSnapshotsEnabled()) {
+  if (isSnapshotsEnabled() && !suppressSnapshotForRoutineError) {
     void writeServerSnapshot({
       phase: 'client-response.error',
       requestId: effectiveRequestId,
@@ -591,18 +601,19 @@ export function mergePipelineMetadata(
   requestBodyMetadata: Record<string, unknown> | undefined,
   internalMetadata: Record<string, unknown>
 ): Record<string, unknown> {
-  if (!requestBodyMetadata || Object.keys(requestBodyMetadata).length === 0) {
+  const sanitizedRequestMetadata = sanitizeClientPipelineMetadata(requestBodyMetadata);
+  if (!sanitizedRequestMetadata || Object.keys(sanitizedRequestMetadata).length === 0) {
     return internalMetadata;
   }
   const merged: Record<string, unknown> = {
-    ...requestBodyMetadata,
+    ...sanitizedRequestMetadata,
     ...internalMetadata
   };
   const requestRt =
-    requestBodyMetadata.__rt &&
-    typeof requestBodyMetadata.__rt === 'object' &&
-    !Array.isArray(requestBodyMetadata.__rt)
-      ? (requestBodyMetadata.__rt as Record<string, unknown>)
+    sanitizedRequestMetadata.__rt &&
+    typeof sanitizedRequestMetadata.__rt === 'object' &&
+    !Array.isArray(sanitizedRequestMetadata.__rt)
+      ? (sanitizedRequestMetadata.__rt as Record<string, unknown>)
       : undefined;
   const internalRt =
     internalMetadata.__rt &&
@@ -617,6 +628,17 @@ export function mergePipelineMetadata(
     };
   }
   return merged;
+}
+
+function sanitizeClientPipelineMetadata(
+  metadata: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!metadata || Object.keys(metadata).length === 0) {
+    return undefined;
+  }
+  const sanitized: Record<string, unknown> = { ...metadata };
+  delete sanitized.routeHint;
+  return sanitized;
 }
 
 function normalizeError(error: unknown, requestId: string, endpoint: string): Error & Record<string, unknown> {

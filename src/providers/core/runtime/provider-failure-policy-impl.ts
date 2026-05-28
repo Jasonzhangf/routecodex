@@ -863,7 +863,7 @@ export function isProviderFailureHealthNeutral(args: {
   statusCode?: number;
   classification?: ProviderFailureClassification;
 }): boolean {
-  if (args.stage === 'provider.followup' || isHostFailureStage(args.stage)) {
+  if (args.stage === 'provider.followup') {
     return true;
   }
   const statusCode =
@@ -884,25 +884,10 @@ export function isProviderFailureHealthNeutral(args: {
   if (errorCode === 'PROVIDER_TRAFFIC_SATURATED' || upstreamCode === 'PROVIDER_TRAFFIC_SATURATED') {
     return true;
   }
-  if (
-    args.classification === 'recoverable'
-    && statusCode !== 503
-    && (
-      statusCode === 429
-      || statusCode === 500
-      || statusCode === 520
-      || errorCode === 'HTTP_429'
-      || upstreamCode === 'HTTP_429'
-      || errorCode === 'HTTP_500'
-      || upstreamCode === 'HTTP_500'
-      || upstreamCode === 'PROVIDER_STATUS_1000'
-    )
-  ) {
-    // HTTP 429 must affect health so priority route can apply cooldown/blacklist policy.
-    if (statusCode === 429 || errorCode === 'HTTP_429' || upstreamCode === 'HTTP_429') {
-      return false;
-    }
-    return true;
+  if (args.classification === 'recoverable') {
+    // Unified policy: all recoverable failures are health-affecting so they can
+    // enter the same VR cooldown/quarantine pipeline (3 strikes + ladder cooldown).
+    return false;
   }
   if (errorCode === 'CLIENT_TOOL_ARGS_INVALID') {
     return true;

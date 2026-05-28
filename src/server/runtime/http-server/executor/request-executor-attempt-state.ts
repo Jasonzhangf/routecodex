@@ -49,9 +49,10 @@ export function prepareRequestExecutorAttemptState(args: {
     metadataForAttempt.__rt && typeof metadataForAttempt.__rt === 'object' && !Array.isArray(metadataForAttempt.__rt)
       ? (metadataForAttempt.__rt as Record<string, unknown>)
       : {};
+  // Keep runtime metadata but do not force-disable virtual-router hit logs.
+  // Jason requirement: routing hits must always be observable in runtime logs.
   metadataForAttempt.__rt = {
-    ...metadataRt,
-    disableVirtualRouterHitLog: true
+    ...metadataRt
   };
 
   const loggerRecord =

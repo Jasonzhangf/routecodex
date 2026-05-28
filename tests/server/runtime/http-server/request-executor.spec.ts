@@ -3086,6 +3086,120 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
+
+  test('BLACKBOX: converted HTTP 503 reroutes to backup after third consecutive recoverable failure', async () => {
+    const providerA = 'sdfv.key1.gpt-5.5';
+    const providerB = 'mimo.mimo-v2.5-pro';
+    const processA = jest.fn(async () => ({
+      status: 503,
+      data: {
+        error: {
+          code: 'HTTP_503',
+          message: 'Service temporarily unavailable'
+        }
+      }
+    }));
+    const processB = jest.fn(async () => ({ status: 200, data: { id: 'raw_b' } }));
+
+    const handles = new Map<string, ProviderHandle>([
+      [providerA, buildHandle(providerA, processA)],
+      [providerB, buildHandle(providerB, processB)]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const selectedProviders: string[] = [];
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : []
+        );
+        const providerKey = excluded.has(providerA) ? providerB : providerA;
+        selectedProviders.push(providerKey);
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-responses',
+            runtimeKey: providerKey
+          },
+          routingDecision: {
+            routeName: 'coding',
+            pool: [providerA, providerB]
+          },
+          processMode: 'standard',
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    const previousBase = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+    const previousMax = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '4';
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = '1';
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = '5';
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const executor = createRequestExecutor({
+        runtimeManager,
+        getHubPipeline: () => pipeline,
+        getModuleDependencies: () => ({
+          errorHandlingCenter: {
+            handleError: jest.fn(async () => undefined)
+          }
+        }),
+        logStage: jest.fn(),
+        stats: new StatsManager()
+      });
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockImplementation(async () => ({ status: 200, body: { output_text: 'ok_from_backup' } }));
+
+      const result = await executor.execute({
+        requestId: 'req-blackbox-converted-503-reroute',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+
+      expect(result).toEqual(expect.objectContaining({ status: 200 }));
+      expect(selectedProviders).toEqual([providerA, providerB]);
+      expect(processA).toHaveBeenCalledTimes(1);
+      expect(processB).toHaveBeenCalledTimes(1);
+      const switchLines = warnSpy.mock.calls
+        .map((call) => String(call[0] ?? ''))
+        .filter((line) => line.includes('[provider-switch]'));
+      expect(switchLines.some((line) => line.includes(`provider=${providerA}`) && line.includes('switch=exclude_and_reroute') && line.includes('status=503'))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+      if (previousAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
+      }
+      if (previousBase === undefined) {
+        delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+      } else {
+        process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = previousBase;
+      }
+      if (previousMax === undefined) {
+        delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
+      } else {
+        process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = previousMax;
+      }
+    }
+  });
   test('keeps generic recoverable 500 on same provider with blocking backoff', async () => {
     const providerA = 'tabglm.key1.glm-5.1';
     const providerB = 'crs.key2.gpt-5.3-codex';
@@ -3882,6 +3996,46 @@ describe('HubRequestExecutor failover', () => {
       attempt: 3,
       promptTooLong: false,
       routePool: ['mini27.key1.MiniMax-M2.7'],
+      excludedProviderKeys: excluded
+    });
+
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excluded)).toEqual([]);
+  });
+
+  test('recoverable 502 excludes current provider after third consecutive attempt when alternative exists', () => {
+    const excluded = new Set<string>();
+    const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+      providerKey: 'fetch.key1.primary',
+      status: 502,
+      error: Object.assign(new Error('fetch failed'), {
+        statusCode: 502,
+        code: 'HTTP_502'
+      }),
+      classification: 'recoverable',
+      attempt: 3,
+      promptTooLong: false,
+      routePool: ['fetch.key1.primary', 'fetch.key2.backup'],
+      excludedProviderKeys: excluded
+    });
+
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(Array.from(excluded)).toEqual(['fetch.key1.primary']);
+  });
+
+  test('recoverable 502 does not exclude current provider before third attempt', () => {
+    const excluded = new Set<string>();
+    const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+      providerKey: 'fetch.key1.primary',
+      status: 502,
+      error: Object.assign(new Error('fetch failed'), {
+        statusCode: 502,
+        code: 'HTTP_502'
+      }),
+      classification: 'recoverable',
+      attempt: 2,
+      promptTooLong: false,
+      routePool: ['fetch.key1.primary', 'fetch.key2.backup'],
       excludedProviderKeys: excluded
     });
 

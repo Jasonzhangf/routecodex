@@ -298,7 +298,9 @@ impl VirtualRouterEngineCore {
             features,
             &self.routing,
         );
-        let sticky_key = crate::virtual_router_engine::routing::resolve_sticky_key(metadata);
+        let is_continuation_for_lb = crate::virtual_router_engine::routing::is_continuation_request(metadata);
+        let sticky_key_for_continuation = is_continuation_for_lb
+            .then(|| crate::virtual_router_engine::routing::resolve_sticky_key(metadata));
         let now_for_weights = extract_runtime_now_ms(metadata).unwrap_or_else(now_ms);
         let health_cfg =
             resolve_health_weighted_config(self.load_balancer.policy().health_weighted.as_ref());
@@ -515,7 +517,7 @@ impl VirtualRouterEngineCore {
                     tier_load_balancing.weights.as_ref(),
                     dynamic_weight_map.as_ref(),
                 );
-                let sticky_for_lb = &sticky_key;
+                let sticky_for_lb = sticky_key_for_continuation.as_deref();
                 // v2 weighted pools may be materialized by the bootstrap layer as:
                 //   mode=priority + loadBalancing.strategy=weighted
                 // when the user only declared loadBalancing.weights (no explicit targets/order).
@@ -540,9 +542,7 @@ impl VirtualRouterEngineCore {
                     build_primary_target_groups(&available, &self.provider_registry);
                 let has_runtime_key_level_weights =
                     has_runtime_key_level_weights(tier_load_balancing.weights.as_ref(), &available);
-                let can_select_grouped = pool.mode.as_deref() != Some("sticky")
-                    && tier_load_balancing.strategy != "sticky"
-                    && dynamic_weight_map.is_none()
+                let can_select_grouped = dynamic_weight_map.is_none()
                     && !has_runtime_key_level_weights;
                 let selected = if effective_priority_mode {
                     available.first().cloned()
@@ -555,7 +555,7 @@ impl VirtualRouterEngineCore {
                         &route_key_for_lb,
                         &ordered_group_ids,
                         &grouped_candidates,
-                        Some(sticky_for_lb),
+                        sticky_for_lb,
                         group_weights.as_ref(),
                         |_| true,
                         mode_override,
@@ -564,7 +564,7 @@ impl VirtualRouterEngineCore {
                     self.load_balancer.select(
                         &route_key_for_lb,
                         &available,
-                        Some(sticky_for_lb),
+                        sticky_for_lb,
                         weight_map.as_ref(),
                         |_| true,
                         mode_override,

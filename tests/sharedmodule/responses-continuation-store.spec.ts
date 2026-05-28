@@ -30,7 +30,6 @@ describe('responses conversation store plain continuation restore', () => {
       requestId: track('req-resp-store-1'),
       sessionId: 'sess-1',
       conversationId: 'conv-1',
-      routeHint: 'tools',
       providerKey: 'crs.direct.gpt-5.4',
       payload: {
         model: 'gpt-5.3-codex',
@@ -51,7 +50,6 @@ describe('responses conversation store plain continuation restore', () => {
 
     recordResponsesResponse({
       requestId: track('req-resp-store-1'),
-      routeHint: 'thinking',
       providerKey: 'crs.direct.gpt-5.4',
       response: {
         id: 'resp-store-1',
@@ -105,7 +103,6 @@ describe('responses conversation store plain continuation restore', () => {
       previousRequestId: 'req-resp-store-1',
       restoredFromResponseId: 'resp-store-1',
       scopeKey: 'session:sess-1',
-      routeHint: 'thinking',
       providerKey: 'crs.direct.gpt-5.4',
       restored: true
     });
@@ -116,7 +113,6 @@ describe('responses conversation store plain continuation restore', () => {
       requestId: track('req-resp-store-direct-pin-1'),
       sessionId: 'sess-direct-pin',
       conversationId: 'conv-direct-pin',
-      routeHint: 'thinking',
       providerKey: 'dibittai.crsa.gpt-5.4',
       payload: {
         model: 'gpt-5.4',
@@ -137,7 +133,6 @@ describe('responses conversation store plain continuation restore', () => {
 
     recordResponsesResponse({
       requestId: track('req-resp-store-direct-pin-1'),
-      routeHint: 'thinking',
       providerKey: 'dibittai.crsa.gpt-5.4',
       response: {
         id: 'resp-direct-pin-1',
@@ -486,6 +481,95 @@ describe('responses conversation store plain continuation restore', () => {
       previousRequestId: 'req-resp-store-2',
       restoredFromResponseId: 'resp-store-supersede-2'
     });
+  });
+
+  it('RED: prunes stale pending scoped requests when a newer scoped request arrives before prior response records', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-pending-old-1'),
+      sessionId: 'sess-pending-prune',
+      conversationId: 'conv-pending-prune',
+      payload: {
+        model: 'gpt-5.3-codex',
+        store: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'pending-1' }]
+          }
+        ]
+      }
+    });
+
+    captureResponsesRequestContext({
+      requestId: track('req-pending-old-2'),
+      sessionId: 'sess-pending-prune',
+      conversationId: 'conv-pending-prune',
+      payload: {
+        model: 'gpt-5.3-codex',
+        store: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'pending-2' }]
+          }
+        ]
+      }
+    });
+
+    const rawStore = responsesConversationStore as unknown as {
+      requestMap?: Map<string, unknown>;
+    };
+    expect(rawStore.requestMap?.has('req-pending-old-1')).toBe(false);
+    expect(rawStore.requestMap?.has('req-pending-old-2')).toBe(true);
+
+    const stats = responsesConversationStore.getDebugStats();
+    expect(stats.requestEntriesWithoutLastResponseId).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not prune pending requests from different scopes', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-pending-scope-a-1'),
+      sessionId: 'sess-pending-a',
+      conversationId: 'conv-pending-a',
+      payload: { model: 'gpt-5.3-codex', store: true },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'pending-a-1' }]
+          }
+        ]
+      }
+    });
+
+    captureResponsesRequestContext({
+      requestId: track('req-pending-scope-b-1'),
+      sessionId: 'sess-pending-b',
+      conversationId: 'conv-pending-b',
+      payload: { model: 'gpt-5.3-codex', store: true },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'pending-b-1' }]
+          }
+        ]
+      }
+    });
+
+    const rawStore = responsesConversationStore as unknown as {
+      requestMap?: Map<string, unknown>;
+    };
+    expect(rawStore.requestMap?.has('req-pending-scope-a-1')).toBe(true);
+    expect(rawStore.requestMap?.has('req-pending-scope-b-1')).toBe(true);
   });
 
   it('keeps recording when response capture sees synthetic RouteCodex assistant control text', () => {

@@ -154,7 +154,7 @@ export function resolveReportedProviderErrorRecoverable(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;
 }): boolean {
-  if (args.stage === 'provider.followup' || isHostRequestExecutorErrorStage(args.stage)) {
+  if (args.stage === 'provider.followup') {
     return false;
   }
   const classification = resolveRequestExecutorProviderErrorClassification({
@@ -162,6 +162,17 @@ export function resolveReportedProviderErrorRecoverable(args: {
     retryError: args.retryError,
     stage: args.stage
   });
+  if (
+    !classification
+    && isBlockingRecoverableProviderFailure({
+      statusCode: args.retryError.statusCode,
+      errorCode: args.retryError.errorCode,
+      upstreamCode: args.retryError.upstreamCode,
+      reason: args.retryError.reason
+    })
+  ) {
+    return true;
+  }
   if (classification === 'special_400') {
     return false;
   }
@@ -209,7 +220,6 @@ export async function reportRequestExecutorProviderError(
       reason: args.retryError.reason,
       attempt: args.attempt
     });
-    return;
   }
   try {
     await emitProviderErrorAndWait({

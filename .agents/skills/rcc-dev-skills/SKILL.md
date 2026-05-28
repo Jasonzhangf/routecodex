@@ -29,6 +29,14 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 
 ## Provider 自动重试 (Auto-Retry) 配置（2026-05-27）
 
+## 2026-05-28 错误处理收敛硬规则（新增）
+
+1. Provider 执行期错误只允许三分类：`recoverable` / `unrecoverable` / `special_400`；禁止新增第四类。
+2. 网络错误（含 HTTP_502 / timeout / transport）属于“可恢复错误”的普通成员，不能做专门旁路策略。
+3. 分类入口唯一：`resolveProviderFailureClassification(...)`；执行出口唯一：`resolveProviderFailureActionPlan(...)` + Virtual Router policy。
+4. 任何模块（RequestExecutor / Converter / Followup）发现新错误样本时，只能补“归一映射”，不能新增“该错误独有处理流程”。
+5. 可恢复错误统一遵循：请求内指数退避（1s 起）+ 连续 3 次失败进入 provider 冷却池；冷却阶梯按 10m -> 30m -> 5h 循环；重启后首命中允许一次被动探测。
+
 ### 功能说明
 每个 Provider 可以在内部自动重试某些可恢复错误，不触发 health impact 上报。
 - 错误码匹配 `autoRetry.codes` 列表 → 静默重试 + `console.warn` 打印
@@ -157,6 +165,16 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 同类的 `PROVIDER_STATUS_1000` 也需注意（目前 `0.8100` 不在 catalog 中，无冲突）。
 
 ## 2026-05-27 调试精华（5555 主备/health/stopless）
+
+## 2026-05-28 回归测试新增硬规则（Jason）
+
+1. 任何功能修复/错误修复，**红测必须包含 HTTP/请求级黑盒红测**。
+2. 黑盒定义：必须从真实入口发请求（如 `fetch http://127.0.0.1:<port>/v1/responses` 或测试内真实 listener），断言真实 HTTP status/body；不得用直接调用 private method、mock `executePipeline`、mock handler 返回值冒充黑盒。
+3. 黑盒必须模拟/捕获线上真实失败形态：如果线上是 provider `throw`，测试也必须 `throw`；如果线上是 SSE/stream，测试也要走对应 HTTP/SSE 入口；只测 `{status: 503}` 返回不等于覆盖 throw 形态。
+4. 白盒/单元测试只能补充定位，不可替代黑盒红测；若先写了白盒，仍必须补 HTTP 黑盒红测后才能修复。
+5. 标准顺序固定为：HTTP 黑盒红测（先红）→ 必要白盒红测（可选）→ 修唯一真源 → HTTP 黑盒变绿 → 构建/安装/运行态 smoke。
+6. 汇报必须单列证据：`HTTP 黑盒红测` / `白盒红测(如有)` / `唯一修复点` / `HTTP 黑盒绿测` / `运行态证据`。
+7. 若黑盒红测没有经过真实请求入口和真实响应断言，不得宣称“已完成修复”。
 
 0. TS→Rust JSON 序列化铁律：Rust enum 若要从 TS 接收小写值（如 `"idle"`、`"on"`、`"trigger"`），必须加 `#[serde(rename_all = "camelCase")]`，否则 serde 默认等 PascalCase（`"Idle"`、`"On"`、`"Trigger"`），反序列化直接炸。
    - 2026-05-27 踩坑：`stop-message-core` 的 `StageMode`、`SnapshotSource`、`GoalStatus`、`SkipReason`、`Action` 五个枚举都缺这个 derive 属性。后果：`decideStopMessageActionWithNative` 每一次都悄无声息地 fallback skip（`native_returned_non_string: object`），stopless 完全不工作。

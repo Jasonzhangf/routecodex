@@ -1113,6 +1113,12 @@ export class HubRequestExecutor implements RequestExecutor {
             converted.body && typeof converted.body === 'object'
               ? (converted.body as Record<string, unknown>)
               : undefined;
+          const convertedStatusCode = typeof converted.status === 'number' ? converted.status : 0;
+          if (convertedStatusCode >= 400) {
+            await clearResponsesConversationByRequestId(input.requestId || executorRequestId).catch(() => {
+              // non-blocking cleanup
+            });
+          }
           const normalizedBodyRecord =
             normalized.body && typeof normalized.body === 'object'
               ? (normalized.body as Record<string, unknown>)

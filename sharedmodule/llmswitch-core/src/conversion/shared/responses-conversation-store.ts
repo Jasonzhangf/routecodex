@@ -167,13 +167,21 @@ class ResponsesConversationStore {
     }
     const prepared = prepareConversationEntry(payload, context);
     const scopeKeys = buildScopeKeys(args);
+    for (const candidate of scopeKeys.length ? this.requestMap.values() : []) {
+      if (
+        candidate
+        && candidate.requestId !== requestId
+        && (!candidate.lastResponseId || !String(candidate.lastResponseId).trim())
+        && Array.isArray(candidate.scopeKeys)
+        && candidate.scopeKeys.some((k) => scopeKeys.includes(k))
+      ) this.detachEntry(candidate);
+    }
     const entry: ConversationEntry = {
       requestId,
       basePayload: isRecord(prepared.basePayload) ? prepared.basePayload : pickPersistedFields(payload),
       input: Array.isArray(prepared.input) ? prepared.input : [],
       allowContinuation: shouldAllowContinuation(payload),
       tools: Array.isArray(prepared.tools) ? prepared.tools : undefined,
-      routeHint: readScopeToken(args.routeHint),
       providerKey: readScopeToken(args.providerKey) ?? readScopeToken(payload.providerKey) ?? readScopeToken((prepared.basePayload as AnyRecord | undefined)?.providerKey),
       sessionId: readScopeToken(args.sessionId),
       conversationId: readScopeToken(args.conversationId),
@@ -223,11 +231,6 @@ class ResponsesConversationStore {
       return;
     }
     if (!responseId) return;
-    const responseRouteHint = readScopeToken(args.routeHint);
-    if (responseRouteHint) {
-      entry.routeHint = responseRouteHint;
-      entry.basePayload.routeHint = responseRouteHint;
-    }
     const responseProviderKey = readScopeToken(args.providerKey);
     if (responseProviderKey) {
       entry.providerKey = responseProviderKey;
@@ -332,7 +335,6 @@ class ResponsesConversationStore {
       : [];
     entry.basePayload = {
       ...(isRecord(entry.basePayload) ? entry.basePayload : {}),
-      ...(entry.routeHint ? { routeHint: entry.routeHint } : {}),
       ...(entry.providerKey ? { providerKey: entry.providerKey } : {}),
       ...(entry.lastResponseId ? { previous_response_id: entry.lastResponseId } : {})
     };

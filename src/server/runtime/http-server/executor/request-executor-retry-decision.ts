@@ -158,9 +158,10 @@ export function resolveProviderRetryExclusionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys
   });
 
-  // Priority-mode rule: after 3 consecutive 429 retries on current provider,
+  // Unified recoverable rule: after 3 consecutive recoverable failures on current provider,
   // exclude this provider so the same request can move to next priority target.
-  if (is429 && (args.attempt ?? 0) >= 3 && hasAlternativeCandidate) {
+  // This intentionally applies to 429/5xx/network recoverable classes without per-error special cases.
+  if (args.classification === 'recoverable' && (args.attempt ?? 0) >= 3 && hasAlternativeCandidate) {
     return {
       excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
         providerKey,

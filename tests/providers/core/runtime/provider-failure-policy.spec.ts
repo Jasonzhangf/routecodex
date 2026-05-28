@@ -274,6 +274,32 @@ describe('provider failure policy ssot', () => {
     expect(classification).toBe('recoverable');
   });
 
+  it('keeps provider failure classification space closed to 3 categories', () => {
+    const samples = [
+      resolveProviderFailureClassification({
+        error: Object.assign(new Error('invalid token'), { statusCode: 401, code: 'INVALID_API_KEY' }),
+        stage: 'provider.send',
+        statusCode: 401,
+        errorCode: 'INVALID_API_KEY'
+      }),
+      resolveProviderFailureClassification({
+        error: Object.assign(new Error('fetch failed'), { statusCode: 502, code: 'HTTP_502' }),
+        stage: 'provider.send',
+        statusCode: 502,
+        errorCode: 'HTTP_502'
+      }),
+      resolveProviderFailureClassification({
+        error: Object.assign(new Error('context length exceeded'), { statusCode: 400, code: 'CONTEXT_LENGTH_EXCEEDED' }),
+        stage: 'provider.send',
+        statusCode: 400,
+        errorCode: 'CONTEXT_LENGTH_EXCEEDED'
+      })
+    ];
+    for (const classification of samples) {
+      expect(['recoverable', 'unrecoverable', 'special_400']).toContain(classification);
+    }
+  });
+
   it('classifies windsurf repeated tool call after tool_result as special_400', () => {
     const error = Object.assign(new Error('[windsurf] upstream repeated prior tool call after tool_result'), {
       code: 'WINDSURF_SERVICE_UNREACHABLE',
@@ -314,7 +340,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies sqlite busy 500 as recoverable and health-neutral', () => {
+  it('classifies sqlite busy 500 as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('database is locked (5) (SQLITE_BUSY)'), {
       code: 'new_api_error',
       upstreamCode: 'new_api_error',
@@ -336,7 +362,7 @@ describe('provider failure policy ssot', () => {
       upstreamCode: 'new_api_error',
       statusCode: 500,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -348,7 +374,7 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'retry_same_provider',
@@ -440,7 +466,7 @@ describe('provider failure policy ssot', () => {
 
     expect(plan).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'retry_same_provider',
@@ -451,7 +477,31 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('treats provider_status_1000 520 malformed-response wrapper as recoverable and health-neutral', () => {
+  it('marks upstream headers timeout as recoverable but health-affecting', () => {
+    const error = Object.assign(new Error('upstream headers timeout'), {
+      code: 'UPSTREAM_HEADERS_TIMEOUT',
+      statusCode: 504
+    });
+    const plan = resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 504,
+      errorCode: 'UPSTREAM_HEADERS_TIMEOUT',
+      reason: 'upstream headers timeout',
+      attempt: 1,
+      maxAttempts: 6
+    });
+
+    expect(plan).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      affectsHealth: true,
+      blockingRecoverable: true,
+      shouldRetry: true,
+      action: 'retry_same_provider'
+    }));
+  });
+
+  it('treats provider_status_1000 520 malformed-response wrapper as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('[hub_response] upstream returned unknown error, 520'), {
       code: 'MALFORMED_RESPONSE',
       upstreamCode: 'provider_status_1000',
@@ -474,7 +524,7 @@ describe('provider failure policy ssot', () => {
       upstreamCode: 'provider_status_1000',
       statusCode: 520,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -486,7 +536,7 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'retry_same_provider',
@@ -534,5 +584,14 @@ describe('provider failure policy ssot', () => {
     });
 
     expect(classification).toBe('recoverable');
+  });
+
+  it('treats host.response_contract 502 as health-affecting (non-neutral)', () => {
+    expect(isProviderFailureHealthNeutral({
+      stage: 'host.response_contract',
+      errorCode: 'EMPTY_ASSISTANT_RESPONSE',
+      statusCode: 502,
+      classification: undefined
+    })).toBe(false);
   });
 });

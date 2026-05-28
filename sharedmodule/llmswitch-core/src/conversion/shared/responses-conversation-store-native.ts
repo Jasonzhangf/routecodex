@@ -63,7 +63,6 @@ export function resumeConversationPayload(
       releasedInputPrefix: entry.releasedInputPrefix,
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
-      routeHint: entry.routeHint,
       providerKey: entry.providerKey
     },
     responseId,
@@ -89,7 +88,6 @@ export function restoreContinuationPayload(
       input: entry.input,
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
-      routeHint: entry.routeHint,
       providerKey: entry.providerKey,
       lastResponseId: entry.lastResponseId
     },
@@ -119,7 +117,6 @@ export function materializeContinuationPayload(
       input: entry.input,
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
-      routeHint: entry.routeHint,
       providerKey: entry.providerKey,
       lastResponseId: entry.lastResponseId
     },
