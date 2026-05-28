@@ -540,10 +540,6 @@ export async function convertProviderResponse(
       recordResponsesResponse({
         requestId: options.context.requestId,
         response: clientPayload,
-        routeHint:
-          typeof options.context.routeId === 'string' && options.context.routeId.trim().length > 0
-            ? options.context.routeId.trim()
-            : undefined
       });
     } catch (error) {
       if (error instanceof ProviderProtocolError) {

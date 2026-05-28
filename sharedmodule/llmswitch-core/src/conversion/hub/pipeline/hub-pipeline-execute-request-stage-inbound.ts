@@ -95,7 +95,6 @@ function persistResponsesConversationContext(args: {
     context: args.context as unknown as Record<string, unknown>,
     sessionId: typeof (args.adapterContext as Record<string, unknown>).sessionId === "string" ? String((args.adapterContext as Record<string, unknown>).sessionId) : undefined,
     conversationId: typeof (args.adapterContext as Record<string, unknown>).conversationId === "string" ? String((args.adapterContext as Record<string, unknown>).conversationId) : undefined,
-    routeHint: typeof (args.adapterContext as Record<string, unknown>).routeId === "string" ? String((args.adapterContext as Record<string, unknown>).routeId) : undefined,
   });
 }
 

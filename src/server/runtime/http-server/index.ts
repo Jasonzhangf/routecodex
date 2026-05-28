@@ -1185,7 +1185,7 @@ export class RouteCodexHttpServer {
               ? (input.metadata as Record<string, unknown>)
               : {};
             const handle = this.providerHandles.get(ctx.providerKey) ?? this.providerHandles.get(target.runtimeKey ?? target.providerKey);
-            const modelForLog = readTrimmedString(handle?.runtime?.modelId)
+            const modelForLog = readTrimmedString(handle?.runtime?.defaultModel)
               ?? readTrimmedString((payload as Record<string, unknown> | undefined)?.model)
               ?? readTrimmedString((providerPayload as Record<string, unknown> | undefined)?.model);
             emitRequestExecutorVirtualRouterConcurrencyLog({

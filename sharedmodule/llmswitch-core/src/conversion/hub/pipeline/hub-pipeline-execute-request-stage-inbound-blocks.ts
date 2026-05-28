@@ -84,8 +84,6 @@ export async function captureInboundContextSnapshot<TContext = Record<string, un
         ? String((args.inboundAdapterContext as Record<string, unknown>).sessionId) : undefined,
       conversationId: typeof (args.inboundAdapterContext as Record<string, unknown>).conversationId === 'string'
         ? String((args.inboundAdapterContext as Record<string, unknown>).conversationId) : undefined,
-      routeHint: typeof (args.inboundAdapterContext as Record<string, unknown>).routeId === 'string'
-        ? String((args.inboundAdapterContext as Record<string, unknown>).routeId) : undefined,
     });
   };
   if (args.inboundStage2ResponsesContext) {
