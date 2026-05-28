@@ -3,6 +3,7 @@ import { asRecord } from './provider-utils.js';
 import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
+import type { HubPipeline, HubPipelineConfig, HubPipelineCtor } from './types.js';
 import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-timing-defaults.js';
 import { registerClockRuntimeHooks } from './clock-runtime-hooks.js';
 import { registerHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
@@ -29,6 +30,58 @@ function logRuntimeSetupNonBlockingError(stage: string, error: unknown, details?
   } catch {
     // Never throw from non-blocking logging.
   }
+}
+
+function collectRouterRoutingPolicyGroups(server: any): string[] {
+  const getPortConfigs = typeof server?.getPortConfigs === 'function' ? server.getPortConfigs.bind(server) : undefined;
+  const ports = getPortConfigs ? getPortConfigs() : [];
+  const groups = new Set<string>();
+  for (const port of Array.isArray(ports) ? ports : []) {
+    if (!port || typeof port !== 'object') {
+      continue;
+    }
+    const record = port as Record<string, unknown>;
+    if (record.mode !== 'router') {
+      continue;
+    }
+    const group = typeof record.routingPolicyGroup === 'string' ? record.routingPolicyGroup.trim() : '';
+    if (group) {
+      groups.add(group);
+    }
+  }
+  return [...groups].sort();
+}
+
+async function rebuildRoutingPolicyGroupHubPipelines(args: {
+  server: any;
+  hubCtor: HubPipelineCtor;
+  baseConfig: HubPipelineConfig;
+}): Promise<void> {
+  const groups = collectRouterRoutingPolicyGroups(args.server);
+  const previous = args.server.hubPipelinesByRoutingPolicyGroup instanceof Map
+    ? (args.server.hubPipelinesByRoutingPolicyGroup as Map<string, HubPipeline>)
+    : new Map<string, HubPipeline>();
+  const next = new Map<string, HubPipeline>();
+  for (const group of groups) {
+    const config = await args.server.buildHubPipelineConfigForRoutingPolicyGroup(group, args.baseConfig);
+    const existing = previous.get(group);
+    if (existing) {
+      existing.updateVirtualRouterConfig(config.virtualRouter);
+      next.set(group, existing);
+    } else {
+      next.set(group, new args.hubCtor(config));
+    }
+  }
+  for (const [group, pipeline] of previous.entries()) {
+    if (!next.has(group)) {
+      try {
+        (pipeline as { dispose?: () => void }).dispose?.();
+      } catch (error) {
+        logRuntimeSetupNonBlockingError('setupRuntime.disposeGroupHubPipeline', error, { group });
+      }
+    }
+  }
+  args.server.hubPipelinesByRoutingPolicyGroup = next;
 }
 
 function readTruthyEnv(names: string[]): boolean {
@@ -159,7 +212,7 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   }
   await preloadCriticalBridgeRuntimeModules();
   const hubCtor = await server.ensureHubPipelineCtor();
-  const hubConfig: { virtualRouter: unknown; [key: string]: unknown } = {
+  const hubConfig: HubPipelineConfig = {
     virtualRouter: bootstrapArtifacts.config
   };
 
@@ -240,6 +293,8 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
     }
     server.hubPipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
   }
+
+  await rebuildRoutingPolicyGroupHubPipelines({ server, hubCtor, baseConfig: hubConfig });
 
   server.hubPipelineConfigForShadow = hubConfig as Record<string, unknown>;
   server.hubPipelineEngineShadow = null;

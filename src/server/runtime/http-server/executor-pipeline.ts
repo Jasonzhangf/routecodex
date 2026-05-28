@@ -35,7 +35,8 @@ export type HubPipelineResult = {
     processMode?: string;
     compatibilityProfile?: string;
   };
-  routingDecision?: { routeName?: string; pool?: string[] };
+  routingDecision?: { routeName?: string; pool?: string[]; [key: string]: unknown };
+  routingDiagnostics?: Record<string, unknown>;
   processMode: string;
   metadata: Record<string, unknown>;
 };
@@ -133,6 +134,10 @@ export async function runHubPipeline(
         : undefined,
     target: result.target,
     routingDecision: result.routingDecision ?? undefined,
+    routingDiagnostics:
+      result.routingDiagnostics && typeof result.routingDiagnostics === 'object'
+        ? (result.routingDiagnostics as Record<string, unknown>)
+        : undefined,
     processMode,
     metadata: result.metadata ?? {}
   };

@@ -54,6 +54,35 @@ struct ExpandedTargetCandidate {
     order: usize,
 }
 
+fn read_route_policy_group(route_params: &Option<Map<String, Value>>) -> Option<String> {
+    route_params
+        .as_ref()
+        .and_then(|params| params.get("routePolicyGroup"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn resolve_pool_strategy(pool: &NormalizedRoutePoolConfig) -> String {
+    pool.load_balancing
+        .as_ref()
+        .and_then(|lb| lb.strategy.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or(pool.mode.as_deref())
+        .unwrap_or("priority")
+        .to_string()
+}
+
+fn display_pool_id(pool: &NormalizedRoutePoolConfig, route_name: &str) -> String {
+    let Some(group) = read_route_policy_group(&pool.route_params) else {
+        return pool.id.clone();
+    };
+    let strategy = resolve_pool_strategy(pool).replace('_', "-");
+    format!("{}-{}-{}", group.replace('_', "-"), strategy, route_name)
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RoutingBootstrapOutput {
@@ -269,13 +298,17 @@ fn expand_routing_table(
                     let mut remapped: HashMap<String, i64> = HashMap::new();
                     for (config_key, weight) in weights.iter() {
                         let parsed = parse_route_entry(config_key, alias_index);
-                        let has_key_alias = parsed.as_ref().and_then(|p| p.key_alias.as_ref()).is_some();
+                        let has_key_alias =
+                            parsed.as_ref().and_then(|p| p.key_alias.as_ref()).is_some();
                         if !has_key_alias {
                             let prefix = format!("{}.", config_key);
                             let pattern = prefix.as_str();
                             let matching: Vec<String> = sorted_targets
                                 .iter()
-                                .filter(|t| t.as_str().starts_with(pattern) || t.as_str() == config_key.as_str())
+                                .filter(|t| {
+                                    t.as_str().starts_with(pattern)
+                                        || t.as_str() == config_key.as_str()
+                                })
                                 .cloned()
                                 .collect();
                             if !matching.is_empty() {
@@ -296,19 +329,55 @@ fn expand_routing_table(
                 }
             }
 
+            // routePolicyGroup is the routing isolation source of truth. Pool id is display-only.
+            let mut enriched_params = pool.route_params.clone();
+            let route_policy_group = read_route_policy_group(&enriched_params);
+            if route_policy_group.is_none() {
+                if let Some(last_dash) = pool.id.rfind('-') {
+                    let group_prefix = &pool.id[..last_dash];
+                    let group_underscore = group_prefix.replace('-', "_");
+                    if !group_underscore.is_empty() {
+                        enriched_params.get_or_insert_with(|| Map::new()).insert(
+                            "routePolicyGroup".to_string(),
+                            Value::String(group_underscore),
+                        );
+                    }
+                }
+            }
+            let route_policy_group = read_route_policy_group(&enriched_params);
             expanded_pools.push(RoutePoolTier {
-                id: pool.id.clone(),
+                id: display_pool_id(pool, route_name),
                 priority: pool.priority,
                 targets: sorted_targets,
                 mode: pool.mode.clone(),
                 backup: Some(pool.backup),
                 force: pool.force,
                 load_balancing,
-                route_params: pool.route_params.clone(),
+                route_params: enriched_params,
                 thinking: pool.thinking.clone(),
             });
+            if let Some(group) = route_policy_group {
+                if let Some(last) = expanded_pools.last_mut() {
+                    last.route_params
+                        .get_or_insert_with(|| Map::new())
+                        .insert("routePolicyGroup".to_string(), Value::String(group));
+                }
+            }
         }
-        routing.insert(route_name.clone(), expanded_pools);
+        // Key by "{group}:{route}" for per-port isolation. Multiple pools for the same
+        // route+port are collected under one key (typically one pool per route).
+        for pool in expanded_pools.drain(..) {
+            let group_key = pool
+                .route_params
+                .as_ref()
+                .and_then(|params| params.get("routePolicyGroup"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|group| !group.is_empty())
+                .map(|group| format!("{}:{}", group, route_name))
+                .unwrap_or_else(|| route_name.clone());
+            routing.entry(group_key).or_insert_with(Vec::new).push(pool);
+        }
     }
 
     Ok((routing, target_keys))
@@ -896,4 +965,82 @@ fn normalize_json_number(number: &Number) -> Option<i64> {
             None
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn weighted_pool_display_id_uses_strategy_not_priority() {
+        let mut route_params = Map::new();
+        route_params.insert(
+            "routePolicyGroup".to_string(),
+            Value::String("gateway_priority_5555".to_string()),
+        );
+        let pool = NormalizedRoutePoolConfig {
+            id: "gateway-priority-5555-search".to_string(),
+            priority: 100,
+            backup: false,
+            targets: vec!["mini27.MiniMax-M2.7".to_string()],
+            mode: None,
+            force: None,
+            load_balancing: Some(LoadBalancingPolicy {
+                strategy: Some("weighted".to_string()),
+                weights: None,
+                health_weighted: None,
+                context_weighted: None,
+            }),
+            route_params: Some(route_params),
+            thinking: None,
+        };
+
+        assert_eq!(
+            display_pool_id(&pool, "search"),
+            "gateway-priority-5555-weighted-search"
+        );
+    }
+
+    #[test]
+    fn expansion_keys_routing_by_route_policy_group_not_pool_id() {
+        let routing_source = BTreeMap::from([(
+            "search".to_string(),
+            vec![NormalizedRoutePoolConfig {
+                id: "gateway-priority-5555-search".to_string(),
+                priority: 100,
+                backup: false,
+                targets: vec!["mini27.MiniMax-M2.7".to_string()],
+                mode: None,
+                force: None,
+                load_balancing: Some(LoadBalancingPolicy {
+                    strategy: Some("weighted".to_string()),
+                    weights: None,
+                    health_weighted: None,
+                    context_weighted: None,
+                }),
+                route_params: Some(
+                    serde_json::from_value(json!({ "routePolicyGroup": "gateway_priority_5555" }))
+                        .unwrap(),
+                ),
+                thinking: None,
+            }],
+        )]);
+        let alias_index = BTreeMap::from([("mini27".to_string(), vec!["key1".to_string()])]);
+        let model_index = BTreeMap::from([(
+            "mini27".to_string(),
+            ModelIndexEntry {
+                declared: true,
+                models: vec!["MiniMax-M2.7".to_string()],
+            },
+        )]);
+
+        let (routing, _) =
+            expand_routing_table(&routing_source, &alias_index, &model_index).unwrap();
+        assert!(routing.contains_key("gateway_priority_5555:search"));
+        assert_eq!(
+            routing["gateway_priority_5555:search"][0].id,
+            "gateway-priority-5555-weighted-search"
+        );
+    }
 }

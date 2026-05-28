@@ -63,6 +63,11 @@ export interface RouterDirectResult {
 export interface RouterDirectSkipped {
   used: false;
   reason: string;
+  preselectedRoute?: {
+    target: Record<string, unknown>;
+    decision?: Record<string, unknown>;
+    diagnostics?: Record<string, unknown>;
+  };
 }
 
 export type RouterDirectOutcome = RouterDirectResult | RouterDirectSkipped;

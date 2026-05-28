@@ -95,6 +95,17 @@ fn resolve_route_hint(metadata: &Value) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn route_has_any_pool(
+    routing: &crate::virtual_router_engine::routing::RoutingPools,
+    route_name: &str,
+) -> bool {
+    if !routing.get(route_name).is_empty() {
+        return true;
+    }
+    let suffix = format!(":{}", route_name);
+    routing.keys().any(|key| key.ends_with(&suffix))
+}
+
 fn summarize_marker_instructions(
     instructions: &[RoutingInstruction],
     marker_seen: bool,
@@ -491,7 +502,7 @@ impl VirtualRouterEngineCore {
                 } else {
                     let mut classification = self.classifier.classify(&features);
                     if let Some(route_hint) = resolve_route_hint(metadata) {
-                        if !self.routing.get(&route_hint).is_empty()
+                        if route_has_any_pool(&self.routing, &route_hint)
                             && !is_server_tool_followup_request(metadata)
                         {
                             classification.route_name = route_hint.clone();
@@ -518,7 +529,7 @@ impl VirtualRouterEngineCore {
             } else {
                 let mut classification = self.classifier.classify(&features);
                 if let Some(route_hint) = resolve_route_hint(metadata) {
-                    if !self.routing.get(&route_hint).is_empty()
+                    if route_has_any_pool(&self.routing, &route_hint)
                         && !is_server_tool_followup_request(metadata)
                     {
                         classification.route_name = route_hint.clone();

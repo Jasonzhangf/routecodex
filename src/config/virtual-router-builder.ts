@@ -112,15 +112,29 @@ function withRoutePolicyGroupTag(routeEntry: unknown, groupId: string): unknown 
  * Per-port routing: collect ALL groups into global routing config.
  * Per-port allowedProviders filter restricts routing at request time.
  */
-function extractRoutingFromUserConfig(userConfig: UnknownRecord): VirtualRouterRoutingConfig {
+export type BuildVirtualRouterInputV2Options = {
+  routingPolicyGroup?: string;
+};
+
+function extractRoutingFromUserConfig(
+  userConfig: UnknownRecord,
+  options?: BuildVirtualRouterInputV2Options,
+): VirtualRouterRoutingConfig {
   const vrNode = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
   const groupsNode = isRecord(vrNode.routingPolicyGroups) ? (vrNode.routingPolicyGroups as UnknownRecord) : undefined;
   if (!groupsNode) {
     throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups');
   }
-  const groupEntries = Object.entries(groupsNode)
+  let groupEntries = Object.entries(groupsNode)
     .filter(([groupId, groupNode]) => Boolean(groupId.trim()) && isRecord(groupNode))
     .map(([groupId, groupNode]) => [groupId.trim(), groupNode as UnknownRecord] as const);
+  const requestedGroup = typeof options?.routingPolicyGroup === 'string' ? options.routingPolicyGroup.trim() : '';
+  if (requestedGroup) {
+    groupEntries = groupEntries.filter(([groupId]) => groupId === requestedGroup);
+    if (groupEntries.length === 0) {
+      throw new Error(`[config] v2 config missing virtualrouter.routingPolicyGroups["${requestedGroup}"]`);
+    }
+  }
   if (groupEntries.length === 0) {
     throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups with at least one group');
   }
@@ -154,9 +168,10 @@ function extractRoutingFromUserConfig(userConfig: UnknownRecord): VirtualRouterR
  */
 export async function buildVirtualRouterInputV2(
   userConfig: UnknownRecord,
-  providerRootDir?: string
+  providerRootDir?: string,
+  options?: BuildVirtualRouterInputV2Options,
 ): Promise<VirtualRouterInput> {
-  const routing = extractRoutingFromUserConfig(userConfig);
+  const routing = extractRoutingFromUserConfig(userConfig, options);
   const referencedProviderIds = resolveReferencedProviderIdsFromRouting(routing);
   for (const providerId of resolveProviderIdsFromProviderPorts(userConfig)) {
     referencedProviderIds.add(providerId);

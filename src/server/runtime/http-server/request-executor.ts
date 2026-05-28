@@ -233,7 +233,7 @@ export type RequestExecutorDeps = {
     resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
     getHandleByRuntimeKey(runtimeKey?: string): ProviderHandle | undefined;
   };
-  getHubPipeline(): HubPipeline | null;
+  getHubPipeline(routingPolicyGroup?: string): HubPipeline | null;
   getModuleDependencies(): ModuleDependencies;
   executeNestedInput?: (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
   logStage(stage: string, requestId: string, details?: Record<string, unknown>): void;
@@ -321,6 +321,13 @@ export class HubRequestExecutor implements RequestExecutor {
 
   private shouldReenterFromSourceRequest(metadata: Record<string, unknown> | undefined): boolean {
     if (!this.deps.executeNestedInput) {
+      return false;
+    }
+    const excludedProviderKeys =
+      Array.isArray(metadata?.excludedProviderKeys)
+        ? metadata.excludedProviderKeys.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+    if (excludedProviderKeys.length > 0) {
       return false;
     }
     const rt =
@@ -450,7 +457,7 @@ export class HubRequestExecutor implements RequestExecutor {
       return normalizeCodeKey(code || 'unknown_error') || 'unknown_error';
     };
     try {
-      const hubPipeline = ensureHubPipeline(this.deps.getHubPipeline);
+      const hubPipeline = ensureHubPipeline(() => this.deps.getHubPipeline(readString(metadataRecord?.routecodexRoutingPolicyGroup)));
       const {
         initialMetadata,
         inboundClientHeaders,

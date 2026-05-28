@@ -25,6 +25,7 @@ import { registerApiKeyAuthMiddleware, registerDefaultMiddleware } from './middl
 import { registerOAuthPortalRoute } from './routes.js';
 import { resolveRepoRoot } from './llmswitch-loader.js';
 import type {
+  HubPipelineConfig,
   HubPipeline,
   HubPipelineCtor,
   ProviderHandle,
@@ -101,6 +102,7 @@ import {
   tickSessionDaemonInjectLoop
 } from './http-server-session-daemon.js';
 import { setupRuntime } from './http-server-runtime-setup.js';
+import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-builder.js';
 import {
   initializeProviderRuntimes,
   createProviderHandle,
@@ -189,6 +191,7 @@ export class RouteCodexHttpServer {
   private _isRunning: boolean = false;
 
   private hubPipeline: HubPipeline | null = null;
+  private hubPipelinesByRoutingPolicyGroup: Map<string, HubPipeline> = new Map();
   private providerHandles: Map<string, ProviderHandle> = new Map();
   private providerKeyToRuntimeKey: Map<string, string> = new Map();
   private providerRuntimeInitErrors: Map<string, Error> = new Map();
@@ -265,91 +268,56 @@ export class RouteCodexHttpServer {
     this.requestExecutor = createRequestExecutor({
       runtimeManager: {
         resolveRuntimeKey: (providerKey?: string, fallback?: string): string | undefined => {
-          const debugQwenchat = typeof providerKey === 'string' && providerKey.startsWith('qwenchat.');
-          if (providerKey && this.providerKeyToRuntimeKey.has(providerKey)) {
-            const mapped = this.providerKeyToRuntimeKey.get(providerKey);
-            if (mapped && this.providerHandles.has(mapped)) {
-              if (debugQwenchat) {
-                console.warn(`[runtime.resolve.debug] providerKey=${providerKey} mapped=${mapped} direct_hit=true`);
-              }
-              return mapped;
+          const tryVariants = (candidate: string | undefined): string | undefined => {
+            if (!candidate) {
+              return undefined;
             }
-            if (mapped) {
-              const normalizedMapped = mapped.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
-              if (normalizedMapped !== mapped && this.providerHandles.has(normalizedMapped)) {
-                if (debugQwenchat) {
-                  console.warn(`[runtime.resolve.debug] providerKey=${providerKey} mapped=${mapped} normalized_hit=${normalizedMapped}`);
-                }
-                return normalizedMapped;
+            const variants = [
+              candidate,
+              candidate.replace(/\.key(\d+)(?=\.|$)/gi, '.$1'),
+              candidate.replace(/\.(\d+)(?=\.|$)/g, '.key$1')
+            ].filter((value, index, arr) => typeof value === 'string' && value.trim() && arr.indexOf(value) === index) as string[];
+            for (const variant of variants) {
+              const mapped = this.providerKeyToRuntimeKey.get(variant);
+              if (mapped && this.providerHandles.has(mapped)) {
+                return mapped;
               }
-              const denormalizedMapped = mapped.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
-              if (denormalizedMapped !== mapped && this.providerHandles.has(denormalizedMapped)) {
-                if (debugQwenchat) {
-                  console.warn(`[runtime.resolve.debug] providerKey=${providerKey} mapped=${mapped} denormalized_hit=${denormalizedMapped}`);
+              if (mapped) {
+                const mappedVariants = [
+                  mapped,
+                  mapped.replace(/\.key(\d+)(?=\.|$)/gi, '.$1'),
+                  mapped.replace(/\.(\d+)(?=\.|$)/g, '.key$1')
+                ].filter((value, index, arr) => typeof value === 'string' && value.trim() && arr.indexOf(value) === index) as string[];
+                for (const mappedVariant of mappedVariants) {
+                  if (this.providerHandles.has(mappedVariant)) {
+                    return mappedVariant;
+                  }
                 }
-                return denormalizedMapped;
+              }
+              if (this.providerHandles.has(variant)) {
+                return variant;
               }
             }
+            return undefined;
+          };
+
+          const direct = tryVariants(providerKey);
+          if (direct) {
+            return direct;
           }
+
           if (providerKey) {
             const parts = providerKey.split('.');
             if (parts.length >= 3) {
-              const providerId = parts[0];
-              const alias = parts[1];
-              const aliasNormalized = alias.replace(/^key(\d+)$/i, '$1');
-              const aliasDenormalized = alias.match(/^\d+$/) ? `key${alias}` : alias;
-              const directNormalizedRuntime = `${providerId}.${aliasNormalized}`;
-              if (this.providerHandles.has(directNormalizedRuntime)) {
-                if (debugQwenchat) {
-                  console.warn(`[runtime.resolve.debug] providerKey=${providerKey} direct_normalized_runtime=${directNormalizedRuntime}`);
-                }
-                return directNormalizedRuntime;
-              }
-              const directDenormalizedRuntime = `${providerId}.${aliasDenormalized}`;
-              if (this.providerHandles.has(directDenormalizedRuntime)) {
-                if (debugQwenchat) {
-                  console.warn(`[runtime.resolve.debug] providerKey=${providerKey} direct_denormalized_runtime=${directDenormalizedRuntime}`);
-                }
-                return directDenormalizedRuntime;
-              }
-            }
-            const normalizedProviderKey = providerKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
-            if (normalizedProviderKey !== providerKey && this.providerKeyToRuntimeKey.has(normalizedProviderKey)) {
-              const mapped = this.providerKeyToRuntimeKey.get(normalizedProviderKey);
-              if (mapped && this.providerHandles.has(mapped)) {
-                return mapped;
-              }
-              if (mapped) {
-                const normalizedMapped = mapped.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
-                if (this.providerHandles.has(normalizedMapped)) {
-                  return normalizedMapped;
-                }
-              }
-            }
-            const denormalizedProviderKey = providerKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
-            if (denormalizedProviderKey !== providerKey && this.providerKeyToRuntimeKey.has(denormalizedProviderKey)) {
-              const mapped = this.providerKeyToRuntimeKey.get(denormalizedProviderKey);
-              if (mapped && this.providerHandles.has(mapped)) {
-                return mapped;
-              }
-              if (mapped) {
-                const denormalizedMapped = mapped.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
-                if (this.providerHandles.has(denormalizedMapped)) {
-                  return denormalizedMapped;
-                }
+              const aliasScopedKey = `${parts[0]}.${parts[1]}`;
+              const aliasHit = tryVariants(aliasScopedKey);
+              if (aliasHit) {
+                return aliasHit;
               }
             }
           }
-          if (debugQwenchat) {
-            const mappedKeys = Array.from(this.providerKeyToRuntimeKey.keys()).filter((k) => k.startsWith('qwenchat.')).slice(0, 20);
-            const handleKeys = Array.from(this.providerHandles.keys()).filter((k) => k.startsWith('qwenchat.')).slice(0, 20);
-            const qwenMappedKeys = Array.from(this.providerKeyToRuntimeKey.keys()).filter((k) => k.startsWith('qwen.')).slice(0, 20);
-            const qwenHandleKeys = Array.from(this.providerHandles.keys()).filter((k) => k.startsWith('qwen.')).slice(0, 20);
-            console.warn(
-              `[runtime.resolve.debug] providerKey=${providerKey} miss fallback=${fallback ?? 'undefined'} mapKeys=${JSON.stringify(mappedKeys)} handleKeys=${JSON.stringify(handleKeys)} qwenMapKeys=${JSON.stringify(qwenMappedKeys)} qwenHandleKeys=${JSON.stringify(qwenHandleKeys)}`
-            );
-          }
-          return fallback;
+
+          return tryVariants(fallback) ?? fallback;
         },
         getHandleByRuntimeKey: (runtimeKey?: string): ProviderHandle | undefined => {
           if (!runtimeKey) {
@@ -393,7 +361,7 @@ export class RouteCodexHttpServer {
           return undefined;
         }
       },
-      getHubPipeline: () => this.hubPipeline,
+      getHubPipeline: (routingPolicyGroup?: string) => this.resolveHubPipelineForRoutingPolicyGroup(routingPolicyGroup),
       getModuleDependencies: () => this.getModuleDependencies(),
       executeNestedInput: (nestedInput) => this.executePortAwarePipeline(
         typeof nestedInput.metadata?.routecodexLocalPort === 'number'
@@ -494,6 +462,31 @@ export class RouteCodexHttpServer {
 
   private async bootstrapVirtualRouter(input: UnknownObject): Promise<VirtualRouterArtifacts> {
     return await bootstrapVirtualRouter(this, input);
+  }
+
+  private resolveHubPipelineForRoutingPolicyGroup(routingPolicyGroup?: string): HubPipeline | null {
+    const group = typeof routingPolicyGroup === 'string' ? routingPolicyGroup.trim() : '';
+    if (group) {
+      const pipeline = this.hubPipelinesByRoutingPolicyGroup.get(group);
+      if (pipeline) {
+        return pipeline;
+      }
+    }
+    return this.hubPipeline;
+  }
+
+  private async buildHubPipelineConfigForRoutingPolicyGroup(
+    routingPolicyGroup: string,
+    baseConfig: HubPipelineConfig,
+  ): Promise<HubPipelineConfig> {
+    const routerInput = await buildVirtualRouterInputV2(this.userConfig as Record<string, unknown>, undefined, {
+      routingPolicyGroup,
+    });
+    const artifacts = await this.bootstrapVirtualRouter(routerInput as UnknownObject);
+    return {
+      ...baseConfig,
+      virtualRouter: artifacts.config,
+    };
   }
 
   private async ensureHubPipelineCtor(): Promise<HubPipelineCtor> {
@@ -996,6 +989,12 @@ export class RouteCodexHttpServer {
     input: PipelineExecutionInput,
   ): Promise<PipelineExecutionResult> {
     const portConfig = this.getPortConfigForLocalPort(localPort);
+    const routeHintHeader = (input.headers as Record<string, unknown> | undefined)?.['x-route-hint'];
+    const routeHint = typeof routeHintHeader === 'string' && routeHintHeader.trim()
+      ? routeHintHeader.trim()
+      : Array.isArray(routeHintHeader) && routeHintHeader[0]
+        ? String(routeHintHeader[0]).trim()
+        : undefined;
 
     // Build per-port metadata: routecodexLocalPort + mode always present.
     // Router ports: inject allowedProviders derived from routingPolicyGroup to
@@ -1018,6 +1017,7 @@ export class RouteCodexHttpServer {
       routecodexRoutingPolicyGroup: portConfig?.routingPolicyGroup,
       stopMessageEnabled: effectiveStopMessageEnabled,
       routecodexPortStopMessageEnabled: effectiveStopMessageEnabled,
+      ...(routeHint ? { routeHint } : {}),
       ...(allowedProviders ? { allowedProviders } : {}),
     };
     const nextInput: PipelineExecutionInput = {
@@ -1025,8 +1025,6 @@ export class RouteCodexHttpServer {
       metadata,
     };
     if (!portConfig || portConfig.mode === 'router') {
-      // For router-mode ports with sameProtocolBehavior='direct', check same-protocol
-      // direct bypass before falling through to the full executor pipeline.
       const directDisabledForCurrentRequest = input.metadata?.routecodexSameProtocolDirectDisabled === true;
       if (
         portConfig?.mode === 'router'
@@ -1054,6 +1052,15 @@ export class RouteCodexHttpServer {
             metadata: {
               ...(nextInput.metadata ?? {}),
               routecodexSameProtocolDirectDisabled: true,
+            },
+          });
+        }
+        if (directResult.preselectedRoute) {
+          return await this.executePipeline({
+            ...nextInput,
+            metadata: {
+              ...(nextInput.metadata ?? {}),
+              __routecodexPreselectedRoute: directResult.preselectedRoute,
             },
           });
         }
@@ -1098,7 +1105,7 @@ export class RouteCodexHttpServer {
     portConfig: PortConfig,
     input: PipelineExecutionInput,
   ): Promise<RouterDirectOutcome> {
-    const hubPipeline = this.hubPipeline;
+    const hubPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
     if (!hubPipeline) {
       this.logStage('router-direct.skipped', input.requestId, { reason: 'hub-pipeline-not-ready' });
       return { used: false, reason: 'hub-pipeline-not-ready' };
@@ -1229,7 +1236,15 @@ export class RouteCodexHttpServer {
             directAttempt,
             thrown: true,
           });
-          return { used: false, reason: 'recoverable_direct_5xx_reenter_executor' };
+          return {
+            used: false,
+            reason: 'recoverable_direct_5xx_reenter_executor',
+            preselectedRoute: {
+              target,
+              decision: routingDecision,
+              diagnostics: pipelineResult.routingDiagnostics,
+            },
+          };
         }
         throw error;
       }
@@ -1249,14 +1264,30 @@ export class RouteCodexHttpServer {
           status: normalizedDirectResponse.status,
           directAttempt,
         });
-        return { used: false, reason: 'recoverable_direct_5xx_reenter_executor' };
+        return {
+          used: false,
+          reason: 'recoverable_direct_5xx_reenter_executor',
+          preselectedRoute: {
+            target,
+            decision: routingDecision,
+            diagnostics: pipelineResult.routingDiagnostics,
+          },
+        };
       }
       break;
     }
 
     if (!directOutcome.used) {
       this.logStage('router-direct.skipped', input.requestId, { reason: directOutcome.reason });
-      return { used: false, reason: directOutcome.reason };
+      return {
+        used: false,
+        reason: directOutcome.reason,
+        preselectedRoute: {
+          target,
+          decision: routingDecision,
+          diagnostics: pipelineResult.routingDiagnostics,
+        },
+      };
     }
 
     return {

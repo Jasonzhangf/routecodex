@@ -215,6 +215,55 @@ describe('direct passthrough route-level', () => {
     expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay' });
   });
 
+  it('router same-protocol direct passes x-route-hint into direct preroute metadata', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+    server.seedUserConfigForBootstrap({
+      httpserver: {
+        ports: [
+          {
+            port: 5555,
+            host: '127.0.0.1',
+            mode: 'router',
+            routingPolicyGroup: 'gateway_priority_5555',
+            sameProtocolBehavior: 'direct',
+          },
+        ],
+      },
+    } as any);
+
+    const directSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: true,
+      response: { status: 200, body: { ok: true } },
+      providerHandle: {} as any,
+      auditContext: {} as any,
+    } as any);
+
+    await (server as any).executePortAwarePipeline(5555, {
+      requestId: 'req_router_direct_route_hint_search',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: { 'x-route-hint': 'search' },
+      query: {},
+      body: { model: 'gpt-5.5', input: 'hello' },
+      metadata: {},
+    });
+
+    expect(directSpy).toHaveBeenCalledTimes(1);
+    expect(directSpy.mock.calls[0]?.[1]?.metadata).toEqual(expect.objectContaining({
+      routeHint: 'search',
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+    }));
+  });
+
   it.each([502, 503])(
     'router direct recoverable %i exits direct path and re-enters unified executor entry',
     async (statusCode) => {

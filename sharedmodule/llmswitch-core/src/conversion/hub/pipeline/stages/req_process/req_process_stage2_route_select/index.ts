@@ -25,6 +25,39 @@ export interface ReqProcessStage2RouteSelectResult {
   diagnostics: RoutingDiagnostics;
 }
 
+function readPreselectedRoute(
+  metadataInput: RouterMetadataInput,
+  normalizedMetadata: Record<string, unknown>
+): { target: TargetMetadata; decision: RoutingDecision; diagnostics: RoutingDiagnostics } | undefined {
+  const candidate =
+    (metadataInput as unknown as Record<string, unknown>).__routecodexPreselectedRoute
+    ?? normalizedMetadata.__routecodexPreselectedRoute;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return undefined;
+  }
+  const record = candidate as Record<string, unknown>;
+  const target = record.target;
+  const decision = record.decision;
+  if (!target || typeof target !== 'object' || Array.isArray(target)) {
+    throw Object.assign(new Error('[HubPipeline] preselected route target is invalid'), {
+      code: 'ERR_PRESELECTED_ROUTE_TARGET_INVALID'
+    });
+  }
+  if (!decision || typeof decision !== 'object' || Array.isArray(decision)) {
+    throw Object.assign(new Error('[HubPipeline] preselected route decision is invalid'), {
+      code: 'ERR_PRESELECTED_ROUTE_DECISION_INVALID'
+    });
+  }
+  return {
+    target: target as TargetMetadata,
+    decision: decision as RoutingDecision,
+    diagnostics:
+      record.diagnostics && typeof record.diagnostics === 'object' && !Array.isArray(record.diagnostics)
+        ? (record.diagnostics as RoutingDiagnostics)
+        : ({} as RoutingDiagnostics)
+  };
+}
+
 function replaceRecordInPlace(target: Record<string, unknown>, source: Record<string, unknown>): void {
   for (const key of Object.keys(target)) {
     if (!Object.prototype.hasOwnProperty.call(source, key)) {
@@ -38,7 +71,8 @@ export function runReqProcessStage2RouteSelect(
   options: ReqProcessStage2RouteSelectOptions
 ): ReqProcessStage2RouteSelectResult {
   const previousModel = typeof options.request.model === 'string' ? options.request.model : undefined;
-  const result = options.routerEngine.route(options.request, options.metadataInput);
+  const preselected = readPreselectedRoute(options.metadataInput, options.normalizedMetadata);
+  const result = preselected ?? options.routerEngine.route(options.request, options.metadataInput);
   const nativeApplied = applyReqProcessRouteSelectionWithNative(
     {
       request: options.request as unknown as Record<string, unknown>,
@@ -55,7 +89,8 @@ export function runReqProcessStage2RouteSelect(
   recordStage(options.stageRecorder, 'chat_process.req.stage5.route_select', {
     target: result.target,
     decision: result.decision,
-    diagnostics: result.diagnostics
+    diagnostics: result.diagnostics,
+    reusedPreselectedRoute: preselected !== undefined
   });
   return {
     target: result.target,

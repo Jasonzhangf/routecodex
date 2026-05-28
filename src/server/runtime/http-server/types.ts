@@ -98,7 +98,8 @@ export interface HubPipelineExecutionResult {
     processMode?: string;
     compatibilityProfile?: string;
   };
-  routingDecision?: { routeName?: string };
+  routingDecision?: { routeName?: string; [key: string]: unknown };
+  routingDiagnostics?: Record<string, unknown>;
   metadata: Record<string, unknown>;
 }
 
@@ -116,4 +117,6 @@ export interface HubPipeline {
   };
 }
 
-export type HubPipelineCtor = new (config: { virtualRouter: unknown; [key: string]: unknown }) => HubPipeline;
+export type HubPipelineConfig = { virtualRouter: unknown; [key: string]: unknown };
+
+export type HubPipelineCtor = new (config: HubPipelineConfig) => HubPipeline;
