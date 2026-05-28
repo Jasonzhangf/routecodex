@@ -1439,3 +1439,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 当前真相边界（2026-05-27）
 - 主链错误语义已基本收口到 catalog + failure policy（classification / retry / storm/backoff）。
 - `provider-response-converter` 仍有局部 remap 逻辑依赖旧测试环境假设（core dist 模块加载），这部分要单独做 harness 后再完全收口，避免误回归。
+
+### 2026-05-29 VR direct/weighted 调试精华
+- Router direct/relay 的首次路由入口一致：inbound 后进入 VR；direct 命中后如需复入 executor，必须携带首次 route result 并跳过第二次 VR，禁止通过禁用 direct 预路由来“减少一次路由”。
+- 多端口 routingPolicyGroup 隔离必须是独立 HubPipeline/VR config，不是只用 `allowedProviders` 或隐藏日志；`[VR-KEYS]` 不应在 5555 实例里看到 5520/10000 keys。
+- Pool id 是展示/日志名，隔离真源只能是 `routeParams.routePolicyGroup`；weighted pool 的 display id 必须从实际 strategy 生成，不能沿用 `gateway-priority-*`。
