@@ -37,7 +37,7 @@ export interface RespProcessStage3ServerToolOrchestrationResult {
   payload: ChatCompletionLike;
   executed: boolean;
   flowId?: string;
-  skipReason?: 'no_servertool_support' | 'direct_mode_no_followup' | 'followup_bypass';
+  skipReason?: 'no_servertool_support' | 'followup_bypass';
 }
 
 export async function runRespProcessStage3ServerToolOrchestration(

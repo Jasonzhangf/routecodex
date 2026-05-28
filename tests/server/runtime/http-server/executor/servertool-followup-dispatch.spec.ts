@@ -28,6 +28,7 @@ jest.unstable_mockModule(
       shouldLoad: false
     })),
     resolveStopMessageSessionScopeWithNative: jest.fn(() => null),
+    resolveServertoolStateKeyWithNative: jest.fn(() => null),
     resolveServertoolStickyKeyWithNative: jest.fn(() => null),
     planServertoolOutcomeWithNative: jest.fn(() => ({
       mode: 'passthrough'
@@ -152,6 +153,60 @@ describe('servertool followup dispatch helper', () => {
     });
     expect(nestedInput?.metadata?.clientRequestId).toBeUndefined();
     expect((result.body as Record<string, any>)?.echoed?.sessionId).toBe('sess_1');
+  });
+
+  it.each([
+    ['/v1/chat/completions', { messages: [{ role: 'user', content: 'continue' }] }],
+    ['/v1/messages', { messages: [{ role: 'user', content: 'continue' }] }],
+    ['/v1/responses', { input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }] }]
+  ])('servertool reenter uses the HTTP server nested entry for %s', async (entryEndpoint, body) => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: {
+        entryEndpoint: input.entryEndpoint,
+        stage: input.metadata?.stage,
+        direction: input.metadata?.direction,
+        followup: input.metadata?.__rt?.serverToolFollowup
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    const result = await executeServerToolReenterPipeline({
+      entryEndpoint,
+      fallbackEntryEndpoint: '/v1/chat/completions',
+      requestId: `req_followup_dispatch_entry_${entryEndpoint.replace(/[^a-z0-9]+/gi, '_')}`,
+      body: body as Record<string, unknown>,
+      metadata: {
+        __rt: { serverToolFollowup: true }
+      },
+      baseMetadata: {
+        routecodexLocalPort: 5555,
+        routecodexPortMode: 'router'
+      },
+      executeNested
+    });
+
+    expect(mockRunClientInjectionFlowBeforeReenter).toHaveBeenCalledTimes(1);
+    expect(executeNested).toHaveBeenCalledTimes(1);
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput.entryEndpoint).toBe(entryEndpoint);
+    expect(nestedInput.metadata).toMatchObject({
+      routecodexLocalPort: 5555,
+      routecodexPortMode: 'router',
+      direction: 'request',
+      stage: 'inbound'
+    });
+    expect(nestedInput.metadata.__rt.serverToolFollowup).toBe(true);
+    expect(result.body).toMatchObject({
+      entryEndpoint,
+      stage: 'inbound',
+      direction: 'request',
+      followup: true
+    });
   });
 
   it('reenter path short-circuits to client inject only outcome before nested execute', async () => {

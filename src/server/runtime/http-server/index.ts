@@ -64,6 +64,7 @@ import { extractStatusCodeFromError } from './executor/utils.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
+import { convertProviderResponseIfNeeded as convertDirectProviderResponseIfNeeded } from './executor-response.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
 import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
@@ -1295,6 +1296,15 @@ export class RouteCodexHttpServer {
       response: directOutcome.response,
       providerHandle: directOutcome.providerHandle,
       auditContext: directOutcome.auditContext,
+      providerPayload,
+      standardizedRequest: pipelineResult.standardizedRequest,
+      processedRequest: pipelineResult.processedRequest,
+      requestSemantics: pipelineResult.processedRequest?.semantics && typeof pipelineResult.processedRequest.semantics === 'object' && !Array.isArray(pipelineResult.processedRequest.semantics)
+        ? (pipelineResult.processedRequest.semantics as Record<string, unknown>)
+        : pipelineResult.standardizedRequest?.semantics && typeof pipelineResult.standardizedRequest.semantics === 'object' && !Array.isArray(pipelineResult.standardizedRequest.semantics)
+          ? (pipelineResult.standardizedRequest.semantics as Record<string, unknown>)
+          : undefined,
+      pipelineMetadata: pipelineResult.metadata,
     };
   }
 
@@ -1324,7 +1334,8 @@ export class RouteCodexHttpServer {
 
   /**
    * Build a PipelineExecutionResult from a router-direct outcome.
-   * Response is passed through without outbound rewriting.
+   * Router direct only owns the same-protocol provider send; response-side
+   * servertool/stopless still runs through the unified HTTP executor bridge.
    */
   private async buildRouterDirectResult(directResult: RouterDirectResult, input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
     const { response, providerHandle, auditContext } = directResult;
@@ -1352,8 +1363,7 @@ export class RouteCodexHttpServer {
       }
     }
 
-    // Response is passed through without outbound rewriting
-    return {
+    const baseResult: PipelineExecutionResult = {
       ...normalized,
       metadata:
         input.metadata && typeof input.metadata === 'object'
@@ -1369,6 +1379,42 @@ export class RouteCodexHttpServer {
         requestStartedAtMs: Date.now(),
       },
     };
+
+    const responseSemantics =
+      baseResult.metadata && typeof baseResult.metadata === 'object' && !Array.isArray(baseResult.metadata)
+        ? ((baseResult.metadata as Record<string, unknown>).responseSemantics as Record<string, unknown> | undefined)
+        : undefined;
+    const pipelineMetadata = {
+      ...(input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+        ? (input.metadata as Record<string, unknown>)
+        : {}),
+      ...(directResult.pipelineMetadata ?? {}),
+      ...(responseSemantics ? { responseSemantics } : {})
+    };
+
+    return await convertDirectProviderResponseIfNeeded({
+      entryEndpoint: input.entryEndpoint,
+      providerType: providerHandle.providerType,
+      requestId: input.requestId,
+      wantsStream: Boolean((input.metadata as Record<string, unknown> | undefined)?.stream),
+      originalRequest:
+        input.body && typeof input.body === 'object' && !Array.isArray(input.body)
+          ? (input.body as Record<string, unknown>)
+          : undefined,
+      requestSemantics: directResult.requestSemantics,
+      processMode: directResult.auditContext.processMode,
+      serverToolsEnabled: true,
+      response: baseResult,
+      pipelineMetadata
+    }, {
+      logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
+      executeNested: (nestedInput) => this.executePortAwarePipeline(
+        typeof nestedInput.metadata?.routecodexLocalPort === 'number'
+          ? nestedInput.metadata.routecodexLocalPort
+          : undefined,
+        nestedInput
+      )
+    });
   }
 
   /**

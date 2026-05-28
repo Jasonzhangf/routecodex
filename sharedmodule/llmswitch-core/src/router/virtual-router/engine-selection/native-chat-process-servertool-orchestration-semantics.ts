@@ -406,6 +406,12 @@ export function resolveServertoolStickyKeyWithNative(
   }
 }
 
+export function resolveServertoolStateKeyWithNative(
+  metadata: Record<string, unknown>
+): string | undefined {
+  return resolveServertoolStickyKeyWithNative(metadata);
+}
+
 export function planStopMessagePersistedLookupWithNative(input: {
   record: Record<string, unknown>;
   runtimeMetadata?: Record<string, unknown>;

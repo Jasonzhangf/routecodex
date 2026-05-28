@@ -58,6 +58,11 @@ export interface RouterDirectResult {
   response: unknown;
   providerHandle: ProviderHandle;
   auditContext: RouterDirectAuditContext;
+  providerPayload?: Record<string, unknown>;
+  standardizedRequest?: Record<string, unknown>;
+  processedRequest?: Record<string, unknown>;
+  requestSemantics?: Record<string, unknown>;
+  pipelineMetadata?: Record<string, unknown>;
 }
 
 export interface RouterDirectSkipped {

@@ -45,7 +45,7 @@ export interface ServertoolResponseStageShellResult {
   payload: ChatCompletionLike;
   executed: boolean;
   flowId?: string;
-  skipReason?: 'no_servertool_support' | 'direct_mode_no_followup' | 'followup_bypass';
+  skipReason?: 'no_servertool_support' | 'followup_bypass';
 }
 
 function markServertoolResponseOrchestration(adapterContext: AdapterContext): void {
@@ -78,16 +78,6 @@ export async function runServertoolResponseStageOrchestrationShell(
     followupSource === 'servertool.reasoning_stop_guard'
     || followupSource === 'servertool.reasoning_stop_continue';
   const stoplessEligibleFollowup = isStopEligibleForServerTool(options.payload, options.adapterContext);
-
-  // Direct mode: stopless must NOT fire. The caller explicitly sets allowFollowup=false.
-  // Relay mode: allowFollowup is undefined or true, stopless can fire.
-  if (options.allowFollowup === false) {
-    return {
-      payload: options.payload,
-      executed: false,
-      skipReason: 'direct_mode_no_followup'
-    };
-  }
 
   if (
     runtimeMeta?.serverToolFollowup === true
