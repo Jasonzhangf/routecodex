@@ -1206,7 +1206,10 @@ function escapeHistoryTag(text: string, tag: string): string {
 
 function compactSystemPromptForCascade(sysText: string): string {
   if (!sysText) return sysText;
-  return sysText.replace(/(^|[\n.!?]\s*)You are /g, '$1The assistant is ');
+  let text = sysText.replace(/(^|[\n.!?]\s*)You are (?:Devin|Codex|OpenClaw|Aider|Cline)(?:[,.]|\s|$)/gi, '$1The assistant is a coding tool');
+  text = text.replace(/\b(?:ignore|disregard) (?:all )?(?:previous|prior) (?:instructions|rules)\b/gi, 'follow the current task context');
+  text = text.replace(/\b(?:bypass|override) (?:the |your )?(?:safety|content|policy|filter)\b/gi, 'request-parameter');
+  return text.replace(/(^|[\n.!?]\s*)You are /g, '$1The assistant is ');
 }
 
 function cascadeHistoryBudget(modelUid: string): number {
@@ -1274,7 +1277,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   private windsurfCascadeSessionIdOverride: string | null = null;
   private readonly windsurfCascadeTimeoutMs: number;
   private readonly windsurfHealthCache = new Map<string, WindsurfQuotaHealthSnapshot>();
-  private readonly windsurfSessionStickyAccount = new Map<string, string>();
+  private windsurfSelectedAccountAlias: string | null = null;
   private readonly windsurfUnavailableAccounts = new Set<string>();
   private readonly windsurfTransientCooldownUntilMs = new Map<string, number>();
   private readonly windsurfTransientFailureCount = new Map<string, number>();
@@ -1390,7 +1393,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
     const existingScope = WindsurfChatProvider.cascadeRuntimeScope.getStore();
     if (!existingScope) {
-      const initialSessionKey = this.resolveWindsurfSessionStickyKeyFromRequest(request);
+      const initialSessionKey = this.resolveWindsurfSessionStateKeyFromRequest(request);
       return await this.runExclusiveCascadeRuntime(async () => {
         return await WindsurfChatProvider.cascadeRuntimeScope.run(
           { pinnedRuntime: null, sessionKey: initialSessionKey },
@@ -1417,9 +1420,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     let lastCascadeId = '';
     const maxCascadeAttempts = Math.max(2, readPositiveIntEnv(['WINDSURF_TRANSIENT_RETRY_ATTEMPTS', 'WINDSURF_CASCADE_RETRY_ATTEMPTS'], 4));
     const stickySessionKey = (existingScope.sessionKey || 'provider-default-session').trim() || 'provider-default-session';
+    const apiKey = await this.resolveCascadeApiKey();
     for (let attempt = 1; attempt <= maxCascadeAttempts + 1; attempt += 1) {
       try {
-        const apiKey = await this.resolveCascadeApiKey();
         const semanticConversation = this.parseCascadeSemanticRoundtripSync(body.messages);
         this.appendBridgeToolHistoryToSemanticConversation(semanticConversation, this.readBridgeToolHistoryPairs(body));
         void wantsSse;
@@ -1506,6 +1509,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         const output = await this.pollCascadeTrajectorySteps({
           cascadeId,
           model,
+          promptChars: text.length,
           customTools,
           completedNativeToolCallIds,
           completedNativeToolSignatures,
@@ -1525,7 +1529,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         const isQuotaExhausted = classified.code === 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED'
           || classified.code === 'WINDSURF_ACCOUNT_QUOTA_EXHAUSTED';
 
-        // Quota exhausted: cool this account and loop back to select a different one
         if (isQuotaExhausted) {
           this.markCurrentAliasQuotaExhausted(stickySessionKey);
           this.logWindsurfStage('sendRequestInternal.error', {
@@ -1535,7 +1538,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             quotaExhausted: true,
             error: error instanceof Error ? error.message : String(error),
           });
-          continue;
+          throw classified;
         }
 
         // Transient error with quota remaining: retry with exponential backoff, no cooldown, no account switch
@@ -2221,7 +2224,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     return this.readApiKey();
   }
 
-  private resolveWindsurfSessionStickyKeyFromRequest(request: UnknownObject): string {
+  private resolveWindsurfSessionStateKeyFromRequest(request: UnknownObject): string {
     const body = this.readRequestBodyRecord(request);
     const candidates: Array<unknown> = [
       body.session_id,
@@ -2378,26 +2381,17 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   }
 
   private selectManagedCredentialForSession(sessionKey: string, entries: WindsurfManagedCredentialEntry[]): WindsurfManagedCredentialEntry {
-    const normalized = sessionKey || 'windsurf-default-session';
-    const ranked = this.rankManagedCredentialsByHealth(entries);
-    const pinnedAlias = this.windsurfSessionStickyAccount.get(normalized);
+    void sessionKey;
+    const pinnedAlias = this.windsurfSelectedAccountAlias;
     if (pinnedAlias) {
-      const pinned = ranked.find((entry) => entry.alias === pinnedAlias);
-      if (pinned && !(pinned.health?.exhausted)) {
+      const pinned = entries.find((entry) => entry.alias === pinnedAlias && !(entry.health?.exhausted));
+      if (pinned) {
         return pinned;
       }
-      try {
-        console.warn(`[windsurf-account] sticky-invalidated session=${normalized} reason=${pinned ? 'exhausted' : 'missing'}`);
-      } catch { /* best-effort */ }
-      this.windsurfSessionStickyAccount.delete(normalized);
     }
+    const ranked = this.rankManagedCredentialsByHealth(entries);
     const selected = ranked.find((entry) => !(entry.health?.exhausted)) || ranked[0]!;
-    this.windsurfSessionStickyAccount.set(normalized, selected.alias);
-    try {
-      const available = ranked.filter((entry) => !(entry.health?.exhausted)).length;
-      const total = ranked.length;
-      console.log(`[windsurf-account] sticky-bind session=${normalized} accountsAvailable=${available}/${total}`);
-    } catch { /* best-effort */ }
+    this.windsurfSelectedAccountAlias = selected.alias;
     return selected;
   }
 
@@ -2431,22 +2425,15 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   ): Promise<{ accountAlias: string; apiKey: string }> {
     const scope = WindsurfChatProvider.cascadeRuntimeScope.getStore();
     const sessionKey = (scope?.sessionKey || 'provider-default-session').trim() || 'provider-default-session';
-    const HEALTH_CACHE_TTL_MS = 60_000;
     for (const entry of managed.entries) {
       const cached = this.windsurfHealthCache.get(entry.alias);
-      const isCacheFresh = cached && (Date.now() - cached.fetchedAt) < HEALTH_CACHE_TTL_MS;
-      if (isCacheFresh) {
+      if (cached) {
         entry.health = cached;
       } else {
         const latest = await this.fetchWindsurfUserStatusForHealth(entry.apiKey);
         if (latest) {
           this.windsurfHealthCache.set(entry.alias, latest);
           entry.health = latest;
-        } else if (cached) {
-          // Health fetch failed (e.g. transient timeout); keep stale cache
-          // rather than setting health to null which would demote this entry
-          // in ranking and potentially destabilize sticky bindings.
-          entry.health = cached;
         }
       }
       if (this.windsurfUnavailableAccounts.has(entry.alias)) {
@@ -2521,9 +2508,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     if (next >= 2) {
       this.windsurfTransientCooldownUntilMs.set(alias, Date.now() + 5 * 60_000);
       this.windsurfTransientFailureCount.set(alias, 0);
-      if (sessionKey) {
-        this.windsurfSessionStickyAccount.delete(sessionKey);
-      }
       console.log(`[windsurf-account] transient-cooldown session=${sessionKey || 'provider-default-session'} cooldownMs=300000`);
     }
   }
@@ -2542,9 +2526,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const cooldownMs = computeWindsurfQuotaCooldownUntilNextMidnightMs();
     this.windsurfQuotaCooldownUntilMs.set(alias, Date.now() + cooldownMs);
     this.windsurfUnavailableAccounts.add(alias);
-    if (sessionKey) {
-      this.windsurfSessionStickyAccount.delete(sessionKey);
-    }
     try {
       console.log(`[windsurf-account] quota-cooldown alias=${alias} cooldownMs=${cooldownMs}`);
     } catch { /* best-effort */ }
@@ -3184,6 +3165,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   }
 
   private resolveCascadeRuntimeQueueKey(): string {
+    const credentialAlias = this.windsurfSessionCredential?.accountAlias?.trim() || '';
+    if (credentialAlias) return credentialAlias;
     const auth = (this.config.config as Record<string, unknown>).auth as Record<string, unknown> | undefined;
     const alias = typeof auth?.accountAlias === 'string' && auth.accountAlias.trim() ? auth.accountAlias.trim() : '';
     const account = typeof auth?.account === 'string' && auth.account.trim() ? auth.account.trim() : '';
@@ -3475,6 +3458,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   private async pollCascadeTrajectorySteps(args: {
     cascadeId: string;
     model: string;
+    promptChars?: number;
     customTools?: Array<Record<string, unknown>>;
     completedNativeToolCallIds?: string[];
     completedNativeToolSignatures?: string[];
@@ -3488,6 +3472,12 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       const maxWaitMs = this.windsurfRuntime?.pollMaxWaitMs ?? 120_000;
       const pollIntervalMs = 500;
       const idleGraceMs = 1_500;
+      const configuredColdStallBaseMs = Number((this.windsurfRuntime as Record<string, unknown>)?.coldStallBaseMs);
+      const coldStallBaseMs = Number.isFinite(configuredColdStallBaseMs) && configuredColdStallBaseMs > 0
+        ? configuredColdStallBaseMs
+        : 30_000;
+      const promptChars = Math.max(0, Number.isFinite(Number(args.promptChars)) ? Number(args.promptChars) : 0);
+      const coldStallMs = Math.min(maxWaitMs, coldStallBaseMs + Math.floor(promptChars / 1500) * 5_000);
       const startedAt = Date.now();
       let lastText = '';
       let lastThinking = '';
@@ -3597,6 +3587,14 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         if (status !== 1) {
           sawActive = true;
           idleCount = 0;
+          const elapsed = Date.now() - startedAt;
+          if (elapsed > coldStallMs && !sawText && !lastThinking && toolCalls.length === 0) {
+            throw createWindsurfProviderError(`[windsurf] Cascade planner stalled with no output after ${Math.round(coldStallMs / 1000)}s`, {
+              code: 'WINDSURF_CASCADE_STALLED',
+              status: 504,
+              retryable: true,
+            });
+          }
         } else {
           const elapsed = Date.now() - startedAt;
           if (!sawActive && elapsed <= idleGraceMs) {
