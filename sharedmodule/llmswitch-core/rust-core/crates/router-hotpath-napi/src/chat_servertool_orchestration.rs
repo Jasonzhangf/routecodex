@@ -1696,9 +1696,11 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .decision
         .get("action")
         .and_then(|a| a.as_str())
-        .unwrap_or("Skip");
+        .unwrap_or("skip")
+        .trim()
+        .to_ascii_lowercase();
 
-    if action != "Trigger" {
+    if action != "trigger" {
         // Not triggering — return empty result
         let output = StopMessageHandlerOutput {
             chat_response: input.base,
