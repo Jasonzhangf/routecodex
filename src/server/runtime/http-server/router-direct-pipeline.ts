@@ -126,7 +126,10 @@ export async function executeRouterDirectPipeline(
     processMode: input.processMode,
   };
 
-  const payloadToSend = recordPayloadAudit(input.requestPayload, auditContext);
+  const payloadToSend = recordPayloadAudit(
+    applyProviderModelOverride(input.requestPayload, input.providerPayload, providerHandle, inboundProtocol),
+    auditContext,
+  );
 
   input.onSnapshotBefore?.(payloadToSend, auditContext);
 
@@ -142,6 +145,30 @@ export async function executeRouterDirectPipeline(
     response,
     providerHandle,
     auditContext,
+  };
+}
+
+function readNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function applyProviderModelOverride(
+  requestPayload: Record<string, unknown>,
+  providerPayload: Record<string, unknown>,
+  providerHandle: ProviderHandle,
+  inboundProtocol: ProviderProtocol,
+): Record<string, unknown> {
+  if (inboundProtocol !== 'openai-chat') {
+    return requestPayload;
+  }
+  const providerModel = readNonEmptyString(providerPayload.model)
+    ?? readNonEmptyString(providerHandle.runtime.defaultModel);
+  if (!providerModel || requestPayload.model === providerModel) {
+    return requestPayload;
+  }
+  return {
+    ...requestPayload,
+    model: providerModel,
   };
 }
 

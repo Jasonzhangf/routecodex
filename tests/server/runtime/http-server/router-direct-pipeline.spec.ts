@@ -96,13 +96,47 @@ describe('router-direct-pipeline', () => {
       const result = await executeRouterDirectPipeline(input);
       expect(result.used).toBe(true);
       expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
-      expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledWith(input.requestPayload);
+      expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledWith({
+        ...input.requestPayload,
+        model: 'gpt-4',
+      });
       const ctx = result.auditContext;
       expect(ctx.observedFields).toBeDefined();
       expect(ctx.originalPayload).toEqual(input.requestPayload);
       expect(ctx.providerKey).toBe('openai.gpt-4');
       expect(ctx.inboundProtocol).toBe('openai-chat');
       expect(ctx.providerProtocol).toBe('openai-chat');
+    });
+
+    it('overrides chat model with provider payload model before direct send', async () => {
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: {
+          model: 'deepseek-v4-flash-free',
+          messages: [{ role: 'user', content: 'hello' }],
+        },
+        requestPayload: {
+          model: 'deepseek-v4-flash',
+          messages: [{ role: 'user', content: 'hello' }],
+        },
+        target: {
+          providerKey: 'opencode-zen-free.key1.deepseek-v4-flash-free',
+          providerType: 'openai',
+          runtimeKey: openaiHandle.runtimeKey,
+          processMode: 'chat',
+        },
+        routingDecision: { routeName: 'thinking', pool: ['opencode-zen-free.key1.deepseek-v4-flash-free'] },
+        processMode: 'chat',
+        requestInfo: { path: '/v1/chat/completions', headers: {} },
+        resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
+      };
+
+      const result = await executeRouterDirectPipeline(input);
+
+      expect(result.used).toBe(true);
+      const sentPayload = (openaiHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sentPayload.model).toBe('deepseek-v4-flash-free');
+      expect(input.requestPayload.model).toBe('deepseek-v4-flash');
     });
 
     it('passes apply_patch payload through unchanged in router direct mode', async () => {
