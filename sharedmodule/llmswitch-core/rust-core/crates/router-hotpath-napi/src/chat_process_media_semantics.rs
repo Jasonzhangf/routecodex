@@ -123,6 +123,17 @@ fn read_part_media_candidate(part: &Value) -> String {
     String::new()
 }
 
+fn part_contains_inline_media_text(part: &Value) -> bool {
+    text_for_part(part)
+        .map(|text| string_contains_inline_media(&text))
+        .unwrap_or(false)
+}
+
+fn part_contains_media_payload(part: &Value) -> bool {
+    (part_type_contains_media(part) && !read_part_media_candidate(part).trim().is_empty())
+        || part_contains_inline_media_text(part)
+}
+
 fn message_has_media_parts(message: &Value) -> bool {
     let parts = match message
         .as_object()
@@ -135,9 +146,7 @@ fn message_has_media_parts(message: &Value) -> bool {
     if parts.is_empty() {
         return false;
     }
-    parts.iter().any(|part| {
-        part_type_contains_media(part) && !read_part_media_candidate(part).trim().is_empty()
-    })
+    parts.iter().any(part_contains_media_payload)
 }
 
 fn contains_image_in_current_turn(messages: &[Value]) -> bool {
@@ -329,7 +338,7 @@ pub fn strip_chat_process_historical_images(
         let mut removed = false;
         let mut filtered: Vec<Value> = Vec::with_capacity(content_parts.len());
         for part in content_parts.iter() {
-            if part_type_contains_media(part) {
+            if part_contains_media_payload(part) {
                 removed = true;
                 let mut replacement = serde_json::Map::new();
                 replacement.insert("type".to_string(), Value::String("text".to_string()));
@@ -421,7 +430,7 @@ pub fn strip_responses_context_input_historical_media(
         let mut removed = false;
         let mut filtered: Vec<Value> = Vec::with_capacity(content.len());
         for part in content.iter() {
-            if part_type_contains_media(part) {
+            if part_contains_media_payload(part) {
                 removed = true;
                 let mut replacement = serde_json::Map::new();
                 replacement.insert("type".to_string(), Value::String("input_text".to_string()));
@@ -553,9 +562,9 @@ pub fn strip_latest_user_turn_media(
     let mut changed = false;
     let mut filtered: Vec<Value> = Vec::with_capacity(content_parts.len());
     for part in content_parts.iter() {
-        if part_type_contains_media(part) {
-            changed = true;
-            let mut replacement = serde_json::Map::new();
+            if part_contains_media_payload(part) {
+                changed = true;
+                let mut replacement = serde_json::Map::new();
             replacement.insert("type".to_string(), Value::String("text".to_string()));
             replacement.insert(
                 "text".to_string(),
@@ -690,9 +699,9 @@ pub fn strip_latest_responses_input_media(
     let mut changed = false;
     let mut filtered: Vec<Value> = Vec::with_capacity(content.len());
     for part in content.iter() {
-        if part_type_contains_media(part) {
-            changed = true;
-            let mut replacement = serde_json::Map::new();
+            if part_contains_media_payload(part) {
+                changed = true;
+                let mut replacement = serde_json::Map::new();
             replacement.insert("type".to_string(), Value::String("input_text".to_string()));
             replacement.insert(
                 "text".to_string(),

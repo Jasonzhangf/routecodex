@@ -1549,3 +1549,5 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 2026-05-29 2095 DeepSeek/OpenCode 400：若 provider-request 里 `role=tool.content` 含 `data:image`/`image_url` 数组，先走 Rust `chat_process_media_semantics` 非多模态 placeholder 真源；不要只看 user 历史媒体。DeepSeek thinking tool-call 历史必须保留 `reasoning_content`。
 
 - 2026-05-29 历史图片清理：必须在 Rust outbound stage3 通用入口无条件 placeholder 历史 user/tool media；当前 user media 才看 `supportsMultimodal=false`。若 400 快照含 `role=tool.content data:image`，先查通用 `strip_historical_media`，禁止 provider 特例修。
+
+- 2026-05-29 mimo/Anthropic 历史图片：若 500 快照无 `role=tool`，继续查 `role=user.content[]` 里的字符串化 JSON；`content` 字段可包含 `[{\"image_url\":\"data:image...\"}]`。修复必须在 Rust `chat_process_media_semantics` 通用 part 判定，禁止只修 OpenAI-chat tool role。

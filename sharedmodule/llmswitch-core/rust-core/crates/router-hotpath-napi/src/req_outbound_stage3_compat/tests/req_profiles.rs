@@ -3626,3 +3626,50 @@ fn test_protocol_field_contract_outbound_openai_chat_always_strips_historical_me
         "data:image/png;base64,current"
     );
 }
+
+#[test]
+fn test_protocol_field_contract_outbound_anthropic_messages_strips_stringified_historical_media() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "mimo-v2.5",
+            "messages": [
+                {"role": "user", "content": [{
+                    "content": "[{\"detail\":\"high\",\"image_url\":\"data:image/png;base64,iVBORw0KGgo=\"}]"
+                }]},
+                {"role": "assistant", "content": [{"type": "text", "text": "seen"}]},
+                {"role": "user", "content": "继续"}
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:claude-code".to_string()),
+            provider_protocol: Some("anthropic-messages".to_string()),
+            request_id: Some("openai-responses-mimo.key1-mimo-v2.5-20260529T213159512-234803-2114".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: Some("search".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("mimo-v2.5".to_string()),
+            client_model_id: Some("gpt-5.5".to_string()),
+            original_model_id: None,
+            provider_id: Some("mimo".to_string()),
+            provider_key: Some("mimo.key1.mimo-v2.5".to_string()),
+            runtime_key: None,
+            client_request_id: Some("req_1780061519512_f3f0220a".to_string()),
+            group_request_id: Some("req_1780061519512_f3f0220a".to_string()),
+            session_id: Some("019e733b-8c4d-74c0-93c1-0a33a3f2bd91".to_string()),
+            conversation_id: None,
+        },
+        explicit_profile: Some("chat:claude-code".to_string()),
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(result.payload["messages"][0]["content"][0]["text"], "[Image omitted]");
+    assert!(
+        !result.payload["messages"].to_string().contains("data:image"),
+        "historical inline image payload must not reach Anthropic outbound"
+    );
+}

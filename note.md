@@ -13128,3 +13128,9 @@ Using skills: coding-principals + rcc-dev-skills
 - Root cause: `pollCascadeTrajectorySteps()` returned tool calls immediately when visible, before `GetCascadeTrajectory` reached IDLE. The next Hub tool-result hop entered the same Cascade executor while it was still RUNNING.
 - Red/green: added `pollCascadeTrajectorySteps must wait for idle before returning visible tool calls`; it failed with `statusCalls=0` before the fix and passes after storing the tool-call candidate and returning only after IDLE.
 - Unique fix point: Windsurf provider poll lifecycle is the only layer that can observe Cascade executor status. Hub Pipeline / Virtual Router must not add Windsurf-specific waiting or retry semantics.
+
+## 2026-05-29 mimo 500: Anthropic user.content 字符串化历史图片
+- 2114 mimo 500 快照：`mimo.key1.mimo-v2.5/req_1780061519512_f3f0220a/provider-request.json` 中历史 `view_image` 结果已被 Anthropic codec 折成 `role=user.content[]`，形状为 `{\"content\":\"[{\\"image_url\\":\\"data:image/png;base64,...\\"}]\"}`，不是 OpenAI `role=tool`。
+- 红测：`test_protocol_field_contract_outbound_anthropic_messages_strips_stringified_historical_media` 先失败在该字符串化 content 未 placeholder。
+- 修复：Rust `chat_process_media_semantics` 的 media part 判定扩展到 `text/content` 字段内的 inline media 字符串；历史图片通用清理覆盖 OpenAI-chat 与 Anthropic-messages。
+- 验证：`cargo test -p router-hotpath-napi protocol_field_contract -- --nocapture` 6/6 通过；5520/5555 已部署 0.90.2488。
