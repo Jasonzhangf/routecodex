@@ -219,7 +219,6 @@ pub(crate) fn resolve_instruction_process_mode_for_selection(
 ) -> Option<String> {
     let candidates = [
         routing_state.forced_target.as_ref(),
-        routing_state.sticky_target.as_ref(),
         routing_state.prefer_target.as_ref(),
     ];
     for candidate in candidates {

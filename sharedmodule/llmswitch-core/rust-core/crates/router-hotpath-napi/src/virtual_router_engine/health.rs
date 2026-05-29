@@ -1,7 +1,7 @@
+use chrono::{Datelike, Local, TimeZone};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use chrono::{Datelike, Local, TimeZone};
 
 const PERSIST_REASON_HTTP_503_DAILY: &str = "__http_503_daily_cooldown__";
 
@@ -36,6 +36,7 @@ struct ProviderInternalState {
     http_429_cooldown_cycles: i64,
     consecutive_recoverable_failures: i64,
     recoverable_cooldown_cycles: i64,
+    persisted_503_reprobe_available: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,6 +124,7 @@ impl ProviderHealthManager {
                         http_429_cooldown_cycles: 0,
                         consecutive_recoverable_failures: 0,
                         recoverable_cooldown_cycles: 0,
+                        persisted_503_reprobe_available: false,
                     },
                 );
             }
@@ -146,6 +148,7 @@ impl ProviderHealthManager {
         state.http_429_cooldown_cycles = 0;
         state.consecutive_recoverable_failures = 0;
         state.recoverable_cooldown_cycles = 0;
+        state.persisted_503_reprobe_available = false;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
             state.reason = Some(reason);
@@ -173,6 +176,7 @@ impl ProviderHealthManager {
         state.http_429_cooldown_cycles = 0;
         state.consecutive_recoverable_failures = 0;
         state.recoverable_cooldown_cycles = 0;
+        state.persisted_503_reprobe_available = false;
         state.state = "tripped".to_string();
         state.reason = reason;
         state.cooldown_expires_at = Some(now_ms + ttl);
@@ -193,6 +197,7 @@ impl ProviderHealthManager {
         state.http_429_cooldown_cycles = 0;
         state.consecutive_recoverable_failures = 0;
         state.recoverable_cooldown_cycles = 0;
+        state.persisted_503_reprobe_available = false;
         state.state = "tripped".to_string();
         state.reason = Some(PERSIST_REASON_HTTP_503_DAILY.to_string());
         state.cooldown_expires_at = Some(now_ms + ttl);
@@ -200,17 +205,46 @@ impl ProviderHealthManager {
     }
 
     pub(crate) fn record_success(&mut self, provider_key: &str) {
-        let state = self.get_state_mut(provider_key);
-        state.failure_count = 0;
-        state.consecutive_http_502_failures = 0;
-        state.consecutive_http_429_failures = 0;
-        state.http_429_cooldown_cycles = 0;
-        state.consecutive_recoverable_failures = 0;
-        state.recoverable_cooldown_cycles = 0;
-        state.state = "healthy".to_string();
-        state.cooldown_expires_at = None;
-        state.last_failure_at = None;
-        state.reason = None;
+        {
+            let state = self.get_state_mut(provider_key);
+            state.failure_count = 0;
+            state.consecutive_http_502_failures = 0;
+            state.consecutive_http_429_failures = 0;
+            state.http_429_cooldown_cycles = 0;
+            state.consecutive_recoverable_failures = 0;
+            state.recoverable_cooldown_cycles = 0;
+            state.state = "healthy".to_string();
+            state.cooldown_expires_at = None;
+            state.last_failure_at = None;
+            state.reason = None;
+        }
+        self.clear_windsurf_managed_persisted_503_family(provider_key);
+    }
+
+    fn clear_windsurf_managed_persisted_503_family(&mut self, provider_key: &str) {
+        let canonical = Self::canonicalize_provider_key(provider_key);
+        if !canonical.starts_with("windsurf.managed.") {
+            return;
+        }
+        for state in self.states.values_mut() {
+            if !state.provider_key.starts_with("windsurf.managed.") {
+                continue;
+            }
+            if state.reason.as_deref() != Some(PERSIST_REASON_HTTP_503_DAILY) {
+                continue;
+            }
+            state.state = "healthy".to_string();
+            state.failure_count = 0;
+            state.cooldown_expires_at = None;
+            state.last_failure_at = None;
+            state.reason = None;
+            state.consecutive_http_502_failures = 0;
+            state.consecutive_http_429_failures = 0;
+            state.http_429_cooldown_cycles = 0;
+            state.consecutive_recoverable_failures = 0;
+            state.recoverable_cooldown_cycles = 0;
+            state.persisted_503_reprobe_available = false;
+        }
     }
 
     pub(crate) fn trip_provider(
@@ -229,6 +263,7 @@ impl ProviderHealthManager {
         state.http_429_cooldown_cycles = 0;
         state.consecutive_recoverable_failures = 0;
         state.recoverable_cooldown_cycles = 0;
+        state.persisted_503_reprobe_available = false;
         state.state = "tripped".to_string();
         state.reason = reason;
         state.cooldown_expires_at = Some(now_ms + ttl);
@@ -249,13 +284,14 @@ impl ProviderHealthManager {
                 state.cooldown_expires_at = None;
                 state.last_failure_at = None;
                 state.reason = None;
-            state.consecutive_http_502_failures = 0;
-            state.consecutive_http_429_failures = 0;
-            state.consecutive_recoverable_failures = 0;
-            state.http_429_cooldown_cycles %= 3;
-            state.recoverable_cooldown_cycles %= 3;
-            return true;
-        }
+                state.consecutive_http_502_failures = 0;
+                state.consecutive_http_429_failures = 0;
+                state.consecutive_recoverable_failures = 0;
+                state.http_429_cooldown_cycles %= 3;
+                state.recoverable_cooldown_cycles %= 3;
+                state.persisted_503_reprobe_available = false;
+                return true;
+            }
         }
         false
     }
@@ -282,6 +318,63 @@ impl ProviderHealthManager {
         Some(expiry - now_ms)
     }
 
+    pub(crate) fn is_persisted_503_daily_cooldown_active(
+        &self,
+        provider_key: &str,
+        now_ms: i64,
+    ) -> bool {
+        let canonical = Self::canonicalize_provider_key(provider_key);
+        let Some(state) = self.states.get(&canonical) else {
+            return false;
+        };
+        if state.reason.as_deref() != Some(PERSIST_REASON_HTTP_503_DAILY) {
+            return false;
+        }
+        state
+            .cooldown_expires_at
+            .map(|expiry| expiry > now_ms)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn consume_persisted_503_reprobe_if_available(
+        &mut self,
+        provider_key: &str,
+        now_ms: i64,
+    ) -> bool {
+        let canonical = Self::canonicalize_provider_key(provider_key);
+        let Some(state) = self.states.get_mut(&canonical) else {
+            return false;
+        };
+        if state.reason.as_deref() != Some(PERSIST_REASON_HTTP_503_DAILY) {
+            return false;
+        }
+        if !state.persisted_503_reprobe_available {
+            return false;
+        }
+        let active = state
+            .cooldown_expires_at
+            .map(|expiry| expiry > now_ms)
+            .unwrap_or(false);
+        if !active {
+            state.persisted_503_reprobe_available = false;
+            return false;
+        }
+        state.persisted_503_reprobe_available = false;
+        state.state = "healthy".to_string();
+        state.failure_count = 0;
+        state.cooldown_expires_at = None;
+        state.last_failure_at = None;
+        state.reason = None;
+        state.consecutive_http_502_failures = 0;
+        state.consecutive_http_429_failures = 0;
+        // A persisted cooldown passive reprobe is a single startup chance, not a
+        // fresh three-error series. If that routed request fails again, the next
+        // provider-failure event must immediately return this provider to the
+        // recoverable cooldown ladder so the executor can reroute to backup.
+        state.consecutive_recoverable_failures = 2;
+        true
+    }
+
     pub(crate) fn describe_state(&self, provider_key: &str) -> Option<Value> {
         let canonical = Self::canonicalize_provider_key(provider_key);
         let state = self.states.get(&canonical)?;
@@ -302,7 +395,6 @@ impl ProviderHealthManager {
         self.config.clone()
     }
 
-
     pub(crate) fn clear_runtime_state(&mut self) {
         for state in self.states.values_mut() {
             state.state = "healthy".to_string();
@@ -315,12 +407,16 @@ impl ProviderHealthManager {
             state.http_429_cooldown_cycles = 0;
             state.consecutive_recoverable_failures = 0;
             state.recoverable_cooldown_cycles = 0;
+            state.persisted_503_reprobe_available = false;
         }
     }
 
     pub(crate) fn clear_imported_persisted_state(&mut self) {
         for state in self.states.values_mut() {
             if state.reason.as_deref() != Some(PERSIST_REASON_HTTP_503_DAILY) {
+                continue;
+            }
+            if state.cooldown_expires_at.is_none() {
                 continue;
             }
             state.state = "healthy".to_string();
@@ -358,7 +454,12 @@ impl ProviderHealthManager {
         json!({ "version": 1, "providerCooldowns": entries })
     }
 
-    pub(crate) fn import_persistable_state(&mut self, raw: &Value, now_ms: i64) {
+    pub(crate) fn import_persistable_state(
+        &mut self,
+        raw: &Value,
+        now_ms: i64,
+        allow_persisted_reprobe: bool,
+    ) {
         let Some(entries) = raw.get("providerCooldowns").and_then(|v| v.as_array()) else {
             return;
         };
@@ -375,7 +476,28 @@ impl ProviderHealthManager {
             if expires_at <= now_ms {
                 continue;
             }
+            let canonical = Self::canonicalize_provider_key(provider_key);
+            if !allow_persisted_reprobe {
+                if let Some(existing) = self.states.get(&canonical) {
+                    if existing.state == "healthy"
+                        && existing.cooldown_expires_at.is_none()
+                        && existing.reason.is_none()
+                        && !existing.persisted_503_reprobe_available
+                    {
+                        continue;
+                    }
+                }
+            }
+            let existing_reprobe_available = self
+                .states
+                .get(&canonical)
+                .map(|state| state.persisted_503_reprobe_available)
+                .unwrap_or(false);
             self.cooldown_provider_until_midnight_persisted(provider_key, now_ms, expires_at);
+            if let Some(state) = self.states.get_mut(&canonical) {
+                state.persisted_503_reprobe_available =
+                    allow_persisted_reprobe || existing_reprobe_available;
+            }
         }
     }
 
@@ -391,6 +513,7 @@ impl ProviderHealthManager {
         state.failure_count += 1;
         state.consecutive_http_502_failures += 1;
         state.consecutive_recoverable_failures += 1;
+        state.persisted_503_reprobe_available = false;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
             state.reason = Some(reason);
@@ -424,7 +547,8 @@ impl ProviderHealthManager {
 
         state.consecutive_http_429_failures = 0;
         state.state = "tripped".to_string();
-        state.cooldown_expires_at = Some(now_ms + next_ladder_cooldown_ms(state.http_429_cooldown_cycles));
+        state.cooldown_expires_at =
+            Some(now_ms + next_ladder_cooldown_ms(state.http_429_cooldown_cycles));
         state.http_429_cooldown_cycles += 1;
         Http429ControlOutcome::CooldownApplied
     }
@@ -446,6 +570,7 @@ impl ProviderHealthManager {
                     http_429_cooldown_cycles: 0,
                     consecutive_recoverable_failures: 0,
                     recoverable_cooldown_cycles: 0,
+                    persisted_503_reprobe_available: false,
                 },
             );
         }
@@ -464,6 +589,7 @@ impl ProviderHealthManager {
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures = 0;
         state.consecutive_recoverable_failures += 1;
+        state.persisted_503_reprobe_available = false;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
             state.reason = Some(reason);
@@ -473,7 +599,8 @@ impl ProviderHealthManager {
         }
         state.consecutive_recoverable_failures = 0;
         state.state = "tripped".to_string();
-        state.cooldown_expires_at = Some(now_ms + next_ladder_cooldown_ms(state.recoverable_cooldown_cycles));
+        state.cooldown_expires_at =
+            Some(now_ms + next_ladder_cooldown_ms(state.recoverable_cooldown_cycles));
         state.recoverable_cooldown_cycles += 1;
         Http429ControlOutcome::CooldownApplied
     }
@@ -494,7 +621,11 @@ fn compute_cooldown_until_next_local_midnight_ms(now_ms: i64) -> i64 {
         return 24 * 60 * 60_000;
     };
     let ttl = next_midnight.timestamp_millis() - now_ms;
-    if ttl > 0 { ttl } else { 24 * 60 * 60_000 }
+    if ttl > 0 {
+        ttl
+    } else {
+        24 * 60 * 60_000
+    }
 }
 
 impl Default for ProviderHealthConfigNormalized {
@@ -562,7 +693,10 @@ mod tests {
             .unwrap();
         assert_eq!(state3.failure_count, 3);
         assert_eq!(state3.state, "tripped");
-        assert_eq!(state3.cooldown_expires_at, Some(now + 2000 + DEFAULT_COOLDOWN_MS));
+        assert_eq!(
+            state3.cooldown_expires_at,
+            Some(now + 2000 + DEFAULT_COOLDOWN_MS)
+        );
 
         // Should not be available during cooldown
         assert!(!manager.is_available("test-provider", now + 2000 + 50_000));
@@ -677,10 +811,22 @@ mod tests {
         assert!(manager.is_available("test-provider", second_expiry + 1));
 
         // third cycle: 3 consecutive 429 -> 5h cooldown
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), second_expiry + 2);
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), second_expiry + 3);
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            second_expiry + 2,
+        );
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            second_expiry + 3,
+        );
         assert_eq!(
-            manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), second_expiry + 4),
+            manager.record_http_429_failure(
+                "test-provider",
+                Some("HTTP_429".to_string()),
+                second_expiry + 4
+            ),
             Http429ControlOutcome::CooldownApplied
         );
         let third = manager
@@ -694,15 +840,16 @@ mod tests {
 
     #[test]
     fn test_http_429_third_cycle_uses_long_5h_cooldown() {
-
         let mut manager = ProviderHealthManager::new();
         manager.register_providers(&["test-provider".to_string()]);
         let now = 1_747_800_000_000i64;
 
         // First 3x 429 => 10m
         let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now);
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now + 1);
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now + 2);
+        let _ =
+            manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now + 1);
+        let _ =
+            manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now + 2);
         let first = manager
             .snapshot()
             .into_iter()
@@ -712,9 +859,21 @@ mod tests {
         assert!(manager.is_available("test-provider", first_expiry + 1));
 
         // Second 3x 429 => 30m
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), first_expiry + 2);
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), first_expiry + 3);
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), first_expiry + 4);
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            first_expiry + 2,
+        );
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            first_expiry + 3,
+        );
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            first_expiry + 4,
+        );
         let second = manager
             .snapshot()
             .into_iter()
@@ -724,9 +883,21 @@ mod tests {
         assert!(manager.is_available("test-provider", second_expiry + 1));
 
         // Third 3x 429 => 5h
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), second_expiry + 2);
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), second_expiry + 3);
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), second_expiry + 4);
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            second_expiry + 2,
+        );
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            second_expiry + 3,
+        );
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            second_expiry + 4,
+        );
         let third = manager
             .snapshot()
             .into_iter()
@@ -740,15 +911,28 @@ mod tests {
         assert!(manager.is_available("test-provider", third_expiry + 1));
 
         // Fourth 3x 429 => cycle resets back to 10m
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), third_expiry + 2);
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), third_expiry + 3);
-        let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), third_expiry + 4);
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            third_expiry + 2,
+        );
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            third_expiry + 3,
+        );
+        let _ = manager.record_http_429_failure(
+            "test-provider",
+            Some("HTTP_429".to_string()),
+            third_expiry + 4,
+        );
         let fourth = manager
             .snapshot()
             .into_iter()
             .find(|s| s.provider_key == "test-provider")
             .expect("provider state");
-        let fourth_ttl = fourth.cooldown_expires_at.expect("fourth cooldown expiry") - (third_expiry + 4);
+        let fourth_ttl =
+            fourth.cooldown_expires_at.expect("fourth cooldown expiry") - (third_expiry + 4);
         assert!(fourth_ttl > 9 * 60_000 && fourth_ttl <= 11 * 60_000);
     }
 }

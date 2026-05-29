@@ -126,7 +126,7 @@ describe('provider-traffic-governor', () => {
     expect(policy.rpm.acquireTimeoutMs).toBe(23000);
   });
 
-  it('forces Windsurf account runtimes to single concurrency even when config asks for more', () => {
+  it('RED: honors explicit Windsurf account runtime concurrency instead of forcing global single-flight', () => {
     const policy = resolveProviderTrafficPolicy(
       createRuntime({
         providerId: 'windsurf',
@@ -140,13 +140,13 @@ describe('provider-traffic-governor', () => {
       }),
       'windsurf.ws-pro-4.gpt-5.4-medium'
     );
-    expect(policy.concurrency.maxInFlight).toBe(1);
+    expect(policy.concurrency.maxInFlight).toBe(3);
     expect(policy.concurrency.acquireTimeoutMs).toBe(12000);
   });
 
 
 
-  it('RED: Windsurf runtime must stay single-concurrency even when persisted adaptive state says currentCap > 1', async () => {
+  it('RED: Windsurf runtime must not be clamped to single concurrency by persisted adaptive state', async () => {
     const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-windsurf-adaptive-${process.pid}-${randomUUID()}`);
     const adaptivePath = path.join(rootDir, 'dynamic-concurrency-overrides.json');
     const prevAdaptivePath = process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH;
@@ -187,14 +187,15 @@ describe('provider-traffic-governor', () => {
         requestId: 'windsurf-first',
         runtime
       });
-      expect(first.policy.concurrency.maxInFlight).toBe(1);
-      await expect(governor.acquire({
+      expect(first.policy.concurrency.maxInFlight).toBe(3);
+      const second = await governor.acquire({
         runtimeKey: runtime.runtimeKey,
         providerKey: 'windsurf.ws-pro-4.gpt-5.3-codex',
         requestId: 'windsurf-second',
         runtime
-      })).rejects.toBeInstanceOf(ProviderTrafficSaturatedError);
+      });
       await governor.release(first.permit);
+      await governor.release(second.permit);
     } finally {
       if (typeof prevAdaptivePath === 'string') {
         process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH = prevAdaptivePath;

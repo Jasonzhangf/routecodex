@@ -265,7 +265,7 @@ function isSingleConcurrencyProviderRuntime(runtime: ProviderRuntimeProfile): bo
   const providerFamily = readLowerToken(runtime.providerFamily);
   const runtimeKey = readLowerToken(runtime.runtimeKey);
   const tokens = [providerId, providerKey, providerFamily, runtimeKey].filter(Boolean);
-  return isWebProviderRuntime(runtime) || tokens.some((value) => value === 'windsurf' || value.startsWith('windsurf.'));
+  return isWebProviderRuntime(runtime);
 }
 
 
@@ -1430,6 +1430,10 @@ export function getSharedProviderTrafficGovernor(): ProviderTrafficGovernor {
     sharedGovernor = new ProviderTrafficGovernor();
   }
   return sharedGovernor;
+}
+
+export function resetSharedProviderTrafficGovernorForTests(): void {
+  sharedGovernor = null;
 }
 
 export function createNoopProviderTrafficGovernor(): ProviderTrafficGovernorLike {

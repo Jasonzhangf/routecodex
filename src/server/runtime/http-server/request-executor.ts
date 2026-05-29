@@ -251,6 +251,34 @@ export interface RequestExecutor {
 
 
 
+
+function releaseSameProviderRetryHoldForReroute(args: {
+  holdState: BlockingRecoverableRouteHoldState | null;
+  routePool: string[] | null;
+  excludedProviderKeys: Set<string>;
+  logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
+  requestId: string;
+  attempt: number;
+}): boolean {
+  const providerKey = args.holdState?.providerKey;
+  if (args.holdState?.preserveSameProviderRetry !== true || !providerKey) {
+    return false;
+  }
+  for (const candidate of args.routePool ?? []) {
+    if (typeof candidate === 'string' && candidate && candidate !== providerKey) {
+      args.excludedProviderKeys.delete(candidate);
+    }
+  }
+  args.excludedProviderKeys.add(providerKey);
+  args.logStage('provider.retry.same_provider_route_released', args.requestId, {
+    providerKey,
+    attempt: args.attempt,
+    excluded: Array.from(args.excludedProviderKeys),
+    reason: 'same_provider_retry_target_unavailable'
+  });
+  return true;
+}
+
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
 const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
@@ -625,6 +653,20 @@ export class HubRequestExecutor implements RequestExecutor {
               attempt = Math.max(0, attempt - 1);
               continue;
             }
+            if (
+              releaseSameProviderRetryHoldForReroute({
+                holdState: blockingRecoverableRouteHoldState,
+                routePool: initialRoutePool,
+                excludedProviderKeys,
+                logStage: (stage, requestId, details) => logStage(stage, requestId, details),
+                requestId: providerRequestId,
+                attempt
+              })
+            ) {
+              blockingRecoverableRouteHoldState = null;
+              allowBlockingRecoverableRetryBeyondAttemptBudget = true;
+              continue;
+            }
             if (blockingSingletonRecoverablePoolCooldown && lastError) {
               throw lastError;
             }
@@ -758,14 +800,6 @@ export class HubRequestExecutor implements RequestExecutor {
           allowBlockingRecoverableRetryBeyondAttemptBudget =
             failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
           metadataForAttempt.excludedProviderKeys = Array.from(excludedProviderKeys);
-          if (this.shouldReenterFromSourceRequest(metadataForAttempt)) {
-            return await this.reenterFromSourceRequest({
-              input,
-              retryPayloadSeed,
-              metadataForAttempt,
-              excludedProviderKeys
-            });
-          }
           continue;
         }
         const previousRequestId = input.requestId;
@@ -886,6 +920,7 @@ export class HubRequestExecutor implements RequestExecutor {
             runtimeKey
           });
         const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt) || providerOwnsWindsurfManagedTraffic;
+        let retryAfterProviderFailure = false;
         try {
           throwIfClientAbortSignalAborted(clientAbortSignal);
           if (providerTransportBackoffKey) {
@@ -1342,15 +1377,7 @@ export class HubRequestExecutor implements RequestExecutor {
             recordScopedErrorBackoff(scopedBackoffKey);
           }
           metadataForAttempt.excludedProviderKeys = Array.from(excludedProviderKeys);
-          if (this.shouldReenterFromSourceRequest(metadataForAttempt)) {
-            return await this.reenterFromSourceRequest({
-              input,
-              retryPayloadSeed,
-              metadataForAttempt,
-              excludedProviderKeys
-            });
-          }
-          continue;
+          retryAfterProviderFailure = true;
         } finally {
           if (trafficPermit) {
             await releaseProviderTrafficPermit({
@@ -1364,6 +1391,9 @@ export class HubRequestExecutor implements RequestExecutor {
             });
             trafficPermit = null;
           }
+        }
+        if (retryAfterProviderFailure) {
+          continue;
         }
         }
 

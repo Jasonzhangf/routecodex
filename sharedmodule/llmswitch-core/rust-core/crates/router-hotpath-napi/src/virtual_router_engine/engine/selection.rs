@@ -2,13 +2,7 @@ use napi::Env;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
-use crate::virtual_router_engine::context_weighted::{
-    compute_context_multiplier, compute_effective_safe_window_tokens,
-    resolve_context_weighted_config,
-};
-use super::tier_load_balancing::{
-    build_candidate_weights, build_group_weights, resolve_tier_load_balancing,
-};
+use super::tier_load_balancing::{build_group_weights, resolve_tier_load_balancing};
 use super::types::SelectionResult;
 use super::VirtualRouterEngineCore;
 use crate::virtual_router_engine::classifier::{ClassificationResult, DEFAULT_ROUTE};
@@ -16,16 +10,12 @@ use crate::virtual_router_engine::error::{
     format_virtual_router_error, format_virtual_router_error_with_details,
 };
 use crate::virtual_router_engine::features::RoutingFeatures;
-use crate::virtual_router_engine::health_weighted::{
-    compute_health_weight, resolve_health_weighted_config,
-};
 use crate::virtual_router_engine::instructions::RoutingInstructionState;
 use crate::virtual_router_engine::quota::ProviderQuotaState;
 use crate::virtual_router_engine::routing::{
     build_route_queue, default_pool_supports_capability, extract_excluded_provider_keys,
-    extract_provider_id, extract_runtime_now_ms, filter_candidates_by_state,
-    filter_pools_by_capability, resolve_instruction_target, route_has_targets,
-    InstructionTargetMatchMode,
+    extract_provider_id, filter_candidates_by_state, filter_pools_by_capability,
+    resolve_instruction_target, route_has_targets, InstructionTargetMatchMode,
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
@@ -60,8 +50,46 @@ fn pool_matches_route_policy_group(
         .filter(|value| !value.is_empty());
     match pool_group {
         Some(value) => value == requested_group,
-        None => true,
+        // A requested routing policy group is a hard port-isolation boundary.
+        // Untagged/global pools must not leak into a port-scoped route pool.
+        None => false,
     }
+}
+
+fn resolve_route_pools_for_selection(
+    routing: &crate::virtual_router_engine::routing::RoutingPools,
+    route_name: &str,
+    routing_group_prefix: Option<&String>,
+) -> Vec<crate::virtual_router_engine::routing::RoutePoolTier> {
+    if let Some(prefix) = routing_group_prefix {
+        let routing_key = format!("{}{}", prefix, route_name);
+        if let Some(pools) = routing.get_opt(&routing_key) {
+            return pools.clone();
+        }
+    }
+    if let Some(pools) = routing.get_opt(route_name) {
+        return pools.clone();
+    }
+    let suffix = format!(":{}", route_name);
+    let mut matches: Vec<_> = routing
+        .keys()
+        .filter(|key| !key.as_str().contains(':') || key.ends_with(&suffix))
+        .filter(|key| key.ends_with(&suffix))
+        .cloned()
+        .collect();
+    matches.sort();
+    if matches.len() == 1 {
+        return routing.get(matches[0].as_str());
+    }
+    Vec::new()
+}
+
+fn has_single_group_prefixed_route(
+    routing: &crate::virtual_router_engine::routing::RoutingPools,
+    route_name: &str,
+) -> bool {
+    let suffix = format!(":{}", route_name);
+    routing.keys().filter(|key| key.ends_with(&suffix)).count() == 1
 }
 
 fn order_instruction_keys_by_default_route(
@@ -120,55 +148,9 @@ fn classify_context_candidates(
     (safe, risky, overflow)
 }
 
-fn build_context_weighted_map(
-    provider_registry: &crate::virtual_router_engine::provider_registry::ProviderRegistry,
-    candidates: &[String],
-    warn_ratio: f64,
-    raw_cfg: Option<&crate::virtual_router_engine::context_weighted::ContextWeightedConfig>,
-) -> Option<HashMap<String, i64>> {
-    let cfg = resolve_context_weighted_config(raw_cfg);
-    if !cfg.enabled || candidates.len() <= 1 {
-        return None;
-    }
-
-    let mut safe_windows: HashMap<String, i64> = HashMap::new();
-    let mut reference_safe_tokens = cfg.client_cap_tokens.max(1);
-    for key in candidates {
-        let model_max_tokens = provider_registry
-            .get(key)
-            .and_then(|profile| profile.max_context_tokens)
-            .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_MODEL_CONTEXT_TOKENS);
-        let effective_safe_tokens = compute_effective_safe_window_tokens(
-            model_max_tokens,
-            warn_ratio,
-            cfg.client_cap_tokens,
-        );
-        if effective_safe_tokens > reference_safe_tokens {
-            reference_safe_tokens = effective_safe_tokens;
-        }
-        safe_windows.insert(key.clone(), effective_safe_tokens);
-    }
-
-    let mut weights = HashMap::new();
-    let mut has_non_uniform = false;
-    for key in candidates {
-        let effective_safe_tokens = *safe_windows.get(key).unwrap_or(&reference_safe_tokens);
-        let multiplier =
-            compute_context_multiplier(reference_safe_tokens, effective_safe_tokens, &cfg);
-        let weight = (100.0 * multiplier).round().max(1.0) as i64;
-        if weight != 100 {
-            has_non_uniform = true;
-        }
-        weights.insert(key.clone(), weight);
-    }
-
-    if has_non_uniform { Some(weights) } else { None }
-}
-
 impl VirtualRouterEngineCore {
     /// Apply standard candidate filters: routing state, excluded keys, and provider availability.
-    /// This is the single filter chain used by all selection paths (forced, sticky, prefer, pool).
+    /// This is the single filter chain used by all selection paths (forced, prefer, pool).
     pub(crate) fn apply_standard_filters(
         &mut self,
         env: Env,
@@ -182,14 +164,24 @@ impl VirtualRouterEngineCore {
             .into_iter()
             .filter(|key| !excluded_keys.contains(key))
             .collect();
-        let mut available: Vec<String> = route_candidates
-            .iter()
-            .filter(|key| self.is_provider_available(env, key))
-            .cloned()
-            .collect();
+        let now = now_ms();
+        let mut available: Vec<String> = Vec::new();
+        for key in &route_candidates {
+            if self.is_provider_available(env, key)
+                || self
+                    .health_manager
+                    .consume_persisted_503_reprobe_if_available(key, now)
+            {
+                available.push(key.clone());
+            }
+        }
         if available.is_empty() && route_candidates.len() == 1 {
             let provider_key = &route_candidates[0];
-            if self.is_singleton_provider_soft_available_from_rust_quota(env, provider_key) {
+            if self.is_singleton_provider_soft_available_from_rust_quota(env, provider_key)
+                || self
+                    .health_manager
+                    .consume_persisted_503_reprobe_if_available(provider_key, now)
+            {
                 available.push(provider_key.clone());
             }
         }
@@ -225,31 +217,6 @@ impl VirtualRouterEngineCore {
             }
         }
 
-        if let Some(target) = &routing_state.sticky_target {
-            if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
-                let ordered_keys =
-                    order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
-                let available =
-                    self.apply_standard_filters(env, &ordered_keys, routing_state, &excluded_keys);
-                let available_set: HashSet<String> = available.iter().cloned().collect();
-                let sticky_key = match resolved.mode {
-                    InstructionTargetMatchMode::Exact => available.into_iter().next(),
-                    InstructionTargetMatchMode::Filter => self
-                        .load_balancer
-                        .select_round_robin_with_skips("sticky", &ordered_keys, |key| {
-                            available_set.contains(key)
-                        }),
-                };
-                if let Some(sticky_key) = sticky_key {
-                    return Ok(SelectionResult::new(
-                        sticky_key.clone(),
-                        requested_route.to_string(),
-                        ordered_keys,
-                        Some("sticky".to_string()),
-                    ));
-                }
-            }
-        }
 
         if let Some(target) = &routing_state.prefer_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
@@ -298,13 +265,10 @@ impl VirtualRouterEngineCore {
             features,
             &self.routing,
         );
-        let is_continuation_for_lb = crate::virtual_router_engine::routing::is_continuation_request(metadata);
-        let sticky_key_for_continuation = is_continuation_for_lb
-            .then(|| crate::virtual_router_engine::routing::resolve_sticky_key(metadata));
-        let now_for_weights = extract_runtime_now_ms(metadata).unwrap_or_else(now_ms);
-        let health_cfg =
-            resolve_health_weighted_config(self.load_balancer.policy().health_weighted.as_ref());
         let requested_route_policy_group = read_requested_route_policy_group(metadata);
+        let routing_group_prefix = requested_route_policy_group
+            .as_deref()
+            .map(|g| format!("{}:", g));
         let requires_remote_video = features.has_video_attachment
             && features.has_remote_video_attachment
             && route_has_targets(&self.routing, "video");
@@ -317,8 +281,7 @@ impl VirtualRouterEngineCore {
             default_pool_supports_capability(&self.routing, &self.provider_registry, "multimodal");
         let use_default_pool_web_search_fallback =
             web_search_route_requested && default_pool_supports_web_search;
-        let use_default_pool_multimodal_fallback =
-            multimodal_route_requested;
+        let use_default_pool_multimodal_fallback = multimodal_route_requested;
         let longcontext_candidate_active = requested_route == "longcontext"
             || classification
                 .candidates
@@ -345,7 +308,12 @@ impl VirtualRouterEngineCore {
             {
                 self.routing.get(DEFAULT_ROUTE)
             } else {
-                self.routing.get(&route_name)
+                // Per-port isolation: try group-prefixed key first, fall back to bare route name
+                resolve_route_pools_for_selection(
+                    &self.routing,
+                    &route_name,
+                    routing_group_prefix.as_ref(),
+                )
             };
             if web_search_route_requested
                 && route_name == DEFAULT_ROUTE
@@ -377,7 +345,11 @@ impl VirtualRouterEngineCore {
                 }
             }
             for pool in pools {
-                if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref())
+                if !has_single_group_prefixed_route(&self.routing, &route_name)
+                    && !pool_matches_route_policy_group(
+                        &pool,
+                        requested_route_policy_group.as_deref(),
+                    )
                 {
                     continue;
                 }
@@ -426,11 +398,9 @@ impl VirtualRouterEngineCore {
                     .filter(|key| !excluded_keys.contains(key))
                     .collect::<Vec<String>>();
                     if !filtered_candidates.is_empty() {
-                        if let Some(unavailable) = build_unavailable_providers_details(
-                            self,
-                            env,
-                            &filtered_candidates,
-                        ) {
+                        if let Some(unavailable) =
+                            build_unavailable_providers_details(self, env, &filtered_candidates)
+                        {
                             unavailable_route_pools.push(json!({
                                 "routeName": route_name,
                                 "poolId": pool.id,
@@ -443,132 +413,44 @@ impl VirtualRouterEngineCore {
                 }
                 let tier_load_balancing =
                     resolve_tier_load_balancing(&pool, self.load_balancer.policy());
-                let mut dynamic_weight_map: Option<HashMap<String, i64>> = None;
-                let context_weight_map = build_context_weighted_map(
-                    &self.provider_registry,
-                    &available,
-                    self.context_warn_ratio,
-                    self.load_balancer.policy().context_weighted.as_ref(),
-                );
-                if health_cfg.enabled {
-                    let mut weights = HashMap::new();
-                    for key in &available {
-                        let entry = self.quota_manager.get_state(key);
-                        let weight =
-                            compute_health_weight(entry.as_ref(), now_for_weights, &health_cfg);
-                        let context_weight =
-                            context_weight_map.as_ref().and_then(|map| map.get(key)).cloned();
-                        let final_weight = match context_weight {
-                            Some(ctx) => ((weight as i128) * (ctx as i128) / 100).max(1) as i64,
-                            None => weight,
-                        };
-                        weights.insert(key.clone(), final_weight);
-                    }
-                    if !excluded_keys.is_empty() && health_cfg.recover_to_best_on_retry {
-                        let mut best_key: Option<String> = None;
-                        let mut best_weight: i64 = i64::MIN;
-                        for key in &available {
-                            let weight = *weights.get(key).unwrap_or(&1);
-                            if weight > best_weight {
-                                best_weight = weight;
-                                best_key = Some(key.clone());
-                            }
-                        }
-                        if let Some(provider_key) = best_key {
-                            return Ok(SelectionResult::new(
-                                provider_key,
-                                route_name.to_string(),
-                                pool.targets.clone(),
-                                Some(pool.id.clone()),
-                            )
-                            .with_route_params(pool.route_params.clone()));
-                        }
-                    }
-                    dynamic_weight_map = Some(weights);
-                } else {
-                    let mut weights = HashMap::new();
-                    let mut has_penalty = false;
-                    for key in &available {
-                        let mut final_weight = context_weight_map
-                            .as_ref()
-                            .and_then(|map| map.get(key))
-                            .cloned()
-                            .unwrap_or(100);
-                        if let Some(state) = self.quota_manager.get_state(key) {
-                            let penalty = state.consecutive_error_count.max(0) as f64;
-                            let penalty_weight =
-                                (100.0 / (1.0 + penalty)).floor().max(1.0) as i64;
-                            final_weight =
-                                ((final_weight as i128) * (penalty_weight as i128) / 100).max(1)
-                                    as i64;
-                            if penalty > 0.0 {
-                                has_penalty = true;
-                            }
-                        }
-                        weights.insert(key.clone(), final_weight);
-                    }
-                    if has_penalty || context_weight_map.is_some() {
-                        dynamic_weight_map = Some(weights);
-                    }
-                }
-                let weight_map = build_candidate_weights(
-                    &available,
-                    &self.provider_registry,
-                    tier_load_balancing.weights.as_ref(),
-                    dynamic_weight_map.as_ref(),
-                );
-                let sticky_for_lb = sticky_key_for_continuation.as_deref();
-                // v2 weighted pools may be materialized by the bootstrap layer as:
-                //   mode=priority + loadBalancing.strategy=weighted
-                // when the user only declared loadBalancing.weights (no explicit targets/order).
-                // In that conflicting state, Rust selection must honor the weighted strategy
-                // instead of letting the synthetic priority mode lock the pool to the first
-                // provider.model group forever.
-                let effective_priority_mode = pool.mode.as_deref() == Some("priority")
-                    && tier_load_balancing.strategy != "weighted";
-                let mode_override = if effective_priority_mode {
-                    Some("priority")
-                } else if let Some(mode) = pool.mode.as_deref() {
-                    if mode == "priority" {
-                        Some(tier_load_balancing.strategy.as_str())
-                    } else {
-                        Some(mode)
-                    }
-                } else {
-                    Some(tier_load_balancing.strategy.as_str())
-                };
                 let route_key_for_lb = route_name.to_string();
                 let (ordered_group_ids, grouped_candidates) =
                     build_primary_target_groups(&available, &self.provider_registry);
-                let has_runtime_key_level_weights =
-                    has_runtime_key_level_weights(tier_load_balancing.weights.as_ref(), &available);
-                let can_select_grouped = dynamic_weight_map.is_none()
-                    && !has_runtime_key_level_weights;
-                let selected = if effective_priority_mode {
-                    available.first().cloned()
-                } else if can_select_grouped && !ordered_group_ids.is_empty() {
-                    let group_weights = build_group_weights(
-                        &grouped_candidates,
-                        tier_load_balancing.weights.as_ref(),
-                    );
-                    self.load_balancer.select_grouped(
+                let strategy = tier_load_balancing.strategy.as_str();
+                let selected = match strategy {
+                    "priority" => available.first().cloned(),
+                    "weighted" if !ordered_group_ids.is_empty() => {
+                        let group_weights = build_group_weights(
+                            &grouped_candidates,
+                            tier_load_balancing.weights.as_ref(),
+                        );
+                        self.load_balancer.select_grouped(
+                            &route_key_for_lb,
+                            &ordered_group_ids,
+                            &grouped_candidates,
+                            group_weights.as_ref(),
+                            |_| true,
+                            Some("weighted"),
+                        )
+                    }
+                    "round-robin" if !ordered_group_ids.is_empty() => {
+                        self.load_balancer.select_grouped(
+                            &route_key_for_lb,
+                            &ordered_group_ids,
+                            &grouped_candidates,
+                            None,
+                            |_| true,
+                            Some("round-robin"),
+                        )
+                    }
+                    _ => self.load_balancer.select_grouped(
                         &route_key_for_lb,
                         &ordered_group_ids,
                         &grouped_candidates,
-                        sticky_for_lb,
-                        group_weights.as_ref(),
+                        None,
                         |_| true,
-                        mode_override,
-                    )
-                } else {
-                    self.load_balancer.select(
-                        &route_key_for_lb,
-                        &available,
-                        sticky_for_lb,
-                        weight_map.as_ref(),
-                        |_| true,
-                        mode_override,
-                    )
+                        Some("round-robin"),
+                    ),
                 };
                 if let Some(provider_key) = selected {
                     return Ok(SelectionResult::new(
@@ -578,7 +460,10 @@ impl VirtualRouterEngineCore {
                         Some(pool.id.clone()),
                     )
                     .with_route_params(pool.route_params.clone())
-                    .with_unavailable_providers((!unavailable_route_pools.is_empty()).then_some(Value::Array(unavailable_route_pools))));
+                    .with_unavailable_providers(
+                        (!unavailable_route_pools.is_empty())
+                            .then_some(Value::Array(unavailable_route_pools)),
+                    ));
                 }
             }
         }
@@ -666,7 +551,6 @@ impl VirtualRouterEngineCore {
         }
         singleton_rust_quota_recoverable_wait_ms(&state, now).is_none()
     }
-
 }
 
 fn build_unavailable_providers_details(
@@ -748,16 +632,6 @@ fn build_primary_target_groups(
     (ordered_group_ids, groups)
 }
 
-fn has_runtime_key_level_weights(
-    weights: Option<&HashMap<String, i64>>,
-    candidates: &[String],
-) -> bool {
-    let Some(weights) = weights else {
-        return false;
-    };
-    candidates.iter().any(|key| weights.contains_key(key))
-}
-
 #[derive(Debug, Clone)]
 struct RecoverableCooldownHint {
     provider_key: String,
@@ -832,7 +706,10 @@ fn push_unavailable_reason(
     provider_key: &str,
     reason: Value,
 ) {
-    if let Some(existing) = blockers.iter_mut().find(|item| item.provider_key == provider_key) {
+    if let Some(existing) = blockers
+        .iter_mut()
+        .find(|item| item.provider_key == provider_key)
+    {
         existing.reasons.push(reason);
         return;
     }
@@ -945,7 +822,10 @@ fn collect_recoverable_cooldown_for_key(
         }
     }
 
-    if let Some(wait_ms) = core.health_manager.cooldown_remaining_ms(provider_key, now_ms) {
+    if let Some(wait_ms) = core
+        .health_manager
+        .cooldown_remaining_ms(provider_key, now_ms)
+    {
         record_recoverable_cooldown(
             provider_key,
             wait_ms,
@@ -982,7 +862,11 @@ fn collect_recoverable_cooldown_for_key(
 }
 
 fn quota_state_blocks_provider(state: &ProviderQuotaState, now_ms: i64) -> bool {
-    if state.blacklist_until.map(|until| until > now_ms).unwrap_or(false) {
+    if state
+        .blacklist_until
+        .map(|until| until > now_ms)
+        .unwrap_or(false)
+    {
         return true;
     }
     if state
@@ -1175,5 +1059,68 @@ mod tests {
             )
             .expect("selection should succeed");
         assert_eq!(selected.provider_key, "mimo.key1.mimo-v2.5-pro");
+    }
+
+    #[test]
+    fn singleton_provider_with_persisted_503_health_cooldown_gets_one_selection_probe() {
+        let provider_key = "windsurf.managed.gpt-5.5-low";
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            provider_key.to_string(),
+            json!({
+                "providerKey": provider_key,
+                "providerType": "openai",
+                "modelId": "gpt-5.5-low",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+
+        let routing = Map::from_iter([(
+            "thinking".to_string(),
+            Value::Array(vec![json!({
+                "id": "gateway-priority-5520-thinking",
+                "priority": 100,
+                "mode": "round-robin",
+                "targets": [provider_key]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+        let now = now_ms();
+        core.health_manager
+            .cooldown_provider_until_midnight_persisted(provider_key, now, now + 60_000);
+
+        assert_eq!(
+            core.apply_standard_filters(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &[provider_key.to_string()],
+                &RoutingInstructionState::default(),
+                &std::collections::HashSet::new(),
+            ),
+            vec![provider_key.to_string()]
+        );
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({}),
+                &ClassificationResult {
+                    route_name: "thinking".to_string(),
+                    confidence: 1.0,
+                    reasoning: "test".to_string(),
+                    candidates: vec!["thinking".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("singleton persisted 503 should allow one passive reprobe selection");
+
+        assert_eq!(selected.provider_key, provider_key);
     }
 }
