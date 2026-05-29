@@ -1,10 +1,46 @@
 import type { RouterMetadataInput } from '../../types.js';
-import { resolveVirtualRouterStickyKeyWithNative } from '../../engine-selection/native-virtual-router-sticky-semantics.js';
+import { failNativeRequired } from '../../engine-selection/native-router-hotpath-policy.js';
+import { loadNativeRouterHotpathBindingForInternalUse } from '../../engine-selection/native-router-hotpath.js';
 
-export function resolveStickyKey(metadata: RouterMetadataInput): string {
-  const stickyKey = resolveVirtualRouterStickyKeyWithNative(metadata as unknown as Record<string, unknown>);
-  if (typeof stickyKey === 'string' && stickyKey.trim()) {
-    return stickyKey;
+function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
+  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+  const fn = binding?.[name];
+  return typeof fn === 'function' ? (fn as (...args: unknown[]) => unknown) : null;
+}
+
+function parseStringValue(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== 'string') {
+      return null;
+    }
+    const trimmed = parsed.trim();
+    return trimmed || null;
+  } catch {
+    return null;
   }
-  throw new Error('native virtual-router sticky key resolver returned empty result');
+}
+
+export function resolveRoutingStateKey(metadata: RouterMetadataInput): string {
+  const capability = 'resolveVirtualRouterRoutingStateKeyJson';
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let payloadJson: string;
+  try {
+    payloadJson = JSON.stringify((metadata ?? null) as unknown);
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return parseStringValue(raw) ?? fail('invalid payload');
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error ?? 'unknown'));
+  }
 }
