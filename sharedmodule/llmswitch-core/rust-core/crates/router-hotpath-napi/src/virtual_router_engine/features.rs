@@ -7,9 +7,9 @@ use crate::virtual_router_engine::message_utils::{extract_message_text, get_late
 use crate::virtual_router_engine::routing::is_server_tool_followup_request;
 use media::analyze_media_attachments;
 use tools::{
-    choose_higher_priority_tool_category, classify_tool_call_for_report, detect_coding_tool,
-    detect_last_assistant_tool_category, detect_vision_tool, detect_web_search_tool_declared,
-    detect_web_tool, extract_meaningful_declared_tool_names,
+    classify_tool_call_for_report, detect_coding_tool, detect_last_assistant_tool_category,
+    detect_vision_tool, detect_web_search_tool_declared, detect_web_tool,
+    extract_meaningful_declared_tool_names,
 };
 
 fn get_message_role(message: &Value) -> Option<String> {
@@ -228,10 +228,9 @@ fn collect_responses_tool_signals(entries: &[Value]) -> (bool, Option<tools::Too
                 "arguments": obj.get("arguments").cloned().unwrap_or(Value::Null),
             }
         });
-        last_assistant_tool = choose_higher_priority_tool_category(
-            last_assistant_tool,
-            classify_tool_call_for_report(&synthesized),
-        );
+        if let Some(classification) = classify_tool_call_for_report(&synthesized) {
+            last_assistant_tool = Some(classification);
+        }
     }
 
     (has_tool_call_responses, last_assistant_tool)
@@ -908,7 +907,10 @@ mod tests {
 
         let features = build_routing_features(&request, &json!({}));
         assert!(features.latest_message_from_user);
-        assert_eq!(features.user_text_sample, "现在解释一下这段日志，不要改代码");
+        assert_eq!(
+            features.user_text_sample,
+            "现在解释一下这段日志，不要改代码"
+        );
         assert!(!features.has_tool_call_responses);
         assert_eq!(features.last_assistant_tool_category, None);
     }

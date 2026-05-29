@@ -49,6 +49,19 @@ function isTerminalQuotaRerouteCandidate(args: {
   );
 }
 
+function isWindsurfManagedAccountPoolCooldown(args: {
+  error: unknown;
+  retryError: RetryErrorSnapshot;
+}): boolean {
+  const record =
+    args.error && typeof args.error === 'object' && !Array.isArray(args.error)
+      ? (args.error as Record<string, unknown>)
+      : undefined;
+  const code = String(record?.code ?? args.retryError.errorCode ?? '').trim().toUpperCase();
+  const upstreamCode = String(record?.upstreamCode ?? args.retryError.upstreamCode ?? '').trim().toUpperCase();
+  return code === 'WINDSURF_ACCOUNT_POOL_COOLDOWN' || upstreamCode === 'WINDSURF_ACCOUNT_POOL_COOLDOWN';
+}
+
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
 };
@@ -97,6 +110,25 @@ export async function resolveProviderRetryExecutionPlan(args: {
   });
   args.recordAttempt({ error: true });
 
+  if (isWindsurfManagedAccountPoolCooldown({ error: args.error, retryError: args.retryError })) {
+    return {
+      shouldRetry: false,
+      blockingRecoverable: false,
+      excludedCurrentProvider: false,
+      holdOnLastAvailable429: false,
+      retryBackoffMs: 0,
+      recoverableBackoffMs: 0
+    };
+  }
+
+  if (classification === 'recoverable' && args.attempt >= 3 && args.providerKey && Array.isArray(args.routePool)) {
+    for (const candidate of args.routePool) {
+      if (typeof candidate === 'string' && candidate && candidate !== args.providerKey) {
+        args.excludedProviderKeys.delete(candidate);
+      }
+    }
+  }
+
   const exclusionPlan = hostContractFailure
     ? {
         excludedCurrentProvider: false
@@ -110,7 +142,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
         }
       : resolveProviderRetryExclusionPlan({
           providerKey: args.providerKey,
-          status: args.status,
+          status: args.retryError.statusCode ?? args.status,
           error: args.error,
           classification,
           attempt: args.attempt,
@@ -126,22 +158,32 @@ export async function resolveProviderRetryExecutionPlan(args: {
     retryError: args.retryError
   });
 
-  const terminalQuotaReroute =
-    !eligibilityPlan.shouldRetry
-    && exclusionPlan.excludedCurrentProvider
+  const hasTerminalAlternativeCandidate =
+    exclusionPlan.excludedCurrentProvider
     && !holdOnLastAvailable429
     && hasAlternativeRouteCandidate({
       providerKey: args.providerKey,
       routePool: args.routePool,
       excludedProviderKeys: args.excludedProviderKeys
-    })
+    });
+  const terminalQuotaReroute =
+    !eligibilityPlan.shouldRetry
+    && hasTerminalAlternativeCandidate
     && isTerminalQuotaRerouteCandidate({
       error: args.error,
       retryError: args.retryError,
       status: args.status
     });
+  const recoverableThresholdReroute =
+    hasTerminalAlternativeCandidate
+    && classification === 'recoverable'
+    && (args.attempt ?? 0) >= 3;
+  const terminalRecoverableReroute =
+    !eligibilityPlan.shouldRetry
+    && hasTerminalAlternativeCandidate
+    && classification === 'recoverable';
 
-  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute) {
+  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute && !terminalRecoverableReroute && !recoverableThresholdReroute) {
     const keepTerminalExclusion =
       exclusionPlan.excludedCurrentProvider
       && (args.status === 429 || args.forceExcludeCurrentProviderOnRetry === true);
@@ -155,19 +197,26 @@ export async function resolveProviderRetryExecutionPlan(args: {
     };
   }
 
-  if (terminalQuotaReroute) {
-    const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
-      error: args.error,
-      retryError: args.retryError,
-      providerKey: args.providerKey,
-      runtimeKey: args.runtimeKey,
-      stage: args.stage,
-      attempt: args.attempt,
-      forceProviderScopedBackoff: true,
-      forceAttemptScopedBackoff: false,
-      abortSignal: args.abortSignal,
-      logNonBlockingError: args.logNonBlockingError
-    });
+  if (terminalQuotaReroute || terminalRecoverableReroute || recoverableThresholdReroute) {
+    const retryBackoffPlan = (terminalRecoverableReroute || recoverableThresholdReroute)
+      ? {
+          blockingRecoverable: false,
+          retryBackoffMs: 0,
+          recoverableBackoffMs: 0,
+          backoffScope: 'provider' as const
+        }
+      : await resolveProviderRetryBackoffPlan({
+          error: args.error,
+          retryError: args.retryError,
+          providerKey: args.providerKey,
+          runtimeKey: args.runtimeKey,
+          stage: args.stage,
+          attempt: args.attempt,
+          forceProviderScopedBackoff: true,
+          forceAttemptScopedBackoff: false,
+          abortSignal: args.abortSignal,
+          logNonBlockingError: args.logNonBlockingError
+        });
     const retrySwitchPlan = buildProviderRetrySwitchPlan({
       runtimeKey: args.runtimeKey,
       routePool: args.routePool,

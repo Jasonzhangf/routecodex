@@ -263,21 +263,10 @@ pub(super) fn detect_last_assistant_tool_category(
             Some(list) if !list.is_empty() => list,
             _ => continue,
         };
-        let mut best: Option<ToolClassification> = None;
-        let mut best_score: i32 = -1;
-        for call in tool_calls {
-            let classification = match classify_tool_call(call) {
-                Some(value) => value,
-                None => continue,
-            };
-            let score = tool_category_priority(classification.category.as_str());
-            if score > best_score {
-                best_score = score;
-                best = Some(classification);
+        for call in tool_calls.iter().rev() {
+            if let Some(classification) = classify_tool_call(call) {
+                return Some(classification);
             }
-        }
-        if best.is_some() {
-            return best;
         }
     }
     None

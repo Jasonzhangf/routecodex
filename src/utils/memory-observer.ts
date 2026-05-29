@@ -76,7 +76,13 @@ function logSnapshot(): void {
       }]`
     : '';
 
-  console.log(msg + storeMsg);
+  if (shouldLogMemoryObserver()) {
+    console.log(msg + storeMsg);
+  }
+}
+
+function shouldLogMemoryObserver(): boolean {
+  return process.env.ROUTECODEX_MEM_OBSERVER_DISABLE !== '1' && process.env.RCC_MEM_OBSERVER_DISABLE !== '1';
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -86,14 +92,18 @@ export function startMemoryObserver(): void {
   // Emit immediately on start
   logSnapshot();
   timer = setInterval(logSnapshot, INTERVAL_MS);
-  console.log(`[mem-observer] started (interval=${INTERVAL_MS / 1000}s)`);
+  if (shouldLogMemoryObserver()) {
+    console.log(`[mem-observer] started (interval=${INTERVAL_MS / 1000}s)`);
+  }
 }
 
 export function stopMemoryObserver(): void {
   if (timer) {
     clearInterval(timer);
     timer = null;
-    console.log('[mem-observer] stopped');
+    if (shouldLogMemoryObserver()) {
+      console.log('[mem-observer] stopped');
+    }
   }
 }
 

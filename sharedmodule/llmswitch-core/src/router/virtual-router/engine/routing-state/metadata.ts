@@ -8,11 +8,16 @@ export function buildMetadataInstructions(
   }
 ): RoutingInstruction[] {
   const instructions: RoutingInstruction[] = [];
+  const metadataRecord = metadata as unknown as Record<string, unknown>;
   const forcedField = options?.forcedProviderKeyField || '__shadowCompareForcedProviderKey';
-  const forcedProviderKeyRaw = (metadata as unknown as Record<string, unknown>)[forcedField];
+  const forcedProviderKeyRaw = metadataRecord[forcedField];
   const forcedProviderKey = parseMetadataForceProviderKey(forcedProviderKeyRaw);
   if (forcedProviderKey) {
     instructions.push({ type: 'force', ...forcedProviderKey });
+  }
+  const retryProviderKey = parseMetadataForceProviderKey(metadataRecord.__routecodexRetryProviderKey);
+  if (retryProviderKey) {
+    instructions.push({ type: 'force', ...retryProviderKey });
   }
   if (Array.isArray((metadata as any).disabledProviderKeyAliases)) {
     for (const entry of (metadata as any).disabledProviderKeyAliases) {
@@ -39,15 +44,6 @@ export function resolveRoutingMode(
   }
   if (hasForce || state.forcedTarget) {
     return 'force';
-  }
-  if (hasAllow || state.allowedProviders.size > 0) {
-    return 'sticky';
-  }
-  if (hasPrefer || state.preferTarget) {
-    return 'sticky';
-  }
-  if (state.stickyTarget) {
-    return 'sticky';
   }
   return 'none';
 }

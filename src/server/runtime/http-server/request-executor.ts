@@ -362,9 +362,18 @@ export class HubRequestExecutor implements RequestExecutor {
       && Number.isFinite(metadataRt.requestExecutorSourceReentryDepth)
         ? Math.max(0, Math.floor(metadataRt.requestExecutorSourceReentryDepth))
         : 0;
+    const restoredBodyRecord = restoredBody && typeof restoredBody === 'object' && !Array.isArray(restoredBody)
+      ? (restoredBody as Record<string, unknown>)
+      : {};
+    restoredBodyRecord.metadata = {
+      ...(restoredBodyRecord.metadata && typeof restoredBodyRecord.metadata === 'object' && !Array.isArray(restoredBodyRecord.metadata)
+        ? (restoredBodyRecord.metadata as Record<string, unknown>)
+        : {}),
+      excludedProviderKeys: Array.from(args.excludedProviderKeys)
+    };
     const nestedInput: PipelineExecutionInput = {
       ...args.input,
-      body: restoredBody,
+      body: restoredBodyRecord,
       metadata: {
         ...args.metadataForAttempt,
         excludedProviderKeys: Array.from(args.excludedProviderKeys),
@@ -456,6 +465,7 @@ export class HubRequestExecutor implements RequestExecutor {
         || (typeof extractStatusCodeFromError(error) === 'number' ? `status_${extractStatusCodeFromError(error)}` : '');
       return normalizeCodeKey(code || 'unknown_error') || 'unknown_error';
     };
+    let sessionStormBackoffScopesForCatch: string[] | undefined;
     try {
       const hubPipeline = ensureHubPipeline(() => this.deps.getHubPipeline(readString(metadataRecord?.routecodexRoutingPolicyGroup)));
       const {
@@ -470,6 +480,7 @@ export class HubRequestExecutor implements RequestExecutor {
         onRequestStart: this.deps.onRequestStart,
         logNonBlockingError: logRequestExecutorNonBlockingError
       });
+      sessionStormBackoffScopesForCatch = sessionStormBackoffScopes;
       try {
         const pipelineLabel = 'hub';
         let aggregatedUsage: UsageMetrics | undefined;
@@ -508,6 +519,18 @@ export class HubRequestExecutor implements RequestExecutor {
           forcedRouteHint,
           throwIfClientAbortSignalAborted
         });
+        const holdStateForSameProviderRetry = blockingRecoverableRouteHoldState as BlockingRecoverableRouteHoldState | null;
+        if (
+          holdStateForSameProviderRetry?.preserveSameProviderRetry === true
+          && holdStateForSameProviderRetry.providerKey
+        ) {
+          excludedProviderKeys.delete(holdStateForSameProviderRetry.providerKey);
+          metadataForAttempt.__routecodexRetryProviderKey = holdStateForSameProviderRetry.providerKey;
+          logStage('provider.retry.same_provider_route_lock', providerRequestId, {
+            providerKey: holdStateForSameProviderRetry.providerKey,
+            attempt
+          });
+        }
         const hubStartedAtMs = Date.now();
         logStageLazy(`${pipelineLabel}.start`, providerRequestId, () => ({
           endpoint: input.entryEndpoint,
@@ -523,26 +546,27 @@ export class HubRequestExecutor implements RequestExecutor {
             const candidateProviderCount = resolvePoolCooldownCandidateProviderCount(pipelineError);
             const singletonRecoverablePoolCandidate =
               cooldownWaitMs !== undefined && candidateProviderCount === 1;
+            const holdStateForPoolCooldown = blockingRecoverableRouteHoldState as BlockingRecoverableRouteHoldState | null;
             if (
-              blockingRecoverableRouteHoldState?.holdOnLastAvailable429
-              && blockingRecoverableRouteHoldState.explicitSingletonPool
+              holdStateForPoolCooldown?.holdOnLastAvailable429
+              && holdStateForPoolCooldown.explicitSingletonPool
             ) {
               const blockingRetryBackoffMs =
                 cooldownWaitMs
                 ?? consumeRecoverableErrorBackoffMs(
                   buildRecoverableErrorBackoffKey({
-                    providerKey: blockingRecoverableRouteHoldState.providerKey,
-                    runtimeKey: blockingRecoverableRouteHoldState.runtimeKey,
-                    statusCode: blockingRecoverableRouteHoldState.retryError.statusCode,
-                    errorCode: blockingRecoverableRouteHoldState.retryError.errorCode,
-                    upstreamCode: blockingRecoverableRouteHoldState.retryError.upstreamCode,
-                    reason: blockingRecoverableRouteHoldState.retryError.reason
+                    providerKey: holdStateForPoolCooldown.providerKey,
+                    runtimeKey: holdStateForPoolCooldown.runtimeKey,
+                    statusCode: holdStateForPoolCooldown.retryError.statusCode,
+                    errorCode: holdStateForPoolCooldown.retryError.errorCode,
+                    upstreamCode: holdStateForPoolCooldown.retryError.upstreamCode,
+                    reason: holdStateForPoolCooldown.retryError.reason
                   }),
                   {
-                    statusCode: blockingRecoverableRouteHoldState.retryError.statusCode,
-                    errorCode: blockingRecoverableRouteHoldState.retryError.errorCode,
-                    upstreamCode: blockingRecoverableRouteHoldState.retryError.upstreamCode,
-                    reason: blockingRecoverableRouteHoldState.retryError.reason
+                    statusCode: holdStateForPoolCooldown.retryError.statusCode,
+                    errorCode: holdStateForPoolCooldown.retryError.errorCode,
+                    upstreamCode: holdStateForPoolCooldown.retryError.upstreamCode,
+                    reason: holdStateForPoolCooldown.retryError.reason
                   }
                 );
               logStage('provider.route_pool_cooldown_wait', providerRequestId, {
@@ -733,6 +757,7 @@ export class HubRequestExecutor implements RequestExecutor {
           blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
           allowBlockingRecoverableRetryBeyondAttemptBudget =
             failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
+          metadataForAttempt.excludedProviderKeys = Array.from(excludedProviderKeys);
           if (this.shouldReenterFromSourceRequest(metadataForAttempt)) {
             return await this.reenterFromSourceRequest({
               input,
@@ -841,11 +866,6 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
         }
-        const providerTransportBackoffKey = buildProviderTransportBackoffKey({
-          providerKey: target.providerKey,
-          runtimeKey
-        });
-
         let trafficPermit: ProviderTrafficPermit | null = null;
         let trafficPolicyMaxInFlight = 0;
         let trafficActiveInFlightAtAcquire = 0;
@@ -856,7 +876,16 @@ export class HubRequestExecutor implements RequestExecutor {
           typeof (providerPayload as { stream?: unknown } | undefined)?.stream === 'boolean'
             ? Boolean((providerPayload as { stream?: unknown }).stream)
             : undefined;
-        const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt);
+        const providerOwnsWindsurfManagedTraffic =
+          (typeof target.providerKey === 'string' && target.providerKey.startsWith('windsurf.managed.'))
+          || (typeof runtimeKey === 'string' && runtimeKey.startsWith('windsurf.managed.'));
+        const providerTransportBackoffKey = providerOwnsWindsurfManagedTraffic
+          ? undefined
+          : buildProviderTransportBackoffKey({
+            providerKey: target.providerKey,
+            runtimeKey
+          });
+        const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt) || providerOwnsWindsurfManagedTraffic;
         try {
           throwIfClientAbortSignalAborted(clientAbortSignal);
           if (providerTransportBackoffKey) {
@@ -886,7 +915,7 @@ export class HubRequestExecutor implements RequestExecutor {
             logStage('provider.traffic.acquire.bypassed', input.requestId, {
               providerKey: target.providerKey,
               runtimeKey,
-              reason: 'servertool_followup',
+              reason: providerOwnsWindsurfManagedTraffic ? 'windsurf_managed_provider_owned' : 'servertool_followup',
               attempt
             });
           } else {
@@ -1299,7 +1328,7 @@ export class HubRequestExecutor implements RequestExecutor {
             const scopedErrorCode = resolveScopedBackoffErrorCode(error);
             const scopedBackoffKey = buildScopedBackoffKey(target.providerKey, scopedErrorCode);
             const pendingScopedWaitMs = peekScopedErrorBackoffWaitMs(scopedBackoffKey);
-            if (pendingScopedWaitMs > 0) {
+            if (pendingScopedWaitMs > 0 && !failureState.allowBlockingRecoverableRetryBeyondAttemptBudget) {
               logStage('server.global_error_backoff_wait', providerRequestId, {
                 waitMs: pendingScopedWaitMs,
                 scope: scopedBackoffKey
@@ -1312,6 +1341,7 @@ export class HubRequestExecutor implements RequestExecutor {
             }
             recordScopedErrorBackoff(scopedBackoffKey);
           }
+          metadataForAttempt.excludedProviderKeys = Array.from(excludedProviderKeys);
           if (this.shouldReenterFromSourceRequest(metadataForAttempt)) {
             return await this.reenterFromSourceRequest({
               input,
@@ -1347,6 +1377,20 @@ export class HubRequestExecutor implements RequestExecutor {
         await clearResponsesConversationByRequestId(input.requestId || executorRequestId);
       } catch {
         // non-blocking cleanup
+      }
+      if (isSessionStormBackoffCandidate(error)) {
+        const scopes = sessionStormBackoffScopesForCatch?.length
+          ? sessionStormBackoffScopesForCatch
+          : resolveSessionStormBackoffScopes(metadataRecord ?? {});
+        for (const scope of scopes) {
+          const backoffMs = consumeSessionStormBackoffMs(scope, error);
+          logStage('request.session_storm_backoff.recorded', input.requestId || executorRequestId, {
+            scope,
+            backoffMs,
+            source: 'pipeline_or_pre_provider_failure',
+            code: resolveScopedBackoffErrorCode(error)
+          });
+        }
       }
       const scopedErrorCode = resolveScopedBackoffErrorCode(error);
       const scopedBackoffKey = buildScopedBackoffKey('unresolved-provider', scopedErrorCode);

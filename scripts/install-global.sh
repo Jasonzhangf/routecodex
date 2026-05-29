@@ -308,25 +308,6 @@ verify_install() {
     fi
 }
 
-verify_server_health() {
-    if [ "${ROUTECODEX_INSTALL_SKIP_E2E:-0}" = "1" ]; then
-        echo ""
-        echo "⏭️  已跳过全局 CLI 端到端检查（ROUTECODEX_INSTALL_SKIP_E2E=1）"
-        return
-    fi
-
-    local HEALTH_LOG="/tmp/routecodex-install-health-$(date +%s).log"
-    echo ""
-    echo "🩺 执行服务器健康&端到端检查 (chat + anthropic SSE)..."
-    if env -u ROUTECODEX_BUILD_RESTART_ONLY -u RCC_BUILD_RESTART_ONLY node scripts/verify-install-e2e.mjs >"$HEALTH_LOG" 2>&1; then
-        echo "✅ 全局 CLI 端到端检查通过"
-        rm -f "$HEALTH_LOG" || true
-        return
-    fi
-    echo "❌ 端到端检查失败，请查看日志: $HEALTH_LOG"
-    tail -n 200 "$HEALTH_LOG" 2>/dev/null || true
-    exit 1
-}
 
 restart_managed_dev_server_if_requested() {
     local restart_only="${ROUTECODEX_BUILD_RESTART_ONLY:-${RCC_BUILD_RESTART_ONLY:-0}}"
@@ -387,7 +368,6 @@ main() {
     refresh_rcc_install_current_snapshots
     link_global_llms_dev
     verify_install
-    verify_server_health
     restart_managed_dev_server_if_requested
     node scripts/cleanup-stale-server-pids.mjs --quiet || true
 

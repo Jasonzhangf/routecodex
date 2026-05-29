@@ -249,9 +249,6 @@ pub(super) fn parse_single_instruction(
     if let Some(stop) = parse_stop_message_instruction(instruction)? {
         return Ok(Some(stop));
     }
-    if let Some(sticky) = parse_named_target_instruction(instruction, "sticky") {
-        return Ok(Some(sticky));
-    }
     if let Some(force) = parse_named_target_instruction(instruction, "force") {
         return Ok(Some(force));
     }

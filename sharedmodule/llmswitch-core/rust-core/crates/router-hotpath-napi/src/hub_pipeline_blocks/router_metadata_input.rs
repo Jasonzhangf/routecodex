@@ -214,6 +214,34 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
             );
         }
 
+        if let Some(retry_provider_key) = metadata_obj
+            .get("__routecodexRetryProviderKey")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        {
+            out.insert(
+                "__routecodexRetryProviderKey".to_string(),
+                Value::String(retry_provider_key),
+            );
+        }
+
+        if let Some(excluded_provider_keys) = metadata_obj
+            .get("excludedProviderKeys")
+            .and_then(|v| v.as_array())
+        {
+            let normalized: Vec<Value> = excluded_provider_keys
+                .iter()
+                .filter_map(|entry| entry.as_str())
+                .map(|entry| entry.trim().to_string())
+                .filter(|entry| !entry.is_empty())
+                .map(Value::String)
+                .collect();
+            if !normalized.is_empty() {
+                out.insert("excludedProviderKeys".to_string(), Value::Array(normalized));
+            }
+        }
+
         if let Some(disabled_aliases) = metadata_obj
             .get("disabledProviderKeyAliases")
             .and_then(|v| v.as_array())

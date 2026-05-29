@@ -235,17 +235,17 @@ function shouldSuppressRuntimeLogLine(text: string): boolean {
   if (!text) {
     return false;
   }
-  if (text.includes('[virtual-router-hit]')) {
-    return true;
+  if (text.includes('[port-resolve]')) {
+    return process.env.ROUTECODEX_PORT_RESOLVE_LOGS !== '1' && process.env.RCC_PORT_RESOLVE_LOGS !== '1';
   }
-  if (text.includes('[provider-switch]')) {
-    return true;
+  if (text.includes('[mem-observer]')) {
+    return process.env.ROUTECODEX_MEM_OBSERVER_DISABLE === '1' || process.env.RCC_MEM_OBSERVER_DISABLE === '1';
   }
   if (text.includes('[usage] request ')) {
     return true;
   }
   if (
-    text.includes('[sticky-session-store]')
+    text.includes('[routing-state-store]')
     && text.includes('tmpCleanup failed (non-blocking)')
     && text.includes('ENOENT')
   ) {

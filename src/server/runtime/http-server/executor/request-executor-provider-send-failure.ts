@@ -267,19 +267,39 @@ export async function processProviderSendFailure(
     throw args.error;
   }
 
+  const shouldPreserveSameProviderRetry = retryExecutionPlan.retrySwitchPlan?.switchAction === 'retry_same_provider';
+  if (shouldPreserveSameProviderRetry && args.providerKey && Array.isArray(args.routePoolForAttempt)) {
+    for (const candidate of args.routePoolForAttempt) {
+      if (typeof candidate === 'string' && candidate && candidate !== args.providerKey) {
+        args.excludedProviderKeys.add(candidate);
+      }
+    }
+    args.excludedProviderKeys.delete(args.providerKey);
+  } else if (retryExecutionPlan.retrySwitchPlan?.switchAction === 'exclude_and_reroute' && args.providerKey && Array.isArray(args.routePoolForAttempt)) {
+    for (const candidate of args.routePoolForAttempt) {
+      if (typeof candidate === 'string' && candidate && candidate !== args.providerKey) {
+        args.excludedProviderKeys.delete(candidate);
+      }
+    }
+  }
   const blockingRecoverableRouteHoldState =
-    retryExecutionPlan.blockingRecoverable
+    (retryExecutionPlan.blockingRecoverable || shouldPreserveSameProviderRetry)
       ? {
         providerKey: args.providerKey,
         runtimeKey: args.runtimeKey,
         retryError,
         holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
         explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1,
-        preserveSameProviderRetry: retryExecutionPlan.retrySwitchPlan?.switchAction === 'retry_same_provider'
+        preserveSameProviderRetry: shouldPreserveSameProviderRetry,
+        routePoolForSameProviderRetry: Array.isArray(args.routePoolForAttempt) ? [...args.routePoolForAttempt] : undefined
       }
       : null;
   const allowBlockingRecoverableRetryBeyondAttemptBudget =
-    retryExecutionPlan.blockingRecoverable && args.attempt >= args.maxAttempts;
+    args.attempt >= args.maxAttempts
+    && (
+      retryExecutionPlan.blockingRecoverable
+      || (retryExecutionPlan.excludedCurrentProvider && retryExecutionPlan.shouldRetry)
+    );
 
   emitRequestExecutorProviderRetryTelemetry({
     requestId: args.requestId,
