@@ -399,7 +399,8 @@ mod tests {
     }
 
     #[test]
-    fn historical_other_label_without_current_tool_followup_does_not_route_to_tools_by_continuation() {
+    fn historical_other_label_without_current_tool_followup_does_not_route_to_tools_by_continuation(
+    ) {
         let features = RoutingFeatures {
             latest_message_from_user: false,
             has_tools: true,

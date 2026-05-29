@@ -286,7 +286,11 @@ pub(crate) fn parse_target(target: &str) -> Option<InstructionTarget> {
         });
     }
 
-    if parts.len() == 3 && Regex::new(r"^\d+[a-zA-Z0-9_-]*$").unwrap().is_match(parts[2]) {
+    if parts.len() == 3
+        && Regex::new(r"^\d+[a-zA-Z0-9_-]*$")
+            .unwrap()
+            .is_match(parts[2])
+    {
         let model = format!("{}.{}", parts[1], parts[2]);
         if !Regex::new(r"^[a-zA-Z0-9_.-]+$").unwrap().is_match(&model) {
             return None;

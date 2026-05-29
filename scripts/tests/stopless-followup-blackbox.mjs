@@ -214,5 +214,5 @@ main().then(() => {
 }).catch((err) => {
   console.error('❌ stopless blackbox failed');
   console.error(err && err.stack ? err.stack : err);
-  setTimeout(() => process.exit(1), 20).unref();
+  process.exit(1);
 });

@@ -164,5 +164,5 @@ main().then(() => {
 }).catch((error) => {
   console.error('[responses-store-error-release-blackbox] failed');
   console.error(error instanceof Error ? error.stack || error.message : error);
-  setTimeout(() => process.exit(1), 20).unref();
+  process.exit(1);
 });

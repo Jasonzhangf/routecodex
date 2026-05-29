@@ -159,4 +159,4 @@ async function main() {
   const relay = runScenarioChild('relay');
   console.log(JSON.stringify({ ok: true, direct, relay }, null, 2));
 }
-main().then(() => setTimeout(() => process.exit(0), 20).unref()).catch((error) => { console.error('[responses-continuation-provider-key-blackbox] failed'); console.error(error instanceof Error ? error.stack || error.message : error); setTimeout(() => process.exit(1), 20).unref(); });
+main().then(() => setTimeout(() => process.exit(0), 20).unref()).catch((error) => { console.error('[responses-continuation-provider-key-blackbox] failed'); console.error(error instanceof Error ? error.stack || error.message : error); process.exit(1); });

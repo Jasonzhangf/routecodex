@@ -838,7 +838,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn multi_tool_messages_prefer_search_over_read() {
+    fn multi_tool_messages_use_latest_tool_call_not_prior_search() {
         let messages = vec![json!({
             "role": "assistant",
             "tool_calls": [
@@ -864,7 +864,7 @@ mod tests {
         let result = detect_last_assistant_tool_category(&messages);
         assert_eq!(
             result.as_ref().map(|item| item.category.as_str()),
-            Some("search")
+            Some("thinking")
         );
     }
 

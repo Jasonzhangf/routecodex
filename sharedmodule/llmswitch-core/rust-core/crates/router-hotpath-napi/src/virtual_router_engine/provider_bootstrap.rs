@@ -368,9 +368,9 @@ fn build_provider_runtime_entries(
         if use_internal_managed_windsurf {
             let managed_alias = String::from("managed");
             alias_index.insert(provider_id.clone(), vec![managed_alias.clone()]);
-            let selected_entry = auth_entries
-                .first()
-                .ok_or_else(|| format!("Provider {} requires at least one auth entry", provider_id))?;
+            let selected_entry = auth_entries.first().ok_or_else(|| {
+                format!("Provider {} requires at least one auth entry", provider_id)
+            })?;
             let mut runtime_auth = selected_entry.auth.clone();
             runtime_auth.entries = extract_raw_auth_entries(provider);
             if runtime_auth.auth_type == "apiKey" && runtime_auth.secret_ref.is_none() {
@@ -438,7 +438,20 @@ fn build_provider_runtime_entries(
             .iter()
             .map(|entry| entry.key_alias.clone())
             .collect();
-        let provider_level_pool_alias = if auth_entries.len() > 1 {
+        // Only add pool alias for WindSurf providers (multi-account pool).
+        let is_pool_compatible = provider_id.trim().eq_ignore_ascii_case("windsurf")
+            || normalized_provider
+                .compatibility_profile
+                .trim()
+                .eq_ignore_ascii_case("chat:windsurf")
+            || auth_entries.iter().any(|e| {
+                e.auth
+                    .raw_type
+                    .as_deref()
+                    .map(|rt| rt.eq_ignore_ascii_case("windsurf-account"))
+                    .unwrap_or(false)
+            });
+        let provider_level_pool_alias = if auth_entries.len() > 1 && is_pool_compatible {
             let mut candidate = PROVIDER_LEVEL_POOL_ALIAS.to_string();
             let mut index = 1;
             while aliases.iter().any(|existing| existing == &candidate) {
@@ -454,9 +467,9 @@ fn build_provider_runtime_entries(
         model_index.insert(provider_id.clone(), collected_models);
 
         if let Some(pool_alias) = provider_level_pool_alias {
-            let selected_entry = auth_entries
-                .first()
-                .ok_or_else(|| format!("Provider {} requires at least one auth entry", provider_id))?;
+            let selected_entry = auth_entries.first().ok_or_else(|| {
+                format!("Provider {} requires at least one auth entry", provider_id)
+            })?;
             let mut runtime_auth = selected_entry.auth.clone();
             runtime_auth.entries = extract_raw_auth_entries(provider);
             if runtime_auth.auth_type == "apiKey" && runtime_auth.secret_ref.is_none() {
@@ -617,14 +630,6 @@ fn should_use_internal_managed_windsurf(
             Some(v) => v,
             None => return false,
         };
-        let entries_len = auth
-            .get("entries")
-            .and_then(|value| value.as_array())
-            .map(|arr| arr.len())
-            .unwrap_or(0);
-        if entries_len < 2 {
-            return false;
-        }
         let raw_type = read_optional_string(auth.get("rawType").or_else(|| auth.get("raw_type")))
             .or_else(|| read_optional_string(auth.get("type")))
             .unwrap_or_default()
@@ -1670,7 +1675,7 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_preserves_windsurf_account_credentials_in_runtime_auth() {
+    fn bootstrap_keeps_windsurf_accounts_internal_to_managed_runtime() {
         let providers = json!({
             "windsurf": {
                 "id": "windsurf",
@@ -1707,12 +1712,22 @@ mod tests {
         let output = bootstrap_virtual_router_providers_json(providers.to_string())
             .expect("bootstrap should succeed");
         let parsed: Value = serde_json::from_str(&output).expect("output json should parse");
-        let auth = &parsed["runtimeEntries"]["windsurf.ws-pro-1"]["auth"];
+        let runtime_entries = parsed["runtimeEntries"]
+            .as_object()
+            .expect("runtimeEntries should be object");
+        assert!(runtime_entries.contains_key("windsurf.managed"));
+        assert!(
+            !runtime_entries.contains_key("windsurf.ws-pro-1"),
+            "windsurf account aliases must not be externally observable runtime providers"
+        );
+        assert_eq!(parsed["aliasIndex"]["windsurf"], json!(["managed"]));
+
+        let auth = &parsed["runtimeEntries"]["windsurf.managed"]["auth"];
         assert_eq!(auth["type"], "apiKey");
         assert_eq!(auth["rawType"], "windsurf-account");
         assert_eq!(auth["mobile"], "2094423@qq.com");
         assert_eq!(auth["password"], "welcome4zcam#");
-        let extensions = &parsed["runtimeEntries"]["windsurf.ws-pro-1"]["extensions"]["windsurf"];
+        let extensions = &parsed["runtimeEntries"]["windsurf.managed"]["extensions"]["windsurf"];
         assert_eq!(extensions["pollIntervalMs"], 800);
         assert_eq!(extensions["pollMaxWaitMs"], 120000);
         assert_eq!(extensions["enableThinking"], true);

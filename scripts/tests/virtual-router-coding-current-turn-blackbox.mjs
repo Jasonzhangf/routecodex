@@ -253,5 +253,5 @@ main().then(() => {
 }).catch((error) => {
   console.error('[virtual-router-coding-current-turn-blackbox] failed');
   console.error(error instanceof Error ? error.stack || error.message : error);
-  setTimeout(() => process.exit(1), 20).unref();
+  process.exit(1);
 });

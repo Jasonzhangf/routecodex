@@ -776,7 +776,7 @@ mod tests {
     }
 
     #[test]
-    fn previous_turn_tool_signals_prefer_search_over_read_in_responses_context() {
+    fn previous_turn_tool_signals_use_latest_read_not_prior_search_in_responses_context() {
         let request = json!({
             "model": "glm-5",
             "tools": [
@@ -823,7 +823,7 @@ mod tests {
         assert!(features.has_tool_call_responses);
         assert_eq!(
             features.last_assistant_tool_category.as_deref(),
-            Some("search")
+            Some("thinking")
         );
     }
 

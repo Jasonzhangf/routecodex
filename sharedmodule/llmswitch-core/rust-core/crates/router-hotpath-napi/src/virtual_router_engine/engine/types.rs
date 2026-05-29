@@ -32,7 +32,10 @@ impl SelectionResult {
         self
     }
 
-    pub(super) fn with_unavailable_providers(mut self, unavailable_providers: Option<Value>) -> Self {
+    pub(super) fn with_unavailable_providers(
+        mut self,
+        unavailable_providers: Option<Value>,
+    ) -> Self {
         self.unavailable_providers = unavailable_providers;
         self
     }

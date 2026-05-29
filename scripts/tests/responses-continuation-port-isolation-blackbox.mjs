@@ -49,4 +49,4 @@ async function main() {
     console.log(JSON.stringify({ ok: true, firstStatus: first.status, secondStatus: second.status, hits }, null, 2));
   } finally { await close(harness?.server); await routeCodex?.disposeProviders?.().catch(() => {}); await close(a1?.server); await close(b1?.server); for (const r of restores.reverse()) r(); await fs.rm(tmp, { recursive: true, force: true }); }
 }
-main().then(() => setTimeout(() => process.exit(0), 20).unref()).catch((e) => { console.error(e?.stack || e); setTimeout(() => process.exit(1), 20).unref(); });
+main().then(() => setTimeout(() => process.exit(0), 20).unref()).catch((e) => { console.error(e?.stack || e); process.exit(1); });

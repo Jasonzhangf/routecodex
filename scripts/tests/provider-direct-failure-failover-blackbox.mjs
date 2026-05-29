@@ -77,5 +77,5 @@ main().then(() => {
   setTimeout(() => process.exit(0), 20).unref();
 }).catch((e) => {
   console.error(e);
-  setTimeout(() => process.exit(1), 20).unref();
+  process.exit(1);
 });

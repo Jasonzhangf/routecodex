@@ -301,13 +301,17 @@ fn expand_routing_table(
                         let has_key_alias =
                             parsed.as_ref().and_then(|p| p.key_alias.as_ref()).is_some();
                         if !has_key_alias {
-                            let prefix = format!("{}.", config_key);
-                            let pattern = prefix.as_str();
                             let matching: Vec<String> = sorted_targets
                                 .iter()
                                 .filter(|t| {
-                                    t.as_str().starts_with(pattern)
-                                        || t.as_str() == config_key.as_str()
+                                    if t.as_str() == config_key.as_str() {
+                                        return true;
+                                    }
+                                    let Some(parsed) = parsed.as_ref() else {
+                                        return false;
+                                    };
+                                    t.as_str().starts_with(&format!("{}.", parsed.provider_id))
+                                        && t.as_str().ends_with(&format!(".{}", parsed.model_id))
                                 })
                                 .cloned()
                                 .collect();
@@ -1000,6 +1004,61 @@ mod tests {
             display_pool_id(&pool, "search"),
             "gateway-priority-5555-weighted-search"
         );
+    }
+
+    #[test]
+    fn provider_level_target_expands_to_individual_auth_keys_unless_pool_alias_exists() {
+        let routing_source = BTreeMap::from([(
+            "search".to_string(),
+            vec![NormalizedRoutePoolConfig {
+                id: "search".to_string(),
+                priority: 100,
+                backup: false,
+                targets: vec!["mimo.mimo-v2.5".to_string()],
+                mode: Some("weighted".to_string()),
+                force: None,
+                load_balancing: Some(LoadBalancingPolicy {
+                    strategy: Some("weighted".to_string()),
+                    weights: Some(HashMap::from([("mimo.mimo-v2.5".to_string(), 1)])),
+                    health_weighted: None,
+                    context_weighted: None,
+                }),
+                route_params: None,
+                thinking: None,
+            }],
+        )]);
+        let alias_index = BTreeMap::from([(
+            "mimo".to_string(),
+            vec!["key1".to_string(), "key2".to_string()],
+        )]);
+        let model_index = BTreeMap::from([(
+            "mimo".to_string(),
+            ModelIndexEntry {
+                declared: true,
+                models: vec!["mimo-v2.5".to_string()],
+            },
+        )]);
+
+        let (routing, _) =
+            expand_routing_table(&routing_source, &alias_index, &model_index).unwrap();
+        let pool = &routing["search"][0];
+
+        assert_eq!(
+            pool.targets,
+            vec![
+                "mimo.key1.mimo-v2.5".to_string(),
+                "mimo.key2.mimo-v2.5".to_string()
+            ]
+        );
+        let weights = pool
+            .load_balancing
+            .as_ref()
+            .and_then(|lb| lb.weights.as_ref())
+            .expect("expanded weights should be present");
+        assert!(weights.contains_key("mimo.key1.mimo-v2.5"));
+        assert!(weights.contains_key("mimo.key2.mimo-v2.5"));
+        assert!(!weights.contains_key("mimo.pool.mimo-v2.5"));
+        assert!(!weights.contains_key("mimo.mimo-v2.5"));
     }
 
     #[test]

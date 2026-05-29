@@ -298,7 +298,8 @@ fn normalize_load_balancing(value: Option<&Value>) -> Option<LoadBalancingConfig
     let health_weighted = normalize_health_weighted(record.get("healthWeighted"));
     let context_weighted = normalize_context_weighted(record.get("contextWeighted"));
 
-    let has_non_strategy = weights.is_some() || health_weighted.is_some() || context_weighted.is_some();
+    let has_non_strategy =
+        weights.is_some() || health_weighted.is_some() || context_weighted.is_some();
     if strategy_raw.is_empty() && !has_non_strategy {
         return None;
     }
@@ -724,7 +725,6 @@ fn parse_bool_like(value: &Value) -> Option<bool> {
 fn clamp_warn_ratio(value: f64) -> f64 {
     if !value.is_finite() {
         return DEFAULT_WARN_RATIO;
-
     }
     let clamped = value.max(0.1).min(0.99);
     if clamped.is_finite() {

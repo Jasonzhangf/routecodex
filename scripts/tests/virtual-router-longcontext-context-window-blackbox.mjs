@@ -215,5 +215,5 @@ main().then(() => {
 }).catch((error) => {
   console.error('[virtual-router-longcontext-context-window-blackbox] failed');
   console.error(error instanceof Error ? error.stack || error.message : error);
-  setTimeout(() => process.exit(1), 20).unref();
+  process.exit(1);
 });
