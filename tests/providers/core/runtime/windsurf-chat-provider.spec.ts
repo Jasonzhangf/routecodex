@@ -6085,6 +6085,93 @@ print('{"ok":true}')
     expect(parsedFields.map((f: any) => f.fieldNo)).toContain(28);
   });
 
+  test('RED: resumed cascade additional_steps only include current native tool result window', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$current-native', rawType: 'windsurf-devin-token' });
+    const semantic = [
+      { type: 'user', text: 'old pwd' },
+      { type: 'assistant', text: '', tool_calls: [{ call_id: 'native:run_command:old', name: 'run_command', arguments: { command_line: 'pwd', cwd: '/old' } }] },
+      { type: 'function_call_output', call_id: 'native:run_command:old', name: 'run_command', output: '/old\n' },
+      { type: 'user', text: 'new pwd' },
+      { type: 'assistant', text: '', tool_calls: [{ call_id: 'native:run_command:new', name: 'run_command', arguments: { command_line: 'pwd', cwd: '/new' } }] },
+      { type: 'function_call_output', call_id: 'native:run_command:new', name: 'run_command', output: '/new\n' },
+      { type: 'user', text: 'continue' },
+    ];
+
+    const steps = (provider as any).buildCascadeAdditionalStepsFromSemanticConversation(semantic, [], { currentOnly: true });
+
+    expect(steps).toHaveLength(1);
+    const parsedFields = (provider as any).parseProtoFields(steps[0]);
+    expect(parsedFields.map((f: any) => f.fieldNo)).toContain(28);
+    expect(steps[0].toString('utf8')).toContain('/new');
+    expect(steps[0].toString('utf8')).not.toContain('/old');
+  });
+
+  test('RED: resumed cascade additional_steps include trailing standard chat tool result window', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$current-trailing-native', rawType: 'windsurf-devin-token' });
+    const semantic = [
+      { type: 'user', text: 'continue' },
+      { type: 'assistant', text: '', tool_calls: [{ call_id: 'native:run_command:1', name: 'exec_command', arguments: { cmd: 'pwd', cwd: '/tmp/current' } }] },
+      { type: 'function_call_output', call_id: 'native:run_command:1', name: 'exec_command', output: '' },
+    ];
+
+    const steps = (provider as any).buildCascadeAdditionalStepsFromSemanticConversation(semantic, [
+      { type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } },
+    ], { currentOnly: true });
+
+    expect(steps).toHaveLength(1);
+    const parsedFields = (provider as any).parseProtoFields(steps[0]);
+    expect(parsedFields.map((f: any) => f.fieldNo)).toContain(28);
+    expect(steps[0].toString('utf8')).toContain('pwd');
+  });
+
+  test('RED: resumed cascade additional_steps ignore stale native results when latest user follows an unmapped search tool result', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$current-last-window', rawType: 'windsurf-devin-token' });
+    const semantic = [
+      { type: 'user', text: 'continue' },
+      { type: 'assistant', text: '', tool_calls: [{ call_id: 'call_old_native', name: 'exec_command', arguments: { cmd: 'find missing' } }] },
+      { type: 'function_call_output', call_id: 'call_old_native', name: 'exec_command', output: '' },
+      { type: 'assistant', text: '', tool_calls: [{ call_id: 'call_latest_unmapped', name: 'web_search', arguments: { query: 'hub pipeline' } }] },
+      { type: 'function_call_output', call_id: 'call_latest_unmapped', name: 'web_search', output: 'search results' },
+      { type: 'user', text: '继续' },
+    ];
+
+    const steps = (provider as any).buildCascadeAdditionalStepsFromSemanticConversation(semantic, [
+      { type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } },
+    ], { currentOnly: true, mcpMode: true });
+
+    expect(steps).toHaveLength(0);
+  });
+
+  test('RED: native Cascade tool config stays WindsurfAPI-shaped and does not inject MCP config without server state', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$native-config', rawType: 'windsurf-devin-token' });
+
+    const config = (provider as any).buildNativeCascadeToolConfig(['run_command']);
+    const fields = (provider as any).parseProtoFields(config);
+
+    expect(config.toString('hex')).toContain('4200');
+    expect(fields.map((f: any) => f.fieldNo)).toContain(32);
+    expect(fields.map((f: any) => f.fieldNo)).not.toContain(16);
+  });
+
+  test('RED: resumed cascade additional_steps encode current MCP tool result as mcp_tool step', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$current-mcp', rawType: 'windsurf-devin-token' });
+    const semantic = [
+      { type: 'user', text: 'click' },
+      { type: 'assistant', text: '', tool_calls: [{ call_id: 'mcp_call_1', name: 'mcp__computer_use__click', arguments: { x: 10, y: 20 } }] },
+      { type: 'function_call_output', call_id: 'mcp_call_1', name: 'mcp__computer_use__click', output: 'clicked' },
+      { type: 'user', text: 'continue' },
+    ];
+
+    const steps = (provider as any).buildCascadeAdditionalStepsFromSemanticConversation(semantic, [], { currentOnly: true, mcpMode: true });
+
+    expect(steps).toHaveLength(1);
+    const fields = (provider as any).parseProtoFields(steps[0]);
+    expect(fields.map((f: any) => f.fieldNo)).toEqual(expect.arrayContaining([1, 4, 47]));
+    expect(steps[0].toString('utf8')).toContain('computer_use');
+    expect(steps[0].toString('utf8')).toContain('click');
+    expect(steps[0].toString('utf8')).toContain('clicked');
+  });
+
   test('RED: unique cascade blackbox must encode additional_steps like WindsurfAPI native bridge history', async () => {
     const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$cascade', rawType: 'windsurf-devin-token' });
     const reference = runWindsurfApiReference(`
@@ -6775,7 +6862,7 @@ print('{"ok":true}')
           throw Object.assign(new Error('uri: file:///tmp/ws-1: path is already tracked'), {
             code: 'WINDSURF_SERVICE_UNREACHABLE',
             status: 502,
-            retryable: false,
+            retryable: true,
           });
         }
         return Buffer.alloc(0);
@@ -6785,10 +6872,10 @@ print('{"ok":true}')
     try {
       await expect((provider as any).ensureWindsurfCascadeWarmup('api-key-1', 'session-1')).resolves.toBeUndefined();
       expect(calls).toEqual([
+        '/exa.language_server_pb.LanguageServerService/GetUserStatus',
+        '/exa.language_server_pb.LanguageServerService/UpdatePanelStateWithUserStatus',
         '/exa.language_server_pb.LanguageServerService/InitializeCascadePanelState',
         '/exa.language_server_pb.LanguageServerService/AddTrackedWorkspace',
-        '/exa.language_server_pb.LanguageServerService/UpdateWorkspaceTrust',
-        '/exa.language_server_pb.LanguageServerService/Heartbeat',
       ]);
       expect(closeSpy).not.toHaveBeenCalled();
       expect((provider as any).windsurfCascadeWarmupPromise).toBeTruthy();
@@ -6796,6 +6883,53 @@ print('{"ok":true}')
       grpcSpy.mockRestore();
       closeSpy.mockRestore();
     }
+  });
+
+  test('RED: ensureWindsurfCascadeWarmup must not hang forever when a warmup stage never returns', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$warmup-hang', rawType: 'windsurf-devin-token' });
+    jest.spyOn(provider as any, 'resolveManagedWorkspacePath').mockReturnValue('/tmp/ws-1');
+    const calls: string[] = [];
+    const grpcSpy = jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string) => {
+      calls.push(pathName);
+      if (pathName.endsWith('/AddTrackedWorkspace')) {
+        return await new Promise<Buffer>(() => {});
+      }
+      return Buffer.alloc(0);
+    });
+    const closeSpy = jest.spyOn(provider as any, 'closeLocalGrpcSession').mockImplementation(() => {});
+
+    const promise = (provider as any).ensureWindsurfCascadeWarmup('api-key-1', 'session-1');
+    let settled = false;
+    promise.then(() => { settled = true; }, () => { settled = true; });
+    for (let i = 0; i < 60 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+    }
+    await expect(promise).rejects.toMatchObject({ code: 'WINDSURF_FETCH_TIMEOUT', retryable: true });
+    expect(calls).toContain('/exa.language_server_pb.LanguageServerService/AddTrackedWorkspace');
+    expect(closeSpy).toHaveBeenCalled();
+    expect((provider as any).windsurfCascadeWarmupPromise).toBeNull();
+    grpcSpy.mockRestore();
+    closeSpy.mockRestore();
+    jest.useRealTimers();
+  });
+
+  test('RED: sendStartCascade must not trigger request-path warmup polling', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$start-nonblocking-warmup', rawType: 'windsurf-devin-token' });
+    const warmupSpy = jest.spyOn(provider as any, 'ensureWindsurfCascadeWarmup').mockImplementation(async () => new Promise<void>(() => {}));
+    const grpcSpy = jest.spyOn(provider as any, 'grpcUnaryLocal').mockResolvedValue(encodeProtoFieldString(1, 'cid-nonblocking'));
+
+    const result = await (provider as any).sendStartCascade({ apiKey: 'api-key-1', sessionId: 'session-1' });
+
+    expect(result).toBe('cid-nonblocking');
+    expect(warmupSpy).not.toHaveBeenCalled();
+    expect(grpcSpy).toHaveBeenCalledWith(
+      '/exa.language_server_pb.LanguageServerService/StartCascade',
+      expect.any(Buffer),
+    );
+    warmupSpy.mockRestore();
+    grpcSpy.mockRestore();
   });
 
 
@@ -7021,6 +7155,49 @@ print('{"ok":true}')
     jest.useRealTimers();
   });
 
+  test('RED: pollCascadeTrajectorySteps must wait for idle before returning visible tool calls', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    const toolCallStep = encodeTrajectoryStepEnvelope({
+      type: 15,
+      status: 3,
+      customToolCall: { id: 'call_run_1', name: 'run_command', argumentsJson: '{"command_line":"pwd"}' },
+    });
+    let stepsCalls = 0;
+    let statusCalls = 0;
+    (provider as any).grpcUnaryLocal = jest.fn(async (_method: string) => {
+      if (String(_method).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        return toolCallStep;
+      }
+      if (String(_method).includes('GetCascadeTrajectory')) {
+        statusCalls += 1;
+        return Buffer.from([0x10, statusCalls < 3 ? 0x02 : 0x01]);
+      }
+      return Buffer.alloc(0);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({
+      cascadeId: 'cid-tool-call-must-wait-idle',
+      model: 'kimi-k2-6',
+      nativeTools: [{ type: 'function', function: { name: 'run_command' } }],
+    });
+    let settled = false;
+    promise.finally(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(statusCalls).toBe(1);
+    for (let i = 0; i < 20 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+    }
+    const result = await promise;
+    expect(statusCalls).toBeGreaterThanOrEqual(3);
+    expect(stepsCalls).toBeGreaterThanOrEqual(3);
+    expect(result.candidate.tool_calls).toHaveLength(1);
+    expect(result.candidate.tool_calls[0].function.name).toBe('run_command');
+    jest.useRealTimers();
+  });
+
   test('RED: pollCascadeTrajectorySteps must not finalize empty assistant while only completed native result steps are visible', async () => {
     jest.useFakeTimers();
     const provider = createProvider();
@@ -7207,10 +7384,12 @@ print('{"ok":true}')
     jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string, payload: Buffer) => {
       if (String(pathName).includes('GetCascadeTrajectorySteps')) {
         const fields = (provider as any).parseProtoFields(payload);
-        calls.push({ path: 'steps', offset: (provider as any).readProtoNumber(fields, 2) ?? 0 });
-        return calls.filter((c) => c.path === 'steps').length === 1
-          ? encodeSteps('partial active text')
-          : encodeSteps('complete answer, not truncated');
+        const offset = (provider as any).readProtoNumber(fields, 2) ?? 0;
+        calls.push({ path: 'steps', offset });
+        if (offset > 0) return Buffer.alloc(0);
+        return calls.filter((c) => c.path === 'status').length >= 2
+          ? encodeSteps('complete answer, not truncated')
+          : encodeSteps('partial active text');
       }
       if (String(pathName).includes('GetCascadeTrajectory')) {
         calls.push({ path: 'status' });
@@ -7219,8 +7398,38 @@ print('{"ok":true}')
       throw new Error(`unexpected ${pathName}`);
     });
     const result = await (provider as any).pollCascadeTrajectorySteps({ cascadeId: 'cid-1', model: 'gpt-5.4-medium' });
-    expect(calls.filter((c) => c.path === 'steps').map((c) => c.offset).slice(0, 2)).toEqual([0, 0]);
+    const stepOffsets = calls.filter((c) => c.path === 'steps').map((c) => c.offset);
+    expect(stepOffsets[0]).toBe(0);
+    expect(stepOffsets).toContain(1);
+    expect(stepOffsets.at(-1)).toBe(0);
     expect(result.candidate.content).toBe('complete answer, not truncated');
+  });
+
+  test('RED: pollCascadeTrajectorySteps must fail fast on warm stall instead of silently polling until maxWait', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    (provider as any).windsurfRuntime = {
+      ...((provider as any).windsurfRuntime || {}),
+      pollMaxWaitMs: 60_000,
+      warmStallMs: 2_000,
+    };
+    const textStep = encodeTrajectoryStepEnvelope({ type: 2, status: 3, responseText: 'partial answer' });
+    const activeStatus = encodeProtoFieldVarint(2, 2);
+    let stepsCalls = 0;
+    jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string) => {
+      if (String(pathName).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        return stepsCalls === 1 ? textStep : Buffer.alloc(0);
+      }
+      if (String(pathName).includes('GetCascadeTrajectory')) return activeStatus;
+      throw new Error(`unexpected ${pathName}`);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({ cascadeId: 'cid-warm-stall', model: 'gpt-5.4-medium' });
+    const rejection = expect(promise).rejects.toMatchObject({ code: 'WINDSURF_CASCADE_STALLED', status: 504 });
+    await jest.advanceTimersByTimeAsync(3_000);
+    await rejection;
+    expect(stepsCalls).toBeLessThan(20);
+    jest.useRealTimers();
   });
 
 
@@ -7232,12 +7441,14 @@ print('{"ok":true}')
       encodeProtoFieldVarint(4, 3),
       encodeProtoFieldMessage(20, encodeProtoFieldString(1, text)),
     ]));
-    jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string) => {
+    jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string, payload: Buffer) => {
       if (String(pathName).includes('GetCascadeTrajectorySteps')) {
         calls.push('steps');
-        const n = calls.filter((x) => x === 'steps').length;
-        if (n <= 3) return encodeSteps('partial answer');
-        return encodeSteps('partial answer with final tail');
+        const fields = (provider as any).parseProtoFields(payload);
+        const offset = (provider as any).readProtoNumber(fields, 2) ?? 0;
+        if (offset > 0) return Buffer.alloc(0);
+        const statusCount = calls.filter((x) => x === 'status').length;
+        return statusCount >= 2 ? encodeSteps('partial answer with final tail') : encodeSteps('partial answer');
       }
       if (String(pathName).includes('GetCascadeTrajectory')) {
         calls.push('status');
@@ -7259,10 +7470,13 @@ print('{"ok":true}')
       encodeProtoFieldVarint(4, 3),
       encodeProtoFieldMessage(20, encodeProtoFieldString(1, 'complete answer, not truncated')),
     ]));
-    jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string) => {
+    jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string, payload: Buffer) => {
       if (String(pathName).includes('GetCascadeTrajectorySteps')) {
         calls.push('steps');
-        return calls.filter((x) => x === 'steps').length < 3 ? emptySteps : finalSteps;
+        const fields = (provider as any).parseProtoFields(payload);
+        const offset = (provider as any).readProtoNumber(fields, 2) ?? 0;
+        if (offset > 0) return Buffer.alloc(0);
+        return calls.filter((x) => x === 'status').length < 2 ? emptySteps : finalSteps;
       }
       if (String(pathName).includes('GetCascadeTrajectory')) {
         calls.push('status');
@@ -7582,7 +7796,7 @@ print('{"ok":true}')
         status: 502,
         retryable: true,
       });
-      expect(warmupSpy).toHaveBeenCalled();
+      expect(warmupSpy).not.toHaveBeenCalled();
       expect(closeSpy).toHaveBeenCalledTimes(1);
       expect((provider as any).windsurfCascadeWarmupPromise).toBeNull();
     } finally {
@@ -7894,6 +8108,72 @@ print('{"ok":true}')
       warmupSpy.mockRestore();
       sessionSpy.mockRestore();
       startSpy.mockRestore();
+      sendSpy.mockRestore();
+      pollSpy.mockRestore();
+    }
+  });
+
+  test('RED: resumed SendUserCascadeMessage retry must rebuild full history for fresh cascade like WindsurfAPI', async () => {
+    const provider = new WindsurfChatProvider({
+      type: 'openai-standard',
+      config: {
+        providerType: 'openai',
+        baseUrl: 'http://localhost:3003',
+        model: 'gpt-5.3-codex',
+        auth: { type: 'apikey', apiKey: 'devin-session-token$resume-full-history-retry', rawType: 'windsurf-devin-token' },
+        extensions: {
+          windsurf: {
+            lsPort: 42101,
+            csrfToken: 'windsurf-api-csrf-fixed-token',
+            sessionId: 'session-1',
+            workspacePath: '/tmp/ws-1',
+            workspaceUri: 'file:///tmp/ws-1',
+          },
+        },
+      },
+    } as any, deps);
+
+    jest.spyOn(provider as any, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$resume-full-history-retry');
+    const selectSpy = jest.spyOn(provider as any, 'selectUsablePinnedGrpcRuntime')
+      .mockResolvedValueOnce({ sessionId: 'session-1', cascadeId: 'cid-resume', stepOffset: 8 })
+      .mockResolvedValueOnce({ sessionId: 'session-2', cascadeId: 'cid-fresh', stepOffset: 0 });
+    const sendTexts: string[] = [];
+    const sendSpy = jest.spyOn(provider as any, 'sendCascadeMessage')
+      .mockImplementationOnce(async (args: any) => {
+        sendTexts.push(args.text);
+        throw new Error('trajectory not_found for cascade cid-resume');
+      })
+      .mockImplementationOnce(async (args: any) => {
+        sendTexts.push(args.text);
+      });
+    const pollSpy = jest.spyOn(provider as any, 'pollCascadeTrajectorySteps').mockResolvedValue({
+      candidate: { role: 'assistant', content: 'OK' },
+      usage: null,
+      stepOffset: 3,
+    });
+
+    try {
+      await expect((provider as any).sendRequestInternal({
+        body: {
+          model: 'gpt-5.3-codex',
+          messages: [
+            { role: 'user', content: 'first turn context' },
+            { role: 'assistant', content: 'prior assistant answer' },
+            { role: 'user', content: '继续' },
+          ],
+        },
+      })).resolves.toMatchObject({ choices: [{ message: { content: 'OK' } }] });
+
+      expect(sendSpy).toHaveBeenCalledTimes(2);
+      expect(selectSpy).toHaveBeenCalledTimes(2);
+      expect(sendTexts[0]).toBe('继续');
+      expect(sendTexts[1]).toContain('first turn context');
+      expect(sendTexts[1]).toContain('prior assistant answer');
+      expect(sendTexts[1]).toContain('继续');
+      expect(sendTexts[1]).not.toBe('继续');
+      expect(pollSpy).toHaveBeenCalledWith(expect.objectContaining({ cascadeId: 'cid-fresh', stepOffset: 0 }));
+    } finally {
+      selectSpy.mockRestore();
       sendSpy.mockRestore();
       pollSpy.mockRestore();
     }

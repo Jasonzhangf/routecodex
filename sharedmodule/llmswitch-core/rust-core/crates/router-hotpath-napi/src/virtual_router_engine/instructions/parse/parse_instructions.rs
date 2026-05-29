@@ -252,42 +252,6 @@ pub(super) fn parse_single_instruction(
     if let Some(force) = parse_named_target_instruction(instruction, "force") {
         return Ok(Some(force));
     }
-    if let Some(prefer) = parse_named_target_instruction(instruction, "prefer") {
-        return Ok(Some(prefer));
-    }
-    if instruction.starts_with('!') {
-        let raw_target = instruction[1..].trim();
-        let (target_text, process_mode) = split_target_and_process_mode(raw_target);
-        if target_text.is_empty() {
-            return Ok(None);
-        }
-        let mut parsed = match parse_target(&target_text) {
-            Some(value) => value,
-            None => return Ok(None),
-        };
-        if let Some(mode) = process_mode {
-            parsed.process_mode = Some(mode);
-        }
-        if !target_text.contains('.') {
-            if let Some(provider) = parsed.provider.clone() {
-                return Ok(Some(RoutingInstruction {
-                    kind: "allow".to_string(),
-                    target: None,
-                    provider: Some(provider),
-                    stop_message: None,
-                    pre_command: None,
-                }));
-            }
-            return Ok(None);
-        }
-        return Ok(Some(RoutingInstruction {
-            kind: "prefer".to_string(),
-            target: Some(parsed),
-            provider: None,
-            stop_message: None,
-            pre_command: None,
-        }));
-    }
     if instruction.starts_with('#') {
         let target = instruction[1..].trim();
         if let Some(parsed) = parse_target(target) {

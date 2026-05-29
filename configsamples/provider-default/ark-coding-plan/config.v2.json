@@ -58,7 +58,7 @@
         ]
       }
     },
-    "compatibilityProfile": "chat:openai",
+    "compatibilityProfile": "compat:passthrough",
     "transportBackend": "vercel-ai-sdk",
     "concurrency": {
       "maxInFlight": 2,

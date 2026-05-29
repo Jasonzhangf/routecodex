@@ -41,4 +41,39 @@ describe('RequestHeaderBuilder transparency', () => {
     expect(headers.session_id).toBeUndefined();
     expect(headers.conversation_id).toBeUndefined();
   });
+
+  test('does not reuse opencode session when reasoning history is tainted', async () => {
+    const headers = await RequestHeaderBuilder.buildHeaders({
+      baseHeaders: { 'Content-Type': 'application/json' },
+      serviceHeaders: {},
+      overrideHeaders: {},
+      runtimeHeaders: {},
+      authHeaders: { Authorization: 'Bearer test-key' },
+      normalizedClientHeaders: {
+        accept: 'application/json',
+        session_id: 'sess-tainted'
+      },
+      inboundMetadata: {
+        sessionId: 'sess-tainted'
+      },
+      runtimeMetadata: {
+        requestId: 'req-tainted',
+        providerId: 'opencode-zen-free',
+        providerKey: 'opencode-zen-free.key1.deepseek-v4-flash-free',
+        providerType: 'openai',
+        providerProtocol: 'openai-chat',
+        routeName: 'longcontext',
+        metadata: {
+          sessionId: 'sess-tainted',
+          opencodeTaintedReasoning: true
+        }
+      } as any,
+      defaultUserAgent: 'RouteCodex/test',
+      isGeminiFamily: false,
+      codexUaMode: true
+    });
+
+    expect(headers['x-opencode-session']).toBeUndefined();
+    expect(headers['x-opencode-request']).toBe('req-tainted');
+  });
 });

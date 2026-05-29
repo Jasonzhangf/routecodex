@@ -2,6 +2,8 @@ import { describe, expect, test } from '@jest/globals';
 
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
 
+const FUTURE_RESET_AT = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
 function buildDualProviderConfig(providerA = 'quota.key1.gpt-test', providerB = 'quota.key2.gpt-test'): any {
   return {
     routing: {
@@ -57,7 +59,7 @@ describe('virtual router native quota exhausted resetAt rust-state', () => {
       status: 429,
       quotaScope: 'daily',
       quotaReason: 'quota_exhausted',
-      resetAt: '2026-05-28T00:00:00.000Z',
+      resetAt: FUTURE_RESET_AT,
       runtime: {
         requestId: 'req-quota-resetat-native-gap',
         routeName: 'default',

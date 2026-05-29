@@ -8,6 +8,7 @@ import {
 } from "../policy/policy-engine.js";
 import { applyProviderOutboundToolSurface } from "../tool-surface/tool-surface-engine.js";
 import { applyDirectBuiltinWebSearchToolWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
+import { stripPrivateFieldsWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js";
 import { stripInternalToolingMetadataWithNative } from "../../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js";
 
 export function buildShadowBaselineProviderPayload(args: {
@@ -111,6 +112,8 @@ export function finalizeProviderPayloadWithPolicy(args: {
       providerPayload.metadata = strippedMetadata;
     }
   }
+
+  providerPayload = stripPrivateFieldsWithNative(providerPayload);
 
   recordHubPolicyObservation({
     policy: args.effectivePolicy,

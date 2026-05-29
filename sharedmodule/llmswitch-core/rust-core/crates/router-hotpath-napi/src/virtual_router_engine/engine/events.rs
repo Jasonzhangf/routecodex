@@ -86,13 +86,16 @@ impl VirtualRouterEngineCore {
         let now = now_ms();
         let status_code = extract_status_code(event);
         // Single policy gate:
-        // - HTTP 503 is recoverable: same-provider retries are allowed until the
-        //   consecutive threshold trips the normal cooldown ladder.
+        // - HTTP 503 triggers a persisted daily cooldown immediately (not the
+        //   recoverable-failure ladder). This matches extract_recoverable_cooldown_ms.
         // - all other failures: consecutive threshold handling in health.rs
         if matches!(status_code, Some(503)) {
-            self.health_manager.record_recoverable_failure(
+            let cooldown_ms = extract_cooldown_override_ms(event)
+                .unwrap_or(compute_cooldown_until_next_local_midnight_ms(now));
+            self.health_manager.trip_provider(
                 &provider_key,
                 Some("__http_503_daily_cooldown__".to_string()),
+                Some(cooldown_ms),
                 now,
             );
             self.persist_provider_health();
@@ -144,20 +147,24 @@ impl VirtualRouterEngineCore {
         self.persist_provider_health();
     }
 
-    fn apply_qwen_auth_family_blacklist(&mut self, event: &Value) -> bool {
+    fn apply_auth_family_blacklist(&mut self, event: &Value) -> bool {
         let Some(provider_key) = resolve_provider_key(event) else {
             return false;
         };
-        if !provider_key.starts_with("qwen.") {
+        let auth_family = self
+            .provider_registry
+            .get(&provider_key)
+            .and_then(|p| p.auth_family.clone());
+        let Some(auth_family) = auth_family else {
             return false;
-        }
-        if !is_qwen_auth_invalid_event(event) {
+        };
+        if !is_auth_invalid_event(event) {
             return false;
         }
         let cooldown_ms = compute_cooldown_until_next_local_midnight_ms(now_ms())
             .max(DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS);
         let now = now_ms();
-        for key in self.provider_registry.list_provider_keys("qwen") {
+        for key in self.provider_registry.list_by_auth_family(&auth_family) {
             self.health_manager.trip_provider(
                 &key,
                 Some("auth".to_string()),
@@ -191,9 +198,12 @@ impl VirtualRouterEngineCore {
                     return true;
                 }
                 if status == Some(503) {
-                    self.health_manager.record_recoverable_failure(
+                    let cooldown_ms = extract_cooldown_override_ms(event)
+                        .unwrap_or(compute_cooldown_until_next_local_midnight_ms(now));
+                    self.health_manager.trip_provider(
                         provider_key,
                         Some("__http_503_daily_cooldown__".to_string()),
+                        Some(cooldown_ms),
                         now,
                     );
                     self.persist_provider_health();
@@ -211,7 +221,7 @@ impl VirtualRouterEngineCore {
                     extract_cooldown_override_ms(event).unwrap_or(default_unrecoverable_ttl);
                 self.health_manager
                     .trip_provider(provider_key, reason, Some(cooldown_ms), now);
-                let _ = self.apply_qwen_auth_family_blacklist(event);
+                let _ = self.apply_auth_family_blacklist(event);
                 self.persist_provider_health();
                 true
             }
@@ -250,8 +260,7 @@ impl VirtualRouterEngineCore {
             let Some(profile) = self.provider_registry.get(&key) else {
                 continue;
             };
-            let model_id = profile.model_id.as_deref().unwrap_or("");
-            let series = resolve_model_series(model_id);
+            let series = profile.series.as_deref().unwrap_or("");
             if series != detail.series {
                 continue;
             }
@@ -587,7 +596,7 @@ fn is_google_account_verification_required(event: &Value) -> bool {
         || lowered.contains("support.google.com/accounts?p=al_alert")
 }
 
-fn is_qwen_auth_invalid_event(event: &Value) -> bool {
+fn is_auth_invalid_event(event: &Value) -> bool {
     let mut sources: Vec<String> = Vec::new();
     collect_string_candidate(event.get("code"), &mut sources);
     collect_string_candidate(event.get("error").and_then(|v| v.get("code")), &mut sources);
@@ -631,11 +640,7 @@ fn is_qwen_auth_invalid_event(event: &Value) -> bool {
 fn extract_series_cooldown_detail(event: &Value) -> Option<SeriesCooldownDetail> {
     let details = event.get("details")?.as_object()?;
     let raw = details.get("virtualRouterSeriesCooldown")?.as_object()?;
-    let series_raw = raw.get("series")?.as_str()?.trim().to_lowercase();
-    let series = match series_raw.as_str() {
-        "gemini-pro" | "gemini-flash" | "claude" => series_raw,
-        _ => return None,
-    };
+    let series = raw.get("series")?.as_str()?.trim().to_lowercase();
     let cooldown_ms = match raw.get("cooldownMs") {
         Some(v) if v.is_i64() => v.as_i64().unwrap_or(0),
         Some(v) if v.is_u64() => v.as_u64().unwrap_or(0) as i64,
@@ -660,20 +665,6 @@ fn extract_series_cooldown_detail(event: &Value) -> Option<SeriesCooldownDetail>
         series,
         cooldown_ms,
     })
-}
-
-fn resolve_model_series(model_id: &str) -> String {
-    let lower = model_id.to_lowercase();
-    if lower.contains("claude") || lower.contains("opus") {
-        return "claude".to_string();
-    }
-    if lower.contains("flash") {
-        return "gemini-flash".to_string();
-    }
-    if lower.contains("gemini") || lower.contains("pro") {
-        return "gemini-pro".to_string();
-    }
-    "default".to_string()
 }
 
 const ANTIGRAVITY_AUTH_VERIFY_BAN_MS: i64 = 24 * 60 * 60_000;
@@ -1061,11 +1052,28 @@ mod tests {
 
     #[test]
     fn qwen_invalid_auth_blacklists_qwen_family_until_midnight() {
-        let mut core = build_test_core_with_providers(&[
-            ("qwen.1.coder-model", "coder-model"),
-            ("qwen.2.coder-model", "coder-model"),
-            ("qwenchat.1.qwen3.6-plus", "qwen3.6-plus"),
-        ]);
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        for (key, model_id, auth_family) in &[
+            ("qwen.1.coder-model", "coder-model", Some("qwen")),
+            ("qwen.2.coder-model", "coder-model", Some("qwen")),
+            ("qwenchat.1.qwen3.6-plus", "qwen3.6-plus", None),
+        ] {
+            let mut entry = json!({
+                "providerKey": key,
+                "providerType": "openai",
+                "modelId": model_id,
+                "enabled": true
+            });
+            if let Some(family) = auth_family {
+                entry["authFamily"] = json!(family);
+            }
+            providers.insert(key.to_string(), entry);
+        }
+        core.provider_registry.load(&providers);
+        let provider_keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&provider_keys);
+
         let event = json!({
             "code": "HTTP_401",
             "message": "invalid access token or token expired",

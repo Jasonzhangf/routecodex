@@ -16,6 +16,8 @@ pub(crate) struct ProviderProfile {
     pub streaming: Option<Value>,
     pub max_context_tokens: Option<i64>,
     pub server_tools_disabled: bool,
+    pub series: Option<String>,
+    pub auth_family: Option<String>,
     pub provider_specific_config: HashMap<String, Value>,
 }
 
@@ -61,15 +63,20 @@ impl ProviderRegistry {
         if model_id.is_empty() {
             return false;
         }
-        let explicit = profile
+        profile
             .model_capabilities
             .as_ref()
             .and_then(|model_capabilities| model_capabilities.get(&model_id))
-            .map(|capabilities| capabilities.iter().any(|item| item == capability));
-        if explicit == Some(true) {
-            return true;
-        }
-        self.has_default_capability(profile, capability)
+            .map(|capabilities| capabilities.iter().any(|item| item == capability))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn list_by_auth_family(&self, auth_family: &str) -> Vec<String> {
+        self.providers
+            .iter()
+            .filter(|(_, profile)| profile.auth_family.as_deref() == Some(auth_family))
+            .map(|(key, _)| key.clone())
+            .collect()
     }
 
     pub(crate) fn resolve_runtime_key_by_index(
@@ -232,6 +239,16 @@ impl ProviderRegistry {
             .get("serverToolsDisabled")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let series = map
+            .get("series")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let auth_family = map
+            .get("authFamily")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
         // Collect provider-specific config keys (everything not in the common schema)
         let common_keys: &[&str] = &[
             "providerKey",
@@ -245,6 +262,8 @@ impl ProviderRegistry {
             "responsesConfig",
             "streaming",
             "modelCapabilities",
+            "series",
+            "authFamily",
             "maxContext",
             "max_context",
             "contextWindow",
@@ -275,6 +294,8 @@ impl ProviderRegistry {
             streaming,
             max_context_tokens,
             server_tools_disabled,
+            series,
+            auth_family,
             provider_specific_config,
         })
     }
@@ -306,34 +327,6 @@ fn read_context_tokens(map: &Map<String, Value>) -> Option<i64> {
     best
 }
 
-impl ProviderRegistry {
-    fn has_default_capability(&self, profile: &ProviderProfile, capability: &str) -> bool {
-        let provider_type = profile.provider_type.trim().to_ascii_lowercase();
-        let outbound = profile
-            .outbound_profile
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        let compatibility = profile
-            .compatibility_profile
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        match capability {
-            "multimodal" => {
-                provider_type == "responses"
-                    || outbound.contains("responses")
-                    || compatibility.contains("responses")
-                    || compatibility.contains("crs")
-            }
-            "web_search" => compatibility.contains("crs"),
-            _ => false,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_provider_defaults_to_multimodal_without_explicit_capabilities() {
+    fn responses_provider_without_explicit_capabilities_returns_false() {
         let mut registry = ProviderRegistry::default();
         let providers = json!({
             "sdfv.key1.gpt-5.4": {
@@ -372,11 +365,11 @@ mod tests {
             }
         });
         registry.load(providers.as_object().unwrap());
-        assert!(registry.has_capability("sdfv.key1.gpt-5.4", "multimodal"));
+        assert!(!registry.has_capability("sdfv.key1.gpt-5.4", "multimodal"));
     }
 
     #[test]
-    fn explicit_web_search_capability_does_not_disable_responses_multimodal_default() {
+    fn explicit_model_capability_is_detected() {
         let mut registry = ProviderRegistry::default();
         let providers = json!({
             "sdfv.key1.gpt-5.4": {
@@ -384,17 +377,17 @@ mod tests {
                 "providerType": "responses",
                 "modelId": "gpt-5.4",
                 "modelCapabilities": {
-                    "gpt-5.4": ["web_search"]
+                    "gpt-5.4": ["multimodal", "web_search"]
                 }
             }
         });
         registry.load(providers.as_object().unwrap());
-        assert!(registry.has_capability("sdfv.key1.gpt-5.4", "web_search"));
         assert!(registry.has_capability("sdfv.key1.gpt-5.4", "multimodal"));
+        assert!(registry.has_capability("sdfv.key1.gpt-5.4", "web_search"));
     }
 
     #[test]
-    fn crs_compatibility_defaults_to_web_search_and_multimodal() {
+    fn provider_without_explicit_multimodal_does_not_have_it_even_with_responses_compat() {
         let mut registry = ProviderRegistry::default();
         let providers = json!({
             "dibittai.crsa.gpt-5.4": {
@@ -405,8 +398,8 @@ mod tests {
             }
         });
         registry.load(providers.as_object().unwrap());
-        assert!(registry.has_capability("dibittai.crsa.gpt-5.4", "multimodal"));
-        assert!(registry.has_capability("dibittai.crsa.gpt-5.4", "web_search"));
+        assert!(!registry.has_capability("dibittai.crsa.gpt-5.4", "multimodal"));
+        assert!(!registry.has_capability("dibittai.crsa.gpt-5.4", "web_search"));
     }
 }
 

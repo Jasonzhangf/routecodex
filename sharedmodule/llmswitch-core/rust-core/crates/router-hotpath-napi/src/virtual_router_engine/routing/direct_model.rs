@@ -52,20 +52,26 @@ pub(crate) fn should_fallback_direct_model_for_media(
     routing: &RoutingPools,
     provider_registry: &ProviderRegistry,
 ) -> bool {
-    if !features.has_image_attachment {
+    if !features.has_image_attachment && !features.has_video_attachment {
         return false;
     }
-    if provider_id.trim().to_lowercase() != "qwen" {
+    let needs_multimodal = features.has_image_attachment
+        || (features.has_video_attachment && features.has_remote_video_attachment);
+    if !needs_multimodal {
         return false;
     }
-    let model = model_id.trim().to_lowercase();
-    let is_qwen35_plus =
-        model == "qwen3.5-plus" || model == "qwen3-5-plus" || model == "qwen3_5-plus";
-    if !is_qwen35_plus {
+    if !default_pool_supports_capability(routing, provider_registry, "multimodal") {
         return false;
     }
-    if !(features.has_video_attachment && features.has_local_video_attachment) {
-        return false;
-    }
-    default_pool_supports_capability(routing, provider_registry, "multimodal")
+    // Check if the target provider+model has multimodal capability.
+    // If not, fallback to the default pool which may have multimodal-capable providers.
+    let keys = provider_registry.list_provider_keys(provider_id);
+    let has_multimodal = keys.iter().any(|key| {
+        provider_registry
+            .get(key)
+            .and_then(|p| p.model_id.as_deref())
+            == Some(model_id)
+            && provider_registry.has_capability(key, "multimodal")
+    });
+    !has_multimodal
 }

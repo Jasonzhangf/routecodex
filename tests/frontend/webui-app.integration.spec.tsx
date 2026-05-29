@@ -117,7 +117,7 @@ describe('webui integration flows (feature coverage)', () => {
           ? detail.compatibilityProfile
           : typeof detail.type === 'string'
             ? `chat:${detail.type}`
-            : 'chat:openai',
+            : 'compat:passthrough',
       enabled: detail.enabled !== false,
       defaultModels: modelIds,
       credentialsRef:
@@ -336,7 +336,7 @@ describe('webui integration flows (feature coverage)', () => {
                 providerKey: id,
                 runtimeKey: id,
                 family: typeof detail.providerType === 'string' ? detail.providerType : 'openai',
-                protocol: typeof detail.compatibilityProfile === 'string' ? detail.compatibilityProfile : 'chat:openai',
+                protocol: typeof detail.compatibilityProfile === 'string' ? detail.compatibilityProfile : 'compat:passthrough',
                 enabled: detail.enabled !== false
               }
             ];
@@ -345,7 +345,7 @@ describe('webui integration flows (feature coverage)', () => {
             providerKey: `${id}.default.${modelId}`,
             runtimeKey: `${id}.default.${modelId}`,
             family: typeof detail.providerType === 'string' ? detail.providerType : 'openai',
-            protocol: typeof detail.compatibilityProfile === 'string' ? detail.compatibilityProfile : 'chat:openai',
+            protocol: typeof detail.compatibilityProfile === 'string' ? detail.compatibilityProfile : 'compat:passthrough',
             enabled: detail.enabled !== false
           }));
         });

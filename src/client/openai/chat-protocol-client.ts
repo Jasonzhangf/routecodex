@@ -1,5 +1,6 @@
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../http-protocol-client.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
+import { normalizeResponsesToChatBody } from '../../utils/responses-to-chat.js';
 
 interface DataEnvelope {
   data?: Record<string, unknown>;
@@ -28,6 +29,8 @@ export class OpenAIChatProtocolClient implements HttpProtocolClient<ProtocolRequ
       throw new Error('provider-runtime-error: missing model from virtual router');
     }
     body.model = inboundModel;
+
+    normalizeResponsesToChatBody(body);
 
     const resolvedTokens = this.resolveMaxTokens(body);
     if (resolvedTokens > 0) {

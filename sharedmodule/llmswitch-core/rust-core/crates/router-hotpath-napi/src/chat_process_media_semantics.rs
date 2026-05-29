@@ -562,9 +562,9 @@ pub fn strip_latest_user_turn_media(
     let mut changed = false;
     let mut filtered: Vec<Value> = Vec::with_capacity(content_parts.len());
     for part in content_parts.iter() {
-            if part_contains_media_payload(part) {
-                changed = true;
-                let mut replacement = serde_json::Map::new();
+        if part_contains_media_payload(part) {
+            changed = true;
+            let mut replacement = serde_json::Map::new();
             replacement.insert("type".to_string(), Value::String("text".to_string()));
             replacement.insert(
                 "text".to_string(),
@@ -699,9 +699,9 @@ pub fn strip_latest_responses_input_media(
     let mut changed = false;
     let mut filtered: Vec<Value> = Vec::with_capacity(content.len());
     for part in content.iter() {
-            if part_contains_media_payload(part) {
-                changed = true;
-                let mut replacement = serde_json::Map::new();
+        if part_contains_media_payload(part) {
+            changed = true;
+            let mut replacement = serde_json::Map::new();
             replacement.insert("type".to_string(), Value::String("input_text".to_string()));
             replacement.insert(
                 "text".to_string(),

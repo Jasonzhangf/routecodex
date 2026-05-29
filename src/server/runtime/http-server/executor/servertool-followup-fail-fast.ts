@@ -117,3 +117,12 @@ export function getNestedFollowupAbortSignal(metadata: unknown): AbortSignal | u
     ? getClientConnectionAbortSignal(metadata)
     : undefined;
 }
+
+export function throwIfNestedFollowupAborted(metadata: unknown): void {
+  const abortSignal = getNestedFollowupAbortSignal(metadata);
+  if (!abortSignal?.aborted) {
+    return;
+  }
+  const reason = (abortSignal as { reason?: unknown }).reason;
+  throw reason instanceof Error ? reason : new Error('CLIENT_DISCONNECTED');
+}

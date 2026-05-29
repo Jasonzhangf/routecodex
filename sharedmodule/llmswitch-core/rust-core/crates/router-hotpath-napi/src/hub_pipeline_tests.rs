@@ -231,6 +231,69 @@ fn test_protocol_resolution_aliases() {
 }
 
 #[test]
+fn test_protocol_field_contract_inbound_preserves_openai_chat_fields_only() {
+    let payload = json!({
+        "model": "deepseek-v4-flash-free",
+        "messages": [
+            {"role": "user", "content": "继续"},
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": ".",
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"}
+                }]
+            }
+        ],
+        "tools": [{
+            "type": "function",
+            "function": {"name": "exec_command", "parameters": {"type": "object", "properties": {}}}
+        }],
+        "parallel_tool_calls": false,
+        "tool_choice": "auto"
+    });
+
+    let result = run_req_inbound_pipeline(payload, "openai-chat", "/v1/responses").unwrap();
+    assert_eq!(result.protocol, "openai-chat");
+    assert_eq!(result.payload["messages"][1]["content"], "");
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert!(result.payload["messages"][1].get("thinking").is_none());
+}
+
+#[test]
+fn test_protocol_field_contract_chat_process_preserves_openai_chat_fields_only() {
+    let envelope = ChatEnvelope {
+        messages: vec![
+            json!({"role": "user", "content": "继续"}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": ".",
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"}
+                }]
+            }),
+        ],
+        semantics: Some(json!({"model": "deepseek-v4-flash-free"})),
+        metadata: Some(json!({"providerProtocol": "openai-chat"})),
+    };
+    let routing = RoutingDecision {
+        provider_key: "opencode-zen-free.key1.deepseek-v4-flash-free".to_string(),
+        target_endpoint: "/v1/chat/completions".to_string(),
+        metadata: Some(json!({"providerProtocol": "openai-chat"})),
+    };
+
+    let result = run_req_process_pipeline(envelope, routing).unwrap();
+    assert_eq!(result.request["messages"][1]["content"], "");
+    assert_eq!(result.request["messages"][1]["reasoning_content"], ".");
+    assert!(result.request["messages"][1].get("thinking").is_none());
+}
+
+#[test]
 fn test_invalid_protocol_error() {
     let result = resolve_provider_protocol("invalid-protocol");
     assert!(result.is_err());

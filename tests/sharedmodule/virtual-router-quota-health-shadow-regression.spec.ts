@@ -3,6 +3,8 @@ import { describe, expect, test } from '@jest/globals';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
 import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
+const FUTURE_RESET_AT = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
 function buildDualProviderConfig(providerA = 'shadowgate.key1.gpt-test', providerB = 'shadowgate.key2.gpt-test'): any {
   return {
     routing: {
@@ -148,7 +150,7 @@ describe('virtual router quota/health shadow regression gate', () => {
       status: 429,
       quotaScope: 'daily',
       quotaReason: 'quota_exhausted',
-      resetAt: '2026-05-28T00:00:00.000Z',
+      resetAt: FUTURE_RESET_AT,
       runtime: {
         requestId: 'req-shadow-quota-resetat-source',
         routeName: 'default',
@@ -192,7 +194,7 @@ describe('virtual router quota/health shadow regression gate', () => {
       status: 429,
       quotaScope: 'daily',
       quotaReason: 'quota_exhausted',
-      resetAt: '2026-05-28T00:00:00.000Z',
+      resetAt: FUTURE_RESET_AT,
       runtime: {
         requestId: 'req-shadow-singleton-source',
         routeName: 'default',

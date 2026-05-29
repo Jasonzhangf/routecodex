@@ -351,10 +351,6 @@ pub(crate) fn apply_routing_instructions(
             "force" => {
                 state.forced_target = instruction.target.clone();
             }
-            "prefer" => {
-                state.prefer_target = instruction.target.clone();
-                state.forced_target = None;
-            }
             "allow" => {
                 if !allow_reset {
                     state.allowed_providers.clear();
@@ -440,7 +436,6 @@ pub(crate) fn apply_routing_instructions(
             }
             "clear" => {
                 state.forced_target = None;
-                state.prefer_target = None;
                 state.allowed_providers.clear();
                 state.disabled_providers.clear();
                 state.disabled_keys.clear();

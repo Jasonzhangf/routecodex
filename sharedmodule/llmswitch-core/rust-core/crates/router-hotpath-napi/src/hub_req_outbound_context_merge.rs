@@ -223,6 +223,11 @@ fn strip_private_fields_in_place(value: &mut Value) {
 fn strip_private_fields(value: &Value) -> Value {
     let mut next = value.clone();
     strip_private_fields_in_place(&mut next);
+    if let Value::Object(row) = &mut next {
+        if matches!(row.get("reasoning"), Some(Value::Null)) {
+            row.remove("reasoning");
+        }
+    }
     next
 }
 
@@ -365,6 +370,27 @@ pub fn strip_private_fields_json(payload_json: String) -> NapiResult<String> {
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = strip_private_fields(&payload);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod strip_private_fields_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn strips_top_level_null_reasoning_without_changing_false_parallel_tool_calls() {
+        let output = strip_private_fields(&json!({
+            "model": "deepseek-v4-flash-free",
+            "messages": [{"role": "user", "content": "ping"}],
+            "reasoning": null,
+            "parallel_tool_calls": false,
+            "tool_choice": "auto"
+        }));
+
+        assert!(output.get("reasoning").is_none());
+        assert_eq!(output["parallel_tool_calls"], Value::Bool(false));
+        assert_eq!(output["tool_choice"], Value::String("auto".to_string()));
+    }
 }
 
 #[napi]

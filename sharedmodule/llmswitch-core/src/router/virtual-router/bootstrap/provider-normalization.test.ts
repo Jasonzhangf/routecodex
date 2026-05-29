@@ -15,6 +15,19 @@ function resolveRepoProviderConfigPath(filename: string): string {
   throw new Error(`provider config not found for ${filename} from cwd=${process.cwd()}`);
 }
 
+function resolveRepoProviderDefaultSamplesDir(): string {
+  const candidates = [
+    path.join(process.cwd(), '..', '..', 'configsamples', 'provider-default'),
+    path.join(process.cwd(), 'configsamples', 'provider-default')
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`provider-default samples dir not found from cwd=${process.cwd()}`);
+}
+
 describe('normalizeProvider anthropic thinking config', () => {
   it('reads model-level anthropic thinking from provider config', () => {
     const normalized = normalizeProvider('ali-coding-plan', {
@@ -251,5 +264,27 @@ describe('normalizeProvider anthropic thinking config', () => {
 
     expect(normalized.providerType).toBe('responses');
     expect(normalized.providerModule).toBe('mock-provider');
+  });
+
+  it('normalizes every provider-default sample with registered compatibility profiles', () => {
+    const samplesDir = resolveRepoProviderDefaultSamplesDir();
+    const sampleNames = fs.readdirSync(samplesDir).sort();
+    expect(sampleNames.length).toBeGreaterThan(0);
+
+    const failures: string[] = [];
+    for (const sampleName of sampleNames) {
+      const configPath = path.join(samplesDir, sampleName, 'config.v2.json');
+      if (!fs.existsSync(configPath)) {
+        continue;
+      }
+      try {
+        const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { providerId?: string; provider?: unknown };
+        normalizeProvider(raw.providerId ?? sampleName, raw.provider);
+      } catch (error) {
+        failures.push(`${sampleName}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    expect(failures).toEqual([]);
   });
 });

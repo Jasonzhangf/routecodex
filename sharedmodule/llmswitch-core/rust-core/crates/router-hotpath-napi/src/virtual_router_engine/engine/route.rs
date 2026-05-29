@@ -146,7 +146,6 @@ fn summarize_marker_instructions(
         let label = match inst.kind.as_str() {
             "clear" => "clear",
             "force" => "force",
-            "prefer" => "prefer",
             "allow" => "allow",
             "disable" => "disable",
             "enable" => "enable",
@@ -203,26 +202,6 @@ impl VirtualRouterEngineCore {
             }
             _ => false,
         }
-    }
-
-    fn should_auto_clear_prefer_target(
-        &mut self,
-        env: Env,
-        state: &RoutingInstructionState,
-    ) -> bool {
-        let Some(target) = state.prefer_target.as_ref() else {
-            return false;
-        };
-        let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) else {
-            return true;
-        };
-        let filtered = filter_candidates_by_state(&resolved.keys, state, &self.provider_registry);
-        if filtered.is_empty() {
-            return true;
-        }
-        filtered
-            .iter()
-            .all(|provider_key| !self.is_provider_available(env, provider_key))
     }
 
     fn load_routing_state_for_scope(&mut self, key: &str) -> RoutingInstructionState {
@@ -284,7 +263,6 @@ impl VirtualRouterEngineCore {
         }
         if !is_continuation {
             selection_routing_state.forced_target = None;
-            selection_routing_state.prefer_target = None;
         }
         if let Some(target) = metadata
             .get("__routecodexRetryProviderKey")
@@ -387,12 +365,6 @@ impl VirtualRouterEngineCore {
             apply_routing_instructions(&core_instructions, &mut persisted_routing_state)?;
             apply_routing_instructions(&core_instructions, &mut selection_routing_state)?;
         }
-        if self.should_auto_clear_prefer_target(env, &persisted_routing_state) {
-            persisted_routing_state.prefer_target = None;
-        }
-        if self.should_auto_clear_prefer_target(env, &selection_routing_state) {
-            selection_routing_state.prefer_target = None;
-        }
         let persisted_state = if stop_message_scope.is_some() {
             strip_client_inject_fields(&persisted_routing_state)
         } else {
@@ -424,151 +396,159 @@ impl VirtualRouterEngineCore {
 
         let direct_model =
             parse_direct_provider_model(request_working.get("model"), &self.provider_registry);
-        let (classification, requested_route, selection) =
-            if let Some((provider_id, model_id)) = direct_model {
-                let has_model = self
-                    .provider_registry
-                    .list_provider_keys(&provider_id)
-                    .iter()
-                    .any(|key| {
-                        self.provider_registry
-                            .get(key)
-                            .and_then(|profile| profile.model_id.clone())
-                            .map(|candidate| candidate == model_id)
-                            .unwrap_or(false)
-                    });
-                if !has_model {
-                    return Err(format_virtual_router_error(
-                        "CONFIG_ERROR",
-                        format!("Unknown model {} for provider {}", model_id, provider_id),
-                    ));
-                }
-                if !should_fallback_direct_model_for_media(
-                    &provider_id,
-                    &model_id,
-                    &features,
-                    &self.routing,
-                    &self.provider_registry,
-                ) {
-                    let candidate_keys = self.provider_registry.list_provider_keys(&provider_id);
-                    let mut eligible: Vec<String> = Vec::new();
-                    for key in candidate_keys {
-                        if let Some(profile) = self.provider_registry.get(&key) {
-                            if profile.model_id.as_deref() == Some(&model_id) {
-                                eligible.push(key);
-                            }
+        if let Some((provider_id, model_id)) = direct_model {
+            let has_model = self
+                .provider_registry
+                .list_provider_keys(&provider_id)
+                .iter()
+                .any(|key| {
+                    self.provider_registry
+                        .get(key)
+                        .and_then(|profile| profile.model_id.clone())
+                        .map(|candidate| candidate == model_id)
+                        .unwrap_or(false)
+                });
+            if !has_model {
+                return Err(format_virtual_router_error(
+                    "CONFIG_ERROR",
+                    format!("Unknown model {} for provider {}", model_id, provider_id),
+                ));
+            }
+            if !should_fallback_direct_model_for_media(
+                &provider_id,
+                &model_id,
+                &features,
+                &self.routing,
+                &self.provider_registry,
+            ) {
+                let candidate_keys = self.provider_registry.list_provider_keys(&provider_id);
+                let mut eligible: Vec<String> = Vec::new();
+                for key in candidate_keys {
+                    if let Some(profile) = self.provider_registry.get(&key) {
+                        if profile.model_id.as_deref() == Some(&model_id) {
+                            eligible.push(key);
                         }
                     }
-                    eligible.sort();
-                    let eligible = filter_candidates_by_state(
-                        &eligible,
-                        &routing_state_for_selection,
-                        &self.provider_registry,
-                    );
-                    let cooldown_candidate_keys = eligible.clone();
-                    let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata)
-                        .into_iter()
-                        .collect();
-                    let available: Vec<String> = self.apply_standard_filters(
+                }
+                eligible.sort();
+                let eligible = filter_candidates_by_state(
+                    &eligible,
+                    &routing_state_for_selection,
+                    &self.provider_registry,
+                );
+                let cooldown_candidate_keys = eligible.clone();
+                let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata)
+                    .into_iter()
+                    .collect();
+                let available: Vec<String> = self.apply_standard_filters(
+                    env,
+                    &eligible,
+                    &routing_state_for_selection,
+                    &excluded_keys,
+                );
+                if available.is_empty() {
+                    return Err(build_provider_not_available_error(
+                        self,
                         env,
-                        &eligible,
-                        &routing_state_for_selection,
-                        &excluded_keys,
-                    );
-                    if available.is_empty() {
-                        return Err(build_provider_not_available_error(
-                            self,
-                            env,
-                            &cooldown_candidate_keys,
+                        &cooldown_candidate_keys,
+                        format!(
+                            "All providers unavailable for model {}.{}",
+                            provider_id, model_id
+                        ),
+                    ));
+                }
+                let route_key = format!("direct:{}.{}", provider_id, model_id);
+                let direct_key = self
+                    .load_balancer
+                    .select(&route_key, &available, None, |_| true, Some("round-robin"))
+                    .ok_or_else(|| {
+                        format_virtual_router_error(
+                            "PROVIDER_NOT_AVAILABLE",
                             format!(
                                 "All providers unavailable for model {}.{}",
                                 provider_id, model_id
                             ),
-                        ));
+                        )
+                    })?;
+                let reasoning = append_reasoning_tag(
+                    &format!("direct_model:{}.{}", provider_id, model_id),
+                    marker_reason.clone(),
+                );
+                let selection = SelectionResult::new(
+                    direct_key.clone(),
+                    "direct".to_string(),
+                    vec![direct_key.clone()],
+                    Some("direct".to_string()),
+                );
+                let target = self
+                    .provider_registry
+                    .build_target(&selection.provider_key)
+                    .ok_or("failed to build target")?;
+                let mut target_obj = target;
+                if let Value::Object(ref mut map) = target_obj {
+                    if let Some(route_params) = selection.route_params.clone() {
+                        map.insert("routeParams".to_string(), Value::Object(route_params));
                     }
-                    let route_key = format!("direct:{}.{}", provider_id, model_id);
-                    let direct_key = self
-                        .load_balancer
-                        .select(&route_key, &available, None, |_| true, Some("round-robin"))
-                        .ok_or_else(|| {
-                            format_virtual_router_error(
-                                "PROVIDER_NOT_AVAILABLE",
-                                format!(
-                                    "All providers unavailable for model {}.{}",
-                                    provider_id, model_id
-                                ),
-                            )
-                        })?;
-                    let classification = ClassificationResult {
-                        route_name: "direct".to_string(),
-                        confidence: 1.0,
-                        reasoning: append_reasoning_tag(
-                            &format!("direct_model:{}.{}", provider_id, model_id),
-                            marker_reason.clone(),
-                        ),
-                        candidates: vec!["direct".to_string()],
-                    };
-                    let selection = SelectionResult::new(
-                        direct_key.clone(),
-                        "direct".to_string(),
-                        vec![direct_key.clone()],
-                        Some("direct".to_string()),
-                    );
-                    (classification, "direct".to_string(), selection)
-                } else {
-                    let mut classification = self.classifier.classify(&features);
-                    if let Some(route_hint) = resolve_route_hint(metadata) {
-                        if route_has_any_pool(&self.routing, &route_hint)
-                            && !is_server_tool_followup_request(metadata)
-                        {
-                            classification.route_name = route_hint.clone();
-                            classification.reasoning = append_reasoning_tag(
-                                &classification.reasoning,
-                                Some(format!("route_hint:{}", route_hint)),
-                            );
-                        }
+                    if self.web_search_force {
+                        map.insert("forceWebSearch".to_string(), Value::Bool(true));
                     }
-                    classification.reasoning =
-                        append_reasoning_tag(&classification.reasoning, marker_reason.clone());
-                    let requested_route = classification.route_name.clone();
-                    let selection = self.select_provider(
-                        &requested_route,
-                        &metadata_for_selection,
-                        &classification,
-                        &features,
+                    if let Some(mode) = resolve_instruction_process_mode_for_selection(
+                        &selection.provider_key,
                         &routing_state_for_selection,
-                        bound_alias_prefix.as_deref(),
-                        env,
-                    )?;
-                    (classification, requested_route, selection)
-                }
-            } else {
-                let mut classification = self.classifier.classify(&features);
-                if let Some(route_hint) = resolve_route_hint(metadata) {
-                    if route_has_any_pool(&self.routing, &route_hint)
-                        && !is_server_tool_followup_request(metadata)
-                    {
-                        classification.route_name = route_hint.clone();
-                        classification.reasoning = append_reasoning_tag(
-                            &classification.reasoning,
-                            Some(format!("route_hint:{}", route_hint)),
-                        );
+                        &self.provider_registry,
+                    ) {
+                        map.insert("processMode".to_string(), Value::String(mode));
                     }
                 }
-                classification.reasoning =
-                    append_reasoning_tag(&classification.reasoning, marker_reason.clone());
-                let requested_route = classification.route_name.clone();
-                let selection = self.select_provider(
-                    &requested_route,
-                    &metadata_for_selection,
-                    &classification,
-                    &features,
-                    &routing_state_for_selection,
-                    bound_alias_prefix.as_deref(),
-                    env,
-                )?;
-                (classification, requested_route, selection)
-            };
+                return Ok(json!({
+                    "target": target_obj,
+                    "decision": {
+                        "routeName": "direct",
+                        "providerKey": selection.provider_key,
+                        "pool": selection.pool,
+                        "poolId": selection.pool_id,
+                        "confidence": 1.0,
+                        "reasoning": reasoning,
+                        "fallback": false
+                    },
+                    "diagnostics": {
+                        "routeName": "direct",
+                        "providerKey": selection.provider_key,
+                        "pool": selection.pool,
+                        "poolId": selection.pool_id,
+                        "reasoning": reasoning,
+                        "fallback": false,
+                        "confidence": 1.0
+                    }
+                }));
+            }
+        }
+
+        // RELAY: single shared path
+        let mut classification = self.classifier.classify(&features);
+        if let Some(route_hint) = resolve_route_hint(metadata) {
+            if route_has_any_pool(&self.routing, &route_hint)
+                && !is_server_tool_followup_request(metadata)
+            {
+                classification.route_name = route_hint.clone();
+                classification.reasoning = append_reasoning_tag(
+                    &classification.reasoning,
+                    Some(format!("route_hint:{}", route_hint)),
+                );
+            }
+        }
+        classification.reasoning =
+            append_reasoning_tag(&classification.reasoning, marker_reason.clone());
+        let requested_route = classification.route_name.clone();
+        let selection = self.select_provider(
+            &requested_route,
+            &metadata_for_selection,
+            &classification,
+            &features,
+            &routing_state_for_selection,
+            bound_alias_prefix.as_deref(),
+            env,
+        )?;
 
         let target = self
             .provider_registry

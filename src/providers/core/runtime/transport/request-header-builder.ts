@@ -147,7 +147,9 @@ export class RequestHeaderBuilder {
       HeaderUtils.assignHeader(finalHeaders, 'x-opencode-project', projectId);
     }
 
-    const sessionId = RequestHeaderBuilder.resolveOpenCodeZenSessionId(context);
+    const sessionId = RequestHeaderBuilder.hasOpenCodeZenTaintedReasoning(context)
+      ? undefined
+      : RequestHeaderBuilder.resolveOpenCodeZenSessionId(context);
     if (sessionId) {
       HeaderUtils.assignHeader(finalHeaders, 'x-opencode-session', sessionId);
     }
@@ -161,6 +163,14 @@ export class RequestHeaderBuilder {
     if (client) {
       HeaderUtils.assignHeader(finalHeaders, 'x-opencode-client', client);
     }
+  }
+
+  private static hasOpenCodeZenTaintedReasoning(context: RequestHeaderBuildContext): boolean {
+    const metadata = context.runtimeMetadata?.metadata;
+    if (!metadata || typeof metadata !== 'object') {
+      return false;
+    }
+    return (metadata as Record<string, unknown>).opencodeTaintedReasoning === true;
   }
 
   private static isOpenCodeZenRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {

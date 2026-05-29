@@ -38,7 +38,7 @@ function installPageFetchMock() {
         {
           id: 'qwen',
           family: 'openai',
-          protocol: 'chat:openai',
+          protocol: 'compat:passthrough',
           enabled: true,
           defaultModels: ['qwen-max', 'qwen-plus'],
           credentialsRef: 'authfile-qwen-default',
@@ -56,7 +56,7 @@ function installPageFetchMock() {
           providerType: 'openai',
           enabled: true,
           baseURL: 'https://example.com/v1',
-          compatibilityProfile: 'chat:openai',
+          compatibilityProfile: 'compat:passthrough',
           models: { 'qwen-max': {}, 'qwen-plus': {} },
           auth: { type: 'oauth', tokenFile: 'default' }
         }
@@ -74,7 +74,7 @@ function installPageFetchMock() {
           providerKey: 'qwen.default.qwen-max',
           runtimeKey: 'qwen.default.qwen-max',
           family: 'openai',
-          protocol: 'chat:openai',
+          protocol: 'compat:passthrough',
           enabled: true
         }
       ]);

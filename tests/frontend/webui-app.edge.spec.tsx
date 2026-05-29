@@ -169,7 +169,7 @@ describe('webui edge coverage', () => {
           {
             id: 'qwen',
             family: 'openai',
-            protocol: 'chat:openai',
+            protocol: 'compat:passthrough',
             enabled: true,
             defaultModels: ['qwen-max'],
             credentialsRef: 'authfile-qwen-default',
@@ -183,7 +183,7 @@ describe('webui edge coverage', () => {
             providerKey: 'qwen.default.qwen-max',
             runtimeKey: 'qwen.default.qwen-max',
             family: 'openai',
-            protocol: 'chat:openai',
+            protocol: 'compat:passthrough',
             enabled: true
           }
         ]);

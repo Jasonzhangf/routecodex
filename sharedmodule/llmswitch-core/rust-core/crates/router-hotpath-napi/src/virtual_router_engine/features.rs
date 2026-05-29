@@ -311,47 +311,65 @@ pub(crate) struct RoutingFeatures {
     pub metadata: Value,
 }
 
-pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> RoutingFeatures {
-    let messages = request
-        .get("messages")
+#[derive(Debug, Clone, Default)]
+struct TurnSegmentState {
+    latest_role: Option<String>,
+    latest_message: Option<Value>,
+    has_tool_call_responses: bool,
+    last_assistant_tool: Option<tools::ToolClassification>,
+}
+
+fn extract_turn_state(request: &Value) -> TurnSegmentState {
+    let has_responses_input = request
+        .get("semantics")
+        .and_then(|v| v.get("responses"))
+        .and_then(|v| v.get("context"))
+        .and_then(|v| v.get("input"))
         .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let (
-        message_latest_role,
-        message_latest_message,
-        message_has_tool_call_responses,
-        message_last_assistant_tool,
-    ) = get_message_turn_state(&messages);
-    let (
-        responses_latest_role,
-        responses_latest_message,
-        responses_has_tool_call_responses,
-        responses_last_assistant_tool,
-    ) = get_responses_context_turn_state(request);
-    let current_user_from_messages = message_latest_role.as_deref() == Some("user");
-    let current_user_from_responses =
-        !current_user_from_messages && responses_latest_role.as_deref() == Some("user");
-    let latest_message_role = if current_user_from_messages || current_user_from_responses {
-        "user".to_string()
-    } else {
-        responses_latest_role
-            .clone()
-            .or(message_latest_role.clone())
-            .unwrap_or_else(|| get_latest_message_role(&messages).unwrap_or_default())
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false);
+
+    let message_state = {
+        let messages = request
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let (role, msg, has_tool, tool) = get_message_turn_state(&messages);
+        TurnSegmentState {
+            latest_role: role,
+            latest_message: msg,
+            has_tool_call_responses: has_tool,
+            last_assistant_tool: tool,
+        }
     };
 
-    let latest_message = if current_user_from_messages {
-        message_latest_message.as_ref()
-    } else if current_user_from_responses {
-        responses_latest_message.as_ref()
-    } else {
-        responses_latest_message
-            .as_ref()
-            .or(message_latest_message.as_ref())
-    };
+    // If messages has a fresh user turn, prefer it. Otherwise fall back to responses context.
+    if message_state.latest_role.as_deref() == Some("user") || !has_responses_input {
+        return message_state;
+    }
+
+    let (role, msg, has_tool, tool) = get_responses_context_turn_state(request);
+    TurnSegmentState {
+        latest_role: role,
+        latest_message: msg,
+        has_tool_call_responses: has_tool,
+        last_assistant_tool: tool,
+    }
+}
+
+pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> RoutingFeatures {
+    let turn_state = extract_turn_state(request);
+    let latest_message_role = turn_state.latest_role.clone().unwrap_or_else(|| {
+        let messages = request
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        get_latest_message_role(&messages).unwrap_or_default()
+    });
     let latest_user_text = if latest_message_role == "user" {
-        if let Some(msg) = latest_message {
+        if let Some(msg) = &turn_state.latest_message {
             extract_message_text(msg)
         } else {
             "".to_string()
@@ -362,21 +380,6 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     let normalized_user_text = latest_user_text.to_lowercase();
     let meaningful_declared_tools = extract_meaningful_declared_tool_names(request.get("tools"));
     let has_tools = !meaningful_declared_tools.is_empty();
-    let (has_tool_call_responses, last_assistant_tool) = if current_user_from_messages {
-        (message_has_tool_call_responses, message_last_assistant_tool)
-    } else if current_user_from_responses {
-        (
-            responses_has_tool_call_responses,
-            responses_last_assistant_tool,
-        )
-    } else if responses_latest_role.is_some() {
-        (
-            responses_has_tool_call_responses,
-            responses_last_assistant_tool,
-        )
-    } else {
-        (message_has_tool_call_responses, message_last_assistant_tool)
-    };
     let estimated_tokens = read_finite_floor_i64(metadata.get("estimatedInputTokens"))
         .or_else(|| read_finite_floor_i64(metadata.get("estimatedTokens")))
         .or_else(|| read_finite_floor_i64(metadata.get("estimated_tokens")))
@@ -384,7 +387,7 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     let has_thinking = detect_keyword(&normalized_user_text, &THINKING_KEYWORDS);
     let has_vision_tool = detect_vision_tool(request.get("tools"));
     let media_signals = if latest_message_role == "user" {
-        analyze_media_attachments(latest_message)
+        analyze_media_attachments(turn_state.latest_message.as_ref())
     } else {
         analyze_media_attachments(None)
     };
@@ -393,11 +396,17 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     let has_web_tool = detect_web_tool(request.get("tools"));
     let has_thinking_keyword =
         has_thinking || detect_extended_thinking_keyword(&normalized_user_text);
-    let last_assistant_tool_label = last_assistant_tool
+    let last_assistant_tool_label = turn_state
+        .last_assistant_tool
         .as_ref()
         .and_then(|tool| tool.label.clone());
 
     let metadata_copy = metadata.clone();
+    let messages = request
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
 
     RoutingFeatures {
         request_id: metadata
@@ -412,7 +421,7 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
         user_text_sample: latest_user_text.chars().take(2000).collect(),
         tool_count: meaningful_declared_tools.len(),
         has_tools,
-        has_tool_call_responses,
+        has_tool_call_responses: turn_state.has_tool_call_responses,
         has_vision_tool,
         has_image_attachment,
         has_video_attachment: media_signals.has_video,
@@ -423,10 +432,12 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
         has_coding_tool,
         has_thinking_keyword,
         estimated_tokens,
-        last_assistant_tool_category: last_assistant_tool
+        last_assistant_tool_category: turn_state
+            .last_assistant_tool
             .as_ref()
             .map(|tool| tool.category.clone()),
-        last_assistant_tool_snippet: last_assistant_tool
+        last_assistant_tool_snippet: turn_state
+            .last_assistant_tool
             .as_ref()
             .and_then(|tool| tool.snippet.clone()),
         last_assistant_tool_label,

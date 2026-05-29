@@ -217,20 +217,11 @@ pub(crate) fn resolve_instruction_process_mode_for_selection(
     routing_state: &RoutingInstructionState,
     registry: &ProviderRegistry,
 ) -> Option<String> {
-    let candidates = [
-        routing_state.forced_target.as_ref(),
-        routing_state.prefer_target.as_ref(),
-    ];
-    for candidate in candidates {
-        let target = match candidate {
-            Some(t) => t,
-            None => continue,
-        };
+    if let Some(target) = &routing_state.forced_target {
         let process_mode = target.process_mode.clone();
-        if process_mode.is_none() {
-            continue;
-        }
-        if instruction_target_matches_provider_key(target, provider_key, registry) {
+        if process_mode.is_some()
+            && instruction_target_matches_provider_key(target, provider_key, registry)
+        {
             return process_mode;
         }
     }

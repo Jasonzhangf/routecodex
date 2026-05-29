@@ -15,7 +15,7 @@ use crate::virtual_router_engine::quota::ProviderQuotaState;
 use crate::virtual_router_engine::routing::{
     build_route_queue, default_pool_supports_capability, extract_excluded_provider_keys,
     extract_provider_id, filter_candidates_by_state, filter_pools_by_capability,
-    resolve_instruction_target, route_has_targets, InstructionTargetMatchMode,
+    resolve_instruction_target, route_has_targets,
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
@@ -82,32 +82,6 @@ fn resolve_route_pools_for_selection(
         return routing.get(matches[0].as_str());
     }
     Vec::new()
-}
-
-fn order_instruction_keys_by_default_route(
-    keys: &[String],
-    routing: &crate::virtual_router_engine::routing::RoutingPools,
-) -> Vec<String> {
-    if keys.len() <= 1 {
-        return keys.to_vec();
-    }
-    let key_set: HashSet<&str> = keys.iter().map(String::as_str).collect();
-    let mut ordered: Vec<String> = Vec::new();
-    for pool in routing.get(DEFAULT_ROUTE) {
-        for target in pool.targets {
-            if key_set.contains(target.as_str()) && !ordered.contains(&target) {
-                ordered.push(target);
-            }
-        }
-    }
-    let mut remaining: Vec<String> = keys
-        .iter()
-        .filter(|key| !ordered.contains(*key))
-        .cloned()
-        .collect();
-    remaining.sort();
-    ordered.extend(remaining);
-    ordered
 }
 
 fn classify_context_candidates(
@@ -209,47 +183,6 @@ impl VirtualRouterEngineCore {
             }
         }
 
-        if let Some(target) = &routing_state.prefer_target {
-            if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
-                let ordered_keys =
-                    order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
-                let available =
-                    self.apply_standard_filters(env, &ordered_keys, routing_state, &excluded_keys);
-                let available_set: HashSet<String> = available.iter().cloned().collect();
-                let mutation_only = metadata
-                    .get("routingInstructionMutationOnly")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let prefer_key = match resolved.mode {
-                    InstructionTargetMatchMode::Exact => available.into_iter().next(),
-                    InstructionTargetMatchMode::Filter => {
-                        let route_key = format!("prefer:{}", ordered_keys.join("|"));
-                        if mutation_only {
-                            self.load_balancer.peek_round_robin_with_skips(
-                                &route_key,
-                                &ordered_keys,
-                                |key| available_set.contains(key),
-                            )
-                        } else {
-                            self.load_balancer.select_round_robin_with_skips(
-                                &route_key,
-                                &ordered_keys,
-                                |key| available_set.contains(key),
-                            )
-                        }
-                    }
-                };
-                if let Some(prefer_key) = prefer_key {
-                    return Ok(SelectionResult::new(
-                        prefer_key.clone(),
-                        "prefer".to_string(),
-                        ordered_keys,
-                        Some("prefer".to_string()),
-                    ));
-                }
-            }
-        }
-
         let mut route_queue = build_route_queue(
             requested_route,
             &classification.candidates,
@@ -279,6 +212,7 @@ impl VirtualRouterEngineCore {
                 .iter()
                 .any(|candidate| candidate == "longcontext");
         let mut unavailable_route_pools: Vec<Value> = Vec::new();
+        let mut all_candidate_keys: Vec<String> = Vec::new();
 
         for route_name in route_queue {
             let mut pools = if requires_remote_video {
@@ -342,6 +276,11 @@ impl VirtualRouterEngineCore {
                 }
                 if pool.targets.is_empty() {
                     continue;
+                }
+                for key in &pool.targets {
+                    if !all_candidate_keys.contains(key) {
+                        all_candidate_keys.push(key.clone());
+                    }
                 }
                 let mut available =
                     self.apply_standard_filters(env, &pool.targets, routing_state, &excluded_keys);
@@ -452,37 +391,11 @@ impl VirtualRouterEngineCore {
                 }
             }
         }
-        let mut candidate_keys = Vec::new();
-        for route_name in build_route_queue(
-            requested_route,
-            &classification.candidates,
-            features,
-            &self.routing,
-        ) {
-            for pool in self.routing.get(&route_name) {
-                if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref())
-                {
-                    continue;
-                }
-                for key in filter_candidates_by_state(
-                    &pool.targets,
-                    routing_state,
-                    &self.provider_registry,
-                ) {
-                    if excluded_keys.contains(&key) {
-                        continue;
-                    }
-                    if !candidate_keys.contains(&key) {
-                        candidate_keys.push(key);
-                    }
-                }
-            }
-        }
 
         Err(build_provider_not_available_error(
             self,
             env,
-            &candidate_keys,
+            &all_candidate_keys,
             "No available providers after applying routing instructions",
         ))
     }
@@ -1125,7 +1038,8 @@ mod tests {
     }
 
     #[test]
-    fn singleton_provider_with_active_503_health_cooldown_stays_filtered_until_startup_import_probe() {
+    fn singleton_provider_with_active_503_health_cooldown_stays_filtered_until_startup_import_probe(
+    ) {
         let provider_key = "windsurf.managed.gpt-5.5-low";
         let mut core = VirtualRouterEngineCore::new();
         let mut providers = Map::new();

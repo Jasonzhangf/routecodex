@@ -18,7 +18,6 @@ use super::thinking_history::{
     ensure_deepseek_thinking_content_for_assistant_history,
     ensure_reasoning_content_for_anthropic_assistant_history,
     ensure_reasoning_content_for_assistant_history,
-    fill_synthetic_reasoning_content_for_tool_calls,
     should_apply_anthropic_thinking_history_compat, should_apply_deepseek_thinking_history_compat,
     should_apply_local_deepseek_thinking_history_compat,
 };
@@ -147,14 +146,6 @@ pub fn run_req_outbound_stage3_compat(
     if should_apply_deepseek_thinking_history_compat(&payload, &adapter_context) {
         if let Some(root) = payload.as_object_mut() {
             ensure_deepseek_thinking_content_for_assistant_history(root);
-            if adapter_context
-                .provider_key
-                .as_deref()
-                .map(|key| key.starts_with("opencode-zen-free."))
-                .unwrap_or(false)
-            {
-                fill_synthetic_reasoning_content_for_tool_calls(root);
-            }
             if provider_protocol_matches(
                 adapter_context.provider_protocol.as_ref(),
                 "anthropic-messages",

@@ -798,10 +798,7 @@ fn test_req_profile_chat_iflow_normalizes_thinking_and_reasoning() {
     assert_eq!(result.applied_profile, Some("chat:iflow".to_string()));
     assert_eq!(result.payload["thinking"]["type"], "enabled");
     assert_eq!(result.payload["temperature"], 1.0);
-    assert_eq!(
-        result.payload["messages"][1]["reasoning_content"],
-        "I need to call exec_command."
-    );
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
 }
 
 #[test]
@@ -1017,10 +1014,7 @@ fn test_req_profile_chat_local_deepseek_thinking_history_still_applies_under_unk
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
-    assert_eq!(
-        result.payload["messages"][1]["reasoning_content"],
-        "I need to call exec_command."
-    );
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
     assert_eq!(
         result.payload["messages"][2]["reasoning_content"],
         "Jason，我已通读整个项目。以下是 `/goal` 提示词设计。"
@@ -1147,10 +1141,7 @@ fn test_req_profile_anthropic_thinking_history_injects_reasoning_content() {
     };
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(
-        result.payload["messages"][1]["reasoning_content"],
-        "I need to call view_image."
-    );
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
     assert_eq!(
         result.payload["messages"][2]["reasoning_content"],
         "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
@@ -3601,6 +3592,7 @@ fn test_protocol_field_contract_outbound_deepseek_openai_chat_trailing_tool_has_
                 {
                     "role": "assistant",
                     "content": "",
+                    "reasoning_content": "Need to inspect cwd before running pwd.",
                     "tool_calls": [{
                         "type": "function",
                         "id": "call_tail",
@@ -3646,7 +3638,7 @@ fn test_protocol_field_contract_outbound_deepseek_openai_chat_trailing_tool_has_
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert_eq!(
         result.payload["messages"][1]["reasoning_content"],
-        "I need to call exec_command."
+        "Need to inspect cwd before running pwd."
     );
 }
 

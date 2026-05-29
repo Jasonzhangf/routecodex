@@ -9,8 +9,8 @@ mod selection;
 pub(crate) use bootstrap::{bootstrap_virtual_router_routing_json, NormalizedRoutePoolConfig};
 #[allow(unused_imports)]
 pub(crate) use config::{
-    build_route_candidates, build_route_queue, default_pool_supports_capability,
-    filter_pools_by_capability, parse_routing, route_has_targets, RoutePoolTier, RoutingPools,
+    build_route_queue, default_pool_supports_capability, filter_pools_by_capability, parse_routing,
+    route_has_targets, RoutePoolTier, RoutingPools,
 };
 #[allow(unused_imports)]
 pub(crate) use direct_model::{

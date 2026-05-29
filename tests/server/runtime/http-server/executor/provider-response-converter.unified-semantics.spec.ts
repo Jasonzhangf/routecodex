@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -744,5 +745,62 @@ describe('provider-response-converter unified semantics handoff', () => {
     const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(bridgeArgs?.providerProtocol).toBe('openai-responses');
     expect((result as any).body?.__sse_responses).toBeDefined();
+  });
+
+  it('does not start stopless reenter followup after client disconnect', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const { trackClientConnectionState } = await import(
+      '../../../../../src/server/utils/client-connection-state.js'
+    );
+    const req = new EventEmitter() as any;
+    req.headers = {};
+    const res = new EventEmitter() as any;
+    res.writableFinished = false;
+    res.writableEnded = false;
+    const clientConnectionState = trackClientConnectionState(req, res);
+    res.emit('close');
+
+    mockConvertProviderResponse.mockImplementationOnce(async ({ reenterPipeline }) => {
+      await reenterPipeline({
+        entryEndpoint: '/v1/responses',
+        requestId: 'req_stopless_client_disconnect_1_followup',
+        body: { model: 'gpt-5.5', input: '继续执行' },
+        metadata: {}
+      });
+      return { body: { id: 'resp_should_not_continue' } };
+    });
+
+    const executeNested = jest.fn(async () => ({ body: { id: 'resp_nested_started' } } as any));
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        providerType: 'openai',
+        requestId: 'req_stopless_client_disconnect_1',
+        wantsStream: true,
+        response: { body: { id: 'resp_seed_stopless' } } as any,
+        requestSemantics: {} as any,
+        originalRequest: { model: 'gpt-5.5', input: 'continue' } as any,
+        pipelineMetadata: {
+          clientConnectionState,
+          __rt: { serverToolFollowup: true, clientProtocol: 'openai-responses' }
+        }
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined,
+        },
+        executeNested,
+      },
+    )).rejects.toMatchObject({ code: 'CLIENT_DISCONNECTED' });
+    expect(executeNested).not.toHaveBeenCalled();
   });
 });

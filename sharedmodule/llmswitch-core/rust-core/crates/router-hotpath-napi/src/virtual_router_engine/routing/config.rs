@@ -168,51 +168,6 @@ fn is_tool_route_with_tools_fallback(route: &str, features: &RoutingFeatures) ->
         || (route == "thinking" && features.has_tools)
 }
 
-pub(crate) fn build_route_candidates(
-    requested_route: &str,
-    candidates: &[String],
-    features: &RoutingFeatures,
-    routing: &RoutingPools,
-) -> Vec<String> {
-    let mut route_queue: Vec<String> = Vec::new();
-    route_queue.push(requested_route.to_string());
-    for route in candidates {
-        if !route_queue.contains(route) {
-            route_queue.push(route.clone());
-        }
-    }
-    if !route_queue.contains(&super::super::classifier::DEFAULT_ROUTE.to_string()) {
-        route_queue.push(super::super::classifier::DEFAULT_ROUTE.to_string());
-    }
-    let mut available: Vec<String> = Vec::new();
-    for route in route_queue {
-        let pools = routing.get(&route);
-        for pool in pools {
-            for key in &pool.targets {
-                if !available.contains(key) {
-                    available.push(key.clone());
-                }
-            }
-        }
-    }
-    if features.has_image_attachment && requested_route == "multimodal" {
-        let mut prioritized: Vec<String> = Vec::new();
-        let mut others: Vec<String> = Vec::new();
-        for key in &available {
-            if key.contains("responses") || key.contains("gemini") {
-                prioritized.push(key.clone());
-            } else {
-                others.push(key.clone());
-            }
-        }
-        if !prioritized.is_empty() {
-            prioritized.extend(others);
-            return prioritized;
-        }
-    }
-    available
-}
-
 pub(crate) fn filter_pools_by_capability(
     pools: &[RoutePoolTier],
     provider_registry: &ProviderRegistry,
@@ -558,5 +513,108 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["primary", "backup"]
         );
+    }
+
+    // Red-test: scan provider configs on disk and verify VR/hubpipeline code
+    // contains no hardcoded provider IDs. Providers evolve — only config should
+    // drive provider identification.
+    #[test]
+    fn no_provider_ids_are_hardcoded_in_virtual_router_or_hub_pipeline_code() {
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"));
+        let Ok(home) = home else {
+            eprintln!("WARN: HOME not set, skipping red-test");
+            return;
+        };
+        let provider_dir = std::path::Path::new(&home).join(".rcc").join("provider");
+        if !provider_dir.exists() {
+            eprintln!("WARN: ~/.rcc/provider not found, skipping red-test");
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(&provider_dir) else {
+            return;
+        };
+        let mut provider_ids: Vec<String> = Vec::new();
+        for entry in entries {
+            let Ok(entry) = entry else { continue };
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                if let Some(name) = entry.file_name().to_str() {
+                    provider_ids.push(name.to_string());
+                }
+            }
+        }
+        if provider_ids.is_empty() {
+            return;
+        }
+
+        // Source directories to check (relative to this file's location)
+        let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let vr_root = crate_root.join("virtual_router_engine");
+        let hub_root = crate_root.join("hub_pipeline_blocks");
+
+        let mut checked_dirs: Vec<std::path::PathBuf> = Vec::new();
+        if vr_root.exists() {
+            checked_dirs.push(vr_root);
+        }
+        if hub_root.exists() {
+            checked_dirs.push(hub_root);
+        }
+
+        // Collect all .rs files (excluding test modules and test files,
+        // and provider_bootstrap which is config normalization, not VR runtime)
+        let mut rs_files: Vec<std::path::PathBuf> = Vec::new();
+        for dir in &checked_dirs {
+            collect_rs_files(dir, &mut rs_files);
+        }
+        rs_files.retain(|f| {
+            !f.file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s == "provider_bootstrap")
+                .unwrap_or(false)
+        });
+
+        // Suspicious patterns: provider_id used as a hardcoded string in a
+        // comparison context.
+        let mut violations: Vec<String> = Vec::new();
+        for file in &rs_files {
+            let content = std::fs::read_to_string(file).unwrap_or_default();
+            for pid in &provider_ids {
+                let pid_lower = pid.to_lowercase();
+                // Pattern: == "provider_id" or == 'provider_id'
+                for pattern in &[
+                    format!("== \"{pid_lower}\""),
+                    format!("== '{pid_lower}'"),
+                    format!("== \"{pid}\""),
+                    format!("== '{pid}'"),
+                ] {
+                    if content.contains(pattern.as_str()) {
+                        violations.push(format!(
+                            "{}: found `{}`",
+                            file.strip_prefix(&crate_root).unwrap_or(file).display(),
+                            pattern
+                        ));
+                    }
+                }
+            }
+        }
+
+        if !violations.is_empty() {
+            panic!(
+                "Provider IDs hardcoded in VR/hubpipeline code (only config should drive):\n{}",
+                violations.join("\n")
+            );
+        }
+    }
+
+    fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    collect_rs_files(&path, out);
+                } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
+                    out.push(path);
+                }
+            }
+        }
     }
 }

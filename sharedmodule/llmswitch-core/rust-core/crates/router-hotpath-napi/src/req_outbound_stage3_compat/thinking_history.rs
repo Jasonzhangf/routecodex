@@ -19,29 +19,6 @@ fn has_non_empty_tool_calls(row: &Map<String, Value>) -> bool {
         .unwrap_or(false)
 }
 
-fn read_first_tool_call_name(row: &Map<String, Value>) -> Option<String> {
-    row.get("tool_calls")
-        .and_then(Value::as_array)
-        .and_then(|entries| entries.first())
-        .and_then(Value::as_object)
-        .and_then(|call| {
-            call.get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| function.get("name"))
-                .or_else(|| call.get("name"))
-        })
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(ToString::to_string)
-}
-
-fn synthesize_tool_call_reasoning(row: &Map<String, Value>) -> String {
-    read_first_tool_call_name(row)
-        .map(|name| format!("I need to call {}.", name))
-        .unwrap_or_else(|| "I need to call a tool.".to_string())
-}
-
 fn find_last_user_index(messages: &[Value]) -> Option<usize> {
     let mut last_user_index: Option<usize> = None;
     for (index, message) in messages.iter().enumerate() {
@@ -248,38 +225,6 @@ pub(crate) fn fill_reasoning_content_for_tool_calls(root: &mut Map<String, Value
         row.insert(
             "reasoning_content".to_string(),
             Value::String(".".to_string()),
-        );
-    }
-}
-
-pub(crate) fn fill_synthetic_reasoning_content_for_tool_calls(root: &mut Map<String, Value>) {
-    let Some(messages) = root.get_mut("messages").and_then(|v| v.as_array_mut()) else {
-        return;
-    };
-    for message in messages.iter_mut() {
-        let Some(row) = message.as_object_mut() else {
-            continue;
-        };
-        let role = row
-            .get("role")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        let has_placeholder_reasoning = row
-            .get("reasoning_content")
-            .and_then(Value::as_str)
-            .map(|value| value.trim() == ".")
-            .unwrap_or(false);
-        if role != "assistant"
-            || !has_non_empty_tool_calls(row)
-            || (!missing_reasoning_content(row) && !has_placeholder_reasoning)
-        {
-            continue;
-        }
-        row.insert(
-            "reasoning_content".to_string(),
-            Value::String(synthesize_tool_call_reasoning(row)),
         );
     }
 }

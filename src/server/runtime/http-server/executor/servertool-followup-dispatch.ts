@@ -7,6 +7,7 @@ import { importCoreDist } from '../../../../modules/llmswitch/bridge/module-load
 import {
   awaitNestedExecutionWithFailFast,
   getNestedFollowupAbortSignal,
+  throwIfNestedFollowupAborted,
   resolveServerToolNestedFollowupTimeoutMs
 } from './servertool-followup-fail-fast.js';
 
@@ -861,7 +862,9 @@ export async function executeServerToolReenterPipeline(args: {
     // Reusing the same object would accumulate history drift across retries.
     const nestedInputAttempt = clonePipelineInputForRetry(nestedInput);
     try {
+      throwIfNestedFollowupAborted(nestedInputAttempt.metadata);
       await captureNestedResponsesRequestContext(nestedInputAttempt);
+      throwIfNestedFollowupAborted(nestedInputAttempt.metadata);
       const attemptResult = await awaitNestedExecutionWithFailFast({
         promise: args.executeNested(nestedInputAttempt),
         abortSignal: getNestedFollowupAbortSignal(

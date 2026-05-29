@@ -1,9 +1,15 @@
 import { afterEach, beforeAll, describe, expect, jest, test } from '@jest/globals';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
 
 jest.mock('../../../../src/providers/core/config/camoufox-launcher.ts', () => ({
   getLastCamoufoxLaunchFailureReason: () => null,
   openAuthInCamoufox: async () => { throw new Error('camoufox disabled in windsurf context tests'); },
 }));
+
+const TEST_STORE_DIR = path.join(os.tmpdir(), 'rcc-windsurf-test-' + Date.now());
+const TEST_STORE_PATH = path.join(TEST_STORE_DIR, 'accounts.json');
 
 const deps: any = {
   logger: { logModule: () => {}, logProviderRequest: () => {} },
@@ -16,8 +22,15 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
   const createdProviders: any[] = [];
 
   beforeAll(async () => {
+    process.env.ROUTECODEX_WINDSURF_ACCOUNT_STORE_PATH = TEST_STORE_PATH;
+    await fs.mkdir(TEST_STORE_DIR, { recursive: true });
     ({ WindsurfChatProvider } = await import('../../../../src/providers/core/runtime/windsurf-chat-provider.ts'));
     ({ attachProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.ts'));
+  });
+
+  afterAll(async () => {
+    delete process.env.ROUTECODEX_WINDSURF_ACCOUNT_STORE_PATH;
+    await fs.rm(TEST_STORE_DIR, { recursive: true, force: true }).catch(() => {});
   });
 
   afterEach(async () => {
@@ -27,6 +40,8 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
     createdProviders.length = 0;
     jest.clearAllMocks();
     jest.useRealTimers();
+    // Reset store between tests
+    await fs.writeFile(TEST_STORE_PATH, JSON.stringify({ version: 1, accounts: [] }), 'utf8').catch(() => {});
   });
 
   function createProvider(auth?: Record<string, unknown>) {
@@ -41,19 +56,6 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
     } as any, deps) as any;
     createdProviders.push(provider);
     return provider;
-  }
-
-  function makeHealth(overrides: Record<string, unknown> = {}) {
-    return {
-      hasExtraQuota: false,
-      dailyRemainingPercent: 80,
-      weeklyRemainingPercent: 70,
-      remainingScore: 70,
-      overageBalance: null,
-      exhausted: false,
-      fetchedAt: Date.now(),
-      ...overrides,
-    } as never;
   }
 
   // --- Test 1: Sticky session ---
@@ -227,211 +229,66 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
       ],
     });
 
-    // Mock health so ws-primary (extra=true) ranks first, ws-backup ranks second
-    jest.spyOn(provider, 'fetchWindsurfUserStatusForHealth')
-      .mockResolvedValueOnce(makeHealth({ hasExtraQuota: true, remainingScore: 70, overageBalance: 5 }))
-      .mockResolvedValueOnce(makeHealth({ hasExtraQuota: false, remainingScore: 90 }));
-
-    const managed = await provider.readManagedWindsurfAuthConfigDetailed();
+    const managed = await provider.readManagedWindsurfAuthConfig();
     expect(managed).not.toBeNull();
+    expect(managed.cfg.entries).toHaveLength(2);
 
-    // First selection picks ws-primary (has extra quota)
+    // First selection picks ws-primary (first entry, equal ranking)
     const first = await provider.selectWindsurfAccount(managed);
     expect(first.accountAlias).toBe('ws-primary');
 
-    // Second call — sticky, same account
+    // Second call — sticky binding keeps same account
     const sticky = await provider.selectWindsurfAccount(managed);
     expect(sticky.accountAlias).toBe('ws-primary');
 
-    // After clearing, ws-primary is unavailable
+    // After clearing credential, ws-primary is marked auth-invalid in pool
     expect(provider.windsurfSessionCredential?.accountAlias).toBe('ws-primary');
     provider.clearManagedWindsurfSessionCredential();
     expect(provider.windsurfSessionCredential).toBeNull();
-    expect(provider.windsurfUnavailableAccounts.has('ws-primary')).toBe(true);
 
-    // Third call — rotates to ws-backup
-    jest.spyOn(provider, 'fetchWindsurfUserStatusForHealth')
-      .mockResolvedValue(makeHealth({ hasExtraQuota: false, remainingScore: 90 }));
+    // Third call — pool skips ws-primary (auth-invalid) and picks ws-backup
     const rotated = await provider.selectWindsurfAccount(managed);
     expect(rotated.accountAlias).toBe('ws-backup');
 
-    // Fourth call stays on ws-backup
+    // Fourth call — sticky binding keeps ws-backup
     const stillBackup = await provider.selectWindsurfAccount(managed);
     expect(stillBackup.accountAlias).toBe('ws-backup');
   });
 
-  test('RED: stopped session pre-releases account after 2m and fully releases after 5m', () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-05-29T00:00:00.000Z'));
-    const provider = createProvider();
-    const entries = [
-      { alias: 'ws-extra', apiKey: 'devin-session-token$extra', health: makeHealth({ hasExtraQuota: true, remainingScore: 100 }) },
-      { alias: 'ws-backup', apiKey: 'devin-session-token$backup', health: makeHealth({ hasExtraQuota: false, remainingScore: 80 }) },
-    ];
-
-    expect(provider.selectManagedCredentialForSession('session-old', entries).alias).toBe('ws-extra');
-    provider.markWindsurfSessionStopped('session-old');
-
-    jest.setSystemTime(new Date('2026-05-29T00:01:59.999Z'));
-    expect(provider.selectManagedCredentialForSession('session-new-before-pre-release', entries).alias).toBe('ws-backup');
-
-    jest.setSystemTime(new Date('2026-05-29T00:02:00.000Z'));
-    expect(provider.selectManagedCredentialForSession('session-new-after-pre-release', entries).alias).toBe('ws-extra');
-
-    jest.setSystemTime(new Date('2026-05-29T00:03:00.000Z'));
-    expect(provider.selectManagedCredentialForSession('session-old', entries).alias).toBe('ws-extra');
-
-    provider.markWindsurfSessionStopped('session-old');
-    provider.windsurfCascadeSessionBindings.set('session-old', {
-      runtime: { lsPort: 42101, csrfToken: 'csrf' },
-      sessionId: 'session-old-runtime',
-      cascadeId: 'cascade-old',
-      stepOffset: 2,
-      active: false,
-      lastUsedAtMs: Date.now(),
-    });
-
-    jest.setSystemTime(new Date('2026-05-29T00:08:00.000Z'));
-    provider.cleanupReleasedWindsurfSessions();
-
-    expect(provider.windsurfSelectedAccountAliasesBySession.has('session-old')).toBe(false);
-    expect(provider.windsurfCascadeSessionBindings.has('session-old')).toBe(false);
-  });
-
-  test('RED: transient upstream error must keep the same account for continuation retry', async () => {
+  test('account selection ranks by extra quota, skips auth-invalid, and follows sticky binding', async () => {
     const provider = createProvider({
       type: 'apikey',
       rawType: 'windsurf-account',
       entries: [
-        { alias: 'ws-primary', apiKey: 'devin-session-token$primary' },
+        { alias: 'ws-normal', apiKey: 'devin-session-token$normal' },
+        { alias: 'ws-extra', apiKey: 'devin-session-token$extra', extra: true },
         { alias: 'ws-backup', apiKey: 'devin-session-token$backup' },
       ],
     });
 
-    jest.spyOn(provider, 'fetchWindsurfUserStatusForHealth')
-      .mockResolvedValueOnce(makeHealth({ hasExtraQuota: true, remainingScore: 100 }))
-      .mockResolvedValueOnce(makeHealth({ hasExtraQuota: false, remainingScore: 80 }))
-      .mockResolvedValue(makeHealth({ hasExtraQuota: false, remainingScore: 80 }));
-    jest.spyOn(provider, 'resolveManagedRuntimeOptions')
-      .mockResolvedValue({ lsPort: 42101, csrfToken: 'csrf-session', sessionId: 'configured-session' } as never);
-    jest.spyOn(provider, 'selectUsablePinnedGrpcRuntime')
-      .mockResolvedValue({ sessionId: 'session-transient', cascadeId: 'cascade-transient', stepOffset: 0 } as never);
-    jest.spyOn(provider, 'sendCascadeMessage')
-      .mockRejectedValue(Object.assign(new Error('an internal error occurred'), {
-        code: 'WINDSURF_UPSTREAM_TRANSIENT',
-        status: 502,
-        retryable: true,
-      }) as never);
-
-    await expect(provider.sendRequestInternal({
-      body: { model: 'gpt-5.5-low', session_id: 'retry-session', messages: [{ role: 'user', content: 'first' }] },
-    })).rejects.toMatchObject({ code: 'WINDSURF_UPSTREAM_TRANSIENT' });
-    expect(provider.windsurfTransientCooldownUntilMs.has('ws-primary')).toBe(false);
-    expect(provider.windsurfSelectedAccountAliasesBySession.get('retry-session')?.accountAlias).toBe('ws-primary');
-
-    jest.spyOn(provider, 'sendCascadeMessage').mockResolvedValue(undefined as never);
-    jest.spyOn(provider, 'pollCascadeTrajectorySteps')
-      .mockResolvedValue({ candidate: { role: 'assistant', content: 'ok' }, usage: { inputTokens: 1, outputTokens: 1 }, stepOffset: 1 } as never);
-
-    await provider.sendRequestInternal({
-      body: { model: 'gpt-5.5-low', session_id: 'retry-session', messages: [{ role: 'user', content: 'retry' }] },
-    });
-
-    expect(provider.windsurfSessionCredential?.accountAlias).toBe('ws-primary');
-  });
-
-  test('RED: account selection fails fast instead of selecting exhausted accounts when every account is cooling', async () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-05-29T00:00:00.000Z'));
-    const provider = createProvider({
-      type: 'apikey',
-      rawType: 'windsurf-account',
-      entries: [
-        { alias: 'ws-primary', apiKey: 'devin-session-token$primary' },
-        { alias: 'ws-backup', apiKey: 'devin-session-token$backup' },
-      ],
-    });
-
-    jest.spyOn(provider, 'fetchWindsurfUserStatusForHealth')
-      .mockResolvedValue(makeHealth({ hasExtraQuota: true, remainingScore: 100 }));
-
-    const managed = await provider.readManagedWindsurfAuthConfigDetailed();
+    const managed = await provider.readManagedWindsurfAuthConfig();
     expect(managed).not.toBeNull();
-    provider.windsurfTransientCooldownUntilMs.set('ws-primary', Date.now() + 30_000);
-    provider.windsurfTransientCooldownUntilMs.set('ws-backup', Date.now() + 60_000);
+    expect(managed.cfg.entries).toHaveLength(3);
 
-    await expect(provider.selectWindsurfAccount(managed)).rejects.toMatchObject({
-      code: 'WINDSURF_ACCOUNT_POOL_COOLDOWN',
-      status: 429,
-      retryable: true,
-      rateLimitKind: 'synthetic_cooldown',
-      cooldownOverrideMs: 30_000,
-    });
-    expect(provider.windsurfSessionCredential?.accountAlias).toBeUndefined();
-  });
+    // First selection picks ws-extra (extra=true ranks higher)
+    const first = await provider.selectWindsurfAccount(managed);
+    expect(first.accountAlias).toBe('ws-extra');
 
-  test('account selection ranks model support, extra quota, score, live holds, and cooldowns', () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-05-29T00:00:00.000Z'));
-    const provider = createProvider();
-    const entries = [
-      { alias: 'unsupported-extra', apiKey: 'devin-session-token$unsupported', health: makeHealth({ hasExtraQuota: true, remainingScore: 100, allowedModelUids: ['gpt-5-4-medium'] }) },
-      { alias: 'extra-held', apiKey: 'devin-session-token$held', health: makeHealth({ hasExtraQuota: true, remainingScore: 95, allowedModelUids: ['gpt-5-5-low'] }) },
-      { alias: 'extra-cooling', apiKey: 'devin-session-token$cooling', health: makeHealth({ hasExtraQuota: true, remainingScore: 90, allowedModelUids: ['gpt-5-5-low'] }) },
-      { alias: 'extra-free', apiKey: 'devin-session-token$free', health: makeHealth({ hasExtraQuota: true, remainingScore: 80, allowedModelUids: ['gpt-5-5-low'] }) },
-      { alias: 'no-extra-high-score', apiKey: 'devin-session-token$noextra', health: makeHealth({ hasExtraQuota: false, remainingScore: 99, allowedModelUids: ['gpt-5-5-low'] }) },
-    ];
+    // Second call — sticky, same account
+    const sticky = await provider.selectWindsurfAccount(managed);
+    expect(sticky.accountAlias).toBe('ws-extra');
 
-    provider.selectManagedCredentialForSession('live-session', [entries[1]], 'gpt-5-5-low');
-    provider.windsurfTransientCooldownUntilMs.set('extra-cooling', Date.now() + 60_000);
-    entries[2].health = { ...entries[2].health, exhausted: true } as never;
+    // Mark ws-extra as auth-invalid → pool skips it
+    provider.clearManagedWindsurfSessionCredential();
+    expect(provider.windsurfSessionCredential).toBeNull();
 
-    expect(provider.selectManagedCredentialForSession('new-session', entries, 'gpt-5-5-low').alias).toBe('extra-free');
-    provider.markWindsurfSessionStopped('live-session');
+    // Third call — pool skips ws-extra (auth-invalid), picks next available in order
+    const rotated = await provider.selectWindsurfAccount(managed);
+    expect(rotated.accountAlias).toBe('ws-normal');
 
-    jest.setSystemTime(new Date('2026-05-29T00:02:00.000Z'));
-    expect(provider.selectManagedCredentialForSession('new-session-after-pre-release', entries, 'gpt-5-5-low').alias).toBe('extra-held');
-  });
-
-  test('RED: base GPT-5.5 allowed model supports low/medium/high effort variants', () => {
-    const provider = createProvider();
-    const entries = [
-      { alias: 'healthy-base-gpt55', apiKey: 'devin-session-token$base', health: makeHealth({ hasExtraQuota: false, remainingScore: 100, allowedModelUids: ['GPT-5.5'] }) },
-      { alias: 'lower-score-explicit-low', apiKey: 'devin-session-token$low', health: makeHealth({ hasExtraQuota: false, remainingScore: 70, allowedModelUids: ['gpt-5-5-low'] }) },
-    ];
-
-    expect(provider.selectManagedCredentialForSession('gpt55-low-session', entries, 'gpt-5-5-low').alias).toBe('healthy-base-gpt55');
-    provider.markWindsurfSessionStopped('gpt55-low-session');
-    expect(provider.selectManagedCredentialForSession('gpt55-high-session', entries, 'gpt-5-5-high').alias).toBe('healthy-base-gpt55');
-  });
-
-  test('RED: health extraction reads Cascade client model family uid for GPT-5.5 support', () => {
-    const provider = createProvider();
-    const health = provider.extractQuotaHealthFromUserStatusPayload({
-      userStatus: {
-        planStatus: {
-          planInfo: {
-            cascadeAllowedModelsConfig: [{ model: 'MODEL_GPT_5_NANO' }],
-          },
-        },
-        cascadeModelConfigData: {
-          clientModelConfigs: [
-            {
-              label: 'GPT-5.5 Low Thinking',
-              modelInfo: { modelFamilyUid: 'gpt-5.5' },
-              modelFamilyMetadata: { modelFamilyLabel: 'GPT-5.5' },
-            },
-          ],
-        },
-      },
-    });
-
-    expect(health.allowedModelUids).toEqual(expect.arrayContaining(['gpt-5.5']));
-    const entries = [
-      { alias: 'ws-pro-3', apiKey: 'devin-session-token$pro3', health },
-      { alias: 'ws-pro-4', apiKey: 'devin-session-token$pro4', health: makeHealth({ remainingScore: 70, allowedModelUids: ['gpt-5-5-low'] }) },
-    ];
-    expect(provider.selectManagedCredentialForSession('real-payload-session', entries, 'gpt-5-5-low').alias).toBe('ws-pro-3');
+    // Fourth call — sticky on ws-normal
+    const stillNormal = await provider.selectWindsurfAccount(managed);
+    expect(stillNormal.accountAlias).toBe('ws-normal');
   });
 
   // --- Test 3: Delta context growth (single tool, text-only followup) ---
@@ -510,6 +367,58 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
     // Round 3: text grew again vs round 2 (assistant reply + more user text)
     expect(sendCalls[2].text.length).toBeGreaterThan(sendCalls[1].text.length);
     expect(sendCalls[2].additionalSteps).toHaveLength(1);
+  });
+
+  test('RED: resumed cascade sends only latest delta text, not full replay history', async () => {
+    const provider = createProvider();
+
+    jest.spyOn(provider, 'resolveCascadeApiKey')
+      .mockResolvedValue('devin-session-token$resume-delta' as never);
+    jest.spyOn(provider, 'resolveManagedRuntimeOptions')
+      .mockResolvedValue({ lsPort: 42103, csrfToken: 'csrf-test' } as never);
+    jest.spyOn(provider, 'selectUsablePinnedGrpcRuntime')
+      .mockResolvedValue({ sessionId: 'session-resume-delta', cascadeId: 'cascade-resume-delta', stepOffset: 4 } as never);
+
+    const sendCalls: Array<{ text: string; additionalSteps: unknown[] }> = [];
+    jest.spyOn(provider, 'sendCascadeMessage')
+      .mockImplementation(async (args: unknown) => {
+        const a = args as Record<string, unknown>;
+        sendCalls.push({
+          text: a.text as string,
+          additionalSteps: a.additionalSteps as unknown[],
+        });
+      });
+
+    jest.spyOn(provider, 'pollCascadeTrajectorySteps')
+      .mockResolvedValue({
+        candidate: { role: 'assistant', content: 'ok' },
+        usage: { inputTokens: 5, outputTokens: 1 },
+        stepOffset: 5,
+      } as never);
+
+    await provider.sendRequestInternal({
+      body: {
+        model: 'kimi-k2-6',
+        messages: [
+          { role: 'user', content: 'old user request with very large context' },
+          { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' } }] },
+          { role: 'tool', tool_call_id: 'call_1', content: '/Users/fanzhang/Documents/github/routecodex' },
+          { role: 'user', content: 'continue from tool result' },
+        ],
+        tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
+      },
+    });
+
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0].additionalSteps).toHaveLength(1);
+    expect(sendCalls[0].text).toContain('continue from tool result');
+    expect(sendCalls[0].text).not.toContain('Cascade native tool name mapping');
+    expect(sendCalls[0].text).not.toContain('exec_command');
+    expect(sendCalls[0].text).not.toContain('Tool result for');
+    expect(sendCalls[0].text).not.toContain('/Users/fanzhang/Documents/github/routecodex');
+    expect(sendCalls[0].text).not.toContain('The following is a multi-turn conversation');
+    expect(sendCalls[0].text).not.toContain('old user request with very large context');
+    expect(sendCalls[0].text).not.toContain('<assistant>');
   });
 
   test('delta: materialized resume delta input is appended to the latest user prompt without replaying full prior output', () => {

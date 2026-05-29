@@ -237,20 +237,8 @@ fn parse_named_target_instruction_requests_passthrough(instruction: &str, prefix
 fn parse_single_instruction_requests_passthrough(instruction: &str) -> bool {
     if parse_named_target_instruction_requests_passthrough(instruction, "sticky")
         || parse_named_target_instruction_requests_passthrough(instruction, "force")
-        || parse_named_target_instruction_requests_passthrough(instruction, "prefer")
     {
         return true;
-    }
-    if instruction.starts_with('!') {
-        let raw_target = instruction[1..].trim();
-        let (target, process_mode) = split_target_and_process_mode(raw_target);
-        if target.is_empty() || !parse_target_is_valid(target.as_str()) {
-            return false;
-        }
-        if !target.contains('.') {
-            return false;
-        }
-        return matches!(process_mode.as_deref(), Some("passthrough"));
     }
     false
 }

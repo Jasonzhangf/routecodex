@@ -16,6 +16,7 @@ import { stripInternalKeysDeep } from '../../../../utils/strip-internal-keys.js'
 import type { UnknownObject } from '../../../../types/common-types.js';
 import type { ProviderContext } from '../../api/provider-types.js';
 import type { PreparedHttpRequest } from '../http-request-executor.js';
+import { normalizeResponsesToChatBody } from '../../../../utils/responses-to-chat.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -591,6 +592,7 @@ export class VercelAiSdkOpenAiTransport {
     context: ProviderContext
   ): Promise<unknown> {
     const rawBody = applyOpenCodeZenThinkingDefaults(asRecord(requestInfo.body), context);
+    normalizeResponsesToChatBody(rawBody);
     const modelId = pickString(rawBody.model);
     if (!modelId) {
       throw new Error('provider-runtime-error: missing model from openai sdk transport');

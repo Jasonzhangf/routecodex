@@ -133,7 +133,7 @@ mkdir -p ~/.rcc/provider/myprovider
     "enabled": true,
     "type": "openai",
     "baseURL": "https://api.myprovider.com/v1",
-    "compatibilityProfile": "chat:openai",
+    "compatibilityProfile": "compat:passthrough",
     "auth": {
       "type": "apikey",
       "apiKey": "${MYPROVIDER_API_KEY}"
