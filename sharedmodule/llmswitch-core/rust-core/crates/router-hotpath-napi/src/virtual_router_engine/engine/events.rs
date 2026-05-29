@@ -46,7 +46,7 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_success(&mut self, event: &Value) {
-        self.refresh_provider_health_from_store();
+        self.refresh_provider_health_from_store(false);
         let provider_key = event
             .get("runtime")
             .and_then(|v| v.get("providerKey"))
@@ -74,7 +74,7 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
-        self.refresh_provider_health_from_store();
+        self.refresh_provider_health_from_store(false);
         if !event_affects_health(event) {
             return;
         }
@@ -86,12 +86,15 @@ impl VirtualRouterEngineCore {
         let now = now_ms();
         let status_code = extract_status_code(event);
         // Single policy gate:
-        // - HTTP 503: immediate persisted cooldown until local midnight
+        // - HTTP 503 is recoverable: same-provider retries are allowed until the
+        //   consecutive threshold trips the normal cooldown ladder.
         // - all other failures: consecutive threshold handling in health.rs
         if matches!(status_code, Some(503)) {
-            let ttl = compute_cooldown_until_next_local_midnight_ms(now);
-            self.health_manager
-                .cooldown_provider_until_midnight_persisted(&provider_key, now, now + ttl);
+            self.health_manager.record_recoverable_failure(
+                &provider_key,
+                Some("__http_503_daily_cooldown__".to_string()),
+                now,
+            );
             self.persist_provider_health();
             return;
         }
@@ -101,7 +104,7 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_error(&mut self, event: &Value) {
-        self.refresh_provider_health_from_store();
+        self.refresh_provider_health_from_store(false);
         if !event_affects_health(event) {
             return;
         }
@@ -188,9 +191,11 @@ impl VirtualRouterEngineCore {
                     return true;
                 }
                 if status == Some(503) {
-                    let ttl = compute_cooldown_until_next_local_midnight_ms(now);
-                    self.health_manager
-                        .cooldown_provider_until_midnight_persisted(provider_key, now, now + ttl);
+                    self.health_manager.record_recoverable_failure(
+                        provider_key,
+                        Some("__http_503_daily_cooldown__".to_string()),
+                        now,
+                    );
                     self.persist_provider_health();
                     return true;
                 }
@@ -202,7 +207,8 @@ impl VirtualRouterEngineCore {
             }
             ProviderErrorClassification::Unrecoverable => {
                 let default_unrecoverable_ttl = compute_cooldown_until_next_local_midnight_ms(now);
-                let cooldown_ms = extract_cooldown_override_ms(event).unwrap_or(default_unrecoverable_ttl);
+                let cooldown_ms =
+                    extract_cooldown_override_ms(event).unwrap_or(default_unrecoverable_ttl);
                 self.health_manager
                     .trip_provider(provider_key, reason, Some(cooldown_ms), now);
                 let _ = self.apply_qwen_auth_family_blacklist(event);
@@ -298,9 +304,8 @@ impl VirtualRouterEngineCore {
         };
         let now = now_ms();
         let reset_at = extract_reset_at_ms(event);
-        let cooldown_until = reset_at.or_else(|| {
-            extract_cooldown_override_ms(event).map(|ttl| now + ttl.max(1))
-        });
+        let cooldown_until =
+            reset_at.or_else(|| extract_cooldown_override_ms(event).map(|ttl| now + ttl.max(1)));
         self.quota_manager
             .freeze_quota_depleted(&provider_key, now, cooldown_until, reset_at);
         true
@@ -438,7 +443,10 @@ fn should_record_quota_error_signal(event: &Value) -> bool {
     if code == "QUOTA_DEPLETED" {
         return false;
     }
-    matches!(extract_provider_error_classification(event), Some(ProviderErrorClassification::Recoverable))
+    matches!(
+        extract_provider_error_classification(event),
+        Some(ProviderErrorClassification::Recoverable)
+    )
 }
 
 fn extract_provider_error_classification(event: &Value) -> Option<ProviderErrorClassification> {
@@ -815,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn recoverable_error_keeps_single_provider_available() {
+    fn recoverable_error_records_single_provider_strike_before_threshold() {
         let provider_key = "test.key1.model";
         let mut core = build_test_core(provider_key, "gpt-test");
 
@@ -823,21 +831,21 @@ mod tests {
 
         let state = provider_state(&core, provider_key);
         assert_eq!(state.state, "healthy");
-        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.failure_count, 1);
         assert_eq!(state.cooldown_expires_at, None);
     }
 
     #[test]
-    fn unrecoverable_error_keeps_single_provider_available() {
+    fn unrecoverable_error_trips_single_provider_immediately() {
         let provider_key = "test.key1.model";
         let mut core = build_test_core(provider_key, "gpt-test");
 
         core.handle_provider_error(&build_error_event(provider_key, "unrecoverable"));
 
         let state = provider_state(&core, provider_key);
-        assert_eq!(state.state, "healthy");
-        assert_eq!(state.failure_count, 0);
-        assert_eq!(state.cooldown_expires_at, None);
+        assert_eq!(state.state, "tripped");
+        assert!(state.failure_count >= 3);
+        assert!(state.cooldown_expires_at.is_some());
     }
 
     #[test]
@@ -900,7 +908,10 @@ mod tests {
         let state = provider_state(&core, "test.key1.model-a");
         assert_eq!(state.state, "tripped");
         let ttl = state.cooldown_expires_at.expect("cooldown expiry") - now_ms();
-        assert!(ttl > 9 * 60_000 && ttl <= 11 * 60_000, "expected ~10m ttl, got {ttl}");
+        assert!(
+            ttl > 9 * 60_000 && ttl <= 11 * 60_000,
+            "expected ~10m ttl, got {ttl}"
+        );
     }
 
     #[test]
@@ -999,12 +1010,13 @@ mod tests {
             health::Http429ControlOutcome::CooldownApplied
         );
 
-        let err = crate::virtual_router_engine::engine::selection::build_provider_not_available_error(
-            &core,
-            unsafe { napi::Env::from_raw(std::ptr::null_mut()) },
-            &vec![provider_key.to_string()],
-            "No available providers after applying routing instructions",
-        );
+        let err =
+            crate::virtual_router_engine::engine::selection::build_provider_not_available_error(
+                &core,
+                unsafe { napi::Env::from_raw(std::ptr::null_mut()) },
+                &vec![provider_key.to_string()],
+                "No available providers after applying routing instructions",
+            );
 
         assert!(err.contains("PROVIDER_NOT_AVAILABLE"));
         assert!(err.contains("unavailableProviders"));
@@ -1024,7 +1036,10 @@ mod tests {
         let state = provider_state(&core, "test.key1.model-a");
         assert_eq!(state.state, "healthy");
         assert_eq!(state.failure_count, 1);
-        assert!(state.cooldown_expires_at.is_none(), "unexpected cooldown on first recoverable error");
+        assert!(
+            state.cooldown_expires_at.is_none(),
+            "unexpected cooldown on first recoverable error"
+        );
     }
 
     #[test]
@@ -1109,27 +1124,35 @@ mod tests {
             first_ttl > 9 * 60_000 && first_ttl <= 11 * 60_000,
             "first cooldown should be ~10m, ttl={first_ttl}"
         );
-        assert!(core.health_manager.is_available(provider_key, first_expiry + 1));
+        assert!(core
+            .health_manager
+            .is_available(provider_key, first_expiry + 1));
 
         core.handle_provider_error(&mk("req-4"));
         core.handle_provider_error(&mk("req-5"));
         core.handle_provider_error(&mk("req-6"));
         let second_cycle = provider_state(&core, provider_key);
         assert_eq!(second_cycle.state, "tripped");
-        let second_expiry = second_cycle.cooldown_expires_at.expect("second cooldown expiry");
+        let second_expiry = second_cycle
+            .cooldown_expires_at
+            .expect("second cooldown expiry");
         let second_ttl = second_expiry - now_ms();
         assert!(
             second_ttl > 29 * 60_000 && second_ttl <= 31 * 60_000,
             "second cooldown should be ~30m, ttl={second_ttl}"
         );
 
-        assert!(core.health_manager.is_available(provider_key, second_expiry + 1));
+        assert!(core
+            .health_manager
+            .is_available(provider_key, second_expiry + 1));
         core.handle_provider_error(&mk("req-7"));
         core.handle_provider_error(&mk("req-8"));
         core.handle_provider_error(&mk("req-9"));
         let third_cycle = provider_state(&core, provider_key);
         assert_eq!(third_cycle.state, "tripped");
-        let third_expiry = third_cycle.cooldown_expires_at.expect("third cooldown expiry");
+        let third_expiry = third_cycle
+            .cooldown_expires_at
+            .expect("third cooldown expiry");
         let third_ttl = third_expiry - now_ms();
         assert!(
             third_ttl > (5 * 60 * 60_000 - 60_000) && third_ttl <= (5 * 60 * 60_000 + 60_000),
@@ -1174,23 +1197,27 @@ mod tests {
         with_session_dir_override(temp_dir.to_str(), || {
             let provider_key = "sdfv.key1.gpt-5.4";
             let backup_key = "mimo.key1.mimo-v2.5-pro";
-            let mut core =
-                build_test_core_with_providers(&[(provider_key, "gpt-5.4"), (backup_key, "mimo-v2.5-pro")]);
+            let mut core = build_test_core_with_providers(&[
+                (provider_key, "gpt-5.4"),
+                (backup_key, "mimo-v2.5-pro"),
+            ]);
 
-            // Step-1: simulate HTTP 503 on primary with routePoolSize=2 -> persisted daily cooldown.
-            core.handle_provider_failure(&json!({
-                "code": "HTTP_503",
-                "message": "upstream unavailable",
-                "stage": "provider.send",
-                "status": 503,
-                "runtime": {
-                    "requestId": "req-503",
-                    "providerKey": provider_key
-                },
-                "details": {
-                    "routePoolSize": 2
-                }
-            }));
+            // Step-1: simulate three consecutive HTTP 503 failures on primary -> persisted cooldown.
+            for idx in 0..3 {
+                core.handle_provider_failure(&json!({
+                    "code": "HTTP_503",
+                    "message": "upstream unavailable",
+                    "stage": "provider.send",
+                    "status": 503,
+                    "runtime": {
+                        "requestId": format!("req-503-{idx}"),
+                        "providerKey": provider_key
+                    },
+                    "details": {
+                        "routePoolSize": 2
+                    }
+                }));
+            }
 
             let tripped = provider_state(&core, provider_key);
             assert_eq!(tripped.state, "tripped");
@@ -1203,13 +1230,8 @@ mod tests {
                 .expect("providerCooldowns array");
             assert!(
                 persisted_entries.iter().any(|entry| {
-                    entry
-                        .get("providerKey")
-                        .and_then(|v| v.as_str())
-                        == Some("sdfv.1.gpt-5.4")
-                        && entry
-                            .get("reason")
-                            .and_then(|v| v.as_str())
+                    entry.get("providerKey").and_then(|v| v.as_str()) == Some("sdfv.1.gpt-5.4")
+                        && entry.get("reason").and_then(|v| v.as_str())
                             == Some("__http_503_daily_cooldown__")
                 }),
                 "persisted cooldown for canonical primary key not found"
@@ -1241,15 +1263,17 @@ mod tests {
             );
 
             // Step-3: simulate a new engine restart/import cycle: no persisted cooldown should come back.
-            let mut restarted =
-                build_test_core_with_providers(&[(provider_key, "gpt-5.4"), (backup_key, "mimo-v2.5-pro")]);
-            restarted.refresh_provider_health_from_store();
+            let mut restarted = build_test_core_with_providers(&[
+                (provider_key, "gpt-5.4"),
+                (backup_key, "mimo-v2.5-pro"),
+            ]);
+            restarted.refresh_provider_health_from_store(true);
             let restarted_state = provider_state(&restarted, provider_key);
             assert_eq!(restarted_state.state, "healthy");
             assert_eq!(restarted_state.cooldown_expires_at, None);
 
-            // Step-4: if first live request after restart still hits unrecoverable 503,
-            // it must be re-cooled-down again (no sticky restore of old state; re-evaluate by latest failure).
+            // Step-4: if first live request after restart still hits 503, it starts a fresh
+            // recoverable series; without persisted reprobe state it does not instantly trip.
             restarted.handle_provider_failure(&json!({
                 "code": "HTTP_503",
                 "message": "upstream unavailable again",
@@ -1264,8 +1288,76 @@ mod tests {
                 }
             }));
             let retripped = provider_state(&restarted, provider_key);
-            assert_eq!(retripped.state, "tripped");
-            assert!(retripped.cooldown_expires_at.is_some());
+            assert_eq!(retripped.state, "healthy");
+            assert_eq!(retripped.failure_count, 1);
+            assert_eq!(retripped.cooldown_expires_at, None);
+        });
+
+        let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
+    }
+
+    #[test]
+    fn windsurf_managed_health_success_clears_sibling_model_persisted_503_cooldown() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir =
+            std::env::temp_dir().join(format!("rcc-windsurf-managed-health-aggregation-{unique}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        with_session_dir_override(temp_dir.to_str(), || {
+            let low_key = "windsurf.managed.gpt-5.5-low";
+            let medium_key = "windsurf.managed.gpt-5.5-medium";
+            let mut core = build_test_core_with_providers(&[
+                (low_key, "gpt-5.5-low"),
+                (medium_key, "gpt-5.5-medium"),
+            ]);
+
+            for idx in 0..3 {
+                core.handle_provider_failure(&json!({
+                    "code": "WINDSURF_SERVICE_UNREACHABLE",
+                    "message": "windsurf upstream returned transient 503",
+                    "stage": "provider.send",
+                    "status": 503,
+                    "runtime": {
+                        "requestId": format!("low-live-request-{idx}"),
+                        "providerKey": low_key
+                    },
+                    "details": {
+                        "routePoolSize": 1,
+                        "errorClassification": "recoverable"
+                    }
+                }));
+            }
+
+            let cooled_low = provider_state(&core, low_key);
+            assert_eq!(cooled_low.state, "tripped");
+            assert!(cooled_low.cooldown_expires_at.is_some());
+
+            core.handle_provider_success(&json!({
+                "runtime": {
+                    "requestId": "startup-health-probe",
+                    "providerKey": medium_key,
+                    "runtimeKey": medium_key
+                },
+                "timestamp": now_ms()
+            }));
+
+            let low_after_probe = provider_state(&core, low_key);
+            assert_eq!(low_after_probe.state, "healthy");
+            assert_eq!(low_after_probe.cooldown_expires_at, None);
+
+            let persisted_after_probe = load_provider_health_state()
+                .expect("provider-health persisted after windsurf managed probe");
+            let entries_after_probe = persisted_after_probe
+                .get("providerCooldowns")
+                .and_then(|v| v.as_array())
+                .expect("providerCooldowns array after windsurf managed probe");
+            assert!(
+                entries_after_probe.is_empty(),
+                "managed Windsurf health success must clear sibling model persisted cooldowns"
+            );
         });
 
         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));

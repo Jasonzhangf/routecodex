@@ -74,7 +74,10 @@ impl VirtualRouterEngineCore {
                 self.quota_manager.register_provider_profile(profile);
             }
         }
-        self.refresh_provider_health_from_store();
+        // Clear ALL runtime quota state on startup so every provider gets
+        // one chance to be selected regardless of previous cooldown/blacklist.
+        self.quota_manager.clear_runtime_state();
+        self.refresh_provider_health_from_store(true);
         let load_balancing = config
             .get("loadBalancing")
             .cloned()
@@ -108,10 +111,13 @@ impl VirtualRouterEngineCore {
         Ok(())
     }
 
-    pub(crate) fn refresh_provider_health_from_store(&mut self) {
-        self.health_manager.clear_imported_persisted_state();
+    pub(crate) fn refresh_provider_health_from_store(&mut self, allow_persisted_reprobe: bool) {
+        if allow_persisted_reprobe {
+            self.health_manager.clear_imported_persisted_state();
+        }
         if let Some(raw) = load_provider_health_state() {
-            self.health_manager.import_persistable_state(&raw, now_ms());
+            self.health_manager
+                .import_persistable_state(&raw, now_ms(), allow_persisted_reprobe);
         }
     }
 

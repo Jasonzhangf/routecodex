@@ -130,7 +130,31 @@ impl ProviderQuotaManager {
         self.record_success(provider_key);
     }
 
-    pub(crate) fn disable_provider(&mut self, provider_key: &str, mode: &str, duration_ms: i64, now_ms: i64) {
+    pub(crate) fn clear_runtime_state(&mut self) {
+        for state in self.states.values_mut() {
+            state.in_pool = true;
+            state.reason = "active".to_string();
+            state.auth_issue = None;
+            state.cooldown_until = None;
+            state.cooldown_keeps_pool = None;
+            state.blacklist_until = None;
+            state.reset_at = None;
+            state.last_error_series = None;
+            state.last_error_code = None;
+            state.last_error_at_ms = None;
+            state.consecutive_error_count = 0;
+            state.selection_penalty = 0;
+            state.last_provider_guard_applied = false;
+        }
+    }
+
+    pub(crate) fn disable_provider(
+        &mut self,
+        provider_key: &str,
+        mode: &str,
+        duration_ms: i64,
+        now_ms: i64,
+    ) {
         let state = self.get_state_mut(provider_key);
         let clamped_duration_ms = duration_ms.max(0);
         let until = if clamped_duration_ms > 0 {
@@ -271,7 +295,11 @@ impl ProviderQuotaManager {
             .collect()
     }
 
-    pub(crate) fn active_blocker(&self, provider_key: &str, now_ms: i64) -> Option<ProviderQuotaState> {
+    pub(crate) fn active_blocker(
+        &self,
+        provider_key: &str,
+        now_ms: i64,
+    ) -> Option<ProviderQuotaState> {
         let canonical = canonicalize_provider_key(provider_key);
         let state = self.states.get(&canonical)?;
         let blacklist_until = state.blacklist_until.filter(|until| *until > now_ms);
@@ -339,7 +367,10 @@ fn read_auth_type(profile: &ProviderProfile) -> String {
         .and_then(|value| value.as_str())
     {
         let normalized = kind.trim().to_ascii_lowercase();
-        if normalized == "apikey" || normalized == "api_key" || normalized == "apiKey".to_ascii_lowercase() {
+        if normalized == "apikey"
+            || normalized == "api_key"
+            || normalized == "apiKey".to_ascii_lowercase()
+        {
             return "apikey".to_string();
         }
         if normalized == "oauth" {
