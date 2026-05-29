@@ -1,7 +1,7 @@
 import type { HubPipelineResult } from '../executor-pipeline.js';
 import { finalizeRequestExecutorAttemptMetadata } from './request-executor-attempt-state.js';
 import { resolveExcludedProviderReselectionPlan } from './request-executor-reselection-plan.js';
-import { applyRetryExclusionForCurrentProvider, hasAlternativeRouteCandidate } from './request-executor-retry-decision.js';
+import { applyRetryExclusionForCurrentProvider } from './request-executor-retry-decision.js';
 import { buildProviderTransportBackoffKey, peekProviderTransportBackoffWaitMs } from './request-executor-retry-state.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import type { BlockingRecoverableRouteHoldState } from './request-executor-error-types.js';
@@ -81,14 +81,22 @@ export function resolveRequestExecutorPipelineAttempt(args: {
     target && typeof target.runtimeKey === 'string' && target.runtimeKey.trim()
       ? target.runtimeKey.trim()
       : undefined;
-  const providerTransportBackoffKey = buildProviderTransportBackoffKey({
-    providerKey: target?.providerKey,
-    runtimeKey: targetRuntimeKey
-  });
+  const providerOwnsWindsurfManagedTraffic =
+    (typeof target?.providerKey === 'string' && target.providerKey.startsWith('windsurf.managed.'))
+    || (typeof targetRuntimeKey === 'string' && targetRuntimeKey.startsWith('windsurf.managed.'));
+  const providerTransportBackoffKey = providerOwnsWindsurfManagedTraffic
+    ? undefined
+    : buildProviderTransportBackoffKey({
+      providerKey: target?.providerKey,
+      runtimeKey: targetRuntimeKey
+    });
   const pendingTransportBackoffMs =
     providerTransportBackoffKey
       ? peekProviderTransportBackoffWaitMs(providerTransportBackoffKey)
       : 0;
+  if (providerOwnsWindsurfManagedTraffic && target?.providerKey) {
+    args.excludedProviderKeys.delete(target.providerKey);
+  }
   const preserveSameProviderRetry =
     args.blockingRecoverableRouteHoldState?.preserveSameProviderRetry === true
     && (
@@ -96,12 +104,8 @@ export function resolveRequestExecutorPipelineAttempt(args: {
       || (args.blockingRecoverableRouteHoldState.runtimeKey && args.blockingRecoverableRouteHoldState.runtimeKey === targetRuntimeKey)
     );
   if (pendingTransportBackoffMs > 0 && target?.providerKey) {
-    const hasAlternativeCandidate = hasAlternativeRouteCandidate({
-      providerKey: target.providerKey,
-      routePool: routePoolForAttempt,
-      excludedProviderKeys: args.excludedProviderKeys
-    });
-    if (hasAlternativeCandidate && !preserveSameProviderRetry) {
+    const targetAlreadyExcluded = args.excludedProviderKeys.has(target.providerKey);
+    if (targetAlreadyExcluded && !preserveSameProviderRetry) {
       applyRetryExclusionForCurrentProvider({
         providerKey: target.providerKey,
         excludedProviderKeys: args.excludedProviderKeys
@@ -111,7 +115,8 @@ export function resolveRequestExecutorPipelineAttempt(args: {
         runtimeKey: targetRuntimeKey,
         waitMs: pendingTransportBackoffMs,
         excluded: Array.from(args.excludedProviderKeys),
-        attempt: args.attempt
+        attempt: args.attempt,
+        targetAlreadyExcluded
       });
       return {
         kind: 'retry_next_attempt',

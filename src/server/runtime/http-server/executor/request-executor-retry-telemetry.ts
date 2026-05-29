@@ -10,11 +10,16 @@ export function emitRequestExecutorProviderRetryTelemetry(args: {
   logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
   logProviderRetrySwitch: (args: ProviderRetryTelemetryPlan['switchLogArgs']) => void;
 }): void {
-  if (args.retryTelemetryPlan.runtimeScopeExcludeDetails) {
-    args.logStage('provider.retry.runtime_scope_exclude', args.requestId, args.retryTelemetryPlan.runtimeScopeExcludeDetails);
+  try {
+    if (args.retryTelemetryPlan.runtimeScopeExcludeDetails) {
+      args.logStage('provider.retry.runtime_scope_exclude', args.requestId, args.retryTelemetryPlan.runtimeScopeExcludeDetails);
+    }
+    args.logProviderRetrySwitch(args.retryTelemetryPlan.switchLogArgs);
+    args.logStage('provider.retry', args.requestId, args.retryTelemetryPlan.retryStageDetails);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? 'Unknown telemetry error');
+    console.warn(`[provider-retry-telemetry] failed requestId=${args.requestId} message=${JSON.stringify(message)}`);
   }
-  args.logProviderRetrySwitch(args.retryTelemetryPlan.switchLogArgs);
-  args.logStage('provider.retry', args.requestId, args.retryTelemetryPlan.retryStageDetails);
 }
 
 export function buildProviderRetryTelemetryPlan(args: {
@@ -36,7 +41,7 @@ export function buildProviderRetryTelemetryPlan(args: {
     throw new Error('retry telemetry requires retrySwitchPlan/backoffScope');
   }
   const retrySwitchPlan = args.retryExecutionPlan.retrySwitchPlan;
-  const nextAttempt = Math.min(args.maxAttempts, args.attempt + 1);
+  const nextAttempt = args.attempt + 1;
   const switchLogArgs = {
     requestId: args.requestId,
     attempt: args.attempt,

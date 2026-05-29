@@ -360,7 +360,7 @@ export function logProviderRetrySwitchCompact(args: {
   }
   args.providerSwitchLogState.set(dedupeKey, { lastAtMs: now, suppressed: 0 });
   const boundedAttempt = Math.max(1, Math.min(args.maxAttempts, args.attempt));
-  const boundedNextAttempt = Math.max(boundedAttempt, Math.min(args.maxAttempts, args.nextAttempt));
+  const boundedNextAttempt = Math.max(boundedAttempt, args.nextAttempt);
   const retryTag =
     `[provider-switch] req=${args.requestId} attempt=${boundedAttempt}/${args.maxAttempts} -> ` +
     `${boundedNextAttempt}/${args.maxAttempts}`;

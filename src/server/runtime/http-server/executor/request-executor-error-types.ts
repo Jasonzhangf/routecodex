@@ -106,6 +106,7 @@ export type BlockingRecoverableRouteHoldState = {
   holdOnLastAvailable429: boolean;
   explicitSingletonPool: boolean;
   preserveSameProviderRetry?: boolean;
+  routePoolForSameProviderRetry?: string[];
 };
 
 export type ProviderErrorStageLogger = (

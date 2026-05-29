@@ -815,8 +815,8 @@ export function resolveProviderFailureExclusionDecision(args: {
     || normalizedUpstreamCode === 'HTTP_503';
   if (isHttp503) {
     return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
+      excludeCurrentProvider: false,
+      retryAction: 'retry_same_provider'
     };
   }
   if (args.promptTooLong) {
@@ -825,7 +825,13 @@ export function resolveProviderFailureExclusionDecision(args: {
       retryAction: 'reroute_explicit_alternative'
     };
   }
-  if (args.classification === 'special_400' || args.classification === 'recoverable') {
+  if (args.classification === 'special_400') {
+    return {
+      excludeCurrentProvider: false,
+      retryAction: 'retry_same_provider'
+    };
+  }
+  if (args.classification === 'recoverable') {
     return {
       excludeCurrentProvider: false,
       retryAction: 'retry_same_provider'

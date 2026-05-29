@@ -87,6 +87,7 @@ export async function processProviderResolveFailure(
     stage: 'provider.runtime_resolve',
     logicalRequestChainKey: args.logicalRequestChainKey,
     logicalChainRetryLimitStageRequestId: args.requestId,
+    routePool: args.routePoolForAttempt,
     excludedProviderKeys: args.excludedProviderKeys,
     recordAttempt: args.recordAttempt,
     logStage: args.logStage,
@@ -103,18 +104,25 @@ export async function processProviderResolveFailure(
     throw args.error;
   }
 
+  const shouldPreserveSameProviderRetry = retryExecutionPlan.retrySwitchPlan?.switchAction === 'retry_same_provider';
   const blockingRecoverableRouteHoldState =
-    retryExecutionPlan.blockingRecoverable
+    (retryExecutionPlan.blockingRecoverable || shouldPreserveSameProviderRetry)
       ? {
         providerKey: args.providerKey,
         runtimeKey: args.runtimeKey,
         retryError,
         holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
-        explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1
+        explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1,
+        preserveSameProviderRetry: shouldPreserveSameProviderRetry,
+        routePoolForSameProviderRetry: Array.isArray(args.routePoolForAttempt) ? [...args.routePoolForAttempt] : undefined
       }
       : null;
   const allowBlockingRecoverableRetryBeyondAttemptBudget =
-    retryExecutionPlan.blockingRecoverable && args.attempt >= args.maxAttempts;
+    args.attempt >= args.maxAttempts
+    && (
+      retryExecutionPlan.blockingRecoverable
+      || (retryExecutionPlan.excludedCurrentProvider && retryExecutionPlan.shouldRetry)
+    );
 
   emitRequestExecutorProviderRetryTelemetry({
     requestId: args.requestId,
