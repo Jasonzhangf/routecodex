@@ -12,7 +12,6 @@ type StopMessageRouterMetadataOutput = {
 };
 
 type RouterMetadataRuntimeFlagsOutput = {
-  disableStickyRoutes?: boolean;
   estimatedInputTokens?: number;
 };
 
@@ -127,9 +126,6 @@ function parseRouterMetadataRuntimeFlags(raw: string): RouterMetadataRuntimeFlag
   }
   const row = parsed as Record<string, unknown>;
   const out: RouterMetadataRuntimeFlagsOutput = {};
-  if (row.disableStickyRoutes === true) {
-    out.disableStickyRoutes = true;
-  }
   if (typeof row.estimatedInputTokens === 'number' && Number.isFinite(row.estimatedInputTokens)) {
     out.estimatedInputTokens = row.estimatedInputTokens;
   }

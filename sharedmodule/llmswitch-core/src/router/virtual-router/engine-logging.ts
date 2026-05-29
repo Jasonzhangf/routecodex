@@ -39,7 +39,7 @@ export type VirtualRouterHitRecord = {
   providerKey: string;
   modelId?: string;
   hitReason?: string;
-  stickyScope?: string;
+  continuationScope?: string;
   requestTokens?: number;
   selectionPenalty?: number;
   stopMessage: StopMessageRuntimeSummary;
@@ -126,7 +126,7 @@ export function createVirtualRouterHitRecord(input: {
   providerKey: string;
   modelId?: string;
   hitReason?: string;
-  stickyScope?: string;
+  continuationScope?: string;
   routingState?: RoutingInstructionState;
   requestTokens?: number;
   selectionPenalty?: number;
@@ -144,7 +144,7 @@ export function createVirtualRouterHitRecord(input: {
     providerKey: input.providerKey,
     ...(input.modelId ? { modelId: input.modelId } : {}),
     ...(input.hitReason ? { hitReason: input.hitReason } : {}),
-    ...(input.stickyScope ? { stickyScope: input.stickyScope } : {}),
+    ...(input.continuationScope ? { continuationScope: input.continuationScope } : {}),
     ...(typeof normalizeRoundedInteger(input.requestTokens) === 'number'
       ? { requestTokens: normalizeRoundedInteger(input.requestTokens) }
       : {}),
@@ -176,7 +176,7 @@ export function toVirtualRouterHitEvent(
   };
 }
 
-export function formatStickyScope(scope?: string): string | undefined {
+export function formatContinuationScope(scope?: string): string | undefined {
   if (!scope || scope.trim().length === 0) {
     return undefined;
   }
@@ -335,26 +335,20 @@ export function buildHitReason(
   const reasoning = classification.reasoning || '';
   let primary = reasoning.split('|')[0] || '';
   const commandDetail = features.lastAssistantToolLabel;
-  const isStickyMode = mode === 'sticky';
-  if (
-    isStickyMode &&
-    (routeUsed === 'tools' || routeUsed === 'thinking' || routeUsed === 'coding')
-  ) {
-    primary = '';
-  }
+  void mode;
   const base = (() => {
     if (routeUsed === 'tools') {
-      const label = isStickyMode ? 'sticky' : 'tools';
+      const label = 'tools';
       return decorateWithDetail(primary || label, primary, commandDetail);
     }
 
     if (routeUsed === 'thinking') {
-      const label = isStickyMode ? 'sticky' : 'thinking';
+      const label = 'thinking';
       return decorateWithDetail(primary || label, primary, commandDetail);
     }
 
     if (routeUsed === 'coding') {
-      const label = isStickyMode ? 'sticky' : 'coding';
+      const label = 'coding';
       return decorateWithDetail(primary || label, primary, commandDetail);
     }
 
@@ -363,9 +357,6 @@ export function buildHitReason(
     }
 
     if (routeUsed === DEFAULT_ROUTE && classification.fallback) {
-      if (isStickyMode) {
-        return primary || 'sticky:default';
-      }
       return primary || 'fallback:default';
     }
 
@@ -394,7 +385,7 @@ export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
     const prefixColor = '\x1b[38;5;208m';
     const reset = '\x1b[0m';
     const timeColor = '\x1b[90m';
-    const stickyColor = '\x1b[33m';
+    const continuationColor = '\x1b[33m';
     const stopColor = '\x1b[38;5;214m';
     const prefix = `${prefixColor}[virtual-router-hit]${reset}`;
     const timeLabel = `${timeColor}${timestamp}${reset}`;
@@ -406,8 +397,8 @@ export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
     const sessionId = typeof record.sessionId === 'string' ? record.sessionId.trim() : '';
     const sessionLabel = sessionId ? ` sid=${sessionId}` : '';
     const routeColor = (sessionId ? resolveSessionColor(sessionId) : undefined) || resolveRouteColor(record.routeName);
-    const stickyText = formatStickyScope(record.stickyScope);
-    const stickyLabel = stickyText ? ` ${stickyColor}[sticky:${stickyText}]${reset}` : '';
+    const continuationText = formatContinuationScope(record.continuationScope);
+    const continuationLabel = continuationText ? ` ${continuationColor}[continuation:${continuationText}]${reset}` : '';
     const reasonLabel = record.hitReason ? ` reason=${record.hitReason}` : '';
     const requestTokenLabel =
       typeof record.requestTokens === 'number' && Number.isFinite(record.requestTokens)
@@ -435,13 +426,13 @@ export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
       }
       stopLabel = ` ${stopColor}[stopMessage:${parts.join(' ')}]${reset}`;
     }
-    return `${prefix} ${timeLabel}${requestLabel}${sessionLabel} ${routeColor}${targetLabel}${stickyLabel}${reasonLabel}${requestTokenLabel}${penaltyLabel}${stopLabel}${reset}`;
+    return `${prefix} ${timeLabel}${requestLabel}${sessionLabel} ${routeColor}${targetLabel}${continuationLabel}${reasonLabel}${requestTokenLabel}${penaltyLabel}${stopLabel}${reset}`;
   } catch {
     const now = new Date(record.timestampMs);
     const timestamp = now.toLocaleTimeString('zh-CN', { hour12: false });
     const routeLabel = record.poolId ? `${record.routeName}/${record.poolId}` : record.routeName;
-    const stickyText = formatStickyScope(record.stickyScope);
-    const stickyLabel = stickyText ? ` [sticky:${stickyText}]` : '';
+    const continuationText = formatContinuationScope(record.continuationScope);
+    const continuationLabel = continuationText ? ` [continuation:${continuationText}]` : '';
     const requestId = typeof record.requestId === 'string' ? record.requestId : '';
     const requestLabel = requestId && !requestId.includes('unknown') ? ` req=${requestId}` : '';
     const sessionId = typeof record.sessionId === 'string' ? record.sessionId.trim() : '';
@@ -462,6 +453,6 @@ export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
       const left = stop.remaining >= 0 ? String(stop.remaining) : 'n/a';
       stopLabel = ` [stopMessage:${safeText} mode=${stop.mode} round=${rounds} active=${stop.active ? 'yes' : 'no'} left=${left}]`;
     }
-    return `[virtual-router-hit] ${timestamp}${requestLabel}${sessionLabel} ${routeLabel} -> ${record.providerKey}${record.modelId ? '.' + record.modelId : ''}${stickyLabel}${record.hitReason ? ` reason=${record.hitReason}` : ''}${requestTokenLabel}${penaltyLabel}${stopLabel}`;
+    return `[virtual-router-hit] ${timestamp}${requestLabel}${sessionLabel} ${routeLabel} -> ${record.providerKey}${record.modelId ? '.' + record.modelId : ''}${continuationLabel}${record.hitReason ? ` reason=${record.hitReason}` : ''}${requestTokenLabel}${penaltyLabel}${stopLabel}`;
   }
 }

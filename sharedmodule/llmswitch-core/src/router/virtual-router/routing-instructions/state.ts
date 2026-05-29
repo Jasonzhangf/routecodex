@@ -62,7 +62,6 @@ export function serializeRoutingInstructionState(state: RoutingInstructionState)
         }
       : {}),
     forcedTarget: state.forcedTarget,
-    stickyTarget: state.stickyTarget,
     preferTarget: state.preferTarget,
     allowedProviders: Array.from(state.allowedProviders),
     disabledProviders: Array.from(state.disabledProviders),
@@ -95,7 +94,6 @@ export function deserializeRoutingInstructionState(data: Record<string, unknown>
   const state: RoutingInstructionState = {
     stoplessGoalState: undefined,
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set(),
     disabledProviders: new Set(),
@@ -190,9 +188,6 @@ export function deserializeRoutingInstructionState(data: Record<string, unknown>
 
   if (data.forcedTarget && typeof data.forcedTarget === 'object') {
     state.forcedTarget = data.forcedTarget as any;
-  }
-  if (data.stickyTarget && typeof data.stickyTarget === 'object') {
-    state.stickyTarget = data.stickyTarget as any;
   }
   if (data.preferTarget && typeof data.preferTarget === 'object') {
     state.preferTarget = data.preferTarget as any;

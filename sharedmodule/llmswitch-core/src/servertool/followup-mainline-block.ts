@@ -66,7 +66,7 @@ import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../router/virtual-router/sticky-session-store.js';
+} from '../router/virtual-router/routing-state-store.js';
 
 type OrchestrationResult = {
   chat: JsonObject;

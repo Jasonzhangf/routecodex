@@ -135,7 +135,6 @@ export function applyStopMessageSnapshotToState(
   const next = state ?? {
     stoplessGoalState: undefined,
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set<string>(),
     disabledProviders: new Set<string>(),

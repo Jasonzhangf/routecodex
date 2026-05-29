@@ -8,7 +8,7 @@ import {
 import type { RoutingInstructionState } from '../../../router/virtual-router/routing-instructions.js';
 import {
   saveRoutingInstructionStateSync
-} from '../../../router/virtual-router/sticky-session-store.js';
+} from '../../../router/virtual-router/routing-state-store.js';
 import { isStopEligibleForServerTool } from '../../stop-gateway-context.js';
 import { extractResponsesOutputText, hasToolLikeOutput } from './ai-followup.js';
 import { resolveStopMessageSnapshot } from './routing-state.js';
@@ -65,7 +65,6 @@ export function persistStopMessageState(stickyKey: string | undefined, state: Ro
   const hasNonStopMessageState =
     Boolean(state.stoplessGoalState) ||
     Boolean(state.forcedTarget) ||
-    Boolean(state.stickyTarget) ||
     Boolean(state.preferTarget) ||
     state.allowedProviders.size > 0 ||
     state.disabledProviders.size > 0 ||

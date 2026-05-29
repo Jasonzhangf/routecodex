@@ -41,7 +41,7 @@ function* filesUnder(target) {
 const hits = [];
 for (const root of roots) {
   for (const rel of filesUnder(root)) {
-    if (!/\.(rs|ts|tsx|mjs)$/.test(rel) || rel.endsWith('.d.ts')) continue;
+    if (!/\.(rs|ts|tsx|mjs)$/.test(rel)) continue;
     const text = fs.readFileSync(path.join(repo, rel), 'utf8');
     for (const term of banned) {
       if (text.includes(term)) hits.push({ file: rel, term });

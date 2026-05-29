@@ -33,7 +33,6 @@ export interface NativeStopMessageRouterMetadataOutput {
 }
 
 export interface NativeRouterMetadataRuntimeFlagsOutput {
-  disableStickyRoutes?: boolean;
   estimatedInputTokens?: number;
 }
 

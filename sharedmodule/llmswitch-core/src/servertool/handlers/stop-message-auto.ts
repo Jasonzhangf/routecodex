@@ -31,7 +31,7 @@ import {
   readRuntimeStopMessageStageMode
 } from './stop-message-auto/runtime-utils.js';
 import { readStoplessGoalState } from './stopless-goal-state.js';
-import { loadRoutingInstructionStateSync } from '../../router/virtual-router/sticky-session-store.js';
+import { loadRoutingInstructionStateSync } from '../../router/virtual-router/routing-state-store.js';
 import type {
   StopMessageDecisionContext,
   StopMessageDecision

@@ -91,11 +91,11 @@ export function resolveStopMessageScope(metadata: RouterMetadataInput): string |
 }
 
 export function getRoutingInstructionState(
-  stickyKey: string | undefined,
+  routingStateKey: string | undefined,
   routingInstructionState: Map<string, RoutingInstructionState>,
   routingStateStore: RoutingInstructionStateStoreLike
 ): RoutingInstructionState {
-  const key = stickyKey || 'default';
+  const key = routingStateKey || 'default';
   const existing = routingInstructionState.get(key);
 
   // 对 session:/conversation:/tmux: 作用域，在每次读取时尝试从磁盘刷新 stopMessage 相关字段，

@@ -25,7 +25,7 @@ import {
   VIRTUAL_ROUTER_ERROR_PREFIX
 } from './engine-selection/native-router-hotpath-loader.js';
 import { ProviderRegistry } from './provider-registry.js';
-import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from './sticky-session-store.js';
+import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from './routing-state-store.js';
 import { mergeStopMessageFromPersisted } from './stop-message-state-sync.js';
 import { resolveStopMessageScope } from './engine/routing-state/store.js';
 import type { RoutingInstructionState } from './routing-instructions.js';
@@ -380,7 +380,6 @@ function pruneLegacySessionScopedStopAndPreCommandState(metadata: RouterMetadata
   const hasOtherRoutingState =
     Boolean(state.stoplessGoalState) ||
     Boolean(state.forcedTarget) ||
-    Boolean(state.stickyTarget) ||
     Boolean(state.preferTarget) ||
     state.allowedProviders.size > 0 ||
     state.disabledProviders.size > 0 ||

@@ -96,6 +96,7 @@ type ResponsesConversationModule = {
     conversationId?: string;
     routeHint?: string;
   }) => void;
+  rebindResponsesConversationRequestId?: (oldId: string, newId: string) => void;
 };
 
 let cachedResponsesConversationModule: ResponsesConversationModule | null = null;
@@ -139,6 +140,29 @@ async function captureNestedResponsesRequestContext(input: PipelineExecutionInpu
     conversationId: typeof metadata.conversationId === 'string' ? metadata.conversationId : undefined,
     routeHint: typeof metadata.routeHint === 'string' ? metadata.routeHint : undefined
   });
+}
+
+function readResponsesResponseId(body: Record<string, unknown> | undefined): string | undefined {
+  if (!body) return undefined;
+  const nested = body.response && typeof body.response === 'object' && !Array.isArray(body.response)
+    ? body.response as Record<string, unknown>
+    : undefined;
+  for (const value of [body.id, body.response_id, nested?.id]) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+async function rebindNestedResponsesContextToResponseId(input: PipelineExecutionInput, body: Record<string, unknown> | undefined): Promise<void> {
+  const entryEndpoint = typeof input.entryEndpoint === 'string' ? input.entryEndpoint.toLowerCase() : '';
+  if (!entryEndpoint.includes('/v1/responses')) return;
+  const responseId = readResponsesResponseId(body);
+  if (!responseId || responseId === input.requestId) return;
+  const mod = await getResponsesConversationModule();
+  if (typeof mod.rebindResponsesConversationRequestId !== 'function') {
+    throw new Error('[servertool] responses followup context rebind helper unavailable');
+  }
+  mod.rebindResponsesConversationRequestId(input.requestId, responseId);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -702,16 +726,6 @@ function buildServerToolNestedInput(args: {
     delete nestedMetadata.stream;
   }
 
-  const baseProviderKeyCandidate =
-    typeof (args.baseMetadata as Record<string, unknown> | undefined)?.providerKey === 'string'
-      ? String((args.baseMetadata as Record<string, unknown>).providerKey).trim()
-      : '';
-  const extraProviderKeyCandidate =
-    typeof nestedExtra.providerKey === 'string' ? String(nestedExtra.providerKey).trim() : '';
-  const pinnedProviderKey = baseProviderKeyCandidate || extraProviderKeyCandidate;
-  if (pinnedProviderKey && !readForcedProviderKey(nestedMetadata)) {
-    nestedMetadata.__shadowCompareForcedProviderKey = pinnedProviderKey;
-  }
   const metadataRequestSemantics =
     nestedMetadata.requestSemantics && typeof nestedMetadata.requestSemantics === 'object' && !Array.isArray(nestedMetadata.requestSemantics)
       ? ({ ...(nestedMetadata.requestSemantics as Record<string, unknown>) } as Record<string, unknown>)
@@ -892,6 +906,7 @@ export async function executeServerToolReenterPipeline(args: {
     nestedResult.body && typeof nestedResult.body === 'object'
       ? (nestedResult.body as Record<string, unknown>)
       : undefined;
+  await rebindNestedResponsesContextToResponseId(nestedInput, nestedBody);
   return { body: nestedBody };
 }
 

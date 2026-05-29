@@ -24,7 +24,6 @@ export interface StoplessGoalStateSnapshot {
 export interface RoutingInstruction {
   type:
     | 'force'
-    | 'sticky'
     | 'prefer'
     | 'disable'
     | 'enable'
@@ -57,14 +56,6 @@ export interface RoutingInstruction {
 export interface RoutingInstructionState {
   stoplessGoalState?: StoplessGoalStateSnapshot;
   forcedTarget?: {
-    provider?: string;
-    keyAlias?: string;
-    keyIndex?: number;
-    model?: string;
-    pathLength?: number;
-    processMode?: 'chat' | 'passthrough';
-  };
-  stickyTarget?: {
     provider?: string;
     keyAlias?: string;
     keyIndex?: number;
