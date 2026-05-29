@@ -782,6 +782,12 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 "tool_calls".to_string(),
                 Value::Array(vec![Value::Object(call_obj)]),
             );
+            if let Some(reasoning) = consume_entry_reasoning() {
+                message.insert(
+                    "reasoning_content".to_string(),
+                    Value::String(reasoning.join("\n")),
+                );
+            }
             messages.push(Value::Object(message));
             register_pending_tool_call(&mut pending_tool_call_ids, call_id.as_str());
             pending_tool_call_message_index.insert(call_id.clone(), entry_index);

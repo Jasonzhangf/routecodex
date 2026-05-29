@@ -1933,6 +1933,39 @@ fn convert_bridge_input_responses_reasoning_only_message_restores_assistant_reas
 }
 
 #[test]
+fn convert_bridge_input_function_call_preserves_reasoning_content() {
+    let output = convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+        input: vec![json!({
+            "type": "function_call",
+            "id": "fc_call_1",
+            "call_id": "call_1",
+            "name": "exec_command",
+            "arguments": "{\"cmd\":\"pwd\"}",
+            "reasoning_content": "Need to inspect cwd before editing."
+        })],
+        tools: None,
+        normalize_function_name: Some("responses".to_string()),
+        tool_result_fallback_text: Some(String::new()),
+        allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
+    })
+    .unwrap();
+
+    let messages = output.messages;
+    assert_eq!(messages.len(), 1);
+    let assistant = messages[0].as_object().unwrap();
+    assert_eq!(
+        assistant.get("role").and_then(Value::as_str),
+        Some("assistant")
+    );
+    assert!(assistant.get("tool_calls").is_some());
+    assert_eq!(
+        assistant.get("reasoning_content").and_then(Value::as_str),
+        Some("Need to inspect cwd before editing.")
+    );
+}
+
+#[test]
 fn bridge_message_utils_append_local_image_block_on_latest_user_input_json() {
     let temp_dir =
         std::env::temp_dir().join(format!("llmswitch-local-image-rust-{}", std::process::id()));

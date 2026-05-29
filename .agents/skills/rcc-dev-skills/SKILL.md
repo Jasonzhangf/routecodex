@@ -177,6 +177,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Windsurf resume/已有 cascade 时，`additionalSteps` 只能包含当轮新完成的 native/MCP tool result；历史 tool result 不得 replay。MCP result 对应 Cascade `CortexTrajectoryStep` field 47 `mcp_tool`，native result 走对应 native step field。
 - Windsurf native tool config 必须保留 protobuf zero-length message 字段（如 `run_command` field 8 空子消息）；生成 CascadeToolConfig 时禁止用“空 buffer 跳过字段”的 helper，否则二跳 additional_steps 可能触发 gRPC status 2。
 - Windsurf poll 看到 tool_calls 不能立即返回给 Hub；必须像 WindsurfAPI 一样继续 `GetCascadeTrajectory` 轮询到 Cascade IDLE 后再返回，否则下一跳会撞上 `executor is not idle: CASCADE_RUN_STATUS_RUNNING` 并变成 503/upstreamCode=2。
+- Windsurf 单本地 Cascade executor 同时只能处理一个发送链路；同 provider/账号请求必须在 provider 内串行化，禁止并发 close/reuse 同一 local gRPC session，否则 warmup/SendUserCascadeMessage 会互相污染并表现为卡住或 status 2。
+- Windsurf warmup 必须 bounded：每个 stage 都有 provider 内 timeout；`AddTrackedWorkspace` / `UpdateWorkspaceTrust` / `Heartbeat` 非 transport 错误只记录并继续；transport/timeout 必须 reset local gRPC session + 清 warmup promise，禁止永久占住真实请求。
 
 ## 2026-05-28 回归测试新增硬规则（Jason）
 
@@ -1551,3 +1553,5 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 2026-05-29 历史图片清理：必须在 Rust outbound stage3 通用入口无条件 placeholder 历史 user/tool media；当前 user media 才看 `supportsMultimodal=false`。若 400 快照含 `role=tool.content data:image`，先查通用 `strip_historical_media`，禁止 provider 特例修。
 
 - 2026-05-29 mimo/Anthropic 历史图片：若 500 快照无 `role=tool`，继续查 `role=user.content[]` 里的字符串化 JSON；`content` 字段可包含 `[{\"image_url\":\"data:image...\"}]`。修复必须在 Rust `chat_process_media_semantics` 通用 part 判定，禁止只修 OpenAI-chat tool role。
+
+- 2026-05-29 opencode DeepSeek thinking 400：看到 `reasoning_content ... must be passed back` 时，不要只在 outbound 填点号；先查 Responses store 是否把 `reasoning` output item 和后续 `function_call` 拆开。真源修复顺序：store 绑定 reasoning→function_call，chat process 保留 function_call 顶层 `reasoning_content`，opencode DeepSeek outbound 禁止发送 `reasoning_content:"."`。

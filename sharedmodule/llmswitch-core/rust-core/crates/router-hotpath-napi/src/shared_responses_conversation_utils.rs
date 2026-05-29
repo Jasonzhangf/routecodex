@@ -312,10 +312,65 @@ fn convert_responses_output_to_input_items(response: &Value) -> Value {
         .cloned()
         .unwrap_or_default();
     let mut items: Vec<Value> = Vec::new();
+    let mut pending_reasoning: Option<Map<String, Value>> = None;
     for entry in output {
+        let source_item_type = entry
+            .as_object()
+            .and_then(|row| row.get("type"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
         if let Some(mapped) = normalize_output_item_to_input(&entry) {
+            let item_type = mapped
+                .as_object()
+                .and_then(|row| row.get("type"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            let is_reasoning_only_message = source_item_type == "reasoning"
+                && item_type == "message"
+                && mapped
+                    .as_object()
+                    .and_then(|row| row.get("role"))
+                    .and_then(Value::as_str)
+                    .map(|role| role.trim().eq_ignore_ascii_case("assistant"))
+                    .unwrap_or(false)
+                && mapped
+                    .as_object()
+                    .and_then(|row| row.get("reasoning_content"))
+                    .and_then(Value::as_str)
+                    .map(|text| !text.trim().is_empty())
+                    .unwrap_or(false);
+            if is_reasoning_only_message {
+                if let Some(previous) = pending_reasoning.take() {
+                    items.push(Value::Object(previous));
+                }
+                pending_reasoning = mapped.as_object().cloned();
+                continue;
+            }
+            if item_type == "function_call" {
+                let mut mapped_obj = mapped.as_object().cloned().unwrap_or_default();
+                if let Some(reasoning) = pending_reasoning.take() {
+                    if let Some(value) = reasoning.get("reasoning").cloned() {
+                        mapped_obj.insert("reasoning".to_string(), value);
+                    }
+                    if let Some(value) = reasoning.get("reasoning_content").cloned() {
+                        mapped_obj.insert("reasoning_content".to_string(), value);
+                    }
+                }
+                items.push(Value::Object(mapped_obj));
+                continue;
+            }
+            if let Some(previous) = pending_reasoning.take() {
+                items.push(Value::Object(previous));
+            }
             items.push(mapped);
         }
+    }
+    if let Some(previous) = pending_reasoning.take() {
+        items.push(Value::Object(previous));
     }
     Value::Array(items)
 }
@@ -1514,6 +1569,38 @@ mod tests {
             item.get("reasoning_content").is_some(),
             "reasoning_content text must be at top level"
         );
+    }
+
+    #[test]
+    fn converts_reasoning_item_before_function_call_attaches_reasoning_to_call() {
+        let response = serde_json::json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "reasoning-1",
+                    "status": "completed",
+                    "content": [{"type": "reasoning_text", "text": "Need to inspect cwd before editing."}]
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_call_1",
+                    "call_id": "call_1",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }
+            ]
+        });
+        let items = convert_responses_output_to_input_items(&response)
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["type"], "function_call");
+        assert_eq!(
+            items[0]["reasoning_content"],
+            "Need to inspect cwd before editing."
+        );
+        assert!(items[0].get("reasoning").is_some());
     }
 
     // P1: encrypted_content in reasoning item is preserved in top-level reasoning object

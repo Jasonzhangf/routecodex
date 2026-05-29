@@ -798,7 +798,10 @@ fn test_req_profile_chat_iflow_normalizes_thinking_and_reasoning() {
     assert_eq!(result.applied_profile, Some("chat:iflow".to_string()));
     assert_eq!(result.payload["thinking"]["type"], "enabled");
     assert_eq!(result.payload["temperature"], 1.0);
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][1]["reasoning_content"],
+        "I need to call exec_command."
+    );
 }
 
 #[test]
@@ -899,7 +902,10 @@ fn test_req_profile_chat_local_deepseek_thinking_history_injects_reasoning_conte
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
     assert!(result.applied_profile.is_none());
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][1]["reasoning_content"],
+        "I need to call view_image."
+    );
     assert_eq!(
         result.payload["messages"][2]["reasoning_content"],
         "The user asked me to review and then commit the code. Let me review the code first."
@@ -1011,7 +1017,10 @@ fn test_req_profile_chat_local_deepseek_thinking_history_still_applies_under_unk
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][1]["reasoning_content"],
+        "I need to call exec_command."
+    );
     assert_eq!(
         result.payload["messages"][2]["reasoning_content"],
         "Jason，我已通读整个项目。以下是 `/goal` 提示词设计。"
@@ -1138,7 +1147,10 @@ fn test_req_profile_anthropic_thinking_history_injects_reasoning_content() {
     };
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][1]["reasoning_content"],
+        "I need to call view_image."
+    );
     assert_eq!(
         result.payload["messages"][2]["reasoning_content"],
         "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
@@ -3428,9 +3440,14 @@ fn test_openai_chat_deepseek_v4_model_on_opencode_gets_tool_history_reasoning_co
     };
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][1]["reasoning_content"],
+        "I need to call exec_command."
+    );
     assert_eq!(result.payload["messages"][1]["content"], "");
-    assert!(result.payload["tools"][0]["function"].get("strict").is_none());
+    assert!(result.payload["tools"][0]["function"]
+        .get("strict")
+        .is_none());
 }
 
 #[test]
@@ -3492,9 +3509,14 @@ fn test_protocol_field_contract_outbound_openai_chat_strips_anthropic_thinking_b
     };
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][1]["reasoning_content"],
+        "I need to call exec_command."
+    );
     assert_eq!(result.payload["messages"][1]["content"], "");
-    assert!(result.payload["tools"][0]["function"].get("strict").is_none());
+    assert!(result.payload["tools"][0]["function"]
+        .get("strict")
+        .is_none());
 }
 
 #[test]
@@ -3561,8 +3583,71 @@ fn test_protocol_field_contract_outbound_deepseek_openai_chat_sanitizes_2095_too
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.payload.get("parallel_tool_calls").is_none());
     assert_eq!(result.payload["tool_choice"], "auto");
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][1]["reasoning_content"],
+        "I need to call view_image."
+    );
     assert_eq!(result.payload["messages"][2]["content"], "[Image omitted]");
+}
+
+#[test]
+fn test_protocol_field_contract_outbound_deepseek_openai_chat_trailing_tool_has_real_reasoning_text(
+) {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-flash-free",
+            "messages": [
+                {"role": "user", "content": "继续"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "type": "function",
+                        "id": "call_tail",
+                        "function": {"name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"}
+                    }]
+                },
+                {"role": "tool", "tool_call_id": "call_tail", "content": "/tmp"}
+            ],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "parameters": {"type": "object", "properties": {}}
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("compat:passthrough".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("openai-responses-opencode-zen-free.key1-deepseek-v4-flash-free-20260529T214411604-234811-2122".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: Some("longcontext".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("deepseek-v4-flash-free".to_string()),
+            client_model_id: Some("gpt-5.5".to_string()),
+            original_model_id: None,
+            provider_id: Some("opencode-zen-free".to_string()),
+            provider_key: Some("opencode-zen-free.key1.deepseek-v4-flash-free".to_string()),
+            runtime_key: None,
+            client_request_id: Some("req_1780062251604_710613f4".to_string()),
+            group_request_id: Some("req_1780062251604_710613f4".to_string()),
+            session_id: Some("019e733b-8c4d-74c0-93c1-0a33a3f2bd91".to_string()),
+            conversation_id: None,
+        },
+        explicit_profile: Some("compat:passthrough".to_string()),
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(
+        result.payload["messages"][1]["reasoning_content"],
+        "I need to call exec_command."
+    );
 }
 
 #[test]
@@ -3619,7 +3704,10 @@ fn test_protocol_field_contract_outbound_openai_chat_always_strips_historical_me
     };
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(result.payload["messages"][0]["content"][1]["text"], "[Image omitted]");
+    assert_eq!(
+        result.payload["messages"][0]["content"][1]["text"],
+        "[Image omitted]"
+    );
     assert_eq!(result.payload["messages"][4]["content"], "[Image omitted]");
     assert_eq!(
         result.payload["messages"][5]["content"][1]["image_url"],
@@ -3643,7 +3731,9 @@ fn test_protocol_field_contract_outbound_anthropic_messages_strips_stringified_h
         adapter_context: AdapterContext {
             compatibility_profile: Some("chat:claude-code".to_string()),
             provider_protocol: Some("anthropic-messages".to_string()),
-            request_id: Some("openai-responses-mimo.key1-mimo-v2.5-20260529T213159512-234803-2114".to_string()),
+            request_id: Some(
+                "openai-responses-mimo.key1-mimo-v2.5-20260529T213159512-234803-2114".to_string(),
+            ),
             entry_endpoint: Some("/v1/responses".to_string()),
             route_id: Some("search".to_string()),
             rt: None,
@@ -3667,9 +3757,14 @@ fn test_protocol_field_contract_outbound_anthropic_messages_strips_stringified_h
     };
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(result.payload["messages"][0]["content"][0]["text"], "[Image omitted]");
+    assert_eq!(
+        result.payload["messages"][0]["content"][0]["text"],
+        "[Image omitted]"
+    );
     assert!(
-        !result.payload["messages"].to_string().contains("data:image"),
+        !result.payload["messages"]
+            .to_string()
+            .contains("data:image"),
         "historical inline image payload must not reach Anthropic outbound"
     );
 }

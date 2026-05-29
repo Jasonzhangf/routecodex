@@ -13134,3 +13134,21 @@ Using skills: coding-principals + rcc-dev-skills
 - 红测：`test_protocol_field_contract_outbound_anthropic_messages_strips_stringified_historical_media` 先失败在该字符串化 content 未 placeholder。
 - 修复：Rust `chat_process_media_semantics` 的 media part 判定扩展到 `text/content` 字段内的 inline media 字符串；历史图片通用清理覆盖 OpenAI-chat 与 Anthropic-messages。
 - 验证：`cargo test -p router-hotpath-napi protocol_field_contract -- --nocapture` 6/6 通过；5520/5555 已部署 0.90.2488。
+
+## 2026-05-29 Windsurf warmup stall after AddTrackedWorkspace
+- Live evidence: after installing `0.90.2488`, user request `214300133/214300936` showed two near-simultaneous Windsurf entries on the same `019e69c6...` session; both selected alias `managed`, then only `AddTrackedWorkspace path is already tracked` appeared and no completion/failure followed.
+- Red test: existing `concurrent sendRequestInternal for same Windsurf account must serialize one local runtime instead of sharing LS concurrently` failed with `maxInFlight=2`.
+- Fix: Windsurf provider now wraps the full Cascade send lifecycle in a provider-local FIFO queue via `runWindsurfCascadeSendExclusive`, using the existing AsyncLocal scope `locked` marker to avoid recursion. This keeps Hub/Virtual Router provider-agnostic.
+- Verification: concurrency red test and idle-tool-call red test pass; focused Windsurf continuation/native/MCP regression passes.
+
+## 2026-05-29 Windsurf warmup bounded closure
+- Live evidence: `215724822-234813-2124` on 0.90.2490 still stuck after `[windsurf.grpc.end] AddTrackedWorkspace ... path is already tracked`; no `UpdateWorkspaceTrust`, `Heartbeat`, `StartCascade`, completion, or provider-switch followed.
+- Reference: `/Volumes/extension/code/WindsurfAPI/src/client.js::warmupCascade()` treats warmup as one-shot workspace init; non-transport warmup stage errors are logged/continued, transport errors reset Cascade transport.
+- Fix: `ensureWindsurfCascadeWarmup()` now wraps every stage in bounded `Promise.race` timeout. Non-transport errors on `AddTrackedWorkspace`/`UpdateWorkspaceTrust`/`Heartbeat` continue; timeout/transport errors throw and reset local gRPC session + warmup promise.
+- Red/green: added `ensureWindsurfCascadeWarmup must not hang forever when a warmup stage never returns`; it hung before fix and passes after bounded stage timeout.
+
+## 2026-05-29 opencode DeepSeek 400: reasoning_content must be passed back
+- 2122 provider error: `The reasoning_content in the thinking mode must be passed back to the API.` 失败请求尾部是 assistant tool_call + tool_result，assistant tool_call 的 `reasoning_content` 为 `"."` 占位；成功上一跳 provider-response 里有真实 `reasoning_content`，但 Responses conversation store 把 reasoning output 存成独立 message，未绑定到后续 function_call。
+- 红测：`test_protocol_field_contract_outbound_deepseek_openai_chat_trailing_tool_has_real_reasoning_text` 先失败；新增 `converts_reasoning_item_before_function_call_attaches_reasoning_to_call` 与 `convert_bridge_input_function_call_preserves_reasoning_content` 覆盖 store/chat process 协议字段保留。
+- 修复：Rust Responses store 将 `reasoning` output item 绑定到紧随的 `function_call` input；bridge input 将 function_call 顶层 `reasoning_content` 写回 assistant tool-call message；opencode DeepSeek outbound 将 `"."` tool-call 占位替换为确定性 tool reasoning 文本。
+- 验证：`protocol_field_contract` 7/7 通过；两个新增定点测试通过；`cargo build --release -p router-hotpath-napi` 通过。

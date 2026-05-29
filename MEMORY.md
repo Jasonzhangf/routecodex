@@ -1726,3 +1726,7 @@ Tags: windsurf, managed-account, health-probe, extra-quota, no-request-account-s
 - 2026-05-29: 历史图片清理的唯一规则修正为无条件 placeholder：outbound stage3 先清历史 user media 与 `role=tool` media，再按 `supportsMultimodal=false` 清当前 user media；不要把历史图片清理绑到 provider 多模态能力，也不要做 DeepSeek 专用重复路径。红测：`test_protocol_field_contract_outbound_openai_chat_always_strips_historical_media`。
 
 - 2026-05-29: mimo Anthropic outbound 可把历史 `view_image` tool result 折成 `role=user.content[]` 的字符串化 JSON（字段名 `content`，内含 `image_url:data:image...`），不是 `role=tool`。历史图片 placeholder 判定必须检查 content part 的 `text/content` 字符串内联媒体；红测锚点：`test_protocol_field_contract_outbound_anthropic_messages_strips_stringified_historical_media`。
+
+### 2026-05-29 opencode DeepSeek reasoning_content 回传规则
+- DeepSeek thinking/OpenAI-chat 的 assistant tool-call history 不能用 `reasoning_content: "."` 长期占位；opencode DeepSeek 会 400 `reasoning_content ... must be passed back`。Responses output 中的 `reasoning` item 必须在 store/chat process 绑定到紧随 `function_call`，让后续 OpenAI-chat assistant tool-call message 带真实 `reasoning_content`。
+- 回归入口：`test_protocol_field_contract_outbound_deepseek_openai_chat_trailing_tool_has_real_reasoning_text`、`converts_reasoning_item_before_function_call_attaches_reasoning_to_call`、`convert_bridge_input_function_call_preserves_reasoning_content`。
