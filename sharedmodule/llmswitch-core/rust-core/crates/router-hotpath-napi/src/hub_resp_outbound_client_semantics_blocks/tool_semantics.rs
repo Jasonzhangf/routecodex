@@ -83,7 +83,9 @@ fn resolve_semantics_client_tools_raw_candidate(semantics: &Value) -> Option<Val
     anthropic_record.get("clientToolsRaw").cloned()
 }
 
-pub(crate) fn resolve_alias_map_from_resp_semantics(semantics: &Value) -> Option<Map<String, Value>> {
+pub(crate) fn resolve_alias_map_from_resp_semantics(
+    semantics: &Value,
+) -> Option<Map<String, Value>> {
     if let Some(tool_name_alias_map) = resolve_semantics_tool_name_alias_map_candidate(semantics) {
         if let Some(from_candidate) = normalize_alias_map(&tool_name_alias_map) {
             return Some(from_candidate);
@@ -133,8 +135,9 @@ pub(crate) fn resolve_alias_map_from_sources(
     resolve_alias_map_from_resp_semantics(&semantics)
 }
 
-pub(crate) fn resolve_client_tools_raw_from_resp_semantics(semantics: &Value) -> Option<Vec<Value>> {
+pub(crate) fn resolve_client_tools_raw_from_resp_semantics(
+    semantics: &Value,
+) -> Option<Vec<Value>> {
     let raw_tools = resolve_semantics_client_tools_raw_candidate(semantics)?;
     resolve_client_tools_raw(&raw_tools)
 }
-

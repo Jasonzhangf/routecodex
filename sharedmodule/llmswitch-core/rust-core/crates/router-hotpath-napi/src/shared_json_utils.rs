@@ -65,10 +65,7 @@ pub(crate) fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     Some(raw)
 }
 
-pub(crate) fn read_object_trimmed_string(
-    object: &Map<String, Value>,
-    key: &str,
-) -> Option<String> {
+pub(crate) fn read_object_trimmed_string(object: &Map<String, Value>, key: &str) -> Option<String> {
     read_trimmed_string(object.get(key))
 }
 
@@ -284,9 +281,9 @@ mod tests {
     use super::{
         as_object, extract_balanced_json_array_at, extract_balanced_json_candidate_at,
         extract_balanced_json_object_at, normalize_record, normalize_record_ref,
-        parse_js_number_like, parse_json_bool, read_first_object_trimmed_string, read_object_trimmed_string,
-        read_string_array_command, read_trimmed_string, read_workdir_from_args,
-        split_command_string, value_as_object_or_empty,
+        parse_js_number_like, parse_json_bool, read_first_object_trimmed_string,
+        read_object_trimmed_string, read_string_array_command, read_trimmed_string,
+        read_workdir_from_args, split_command_string, value_as_object_or_empty,
     };
     use serde_json::json;
 
@@ -314,25 +311,44 @@ mod tests {
 
     #[test]
     fn shared_pick_first_trimmed_string_value_deletion_gate_removed_local_clones() {
-        let lmstudio_core_path = crate_src_path("req_outbound_stage3_compat/lmstudio/request/core_utils.rs");
-        let lmstudio_core_source = fs::read_to_string(&lmstudio_core_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", lmstudio_core_path.display(), error));
+        let lmstudio_core_path =
+            crate_src_path("req_outbound_stage3_compat/lmstudio/request/core_utils.rs");
+        let lmstudio_core_source =
+            fs::read_to_string(&lmstudio_core_path).unwrap_or_else(|error| {
+                panic!("failed to read {}: {}", lmstudio_core_path.display(), error)
+            });
         assert!(
-            !lmstudio_core_source.contains("fn pick_trimmed_string_values(values: &[Option<&Value>]) -> Option<String> {"),
+            !lmstudio_core_source.contains(
+                "fn pick_trimmed_string_values(values: &[Option<&Value>]) -> Option<String> {"
+            ),
             "lmstudio request core_utils still owns local pick_trimmed_string_values clone"
         );
 
-        let lmstudio_tool_ids_path = crate_src_path("req_outbound_stage3_compat/lmstudio/request/tool_ids.rs");
-        let lmstudio_tool_ids_source = fs::read_to_string(&lmstudio_tool_ids_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", lmstudio_tool_ids_path.display(), error));
+        let lmstudio_tool_ids_path =
+            crate_src_path("req_outbound_stage3_compat/lmstudio/request/tool_ids.rs");
+        let lmstudio_tool_ids_source =
+            fs::read_to_string(&lmstudio_tool_ids_path).unwrap_or_else(|error| {
+                panic!(
+                    "failed to read {}: {}",
+                    lmstudio_tool_ids_path.display(),
+                    error
+                )
+            });
         assert!(
             lmstudio_tool_ids_source.contains("pick_first_trimmed_string_value(&["),
             "lmstudio request tool_ids must route trimmed string picker through shared_json_utils truth"
         );
 
-        let lmstudio_function_ids_path = crate_src_path("req_outbound_stage3_compat/lmstudio/request/function_call_ids.rs");
+        let lmstudio_function_ids_path =
+            crate_src_path("req_outbound_stage3_compat/lmstudio/request/function_call_ids.rs");
         let lmstudio_function_ids_source = fs::read_to_string(&lmstudio_function_ids_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", lmstudio_function_ids_path.display(), error));
+            .unwrap_or_else(|error| {
+                panic!(
+                    "failed to read {}: {}",
+                    lmstudio_function_ids_path.display(),
+                    error
+                )
+            });
         assert!(
             lmstudio_function_ids_source.contains("pick_first_trimmed_string_value(&["),
             "lmstudio request function_call_ids must route trimmed string picker through shared_json_utils truth"
@@ -342,7 +358,8 @@ mod tests {
         let compat_source = fs::read_to_string(&compat_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", compat_path.display(), error));
         assert!(
-            !compat_source.contains("fn pick_string(candidates: &[Option<&Value>]) -> Option<String> {"),
+            !compat_source
+                .contains("fn pick_string(candidates: &[Option<&Value>]) -> Option<String> {"),
             "shared_response_compat.rs still owns local pick_string clone"
         );
         assert!(
@@ -602,12 +619,16 @@ mod tests {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_trimmed_non_empty_string(value: Option<&Value>) -> Option<String>"),
+            !source.contains(
+                "fn read_trimmed_non_empty_string(value: Option<&Value>) -> Option<String>"
+            ),
             "local read_trimmed_non_empty_string clone still present in {}",
             path.display()
         );
         assert!(
-            !source.contains("fn clone_non_empty_object(value: Option<&Value>) -> Option<Map<String, Value>>"),
+            !source.contains(
+                "fn clone_non_empty_object(value: Option<&Value>) -> Option<Map<String, Value>>"
+            ),
             "local clone_non_empty_object clone still present in {}",
             path.display()
         );
@@ -617,7 +638,9 @@ mod tests {
             path.display()
         );
         assert!(
-            !source.contains("fn clone_plain_object(value: Option<&Value>) -> Option<Map<String, Value>>"),
+            !source.contains(
+                "fn clone_plain_object(value: Option<&Value>) -> Option<Map<String, Value>>"
+            ),
             "local clone_plain_object clone still present in {}",
             path.display()
         );
@@ -636,7 +659,9 @@ mod tests {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_trimmed_non_empty_string(value: Option<&Value>) -> Option<String>"),
+            !source.contains(
+                "fn read_trimmed_non_empty_string(value: Option<&Value>) -> Option<String>"
+            ),
             "local read_trimmed_non_empty_string clone still present in {}",
             path.display()
         );
@@ -647,7 +672,8 @@ mod tests {
     }
 
     #[test]
-    fn shared_read_trimmed_string_deletion_gate_removed_virtual_router_stop_message_actions_local_clone() {
+    fn shared_read_trimmed_string_deletion_gate_removed_virtual_router_stop_message_actions_local_clone(
+    ) {
         let path = crate_src_path("virtual_router_stop_message_actions.rs");
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
@@ -672,7 +698,8 @@ mod tests {
             let source = fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
             assert!(
-                !source.contains("fn normalize_stage_mode(value: Option<&Value>) -> Option<String> {"),
+                !source
+                    .contains("fn normalize_stage_mode(value: Option<&Value>) -> Option<String> {"),
                 "local normalize_stage_mode clone still present in {}",
                 path.display()
             );
@@ -740,7 +767,8 @@ mod tests {
     }
 
     #[test]
-    fn shared_read_trimmed_string_deletion_gate_removed_hub_req_inbound_context_capture_local_clone() {
+    fn shared_read_trimmed_string_deletion_gate_removed_hub_req_inbound_context_capture_local_clone(
+    ) {
         let path = crate_src_path("hub_req_inbound_context_capture.rs");
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
@@ -813,7 +841,9 @@ mod tests {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("pub(crate) fn read_trimmed_string(value: Option<&Value>) -> Option<String>"),
+            !source.contains(
+                "pub(crate) fn read_trimmed_string(value: Option<&Value>) -> Option<String>"
+            ),
             "local read_trimmed_string wrapper still present in {}",
             path.display()
         );
@@ -888,15 +918,19 @@ mod tests {
     }
 
     #[test]
-    fn shared_read_object_trimmed_string_deletion_gate_removed_deepseek_prompt_content_local_clone() {
-        let path = crate_src_path("req_outbound_stage3_compat/deepseek_web/request/prompt/content.rs");
+    fn shared_read_object_trimmed_string_deletion_gate_removed_deepseek_prompt_content_local_clone()
+    {
+        let path =
+            crate_src_path("req_outbound_stage3_compat/deepseek_web/request/prompt/content.rs");
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("map.get(key)
+            !source.contains(
+                "map.get(key)
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())"),
+        .filter(|value| !value.is_empty())"
+            ),
             "deepseek_web/request/prompt/content.rs still owns local map-key trim clone"
         );
         assert!(
@@ -1008,7 +1042,8 @@ mod tests {
     }
 
     #[test]
-    fn shared_read_trimmed_string_deletion_gate_removed_hub_req_inbound_tool_call_normalization_local_clone() {
+    fn shared_read_trimmed_string_deletion_gate_removed_hub_req_inbound_tool_call_normalization_local_clone(
+    ) {
         let path = crate_src_path("hub_req_inbound_tool_call_normalization.rs");
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
@@ -1027,7 +1062,8 @@ mod tests {
     }
 
     #[test]
-    fn shared_read_trimmed_string_deletion_gate_removed_virtual_router_config_bootstrap_local_wrapper() {
+    fn shared_read_trimmed_string_deletion_gate_removed_virtual_router_config_bootstrap_local_wrapper(
+    ) {
         let path = crate_src_path("virtual_router_engine/config_bootstrap.rs");
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
@@ -1049,7 +1085,9 @@ mod tests {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn clone_runtime_metadata(carrier: Option<&Value>) -> Option<Map<String, Value>>"),
+            !source.contains(
+                "fn clone_runtime_metadata(carrier: Option<&Value>) -> Option<Map<String, Value>>"
+            ),
             "local clone_runtime_metadata clone still present in {}",
             path.display()
         );
@@ -1082,7 +1120,9 @@ mod tests {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_string_field(obj: &Map<String, Value>, key: &str) -> Option<String> {"),
+            !source.contains(
+                "fn read_string_field(obj: &Map<String, Value>, key: &str) -> Option<String> {"
+            ),
             "local read_string_field wrapper still present in {}",
             path.display()
         );
@@ -1118,7 +1158,9 @@ mod tests {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_string_field(map: &Map<String, Value>, key: &str) -> Option<String> {"),
+            !source.contains(
+                "fn read_string_field(map: &Map<String, Value>, key: &str) -> Option<String> {"
+            ),
             "local read_string_field wrapper still present in {}",
             path.display()
         );
@@ -1145,16 +1187,20 @@ mod tests {
         );
     }
 
-
     #[test]
     fn shared_read_object_trimmed_string_deletion_gate_removed_local_tool_id_priority_helpers() {
         let compat_path = crate_src_path("hub_tool_session_compat.rs");
         let compat_source = fs::read_to_string(&compat_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", compat_path.display(), error));
         assert!(
-            !compat_source.contains("fn read_tool_call_id(call: &Map<String, Value>) -> Option<String> {")
-                && !compat_source.contains("fn read_tool_message_id(message: &Map<String, Value>) -> Option<String> {")
-                && !compat_source.contains("fn read_tool_output_id(message: &Map<String, Value>) -> Option<String> {"),
+            !compat_source
+                .contains("fn read_tool_call_id(call: &Map<String, Value>) -> Option<String> {")
+                && !compat_source.contains(
+                    "fn read_tool_message_id(message: &Map<String, Value>) -> Option<String> {"
+                )
+                && !compat_source.contains(
+                    "fn read_tool_output_id(message: &Map<String, Value>) -> Option<String> {"
+                ),
             "hub_tool_session_compat.rs still owns local prioritized tool id readers"
         );
         assert!(
@@ -1173,17 +1219,20 @@ mod tests {
         );
     }
 
-
     #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_qwenchat_append_description_clone() {
         let qwen_path = crate_src_path("req_outbound_stage3_compat/qwen/tool_definitions.rs");
         let qwen_source = fs::read_to_string(&qwen_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", qwen_path.display(), error));
-        let qwenchat_path = crate_src_path("req_outbound_stage3_compat/qwenchat/tool_definitions.rs");
-        let qwenchat_source = fs::read_to_string(&qwenchat_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", qwenchat_path.display(), error));
+        let qwenchat_path =
+            crate_src_path("req_outbound_stage3_compat/qwenchat/tool_definitions.rs");
+        let qwenchat_source = fs::read_to_string(&qwenchat_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {}", qwenchat_path.display(), error)
+        });
         assert!(
-            !qwenchat_source.contains("fn append_description(existing: Option<&Value>, extra: &str) -> Value {"),
+            !qwenchat_source.contains(
+                "fn append_description(existing: Option<&Value>, extra: &str) -> Value {"
+            ),
             "qwenchat/tool_definitions.rs still owns local append_description clone"
         );
         assert!(
@@ -1215,7 +1264,8 @@ mod tests {
         let gemini_source = fs::read_to_string(&gemini_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", gemini_path.display(), error));
         assert!(
-            !gemini_source.contains("fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {"),
+            !gemini_source
+                .contains("fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {"),
             "gemini_openai_codec.rs still owns local coerce_thought_signature clone"
         );
         assert!(
@@ -1225,9 +1275,14 @@ mod tests {
         );
 
         let provider_bootstrap_path = crate_src_path("virtual_router_engine/provider_bootstrap.rs");
-        let provider_bootstrap_source = fs::read_to_string(&provider_bootstrap_path).unwrap_or_else(|error| {
-            panic!("failed to read {}: {}", provider_bootstrap_path.display(), error)
-        });
+        let provider_bootstrap_source = fs::read_to_string(&provider_bootstrap_path)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "failed to read {}: {}",
+                    provider_bootstrap_path.display(),
+                    error
+                )
+            });
         assert!(
             !provider_bootstrap_source.contains("fn read_optional_string(value: Option<&Value>) -> Option<String> {"),
             "virtual_router_engine/provider_bootstrap.rs still owns local read_optional_string clone"
@@ -1241,9 +1296,14 @@ mod tests {
         );
 
         let routing_bootstrap_path = crate_src_path("virtual_router_engine/routing/bootstrap.rs");
-        let routing_bootstrap_source = fs::read_to_string(&routing_bootstrap_path).unwrap_or_else(|error| {
-            panic!("failed to read {}: {}", routing_bootstrap_path.display(), error)
-        });
+        let routing_bootstrap_source =
+            fs::read_to_string(&routing_bootstrap_path).unwrap_or_else(|error| {
+                panic!(
+                    "failed to read {}: {}",
+                    routing_bootstrap_path.display(),
+                    error
+                )
+            });
         assert!(
             !routing_bootstrap_source.contains("fn read_optional_string(value: Option<&Value>) -> Option<String> {"),
             "virtual_router_engine/routing/bootstrap.rs still owns local read_optional_string clone"
@@ -1273,8 +1333,9 @@ mod tests {
         );
 
         let metadata_path = crate_src_path("hub_pipeline_blocks/metadata.rs");
-        let metadata_source = fs::read_to_string(&metadata_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", metadata_path.display(), error));
+        let metadata_source = fs::read_to_string(&metadata_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {}", metadata_path.display(), error)
+        });
         assert!(
             !metadata_source.contains("fn read_trimmed_string_token(metadata: &Map<String, Value>, keys: &[&str]) -> Option<String> {"),
             "hub_pipeline_blocks/metadata.rs still owns local multi-key trim wrapper"
@@ -1301,13 +1362,15 @@ mod tests {
             "shared_responses_conversation_utils.rs still owns local read_workdir_from_args_map wrapper"
         );
         assert!(
-            source.contains("read_trimmed_string(") && source.contains("read_workdir_from_args(args)"),
+            source.contains("read_trimmed_string(")
+                && source.contains("read_workdir_from_args(args)"),
             "shared_responses_conversation_utils.rs must call shared json utils truth directly"
         );
     }
 
     #[test]
-    fn shared_read_first_object_trimmed_string_deletion_gate_removed_hub_pipeline_metadata_wrapper() {
+    fn shared_read_first_object_trimmed_string_deletion_gate_removed_hub_pipeline_metadata_wrapper()
+    {
         let path = crate_src_path("hub_pipeline_blocks/metadata.rs");
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
@@ -1346,7 +1409,8 @@ mod tests {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {"),
+            !source
+                .contains("fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {"),
             "thought_signature_validator.rs still owns local coerce_thought_signature wrapper"
         );
         assert!(
@@ -1370,7 +1434,7 @@ mod tests {
         );
         assert!(
             source.contains(r#"read_trimmed_string(metadata.get("requestId"))"#)
-                && source.contains(r#"continuation.get("stickyScope")"#),
+                && source.contains(r#"continuation.get("continuationScope")"#),
             "virtual_router_engine/routing/metadata.rs must call shared read_trimmed_string truth directly"
         );
     }
@@ -1381,7 +1445,9 @@ mod tests {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_object_string(row: &Map<String, Value>, key: &str) -> Option<String> {"),
+            !source.contains(
+                "fn read_object_string(row: &Map<String, Value>, key: &str) -> Option<String> {"
+            ),
             "local read_object_string wrapper still present in {}",
             path.display()
         );
@@ -1433,7 +1499,9 @@ mod tests {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_object_string(row: &Map<String, Value>, key: &str) -> Option<String> {"),
+            !source.contains(
+                "fn read_object_string(row: &Map<String, Value>, key: &str) -> Option<String> {"
+            ),
             "local read_object_string wrapper still present in {}",
             path.display()
         );
@@ -1503,7 +1571,8 @@ mod tests {
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
             !source.contains("fn as_object(value: &Value) -> Option<&Map<String, Value>> {")
-                && !source.contains("fn normalize_metadata(metadata: Value) -> Map<String, Value> {"),
+                && !source
+                    .contains("fn normalize_metadata(metadata: Value) -> Map<String, Value> {"),
             "chat_governance_finalize.rs still owns local json wrapper helpers"
         );
         assert!(
@@ -1524,8 +1593,10 @@ mod tests {
             let source = fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
             assert!(
-                !source.contains("fn read_non_empty_str(value: Option<&Value>) -> Option<String> {")
-                    && !source.contains("fn read_trimmed_str(value: Option<&Value>) -> Option<String> {"),
+                !source
+                    .contains("fn read_non_empty_str(value: Option<&Value>) -> Option<String> {")
+                    && !source
+                        .contains("fn read_trimmed_str(value: Option<&Value>) -> Option<String> {"),
                 "{} still owns local trimmed-string wrapper",
                 path.display()
             );
@@ -1540,7 +1611,8 @@ mod tests {
     }
 
     #[test]
-    fn shared_read_trimmed_string_deletion_gate_removed_chat_servertool_orchestration_local_wrapper() {
+    fn shared_read_trimmed_string_deletion_gate_removed_chat_servertool_orchestration_local_wrapper(
+    ) {
         let path = crate_src_path("chat_servertool_orchestration.rs");
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
@@ -1555,5 +1627,4 @@ mod tests {
             "chat_servertool_orchestration.rs must use shared read_trimmed_string truth directly"
         );
     }
-
 }

@@ -1,27 +1,33 @@
-import { describe, expect, it } from '@jest/globals';
-import { enforceWindsurfStartupProbeForHandle } from '../../../src/server/runtime/http-server/windsurf-startup-probe.js';
+import { describe, expect, it, jest } from '@jest/globals';
+import { runStartupProviderReprobe } from '../../../src/server/runtime/http-server/provider-startup-reprobe.js';
 
 describe('Windsurf runtime startup probe', () => {
-  it('rejects the runtime handle when Windsurf startup checkHealth returns false', async () => {
-    const previous = process.env.ROUTECODEX_WINDSURF_STARTUP_PROBE;
-    delete process.env.ROUTECODEX_WINDSURF_STARTUP_PROBE;
-    try {
-      await expect(enforceWindsurfStartupProbeForHandle({
-        providerFamily: 'windsurf',
-        runtimeKey: 'windsurf.ws-pro-bad',
-        instance: { checkHealth: async () => false }
-      })).rejects.toMatchObject({ code: 'WINDSURF_STARTUP_PROBE_FAILED' });
-    } finally {
-      if (previous === undefined) delete process.env.ROUTECODEX_WINDSURF_STARTUP_PROBE;
-      else process.env.ROUTECODEX_WINDSURF_STARTUP_PROBE = previous;
-    }
+  it('RED: runs Windsurf startup health probe asynchronously without blocking runtime readiness', async () => {
+    const checkHealth = jest.fn(async () => await new Promise<boolean>(() => {}));
+    const startedAt = Date.now();
+
+    await expect(runStartupProviderReprobe({
+      server: { hubPipeline: { getVirtualRouter: () => null } },
+      providerKey: 'windsurf.managed.gpt-5.5-low',
+      runtimeKey: 'windsurf.managed.gpt-5.5-low',
+      providerFamily: 'windsurf',
+      instance: { checkHealth },
+    })).resolves.toBeUndefined();
+
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+    expect(checkHealth).toHaveBeenCalledTimes(1);
   });
 
-  it('allows non-windsurf providers without probing', async () => {
-    await expect(enforceWindsurfStartupProbeForHandle({
+  it('keeps non-windsurf startup reprobe synchronous for existing health semantics', async () => {
+    const handleProviderSuccess = jest.fn();
+    await expect(runStartupProviderReprobe({
+      server: { hubPipeline: { getVirtualRouter: () => ({ handleProviderSuccess }) } },
+      providerKey: 'openai.key1.gpt-5.4',
+      runtimeKey: 'openai.key1.gpt-5.4',
       providerFamily: 'openai',
-      runtimeKey: 'openai.key1',
-      instance: { checkHealth: async () => false }
+      instance: { checkHealth: async () => true },
     })).resolves.toBeUndefined();
+
+    expect(handleProviderSuccess).toHaveBeenCalled();
   });
 });

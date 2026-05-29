@@ -1,7 +1,7 @@
 use serde_json::{Map, Value};
 
-use crate::shared_json_utils::read_trimmed_string;
 use crate::req_outbound_stage3_compat::shared_tool_text_guidance::build_tool_text_instruction;
+use crate::shared_json_utils::read_trimmed_string;
 
 pub(super) const TOOL_TEXT_GUIDANCE_MARKER: &str = "Tool-call output contract (STRICT)";
 pub(super) const TOOL_TEXT_WRAPPER_OPEN: &str = "<|DSML|tool_calls>";

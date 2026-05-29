@@ -1,40 +1,38 @@
 use super::*;
-use crate::resp_process_stage1_tool_governance_blocks::orchestrator::prepare_payload_for_governance;
-use serde_json::Value;
 use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::strip_python_heredoc_pseudo_escapes;
 use crate::resp_process_stage1_tool_governance_blocks::json_args::read_string_array_command;
-
+use crate::resp_process_stage1_tool_governance_blocks::orchestrator::prepare_payload_for_governance;
+use serde_json::Value;
 
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_text;
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_text::{
-    decode_escaped_newlines_if_needed, extract_apply_patch_text,
-    normalize_apply_patch_header_line, normalize_apply_patch_header_path,
+    decode_escaped_newlines_if_needed, extract_apply_patch_text, normalize_apply_patch_header_line,
+    normalize_apply_patch_header_path,
 };
 use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::{
     sanitize_textual_marker_field_in_message, strip_text_tool_wrapper_noise,
     strip_tool_call_marker_payload,
 };
-use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::{
-    read_command_from_args,
-};
+use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::read_command_from_args;
 use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
+use crate::resp_process_stage1_tool_governance_blocks::message_content::read_message_text_candidates;
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_extract::{
     collect_harvest_text_variants, extract_reasoning_inline_exec_command_arg_key,
     extract_tool_prefixed_exec_command_block, extract_xml_named_tool_call_blocks,
     extract_xml_tool_call_blocks,
 };
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_strict::harvest_text_tool_calls_from_payload;
-use crate::resp_process_stage1_tool_governance_blocks::message_content::read_message_text_candidates;
 use crate::resp_process_stage1_tool_governance_blocks::tool_args::{
     normalize_tool_args, normalize_tool_args_preserving_raw_shape,
+};
+use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::{
+    extract_json_candidates_from_text, extract_tool_call_entries_from_malformed_tool_calls_text,
+    extract_tool_call_entries_from_unknown, normalize_tool_call_entry,
+    parse_tool_calls_shape_from_text,
 };
 use crate::resp_process_stage1_tool_governance_blocks::tool_call_governance::{
     count_normalized_tool_calls, maybe_harvest_empty_tool_calls_from_json_content,
     normalize_apply_patch_tool_calls, remap_tool_calls_for_client_protocol,
-};
-use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::{
-    extract_json_candidates_from_text, extract_tool_call_entries_from_malformed_tool_calls_text,
-    extract_tool_call_entries_from_unknown, normalize_tool_call_entry, parse_tool_calls_shape_from_text,
 };
 use crate::resp_process_stage1_tool_governance_blocks::xml_text_utils::{
     strip_xml_tags_preserve_text, unwrap_xml_cdata_sections,
@@ -44,8 +42,8 @@ use crate::shared_json_utils::{
 };
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 use crate::shared_tooling::extract_rcc_tool_call_fence_segments;
-use serde_json::Map;
 use serde_json::json;
+use serde_json::Map;
 
 #[test]
 fn test_prepare_payload_for_governance_coerces_responses_shape_without_shell_fence_guess() {
@@ -99,6 +97,38 @@ fn test_govern_response_preserves_shell_fence_truth_when_function_calls_wrapper_
         governed.governed_payload["choices"][0]["message"]["content"],
         "```bash\npwd\n```"
     );
+}
+
+#[test]
+fn test_govern_response_preserves_requested_shell_command_name_for_openai_chat() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "__rcc_tool_governance": { "requestedToolNames": ["shell_command"] },
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "content": "",
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "native:run_command:2",
+                        "type": "function",
+                        "function": {
+                            "name": "shell_command",
+                            "arguments": "{\"command\":\"echo ok\"}"
+                        }
+                    }]
+                }
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_preserve_shell_command".to_string(),
+    };
+
+    let governed = govern_response(input).unwrap();
+    let call = &governed.governed_payload["choices"][0]["message"]["tool_calls"][0];
+    assert_eq!(call["function"]["name"], "shell_command");
+    assert_eq!(call["function"]["arguments"], "{\"command\":\"echo ok\"}");
 }
 
 #[test]
@@ -405,8 +435,7 @@ fn test_govern_response_apply_patch_simple_minus_plus_with_file_context_converts
 }
 
 #[test]
-fn test_govern_response_apply_patch_current_schema_preserves_filepath_and_patch_without_guard()
-{
+fn test_govern_response_apply_patch_current_schema_preserves_filepath_and_patch_without_guard() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
             "choices": [{
@@ -443,14 +472,20 @@ fn test_govern_response_apply_patch_current_schema_preserves_filepath_and_patch_
     assert!(patch_value.contains("+ alpha"));
     assert!(patch_value.contains("+ beta"));
     assert!(patch_value.contains("*** End Patch"));
-    assert_eq!(parsed["input"], parsed["patch"], "input should mirror patch");
-    assert!(parsed.get("filePath").is_none(), "filePath should be removed after conversion");
+    assert_eq!(
+        parsed["input"], parsed["patch"],
+        "input should mirror patch"
+    );
+    assert!(
+        parsed.get("filePath").is_none(),
+        "filePath should be removed after conversion"
+    );
     assert!(parsed.get("fileContent").is_none());
 }
 
 #[test]
-fn test_govern_response_apply_patch_simple_add_with_empty_file_context_converts_to_add_file_patch(
-) {
+fn test_govern_response_apply_patch_simple_add_with_empty_file_context_converts_to_add_file_patch()
+{
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
             "choices": [{
@@ -569,8 +604,7 @@ fn test_govern_response_apply_patch_new_file_plain_text_with_hashline_shape_repa
 }
 
 #[test]
-fn test_govern_response_apply_patch_hashline_missing_file_content_fails_closed_with_guard_patch(
-) {
+fn test_govern_response_apply_patch_hashline_missing_file_content_fails_closed_with_guard_patch() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
             "choices": [{
@@ -1491,29 +1525,23 @@ fn test_normalize_tool_args_exec_command_salvages_malformed_large_heredoc_args_i
 #[test]
 fn test_normalize_tool_args_preserving_raw_shape_does_not_guess_exec_command_aliases() {
     let raw_args = json!({"command": "pwd", "workdir": "/workspace"});
-    let out =
-        normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
+    let out = normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(parsed["command"], "pwd");
     assert_eq!(parsed["workdir"], "/workspace");
     assert!(parsed.get("cmd").is_none());
 
     let raw_args = Value::String("{\"command\":\"pwd\"}".to_string());
-    let out =
-        normalize_tool_args_preserving_raw_shape("shell_command", Some(&raw_args)).unwrap();
+    let out = normalize_tool_args_preserving_raw_shape("shell_command", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(parsed["command"], "pwd");
     assert!(parsed.get("cmd").is_none());
 
     let raw_args = json!({});
-    assert!(
-        normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).is_none()
-    );
+    assert!(normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).is_none());
 
     let raw_args = Value::String("{}".to_string());
-    assert!(
-        normalize_tool_args_preserving_raw_shape("shell_command", Some(&raw_args)).is_none()
-    );
+    assert!(normalize_tool_args_preserving_raw_shape("shell_command", Some(&raw_args)).is_none());
 }
 
 #[test]
@@ -1528,7 +1556,9 @@ fn test_json_extraction_helpers() {
     let array_text = "yy [1,{\"a\":2}] zz";
     let array_idx = array_text.find('[').unwrap();
     assert_eq!(
-        extract_balanced_json_array_at(array_text, array_idx).unwrap().1,
+        extract_balanced_json_array_at(array_text, array_idx)
+            .unwrap()
+            .1,
         "[1,{\"a\":2}]"
     );
     assert!(extract_balanced_json_array_at("nope", 0).is_none());
@@ -1591,10 +1621,7 @@ fn test_tool_call_entry_and_qwen_marker_parsing() {
         .as_str()
         .unwrap_or("{}");
     let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
-    assert!(args_json["cmd"]
-        .as_str()
-        .unwrap_or("")
-        .contains("wc -l"));
+    assert!(args_json["cmd"].as_str().unwrap_or("").contains("wc -l"));
 
     let malformed = r#"{"tool_calls":[{"name":"update_plan","input":{"action":"create","plan":[{"step":"A","status":"pending"}]}},{"name":"agent.dispatch","input":{"target_agent_id":"finger-project-agent","task":"alpha"},{"name":"agent.dispatch","input":{"target_agent_id":"finger-reviewer","task":"beta"}}]}"#;
     let out = extract_tool_call_entries_from_malformed_tool_calls_text(malformed, 1);
@@ -1968,7 +1995,8 @@ fn test_normalize_apply_patch_text_preserves_blank_lines_in_add_file() {
 
 #[test]
 fn test_normalize_apply_patch_text_repairs_update_block_missing_hunk_marker() {
-    let input = "*** Begin Patch\n*** Update File: src/a.ts\n-const a = 1;\n+const a = 2;\n*** End Patch";
+    let input =
+        "*** Begin Patch\n*** Update File: src/a.ts\n-const a = 1;\n+const a = 2;\n*** End Patch";
     let normalized = normalize_apply_patch_text(input);
     assert!(normalized.contains("*** Update File: src/a.ts\n@@\n-const a = 1;\n+const a = 2;"));
 }
@@ -2305,8 +2333,7 @@ fn test_validate_apply_patch_arguments_unrecoverable_arg_key_invalid_json_stays_
 #[test]
 #[ignore = "diagnostic replay against local /Volumes error samples"]
 fn test_validate_apply_patch_arguments_replay_latest_20260516_samples() {
-    let base =
-        std::path::Path::new("/Volumes/extension/.rcc/errorsamples/apply-patch-regression");
+    let base = std::path::Path::new("/Volumes/extension/.rcc/errorsamples/apply-patch-regression");
     if !base.exists() {
         eprintln!("skip sample replay: {} not found", base.display());
         return;
@@ -2467,8 +2494,7 @@ fn test_normalize_tool_args_preserving_raw_shape_preserves_find_predicates() {
         "command": "bash -lc 'cd /Volumes/extension/code/wterm && find . -type f ( -name \"*.ts\" -o -name \"*.tsx\" -o -name \"*.js\" -o -name \"*.jsx\" -o -name \"*.json\" ) -not -path \"./node_modules/*\" | head -100'",
         "workdir": "/Volumes/extension/code/wterm"
     });
-    let out =
-        normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
+    let out = normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
     let cmd = parsed["command"].as_str().unwrap_or("");
     assert!(cmd.contains("find . -type f ("));
@@ -2493,8 +2519,7 @@ fn test_normalize_tool_args_preserving_raw_shape_preserves_find_exec_separator()
     let raw_args = json!({
         "command": "bash -lc 'find . -type f -name \"*.ts\" -exec sed -n \"1,3p\" {} ; | head -5'"
     });
-    let out =
-        normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
+    let out = normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
     let cmd = parsed["command"].as_str().unwrap_or("");
     assert!(cmd.contains("-exec sed -n \"1,3p\" {} ;"));
@@ -2509,8 +2534,7 @@ fn test_normalize_tool_args_preserving_raw_shape_preserves_nested_input_find_she
         },
         "workdir": "/workspace"
     });
-    let out =
-        normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
+    let out = normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
     let cmd = parsed["input"]["command"].as_str().unwrap_or("");
     assert!(cmd.contains("find . -type f ("));
@@ -2573,9 +2597,8 @@ fn test_normalize_tool_call_entry_hoists_nested_wrapper_metadata_from_arguments_
     let out = normalize_tool_call_entry(&entry, 1).unwrap();
     assert_eq!(out["id"], "call_1");
     assert_eq!(out["function"]["name"], "exec_command");
-    let args: Value =
-        serde_json::from_str(out["function"]["arguments"].as_str().unwrap_or("{}"))
-            .unwrap_or(Value::Null);
+    let args: Value = serde_json::from_str(out["function"]["arguments"].as_str().unwrap_or("{}"))
+        .unwrap_or(Value::Null);
     assert_eq!(
         args["cmd"],
         "bash -lc 'grep -n -A 20 '\\\"running\\\" =>' /Users/fanzhang/Documents/github/fin/rust/crates/runtime/src/scheduler.rs'"
@@ -2618,9 +2641,8 @@ fn test_normalize_tool_call_entry_infers_update_plan_from_root_shape_without_nam
     });
     let out = normalize_tool_call_entry(&entry, 1).unwrap();
     assert_eq!(out["function"]["name"], "update_plan");
-    let args: Value =
-        serde_json::from_str(out["function"]["arguments"].as_str().unwrap_or("{}"))
-            .unwrap_or(Value::Null);
+    let args: Value = serde_json::from_str(out["function"]["arguments"].as_str().unwrap_or("{}"))
+        .unwrap_or(Value::Null);
     assert_eq!(args["explanation"], "修复 scheduler 决策逻辑");
     assert_eq!(args["plan"][0]["step"], "修改 running 分支");
     assert_eq!(args["plan"][0]["status"], "in_progress");
@@ -2809,9 +2831,8 @@ tool:exec_command (tool:exec_command)
 "#;
     let entry = extract_tool_prefixed_exec_command_block(text, 1).unwrap();
     assert_eq!(entry["function"]["name"], "exec_command");
-    let args: Value =
-        serde_json::from_str(entry["function"]["arguments"].as_str().unwrap_or("{}"))
-            .unwrap_or(Value::Null);
+    let args: Value = serde_json::from_str(entry["function"]["arguments"].as_str().unwrap_or("{}"))
+        .unwrap_or(Value::Null);
     assert_eq!(args["cmd"], "which flutter");
 }
 
@@ -2820,9 +2841,8 @@ fn test_extract_reasoning_inline_exec_command_arg_key() {
     let text = r#"exec_command<arg_key>cmd</arg_key><arg_value>pwd</arg_value></tool_call>"#;
     let entry = extract_reasoning_inline_exec_command_arg_key(text, 1).unwrap();
     assert_eq!(entry["function"]["name"], "exec_command");
-    let args: Value =
-        serde_json::from_str(entry["function"]["arguments"].as_str().unwrap_or("{}"))
-            .unwrap_or(Value::Null);
+    let args: Value = serde_json::from_str(entry["function"]["arguments"].as_str().unwrap_or("{}"))
+        .unwrap_or(Value::Null);
     assert_eq!(args["cmd"], "pwd");
 }
 
@@ -2891,8 +2911,7 @@ fn test_extract_xml_named_tool_call_blocks_generic_command_wrapper_preserves_mas
 }
 
 #[test]
-fn test_extract_xml_named_tool_call_blocks_invoke_parameter_attribute_wrapper_inside_tool_calls(
-) {
+fn test_extract_xml_named_tool_call_blocks_invoke_parameter_attribute_wrapper_inside_tool_calls() {
     let text = r#"<tool_calls>
 <invoke name="exec_command">
 <parameter name="cmd" string="true">tail -100 ~/.finger/logs/daemon.log | tail -20</parameter>
@@ -3104,8 +3123,7 @@ fn test_normalize_tool_args_preserving_raw_shape_keeps_single_exec_command_alias
 }
 
 #[test]
-fn test_normalize_tool_args_preserving_raw_shape_exec_command_keeps_nested_command_only_shape()
-{
+fn test_normalize_tool_args_preserving_raw_shape_exec_command_keeps_nested_command_only_shape() {
     let raw_args = json!({
         "input": {
             "command": "bash -lc 'pwd'"
@@ -3224,12 +3242,9 @@ fn test_collect_harvest_text_variants_masks_wrapper_lines_and_bullet_prefix() {
     let text = "• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: demo.txt\\n+hi\\n*** End Patch\"}}]}\nRCC_TOOL_CALLS_JSON";
     let variants = collect_harvest_text_variants(text);
     assert!(!variants.is_empty());
-    assert!(
-        variants
-            .iter()
-            .any(|item| item.contains("\"tool_calls\"")
-                && !item.contains("<<RCC_TOOL_CALLS_JSON"))
-    );
+    assert!(variants
+        .iter()
+        .any(|item| item.contains("\"tool_calls\"") && !item.contains("<<RCC_TOOL_CALLS_JSON")));
 }
 
 #[test]
@@ -3274,8 +3289,7 @@ fn test_harvest_text_tool_calls_recovers_bullet_prefixed_apply_patch_json_wrappe
 }
 
 #[test]
-fn test_harvest_text_tool_calls_recovers_noisy_exec_command_json_wrapper_with_trailing_status()
-{
+fn test_harvest_text_tool_calls_recovers_noisy_exec_command_json_wrapper_with_trailing_status() {
     let mut payload = json!({
         "__rcc_tool_governance": {
             "providerFamily": "deepseek-web",
@@ -3331,9 +3345,8 @@ fn test_harvest_text_tool_calls_recovers_escaped_exec_command_transcript_with_tr
     assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
     let call = &payload["choices"][0]["message"]["tool_calls"][0];
     assert_eq!(call["function"]["name"], "exec_command");
-    let args: Value =
-        serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
-            .unwrap_or(Value::Null);
+    let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
+        .unwrap_or(Value::Null);
     assert_eq!(args["cmd"], "npm run build:dev");
     assert_eq!(
         args["workdir"],
@@ -3359,9 +3372,8 @@ fn test_harvest_text_tool_calls_recovers_trailing_exec_command_json_after_prose(
     assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
     let call = &payload["choices"][0]["message"]["tool_calls"][0];
     assert_eq!(call["function"]["name"], "exec_command");
-    let args: Value =
-        serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
-            .unwrap_or(Value::Null);
+    let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
+        .unwrap_or(Value::Null);
     assert_eq!(args["command"], "bd --no-db ready");
 }
 
@@ -3383,9 +3395,8 @@ fn test_harvest_text_tool_calls_recovers_exec_command_inside_chunked_transcript_
     assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
     let call = &payload["choices"][0]["message"]["tool_calls"][0];
     assert_eq!(call["function"]["name"], "exec_command");
-    let args: Value =
-        serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
-            .unwrap_or(Value::Null);
+    let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
+        .unwrap_or(Value::Null);
     assert_eq!(args["cmd"], "echo next");
 }
 
@@ -3407,9 +3418,8 @@ fn test_harvest_text_tool_calls_strips_right_gutter_noise_before_exec_command_re
     assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
     let call = &payload["choices"][0]["message"]["tool_calls"][0];
     assert_eq!(call["function"]["name"], "exec_command");
-    let args: Value =
-        serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
-            .unwrap_or(Value::Null);
+    let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
+        .unwrap_or(Value::Null);
     assert_eq!(args["cmd"], "python3 -V");
 }
 
@@ -3636,8 +3646,7 @@ fn test_strip_xml_tags_preserve_text_keeps_line_breaks() {
 }
 
 #[test]
-fn test_sanitize_textual_marker_field_preserves_inner_text_when_wrapper_only_content_would_empty(
-) {
+fn test_sanitize_textual_marker_field_preserves_inner_text_when_wrapper_only_content_would_empty() {
     let mut message = serde_json::json!({
         "content": "<function_calls>保留内部文本</function_calls>"
     })
@@ -4044,13 +4053,15 @@ fn test_remap_tool_calls_for_client_protocol_reverses_write_stdin_args() {
     });
     remap_tool_calls_for_client_protocol(&mut payload, "openai-chat");
     let tool_call = &payload["choices"][0]["message"]["tool_calls"][0];
-    let args: serde_json::Value = serde_json::from_str(
-        tool_call["function"]["arguments"].as_str().unwrap()
-    ).unwrap();
+    let args: serde_json::Value =
+        serde_json::from_str(tool_call["function"]["arguments"].as_str().unwrap()).unwrap();
     // After fix: session_id → sessionId, chars → text
     assert_eq!(args.get("sessionId").and_then(|v| v.as_i64()), Some(123));
     assert_eq!(args.get("session_id"), None);
-    assert_eq!(args.get("text").and_then(|v| v.as_str()), Some("echo hello"));
+    assert_eq!(
+        args.get("text").and_then(|v| v.as_str()),
+        Some("echo hello")
+    );
     assert_eq!(args.get("chars"), None);
     assert_eq!(tool_call["function"]["name"], "write_stdin");
 }
@@ -4091,9 +4102,8 @@ fn test_govern_response_json_matches_core_shape() {
         "entry_endpoint": "/v1/chat/completions",
         "request_id": "req_equiv_resp"
     });
-    let json_out: serde_json::Value = serde_json::from_str(
-        &govern_response_json(json_input.to_string()).expect("json")
-    ).unwrap();
+    let json_out: serde_json::Value =
+        serde_json::from_str(&govern_response_json(json_input.to_string()).expect("json")).unwrap();
     assert_eq!(json_out["governed_payload"], core["governed_payload"]);
     assert_eq!(json_out["summary"], core["summary"]);
 }

@@ -90,8 +90,8 @@ fn collect_requested_tool_name_keys_from_candidate(
 
     for row in rows {
         if let Some(raw_name) = row.as_str() {
-            if let Some(key) = normalize_routecodex_tool_name(Some(raw_name))
-                .map(|key| key.to_ascii_lowercase())
+            if let Some(key) =
+                normalize_routecodex_tool_name(Some(raw_name)).map(|key| key.to_ascii_lowercase())
             {
                 out.insert(key);
             }

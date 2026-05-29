@@ -16,11 +16,19 @@ const DEFAULT_FOLLOWUP_SUFFIX: &str = ":followup";
 /// The TS original: trims base+suffix, falls back to 'servertool' / ':followup'."
 pub fn build_followup_request_id(base: &str, suffix: Option<&str>) -> String {
     let trimmed_base = base.trim();
-    let b = if trimmed_base.is_empty() { "servertool" } else { trimmed_base };
+    let b = if trimmed_base.is_empty() {
+        "servertool"
+    } else {
+        trimmed_base
+    };
     let s = suffix
         .and_then(|x| {
             let t = x.trim();
-            if t.is_empty() { None } else { Some(t) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
         })
         .unwrap_or(DEFAULT_FOLLOWUP_SUFFIX);
     format!("{}{}", b, s)
@@ -64,8 +72,7 @@ pub fn inject_loop_warning(input: LoopWarningInput) -> Vec<Message> {
         "检测到 stopMessage 请求/响应参数已连续 {} 轮一致。\n\
          请立即尝试跳出循环（换路径、换验证方法、或直接给结论）。\n\
          若继续达到 {} 轮一致，将返回 fetch failed 网络错误并停止自动续跑。",
-        repeat_count,
-        input.fail_threshold,
+        repeat_count, input.fail_threshold,
     );
 
     let mut messages = input.messages;

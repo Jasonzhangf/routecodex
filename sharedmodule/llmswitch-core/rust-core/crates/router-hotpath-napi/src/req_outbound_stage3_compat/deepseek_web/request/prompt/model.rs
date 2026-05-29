@@ -1,6 +1,5 @@
 use serde_json::{Map, Value};
 
-use crate::shared_json_utils::read_trimmed_string;
 use super::content::{
     normalize_content_to_text, normalize_tool_calls_as_text, normalize_tool_message_to_text,
 };
@@ -9,6 +8,7 @@ use super::tool_guidance::{
     is_tool_choice_required, strip_existing_tool_guidance_block,
 };
 use super::types::PromptMessage;
+use crate::shared_json_utils::read_trimmed_string;
 
 pub(super) fn to_prompt_messages(
     root: &Map<String, Value>,

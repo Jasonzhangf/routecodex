@@ -17,32 +17,9 @@ export class RoutingStateManagerModule implements ManagerModule {
   readonly id = 'routing';
 
   private stateStore: RoutingInstructionStateStore | null = null;
-  private stickyEnabled: boolean | null = null;
-
-  private isStickyEnabled(): boolean {
-    if (this.stickyEnabled !== null) {
-      return this.stickyEnabled;
-    }
-    const raw =
-      process.env.ROUTECODEX_ENABLE_STICKY ??
-      process.env.RCC_ENABLE_STICKY ??
-      '';
-    const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-    const enabled =
-      normalized === '1' ||
-      normalized === 'true' ||
-      normalized === 'yes' ||
-      normalized === 'on';
-    this.stickyEnabled = enabled;
-    return enabled;
-  }
 
   async init(_context: ManagerContext): Promise<void> {
-    if (!this.isStickyEnabled()) {
-      this.stateStore = null;
-      return;
-    }
-    // Single import surface: llmswitch-core sticky session store is accessed via llmswitch bridge only.
+    // Single import surface: llmswitch-core routing state store is accessed via llmswitch bridge only.
     this.stateStore = {
       loadSync: (key: string) => loadRoutingInstructionStateSync(key) as RoutingInstructionState | null,
       saveAsync: (key: string, state: RoutingInstructionState | null) => {
@@ -59,7 +36,7 @@ export class RoutingStateManagerModule implements ManagerModule {
   }
 
   async stop(): Promise<void> {
-    // 未来如需 compact/迁移 sticky 状态，可在此添加逻辑；当前为 no-op。
+    // 未来如需 compact/迁移 routing state，可在此添加逻辑；当前为 no-op。
   }
 
   getRoutingStateStore(): RoutingInstructionStateStore | null {

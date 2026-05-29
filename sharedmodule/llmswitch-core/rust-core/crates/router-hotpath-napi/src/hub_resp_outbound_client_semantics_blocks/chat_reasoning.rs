@@ -46,7 +46,10 @@ pub(crate) fn build_client_passthrough_patch(
     patch
 }
 
-pub(crate) fn apply_client_passthrough_patch(client_payload: &Value, source_payload: &Value) -> Value {
+pub(crate) fn apply_client_passthrough_patch(
+    client_payload: &Value,
+    source_payload: &Value,
+) -> Value {
     let mut merged = match client_payload.as_object() {
         Some(row) => row.clone(),
         None => return client_payload.clone(),
@@ -194,7 +197,6 @@ pub(crate) fn normalize_openai_chat_reasoning_outbound(candidate: &Value) -> Opt
     }
     Some(Value::Object(row))
 }
-
 
 fn resolve_non_empty_string(raw: Option<&Value>) -> Option<String> {
     raw.and_then(|value| {

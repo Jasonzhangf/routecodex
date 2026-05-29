@@ -1,4 +1,7 @@
 import { beforeAll, describe, expect, test, jest } from '@jest/globals';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 jest.mock('../../../../src/providers/core/config/camoufox-launcher.ts', () => ({
   getLastCamoufoxLaunchFailureReason: () => null,
@@ -18,139 +21,139 @@ function createProvider(auth: Record<string, unknown> = { type: 'apikey', apiKey
     config: {
       providerType: 'openai',
       baseUrl: 'http://localhost:3003',
-      model: 'gpt-5.4-medium',
+      model: 'kimi-k2-6',
       auth,
     },
   } as any, deps);
 }
 
-describe('Windsurf account health routing (RED before implementation)', () => {
+describe('Windsurf single-account direct mode', () => {
   beforeAll(async () => {
     ({ WindsurfChatProvider } = await import('../../../../src/providers/core/runtime/windsurf-chat-provider.ts'));
   });
 
-  test('health api payload must expose quota snapshot (extra via overage + daily/weekly remaining)', async () => {
-    const provider = createProvider();
-    const snapshot = (provider as any).extractQuotaHealthFromUserStatusPayload({
-      userStatus: {
-        planStatus: {
-          dailyQuotaRemainingPercent: 62,
-          weeklyQuotaRemainingPercent: 41,
-          overageBalanceMicros: 9000000,
-        },
-      },
-    });
-    expect(snapshot).toEqual(expect.objectContaining({
-      hasExtraQuota: true,
-      dailyRemainingPercent: 62,
-      weeklyRemainingPercent: 41,
-      remainingScore: 41,
-      overageBalance: 9,
-      exhausted: false,
-      fetchedAt: expect.any(Number),
-    }));
-  });
-
-  test('account ranking must prefer extra quota first, then higher remaining quota', async () => {
-    const provider = createProvider();
-    const ranked = (provider as any).rankManagedCredentialsByHealth([
-      { alias: 'normal-high', apiKey: 'k1', health: { hasExtraQuota: false, remainingScore: 90 } },
-      { alias: 'extra-low', apiKey: 'k2', health: { hasExtraQuota: true, remainingScore: 20 } },
-      { alias: 'extra-high', apiKey: 'k3', health: { hasExtraQuota: true, remainingScore: 70 } },
-      { alias: 'unknown', apiKey: 'k4', health: null },
-    ]);
-
-    expect(ranked.map((entry: any) => entry.alias)).toEqual([
-      'extra-high',
-      'extra-low',
-      'normal-high',
-      'unknown',
-    ]);
-  });
-
-  test('session sticky must pin healthy key until quota exhausted', async () => {
-    const provider = createProvider();
-    const sessionKey = 'sess-sticky-001';
-    const first = (provider as any).selectManagedCredentialForSession(sessionKey, [
-      { alias: 'extra-main', apiKey: 'k-main', health: { hasExtraQuota: true, remainingScore: 58, exhausted: false } },
-      { alias: 'backup', apiKey: 'k-backup', health: { hasExtraQuota: false, remainingScore: 99, exhausted: false } },
-    ]);
-    const second = (provider as any).selectManagedCredentialForSession(sessionKey, [
-      { alias: 'extra-main', apiKey: 'k-main', health: { hasExtraQuota: true, remainingScore: 27, exhausted: false } },
-      { alias: 'backup', apiKey: 'k-backup', health: { hasExtraQuota: false, remainingScore: 99, exhausted: false } },
-    ]);
-
-    expect(first.apiKey).toBe('k-main');
-    expect(second.apiKey).toBe('k-main');
-  });
-
-  test('selected healthiest account must remain pinned even if a later ranking would prefer another account', async () => {
-    const provider = createProvider();
-    const sessionKey = 'sess-healthiest-pin-001';
-    const first = (provider as any).selectManagedCredentialForSession(sessionKey, [
-      { alias: 'extra-main', apiKey: 'k-main', health: { hasExtraQuota: true, remainingScore: 30, exhausted: false } },
-      { alias: 'normal-backup', apiKey: 'k-backup', health: { hasExtraQuota: false, remainingScore: 99, exhausted: false } },
-    ]);
-    const second = (provider as any).selectManagedCredentialForSession(sessionKey, [
-      { alias: 'extra-main', apiKey: 'k-main', health: { hasExtraQuota: false, remainingScore: 10, exhausted: false } },
-      { alias: 'normal-backup', apiKey: 'k-backup', health: { hasExtraQuota: true, remainingScore: 99, exhausted: false } },
-    ]);
-
-    expect(first.apiKey).toBe('k-main');
-    expect(second.apiKey).toBe('k-main');
-  });
-
-  test('routing state key must be resolved from request session fields before fallback default', async () => {
-    const provider = createProvider();
-    expect((provider as any).resolveWindsurfSessionStateKeyFromRequest({
-      body: { conversation_id: 'conv-001' },
-    })).toBe('conv-001');
-    expect((provider as any).resolveWindsurfSessionStateKeyFromRequest({
-      body: { sessionId: 'sess-xyz' },
-    })).toBe('sess-xyz');
-    expect((provider as any).resolveWindsurfSessionStateKeyFromRequest({
-      body: {},
-    })).toBe('provider-default-session');
-  });
-
-  test('permission_denied text alone must not be treated as auth failure', async () => {
-    const provider = createProvider();
-    const isAuthFailure = (provider as any).isWindsurfAuthFailure({
-      message: 'upstream permission_denied for unrelated local runtime gate',
-      status: 502,
-    });
-    expect(isAuthFailure).toBe(false);
-  });
-
-  test('provider-local concurrency capacity must track available healthy accounts', async () => {
-    const provider = createProvider();
-    const cap = (provider as any).computeAccountConcurrencyCapacity([
-      { alias: 'a1', health: { exhausted: false } },
-      { alias: 'a2', health: { exhausted: true } },
-      { alias: 'a3', health: { exhausted: false } },
-    ]);
-    expect(cap).toBe(2);
-  });
-
-  test('account health probe must not refresh on every request after startup cache exists', async () => {
+  test('managed auth must accept exactly one configured account', async () => {
     const provider = createProvider({
       type: 'apikey',
       rawType: 'windsurf-account',
       entries: [
-        { alias: 'ws-extra', apiKey: 'devin-session-token$extra' },
-        { alias: 'ws-normal', apiKey: 'devin-session-token$normal' },
+        { alias: 'ws-pro-3', account: 'frost89409@gmail.com', apiKey: 'devin-session-token$frost' },
+      ],
+    });
+
+    const managed = await (provider as any).readManagedWindsurfAuthConfigDetailed();
+
+    expect(managed.entries.map((entry: any) => entry.alias)).toEqual(['ws-pro-3']);
+  });
+
+  test('managed auth must not scan old windsurf token files into the account pool', async () => {
+    const previousHome = process.env.RCC_HOME;
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-windsurf-single-'));
+    process.env.RCC_HOME = tmp;
+    try {
+      await fs.mkdir(path.join(tmp, 'auth'), { recursive: true });
+      await fs.writeFile(path.join(tmp, 'auth', 'windsurf-ws-pro-4.json'), JSON.stringify({
+        apiKey: 'devin-session-token$old-other-account',
+      }), 'utf8');
+
+      const provider = createProvider({
+        type: 'apikey',
+        rawType: 'windsurf-account',
+        entries: [
+          { alias: 'ws-pro-3', account: 'frost89409@gmail.com', apiKey: 'devin-session-token$frost' },
+        ],
+      });
+
+      const managed = await (provider as any).readManagedWindsurfAuthConfigDetailed();
+
+      expect(managed.entries.map((entry: any) => entry.alias)).toEqual(['ws-pro-3']);
+    } finally {
+      if (previousHome === undefined) delete process.env.RCC_HOME;
+      else process.env.RCC_HOME = previousHome;
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('managed auth must recover the single account from windsurf config tokenFile when runtime entries are absent', async () => {
+    const previousHome = process.env.RCC_HOME;
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-windsurf-config-token-'));
+    process.env.RCC_HOME = tmp;
+    try {
+      const tokenFile = path.join(tmp, 'auth', 'windsurf-ws-pro-3.json');
+      await fs.mkdir(path.dirname(tokenFile), { recursive: true });
+      await fs.mkdir(path.join(tmp, 'provider', 'windsurf'), { recursive: true });
+      await fs.writeFile(tokenFile, JSON.stringify({
+        apiKey: 'devin-session-token$frost-from-token-file',
+      }), 'utf8');
+      await fs.writeFile(path.join(tmp, 'provider', 'windsurf', 'config.v2.toml'), `
+[provider.auth]
+type = "windsurf-account"
+
+[[provider.auth.entries]]
+alias = "ws-pro-3"
+account = "frost89409@gmail.com"
+password = "secret"
+tokenFile = "${tokenFile}"
+`, 'utf8');
+      const provider = createProvider({ type: 'apikey', rawType: 'windsurf-account' });
+
+      const managed = await (provider as any).readManagedWindsurfAuthConfigDetailed();
+
+      expect(managed.entries).toHaveLength(1);
+      expect(managed.entries[0]).toEqual(expect.objectContaining({
+        alias: 'ws-pro-3',
+        apiKey: 'devin-session-token$frost-from-token-file',
+      }));
+    } finally {
+      if (previousHome === undefined) delete process.env.RCC_HOME;
+      else process.env.RCC_HOME = previousHome;
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('selection must pick the single configured account without health probe or ranking', async () => {
+    const provider = createProvider({
+      type: 'apikey',
+      rawType: 'windsurf-account',
+      entries: [
+        { alias: 'ws-pro-3', account: 'frost89409@gmail.com', apiKey: 'devin-session-token$frost' },
       ],
     });
     const fetchSpy = jest.spyOn(provider as any, 'fetchWindsurfUserStatusForHealth')
-      .mockResolvedValueOnce({ hasExtraQuota: true, remainingScore: 60, exhausted: false, fetchedAt: Date.now() - 3_600_000 })
-      .mockResolvedValueOnce({ hasExtraQuota: false, remainingScore: 90, exhausted: false, fetchedAt: Date.now() - 3_600_000 });
+      .mockRejectedValue(new Error('health probe must not run'));
+    const rankSpy = jest.spyOn(provider as any, 'rankManagedCredentialsByHealth');
+
     const managed = await (provider as any).readManagedWindsurfAuthConfigDetailed();
+    const selected = await (provider as any).selectWindsurfAccount(managed, 'kimi-k2-6');
 
-    const first = await (provider as any).selectWindsurfAccount(managed);
-    const second = await (provider as any).selectWindsurfAccount(managed);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(rankSpy).not.toHaveBeenCalled();
+    expect(selected).toEqual({ accountAlias: 'ws-pro-3', apiKey: 'devin-session-token$frost' });
+  });
 
-    expect(first.accountAlias).toBe('ws-extra');
-    expect(second.accountAlias).toBe('ws-extra');
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  test('checkHealth must not call upstream probes in direct mode', async () => {
+    const provider = createProvider();
+    const resolveSpy = jest.spyOn(provider as any, 'resolveCascadeApiKey');
+    const modelConfigSpy = jest.spyOn(provider as any, 'fetchCascadeModelConfigsForSite');
+
+    await expect((provider as any).checkHealth()).resolves.toBe(true);
+
+    expect(resolveSpy).not.toHaveBeenCalled();
+    expect(modelConfigSpy).not.toHaveBeenCalled();
+  });
+
+  test('quota errors must not write internal account cooldown state', async () => {
+    const provider = createProvider();
+    (provider as any).windsurfSessionCredential = {
+      apiKey: 'devin-session-token$frost',
+      sessionToken: 'devin-session-token$frost',
+      auth1Token: '',
+      accountAlias: 'ws-pro-3',
+    };
+
+    (provider as any).markCurrentAliasQuotaExhausted('sess-test');
+
+    expect((provider as any).windsurfUnavailableAccounts.has('ws-pro-3')).toBe(false);
+    expect((provider as any).windsurfQuotaCooldownUntilMs.has('ws-pro-3')).toBe(false);
   });
 });

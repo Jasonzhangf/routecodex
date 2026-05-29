@@ -649,15 +649,34 @@ fn test_apply_req_process_tool_governance_json_matches_core_shape() {
     };
     let input_json = serde_json::to_string(&input).unwrap();
     let core_input: ToolGovernanceInput = serde_json::from_str(&input_json).unwrap();
-    let core = serde_json::to_value(apply_req_process_tool_governance(core_input).expect("core")).unwrap();
-    let json_out: serde_json::Value = serde_json::from_str(
-        &apply_req_process_tool_governance_json(input_json).expect("json")
-    ).unwrap();
-    assert_eq!(json_out["processedRequest"]["messages"], core["processedRequest"]["messages"]);
-    assert_eq!(json_out["processedRequest"]["model"], core["processedRequest"]["model"]);
-    assert_eq!(json_out["processedRequest"]["tools"], core["processedRequest"]["tools"]);
-    assert_eq!(json_out["processedRequest"]["processed"]["status"], core["processedRequest"]["processed"]["status"]);
-    assert_eq!(json_out["processedRequest"]["processed"]["appliedRules"], core["processedRequest"]["processed"]["appliedRules"]);
-    assert_eq!(json_out["nodeResult"]["success"], core["nodeResult"]["success"]);
+    let core =
+        serde_json::to_value(apply_req_process_tool_governance(core_input).expect("core")).unwrap();
+    let json_out: serde_json::Value =
+        serde_json::from_str(&apply_req_process_tool_governance_json(input_json).expect("json"))
+            .unwrap();
+    assert_eq!(
+        json_out["processedRequest"]["messages"],
+        core["processedRequest"]["messages"]
+    );
+    assert_eq!(
+        json_out["processedRequest"]["model"],
+        core["processedRequest"]["model"]
+    );
+    assert_eq!(
+        json_out["processedRequest"]["tools"],
+        core["processedRequest"]["tools"]
+    );
+    assert_eq!(
+        json_out["processedRequest"]["processed"]["status"],
+        core["processedRequest"]["processed"]["status"]
+    );
+    assert_eq!(
+        json_out["processedRequest"]["processed"]["appliedRules"],
+        core["processedRequest"]["processed"]["appliedRules"]
+    );
+    assert_eq!(
+        json_out["nodeResult"]["success"],
+        core["nodeResult"]["success"]
+    );
     assert_eq!(json_out["nodeResult"]["stage"], core["nodeResult"]["stage"]);
 }

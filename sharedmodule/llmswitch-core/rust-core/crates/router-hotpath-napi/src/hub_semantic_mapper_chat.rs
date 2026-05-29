@@ -6,8 +6,8 @@ use crate::hub_req_inbound_context_capture::map_bridge_tools_to_chat;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_metadata_semantics::ensure_protocol_state_mut;
 use crate::shared_openai_message_normalize::normalize_openai_chat_messages;
-use crate::shared_tooling::normalize_tool_result_value;
 use crate::shared_tool_mapping::flatten_chat_tools_for_function_calling;
+use crate::shared_tooling::normalize_tool_result_value;
 
 const CHAT_PARAMETER_KEYS: [&str; 19] = [
     "model",

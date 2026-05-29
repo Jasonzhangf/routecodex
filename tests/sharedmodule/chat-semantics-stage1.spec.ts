@@ -5,7 +5,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@je
 import type { AdapterContext, ChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import { chatEnvelopeToStandardized, standardizedToChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
-import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 
 const mockRunChatRequestToolFilters = jest.fn(async (payload: any) => payload);
 const mockGovernRequest = jest.fn((request: any) => ({

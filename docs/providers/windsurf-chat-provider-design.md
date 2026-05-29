@@ -120,7 +120,7 @@ field 3 arguments_json
 - `exec_command` / `shell_command` / `run_command` / `bash` 与 Cascade `run_command` 仅在**单次 blocking shell 执行**子集上语义等同：`cmd|command|command_line -> command_line`，`workdir|cwd -> cwd`，`blocking=true`。不得把 `write_stdin`、PTY、session 续写、yield 中间返回、sandbox/approval 语义冒充为已等同。
 - App schema 中存在 `CustomToolSpec` / `McpServerState` / `ChatToolDefinition`，但 `SendUserCascadeMessageRequest` 已确认只有 fields 1-9：`cascade_id/items/metadata/experiment_config/cascade_config/images/recipe_ids/blocking/additional_steps`，没有 per-request arbitrary tool definitions 输入槽位。
 - WindsurfAPI 对 unmapped tools 走旧 `toolPreamble` emulation，不是 structured custom-tool request；RouteCodex 不得静默恢复该路径。
-- custom tools 不进入 Cascade native structured protocol，通过 `SendUserCascadeMessageRequest` gRPC field 10 mcpCompat 单字段 JSON 透传编码，不由文本工具协议引导。`preprocessRequest` 将它们写入 `body.windsurf_custom_tools`，下游 `buildSendCascadeMessageRequest` 编码为 field 10 消息。不注入任何文本引导标记，不 fallback 到 RCC/text 协议。
+- custom tools 不进入 Cascade native structured protocol，也不能通过 `SendUserCascadeMessageRequest` 自造 top-level 字段注入。`preprocessRequest` 将它们写入隐藏 `body.windsurf_custom_tools` 并开启 `body.windsurf_mcp_mode`；下游 `buildSendCascadeMessageRequest` 只启用 `CascadeToolConfig.field16 mcp`。不注入任何文本引导标记，不 fallback 到 RCC/text 协议。
 
 ## Implementation Contract
 
@@ -145,7 +145,7 @@ Provider 不得负责：
 - 保留旧 cloud JSON chat 主链。
 
 
-## Custom Tools Protocol (gRPC field 10 mcpCompat)
+## Custom Tools Protocol (Cascade MCP)
 
 非 native 工具（未在 `WINDSURF_TOOL_MAP` 中注册的工具）通过 `SendUserCascadeMessageRequest` field 10 编码一次性 JSON 透传，由 LS 端自主解码适配。
 
@@ -153,7 +153,7 @@ Preprocess 分区：
 
 ```text
 native-equivalent tool -> Cascade native structured protocol
-custom tool            -> gRPC field 10 mcpCompat JSON strip
+custom tool            -> CascadeToolConfig.field16 mcp
 ```
 
 编码规则：
@@ -162,7 +162,7 @@ custom tool            -> gRPC field 10 mcpCompat JSON strip
 field 10: writeProtoMessageField(10, writeProtoStringField(1, stableStringify(entry)))
 ```
 
-每个 custom tool 的 `mcp_compat` 元数据被独立编码为一条 field 10 子消息。
+`SendUserCascadeMessageRequest` 无 custom tool / MCP definition top-level slot；禁止再编码 field 10 synthetic payload。MCP 工具定义必须来自 Windsurf LS 的 MCP server state / tool definition 链路。
 
 Provider 不得做的行为：
 
@@ -193,11 +193,11 @@ Provider 不得做的行为：
 
 当前规则：
 
-1. `apply_patch` 作为 custom tool 处理，通过 `windsurf_custom_tools` gRPC field 10 mcpCompat 透传到 LS。
+1. `apply_patch` 作为 custom tool 处理，通过 `windsurf_custom_tools` 开启 Cascade MCP，不得伪装 native。
 2. 不完全兼容工具不得伪装 native；否则执行结果不可控，错误会被模型误解。
 3. `exec_command` / `shell_command` 仍可 bridge 到 Cascade `run_command`，但只限 one-shot blocking shell 子集；不能外推到 PTY/session/stdin，也不能用 `run_command` 代替 `apply_patch` 文件编辑。
 
-当前测试锚点必须覆盖：`apply_patch` 被分入 `windsurf_custom_tools`；native allowlist 不包含 `write_to_file`；custom tool 通过 gRPC field 10 编码而不在 prompt 中注入文本引导。
+当前测试锚点必须覆盖：`apply_patch` 被分入 `windsurf_custom_tools`；native allowlist 不包含 `write_to_file`；custom tool 开启 `CascadeToolConfig.field16 mcp`，不使用 `SendUserCascadeMessage` field 10，也不在 prompt 中注入文本引导。
 
 执行顺序固定：
 

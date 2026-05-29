@@ -8,7 +8,7 @@ const mockSyncStoplessGoalStateFromRequest = jest.fn((baseContext: Record<string
     createdAt: 1
   };
   return {
-    stickyKey: 'session:test',
+    stateKey: 'session:test',
     hadDirective: false,
     directiveTypes: [],
     state: baseContext.stoplessGoalState

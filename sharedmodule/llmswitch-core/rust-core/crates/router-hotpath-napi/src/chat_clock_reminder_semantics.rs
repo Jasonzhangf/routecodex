@@ -1,8 +1,8 @@
+use crate::shared_tooling::find_last_user_message_index as find_last_user_index_shared;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
-use crate::shared_tooling::find_last_user_message_index as find_last_user_index_shared;
 
 static CLOCK_MARKER_CALL_SEQ: AtomicU64 = AtomicU64::new(0);
 

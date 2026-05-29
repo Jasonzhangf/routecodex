@@ -2597,7 +2597,7 @@ fn test_req_profile_chat_deepseek_web_submit_tool_outputs_continuation_prompt_ma
             "semantics": {
                 "continuation": {
                     "chainId": "req_chain_1",
-                    "stickyScope": "request_chain",
+                    "continuationScope": "request_chain",
                     "stateOrigin": "openai-responses",
                     "restored": true,
                     "toolContinuation": {
@@ -2715,7 +2715,7 @@ fn test_req_profile_chat_deepseek_web_reads_submit_tool_outputs_continuation_fro
                 "semantics": {
                     "continuation": {
                         "chainId": "req_chain_1",
-                        "stickyScope": "request_chain",
+                        "continuationScope": "request_chain",
                         "stateOrigin": "openai-responses",
                         "restored": true,
                         "toolContinuation": {

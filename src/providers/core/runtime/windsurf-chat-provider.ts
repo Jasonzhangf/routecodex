@@ -18,7 +18,8 @@ import {
 import { HttpTransportProvider } from './http-transport-provider.js';
 import { extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import { ApiKeyAuthProvider } from '../../auth/apikey-auth.js';
-import { resolveRccAuthDir } from '../../../config/user-data-paths.js';
+import { parseTomlRecord } from '../../../config/toml-basic.js';
+import { resolveRccAuthDir, resolveRccPath } from '../../../config/user-data-paths.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 
 const MERGE_EFFORT_MAP: Record<string, string> = {
@@ -37,10 +38,28 @@ const WINDSURF_LS_SERVICE = '/exa.language_server_pb.LanguageServerService';
 const WINDSURF_CASCADE_COMMUNICATION_NO_TOOLS = 'You are accessed via API. When asked about your identity, describe your actual underlying model name and provider accurately. Answer directly. STRICTLY respond in the exact same language the user used in their latest message (Chinese → Chinese, English → English, Japanese → Japanese; never switch mid-conversation).';
 const WINDSURF_CASCADE_COMMUNICATION_WITH_TOOLS = 'You are accessed via API. When asked about your identity, describe your actual underlying model name and provider accurately. STRICTLY respond in the exact same language the user used in their latest message (Chinese → Chinese, English → English, Japanese → Japanese; never switch mid-conversation). Use the functions above when relevant.';
 const WINDSURF_CASCADE_TIMEOUT_MS = 300_000;
+const WINDSURF_SESSION_PRE_RELEASE_IDLE_MS = 2 * 60_000;
+const WINDSURF_SESSION_FULL_RELEASE_IDLE_MS = 5 * 60_000;
 
 type WindsurfCascadeRuntimeScope = {
   pinnedRuntime: WindsurfProviderRuntimeOptions | null;
   sessionKey: string;
+  accountAlias?: string;
+};
+
+type WindsurfCascadeSessionBinding = {
+  runtime: WindsurfProviderRuntimeOptions;
+  sessionId: string;
+  cascadeId: string;
+  stepOffset: number;
+  active: boolean;
+  lastUsedAtMs: number;
+};
+
+type WindsurfSessionAccountBinding = {
+  accountAlias: string;
+  active: boolean;
+  lastUsedAtMs: number;
 };
 
 type WindsurfSessionCredential = {
@@ -50,6 +69,7 @@ type WindsurfSessionCredential = {
   accountId?: string;
   primaryOrgId?: string;
   accountAlias?: string;
+  accountEmail?: string;
 };
 
 type WindsurfLoginMethodProbe = {
@@ -72,6 +92,10 @@ type WindsurfManagedAuthConfig = {
     env?: string;
     tokenFile?: string;
     accountAlias?: string;
+    account?: string;
+    username?: string;
+    mobile?: string;
+    password?: string;
     extra?: boolean;
   }>;
 };
@@ -83,6 +107,8 @@ type WindsurfQuotaHealthSnapshot = {
   remainingScore: number;
   overageBalance: number | null;
   exhausted: boolean;
+  allowedModelUids?: string[];
+  accountEmail?: string;
   fetchedAt: number;
 };
 
@@ -90,6 +116,8 @@ type WindsurfManagedCredentialEntry = {
   alias: string;
   apiKey: string;
   tokenFile?: string;
+  account?: string;
+  password?: string;
   health: WindsurfQuotaHealthSnapshot | null;
 };
 
@@ -624,6 +652,78 @@ function findWindsurfToolDefinition(tools: unknown, name: string): Record<string
   return undefined;
 }
 
+function setHiddenWindsurfBodyField(body: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(body, key, {
+    value,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+}
+
+function fileUriToPath(value: unknown): string {
+  const text = String(value || '').trim();
+  if (!text.startsWith('file://')) return text;
+  try {
+    return decodeURIComponent(text.replace(/^file:\/\//, ''));
+  } catch {
+    return text.replace(/^file:\/\//, '');
+  }
+}
+
+function reverseWindsurfNativeToolArguments(standardName: string, nativeKind: WindsurfCascadeToolStepKind, args: Record<string, unknown>): Record<string, unknown> {
+  const normalized = windsurfToolLookupName(standardName);
+  switch (nativeKind) {
+    case 'run_command': {
+      const command = String(args.command ?? args.cmd ?? args.command_line ?? args.proposed_command_line ?? args.input ?? '');
+      return {
+        ...(command ? { command } : {}),
+        ...(typeof args.cwd === 'string' && args.cwd ? { cwd: args.cwd } : {}),
+        ...(typeof args.workdir === 'string' && args.workdir ? { workdir: args.workdir } : {}),
+      };
+    }
+    case 'view_file': {
+      const filePath = fileUriToPath(args.filePath ?? args.file_path ?? args.path ?? args.absolute_path_uri ?? '');
+      return {
+        ...(filePath ? { filePath } : {}),
+        ...(Number.isFinite(Number(args.offset)) ? { offset: Number(args.offset) } : {}),
+        ...(Number.isFinite(Number(args.limit)) ? { limit: Number(args.limit) } : {}),
+      };
+    }
+    case 'list_directory': {
+      const path = fileUriToPath(args.path ?? args.directory_path ?? args.directory_path_uri ?? '');
+      return {
+        ...(path ? { path } : {}),
+        ...(typeof args.recursive === 'boolean' ? { recursive: args.recursive } : {}),
+      };
+    }
+    case 'find':
+      return {
+        ...(typeof args.pattern === 'string' ? { pattern: args.pattern } : {}),
+        ...(typeof args.path === 'string' ? { path: args.path } : typeof args.search_directory === 'string' ? { path: args.search_directory } : {}),
+      };
+    case 'grep_search_v2':
+      return {
+        ...(typeof args.pattern === 'string' ? { pattern: args.pattern } : {}),
+        ...(typeof args.path === 'string' ? { path: args.path } : {}),
+        ...(typeof args.glob === 'string' ? { glob: args.glob } : {}),
+      };
+    case 'write_to_file': {
+      const filePath = fileUriToPath(args.filePath ?? args.file_path ?? args.path ?? args.target_file_uri ?? '');
+      return {
+        ...(filePath ? { filePath } : {}),
+        ...(Array.isArray(args.code_content) ? { content: args.code_content.join('\n') } : typeof args.content === 'string' ? { content: args.content } : {}),
+      };
+    }
+    case 'search_web':
+      return typeof args.query === 'string' ? { query: args.query } : args;
+    case 'read_url_content':
+      return typeof args.url === 'string' ? { url: args.url } : args;
+    default:
+      return normalized ? { ...args } : args;
+  }
+}
+
 function readWindsurfToolFunction(tool: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!tool) return undefined;
   return tool.function && typeof tool.function === 'object' && !Array.isArray(tool.function)
@@ -1042,6 +1142,7 @@ const WINDSURF_MODEL_SET = new Set([
   'gpt-5.5-none-fast','gpt-5.5-low-fast','gpt-5.5-medium-fast','gpt-5.5-high-fast','gpt-5.5-xhigh-fast',
   'gpt-5.3-codex','gpt-5.3-codex-low','gpt-5.3-codex-high','gpt-5.3-codex-xhigh',
   'gpt-5.3-codex-low-fast','gpt-5.3-codex-medium-fast','gpt-5.3-codex-high-fast','gpt-5.3-codex-xhigh-fast',
+  'kimi-k2-6',
   'swe-1.6','swe-1.6-fast',
 ]);
 
@@ -1078,6 +1179,7 @@ const WINDSURF_CHAT_COMPLETIONS_MODEL_MAP: Record<string, { enumValue: number; m
   'gpt-5.3-codex-medium-fast': { enumValue: 0, modelTag: 'gpt-5-3-codex-medium-priority' },
   'gpt-5.3-codex-high-fast': { enumValue: 0, modelTag: 'gpt-5-3-codex-high-priority' },
   'gpt-5.3-codex-xhigh-fast': { enumValue: 0, modelTag: 'gpt-5-3-codex-xhigh-priority' },
+  'kimi-k2-6': { enumValue: 0, modelTag: 'kimi-k2-6' },
   'swe-1.6': { enumValue: 420, modelTag: 'swe-1-6' },
   'swe-1.6-fast': { enumValue: 421, modelTag: 'swe-1-6-fast' },
   'swe-1-6': { enumValue: 420, modelTag: 'swe-1-6' },
@@ -1166,7 +1268,7 @@ type WindsurfFailureClass = {
   status: number;
   upstreamCode?: string;
   upstreamStatus?: number;
-  rateLimitKind?: 'daily_limit' | 'short_lived';
+  rateLimitKind?: 'daily_limit' | 'short_lived' | 'synthetic_cooldown';
   cooldownOverrideMs?: number;
   quotaScope?: 'weekly' | 'model';
   quotaReason?: string;
@@ -1269,7 +1371,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   static readonly WindsurfConnectSseTransform = WindsurfConnectSseTransform;
   private static readonly http2SessionPool = new Map<string, http2.ClientHttp2Session>();
   private static readonly cascadeRuntimeScope = new AsyncLocalStorage<WindsurfCascadeRuntimeScope>();
-  private static readonly cascadeRuntimeQueues = new Map<string, Promise<void>>();
   private readonly windsurfRuntime: ReturnType<typeof normalizeWindsurfProviderRuntimeOptions>;
   private windsurfSessionCredential: WindsurfSessionCredential | null = null;
   private windsurfSessionCredentialPromise: Promise<WindsurfSessionCredential | null> | null = null;
@@ -1278,7 +1379,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   private windsurfCascadeSessionIdOverride: string | null = null;
   private readonly windsurfCascadeTimeoutMs: number;
   private readonly windsurfHealthCache = new Map<string, WindsurfQuotaHealthSnapshot>();
-  private windsurfSelectedAccountAlias: string | null = null;
+  private readonly windsurfSelectedAccountAliasesBySession = new Map<string, WindsurfSessionAccountBinding>();
+  private readonly windsurfCascadeSessionBindings = new Map<string, WindsurfCascadeSessionBinding>();
   private readonly windsurfUnavailableAccounts = new Set<string>();
   private readonly windsurfTransientCooldownUntilMs = new Map<string, number>();
   private readonly windsurfTransientFailureCount = new Map<string, number>();
@@ -1312,17 +1414,13 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   }
 
   public override async checkHealth(): Promise<boolean> {
-    try {
-      const apiKey = await this.resolveCascadeApiKey();
-      await this.fetchCascadeModelConfigsForSite(apiKey);
-      return true;
-    } catch {
-      return false;
-    }
+    return true;
   }
 
   protected override async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
-    const req = { ...request } as Record<string, unknown>;
+    const req = request && typeof request === 'object' && !Array.isArray(request)
+      ? request as Record<string, unknown>
+      : {};
     const body = (req.body as Record<string, unknown>) || req;
 
     if (!Array.isArray(body.messages) && typeof body.input === 'string' && body.input.trim()) {
@@ -1342,15 +1440,16 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       const tools = body.tools as Array<Record<string, unknown>>;
       if (tools.length > 0) {
         const partition = partitionWindsurfTools(tools);
-        body.windsurf_native_mode = partition.nativeTools.length > 0;
-        body.windsurf_native_allowlist = uniqueWindsurfToolKinds(partition.mappedNativeTools);
-        body.windsurf_declared_native_tools = partition.nativeTools;
-        body.windsurf_custom_tools = partition.customTools;
+        setHiddenWindsurfBodyField(body, 'windsurf_native_mode', partition.nativeTools.length > 0 || partition.customTools.length > 0);
+        setHiddenWindsurfBodyField(body, 'windsurf_mcp_mode', partition.customTools.length > 0);
+        setHiddenWindsurfBodyField(body, 'windsurf_native_allowlist', uniqueWindsurfToolKinds(partition.mappedNativeTools));
+        setHiddenWindsurfBodyField(body, 'windsurf_declared_native_tools', partition.nativeTools);
+        setHiddenWindsurfBodyField(body, 'windsurf_custom_tools', partition.customTools);
         delete body.windsurf_declared_tools;
         delete body.tools_preamble;
         delete body.windsurf_tools_preamble_tier;
         if (body.tool_choice !== undefined) {
-          body.windsurf_tool_choice = body.tool_choice;
+          setHiddenWindsurfBodyField(body, 'windsurf_tool_choice', body.tool_choice);
           delete body.tool_choice;
         }
         delete body.tools;
@@ -1395,12 +1494,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const existingScope = WindsurfChatProvider.cascadeRuntimeScope.getStore();
     if (!existingScope) {
       const initialSessionKey = this.resolveWindsurfSessionStateKeyFromRequest(request);
-      return await this.runExclusiveCascadeRuntime(async () => {
-        return await WindsurfChatProvider.cascadeRuntimeScope.run(
-          { pinnedRuntime: null, sessionKey: initialSessionKey },
-          async () => this.sendRequestInternal(request),
-        );
-      });
+      return await WindsurfChatProvider.cascadeRuntimeScope.run(
+        { pinnedRuntime: null, sessionKey: initialSessionKey },
+        async () => this.sendRequestInternal(request),
+      );
     }
     const body = this.readRequestBodyRecord(request);
     const wantsSse = this.wantsUpstreamSse(request, {} as ProviderContext);
@@ -1417,12 +1514,13 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       messageCount: Array.isArray(body.messages) ? body.messages.length : 0,
       wantsSse,
     });
-    let lastError: unknown = null;
     let lastCascadeId = '';
-    const maxCascadeAttempts = Math.max(2, readPositiveIntEnv(['WINDSURF_TRANSIENT_RETRY_ATTEMPTS', 'WINDSURF_CASCADE_RETRY_ATTEMPTS'], 4));
     const stickySessionKey = (existingScope.sessionKey || 'provider-default-session').trim() || 'provider-default-session';
-    const apiKey = await this.resolveCascadeApiKey();
-    for (let attempt = 1; attempt <= maxCascadeAttempts + 1; attempt += 1) {
+    this.markWindsurfSessionActive(stickySessionKey);
+    const resolvedModel = resolveWindsurfChatCompletionsModel(model);
+    const apiKey = await this.resolveCascadeApiKey(resolvedModel.modelTag);
+    let retainedSelected: { sessionId: string; cascadeId: string; stepOffset: number } | null = null;
+    const attempt = 1;
       try {
         const semanticConversation = this.parseCascadeSemanticRoundtripSync(body.messages);
         this.appendBridgeToolHistoryToSemanticConversation(semanticConversation, this.readBridgeToolHistoryPairs(body));
@@ -1430,16 +1528,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         if (!this.getPinnedGrpcRuntime()) {
           this.setPinnedGrpcRuntime(await this.resolveManagedRuntimeOptions());
         }
-        const resolvedModel = resolveWindsurfChatCompletionsModel(model);
-        const nativeMode = body.windsurf_native_mode === true;
+        const mcpMode = body.windsurf_mcp_mode === true;
+        const nativeMode = body.windsurf_native_mode === true || mcpMode;
         const nativeAllowlist = Array.isArray(body.windsurf_native_allowlist) ? body.windsurf_native_allowlist.filter((item): item is WindsurfCascadeToolStepKind => typeof item === 'string' && item in WINDSURF_CASCADE_TOOL_CONFIG_FIELDS) : [];
         const customTools = Array.isArray(body.windsurf_custom_tools) ? body.windsurf_custom_tools as Array<Record<string, unknown>> : [];
-        const mcpCompatPayloads = customTools
-          .map((tool) => {
-            const compat = tool && typeof tool === 'object' && !Array.isArray(tool) ? (tool as Record<string, unknown>).mcp_compat : undefined;
-            return compat && typeof compat === 'object' && !Array.isArray(compat) ? compat as Record<string, unknown> : null;
-          })
-          .filter((entry): entry is Record<string, unknown> => !!entry);
         const nativeDeclaredTools = Array.isArray(body.windsurf_declared_native_tools) ? body.windsurf_declared_native_tools as Array<Record<string, unknown>> : [];
         const deltaSeedParts = this.readDeltaSeedParts(body);
         const text = this.buildCascadePromptText(
@@ -1448,7 +1540,27 @@ export class WindsurfChatProvider extends HttpTransportProvider {
           resolvedModel.modelTag,
           customTools,
           deltaSeedParts,
+          nativeDeclaredTools,
+          body.windsurf_tool_choice,
         );
+        if (process.env.RCC_DEBUG_WINDSURF_TOOLS === '1') {
+          console.log('[windsurf-tools] outbound-shape', JSON.stringify({
+            nativeMode,
+            mcpMode,
+            nativeTools: nativeDeclaredTools.map((tool) => {
+              const fn = tool && typeof tool === 'object' && !Array.isArray(tool) ? tool.function as Record<string, unknown> | undefined : undefined;
+              return typeof fn?.name === 'string' ? fn.name : '';
+            }).filter(Boolean),
+            nativeAllowlist,
+            customTools: customTools.map((tool) => {
+              const fn = tool && typeof tool === 'object' && !Array.isArray(tool) ? tool.function as Record<string, unknown> | undefined : undefined;
+              return typeof fn?.name === 'string' ? fn.name : '';
+            }).filter(Boolean),
+            toolChoice: body.windsurf_tool_choice,
+            textHasShellCommand: text.includes('shell_command'),
+            textHasRunCommand: text.includes('run_command'),
+          }));
+        }
         const completedNativeToolCallIds = this.buildCompletedNativeToolCallIds(semanticConversation);
         const completedNativeToolSignatures = this.buildCompletedNativeToolSignatures(semanticConversation, nativeDeclaredTools);
         const isPanelMissing = (error: unknown): boolean => /panel state not found|not_found.*panel/i.test(String(error instanceof Error ? error.message : error || ''));
@@ -1457,8 +1569,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
 
         let sessionId: string;
         let cascadeId: string;
+        let selected: { sessionId: string; cascadeId: string; stepOffset: number };
         try {
-          const selected = await this.selectUsablePinnedGrpcRuntime(apiKey);
+          selected = retainedSelected || await this.selectUsablePinnedGrpcRuntime(apiKey);
+          retainedSelected = selected;
           sessionId = selected.sessionId;
           cascadeId = selected.cascadeId;
         } catch (error) {
@@ -1466,7 +1580,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             throw error;
           }
           this.resetWindsurfCascadeTransportState('panel-missing-start');
-          const selected = await this.selectUsablePinnedGrpcRuntime(apiKey);
+          retainedSelected = null;
+          selected = await this.selectUsablePinnedGrpcRuntime(apiKey);
+          retainedSelected = selected;
           sessionId = selected.sessionId;
           cascadeId = selected.cascadeId;
         }
@@ -1483,14 +1599,16 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             nativeMode,
             nativeAllowlist,
             additionalSteps: this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools),
-            mcpCompat: mcpCompatPayloads,
+            mcpMode,
           });
         } catch (error) {
           if (!isPanelMissing(error) && !isExpiredCascade(error) && !isUntrustedWorkspace(error)) {
             throw error;
           }
           this.resetWindsurfCascadeTransportState('send-rewarm');
-          const selected = await this.selectUsablePinnedGrpcRuntime(apiKey);
+          retainedSelected = null;
+          selected = await this.selectUsablePinnedGrpcRuntime(apiKey);
+          retainedSelected = selected;
           sessionId = selected.sessionId;
           cascadeId = selected.cascadeId;
           lastCascadeId = cascadeId;
@@ -1504,34 +1622,38 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             nativeMode,
             nativeAllowlist,
             additionalSteps: this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools),
-            mcpCompat: mcpCompatPayloads,
+            mcpMode,
           });
         }
         const output = await this.pollCascadeTrajectorySteps({
           cascadeId,
           model,
+          stepOffset: selected.stepOffset,
           promptChars: text.length,
           customTools,
+          nativeTools: nativeDeclaredTools,
           completedNativeToolCallIds,
           completedNativeToolSignatures,
+        });
+        this.rememberWindsurfCascadeSessionBinding(stickySessionKey, {
+          runtime: this.getPinnedGrpcRuntime() || await this.resolveManagedRuntimeOptions(),
+          sessionId,
+          cascadeId,
+          stepOffset: output.stepOffset,
         });
         const out = this.buildCascadeCompletionFromOutput({
           model,
           candidate: output.candidate,
           usage: output.usage,
+          nativeTools: nativeDeclaredTools,
         });
-        this.clearCurrentAliasTransientFailure();
         return out;
       } catch (error) {
-        lastError = error;
         const classified = this.classifyWindsurfCascadeError(error) as Error & Record<string, unknown>;
-        const isTransient = classified.code === 'WINDSURF_UPSTREAM_TRANSIENT'
-          || classified.code === 'WINDSURF_SERVICE_UNREACHABLE';
         const isQuotaExhausted = classified.code === 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED'
           || classified.code === 'WINDSURF_ACCOUNT_QUOTA_EXHAUSTED';
 
         if (isQuotaExhausted) {
-          this.markCurrentAliasQuotaExhausted(stickySessionKey);
           this.logWindsurfStage('sendRequestInternal.error', {
             cascadeId: lastCascadeId || null,
             attempt,
@@ -1542,21 +1664,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
           throw classified;
         }
 
-        // Transient error with quota remaining: retry with exponential backoff, no cooldown, no account switch
-        if (isTransient && attempt < (maxCascadeAttempts + 1)) {
-          this.logWindsurfStage('sendRequestInternal.error', {
-            cascadeId: lastCascadeId || null,
-            attempt,
-            retryableTransport: true,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          this.resetWindsurfCascadeTransportState(`retryable-transport-${attempt}`);
-          const backoffMs = Math.min(8_000, 250 * (2 ** Math.max(0, attempt - 1)));
-          await new Promise((resolve) => setTimeout(resolve, backoffMs));
-          continue;
-        }
-
-        // Fatal error (non-transient, non-quota): throw immediately
         this.logWindsurfStage('sendRequestInternal.error', {
           cascadeId: lastCascadeId || null,
           attempt,
@@ -1565,16 +1672,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         });
         throw classified;
       } finally {
+        this.markWindsurfSessionStopped(stickySessionKey);
         this.clearPinnedGrpcRuntime();
       }
-    }
-    this.logWindsurfStage('sendRequestInternal.error', {
-      cascadeId: lastCascadeId || null,
-      attempt: maxCascadeAttempts + 1,
-      retryableTransport: false,
-      error: lastError instanceof Error ? lastError.message : String(lastError),
-    });
-    throw this.classifyWindsurfCascadeError(lastError);
   }
 
   /**
@@ -1754,6 +1854,199 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     await fs.writeFile(tokenFilePath, JSON.stringify(credential, null, 2), 'utf8');
   }
 
+  private normalizeWindsurfAccountEmail(value: unknown): string {
+    return typeof value === 'string' ? value.trim().toLowerCase() : '';
+  }
+
+  private isWindsurfHealthForConfiguredAccount(entry: WindsurfManagedCredentialEntry, health: WindsurfQuotaHealthSnapshot | null): boolean {
+    const expected = this.normalizeWindsurfAccountEmail(entry.account);
+    if (!expected) return true;
+    const actual = this.normalizeWindsurfAccountEmail(health?.accountEmail);
+    return !!actual && actual === expected;
+  }
+
+  private async refreshManagedEntryCredentialFromPassword(entry: WindsurfManagedCredentialEntry): Promise<WindsurfQuotaHealthSnapshot | null> {
+    const account = this.normalizeWindsurfAccountEmail(entry.account);
+    const password = typeof entry.password === 'string' ? entry.password.trim() : '';
+    if (!account || !password) return null;
+    const cfg: WindsurfManagedAuthConfig = {
+      rawType: 'windsurf-account',
+      accountAlias: entry.alias,
+      account,
+      password,
+      tokenFile: entry.tokenFile,
+    };
+    const credential = await this.loginWindsurfSessionCredential(cfg);
+    credential.accountAlias = entry.alias;
+    credential.accountEmail = account;
+    await this.persistWindsurfSessionCredential(cfg, credential);
+    entry.apiKey = credential.apiKey;
+    const health = await this.fetchWindsurfUserStatusForHealth(entry.apiKey);
+    if (!this.isWindsurfHealthForConfiguredAccount(entry, health)) {
+      throw createWindsurfProviderError('windsurf managed account token email mismatch after login', {
+        code: 'WINDSURF_ACCOUNT_TOKEN_MISMATCH',
+        status: 401,
+        retryable: false,
+      });
+    }
+    return health;
+  }
+
+  private async loginWindsurfSessionCredential(cfg: WindsurfManagedAuthConfig): Promise<WindsurfSessionCredential> {
+    const mobile = typeof cfg.mobile === 'string' ? cfg.mobile.trim() : '';
+    const account = typeof cfg.account === 'string' ? cfg.account.trim() : '';
+    const username = typeof cfg.username === 'string' ? cfg.username.trim() : '';
+    const password = typeof cfg.password === 'string' ? cfg.password.trim() : '';
+    const parsedInline = parseInlineWindsurfAccount(cfg.apiKey);
+    const loginEmail = mobile || account || username || parsedInline?.email || '';
+    const loginPassword = password || parsedInline?.passwordOrToken || '';
+    if (!loginEmail || !loginPassword) {
+      throw createWindsurfProviderError('windsurf account credential missing', {
+        code: 'WINDSURF_ACCOUNT_CREDENTIAL_MISSING',
+        status: 401,
+        retryable: false,
+      });
+    }
+    this.logWindsurfStage('sessionCredential.login.begin', { loginEmail });
+    const fingerprint = createWindsurfAccountLoginHeaders();
+    try {
+      const loginMethodProbe = await this.resolveWindsurfLoginMethodProbe(loginEmail, fingerprint);
+      this.logWindsurfStage('sessionCredential.loginMethod.done', {
+        loginEmail,
+        method: loginMethodProbe.method,
+        hasPassword: loginMethodProbe.hasPassword,
+      });
+      if (loginMethodProbe.method === 'auth1' && !loginMethodProbe.hasPassword) {
+        throw createWindsurfProviderError('No password set. Please log in with Google or GitHub.', {
+          code: 'WINDSURF_NO_PASSWORD_SET',
+          status: 401,
+          retryable: false,
+        });
+      }
+    } catch (error) {
+      this.logWindsurfStage('sessionCredential.loginMethod.skip', {
+        loginEmail,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    const loginBody = { email: loginEmail, password: loginPassword };
+    let loginResp;
+    try {
+      loginResp = await this.httpClient.post(
+        WINDSURF_AUTH1_PASSWORD_LOGIN_URL,
+        loginBody,
+        {
+          ...fingerprint,
+          'Content-Type': 'application/json',
+        }
+      );
+    } catch (error) {
+      const source = error as { status?: unknown; response?: { data?: unknown }; message?: unknown };
+      const status = typeof source?.status === 'number' ? source.status : typeof source?.response?.data === 'object' ? 401 : 502;
+      const detail = this.extractWindsurfAuthDetail(source?.response?.data);
+      if (status === 401 || detail) {
+        throw createWindsurfProviderError(detail || 'Invalid email or password', {
+          code: detail?.toLowerCase().includes('no password set') ? 'WINDSURF_NO_PASSWORD_SET' : 'WINDSURF_AUTH_FAILED',
+          status: 401,
+          retryable: false,
+        });
+      }
+      throw error;
+    }
+    this.logWindsurfStage('sessionCredential.passwordLogin.done', { loginEmail });
+    const loginRecord = (loginResp.data && typeof loginResp.data === 'object') ? loginResp.data as Record<string, unknown> : {};
+    const auth1Token = typeof loginRecord.token === 'string' ? loginRecord.token.trim() : '';
+    const loginDetail = this.extractWindsurfAuthDetail(loginRecord);
+    if (!auth1Token) {
+      throw createWindsurfProviderError(loginDetail || 'windsurf auth1 token missing', {
+        code: loginDetail?.toLowerCase().includes('no password set') ? 'WINDSURF_NO_PASSWORD_SET' : 'WINDSURF_AUTH_FAILED',
+        status: 401,
+        retryable: false,
+      });
+    }
+    const postAuthHeaders = {
+      ...fingerprint,
+      'Content-Type': 'application/proto',
+      'Content-Length': '0',
+      'Connect-Protocol-Version': '1',
+      Origin: 'https://windsurf.com',
+      Referer: 'https://windsurf.com/account/login',
+      'X-Devin-Auth1-Token': auth1Token,
+    };
+    const postAuthRequest = {
+      method: 'POST',
+      headers: postAuthHeaders,
+      body: Buffer.alloc(0) as unknown,
+    } as RequestInit;
+    const postAuthEndpoints = [WINDSURF_POST_AUTH_URL, WINDSURF_POST_AUTH_LEGACY_URL];
+    let response: Response | null = null;
+    let postAuthEndpoint = WINDSURF_POST_AUTH_URL;
+    let lastPostAuthError: unknown = null;
+    for (const endpoint of postAuthEndpoints) {
+      this.logWindsurfStage('sessionCredential.postAuth.begin', { endpoint, loginEmail });
+      try {
+        response = await this.fetchWithTimeout(endpoint, postAuthRequest, this.windsurfCascadeTimeoutMs);
+        postAuthEndpoint = endpoint;
+        break;
+      } catch (error) {
+        lastPostAuthError = error;
+        this.logWindsurfStage('sessionCredential.postAuth.error', {
+          endpoint,
+          loginEmail,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (!response) {
+      throw lastPostAuthError instanceof Error ? lastPostAuthError : new Error(String(lastPostAuthError ?? 'windsurf post auth failed'));
+    }
+    const raw = await response.text();
+    const maybeJson = (() => { try { return JSON.parse(raw); } catch { return raw; } })();
+    const parsed = this.parseWindsurfPostAuthPayload(maybeJson);
+    if (!response.ok || !parsed.sessionToken) {
+      throw createWindsurfProviderError(parsed.error || `windsurf post auth failed: ${response.status}`, {
+        code: 'WINDSURF_POSTAUTH_FAILED',
+        status: response.status || 502,
+        retryable: response.status >= 500,
+      });
+    }
+    this.logWindsurfStage('sessionCredential.postAuth.done', {
+      endpoint: postAuthEndpoint,
+      loginEmail,
+      accountId: parsed.accountId || null,
+    });
+    return {
+      apiKey: parsed.sessionToken,
+      sessionToken: parsed.sessionToken,
+      auth1Token,
+      accountId: parsed.accountId,
+      primaryOrgId: parsed.primaryOrgId,
+      accountEmail: loginEmail,
+    };
+  }
+
+  private async readWindsurfConfigManagedEntries(): Promise<WindsurfManagedAuthConfig['entries']> {
+    const candidates = [
+      resolveRccPath('provider', 'windsurf', 'config.v2.toml'),
+      resolveRccPath('provider', 'windsurf', 'config.v2.json'),
+    ];
+    for (const filePath of candidates) {
+      try {
+        const raw = await fs.readFile(filePath, 'utf8');
+        const parsed = filePath.endsWith('.toml') ? parseTomlRecord(raw) : JSON.parse(raw) as Record<string, unknown>;
+        const provider = parsed.provider && typeof parsed.provider === 'object' ? parsed.provider as Record<string, unknown> : {};
+        const auth = provider.auth && typeof provider.auth === 'object' ? provider.auth as Record<string, unknown> : {};
+        const entries = Array.isArray(auth.entries) ? auth.entries : [];
+        if (entries.length > 0) {
+          return entries as WindsurfManagedAuthConfig['entries'];
+        }
+      } catch {
+        continue;
+      }
+    }
+    return [];
+  }
+
   private clearManagedWindsurfSessionCredential(): void {
     // Read alias from windsurfSessionCredential (set by selectWindsurfAccount) rather than
     // from authConfig.config.accountAlias, which is no longer mutated to avoid concurrent
@@ -1928,141 +2221,12 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         });
       }
 
-      const mobile = typeof cfg.mobile === 'string' ? cfg.mobile.trim() : '';
-      const account = typeof cfg.account === 'string' ? cfg.account.trim() : '';
-      const username = typeof cfg.username === 'string' ? cfg.username.trim() : '';
-      const password = typeof cfg.password === 'string' ? cfg.password.trim() : '';
-      const parsedInline = parseInlineWindsurfAccount(cfg.apiKey);
-      const loginEmail = mobile || account || username || parsedInline?.email || '';
-      const loginPassword = password || parsedInline?.passwordOrToken || '';
-      if (!loginEmail || !loginPassword) {
-        throw createWindsurfProviderError('windsurf account credential missing', {
-          code: 'WINDSURF_ACCOUNT_CREDENTIAL_MISSING',
-          status: 401,
-          retryable: false,
-        });
-      }
-      this.logWindsurfStage('sessionCredential.login.begin', { loginEmail });
-      const fingerprint = createWindsurfAccountLoginHeaders();
-      try {
-        const loginMethodProbe = await this.resolveWindsurfLoginMethodProbe(loginEmail, fingerprint);
-        this.logWindsurfStage('sessionCredential.loginMethod.done', {
-          loginEmail,
-          method: loginMethodProbe.method,
-          hasPassword: loginMethodProbe.hasPassword,
-        });
-        if (loginMethodProbe.method === 'auth1' && !loginMethodProbe.hasPassword) {
-          throw createWindsurfProviderError('No password set. Please log in with Google or GitHub.', {
-            code: 'WINDSURF_NO_PASSWORD_SET',
-            status: 401,
-            retryable: false,
-          });
-        }
-      } catch (error) {
-        this.logWindsurfStage('sessionCredential.loginMethod.skip', {
-          loginEmail,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-      const loginBody = { email: loginEmail, password: loginPassword };
-      let loginResp;
-      try {
-        loginResp = await this.httpClient.post(
-          WINDSURF_AUTH1_PASSWORD_LOGIN_URL,
-          loginBody,
-          {
-            ...fingerprint,
-            'Content-Type': 'application/json',
-          }
-        );
-      } catch (error) {
-        const source = error as { status?: unknown; response?: { data?: unknown }; message?: unknown };
-        const status = typeof source?.status === 'number' ? source.status : typeof source?.response?.data === 'object' ? 401 : 502;
-        const detail = this.extractWindsurfAuthDetail(source?.response?.data);
-        if (status === 401 || detail) {
-          throw createWindsurfProviderError(detail || 'Invalid email or password', {
-            code: detail?.toLowerCase().includes('no password set') ? 'WINDSURF_NO_PASSWORD_SET' : 'WINDSURF_AUTH_FAILED',
-            status: 401,
-            retryable: false,
-          });
-        }
-        throw error;
-      }
-      this.logWindsurfStage('sessionCredential.passwordLogin.done', { loginEmail });
-      const loginRecord = (loginResp.data && typeof loginResp.data === 'object') ? loginResp.data as Record<string, unknown> : {};
-      const auth1Token = typeof loginRecord.token === 'string' ? loginRecord.token.trim() : '';
-      const loginDetail = this.extractWindsurfAuthDetail(loginRecord);
-      if (!auth1Token) {
-        throw createWindsurfProviderError(loginDetail || 'windsurf auth1 token missing', {
-          code: loginDetail?.toLowerCase().includes('no password set') ? 'WINDSURF_NO_PASSWORD_SET' : 'WINDSURF_AUTH_FAILED',
-          status: 401,
-          retryable: false,
-        });
-      }
-      const postAuthHeaders = {
-        ...fingerprint,
-        'Content-Type': 'application/proto',
-        'Content-Length': '0',
-        'Connect-Protocol-Version': '1',
-        Origin: 'https://windsurf.com',
-        Referer: 'https://windsurf.com/account/login',
-        'X-Devin-Auth1-Token': auth1Token,
-      };
-      const postAuthBody = Buffer.alloc(0);
-      const postAuthRequest = {
-        method: 'POST',
-        headers: postAuthHeaders,
-        body: postAuthBody as unknown,
-      } as RequestInit;
-      const postAuthEndpoints = [WINDSURF_POST_AUTH_URL, WINDSURF_POST_AUTH_LEGACY_URL];
-      let response: Response | null = null;
-      let postAuthEndpoint = WINDSURF_POST_AUTH_URL;
-      let lastPostAuthError: unknown = null;
-      for (const endpoint of postAuthEndpoints) {
-        this.logWindsurfStage('sessionCredential.postAuth.begin', { endpoint, loginEmail });
-        try {
-          response = await this.fetchWithTimeout(endpoint, postAuthRequest, this.windsurfCascadeTimeoutMs);
-          postAuthEndpoint = endpoint;
-          break;
-        } catch (error) {
-          lastPostAuthError = error;
-          this.logWindsurfStage('sessionCredential.postAuth.error', {
-            endpoint,
-            loginEmail,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-      if (!response) {
-        throw lastPostAuthError instanceof Error ? lastPostAuthError : new Error(String(lastPostAuthError ?? 'windsurf post auth failed'));
-      }
-      const raw = await response.text();
-      const maybeJson = (() => { try { return JSON.parse(raw); } catch { return raw; } })();
-      const parsed = this.parseWindsurfPostAuthPayload(maybeJson);
-      if (!response.ok || !parsed.sessionToken) {
-        throw createWindsurfProviderError(parsed.error || `windsurf post auth failed: ${response.status}`, {
-          code: 'WINDSURF_POSTAUTH_FAILED',
-          status: response.status || 502,
-          retryable: response.status >= 500,
-        });
-      }
-      this.logWindsurfStage('sessionCredential.postAuth.done', {
-        endpoint: postAuthEndpoint,
-        loginEmail,
-        accountId: parsed.accountId || null,
-      });
-      this.windsurfSessionCredential = {
-        apiKey: parsed.sessionToken,
-        sessionToken: parsed.sessionToken,
-        auth1Token,
-        accountId: parsed.accountId,
-        primaryOrgId: parsed.primaryOrgId,
-      };
-      (auth as unknown as { config?: { apiKey?: string } }).config!.apiKey = parsed.sessionToken;
+      this.windsurfSessionCredential = await this.loginWindsurfSessionCredential(cfg);
+      (auth as unknown as { config?: { apiKey?: string } }).config!.apiKey = this.windsurfSessionCredential.apiKey;
       await this.persistWindsurfSessionCredential(cfg, this.windsurfSessionCredential);
       this.logWindsurfStage('sessionCredential.ready', {
-        loginEmail,
-        accountId: parsed.accountId || null,
+        loginEmail: this.windsurfSessionCredential.accountEmail || null,
+        accountId: this.windsurfSessionCredential.accountId || null,
       });
       return this.windsurfSessionCredential;
     };
@@ -2206,11 +2370,11 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     return {};
   }
 
-  private async resolveCascadeApiKey(): Promise<string> {
+  private async resolveCascadeApiKey(requestedModelUid?: string): Promise<string> {
     await this.ensureWindsurfSessionCredential();
     const managed = await this.readManagedWindsurfAuthConfigDetailed();
     if (managed) {
-      const selected = await this.selectWindsurfAccount(managed);
+      const selected = await this.selectWindsurfAccount(managed, requestedModelUid);
       if (selected?.apiKey) {
         return selected.apiKey;
       }
@@ -2269,7 +2433,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     if (!managed) {
       return null;
     }
-    const inlineEntries = Array.isArray(managed.cfg.entries) ? managed.cfg.entries : [];
+    const inlineEntries = Array.isArray(managed.cfg.entries) && managed.cfg.entries.length > 0
+      ? managed.cfg.entries
+      : (await this.readWindsurfConfigManagedEntries()) ?? [];
     const entries: WindsurfManagedCredentialEntry[] = [];
     for (const item of inlineEntries) {
       if (!item || typeof item !== 'object') {
@@ -2280,6 +2446,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       const accountAlias = typeof record.accountAlias === 'string' && record.accountAlias.trim() ? record.accountAlias.trim() : '';
       const tokenFile = typeof record.tokenFile === 'string' && record.tokenFile.trim() ? record.tokenFile.trim() : undefined;
       const env = typeof record.env === 'string' && record.env.trim() ? record.env.trim() : '';
+      const account = this.normalizeWindsurfAccountEmail(record.account || record.username || record.mobile);
+      const password = typeof record.password === 'string' ? record.password.trim() : '';
       const configured = typeof record.apiKey === 'string' ? record.apiKey.trim() : '';
       const envValue = env ? String(process.env[env] || '').trim() : '';
       const finalAlias = alias || accountAlias || `entry-${entries.length + 1}`;
@@ -2307,6 +2475,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         alias: finalAlias,
         apiKey,
         tokenFile,
+        account,
+        password,
         health: this.windsurfHealthCache.get(finalAlias) ?? null,
       });
     }
@@ -2317,43 +2487,12 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         alias: ownAlias,
         apiKey: ownApiKey,
         tokenFile: managed.cfg.tokenFile,
+        account: this.normalizeWindsurfAccountEmail(managed.cfg.account || managed.cfg.username || managed.cfg.mobile),
+        password: typeof managed.cfg.password === 'string' ? managed.cfg.password.trim() : '',
         health: this.windsurfHealthCache.get(ownAlias) ?? null,
       });
     }
-    if (entries.length < 2) {
-      try {
-        const authDir = resolveRccAuthDir();
-        const files = await fs.readdir(authDir);
-        for (const file of files) {
-          if (!/^windsurf-ws-pro-\d+\.json$/i.test(file)) {
-            continue;
-          }
-          const tokenPath = path.join(authDir, file);
-          let parsed: Record<string, unknown> | null = null;
-          try {
-            parsed = JSON.parse(await fs.readFile(tokenPath, 'utf8')) as Record<string, unknown>;
-          } catch {
-            parsed = null;
-          }
-          if (!parsed) continue;
-          const sessionToken = typeof parsed.sessionToken === 'string' ? parsed.sessionToken.trim() : '';
-          const apiKey = typeof parsed.apiKey === 'string' ? parsed.apiKey.trim() : '';
-          const token = apiKey || sessionToken;
-          if (!keyLikeSessionToken(token)) continue;
-          const alias = file.replace(/^windsurf-/, '').replace(/\.json$/i, '');
-          if (entries.some((entry) => entry.alias === alias || entry.apiKey === token)) continue;
-          entries.push({
-            alias,
-            apiKey: token,
-            tokenFile: tokenPath,
-            health: this.windsurfHealthCache.get(alias) ?? null,
-          });
-        }
-      } catch {
-        // ignore auth dir scan failures
-      }
-    }
-    if (entries.length < 2) {
+    if (entries.length < 1) {
       return null;
     }
     return { auth: managed.auth, entries, rawType: managed.rawType };
@@ -2364,9 +2503,18 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
     const userStatus = record.userStatus && typeof record.userStatus === 'object' ? record.userStatus as Record<string, unknown> : {};
     const planStatus = userStatus.planStatus && typeof userStatus.planStatus === 'object' ? userStatus.planStatus as Record<string, unknown> : {};
+    const accountEmail = this.normalizeWindsurfAccountEmail(userStatus.email || userStatus.accountEmail || record.email || record.accountEmail);
     const daily = typeof planStatus.dailyQuotaRemainingPercent === 'number' ? planStatus.dailyQuotaRemainingPercent : null;
     const weekly = typeof planStatus.weeklyQuotaRemainingPercent === 'number' ? planStatus.weeklyQuotaRemainingPercent : null;
-    const overageMicros = typeof planStatus.overageBalanceMicros === 'number' ? planStatus.overageBalanceMicros : null;
+    const rawOverageMicros = planStatus.overageBalanceMicros;
+    const parsedOverageMicros = typeof rawOverageMicros === 'string' && rawOverageMicros.trim()
+      ? Number(rawOverageMicros.trim())
+      : NaN;
+    const overageMicros = typeof rawOverageMicros === 'number'
+      ? rawOverageMicros
+      : Number.isFinite(parsedOverageMicros)
+        ? parsedOverageMicros
+        : null;
     const overageBalance = overageMicros === null ? null : overageMicros / 1_000_000;
     const hasExtraQuota = overageBalance !== null && overageBalance > 0;
     const minScoreRaw = Math.min(
@@ -2375,6 +2523,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     );
     const remainingScore = Number.isFinite(minScoreRaw) ? Math.max(0, Math.min(100, minScoreRaw)) : 0;
     const exhausted = (typeof weekly === 'number' && weekly <= 0) || (typeof daily === 'number' && daily <= 0);
+    const allowedModelUids = this.extractAllowedModelUidsFromUserStatusPayload(record);
     return {
       hasExtraQuota,
       dailyRemainingPercent: daily,
@@ -2382,12 +2531,73 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       remainingScore,
       overageBalance,
       exhausted,
+      ...(allowedModelUids.length > 0 ? { allowedModelUids } : {}),
+      ...(accountEmail ? { accountEmail } : {}),
       fetchedAt: now,
     };
   }
 
-  private rankManagedCredentialsByHealth(entries: WindsurfManagedCredentialEntry[]): WindsurfManagedCredentialEntry[] {
+  private extractAllowedModelUidsFromUserStatusPayload(payload: Record<string, unknown>): string[] {
+    const out = new Set<string>();
+    const visit = (value: unknown): void => {
+      if (!value || typeof value !== 'object') return;
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item);
+        return;
+      }
+      const record = value as Record<string, unknown>;
+      for (const key of ['model', 'alias', 'modelFamilyUid', 'model_family_uid', 'modelUid', 'model_uid']) {
+        const direct = typeof record[key] === 'string' ? String(record[key]).trim() : '';
+        if (direct) out.add(direct.toLowerCase());
+      }
+      for (const key of ['modelOrAlias', 'model_or_alias', 'modelInfo', 'model_info']) {
+        visit(record[key]);
+      }
+      for (const nested of Object.values(record)) {
+        visit(nested);
+      }
+    };
+    const userStatus = payload.userStatus && typeof payload.userStatus === 'object' ? payload.userStatus as Record<string, unknown> : {};
+    const planStatus = userStatus.planStatus && typeof userStatus.planStatus === 'object' ? userStatus.planStatus as Record<string, unknown> : {};
+    const planInfo = planStatus.planInfo && typeof planStatus.planInfo === 'object' ? planStatus.planInfo as Record<string, unknown> : {};
+    for (const key of ['cascadeAllowedModelsConfig', 'cascade_allowed_models_config']) {
+      visit(planInfo[key]);
+      visit(planStatus[key]);
+    }
+    for (const key of ['cascadeModelConfigData', 'cascade_model_config_data']) {
+      visit(userStatus[key]);
+      visit(payload[key]);
+    }
+    return [...out].sort();
+  }
+
+  private isWindsurfAccountModelSupported(entry: WindsurfManagedCredentialEntry, requestedModelUid?: string): boolean {
+    const normalizeModelKey = (value: unknown): string => String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[_\s.]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const requested = normalizeModelKey(requestedModelUid);
+    if (!requested) return true;
+    const allowed = Array.isArray(entry.health?.allowedModelUids) ? entry.health.allowedModelUids : [];
+    if (allowed.length === 0) return true;
+    const allowedSet = new Set(allowed.map((item) => normalizeModelKey(item)).filter(Boolean));
+    if (allowedSet.has(requested)) return true;
+    if (/^gpt-5-5(?:-|$)/.test(requested) && allowedSet.has('gpt-5-5')) return true;
+    if (/^gpt-5-5(?:-|$)/.test(requested)) {
+      for (const item of allowedSet) {
+        if (/^model-private-\d+$/i.test(item)) return true;
+        if (/^model-gpt-5-5(?:-|$)/i.test(item)) return true;
+      }
+    }
+    return false;
+  }
+
+  private rankManagedCredentialsByHealth(entries: WindsurfManagedCredentialEntry[], requestedModelUid?: string): WindsurfManagedCredentialEntry[] {
     return [...entries].sort((a, b) => {
+      const aModelSupported = this.isWindsurfAccountModelSupported(a, requestedModelUid);
+      const bModelSupported = this.isWindsurfAccountModelSupported(b, requestedModelUid);
+      if (aModelSupported !== bModelSupported) return aModelSupported ? -1 : 1;
       const ah = a.health;
       const bh = b.health;
       if (!ah && !bh) return 0;
@@ -2400,19 +2610,104 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     });
   }
 
-  private selectManagedCredentialForSession(sessionKey: string, entries: WindsurfManagedCredentialEntry[]): WindsurfManagedCredentialEntry {
-    void sessionKey;
-    const pinnedAlias = this.windsurfSelectedAccountAlias;
-    if (pinnedAlias) {
-      const pinned = entries.find((entry) => entry.alias === pinnedAlias && !(entry.health?.exhausted));
-      if (pinned) {
-        return pinned;
+  private cleanupReleasedWindsurfSessions(nowMs = Date.now()): void {
+    for (const [sessionKey, binding] of this.windsurfSelectedAccountAliasesBySession.entries()) {
+      if (!binding.active && nowMs - binding.lastUsedAtMs >= WINDSURF_SESSION_FULL_RELEASE_IDLE_MS) {
+        this.windsurfSelectedAccountAliasesBySession.delete(sessionKey);
+        this.windsurfCascadeSessionBindings.delete(sessionKey);
       }
     }
-    const ranked = this.rankManagedCredentialsByHealth(entries);
-    const selected = ranked.find((entry) => !(entry.health?.exhausted)) || ranked[0]!;
-    this.windsurfSelectedAccountAlias = selected.alias;
+    for (const [sessionKey, binding] of this.windsurfCascadeSessionBindings.entries()) {
+      if (!binding.active && nowMs - binding.lastUsedAtMs >= WINDSURF_SESSION_FULL_RELEASE_IDLE_MS) {
+        this.windsurfCascadeSessionBindings.delete(sessionKey);
+      }
+    }
+  }
+
+  private normalizeWindsurfSessionKey(sessionKey: string): string {
+    return (sessionKey || '').trim() || 'provider-default-session';
+  }
+
+  private markWindsurfSessionActive(sessionKey: string): void {
+    const normalizedSessionKey = this.normalizeWindsurfSessionKey(sessionKey);
+    const nowMs = Date.now();
+    this.cleanupReleasedWindsurfSessions(nowMs);
+    const accountBinding = this.windsurfSelectedAccountAliasesBySession.get(normalizedSessionKey);
+    if (accountBinding) {
+      this.windsurfSelectedAccountAliasesBySession.set(normalizedSessionKey, { ...accountBinding, active: true, lastUsedAtMs: nowMs });
+    }
+    const cascadeBinding = this.windsurfCascadeSessionBindings.get(normalizedSessionKey);
+    if (cascadeBinding) {
+      this.windsurfCascadeSessionBindings.set(normalizedSessionKey, { ...cascadeBinding, active: true, lastUsedAtMs: nowMs });
+    }
+  }
+
+  private markWindsurfSessionStopped(sessionKey: string): void {
+    const normalizedSessionKey = this.normalizeWindsurfSessionKey(sessionKey);
+    const nowMs = Date.now();
+    const accountBinding = this.windsurfSelectedAccountAliasesBySession.get(normalizedSessionKey);
+    if (accountBinding) {
+      this.windsurfSelectedAccountAliasesBySession.set(normalizedSessionKey, { ...accountBinding, active: false, lastUsedAtMs: nowMs });
+    }
+    const cascadeBinding = this.windsurfCascadeSessionBindings.get(normalizedSessionKey);
+    if (cascadeBinding) {
+      this.windsurfCascadeSessionBindings.set(normalizedSessionKey, { ...cascadeBinding, active: false, lastUsedAtMs: nowMs });
+    }
+  }
+
+  private selectManagedCredentialForSession(sessionKey: string, entries: WindsurfManagedCredentialEntry[], requestedModelUid?: string): WindsurfManagedCredentialEntry {
+    const normalizedSessionKey = this.normalizeWindsurfSessionKey(sessionKey);
+    const nowMs = Date.now();
+    this.cleanupReleasedWindsurfSessions(nowMs);
+    const pinnedAlias = this.windsurfSelectedAccountAliasesBySession.get(normalizedSessionKey)?.accountAlias || '';
+    if (pinnedAlias) {
+      const pinned = entries.find((entry) => entry.alias === pinnedAlias && !(entry.health?.exhausted) && this.isWindsurfAccountModelSupported(entry, requestedModelUid));
+      if (pinned) {
+        this.windsurfSelectedAccountAliasesBySession.set(normalizedSessionKey, { accountAlias: pinned.alias, active: true, lastUsedAtMs: nowMs });
+        return pinned;
+      }
+      this.windsurfSelectedAccountAliasesBySession.delete(normalizedSessionKey);
+    }
+    const ranked = this.rankManagedCredentialsByHealth(entries, requestedModelUid);
+    const selected = ranked.find((entry) => !(entry.health?.exhausted) && this.isWindsurfAccountModelSupported(entry, requestedModelUid))
+      || ranked.find((entry) => !(entry.health?.exhausted))
+      || ranked[0]!;
+    this.windsurfSelectedAccountAliasesBySession.set(normalizedSessionKey, { accountAlias: selected.alias, active: true, lastUsedAtMs: nowMs });
     return selected;
+  }
+
+  private resolveManagedAccountPoolCooldownMs(entries: Array<{ alias: string }>, nowMs = Date.now()): number | null {
+    let waitMs: number | null = null;
+    for (const entry of entries) {
+      const transientUntil = this.windsurfTransientCooldownUntilMs.get(entry.alias) ?? 0;
+      const quotaUntil = this.windsurfQuotaCooldownUntilMs.get(entry.alias) ?? 0;
+      const candidateUntil = Math.max(transientUntil, quotaUntil);
+      if (candidateUntil <= nowMs) continue;
+      const candidateWaitMs = candidateUntil - nowMs;
+      waitMs = waitMs === null ? candidateWaitMs : Math.min(waitMs, candidateWaitMs);
+    }
+    return waitMs;
+  }
+
+  private assertManagedAccountPoolSelectable(entries: WindsurfManagedCredentialEntry[], requestedModelUid?: string): void {
+    const hasSelectable = entries.some((entry) => !(entry.health?.exhausted) && this.isWindsurfAccountModelSupported(entry, requestedModelUid));
+    if (hasSelectable) return;
+    const cooldownMs = this.resolveManagedAccountPoolCooldownMs(entries);
+    if (cooldownMs && cooldownMs > 0) {
+      throw createWindsurfProviderError('windsurf managed account pool is cooling down', {
+        code: 'WINDSURF_ACCOUNT_POOL_COOLDOWN',
+        status: 429,
+        retryable: true,
+        rateLimitKind: 'synthetic_cooldown',
+        cooldownOverrideMs: cooldownMs,
+      });
+    }
+    throw createWindsurfProviderError('windsurf managed account pool has no healthy account', {
+      code: 'WINDSURF_NO_HEALTHY_ACCOUNT',
+      status: 429,
+      retryable: true,
+      rateLimitKind: 'short_lived',
+    });
   }
 
   private computeAccountConcurrencyCapacity(entries: Array<{ alias: string; health: { exhausted?: boolean } | null }>): number {
@@ -2442,61 +2737,19 @@ export class WindsurfChatProvider extends HttpTransportProvider {
 
   private async selectWindsurfAccount(
     managed: { auth: ApiKeyAuthProvider; entries: WindsurfManagedCredentialEntry[]; rawType: string },
+    requestedModelUid?: string,
   ): Promise<{ accountAlias: string; apiKey: string }> {
     const scope = WindsurfChatProvider.cascadeRuntimeScope.getStore();
     const sessionKey = (scope?.sessionKey || 'provider-default-session').trim() || 'provider-default-session';
-    for (const entry of managed.entries) {
-      const cached = this.windsurfHealthCache.get(entry.alias);
-      if (cached) {
-        entry.health = cached;
-      } else {
-        const latest = await this.fetchWindsurfUserStatusForHealth(entry.apiKey);
-        if (latest) {
-          this.windsurfHealthCache.set(entry.alias, latest);
-          entry.health = latest;
-        }
-      }
-      if (this.windsurfUnavailableAccounts.has(entry.alias)) {
-        entry.health = entry.health ? { ...entry.health, exhausted: true } : {
-          hasExtraQuota: false,
-          dailyRemainingPercent: null,
-          weeklyRemainingPercent: null,
-          remainingScore: 0,
-          overageBalance: null,
-          exhausted: true,
-          fetchedAt: Date.now(),
-        };
-      }
-      const cooldownUntil = this.windsurfTransientCooldownUntilMs.get(entry.alias) ?? 0;
-      if (cooldownUntil > Date.now()) {
-        entry.health = entry.health ? { ...entry.health, exhausted: true } : {
-          hasExtraQuota: false,
-          dailyRemainingPercent: null,
-          weeklyRemainingPercent: null,
-          remainingScore: 0,
-          overageBalance: null,
-          exhausted: true,
-          fetchedAt: Date.now(),
-        };
-      }
-      const quotaCooldownUntil = this.windsurfQuotaCooldownUntilMs.get(entry.alias) ?? 0;
-      if (quotaCooldownUntil > Date.now()) {
-        entry.health = entry.health ? { ...entry.health, exhausted: true } : {
-          hasExtraQuota: false,
-          dailyRemainingPercent: null,
-          weeklyRemainingPercent: null,
-          remainingScore: 0,
-          overageBalance: null,
-          exhausted: true,
-          fetchedAt: quotaCooldownUntil,
-        };
-      }
+    const selected = managed.entries[0];
+    if (!selected?.apiKey) {
+      throw createWindsurfProviderError('windsurf managed account pool has no configured account', {
+        code: 'WINDSURF_NO_CONFIGURED_ACCOUNT',
+        status: 401,
+        retryable: false,
+      });
     }
-    // Filter out quota-cooled accounts from ranking; only fallback if all are cooled
-    const activeEntries = managed.entries.filter(
-      (e) => !(this.windsurfQuotaCooldownUntilMs.get(e.alias) ?? 0 > Date.now())
-    );
-    const selected = this.selectManagedCredentialForSession(sessionKey, activeEntries.length > 0 ? activeEntries : managed.entries);
+    this.windsurfSelectedAccountAliasesBySession.set(sessionKey, { accountAlias: selected.alias, active: true, lastUsedAtMs: Date.now() });
     this.windsurfSessionCredential = {
       apiKey: selected.apiKey,
       sessionToken: selected.apiKey,
@@ -2505,14 +2758,14 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       primaryOrgId: this.windsurfSessionCredential?.primaryOrgId,
       accountAlias: selected.alias,
     };
+    if (scope) {
+      scope.accountAlias = selected.alias;
+    }
     // Intentionally do not mutate managed.auth.config.apiKey/accountAlias.
     // resolveCascadeApiKey() returns the selected apiKey directly, and downstream
     // request builders consume that return value instead of relying on auth config mutation.
-    const total = managed.entries.length;
-    const available = managed.entries.filter((e) => !(e.health?.exhausted)).length;
     try {
-      const unavailableCount = this.windsurfUnavailableAccounts.size;
-      console.log(`[windsurf-account] selected accountsAvailable=${available}/${total} unavailableCount=${unavailableCount} maxConcurrency=${this.computeAccountConcurrencyCapacity(managed.entries)}`);
+      console.log(`[windsurf-account] single-account selected alias=${selected.alias} session=${sessionKey} model=${requestedModelUid || '-'} accountsConfigured=${managed.entries.length}`);
     } catch {
       // best-effort logging, never throw
     }
@@ -2520,35 +2773,16 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   }
 
   private markCurrentAliasTransientFailure(sessionKey: string, options?: { forceCooldown?: boolean }): void {
-    const alias = this.windsurfSessionCredential?.accountAlias || '';
-    if (!alias) return;
-    const forceCooldown = options?.forceCooldown === true;
-    const next = forceCooldown ? 2 : (this.windsurfTransientFailureCount.get(alias) ?? 0) + 1;
-    this.windsurfTransientFailureCount.set(alias, next);
-    if (next >= 2) {
-      this.windsurfTransientCooldownUntilMs.set(alias, Date.now() + 5 * 60_000);
-      this.windsurfTransientFailureCount.set(alias, 0);
-      console.log(`[windsurf-account] transient-cooldown session=${sessionKey || 'provider-default-session'} cooldownMs=300000`);
-    }
+    void sessionKey;
+    void options;
   }
 
   private clearCurrentAliasTransientFailure(): void {
-    const alias = this.windsurfSessionCredential?.accountAlias || '';
-    if (!alias) return;
-    this.windsurfTransientFailureCount.delete(alias);
-    this.windsurfTransientCooldownUntilMs.delete(alias);
   }
 
   /** Cool the current account on quota exhaustion: skip health ranking until midnight. */
   private markCurrentAliasQuotaExhausted(sessionKey: string): void {
-    const alias = this.windsurfSessionCredential?.accountAlias || '';
-    if (!alias) return;
-    const cooldownMs = computeWindsurfQuotaCooldownUntilNextMidnightMs();
-    this.windsurfQuotaCooldownUntilMs.set(alias, Date.now() + cooldownMs);
-    this.windsurfUnavailableAccounts.add(alias);
-    try {
-      console.log(`[windsurf-account] quota-cooldown alias=${alias} cooldownMs=${cooldownMs}`);
-    } catch { /* best-effort */ }
+    void sessionKey;
   }
 
   private buildCascadeAuthProbeBody(apiKey: string): Buffer {
@@ -2973,7 +3207,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     }
   }
 
-  private buildWindsurfMetadataProto(apiKey: string, sessionId: string): Buffer {
+  private buildWindsurfMetadataProto(apiKey: string, sessionId?: string): Buffer {
     const platform = os.platform() === 'darwin'
       ? 'macos'
       : os.platform() === 'win32'
@@ -2990,7 +3224,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       writeProtoStringField(7, version),
       writeProtoStringField(8, hardware),
       writeProtoVarintField(9, Math.floor(Math.random() * 2 ** 48)),
-      writeProtoStringField(10, sessionId),
+      ...(sessionId ? [writeProtoStringField(10, sessionId)] : []),
       writeProtoStringField(12, 'windsurf'),
     ]);
   }
@@ -2999,11 +3233,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     return Buffer.concat([
       writeProtoMessageField(1, this.buildWindsurfMetadataProto(apiKey, sessionId)),
       writeProtoVarintField(4, 1),
-      writeProtoVarintField(5, 1),
     ]);
   }
 
-  private buildNativeCascadeToolConfig(allowlist: WindsurfCascadeToolStepKind[]): Buffer {
+  private buildNativeCascadeToolConfig(allowlist: WindsurfCascadeToolStepKind[], mcpMode = false): Buffer {
     const list = allowlist.length > 0 ? allowlist : ['view_file', 'run_command', 'grep_search_v2', 'find', 'list_directory'];
     const parts: Buffer[] = [];
     const includesKind = (kind: string) => list.includes(kind as WindsurfCascadeToolStepKind);
@@ -3012,6 +3245,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     if (includesKind('list_directory')) parts.push(writeProtoMessageField(19, Buffer.alloc(0)));
     if (includesKind('grep_search_v2')) parts.push(writeProtoMessageField(33, Buffer.alloc(0)));
     if (includesKind('find')) parts.push(writeProtoMessageField(5, Buffer.alloc(0)));
+    if (mcpMode) parts.push(writeProtoMessageField(16, writeProtoVarintField(2, 65536)));
     for (const name of list) parts.push(writeProtoStringField(32, name));
     return Buffer.concat(parts);
   }
@@ -3026,11 +3260,28 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     nativeMode?: boolean;
     nativeAllowlist?: WindsurfCascadeToolStepKind[];
     additionalSteps?: Buffer[];
-    mcpCompat?: Array<Record<string, unknown>>;
+    mcpMode?: boolean;
   }): Buffer {
     const conversationalParts: Buffer[] = [
       writeProtoVarintField(4, args.nativeMode ? 1 : 3),
     ];
+    if (!args.nativeMode && !args.mcpMode && !(args.additionalSteps || []).length) {
+      const plannerParts: Buffer[] = [];
+      if (args.modelUid) plannerParts.push(writeProtoStringField(35, args.modelUid));
+      if (args.modelEnum > 0) {
+        plannerParts.push(writeProtoMessageField(15, writeProtoVarintField(1, args.modelEnum)));
+        plannerParts.push(writeProtoVarintField(1, args.modelEnum));
+      }
+      const cascadeConfig = Buffer.concat([
+        writeProtoMessageField(1, Buffer.concat(plannerParts)),
+      ]);
+      return Buffer.concat([
+        writeProtoStringField(1, args.cascadeId),
+        writeProtoMessageField(2, writeProtoStringField(1, args.text)),
+        writeProtoMessageField(3, this.buildWindsurfMetadataProto(args.apiKey, args.sessionId)),
+        writeProtoMessageField(5, cascadeConfig),
+      ]);
+    }
     if (!args.nativeMode) {
       conversationalParts.push(writeProtoMessageField(10, Buffer.concat([
         writeProtoVarintField(1, 1),
@@ -3071,8 +3322,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       writeProtoVarintField(1, 1),
       writeProtoStringField(2, ''),
     ])));
-    if (args.nativeMode) {
-      plannerParts.push(writeProtoMessageField(13, this.buildNativeCascadeToolConfig(args.nativeAllowlist || [])));
+    if (args.nativeMode || args.mcpMode) {
+      plannerParts.push(writeProtoMessageField(13, this.buildNativeCascadeToolConfig(args.nativeAllowlist || [], args.mcpMode === true)));
     }
     const cascadeConfig = Buffer.concat([
       writeProtoMessageField(1, Buffer.concat(plannerParts)),
@@ -3087,7 +3338,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       writeProtoMessageField(3, this.buildWindsurfMetadataProto(args.apiKey, args.sessionId)),
       writeProtoMessageField(5, cascadeConfig),
       ...((args.additionalSteps || []).filter((step) => Buffer.isBuffer(step) && step.length > 0).map((step) => writeProtoMessageField(9, step))),
-      ...((args.mcpCompat || []).map((entry) => writeProtoMessageField(10, writeProtoStringField(1, stableStringify(entry))))),
     ]);
   }
 
@@ -3112,6 +3362,24 @@ export class WindsurfChatProvider extends HttpTransportProvider {
 
   private buildHeartbeatRequest(apiKey: string, sessionId: string): Buffer {
     return Buffer.concat([writeProtoMessageField(1, this.buildWindsurfMetadataProto(apiKey, sessionId))]);
+  }
+
+  private buildGetUserStatusRequest(apiKey: string): Buffer {
+    return Buffer.concat([writeProtoMessageField(1, this.buildWindsurfMetadataProto(apiKey))]);
+  }
+
+  private extractWindsurfUserStatusBytes(response: Buffer): Buffer | null {
+    const fields = this.parseProtoFields(response);
+    const userStatus = this.getProtoField(fields, 1, 2);
+    if (!userStatus || !(userStatus.value instanceof Uint8Array) || userStatus.value.length === 0) return null;
+    return Buffer.from(userStatus.value);
+  }
+
+  private buildUpdatePanelStateWithUserStatusRequest(apiKey: string, sessionId: string, userStatusBytes: Buffer | null): Buffer {
+    return Buffer.concat([
+      writeProtoMessageField(1, this.buildWindsurfMetadataProto(apiKey, sessionId)),
+      ...(userStatusBytes && userStatusBytes.length > 0 ? [writeProtoMessageField(2, userStatusBytes)] : []),
+    ]);
   }
 
   private buildAddTrackedWorkspaceRequest(workspacePath: string): Buffer {
@@ -3148,6 +3416,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     this.windsurfCascadeWarmupPromise = null;
     this.windsurfCascadeSessionIdOverride = null;
     this.clearPinnedGrpcRuntime();
+    const scope = WindsurfChatProvider.cascadeRuntimeScope.getStore();
+    if (scope?.sessionKey) {
+      this.windsurfCascadeSessionBindings.delete(scope.sessionKey);
+    }
     if (/transport|timeout|warmup|panel|send|cascade/i.test(reason)) {
       this.disposeManagedLocalGrpcRuntime(reason);
     }
@@ -3185,29 +3457,14 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   }
 
   private resolveCascadeRuntimeQueueKey(): string {
+    const scopedAlias = WindsurfChatProvider.cascadeRuntimeScope.getStore()?.accountAlias?.trim() || '';
+    if (scopedAlias) return scopedAlias;
     const credentialAlias = this.windsurfSessionCredential?.accountAlias?.trim() || '';
     if (credentialAlias) return credentialAlias;
     const auth = (this.config.config as Record<string, unknown>).auth as Record<string, unknown> | undefined;
     const alias = typeof auth?.accountAlias === 'string' && auth.accountAlias.trim() ? auth.accountAlias.trim() : '';
     const account = typeof auth?.account === 'string' && auth.account.trim() ? auth.account.trim() : '';
     return alias || account || 'windsurf-default-runtime';
-  }
-
-  private async runExclusiveCascadeRuntime<T>(operation: () => Promise<T>): Promise<T> {
-    const key = this.resolveCascadeRuntimeQueueKey();
-    const previous = WindsurfChatProvider.cascadeRuntimeQueues.get(key) || Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => { release = resolve; });
-    WindsurfChatProvider.cascadeRuntimeQueues.set(key, previous.then(() => current, () => current));
-    await previous.catch(() => undefined);
-    try {
-      return await operation();
-    } finally {
-      release();
-      if (WindsurfChatProvider.cascadeRuntimeQueues.get(key) === current) {
-        WindsurfChatProvider.cascadeRuntimeQueues.delete(key);
-      }
-    }
   }
 
   private extractLatestCascadeUserText(semanticConversation: WindsurfSemanticTurn[], tailParts: string[] = []): string {
@@ -3272,6 +3529,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     modelUid: string,
     mcpTools: Array<Record<string, unknown>> = [],
     seedTailParts: string[] = [],
+    nativeTools: Array<Record<string, unknown>> = [],
+    toolChoice?: unknown,
   ): string {
     const rawMessages = Array.isArray(messages) ? messages.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object') : [];
     const systemMsgs = rawMessages.filter((msg) => String(msg.role || '').trim().toLowerCase() === 'system');
@@ -3282,10 +3541,11 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const tailParts: string[] = Array.isArray(seedTailParts)
       ? seedTailParts.filter((part) => typeof part === 'string' && part.trim()).map((part) => part.trim())
       : [];
-    const prefixParts = [sysText].filter((part) => typeof part === 'string' && part.trim());
+    const nativeToolAliasText = this.buildWindsurfNativeToolAliasText(nativeTools, toolChoice);
+    const prefixParts = [sysText, nativeToolAliasText].filter((part) => typeof part === 'string' && part.trim());
 
     if (convo.length <= 1) {
-      const latest = this.extractLatestCascadeUserText(semanticConversation, tailParts);
+      const latest = this.rewriteWindsurfNativeToolAliasesInText(this.extractLatestCascadeUserText(semanticConversation, tailParts), nativeTools);
       return prefixParts.length > 0 ? `${prefixParts.join('\n\n')}\n\n${latest}` : latest;
     }
 
@@ -3309,12 +3569,50 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       historyBytes += line.length;
       firstIncluded = index;
     }
-    const latest = this.extractLatestCascadeUserText(semanticConversation, tailParts);
+    const latest = this.rewriteWindsurfNativeToolAliasesInText(this.extractLatestCascadeUserText(semanticConversation, tailParts), nativeTools);
     let text = `The following is a multi-turn conversation. You MUST remember and use all information from prior turns.\n\n${lines.join('\n\n')}\n\n<human>\n${latest}\n</human>`;
     if (firstIncluded > 0) {
       text = `<truncation_note>The conversation above is truncated — ${firstIncluded} earlier turns were dropped due to length limits. The user's original task and the most recent tool results are preserved. Do NOT ask the user to repeat their task; continue from the latest context.</truncation_note>\n\n${text}`;
     }
     return prefixParts.length > 0 ? `${prefixParts.join('\n\n')}\n\n${text}` : text;
+  }
+
+  private buildWindsurfNativeToolAliasText(nativeTools: Array<Record<string, unknown>> = [], toolChoice?: unknown): string {
+    const mapped = collectWindsurfMappedTools(nativeTools);
+    if (mapped.length === 0) return '';
+    const lines: string[] = [];
+    for (const tool of mapped) {
+      const standardName = String(tool.name || '').trim();
+      if (!standardName || standardName === tool.kind) continue;
+      lines.push(`- Client tool \`${standardName}\` is available in Cascade as native tool \`${tool.kind}\`.`);
+    }
+    if (lines.length === 0) return '';
+    const choiceName = this.extractWindsurfToolChoiceName(toolChoice);
+    const choice = choiceName ? mapped.find((tool) => windsurfToolLookupName(tool.name) === windsurfToolLookupName(choiceName)) : null;
+    return [
+      'Cascade native tool name mapping for this request:',
+      ...lines,
+      ...(choice ? [`The client explicitly selected \`${choice.name}\`; satisfy that by calling native tool \`${choice.kind}\`. Do not say \`${choice.name}\` is unavailable.`] : []),
+    ].join('\n');
+  }
+
+  private rewriteWindsurfNativeToolAliasesInText(text: string, nativeTools: Array<Record<string, unknown>> = []): string {
+    let out = String(text || '');
+    for (const tool of collectWindsurfMappedTools(nativeTools)) {
+      const standardName = String(tool.name || '').trim();
+      if (!standardName || standardName === tool.kind) continue;
+      const escaped = standardName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      out = out.replace(new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'g'), tool.kind);
+    }
+    return out;
+  }
+
+  private extractWindsurfToolChoiceName(toolChoice: unknown): string {
+    if (!toolChoice || typeof toolChoice !== 'object' || Array.isArray(toolChoice)) return '';
+    const row = toolChoice as Record<string, unknown>;
+    if (typeof row.name === 'string') return row.name.trim();
+    const fn = row.function && typeof row.function === 'object' && !Array.isArray(row.function) ? row.function as Record<string, unknown> : null;
+    return typeof fn?.name === 'string' ? fn.name.trim() : '';
   }
 
   private readDeltaSeedParts(body: Record<string, unknown>): string[] {
@@ -3396,9 +3694,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
 
   private handleWindsurfCascadeTransportFailure(error: unknown): Error {
     const classified = this.classifyWindsurfCascadeError(error) as Error & Record<string, unknown>;
-    if (classified.code === 'WINDSURF_UPSTREAM_TRANSIENT' || classified.code === 'WINDSURF_FETCH_TIMEOUT') {
-      this.resetWindsurfCascadeTransportState('transport-failure');
-    }
     return classified;
   }
 
@@ -3412,7 +3707,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     nativeMode?: boolean;
     nativeAllowlist?: WindsurfCascadeToolStepKind[];
     additionalSteps?: Buffer[];
-    mcpCompat?: Array<Record<string, unknown>>;
+    mcpMode?: boolean;
   }): Promise<void> {
     const payload = this.buildSendCascadeMessageRequest(args);
     await this.snapshotWindsurfCascadeProviderRequest(args, payload);
@@ -3435,12 +3730,11 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     nativeMode?: boolean;
     nativeAllowlist?: WindsurfCascadeToolStepKind[];
     additionalSteps?: Buffer[];
-    mcpCompat?: Array<Record<string, unknown>>;
+    mcpMode?: boolean;
   }, payload: Buffer): Promise<void> {
     const context = this.createProviderContext();
     const additionalSteps = Array.isArray(args.additionalSteps) ? args.additionalSteps.filter((step) => Buffer.isBuffer(step) && step.length > 0) : [];
     const text = String(args.text || '');
-    const mcpCompat = Array.isArray(args.mcpCompat) ? args.mcpCompat.filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)) : [];
     try {
       await writeProviderSnapshot({
         phase: 'provider-request',
@@ -3455,7 +3749,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
           nativeMode: args.nativeMode === true,
           nativeAllowlist: args.nativeAllowlist || [],
           additionalStepsCount: additionalSteps.length,
-          mcpCompatCount: mcpCompat.length,
+          mcpMode: args.mcpMode === true,
           payloadBytes: payload.length,
           textBytes: Buffer.byteLength(text, 'utf8'),
           text,
@@ -3478,13 +3772,16 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   private async pollCascadeTrajectorySteps(args: {
     cascadeId: string;
     model: string;
+    stepOffset?: number;
     promptChars?: number;
     customTools?: Array<Record<string, unknown>>;
+    nativeTools?: Array<Record<string, unknown>>;
     completedNativeToolCallIds?: string[];
     completedNativeToolSignatures?: string[];
   }): Promise<{
     candidate: Record<string, unknown>;
     usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } | null;
+    stepOffset: number;
   }> {
     try {
       void args.model;
@@ -3509,13 +3806,17 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       let lastStepCount = 0;
       const completedNativeToolCallIds = new Set(Array.isArray(args.completedNativeToolCallIds) ? args.completedNativeToolCallIds : []);
       const completedNativeToolSignatures = new Set(Array.isArray(args.completedNativeToolSignatures) ? args.completedNativeToolSignatures : []);
+      const stepOffset = Number.isFinite(Number(args.stepOffset)) && Number(args.stepOffset) >= 0
+        ? Math.floor(Number(args.stepOffset))
+        : 0;
 
       while (Date.now() - startedAt < maxWaitMs) {
         const stepsResponse = await this.grpcUnaryLocal(
           `${WINDSURF_LS_SERVICE}/GetCascadeTrajectorySteps`,
-          this.buildGetTrajectoryStepsRequest(args.cascadeId, 0),
+          this.buildGetTrajectoryStepsRequest(args.cascadeId, stepOffset),
         );
         const steps = this.parseTrajectorySteps(stepsResponse);
+        const nextStepOffset = stepOffset + steps.length;
         let accumulatedText = '';
         let accumulatedThinking = '';
         const toolCalls: Array<Record<string, unknown>> = [];
@@ -3592,8 +3893,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             content: accumulatedText,
             ...(accumulatedThinking ? { reasoning_content: accumulatedThinking } : {}),
             tool_calls: toolCalls,
-          }, args.customTools || []);
-          return { candidate, usage };
+          }, [...(args.nativeTools || []), ...(args.customTools || [])]);
+          return { candidate, usage, stepOffset: nextStepOffset };
         }
 
         lastText = accumulatedText || lastText;
@@ -3627,9 +3928,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
           if (canBreak) {
             const finalStepsResponse = await this.grpcUnaryLocal(
               `${WINDSURF_LS_SERVICE}/GetCascadeTrajectorySteps`,
-              this.buildGetTrajectoryStepsRequest(args.cascadeId, 0),
+              this.buildGetTrajectoryStepsRequest(args.cascadeId, stepOffset),
             );
             const finalSteps = this.parseTrajectorySteps(finalStepsResponse);
+            const finalStepOffset = stepOffset + finalSteps.length;
             let finalText = '';
             let finalThinking = '';
             for (const step of finalSteps) {
@@ -3659,7 +3961,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
               content: finalContent,
               ...(finalReasoning ? { reasoning_content: finalReasoning } : {}),
             }, args.customTools || []);
-            return { candidate, usage };
+            return { candidate, usage, stepOffset: finalStepOffset };
           }
         }
 
@@ -3688,6 +3990,17 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const workspacePath = this.resolveManagedWorkspacePath(apiKey);
     await fs.mkdir(workspacePath, { recursive: true });
     this.windsurfCascadeWarmupPromise = (async () => {
+      const userStatusResponse = await this.grpcUnaryLocal(
+        `${WINDSURF_LS_SERVICE}/GetUserStatus`,
+        this.buildGetUserStatusRequest(apiKey),
+        10_000,
+      );
+      const userStatusBytes = this.extractWindsurfUserStatusBytes(userStatusResponse);
+      await this.grpcUnaryLocal(
+        `${WINDSURF_LS_SERVICE}/UpdatePanelStateWithUserStatus`,
+        this.buildUpdatePanelStateWithUserStatusRequest(apiKey, sessionId, userStatusBytes),
+        5_000,
+      );
       await this.grpcUnaryLocal(
         `${WINDSURF_LS_SERVICE}/InitializeCascadePanelState`,
         this.buildInitializePanelStateRequest(apiKey, sessionId),
@@ -3992,7 +4305,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     const configured = typeof this.windsurfRuntime.workspacePath === 'string' ? this.windsurfRuntime.workspacePath.trim() : '';
     if (configured) return configured;
     const wsId = createHash('sha256').update(apiKey || '').digest('hex').slice(0, 16);
-    return path.join(os.homedir(), '.rcc', 'windsurf-workspaces', `workspace-${wsId}`);
+    return path.join(os.tmpdir(), 'routecodex-windsurf-workspaces', `workspace-${wsId}`);
   }
 
   private parseWindsurfLiveLocalGrpcRuntimeLine(line: string): WindsurfLiveLocalGrpcRuntime | null {
@@ -4120,7 +4433,31 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     return candidates.length > 0 ? candidates : [configured];
   }
 
-  private async selectUsablePinnedGrpcRuntime(apiKey: string): Promise<{ sessionId: string; cascadeId: string }> {
+  private rememberWindsurfCascadeSessionBinding(
+    sessionKey: string,
+    binding: Omit<WindsurfCascadeSessionBinding, 'active' | 'lastUsedAtMs'> & Partial<Pick<WindsurfCascadeSessionBinding, 'active' | 'lastUsedAtMs'>>,
+  ): void {
+    const key = this.normalizeWindsurfSessionKey(sessionKey);
+    const stepOffset = Number.isFinite(Number(binding.stepOffset)) && Number(binding.stepOffset) >= 0
+      ? Math.floor(Number(binding.stepOffset))
+      : 0;
+    this.windsurfCascadeSessionBindings.set(key, { ...binding, stepOffset, active: binding.active ?? true, lastUsedAtMs: binding.lastUsedAtMs ?? Date.now() });
+  }
+
+  private async selectUsablePinnedGrpcRuntime(apiKey: string): Promise<{ sessionId: string; cascadeId: string; stepOffset: number }> {
+    const scope = WindsurfChatProvider.cascadeRuntimeScope.getStore();
+    const sessionKey = this.normalizeWindsurfSessionKey(scope?.sessionKey || 'provider-default-session');
+    this.cleanupReleasedWindsurfSessions();
+    const existing = this.windsurfCascadeSessionBindings.get(sessionKey);
+    if (existing?.cascadeId && existing.sessionId) {
+      this.setPinnedGrpcRuntime(existing.runtime);
+      this.windsurfCascadeSessionBindings.set(sessionKey, { ...existing, active: true, lastUsedAtMs: Date.now() });
+      return {
+        sessionId: existing.sessionId,
+        cascadeId: existing.cascadeId,
+        stepOffset: existing.stepOffset,
+      };
+    }
     const managed = await this.resolveManagedRuntimeOptions();
     const candidates = [managed];
     let lastError: unknown = null;
@@ -4132,7 +4469,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       try {
         const sessionId = this.resolveWindsurfCascadeSessionId(true);
         const cascadeId = await this.sendStartCascade({ apiKey, sessionId });
-        return { sessionId, cascadeId };
+        const binding = { runtime: candidate, sessionId, cascadeId, stepOffset: 0, active: true, lastUsedAtMs: Date.now() };
+        this.rememberWindsurfCascadeSessionBinding(sessionKey, binding);
+        return binding;
       } catch (error) {
         lastError = error;
         this.logWindsurfStage('cascade.runtime.probe.failed', {
@@ -4919,8 +5258,17 @@ ${stderr}` : '');
   }
 
 
-  private parseCascadeAssistantTurnSync(candidate: unknown, mcpTools: Array<Record<string, unknown>> = []): Record<string, unknown> {
-    void mcpTools;
+  private resolveStandardToolNameFromCascadeToolName(name: string, nativeTools: Array<Record<string, unknown>> = []): { name: string; nativeKind?: WindsurfCascadeToolStepKind } {
+    const normalized = windsurfToolLookupName(name);
+    const mapped = WINDSURF_TOOL_MAP[normalized];
+    if (!normalized || !mapped) return { name };
+    const declared = collectWindsurfMappedTools(nativeTools);
+    const matchingDeclared = declared.find((tool) => tool.kind === mapped.kind);
+    if (!matchingDeclared?.name) return { name };
+    return { name: matchingDeclared.name, nativeKind: mapped.kind };
+  }
+
+  private parseCascadeAssistantTurnSync(candidate: unknown, nativeTools: Array<Record<string, unknown>> = []): Record<string, unknown> {
     const record = candidate && typeof candidate === 'object' ? candidate as Record<string, unknown> : {};
     const rawContent = Array.isArray(record.content) ? record.content : [];
     const rawTopLevelToolCalls = Array.isArray(record.tool_calls) ? record.tool_calls : [];
@@ -4988,7 +5336,9 @@ ${stderr}` : '');
       if (!callId) {
         throw new Error('[windsurf] assistant tool call missing call_id');
       }
-      const argsJson = stableStringify(args);
+      const resolvedToolName = this.resolveStandardToolNameFromCascadeToolName(name, nativeTools);
+      const standardArgs = resolvedToolName.nativeKind ? reverseWindsurfNativeToolArguments(resolvedToolName.name, resolvedToolName.nativeKind, args) : args;
+      const argsJson = stableStringify(standardArgs);
       if (seenToolCallIds.has(callId)) {
         throw new Error('[windsurf] duplicate assistant tool call id in assistant candidate');
       }
@@ -4997,7 +5347,7 @@ ${stderr}` : '');
         id: callId,
         type: 'function',
         function: {
-          name,
+          name: resolvedToolName.name,
           arguments: argsJson,
         },
       });
@@ -5063,7 +5413,9 @@ ${stderr}` : '');
       } else {
         throw new Error('[windsurf] assistant tool call arguments must be object');
       }
-      const argsJson = stableStringify(args);
+      const resolvedToolName = this.resolveStandardToolNameFromCascadeToolName(name, nativeTools);
+      const standardArgs = resolvedToolName.nativeKind ? reverseWindsurfNativeToolArguments(resolvedToolName.name, resolvedToolName.nativeKind, args) : args;
+      const argsJson = stableStringify(standardArgs);
       if (seenToolCallIds.has(callId)) {
         throw new Error('[windsurf] duplicate assistant tool call id in assistant candidate');
       }
@@ -5072,7 +5424,7 @@ ${stderr}` : '');
         id: callId,
         type: 'function',
         function: {
-          name,
+          name: resolvedToolName.name,
           arguments: argsJson,
         },
       });
@@ -5425,13 +5777,14 @@ ${stderr}` : '');
     model: string;
     candidate: unknown;
     usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } | null;
+    nativeTools?: Array<Record<string, unknown>>;
   }): Record<string, unknown> {
     const candidate = payload.candidate;
     if (!candidate || typeof candidate !== 'object') {
       throw new Error('[windsurf] empty cascade candidate payload');
     }
 
-    const parsed = this.parseCascadeAssistantTurnSync(candidate);
+    const parsed = this.parseCascadeAssistantTurnSync(candidate, payload.nativeTools || []);
     const toolCalls = Array.isArray((parsed as Record<string, unknown>).tool_calls)
       ? ((parsed as Record<string, unknown>).tool_calls as unknown[])
       : [];

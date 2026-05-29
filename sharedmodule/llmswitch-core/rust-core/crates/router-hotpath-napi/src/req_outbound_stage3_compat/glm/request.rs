@@ -1,5 +1,5 @@
-use serde_json::{json, Map, Number, Value};
 use crate::shared_json_utils::read_trimmed_string;
+use serde_json::{json, Map, Number, Value};
 
 const AUTO_THINKING_MODEL_PREFIXES: [&str; 4] = ["glm-4.7", "glm-4.6", "glm-4.5", "glm-z1"];
 const AUTO_THINKING_EXCLUDE_PREFIXES: [&str; 1] = ["glm-4.6v"];

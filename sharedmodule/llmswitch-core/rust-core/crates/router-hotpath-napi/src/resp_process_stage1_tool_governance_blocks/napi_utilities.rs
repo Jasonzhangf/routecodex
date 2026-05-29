@@ -122,7 +122,11 @@ pub(crate) fn validate_apply_patch_arguments(input: &Value) -> Value {
     Value::Object(out)
 }
 
-fn collect_unique_tool_names(candidate: &Value, names: &mut Vec<String>, seen: &mut HashSet<String>) {
+fn collect_unique_tool_names(
+    candidate: &Value,
+    names: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+) {
     for name in collect_tool_names_from_candidate(candidate) {
         if seen.insert(name.clone()) {
             names.push(name);
@@ -135,9 +139,13 @@ fn read_tool_name(item: &Value) -> Option<String> {
         Value::String(s) => read_non_empty_trimmed(s),
         Value::Object(m) => {
             if let Some(Value::Object(func)) = m.get("function") {
-                func.get("name").and_then(Value::as_str).and_then(read_non_empty_trimmed)
+                func.get("name")
+                    .and_then(Value::as_str)
+                    .and_then(read_non_empty_trimmed)
             } else {
-                m.get("name").and_then(Value::as_str).and_then(read_non_empty_trimmed)
+                m.get("name")
+                    .and_then(Value::as_str)
+                    .and_then(read_non_empty_trimmed)
             }
         }
         _ => None,

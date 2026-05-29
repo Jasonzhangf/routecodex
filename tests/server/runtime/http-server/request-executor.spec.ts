@@ -209,7 +209,7 @@ describe('HubRequestExecutor failover', () => {
   });
 
 
-  test('reselects alternative windsurf key when transport backoff is still active on newly selected target', async () => {
+  test('keeps windsurf provider-account ownership out of executor retry routing', async () => {
     const recordAttempt = () => undefined;
 
     const sameProviderAltKeyExcluded = new Set<string>();
@@ -342,16 +342,72 @@ describe('HubRequestExecutor failover', () => {
       hubStartedAtMs: Date.now() - 10,
       pipelineLabel: 'hub'
     });
-    expect(backoffReselectionPlan).toEqual({
-      kind: 'retry_next_attempt',
+    expect(backoffReselectionPlan).toEqual(expect.objectContaining({
+      kind: 'resolved',
       initialRoutePool: [
         'windsurf.ws-pro-1.gpt-5.4-medium',
         'windsurf.ws-pro-2.gpt-5.4-medium',
         'windsurf.ws-pro-3.gpt-5.4-medium'
       ]
-    });
-    expect(Array.from(windsurfTransportBackoffExcluded)).toEqual(['windsurf.ws-pro-1.gpt-5.4-medium']);
+    }));
+    expect(Array.from(windsurfTransportBackoffExcluded)).toEqual([]);
     __requestExecutorTestables.clearProviderTransportBackoff(windsurfTransportBackoffKey!);
+
+    const windsurfManagedExcluded = new Set<string>(['windsurf.managed.gpt-5.5-low']);
+    const windsurfManagedBackoffKey = __requestExecutorTestables.buildProviderTransportBackoffKey({
+      providerKey: 'windsurf.managed.gpt-5.5-low',
+      runtimeKey: 'windsurf.managed.gpt-5.5-low'
+    });
+    expect(typeof windsurfManagedBackoffKey).toBe('string');
+    __requestExecutorTestables.consumeProviderTransportBackoffMs(windsurfManagedBackoffKey!, {
+      error: Object.assign(new Error('managed transient'), {
+        code: 'WINDSURF_UPSTREAM_TRANSIENT',
+        upstreamCode: 'WINDSURF_UPSTREAM_TRANSIENT',
+        statusCode: 502,
+      }),
+      statusCode: 502,
+    });
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(windsurfManagedBackoffKey!)).toBeGreaterThan(0);
+
+    const managedPlan = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-windsurf-managed-no-pipeline-backoff-reselect',
+      providerRequestId: 'req-windsurf-managed-no-pipeline-backoff-reselect',
+      attempt: 2,
+      metadataForAttempt: {},
+      pipelineResult: {
+        requestId: 'req-windsurf-managed-no-pipeline-backoff-reselect',
+        metadata: {},
+        routingDecision: {
+          routeName: 'search',
+          pool: ['windsurf.managed.gpt-5.5-low']
+        },
+        providerPayload: { body: { model: 'gpt-5.5-low' } },
+        target: {
+          providerKey: 'windsurf.managed.gpt-5.5-low',
+          runtimeKey: 'windsurf.managed.gpt-5.5-low',
+          compatibilityProfile: 'chat:windsurf'
+        }
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'req-windsurf-managed-no-pipeline-backoff-reselect',
+      clientAbortSignal: undefined,
+      initialRoutePool: null,
+      excludedProviderKeys: windsurfManagedExcluded,
+      lastError: Object.assign(new Error('managed transient'), {
+        code: 'WINDSURF_UPSTREAM_TRANSIENT'
+      }),
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: __requestExecutorTestables.extractRetryErrorSnapshot,
+      hubStartedAtMs: Date.now() - 10,
+      pipelineLabel: 'hub'
+    });
+    expect(managedPlan).toEqual(expect.objectContaining({
+      kind: 'resolved',
+      initialRoutePool: ['windsurf.managed.gpt-5.5-low']
+    }));
+    expect(Array.from(windsurfManagedExcluded)).toEqual([]);
+    __requestExecutorTestables.clearProviderTransportBackoff(windsurfManagedBackoffKey!);
 
     const windsurfWeeklyQuotaExcluded = new Set<string>();
     const windsurfWeeklyQuotaExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
@@ -448,6 +504,50 @@ describe('HubRequestExecutor failover', () => {
         switchAction: 'retry_same_provider'
       })
     }));
+    expect(Array.from(excluded)).toEqual([]);
+  });
+
+  test('RED: windsurf managed account pool cooldown must fail fast instead of retrying forever', async () => {
+    const excluded = new Set<string>();
+    const recordAttempt = jest.fn();
+    const executionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+      error: Object.assign(new Error('windsurf managed account pool is cooling down'), {
+        code: 'WINDSURF_ACCOUNT_POOL_COOLDOWN',
+        upstreamCode: 'WINDSURF_ACCOUNT_POOL_COOLDOWN',
+        status: 429,
+        retryable: true,
+        rateLimitKind: 'synthetic_cooldown',
+        cooldownOverrideMs: 300_000,
+      }),
+      retryError: {
+        statusCode: 429,
+        errorCode: 'WINDSURF_ACCOUNT_POOL_COOLDOWN',
+        upstreamCode: 'WINDSURF_ACCOUNT_POOL_COOLDOWN',
+        reason: 'windsurf managed account pool is cooling down'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      providerKey: 'windsurf.managed.gpt-5.5-low',
+      runtimeKey: 'windsurf.managed',
+      logicalRequestChainKey: 'req-windsurf-managed-pool-cooldown',
+      logicalChainRetryLimitStageRequestId: 'req-windsurf-managed-pool-cooldown',
+      routePool: ['windsurf.managed.gpt-5.5-low'],
+      runtimeManager: {
+        resolveRuntimeKey: (providerKey?: string) => providerKey ? providerKey.split('.gpt-')[0] : undefined
+      },
+      excludedProviderKeys: excluded,
+      recordAttempt,
+      logStage: () => undefined,
+      status: 429
+    });
+
+    expect(executionPlan).toEqual(expect.objectContaining({
+      shouldRetry: false,
+      excludedCurrentProvider: false,
+      retryBackoffMs: 0,
+      recoverableBackoffMs: 0,
+    }));
+    expect(recordAttempt).toHaveBeenCalledWith({ error: true });
     expect(Array.from(excluded)).toEqual([]);
   });
 
@@ -3174,8 +3274,8 @@ describe('HubRequestExecutor failover', () => {
       });
 
       expect(result).toEqual(expect.objectContaining({ status: 200 }));
-      expect(selectedProviders).toEqual([providerA, providerB]);
-      expect(processA).toHaveBeenCalledTimes(1);
+      expect(selectedProviders).toEqual([providerA, providerA, providerA, providerB]);
+      expect(processA).toHaveBeenCalledTimes(3);
       expect(processB).toHaveBeenCalledTimes(1);
       const switchLines = warnSpy.mock.calls
         .map((call) => String(call[0] ?? ''))
@@ -3308,6 +3408,157 @@ describe('HubRequestExecutor failover', () => {
       } else {
         process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = previousMax;
       }
+    }
+  });
+
+  test('RED: windsurf managed provider must not acquire global traffic permit before provider account selection', async () => {
+    const providerKey = 'windsurf.managed.gpt-5.5-low';
+    const processWindsurf = jest.fn(async () => ({ status: 200, data: { id: 'windsurf_ok' } }));
+    const handles = new Map<string, ProviderHandle>([
+      [providerKey, buildHandle(providerKey, processWindsurf)]
+    ]);
+    const runtimeManager = {
+      resolveRuntimeKey: (key?: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+    const pipeline = {
+      execute: jest.fn(async (input: any) => ({
+        requestId: input.id,
+        providerPayload: {},
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: providerKey
+        },
+        routingDecision: {
+          routeName: 'search',
+          pool: [providerKey]
+        },
+        metadata: {}
+      })),
+      updateVirtualRouterConfig: jest.fn()
+    };
+    const trafficGovernor: ProviderTrafficGovernorLike = {
+      acquire: jest.fn(async () => {
+        throw Object.assign(new Error('global windsurf managed traffic lock should not be used'), {
+          code: 'PROVIDER_TRAFFIC_SATURATED',
+          status: 429,
+        });
+      }),
+      release: jest.fn(async () => ({ released: true, activeInFlight: 0 })),
+      observeOutcome: jest.fn(async () => undefined),
+      isRuntimeBusy: jest.fn(() => false),
+      setConcurrencyBusyCallback: jest.fn(),
+    };
+    const executor = createRequestExecutor({
+      runtimeManager,
+      getHubPipeline: () => pipeline as any,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager(),
+      trafficGovernor
+    });
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({ status: 200, body: { output_text: 'windsurf-ok' } });
+
+    const result = await executor.execute({
+      requestId: 'req-windsurf-managed-no-global-traffic-lock',
+      entryEndpoint: '/v1/responses',
+      body: {},
+      headers: {},
+      metadata: {}
+    });
+
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(processWindsurf).toHaveBeenCalledTimes(1);
+    expect(trafficGovernor.acquire).not.toHaveBeenCalled();
+    expect(trafficGovernor.release).not.toHaveBeenCalled();
+  });
+
+  test('RED: windsurf managed provider must not record executor transport backoff across provider-owned accounts', async () => {
+    const providerKey = 'windsurf.managed.gpt-5.5-low';
+    const firstError = Object.assign(new Error('upstream transient'), {
+      code: 'WINDSURF_UPSTREAM_TRANSIENT',
+      upstreamCode: 'WINDSURF_UPSTREAM_TRANSIENT',
+      statusCode: 502,
+      retryable: true,
+    });
+    const processWindsurf = jest.fn()
+      .mockRejectedValueOnce(firstError)
+      .mockResolvedValueOnce({ status: 200, data: { id: 'windsurf_ok_after_retry' } });
+    const handles = new Map<string, ProviderHandle>([
+      [providerKey, buildHandle(providerKey, processWindsurf)]
+    ]);
+    const runtimeManager = {
+      resolveRuntimeKey: (key?: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+    const pipeline = {
+      execute: jest.fn(async (input: any) => ({
+        requestId: input.id,
+        providerPayload: {},
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: providerKey
+        },
+        routingDecision: {
+          routeName: 'search',
+          pool: [providerKey]
+        },
+        metadata: {}
+      })),
+      updateVirtualRouterConfig: jest.fn()
+    };
+    const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    const previousBase = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+    const previousMax = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = '1';
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = '1';
+    const logStage = jest.fn();
+    try {
+      const executor = createRequestExecutor({
+        runtimeManager,
+        getHubPipeline: () => pipeline as any,
+        getModuleDependencies: () => ({
+          errorHandlingCenter: {
+            handleError: jest.fn(async () => undefined)
+          }
+        }),
+        logStage,
+        stats: new StatsManager()
+      });
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValue({ status: 200, body: { output_text: 'windsurf-ok' } });
+
+      const result = await executor.execute({
+        requestId: 'req-windsurf-managed-no-executor-transport-backoff',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+
+      expect(result).toEqual(expect.objectContaining({ status: 200 }));
+      expect(processWindsurf).toHaveBeenCalledTimes(2);
+      expect(logStage.mock.calls.map((call) => call[0])).not.toContain('provider.transport_backoff.recorded');
+      expect(logStage.mock.calls.map((call) => call[0])).not.toContain('provider.transport_backoff_wait');
+    } finally {
+      if (previousAttempts === undefined) delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      else process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
+      if (previousBase === undefined) delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+      else process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = previousBase;
+      if (previousMax === undefined) delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
+      else process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = previousMax;
     }
   });
 
@@ -4270,6 +4521,45 @@ describe('HubRequestExecutor session storm backoff', () => {
     expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(4000);
     jest.setSystemTime(new Date('2026-04-22T12:00:07.000Z'));
     expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(5000);
+  });
+
+  test('RED: records storm backoff when hub routing fails before provider send', async () => {
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
+
+    const pipelineError = Object.assign(
+      new Error('No available providers after applying routing instructions'),
+      { code: 'PROVIDER_NOT_AVAILABLE' }
+    );
+    const pipeline = {
+      execute: jest.fn(async () => {
+        throw pipelineError;
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+    const logStage = jest.fn();
+    const executor = createRequestExecutor({
+      runtimeManager: { getHandleByRuntimeKey: jest.fn() } as any,
+      getHubPipeline: () => pipeline as any,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: { handleError: jest.fn(async () => undefined) }
+      }),
+      logStage,
+      stats: new StatsManager()
+    });
+
+    await expect(executor.execute({
+      requestId: 'req-hub-no-provider-storm-1',
+      entryEndpoint: '/v1/responses',
+      body: { model: 'gpt-5.2-codex', input: 'hello' },
+      headers: {},
+      metadata: { sessionId: 'storm-session-1' }
+    })).rejects.toMatchObject({ code: 'PROVIDER_NOT_AVAILABLE' });
+
+    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs('session:storm-session-1')).toBe(1000);
+    expect(
+      logStage.mock.calls.some((call) => call[0] === 'request.session_storm_backoff.recorded')
+    ).toBe(true);
   });
 
 });

@@ -10,7 +10,7 @@ const deps: any = {
   errorHandlingCenter: { handleError: async () => {} },
 };
 
-describe('Windsurf custom tools protocol (gRPC field 10)', () => {
+describe('Windsurf custom tools protocol (Cascade MCP)', () => {
   let WindsurfChatProvider: any;
 
   beforeAll(async () => {
@@ -27,16 +27,27 @@ describe('Windsurf custom tools protocol (gRPC field 10)', () => {
     },
   } as any, deps);
 
-  test('preprocess maps non-native tools to neutral windsurf_custom_tools field', async () => {
+  test('RED: preprocess keeps Windsurf custom tool partition private from Hub Pipeline', async () => {
     const provider = createProvider();
     const mapped = await (provider as any).preprocessRequest({
       body: {
         model: 'gpt-5.4-medium',
         messages: [{ role: 'user', content: 'patch file' }],
-        tools: [{ type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } }],
+        tools: [
+          { type: 'function', function: { name: 'node_repl', parameters: { type: 'object' }, mcp_compat: { server: 'node', fn: 'js' } } },
+        ],
       },
     });
-    expect(mapped.body.windsurf_custom_tools.map((t: any) => t.function.name)).toEqual(['apply_patch']);
+    expect(Object.keys(mapped.body)).not.toEqual(expect.arrayContaining([
+      'windsurf_custom_tools',
+      'windsurf_declared_native_tools',
+      'windsurf_native_allowlist',
+      'windsurf_native_mode',
+      'windsurf_tool_choice',
+    ]));
+    expect(JSON.stringify(mapped.body)).not.toContain('mcp_compat');
+    expect(JSON.stringify(mapped.body)).not.toContain('node_repl');
+    expect(mapped.body.tools).toBeUndefined();
     expect(mapped.body.windsurf_text_tool_protocol).toBeUndefined();
   });
 
@@ -63,7 +74,57 @@ describe('Windsurf custom tools protocol (gRPC field 10)', () => {
     expect(mapped.body.windsurf_custom_tools.map((t: any) => t.function.name)).toEqual(['custom_mcp_tool']);
   });
 
-  test('grpc body forwards single mcp_compat payload via SendUserCascadeMessageRequest field 10', async () => {
+  test('RED: repeated provider preprocess preserves private Windsurf native tool fields', async () => {
+    const provider = createProvider();
+    const first = await (provider as any).preprocessRequest({
+      model: 'kimi-k2-6',
+      messages: [{ role: 'user', content: 'run pwd' }],
+      tools: [{ type: 'function', function: { name: 'shell_command', parameters: { type: 'object' } } }],
+      tool_choice: { type: 'function', name: 'shell_command' },
+    });
+    expect(first.windsurf_native_mode).toBe(true);
+
+    const second = await (provider as any).preprocessRequest(first);
+    expect(second.windsurf_native_mode).toBe(true);
+    expect(second.windsurf_native_allowlist).toContain('run_command');
+    expect(second.windsurf_declared_native_tools.map((tool: any) => tool.function.name)).toEqual(['shell_command']);
+    expect(Object.keys(second)).not.toEqual(expect.arrayContaining([
+      'windsurf_declared_native_tools',
+      'windsurf_native_allowlist',
+      'windsurf_native_mode',
+      'windsurf_tool_choice',
+    ]));
+  });
+
+  test('RED: native standard tool names are explained as Cascade native aliases for tool_choice requests', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'call shell_command pwd' }],
+        tools: [{ type: 'function', function: { name: 'shell_command', parameters: { type: 'object' } } }],
+        tool_choice: { type: 'function', function: { name: 'shell_command' } },
+      },
+    });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const text = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-medium',
+      mapped.body.windsurf_custom_tools,
+      [],
+      mapped.body.windsurf_declared_native_tools,
+      mapped.body.windsurf_tool_choice,
+    );
+    expect(text).toContain('Client tool `shell_command` is available in Cascade as native tool `run_command`');
+    expect(text).toContain('satisfy that by calling native tool `run_command`');
+    expect(text).toContain('call run_command pwd');
+    expect(text).not.toContain('<|RCC|tool_calls>');
+    expect(text).not.toContain('<tool_call>');
+    expect(text).not.toContain('function_call');
+  });
+
+  test('RED: custom tools must enable Cascade MCP config and must not use SendUserCascadeMessage field 10', async () => {
     const provider = createProvider();
     const request = (provider as any).buildSendCascadeMessageRequest({
       apiKey: 'api-key-1',
@@ -72,28 +133,101 @@ describe('Windsurf custom tools protocol (gRPC field 10)', () => {
       sessionId: 'session-1',
       modelEnum: 0,
       modelUid: 'gpt-5-4-medium',
-      mcpCompat: [{ server: 's1', tool: 'apply_patch' }],
+      nativeMode: true,
+      nativeAllowlist: [],
+      mcpMode: true,
     });
     const fields = (provider as any).parseProtoFields(request);
-    expect((provider as any).getAllProtoFields(fields, 10, 2)).toHaveLength(1);
+    expect((provider as any).getAllProtoFields(fields, 10, 2)).toHaveLength(0);
+    const cascadeConfig = (provider as any).getProtoField(fields, 5, 2);
+    const cascadeFields = (provider as any).parseProtoFields(cascadeConfig.value);
+    const plannerConfig = (provider as any).getProtoField(cascadeFields, 1, 2);
+    const plannerFields = (provider as any).parseProtoFields(plannerConfig.value);
+    const toolConfig = (provider as any).getProtoField(plannerFields, 13, 2);
+    const toolFields = (provider as any).parseProtoFields(toolConfig.value);
+    expect((provider as any).getProtoField(toolFields, 16, 2)).toBeTruthy();
   });
 
-  test('grpc body forwards multiple mcp_compat payloads for multi-function MCP alignment', async () => {
+  test('sendRequestInternal forwards function.mcp_compat from custom tools', async () => {
     const provider = createProvider();
-    const request = (provider as any).buildSendCascadeMessageRequest({
-      apiKey: 'api-key-1',
-      cascadeId: 'cid-mcp-multi',
-      text: 'continue',
-      sessionId: 'session-1',
-      modelEnum: 0,
-      modelUid: 'gpt-5-4-medium',
-      mcpCompat: [
-        { server: 's1', tool: 'apply_patch', fn: 'apply_patch' },
-        { server: 's1', tool: 'write_stdin', fn: 'write_stdin' },
-      ],
+    jest.spyOn(provider, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$mcp' as never);
+    jest.spyOn(provider, 'resolveManagedRuntimeOptions').mockResolvedValue({ lsPort: 42101, csrfToken: 'csrf-mcp', sessionId: 'configured-session' } as never);
+    jest.spyOn(provider, 'sendStartCascade').mockResolvedValue('cascade-mcp-1' as never);
+    let sent: Record<string, unknown> | null = null;
+    jest.spyOn(provider, 'sendCascadeMessage').mockImplementation(async (args: unknown) => {
+      sent = args as Record<string, unknown>;
     });
-    const fields = (provider as any).parseProtoFields(request);
-    expect((provider as any).getAllProtoFields(fields, 10, 2)).toHaveLength(2);
+    jest.spyOn(provider, 'pollCascadeTrajectorySteps').mockResolvedValue({
+      candidate: { role: 'assistant', content: 'done' },
+      usage: { inputTokens: 1, outputTokens: 1 },
+      stepOffset: 1,
+    } as never);
+
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'continue' }],
+        tools: [
+          { type: 'function', function: { name: 'custom_mcp_tool', parameters: { type: 'object' }, mcp_compat: { server: 's1', fn: 'custom_mcp_tool' } } },
+        ],
+      },
+    });
+    await provider.sendRequestInternal(mapped);
+
+    expect(sent).toMatchObject({
+      nativeMode: true,
+      mcpMode: true,
+    });
+    expect(sent).not.toHaveProperty('mcpCompat');
+  });
+
+  test('RED: native Windsurf tool calls are returned as the original standard chat tool name', async () => {
+    const provider = createProvider();
+    jest.spyOn(provider, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$native' as never);
+    jest.spyOn(provider, 'resolveManagedRuntimeOptions').mockResolvedValue({ lsPort: 42101, csrfToken: 'csrf-native', sessionId: 'configured-session' } as never);
+    jest.spyOn(provider, 'sendStartCascade').mockResolvedValue('cascade-native-1' as never);
+    jest.spyOn(provider, 'sendCascadeMessage').mockResolvedValue(undefined as never);
+    jest.spyOn(provider, 'pollCascadeTrajectorySteps').mockResolvedValue({
+      candidate: {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'call_native_1', type: 'function', function: { name: 'run_command', arguments: '{"command_line":"pwd","cwd":"/tmp"}' } }],
+      },
+      usage: { inputTokens: 1, outputTokens: 1 },
+      stepOffset: 1,
+    } as never);
+
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'run pwd' }],
+        tools: [
+          { type: 'function', function: { name: 'shell_command', parameters: { type: 'object' } } },
+        ],
+      },
+    });
+    const result = await provider.sendRequestInternal(mapped) as any;
+    const toolCall = result.choices[0].message.tool_calls[0];
+
+    expect(toolCall.function.name).toBe('shell_command');
+    expect(JSON.parse(toolCall.function.arguments)).toMatchObject({ command: 'pwd', cwd: '/tmp' });
+  });
+
+  test('RED: standard non-native tools become MCP compact tool definitions without requiring mcp_compat metadata', async () => {
+    const provider = createProvider();
+    const mapped = await (provider as any).preprocessRequest({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [{ role: 'user', content: 'patch and stdin' }],
+        tools: [
+          { type: 'function', function: { name: 'apply_patch', description: 'patch files', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'write_stdin', description: 'write stdin', parameters: { type: 'object' } } },
+        ],
+      },
+    });
+    expect(mapped.body.windsurf_custom_tools.map((tool: any) => tool.function.name)).toEqual(['apply_patch', 'write_stdin']);
+    expect(mapped.body.windsurf_mcp_mode).toBe(true);
+    expect(mapped.body.windsurf_custom_tools.every((tool: any) => tool.function.mcp_compat === undefined)).toBe(true);
   });
 
   test('assistant text containing RCC tool tag is rejected (MCP-only)', () => {

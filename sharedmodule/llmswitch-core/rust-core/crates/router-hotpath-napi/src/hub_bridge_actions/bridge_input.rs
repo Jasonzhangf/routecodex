@@ -18,9 +18,7 @@ use super::types::{
     ExtractReasoningSegmentsOutput, RepairToolCallInput, ValidateToolArgumentsInput,
     ValidateToolArgumentsOutput,
 };
-use super::utils::{
-    coerce_bridge_role, is_synthetic_routecodex_tool_call_id, MediaBlock,
-};
+use super::utils::{coerce_bridge_role, is_synthetic_routecodex_tool_call_id, MediaBlock};
 
 #[derive(Clone)]
 struct DeferredToolResult {

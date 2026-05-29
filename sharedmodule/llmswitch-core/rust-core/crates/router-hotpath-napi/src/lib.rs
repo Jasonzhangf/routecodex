@@ -104,18 +104,18 @@ mod shared_tool_call_id_core;
 mod shared_tool_call_id_manager;
 mod shared_tool_mapping;
 mod shared_tooling;
+mod stop_message_auto_blocks;
 mod streaming_tool_extractor;
 mod thought_signature_validator;
 mod tool_harvester;
 mod virtual_router_engine;
 mod virtual_router_provider_key;
-mod stop_message_auto_blocks;
 mod virtual_router_stop_message_actions;
 mod virtual_router_stop_message_instruction;
 mod virtual_router_stop_message_state_codec;
 mod web_search_mode;
 mod windsurf_tool_history_projection;
-use crate::virtual_router_engine::routing::resolve_sticky_key as resolve_virtual_router_sticky_key;
+use crate::virtual_router_engine::routing::resolve_routing_state_key as resolve_virtual_router_routing_state_key;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct QuotaBucketInputEntry {
@@ -252,10 +252,10 @@ fn compute_quota_buckets(entries: Vec<QuotaBucketInputEntry>, now_ms: f64) -> Qu
 }
 
 #[napi]
-pub fn resolve_virtual_router_sticky_key_json(metadata_json: String) -> NapiResult<String> {
+pub fn resolve_virtual_router_routing_state_key_json(metadata_json: String) -> NapiResult<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_virtual_router_sticky_key(&metadata);
+    let output = resolve_virtual_router_routing_state_key(&metadata);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -956,7 +956,9 @@ pub fn parse_rcc_fence_document_json(text: String) -> NapiResult<String> {
 #[napi]
 pub fn decide_stop_message_action(ctx_json: String) -> NapiResult<String> {
     let ctx: stop_message_core::StopMessageDecisionContext = serde_json::from_str(&ctx_json)
-        .map_err(|e| napi::Error::from_reason(format!("deserialize StopMessageDecisionContext: {e}")))?;
+        .map_err(|e| {
+            napi::Error::from_reason(format!("deserialize StopMessageDecisionContext: {e}"))
+        })?;
     let decision = stop_message_auto_blocks::decide_stop_message_action(&ctx);
     serde_json::to_string(&decision)
         .map_err(|e| napi::Error::from_reason(format!("serialize StopMessageDecision: {e}")))
@@ -977,9 +979,15 @@ pub fn inject_loop_warning_json(input_json: String) -> NapiResult<String> {
 }
 
 #[napi]
-pub fn decide_budget_reset_json(stop_observed: bool, stop_eligible: bool, current_used: u32) -> String {
-    let decision = followup_mainline_blocks::budget_reset(stop_observed, stop_eligible, current_used);
-    serde_json::to_string(&decision).unwrap_or_else(|_| r#"{"should_reset":false,"next_used":0}"#.to_string())
+pub fn decide_budget_reset_json(
+    stop_observed: bool,
+    stop_eligible: bool,
+    current_used: u32,
+) -> String {
+    let decision =
+        followup_mainline_blocks::budget_reset(stop_observed, stop_eligible, current_used);
+    serde_json::to_string(&decision)
+        .unwrap_or_else(|_| r#"{"should_reset":false,"next_used":0}"#.to_string())
 }
 
 #[napi]

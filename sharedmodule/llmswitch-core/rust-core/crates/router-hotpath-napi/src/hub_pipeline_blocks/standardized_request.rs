@@ -166,6 +166,12 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
     let mut standardized_request = Map::<String, Value>::new();
     standardized_request.insert("model".to_string(), Value::String(model.clone()));
     standardized_request.insert("messages".to_string(), Value::Array(messages.clone()));
+    if let Some(previous_response_id) = previous_response_id.clone() {
+        standardized_request.insert(
+            "previous_response_id".to_string(),
+            Value::String(previous_response_id),
+        );
+    }
     if let Some(tools_array) = tools.as_ref() {
         standardized_request.insert("tools".to_string(), Value::Array(tools_array.clone()));
     }

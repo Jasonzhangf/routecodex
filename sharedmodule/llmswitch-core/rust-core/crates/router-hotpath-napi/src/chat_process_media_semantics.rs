@@ -403,6 +403,63 @@ pub fn strip_responses_context_input_historical_media(
     }
 }
 
+pub fn strip_responses_stored_context_input_media(
+    input_entries: Vec<Value>,
+    placeholder_text: String,
+) -> ChatProcessMediaStripOutput {
+    if input_entries.is_empty() {
+        return ChatProcessMediaStripOutput {
+            changed: false,
+            messages: input_entries,
+        };
+    }
+
+    let mut next_entries = input_entries.clone();
+    let mut changed = false;
+    let placeholder = if placeholder_text.trim().is_empty() {
+        "[Image omitted]".to_string()
+    } else {
+        placeholder_text
+    };
+
+    for entry in next_entries.iter_mut() {
+        if read_message_entry_role(entry) != "user" || !message_has_media_parts(entry) {
+            continue;
+        }
+        let Some(obj) = entry.as_object_mut() else {
+            continue;
+        };
+        let Some(content) = obj.get_mut("content").and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        let mut removed = false;
+        let mut filtered: Vec<Value> = Vec::with_capacity(content.len());
+        for part in content.iter() {
+            if part_type_contains_media(part) {
+                removed = true;
+                let mut replacement = serde_json::Map::new();
+                replacement.insert("type".to_string(), Value::String("input_text".to_string()));
+                replacement.insert(
+                    "text".to_string(),
+                    Value::String(placeholder_text_for_part(part, &placeholder)),
+                );
+                filtered.push(Value::Object(replacement));
+            } else {
+                filtered.push(part.clone());
+            }
+        }
+        if removed {
+            *content = filtered;
+            changed = true;
+        }
+    }
+
+    ChatProcessMediaStripOutput {
+        changed,
+        messages: if changed { next_entries } else { input_entries },
+    }
+}
+
 pub fn strip_latest_user_turn_media(
     messages: Vec<Value>,
     placeholder_text: String,

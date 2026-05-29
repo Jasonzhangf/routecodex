@@ -4,7 +4,7 @@ import type { RoutingInstructionState } from '../../../router/virtual-router/rou
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../../router/virtual-router/sticky-session-store.js';
+} from '../../../router/virtual-router/routing-state-store.js';
 import { countRequestTokens } from '../../../router/virtual-router/token-counter.js';
 
 type UsageLike = {

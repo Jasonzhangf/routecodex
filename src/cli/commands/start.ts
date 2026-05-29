@@ -69,6 +69,27 @@ function resolveStartShutdownHttpTimeoutMs(env: NodeJS.ProcessEnv): number {
   return 1200;
 }
 
+function sanitizeStartLogSegment(value: string): string {
+  const trimmed = String(value || '').trim();
+  const withoutJson = trimmed.replace(/\.json$/i, '') || trimmed;
+  const sanitized = withoutJson
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+  return sanitized || 'config';
+}
+
+function resolveStartConfigLogDir(args: {
+  pathImpl: typeof path;
+  homeDir: string;
+  configPath: string;
+}): string {
+  const userDir = resolveRccUserDir(args.homeDir);
+  const configBaseName = args.pathImpl.basename(String(args.configPath || '').trim() || 'config');
+  const configSegment = sanitizeStartLogSegment(configBaseName);
+  return args.pathImpl.join(userDir, 'log', configSegment);
+}
+
 function readChildStartupExitState(args: {
   port: number;
   routeCodexHomeDir?: string;
@@ -411,10 +432,17 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         const bindServerToParent = parseBoolish(
           ctx.env.ROUTECODEX_SERVER_PARENT_GUARD ?? ctx.env.RCC_SERVER_PARENT_GUARD
         ) ?? false;
+        const portLogRoot = pathImpl.join(resolveStartConfigLogDir({
+          pathImpl,
+          homeDir: home(),
+          configPath
+        }), 'ports');
         const childProcessEnv = {
           ...env,
           ROUTECODEX_MANAGED_BY_START: '1',
           RCC_MANAGED_BY_START: '1',
+          ROUTECODEX_PORT_LOG_ROOT: portLogRoot,
+          RCC_PORT_LOG_ROOT: portLogRoot,
           ...(bindServerToParent
             ? {
               ROUTECODEX_EXPECT_PARENT_PID: String(process.pid),

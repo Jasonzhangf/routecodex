@@ -6,8 +6,8 @@ use super::{
     is_structured_apply_patch_payload, normalize_ran_tree_or_chunked_tool_text,
     normalize_standard_chunked_tool_text, normalize_tool_result_value, pack_shell_args_json,
     repair_find_meta_json, split_command_string_json, strip_terminal_right_gutter_noise,
-    unwrap_chunked_exec_transcript_shape, unwrap_ran_transcript_shape,
-    unwrap_xml_cdata_sections, value_to_string,
+    unwrap_chunked_exec_transcript_shape, unwrap_ran_transcript_shape, unwrap_xml_cdata_sections,
+    value_to_string,
 };
 use serde_json::json;
 use std::{fs, path::PathBuf};
@@ -176,6 +176,50 @@ fn shared_tooling_strips_terminal_right_gutter_noise() {
 }
 
 #[test]
+fn shared_tooling_hot_path_regexes_are_not_compiled_per_line() {
+    let source_path = crate_src_path("shared_tooling.rs");
+    let source = fs::read_to_string(&source_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", source_path.display(), error));
+    for function_name in [
+        "strip_terminal_right_gutter_noise",
+        "strip_box_drawing_prefix",
+        "is_transcript_collapsed_placeholder",
+        "is_chunked_exec_transcript_header_line",
+        "unwrap_ran_transcript_shape",
+    ] {
+        let marker = format!("fn {function_name}");
+        let start = source
+            .find(marker.as_str())
+            .unwrap_or_else(|| panic!("missing hot-path function {function_name}"));
+        let body = rust_function_source(&source[start..])
+            .unwrap_or_else(|| panic!("failed to parse hot-path function {function_name}"));
+        assert!(
+            !body.contains("Regex::new"),
+            "{function_name} must not compile regexes inside the per-line hot path"
+        );
+    }
+}
+
+fn rust_function_source(source_from_fn: &str) -> Option<&str> {
+    let open = source_from_fn.find('{')?;
+    let mut depth = 0usize;
+    for (offset, ch) in source_from_fn[open..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    let end = open + offset + ch.len_utf8();
+                    return Some(&source_from_fn[..end]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[test]
 fn shared_tooling_detects_chunked_exec_transcript_headers() {
     assert!(is_chunked_exec_transcript_header_line("Chunk ID: 123"));
     assert!(!is_chunked_exec_transcript_header_line("alpha"));
@@ -234,10 +278,7 @@ fn crate_src_path(relative: &str) -> PathBuf {
 
 #[test]
 fn shared_tooling_deletion_gate_removed_structured_apply_patch_local_clones() {
-    for relative in [
-        "tool_harvester.rs",
-        "hub_text_markup_normalizer.rs",
-    ] {
+    for relative in ["tool_harvester.rs", "hub_text_markup_normalizer.rs"] {
         let path = crate_src_path(relative);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
@@ -247,7 +288,8 @@ fn shared_tooling_deletion_gate_removed_structured_apply_patch_local_clones() {
             path.display()
         );
         assert!(
-            !source.contains("fn extract_structured_apply_patch_payloads(text: &str) -> Vec<Value> {"),
+            !source
+                .contains("fn extract_structured_apply_patch_payloads(text: &str) -> Vec<Value> {"),
             "local structured apply_patch wrapper still present in {}",
             path.display()
         );
@@ -459,8 +501,11 @@ fn shared_tooling_deletion_gate_removed_reasoning_owned_repair_arguments_helper(
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("use crate::hub_reasoning_tool_normalizer::repair_arguments_to_string;")
-                && !source.contains("normalize_assistant_text_to_tool_calls_json, repair_arguments_to_string"),
+            !source
+                .contains("use crate::hub_reasoning_tool_normalizer::repair_arguments_to_string;")
+                && !source.contains(
+                    "normalize_assistant_text_to_tool_calls_json, repair_arguments_to_string"
+                ),
             "{} still imports repair_arguments_to_string from reasoning module",
             path.display()
         );
@@ -471,7 +516,6 @@ fn shared_tooling_deletion_gate_removed_reasoning_owned_repair_arguments_helper(
         );
     }
 }
-
 
 #[test]
 fn shared_tooling_deletion_gate_removed_argument_string_wrappers() {
@@ -490,10 +534,12 @@ fn shared_tooling_deletion_gate_removed_argument_string_wrappers() {
     );
 
     let bridge_utils_path = crate_src_path("hub_bridge_actions/utils.rs");
-    let bridge_utils_source = fs::read_to_string(&bridge_utils_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {}", bridge_utils_path.display(), error));
+    let bridge_utils_source = fs::read_to_string(&bridge_utils_path).unwrap_or_else(|error| {
+        panic!("failed to read {}: {}", bridge_utils_path.display(), error)
+    });
     assert!(
-        !bridge_utils_source.contains("pub(crate) fn serialize_tool_arguments(value: Option<&Value>) -> String {"),
+        !bridge_utils_source
+            .contains("pub(crate) fn serialize_tool_arguments(value: Option<&Value>) -> String {"),
         "hub_bridge_actions/utils.rs still owns serialize_tool_arguments wrapper"
     );
 

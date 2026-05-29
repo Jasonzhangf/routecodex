@@ -4,8 +4,7 @@ use serde_json::{json, Map, Value};
 
 use crate::chat_clock_tool_schema_ops::build_clock_tool_append_operations_json;
 use crate::chat_servertool_orchestration::{
-    build_continue_execution_operations_json,
-    plan_chat_servertool_orchestration_bundle_json,
+    build_continue_execution_operations_json, plan_chat_servertool_orchestration_bundle_json,
 };
 use crate::chat_web_search_tool_schema::build_web_search_tool_append_operations_json;
 use crate::hub_req_inbound_context_capture::resolve_client_inject_ready_json;

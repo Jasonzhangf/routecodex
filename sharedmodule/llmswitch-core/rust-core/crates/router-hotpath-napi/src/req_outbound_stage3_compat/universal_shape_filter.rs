@@ -1,7 +1,7 @@
-use napi::bindgen_prelude::Result as NapiResult;
-use serde_json::{json, Map, Value};
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tooling::normalize_tool_result_value;
+use napi::bindgen_prelude::Result as NapiResult;
+use serde_json::{json, Map, Value};
 
 fn parse_json_value(raw: &str) -> NapiResult<Value> {
     serde_json::from_str(raw).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -200,7 +200,11 @@ fn normalize_request_message(
     if role == "tool" {
         out.insert(
             "content".to_string(),
-            Value::String(row.get("content").map(normalize_tool_result_value).unwrap_or_default()),
+            Value::String(
+                row.get("content")
+                    .map(normalize_tool_result_value)
+                    .unwrap_or_default(),
+            ),
         );
         if let Some(name) = read_trimmed_string(row.get("name")) {
             out.insert("name".to_string(), Value::String(name));

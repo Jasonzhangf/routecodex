@@ -153,11 +153,7 @@ pub(crate) fn normalize_prefixed_tool_call_id(
         return clamp_prefixed_tool_call_id(prefix, &call_core, call_id.unwrap_or_default());
     }
     if let Some(fallback_core) = extract_tool_call_id_core(fallback) {
-        return clamp_prefixed_tool_call_id(
-            prefix,
-            &fallback_core,
-            fallback.unwrap_or_default(),
-        );
+        return clamp_prefixed_tool_call_id(prefix, &fallback_core, fallback.unwrap_or_default());
     }
     let random_core = Uuid::new_v4().simple().to_string()[..8].to_string();
     clamp_prefixed_tool_call_id(prefix, &random_core, &random_core)

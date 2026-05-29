@@ -113,7 +113,9 @@ fn prune_message_tool_history(messages: &mut Vec<Value>) {
                                     raw_name.as_str(),
                                     function_row.get("arguments"),
                                 ) && !(is_apply_patch_tool_name(raw_name.as_str())
-                                    && is_synthetic_apply_patch_guard_call(function_row.get("arguments")))
+                                    && is_synthetic_apply_patch_guard_call(
+                                        function_row.get("arguments"),
+                                    ))
                                 {
                                     return Some(false);
                                 }

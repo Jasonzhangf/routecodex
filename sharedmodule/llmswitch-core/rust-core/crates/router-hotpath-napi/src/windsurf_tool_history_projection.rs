@@ -1490,7 +1490,10 @@ fn build_cascade_history_turn_text(
         {
             return String::new();
         }
-        let raw_output = row.get("output").and_then(|entry| entry.as_str()).unwrap_or("");
+        let raw_output = row
+            .get("output")
+            .and_then(|entry| entry.as_str())
+            .unwrap_or("");
         let output = if lookup_name(&name) == "apply_patch" {
             normalize_apply_patch_tool_result_output(raw_output)
         } else {
@@ -2763,15 +2766,18 @@ mod tests {
         assert!(!latest_human.contains(RCC_TOOL_RESULT_GUIDANCE));
         assert!(!latest_human.contains("<|RCC|tool_result id=\"call_patch\" name=\"apply_patch\">"));
         assert!(
-            prompt.find("Patch the file.").unwrap()
-                < prompt.find("<|RCC|tool_calls>").unwrap()
+            prompt.find("Patch the file.").unwrap() < prompt.find("<|RCC|tool_calls>").unwrap()
         );
         assert!(
             prompt.find("<|RCC|tool_calls>").unwrap()
-                < prompt.find("<|RCC|tool_result id=\"call_patch\" name=\"apply_patch\">").unwrap()
+                < prompt
+                    .find("<|RCC|tool_result id=\"call_patch\" name=\"apply_patch\">")
+                    .unwrap()
         );
         assert!(
-            prompt.find("<|RCC|tool_result id=\"call_patch\" name=\"apply_patch\">").unwrap()
+            prompt
+                .find("<|RCC|tool_result id=\"call_patch\" name=\"apply_patch\">")
+                .unwrap()
                 < prompt.find("Continue.").unwrap()
         );
     }

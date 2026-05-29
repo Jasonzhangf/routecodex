@@ -6,7 +6,7 @@
 - L27-L65 `request-shape`：标准工具请求形状。
 - L67-L131 `response-shape`：trajectory 工具调用返回形状。
 - L133-L190 `tool-result-submit`：工具执行结果回灌形状。
-- L192-L230 `mapping-boundary`：OpenAI tools 到 Cascade native tools 的边界。
+- L192-L230 `mapping-boundary`：OpenAI tools 到 Cascade native/MCP tools 的边界。
 - L232-L265 `routecodex-requirements`：RouteCodex provider 必须满足的行为。
 - L267-L294 `test-plan`：先红黑盒锚点清单。
 - L296-L318 `doc-hygiene`：协议事实写入边界。
@@ -251,7 +251,7 @@ Known mapped families and semantic status:
 | `Write` / `write` / `write_to_file` | `write_to_file` | partial; single-file only | Do not map multi-file patch semantics here. |
 | `WebSearch` / `ToolSearch` / `web_search` | `search_web` | partial; provider-dependent result shape | Only enable when request allowlist and result projection are tested. |
 | `WebFetch` / `read_url_content` | `read_url_content` | partial/direct URL fetch | Only enable when result projection is tested. |
-| `apply_patch` | none | custom tool via gRPC field 10 mcpCompat | Windsurf.app exposes `write_to_file` / `propose_code` as Cascade trajectory/proto steps, not as a controllable executor equivalent to Codex `apply_patch`. Do not native-map `apply_patch` to `write_to_file` / `propose_code`. Instead, pass through `windsurf_custom_tools` → gRPC field 10 JSON strip for LS-side decoding. |
+| `apply_patch` | none | Cascade MCP (`CascadeToolConfig.field16`) | Windsurf.app exposes `write_to_file` / `propose_code` as Cascade trajectory/proto steps, not as a controllable executor equivalent to Codex `apply_patch`. Do not native-map `apply_patch` to `write_to_file` / `propose_code`. |
 | `write_stdin` / PTY/session continuation | none | unsupported by `run_command` equivalence | Must fail-fast; `run_command` is one-shot blocking, not an interactive session. |
 | `update_plan` / `request_user_input` / `spawn_agent` / `send_input` / `wait_agent` / `close_agent` | none | unsupported by current native map | Candidate only for future MCP registration blackbox, not direct translation. |
 | `mcp__*` caller tools | no per-request input slot proven | MCP candidate, not supported yet | Requires separate MCP registration/request blackbox; cannot be injected through `SendUserCascadeMessageRequest`. |
@@ -287,13 +287,13 @@ Additional evidence:
 - WindsurfAPI native bridge maps known tools via `TOOL_MAP`; unmapped tools are sent through its old `toolPreamble` emulation path, not structured custom-tool injection.
 - App `ChatToolDefinition` appears in `GetSystemPromptAndToolsResponse.tool_definitions`, which is LS-produced tool metadata, not a per-request user tool-definition input.
 
-Therefore RouteCodex must treat arbitrary Codex/MCP/custom tools as **unsupported by Cascade native structured protocol**. They must not be encoded into `SendUserCascadeMessageRequest` as native tool definitions, because that request has no such input slot.
+Therefore RouteCodex must treat arbitrary Codex/MCP/custom tools as **unsupported by Cascade native structured protocol**. They must not be encoded into `SendUserCascadeMessageRequest` as native tool definitions or synthetic top-level fields, because that request has no such input slot.
 
 Current RouteCodex decision: custom tools (unmapped from `WINDSURF_TOOL_MAP`) are sent as JSON strips via gRPC field 10. No text-tool markers are injected into the prompt. This is a request-time partition, not fallback after native failure:
 
 ```text
 native-equivalent tool -> Cascade native structured protocol
-custom tool            -> gRPC field 10 mcpCompat JSON strip
+custom tool            -> CascadeToolConfig.field16 mcp enabled; tool definitions come from LS MCP server state
 ```
 
 `apply_patch` is a custom tool for Windsurf. It passes through `windsurf_custom_tools` → gRPC field 10; it must not be translated to Cascade `write_to_file` / `propose_code` native steps.
@@ -357,14 +357,15 @@ Blackbox anchors must be added and run in this order:
 
 5. Installed smoke after implementation:
    - build + install + restart RouteCodex.
-## Custom Tools Protocol (gRPC field 10 mcpCompat)
+## Custom Tools Protocol (Cascade MCP)
 
 Non-native tools (unregistered in `WINDSURF_TOOL_MAP`) are encoded as JSON strips via `SendUserCascadeMessageRequest` gRPC field 10. The LS runtime decodes and adapts them.
 
 Protocol decision:
 
 - Native-equivalent tools must use Cascade structured protocol only.
-- Custom tools pass through `windsurf_custom_tools` → gRPC field 10 mcpCompat JSON strips.
+- Custom tools set hidden `windsurf_custom_tools` / `windsurf_mcp_mode`, then `SendUserCascadeMessage` enables `CascadePlannerConfig.field13.tool_config.field16.mcp`.
+- `SendUserCascadeMessageRequest` has no top-level custom tool/MCP definition field; RouteCodex must not use field 10 for synthetic MCP payloads.
 - RCC text-tool protocol (`<|RCC|tool_calls>` / `<|RCC|tool_result>`) is **removed**. If detected in responses, `WINDSURF_TOOL_PROTOCOL_CONFLICT` (400) is thrown.
 - Harvest decodes custom tool trajectory steps from fields 45/47 directly.
 

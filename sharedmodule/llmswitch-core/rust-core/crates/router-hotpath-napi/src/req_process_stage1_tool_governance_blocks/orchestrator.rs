@@ -14,12 +14,12 @@ use crate::req_process_stage1_tool_governance_blocks::request_sanitizer::{
     apply_anthropic_tool_alias_semantics, apply_post_governed_media_cleanup,
     resolve_governance_context,
 };
+#[cfg(test)]
+use crate::req_process_stage1_tool_governance_blocks::servertool_injection::resolve_tool_name;
 use crate::req_process_stage1_tool_governance_blocks::servertool_injection::{
     apply_hub_operations, maybe_apply_servertool_orchestration, read_runtime_metadata,
     resolve_client_inject_ready,
 };
-#[cfg(test)]
-use crate::req_process_stage1_tool_governance_blocks::servertool_injection::resolve_tool_name;
 use crate::shared_json_utils::{normalize_record, normalize_record_ref};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -145,4 +145,3 @@ pub fn apply_req_process_tool_governance_json(input_json: String) -> NapiResult<
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
-

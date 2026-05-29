@@ -110,7 +110,7 @@ pub(crate) fn synthesize_continuation_from_responses_resume(
     }
 
     continuation.insert(
-        "stickyScope".to_string(),
+        "continuationScope".to_string(),
         Value::String("request_chain".to_string()),
     );
     continuation.insert(
@@ -161,9 +161,7 @@ pub(crate) fn lift_responses_resume_into_semantics(request: &Value, metadata: &V
         if let Some(mut resume_value) = resume {
             if let Some(resume_obj) = resume_value.as_object_mut() {
                 if !resume_obj.contains_key("routeHint") {
-                    if let Some(route_hint) =
-                        read_trimmed_string(next_metadata.get("routeHint"))
-                    {
+                    if let Some(route_hint) = read_trimmed_string(next_metadata.get("routeHint")) {
                         resume_obj.insert("routeHint".to_string(), Value::String(route_hint));
                     }
                 }
@@ -214,4 +212,3 @@ fn read_resume_tool_outputs_detailed(resume_obj: &Map<String, Value>) -> Vec<(St
 
     mapped
 }
-

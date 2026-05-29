@@ -60,6 +60,16 @@ export async function runStartupProviderReprobe(args: {
   instance: { checkHealth(): Promise<boolean> };
 }): Promise<void> {
   if (process.env.ROUTECODEX_STARTUP_REPROBE !== '0') {
+    if (args.providerFamily === 'windsurf') {
+      void runStartupProviderReprobe({ ...args, providerFamily: 'windsurf-background' }).catch((error) => {
+        logStartupReprobeNonBlocking('windsurf_async_reprobe', error, {
+          providerKey: args.providerKey,
+          runtimeKey: args.runtimeKey,
+          providerFamily: args.providerFamily
+        });
+      });
+      return;
+    }
     let healthy = false;
     try {
       healthy = await args.instance.checkHealth();

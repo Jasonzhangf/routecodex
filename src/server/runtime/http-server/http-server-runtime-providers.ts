@@ -156,8 +156,8 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
     ?? server.currentRouterArtifacts?.targetRuntime
     ?? undefined;
   const runtimeMap = {
-    ...(baseRuntimeMap ?? {}),
-    ...(targetRuntimeMap ?? {})
+    ...(targetRuntimeMap ?? {}),
+    ...(baseRuntimeMap ?? {})
   } as Record<string, ProviderRuntimeProfile>;
   if (!runtimeMap || Object.keys(runtimeMap).length < 1) {
     return;
@@ -273,6 +273,14 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
 
         const handle = await server.createProviderHandle(runtimeKey, patchedRuntime);
         server.providerHandles.set(runtimeKey, handle);
+        const normalizedRuntimeKey = runtimeKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
+        const denormalizedRuntimeKey = runtimeKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
+        if (normalizedRuntimeKey !== runtimeKey && !server.providerHandles.has(normalizedRuntimeKey)) {
+          server.providerHandles.set(normalizedRuntimeKey, handle);
+        }
+        if (denormalizedRuntimeKey !== runtimeKey && !server.providerHandles.has(denormalizedRuntimeKey)) {
+          server.providerHandles.set(denormalizedRuntimeKey, handle);
+        }
         const runtimeKeyParts = runtimeKey.split('.');
         if (runtimeKeyParts.length >= 3) {
           const aliasScopedRuntimeKey = `${runtimeKeyParts[0]}.${runtimeKeyParts[1]}`;
@@ -402,8 +410,12 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
         const aliasDenormalized = providerKeyParts[1].match(/^\d+$/) ? `key${providerKeyParts[1]}` : providerKeyParts[1];
         const normalizedAliasScopedKey = `${providerKeyParts[0]}.${aliasNormalized}`;
         const denormalizedAliasScopedKey = `${providerKeyParts[0]}.${aliasDenormalized}`;
-        server.providerKeyToRuntimeKey.set(normalizedAliasScopedKey, resolvedRuntimeKey);
-        server.providerKeyToRuntimeKey.set(denormalizedAliasScopedKey, resolvedRuntimeKey);
+        if (!server.providerKeyToRuntimeKey.has(normalizedAliasScopedKey)) {
+          server.providerKeyToRuntimeKey.set(normalizedAliasScopedKey, resolvedRuntimeKey);
+        }
+        if (!server.providerKeyToRuntimeKey.has(denormalizedAliasScopedKey)) {
+          server.providerKeyToRuntimeKey.set(denormalizedAliasScopedKey, resolvedRuntimeKey);
+        }
       }
     }
   }
@@ -431,7 +443,9 @@ export async function createProviderHandle(
         : undefined) ?? mapProviderProtocol(protocolType, providerFamily));
   const instance = ProviderFactory.createProviderFromRuntime(runtime, server.getModuleDependencies());
   await instance.initialize();
-  await enforceWindsurfStartupProbeForHandle({ providerFamily, runtimeKey, instance });
+  if (providerFamily !== 'windsurf') {
+    await enforceWindsurfStartupProbeForHandle({ providerFamily, runtimeKey, instance });
+  }
   await runStartupProviderReprobe({
     server,
     providerKey: runtime.providerKey || runtimeKey,

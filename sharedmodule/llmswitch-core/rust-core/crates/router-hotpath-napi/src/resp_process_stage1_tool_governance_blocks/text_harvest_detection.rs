@@ -2,7 +2,8 @@ use serde_json::Value;
 
 use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::{
     contains_explicit_tool_wrapper_marker, extract_explicit_tool_wrapper_inner_payload,
-    strip_orphan_tool_markup_lines, strip_tool_call_marker_payload, text_contains_explicit_tool_markup,
+    strip_orphan_tool_markup_lines, strip_tool_call_marker_payload,
+    text_contains_explicit_tool_markup,
 };
 use crate::resp_process_stage1_tool_governance_blocks::message_content::read_message_text_candidates;
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_shape::collect_stage1_harvest_input_texts;
@@ -110,7 +111,6 @@ fn detect_text_tool_provider_family(payload: &Value) -> TextToolProviderFamily {
     TextToolProviderFamily::Other
 }
 
-
 fn payload_contains_harvestable_text_tool_payload(payload: &Value) -> bool {
     let Some(choices) = payload.get("choices").and_then(Value::as_array) else {
         return false;
@@ -177,5 +177,3 @@ fn explicit_wrapper_inner_payload_has_tool_name_marker(raw: &str) -> bool {
         || lowered.contains("tool_name")
         || lowered.contains("\"function\"")
 }
-
-

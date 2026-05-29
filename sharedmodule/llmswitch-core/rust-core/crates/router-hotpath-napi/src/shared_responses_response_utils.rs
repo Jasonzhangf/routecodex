@@ -283,7 +283,7 @@ fn build_responses_continuation(
     }
 
     continuation.insert(
-        "stickyScope".to_string(),
+        "continuationScope".to_string(),
         Value::String("request_chain".to_string()),
     );
     continuation.insert(

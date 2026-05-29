@@ -1,13 +1,15 @@
 use serde_json::{Map, Value};
 
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
+use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::{
+    normalize_exec_command_text, read_command_from_args,
+};
+use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
 use crate::resp_process_stage1_tool_governance_blocks::requested_tools::{
     collect_requested_tool_name_keys, read_tool_call_name_key,
 };
-use crate::resp_process_stage1_tool_governance_blocks::text_harvest_strict::harvest_explicit_wrapper_only_tool_calls_from_payload;
-use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::{normalize_exec_command_text, read_command_from_args};
-use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_extract::looks_like_exec_command_candidate;
+use crate::resp_process_stage1_tool_governance_blocks::text_harvest_strict::harvest_explicit_wrapper_only_tool_calls_from_payload;
 use crate::resp_process_stage1_tool_governance_blocks::tool_args::normalize_tool_args_preserving_raw_shape;
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
@@ -176,6 +178,20 @@ fn normalize_write_stdin_args_for_client(args: &mut Map<String, Value>) {
 
 pub(crate) fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_protocol: &str) {
     let protocol = client_protocol.trim().to_ascii_lowercase();
+    let requested_tool_name_keys = collect_requested_tool_name_keys(payload);
+    let requested_shell_command = payload
+        .get("__rcc_tool_governance")
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("requestedToolNames"))
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter().any(|row| {
+                row.as_str()
+                    .map(|name| name.trim().eq_ignore_ascii_case("shell_command"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
     let wants_anthropic_shell = protocol == "anthropic-messages";
     let wants_exec_command_cmd = matches!(
         protocol.as_str(),
@@ -206,7 +222,12 @@ pub(crate) fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_p
             // Req-side normalizes sessionId→session_id, text→chars; resp side reverses
             {
                 let is_write_stdin = read_trimmed_string(function.get("name"))
-                    .map(|n| matches!(n.to_ascii_lowercase().as_str(), "write_stdin" | "write.stdin"))
+                    .map(|n| {
+                        matches!(
+                            n.to_ascii_lowercase().as_str(),
+                            "write_stdin" | "write.stdin"
+                        )
+                    })
                     .unwrap_or(false);
                 if is_write_stdin {
                     if let Some(arguments) = function.get("arguments").and_then(|v| v.as_str()) {
@@ -237,15 +258,16 @@ pub(crate) fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_p
                 continue;
             }
 
-            let target_name = if wants_anthropic_shell {
-                if is_shell_alias {
-                    "shell_command"
+            let target_name =
+                if wants_anthropic_shell || (requested_shell_command && is_shell_alias) {
+                    if is_shell_alias {
+                        "shell_command"
+                    } else {
+                        "exec_command"
+                    }
                 } else {
                     "exec_command"
-                }
-            } else {
-                "exec_command"
-            };
+                };
             function.insert("name".to_string(), Value::String(target_name.to_string()));
 
             let Some(arguments) = function.get("arguments").cloned() else {

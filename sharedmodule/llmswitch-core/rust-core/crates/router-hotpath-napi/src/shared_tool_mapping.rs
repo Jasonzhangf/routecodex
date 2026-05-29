@@ -117,8 +117,8 @@ pub(crate) fn normalize_routecodex_tool_name(raw: Option<&str>) -> Option<String
     if without_prefix.is_empty() {
         return None;
     }
-    let normalized =
-        normalize_responses_function_name(Some(without_prefix)).unwrap_or_else(|| without_prefix.to_string());
+    let normalized = normalize_responses_function_name(Some(without_prefix))
+        .unwrap_or_else(|| without_prefix.to_string());
     let lowered = normalized.to_ascii_lowercase();
     if matches!(
         lowered.as_str(),
@@ -170,9 +170,8 @@ pub(crate) fn normalize_routecodex_tool_name_with_embedded_hint(raw: &str) -> Op
             .map(|value| value.as_str().trim().to_string())
             .filter(|value| !value.is_empty());
     let normalized_input = extracted_embedded.unwrap_or_else(|| trimmed.to_string());
-    normalize_routecodex_tool_name(Some(normalized_input.as_str())).or_else(|| {
-        normalize_responses_function_name(Some(normalized_input.as_str()))
-    })
+    normalize_routecodex_tool_name(Some(normalized_input.as_str()))
+        .or_else(|| normalize_responses_function_name(Some(normalized_input.as_str())))
 }
 
 pub(crate) fn is_routecodex_explicit_tool_name_candidate(raw: &str) -> bool {
@@ -190,8 +189,8 @@ pub(crate) fn is_routecodex_explicit_tool_name_candidate(raw: &str) -> bool {
         || lowered.contains("[tool_call")
         || lowered.contains("[function_call")
     {
-        let normalized = normalize_routecodex_tool_name_with_embedded_hint(trimmed)
-            .unwrap_or_else(|| {
+        let normalized =
+            normalize_routecodex_tool_name_with_embedded_hint(trimmed).unwrap_or_else(|| {
                 normalize_responses_function_name(Some(trimmed))
                     .unwrap_or_else(|| trimmed.to_string())
             });
@@ -211,7 +210,9 @@ pub(crate) fn is_routecodex_structured_tool_name(raw: &str) -> bool {
     {
         return false;
     }
-    trimmed.chars().any(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    trimmed
+        .chars()
+        .any(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 pub(crate) fn normalize_json_tool_name_with_aliases(
@@ -252,8 +253,8 @@ pub(crate) fn resolve_routecodex_json_tool_name_aliases(
         ("terminal".to_string(), "exec_command".to_string()),
     ] {
         let canonical_src = to_canonical_tool_name(src.as_str());
-        let normalized_dst = normalize_routecodex_tool_name(Some(dst.as_str()))
-            .unwrap_or_else(|| dst.clone());
+        let normalized_dst =
+            normalize_routecodex_tool_name(Some(dst.as_str())).unwrap_or_else(|| dst.clone());
         merged.insert(canonical_src.clone(), normalized_dst.clone());
         let lowered_src = src.trim().to_ascii_lowercase();
         if lowered_src != canonical_src {
@@ -445,7 +446,8 @@ pub(crate) fn build_flattened_namespace_child_alias(
         "responses" | "default" | "" => normalize_routecodex_tool_name(Some(raw.trim())),
         _ => normalize_routecodex_tool_name(Some(raw.trim())),
     };
-    let base_alias = normalize_for_mode(base_raw.as_str()).or_else(|| normalize_for_mode(child_name))?;
+    let base_alias =
+        normalize_for_mode(base_raw.as_str()).or_else(|| normalize_for_mode(child_name))?;
     if !used_aliases.contains(base_alias.as_str()) {
         return Some(base_alias);
     }
@@ -968,7 +970,9 @@ mod tests {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn normalize_requested_tool_name_key(raw_name: &str) -> Option<String> {"),
+            !source.contains(
+                "fn normalize_requested_tool_name_key(raw_name: &str) -> Option<String> {"
+            ),
             "requested_tools.rs still owns local normalize_requested_tool_name_key wrapper"
         );
         assert!(
@@ -1005,9 +1009,15 @@ mod tests {
     #[test]
     fn explicit_tool_name_candidate_uses_embedded_hint_truth() {
         assert!(is_routecodex_explicit_tool_name_candidate("exec_command"));
-        assert!(is_routecodex_explicit_tool_name_candidate("function:websearch"));
-        assert!(is_routecodex_explicit_tool_name_candidate("tool:exec_command"));
-        assert!(!is_routecodex_explicit_tool_name_candidate("not a tool call"));
+        assert!(is_routecodex_explicit_tool_name_candidate(
+            "function:websearch"
+        ));
+        assert!(is_routecodex_explicit_tool_name_candidate(
+            "tool:exec_command"
+        ));
+        assert!(!is_routecodex_explicit_tool_name_candidate(
+            "not a tool call"
+        ));
     }
 
     #[test]
@@ -1298,16 +1308,28 @@ mod tests {
 
     #[test]
     fn strip_function_namespace_removes_known_prefixes() {
-        assert_eq!(strip_function_namespace("functions.exec_command"), "exec_command");
-        assert_eq!(strip_function_namespace("function.web-search"), "web-search");
+        assert_eq!(
+            strip_function_namespace("functions.exec_command"),
+            "exec_command"
+        );
+        assert_eq!(
+            strip_function_namespace("function.web-search"),
+            "web-search"
+        );
         assert_eq!(strip_function_namespace("exec_command"), "exec_command");
     }
 
     #[test]
     fn canonical_and_compact_tool_names_use_shared_mapping_rules() {
-        assert_eq!(to_canonical_tool_name("functions.exec_command"), "exec.command");
+        assert_eq!(
+            to_canonical_tool_name("functions.exec_command"),
+            "exec.command"
+        );
         assert_eq!(to_canonical_tool_name("web-search"), "web.search");
-        assert_eq!(to_compact_tool_name("functions.exec_command"), "execcommand");
+        assert_eq!(
+            to_compact_tool_name("functions.exec_command"),
+            "execcommand"
+        );
     }
 
     #[test]
@@ -1323,7 +1345,8 @@ mod tests {
     }
 
     #[test]
-    fn shared_tool_mapping_deletion_gate_removed_chat_servertool_orchestration_local_websearch_wrapper() {
+    fn shared_tool_mapping_deletion_gate_removed_chat_servertool_orchestration_local_websearch_wrapper(
+    ) {
         let path = crate_src_path("chat_servertool_orchestration.rs");
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
@@ -1342,7 +1365,9 @@ mod tests {
     #[test]
     fn normalize_routecodex_tool_name_with_embedded_hint_extracts_tool_and_function_prefixes() {
         assert_eq!(
-            normalize_routecodex_tool_name_with_embedded_hint("need retry tool:functions.shell-command now"),
+            normalize_routecodex_tool_name_with_embedded_hint(
+                "need retry tool:functions.shell-command now"
+            ),
             Some("exec_command".to_string())
         );
         assert_eq!(
@@ -1354,7 +1379,9 @@ mod tests {
     #[test]
     fn is_routecodex_structured_tool_name_accepts_shape_only_tool_identifiers() {
         assert!(is_routecodex_structured_tool_name("exec_command"));
-        assert!(is_routecodex_structured_tool_name("mcp__computer_use.press_key"));
+        assert!(is_routecodex_structured_tool_name(
+            "mcp__computer_use.press_key"
+        ));
         assert!(!is_routecodex_structured_tool_name("---"));
         assert!(!is_routecodex_structured_tool_name("tool: exec_command"));
         assert!(!is_routecodex_structured_tool_name("exec command"));
@@ -1425,7 +1452,9 @@ mod tests {
             path.display()
         );
         assert!(
-            !source.contains("fn read_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String>"),
+            !source.contains(
+                "fn read_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String>"
+            ),
             "local read_tool_name_hint_from_args clone still present in {}",
             path.display()
         );
@@ -1458,7 +1487,9 @@ mod tests {
             .next()
             .unwrap_or(source.as_str());
         assert!(
-            !pre_tests_source.contains("fn normalize_tool_name(raw: Option<&str>, mode: &str) -> Option<String> {"),
+            !pre_tests_source.contains(
+                "fn normalize_tool_name(raw: Option<&str>, mode: &str) -> Option<String> {"
+            ),
             "internal normalize_tool_name wrapper still present in {}",
             path.display()
         );

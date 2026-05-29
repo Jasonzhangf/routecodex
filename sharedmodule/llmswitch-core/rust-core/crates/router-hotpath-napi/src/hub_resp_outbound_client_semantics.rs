@@ -1,7 +1,4 @@
 pub(crate) use crate::hub_resp_outbound_client_semantics_blocks::anthropic_response::build_anthropic_response_from_chat_value;
-pub(crate) use crate::hub_resp_outbound_client_semantics_blocks::responses_payload::{
-    build_responses_payload_from_chat_core, normalize_responses_function_name,
-};
 pub use crate::hub_resp_outbound_client_semantics_blocks::napi_bindings::{
     apply_client_passthrough_patch_json, build_anthropic_from_openai_chat_json_bridge,
     build_anthropic_response_from_chat_full_json, build_anthropic_response_from_chat_json,
@@ -16,8 +13,10 @@ pub use crate::hub_resp_outbound_client_semantics_blocks::napi_bindings::{
     sanitize_chat_completion_like_json, sanitize_responses_function_name_json,
     summarize_tool_calls_from_provider_response_json,
 };
+pub(crate) use crate::hub_resp_outbound_client_semantics_blocks::responses_payload::{
+    build_responses_payload_from_chat_core, normalize_responses_function_name,
+};
 
 #[cfg(test)]
 #[path = "hub_resp_outbound_client_semantics_tests.rs"]
 mod hub_resp_outbound_client_semantics_tests;
-

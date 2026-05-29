@@ -1,31 +1,29 @@
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
+import { jest } from '@jest/globals';
 
-import { writeSnapshotViaHooks } from '../../sharedmodule/llmswitch-core/src/conversion/shared/snapshot-hooks.js';
+const writeSnapshotViaHooksWithNativeMock = jest.fn();
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-snapshot-hooks.js',
+  () => ({
+    shouldRecordSnapshotsWithNative: () => true,
+    writeSnapshotViaHooksWithNative: writeSnapshotViaHooksWithNativeMock
+  })
+);
 
 describe('snapshot-hooks entryEndpoint folder routing', () => {
-  let tempDir: string;
-
-  beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-snapshot-hooks-test-'));
-    process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
+  afterEach(() => {
+    writeSnapshotViaHooksWithNativeMock.mockReset();
   });
 
-  afterEach(async () => {
-    delete process.env.ROUTECODEX_SNAPSHOT_DIR;
-    if (tempDir) {
-      await fs.rm(tempDir, { recursive: true, force: true });
-    }
-  });
-
-  it('prefers meta.entryEndpoint over endpoint when choosing top-level folder', async () => {
+  it('forwards entry protocol and port to native snapshot writer instead of deriving provider folders in TS', async () => {
+    const { writeSnapshotViaHooks } = await import('../../sharedmodule/llmswitch-core/src/conversion/snapshot-utils.js');
     await writeSnapshotViaHooks({
       endpoint: '/v1/messages',
       stage: 'provider-request',
       requestId: 'req_1',
       groupRequestId: 'grp_1',
       providerKey: 'anthropic.test',
+      entryPort: 5555,
       data: {
         meta: {
           entryEndpoint: '/v1/responses',
@@ -35,9 +33,13 @@ describe('snapshot-hooks entryEndpoint folder routing', () => {
       }
     });
 
-    const folder = path.join(tempDir, 'openai-responses', 'anthropic.test', 'grp_1');
-    const entries = await fs.readdir(folder);
-    expect(entries.some((name) => name.startsWith('provider-request'))).toBe(true);
+    expect(writeSnapshotViaHooksWithNativeMock).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: '/v1/messages',
+      stage: 'provider-request',
+      requestId: 'req_1',
+      groupRequestId: 'grp_1',
+      providerKey: 'anthropic.test',
+      entryPort: 5555
+    }));
   });
 });
-

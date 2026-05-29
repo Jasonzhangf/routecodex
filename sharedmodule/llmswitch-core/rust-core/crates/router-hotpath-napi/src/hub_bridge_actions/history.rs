@@ -2,10 +2,10 @@ use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
+use crate::hub_tool_session_compat::{normalize_tool_session_payload, ToolSessionCompatInput};
 use crate::shared_json_utils::{
     clone_non_empty_object, clone_plain_object, read_optional_bool, read_trimmed_string,
 };
-use crate::hub_tool_session_compat::{normalize_tool_session_payload, ToolSessionCompatInput};
 use crate::shared_metadata_semantics::read_runtime_metadata_json;
 use crate::shared_responses_tool_utils::resolve_tool_call_id_style_json;
 use crate::shared_tool_call_id_core::clamp_responses_input_item_id;
@@ -1137,8 +1137,7 @@ pub(crate) fn build_bridge_history(
                     .or_else(|| read_trimmed_string(row.get("id"))),
                 "missing_tool_call_id: tool message is missing tool_call_id/call_id",
             )?;
-            if allow_orphan_tool_result
-                && !known_tool_call_ids.contains(resolved_call_id.as_str())
+            if allow_orphan_tool_result && !known_tool_call_ids.contains(resolved_call_id.as_str())
             {
                 let normalized_output_id = normalize_function_call_output_id(
                     Some(resolved_call_id.as_str()),
@@ -1222,7 +1221,11 @@ pub(crate) fn build_bridge_history(
                 let name = fn_row
                     .and_then(|v| read_trimmed_string(v.get("name")))
                     .unwrap_or_else(|| "tool".to_string());
-                let args = repair_arguments_to_string(fn_row.and_then(|v| v.get("arguments")).unwrap_or(&Value::Null));
+                let args = repair_arguments_to_string(
+                    fn_row
+                        .and_then(|v| v.get("arguments"))
+                        .unwrap_or(&Value::Null),
+                );
                 let entry = serde_json::json!({
                     "type": "function_call",
                     "id": call_id,

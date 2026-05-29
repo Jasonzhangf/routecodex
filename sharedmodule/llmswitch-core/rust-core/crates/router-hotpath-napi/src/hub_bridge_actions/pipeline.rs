@@ -96,7 +96,8 @@ pub(crate) fn run_bridge_action_pipeline(
             "reasoning.extract" => {
                 let drop_from_content =
                     pick_option_bool(options_ref, "dropFromContent").unwrap_or(true);
-                let id_prefix_base = options_ref.and_then(|row| read_object_trimmed_string(row, "idPrefix"))
+                let id_prefix_base = options_ref
+                    .and_then(|row| read_object_trimmed_string(row, "idPrefix"))
                     .or_else(|| {
                         Some(format!(
                             "{}_{}",
@@ -161,10 +162,12 @@ pub(crate) fn run_bridge_action_pipeline(
             }
             "messages.ensure-output-fields" => {
                 if stage == "request_outbound" {
-                    let tool_fallback =
-                        options_ref.and_then(|row| read_object_trimmed_string(row, "toolFallback")).unwrap_or_default();
-                    let assistant_fallback =
-                        options_ref.and_then(|row| read_object_trimmed_string(row, "assistantFallback")).unwrap_or_default();
+                    let tool_fallback = options_ref
+                        .and_then(|row| read_object_trimmed_string(row, "toolFallback"))
+                        .unwrap_or_default();
+                    let assistant_fallback = options_ref
+                        .and_then(|row| read_object_trimmed_string(row, "assistantFallback"))
+                        .unwrap_or_default();
                     let output = ensure_bridge_output_fields(EnsureBridgeOutputFieldsInput {
                         messages: mem::take(&mut state.messages),
                         tool_fallback: Some(tool_fallback),

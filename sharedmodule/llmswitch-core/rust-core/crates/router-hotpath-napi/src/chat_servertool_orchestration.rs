@@ -10,7 +10,7 @@ use crate::hub_bridge_actions::utils::{
 };
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 use crate::virtual_router_engine::routing::{
-    resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
+    resolve_routing_state_key, resolve_session_scope, resolve_stop_message_scope,
 };
 use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 
@@ -894,18 +894,10 @@ fn resolve_servertool_sticky_key(metadata: &Value) -> String {
     if let Some(scope) = resolve_stop_message_scope(metadata) {
         return scope;
     }
-    let generic = resolve_sticky_key(metadata);
     if let Some(session_scope) = resolve_session_scope(metadata) {
-        let request_id = metadata
-            .get("requestId")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|v| !v.is_empty());
-        if request_id.is_some() && generic == request_id.unwrap() {
-            return session_scope;
-        }
+        return session_scope;
     }
-    generic
+    resolve_routing_state_key(metadata)
 }
 
 fn read_runtime_metadata_bool(runtime_metadata: &Value, key: &str) -> bool {
@@ -1383,7 +1375,6 @@ pub fn run_servertool_response_stage_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-
 fn resolve_apply_patch_dispatch_mode(runtime_metadata: Option<&Value>) -> String {
     let mode = runtime_metadata
         .and_then(|v| v.as_object())
@@ -1402,8 +1393,12 @@ fn resolve_apply_patch_dispatch_mode(runtime_metadata: Option<&Value>) -> String
     }
 }
 
-fn can_dispatch_apply_patch_servertool(normalized_name: &str, runtime_metadata: Option<&Value>) -> bool {
-    normalized_name != "apply_patch" || resolve_apply_patch_dispatch_mode(runtime_metadata) == "servertool"
+fn can_dispatch_apply_patch_servertool(
+    normalized_name: &str,
+    runtime_metadata: Option<&Value>,
+) -> bool {
+    normalized_name != "apply_patch"
+        || resolve_apply_patch_dispatch_mode(runtime_metadata) == "servertool"
 }
 
 #[napi]
@@ -1452,7 +1447,10 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
             });
             continue;
         }
-        if !can_dispatch_apply_patch_servertool(normalized_name.as_str(), input.runtime_metadata.as_ref()) {
+        if !can_dispatch_apply_patch_servertool(
+            normalized_name.as_str(),
+            input.runtime_metadata.as_ref(),
+        ) {
             skipped_tool_calls.push(ServertoolDispatchSkippedOutput {
                 id: tool_call.id,
                 name: normalized_name,
@@ -1605,12 +1603,8 @@ fn extract_target_field(
 ) -> Option<String> {
     let candidates = [
         adapter.get("target").and_then(|t| t.get(field)),
-        metadata
-            .get("target")
-            .and_then(|t| t.get(field)),
-        runtime
-            .get("target")
-            .and_then(|t| t.get(field)),
+        metadata.get("target").and_then(|t| t.get(field)),
+        runtime.get("target").and_then(|t| t.get(field)),
     ];
     for v in candidates.into_iter().flatten() {
         if let Some(s) = v.as_str() {
@@ -1688,8 +1682,9 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         state_update: Value,
     }
 
-    let input: StopMessageHandlerInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("deserialize StopMessageHandlerInput: {e}")))?;
+    let input: StopMessageHandlerInput = serde_json::from_str(&input_json).map_err(|e| {
+        napi::Error::from_reason(format!("deserialize StopMessageHandlerInput: {e}"))
+    })?;
 
     // 1. Check decision action
     let action = input
@@ -1709,12 +1704,15 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
             persist_keys: Vec::new(),
             state_update: Value::Null,
         };
-        return serde_json::to_string(&output)
-            .map_err(|e| napi::Error::from_reason(e.to_string()));
+        return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
 
     // 2. Extract values from decision
-    let used = input.decision.get("used").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let used = input
+        .decision
+        .get("used")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
     let max_repeats = input
         .decision
         .get("maxRepeats")
@@ -1728,28 +1726,41 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
     let metadata = extract_metadata(&input.adapter_context);
 
     // 4. Extract pinnedTarget (priority-based lookup matching TS readPinnedTargetFromAdapterContext)
-    let provider_key = extract_target_field(&input.adapter_context, &runtime, &metadata, "providerKey")
-        .or_else(|| extract_target_field(&input.adapter_context, &runtime, &metadata, "providerId"))
-        .or_else(|| extract_priority_string(&input.adapter_context, &runtime, &metadata, &[
-            "__shadowCompareForcedProviderKey",
-            "targetProviderKey",
-            "providerKey",
-        ]))
-        .or_else(|| {
-            // Fallback: provider_pin from decision
-            provider_pin
-                .as_ref()
-                .and_then(|p| p.get("provider_key"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        });
+    let provider_key =
+        extract_target_field(&input.adapter_context, &runtime, &metadata, "providerKey")
+            .or_else(|| {
+                extract_target_field(&input.adapter_context, &runtime, &metadata, "providerId")
+            })
+            .or_else(|| {
+                extract_priority_string(
+                    &input.adapter_context,
+                    &runtime,
+                    &metadata,
+                    &[
+                        "__shadowCompareForcedProviderKey",
+                        "targetProviderKey",
+                        "providerKey",
+                    ],
+                )
+            })
+            .or_else(|| {
+                // Fallback: provider_pin from decision
+                provider_pin
+                    .as_ref()
+                    .and_then(|p| p.get("provider_key"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            });
 
     let model_id = extract_target_field(&input.adapter_context, &runtime, &metadata, "modelId")
-        .or_else(|| extract_priority_string(&input.adapter_context, &runtime, &metadata, &[
-            "assignedModelId",
-            "modelId",
-            "originalModelId",
-        ]))
+        .or_else(|| {
+            extract_priority_string(
+                &input.adapter_context,
+                &runtime,
+                &metadata,
+                &["assignedModelId", "modelId", "originalModelId"],
+            )
+        })
         .or_else(|| {
             provider_pin
                 .as_ref()
@@ -1781,7 +1792,10 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         metadata_obj.insert("clientConnectionState".to_string(), cs);
     }
     if let Some(ref pk) = provider_key {
-        metadata_obj.insert("__shadowCompareForcedProviderKey".to_string(), Value::String(pk.clone()));
+        metadata_obj.insert(
+            "__shadowCompareForcedProviderKey".to_string(),
+            Value::String(pk.clone()),
+        );
         metadata_obj.insert("providerKey".to_string(), Value::String(pk.clone()));
         metadata_obj.insert("targetProviderKey".to_string(), Value::String(pk.clone()));
     }
@@ -1964,13 +1978,10 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
                     .map(|value| value.trim().to_string())
             })
             .or_else(|| {
-                input
-                    .executed_tool_calls
-                    .first()
-                    .map(|entry| {
-                        normalize_routecodex_tool_name(Some(entry.name.as_str()))
-                            .unwrap_or_else(|| entry.name.trim().to_ascii_lowercase())
-                    })
+                input.executed_tool_calls.first().map(|entry| {
+                    normalize_routecodex_tool_name(Some(entry.name.as_str()))
+                        .unwrap_or_else(|| entry.name.trim().to_ascii_lowercase())
+                })
             })
     } else {
         Some("servertool_multi".to_string())
@@ -2292,7 +2303,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn test_plan_servertool_dispatch_apply_patch_gated_by_runtime_mode() {
         let base = serde_json::json!({
@@ -2311,7 +2321,8 @@ mod tests {
         });
 
         let client_output = plan_servertool_tool_call_dispatch_json(base.to_string()).unwrap();
-        let client_parsed: serde_json::Value = serde_json::from_str(client_output.as_str()).unwrap();
+        let client_parsed: serde_json::Value =
+            serde_json::from_str(client_output.as_str()).unwrap();
         assert_eq!(
             client_parsed
                 .get("executableToolCalls")
@@ -2333,8 +2344,10 @@ mod tests {
         servertool["runtimeMetadata"] = serde_json::json!({
             "__rt": { "applyPatch": { "mode": "servertool" } }
         });
-        let servertool_output = plan_servertool_tool_call_dispatch_json(servertool.to_string()).unwrap();
-        let servertool_parsed: serde_json::Value = serde_json::from_str(servertool_output.as_str()).unwrap();
+        let servertool_output =
+            plan_servertool_tool_call_dispatch_json(servertool.to_string()).unwrap();
+        let servertool_parsed: serde_json::Value =
+            serde_json::from_str(servertool_output.as_str()).unwrap();
         assert_eq!(
             servertool_parsed
                 .get("executableToolCalls")
@@ -2677,21 +2690,20 @@ mod tests {
                 "__rt": { "applyPatch": { "mode": "servertool" } }
             }
         });
-        let dispatch_out = plan_servertool_tool_call_dispatch_json(dispatch_input.to_string()).unwrap();
-        let dispatch_parsed: serde_json::Value = serde_json::from_str(dispatch_out.as_str()).unwrap();
+        let dispatch_out =
+            plan_servertool_tool_call_dispatch_json(dispatch_input.to_string()).unwrap();
+        let dispatch_parsed: serde_json::Value =
+            serde_json::from_str(dispatch_out.as_str()).unwrap();
         assert_eq!(
-            dispatch_parsed["executableToolCalls"][0]["name"],
-            "apply_patch",
+            dispatch_parsed["executableToolCalls"][0]["name"], "apply_patch",
             "apply_patch should be executable when mode=servertool"
         );
         assert_eq!(
-            dispatch_parsed["executableToolCalls"][0]["executionMode"],
-            "reenter",
+            dispatch_parsed["executableToolCalls"][0]["executionMode"], "reenter",
             "apply_patch should use reenter execution mode"
         );
         assert_eq!(
-            dispatch_parsed["executableToolCalls"][0]["stripAfterExecute"],
-            true,
+            dispatch_parsed["executableToolCalls"][0]["stripAfterExecute"], true,
             "apply_patch should be stripped after execute"
         );
 
@@ -2725,25 +2737,25 @@ mod tests {
 
         // All tool_calls were consumed → servertool_only
         assert_eq!(
-            outcome_parsed["outcomeMode"],
-            "servertool_only",
+            outcome_parsed["outcomeMode"], "servertool_only",
             "single servertool-only call should produce servertool_only outcome"
         );
         // remining_tool_call_ids should be empty
         assert!(
-            outcome_parsed["remainingToolCallIds"].as_array().map(|a| a.is_empty()).unwrap_or(false),
+            outcome_parsed["remainingToolCallIds"]
+                .as_array()
+                .map(|a| a.is_empty())
+                .unwrap_or(false),
             "all tool calls were executed → no remaining"
         );
         // followup should be via generic_tool_outputs (no last execution followup)
         assert_eq!(
-            outcome_parsed["followupStrategy"],
-            "generic_tool_outputs",
+            outcome_parsed["followupStrategy"], "generic_tool_outputs",
             "no last followup → generic_tool_outputs strategy"
         );
         // pending_injection should NOT be needed for servertool_only mode
         assert_eq!(
-            outcome_parsed["requiresPendingInjection"],
-            false,
+            outcome_parsed["requiresPendingInjection"], false,
             "servertool_only mode should not require pending injection"
         );
     }
@@ -2851,7 +2863,11 @@ fn parse_apply_patch_arguments(raw: &str) -> serde_json::Value {
                 })
                 .and_then(|w| {
                     let v = w[1].to_string();
-                    if !v.is_empty() { Some(v) } else { None }
+                    if !v.is_empty() {
+                        Some(v)
+                    } else {
+                        None
+                    }
                 });
             if let Some(fp) = file_path {
                 map.insert("filePath".to_string(), serde_json::Value::String(fp));
@@ -2864,11 +2880,16 @@ fn parse_apply_patch_arguments(raw: &str) -> serde_json::Value {
                 .find(|w| {
                     let key = w[0].trim();
                     let val = w[1].trim();
-                    (key == "patch" || key == "input" || key == "diff" || key == "changes") && !val.is_empty()
+                    (key == "patch" || key == "input" || key == "diff" || key == "changes")
+                        && !val.is_empty()
                 })
                 .and_then(|w| {
                     let v = w[1].to_string();
-                    if !v.is_empty() { Some(v) } else { None }
+                    if !v.is_empty() {
+                        Some(v)
+                    } else {
+                        None
+                    }
                 });
             if let Some(p) = patch {
                 map.insert("patch".to_string(), serde_json::Value::String(p));
@@ -2931,7 +2952,8 @@ fn is_line_edit_block(text: &str) -> bool {
     if rows.is_empty() {
         return false;
     }
-    rows.iter().all(|l| l.starts_with("+ ") || l.starts_with("- ") || *l == "+" || *l == "-")
+    rows.iter()
+        .all(|l| l.starts_with("+ ") || l.starts_with("- ") || *l == "+" || *l == "-")
 }
 
 /// Extract fenced patch text from markdown ``` blocks.
@@ -3045,7 +3067,11 @@ fn parse_line_edit_patch(patch: &str) -> Result<ParsedPatch, String> {
     let text = patch.replace("\r\n", "\n").replace('\r', "\n");
     let rows: Vec<&str> = text
         .split('\n')
-        .filter(|line| !(line.is_empty() && text.ends_with('\n') && rows_count(&text) == rows_count_before_split(&text, line)))
+        .filter(|line| {
+            !(line.is_empty()
+                && text.ends_with('\n')
+                && rows_count(&text) == rows_count_before_split(&text, line))
+        })
         .collect();
 
     // Actually, simpler: filter trailing empty
@@ -3151,10 +3177,7 @@ fn find_subsequence(source: &[String], needle: &[String]) -> Option<usize> {
 }
 
 /// Apply line-edit hunks to target content.
-fn apply_line_edit_patch(
-    target_content: &str,
-    hunks: &[LineEditHunk],
-) -> Result<String, String> {
+fn apply_line_edit_patch(target_content: &str, hunks: &[LineEditHunk]) -> Result<String, String> {
     let lines: Vec<String> = target_content
         .replace("\r\n", "\n")
         .replace('\r', "\n")
@@ -3348,12 +3371,13 @@ pub fn run_apply_patch_json(input_json: String) -> NapiResult<String> {
                     patched_content: Some(patched),
                     canonical_args,
                 };
-                serde_json::to_string(&output)
-                    .map_err(|e| napi::Error::from_reason(e.to_string()))
+                serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
             }
             Err(reason) => {
                 let message = match reason.as_str() {
-                    "PATCH_CONTEXT_NOT_FOUND" => "Removed line sequence was not found in target file.".to_string(),
+                    "PATCH_CONTEXT_NOT_FOUND" => {
+                        "Removed line sequence was not found in target file.".to_string()
+                    }
                     _ => reason.clone(),
                 };
                 let payload = serde_json::json!({
@@ -3370,8 +3394,7 @@ pub fn run_apply_patch_json(input_json: String) -> NapiResult<String> {
                     patched_content: None,
                     canonical_args,
                 };
-                serde_json::to_string(&output)
-                    .map_err(|e| napi::Error::from_reason(e.to_string()))
+                serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
             }
         }
     } else {
@@ -3561,7 +3584,10 @@ pub fn vision_build_analysis_payload_json(source_json: String) -> String {
 
 /// Build pinned vision backend metadata from adapter context and payload.
 #[napi]
-pub fn vision_build_pinned_metadata_json(adapter_context_json: String, payload_json: String) -> String {
+pub fn vision_build_pinned_metadata_json(
+    adapter_context_json: String,
+    payload_json: String,
+) -> String {
     let ctx: serde_json::Value = match serde_json::from_str(&adapter_context_json) {
         Ok(v) => v,
         Err(_) => return "null".to_string(),
@@ -3575,27 +3601,17 @@ pub fn vision_build_pinned_metadata_json(adapter_context_json: String, payload_j
 
     let provider_key = target
         .and_then(|t| t.get("providerKey").and_then(|v| v.as_str()))
-        .or_else(|| {
-            ctx.get("targetProviderKey")
-                .and_then(|v| v.as_str())
-        })
+        .or_else(|| ctx.get("targetProviderKey").and_then(|v| v.as_str()))
         .or_else(|| ctx.get("providerKey").and_then(|v| v.as_str()))
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
     let model_id = target
         .and_then(|t| t.get("modelId").and_then(|v| v.as_str()))
-        .or_else(|| {
-            ctx.get("assignedModelId")
-                .and_then(|v| v.as_str())
-        })
+        .or_else(|| ctx.get("assignedModelId").and_then(|v| v.as_str()))
         .or_else(|| ctx.get("modelId").and_then(|v| v.as_str()))
         .or_else(|| ctx.get("originalModelId").and_then(|v| v.as_str()))
-        .or_else(|| {
-            payload
-                .get("model")
-                .and_then(|v| v.as_str())
-        })
+        .or_else(|| payload.get("model").and_then(|v| v.as_str()))
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 

@@ -1,8 +1,8 @@
 use regex::Regex;
 use serde_json::{json, Map, Value};
 
-use crate::shared_json_utils::{read_object_trimmed_string, read_trimmed_string};
 use super::tool_guidance::wrap_tool_calls_json;
+use crate::shared_json_utils::{read_object_trimmed_string, read_trimmed_string};
 
 fn stringify_unknown(value: &Value) -> String {
     if let Some(raw) = value.as_str() {

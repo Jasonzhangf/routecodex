@@ -124,8 +124,7 @@ fn build_responses_payload_from_chat_filters_executed_tool_outputs_from_required
 }
 
 #[test]
-fn build_responses_payload_from_chat_filters_native_tool_output_id_alias_from_required_action()
-{
+fn build_responses_payload_from_chat_filters_native_tool_output_id_alias_from_required_action() {
     let payload = serde_json::json!({
         "id": "resp_native_completed",
         "model": "gpt-5.4-medium",
@@ -222,11 +221,8 @@ fn resolve_anthropic_stop_reason_maps_tool_use_and_default() {
 
 #[test]
 fn resolve_anthropic_chat_completion_outcome_prefers_tool_calls_and_sets_overflow_gate() {
-    let with_tool_calls = resolve_anthropic_chat_completion_outcome(
-        Some("model_context_window_exceeded"),
-        2,
-        false,
-    );
+    let with_tool_calls =
+        resolve_anthropic_chat_completion_outcome(Some("model_context_window_exceeded"), 2, false);
     assert_eq!(
         with_tool_calls["finishReason"],
         Value::String("tool_calls".to_string())
@@ -237,11 +233,8 @@ fn resolve_anthropic_chat_completion_outcome_prefers_tool_calls_and_sets_overflo
         Value::Bool(true)
     );
 
-    let without_tool_calls = resolve_anthropic_chat_completion_outcome(
-        Some("model_context_window_exceeded"),
-        0,
-        true,
-    );
+    let without_tool_calls =
+        resolve_anthropic_chat_completion_outcome(Some("model_context_window_exceeded"), 0, true);
     assert_eq!(
         without_tool_calls["finishReason"],
         Value::String("length".to_string())
@@ -507,8 +500,7 @@ fn normalize_responses_tool_call_arguments_for_client_recovers_declared_tool_nam
         Value::String("mailbox.status".to_string())
     );
     assert_eq!(
-        normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
-            ["name"],
+        normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["name"],
         Value::String("mailbox.status".to_string())
     );
 }
@@ -561,8 +553,7 @@ fn normalize_responses_tool_call_arguments_for_client_bridges_apply_patch_minus_
     assert!(args.contains("+new"));
     assert_eq!(
         output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["arguments"],
-        output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
-            ["arguments"]
+        output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["arguments"]
     );
 }
 
@@ -721,9 +712,8 @@ fn build_responses_payload_from_chat_restores_declared_tool_name_from_tools_raw(
         ]
     });
 
-    let output =
-        build_responses_payload_from_chat_core(&payload, Some("req_tool_alias"), &context)
-            .expect("build responses payload");
+    let output = build_responses_payload_from_chat_core(&payload, Some("req_tool_alias"), &context)
+        .expect("build responses payload");
 
     let output_calls = output["output"].as_array().expect("output array");
     let function_call = output_calls
@@ -1318,8 +1308,7 @@ fn resolve_client_tools_raw_from_resp_semantics_repairs_anthropic_semantics_mirr
 }
 
 #[test]
-fn resolve_alias_map_from_sources_derives_shell_command_alias_from_anthropic_client_tools_raw()
-{
+fn resolve_alias_map_from_sources_derives_shell_command_alias_from_anthropic_client_tools_raw() {
     let output = resolve_alias_map_from_sources(
         &serde_json::json!({}),
         &serde_json::json!({
@@ -1623,9 +1612,13 @@ fn build_responses_payload_from_chat_json_matches_core_shape() {
         }]
     });
     let context = serde_json::json!({"requestId":"req_equiv_outbound","toolsRaw":[]});
-    let core = build_responses_payload_from_chat_core(&payload, Some("req_equiv_outbound"), &context).expect("core");
+    let core =
+        build_responses_payload_from_chat_core(&payload, Some("req_equiv_outbound"), &context)
+            .expect("core");
     let json_out: serde_json::Value = serde_json::from_str(
-        &build_responses_payload_from_chat_json(payload.to_string(), context.to_string()).expect("json")
-    ).unwrap();
+        &build_responses_payload_from_chat_json(payload.to_string(), context.to_string())
+            .expect("json"),
+    )
+    .unwrap();
     assert_eq!(json_out, core);
 }

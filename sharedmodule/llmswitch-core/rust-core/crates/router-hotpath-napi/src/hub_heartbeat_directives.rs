@@ -2,14 +2,14 @@
 //! Rust SSOT for heartbeat directive parsing from request messages.
 //! Filesystem / runtime side-effects remain in TS.
 
+use crate::shared_tooling::{
+    collapse_extra_newlines_and_trim, find_last_user_message_index as find_last_user_index_shared,
+};
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::shared_tooling::{
-    collapse_extra_newlines_and_trim, find_last_user_message_index as find_last_user_index_shared,
-};
 
 const HB_MARKER_START: &str = "<**hb:";
 const HB_MARKER_END: &str = "**>";
@@ -24,7 +24,7 @@ pub struct HeartbeatDirectiveInput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatDirectiveOutput {
-    pub action: String,       // "on" | "off" | "none"
+    pub action: String, // "on" | "off" | "none"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interval_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,7 +53,6 @@ pub struct HeartbeatDirectiveApplyOutput {
     pub messages: Value,
     pub runtime_summary: Option<HeartbeatDirectiveRuntimeSummary>,
 }
-
 
 fn read_string_field(obj: &serde_json::map::Map<String, Value>, keys: &[&str]) -> Option<String> {
     for key in keys {
@@ -178,7 +177,10 @@ fn strip_valid_hb_directives_from_text(text: &str) -> (String, Vec<(String, Opti
         cursor = marker_end;
     }
 
-    (collapse_extra_newlines_and_trim(output.as_str()), directives)
+    (
+        collapse_extra_newlines_and_trim(output.as_str()),
+        directives,
+    )
 }
 
 fn process_content_for_valid_heartbeat_markers(
@@ -389,7 +391,8 @@ fn resolve_heartbeat_directive(input: HeartbeatDirectiveInput) -> HeartbeatDirec
         }
     };
 
-    let role = last_user_msg.get("role")
+    let role = last_user_msg
+        .get("role")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim()
@@ -408,7 +411,8 @@ fn resolve_heartbeat_directive(input: HeartbeatDirectiveInput) -> HeartbeatDirec
     fn extract_text(val: &Value) -> String {
         match val {
             Value::String(s) => s.clone(),
-            Value::Array(arr) => arr.iter()
+            Value::Array(arr) => arr
+                .iter()
                 .filter_map(|v| {
                     if let Value::Object(o) = v {
                         if let Some(Value::String(t)) = o.get("text") {
@@ -435,15 +439,21 @@ fn resolve_heartbeat_directive(input: HeartbeatDirectiveInput) -> HeartbeatDirec
         .map(|b| parse_hb_directive_body(b))
         .unwrap_or_else(|| ("none".to_string(), None));
 
-    let tmux_session_id = metadata.as_object()
-        .and_then(|obj| read_string_field(obj, &[
-            "tmuxSessionId", "clientTmuxSessionId",
-            "tmux_session_id", "client_tmux_session_id",
-            "stopMessageClientInjectSessionScope", "stop_message_client_inject_session_scope",
-        ]));
+    let tmux_session_id = metadata.as_object().and_then(|obj| {
+        read_string_field(
+            obj,
+            &[
+                "tmuxSessionId",
+                "clientTmuxSessionId",
+                "tmux_session_id",
+                "client_tmux_session_id",
+                "stopMessageClientInjectSessionScope",
+                "stop_message_client_inject_session_scope",
+            ],
+        )
+    });
 
-    let workdir = metadata.as_object()
-        .and_then(|obj| read_workdir_field(obj));
+    let workdir = metadata.as_object().and_then(|obj| read_workdir_field(obj));
 
     HeartbeatDirectiveOutput {
         action,
@@ -456,8 +466,8 @@ fn resolve_heartbeat_directive(input: HeartbeatDirectiveInput) -> HeartbeatDirec
 
 #[napi]
 pub fn resolve_heartbeat_directive_json(input_json: String) -> NapiResult<String> {
-    let input: HeartbeatDirectiveInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: HeartbeatDirectiveInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = resolve_heartbeat_directive(input);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -485,7 +495,10 @@ mod tests {
 
         assert_eq!(output.action, "on");
         assert_eq!(output.interval_ms, Some(15 * 60_000));
-        assert_eq!(output.tmux_session_id.as_deref(), Some("hb-native-contract"));
+        assert_eq!(
+            output.tmux_session_id.as_deref(),
+            Some("hb-native-contract")
+        );
         assert_eq!(output.workdir.as_deref(), Some("/tmp/hb-native-contract"));
         assert_eq!(output.content_changed, Some(true));
     }

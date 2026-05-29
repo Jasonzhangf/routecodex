@@ -40,15 +40,14 @@ pub(crate) fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
         || lowered.contains("</parameter>")
 }
 
-
 use crate::resp_process_stage1_tool_governance_blocks::json_args::try_parse_json_value_lenient;
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_shape::sanitize_text_harvest_shape;
 use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::{
     extract_tool_call_entries_from_unknown, maybe_parse_tool_call_text_value,
 };
 use crate::resp_process_stage1_tool_governance_blocks::xml_text_utils::{
-    normalize_dsml_tool_markup, should_attempt_xml_wrapper_harvest,
-    normalize_preserved_text_whitespace, strip_xml_tags_preserve_text,
+    normalize_dsml_tool_markup, normalize_preserved_text_whitespace,
+    should_attempt_xml_wrapper_harvest, strip_xml_tags_preserve_text,
 };
 
 pub(crate) fn mask_tool_wrapper_markup(raw: &str) -> String {
@@ -608,7 +607,10 @@ fn sanitize_textual_noise_field_in_message(
     true
 }
 
-pub(crate) fn sanitize_textual_marker_field_in_message(message: &mut Map<String, Value>, key: &str) -> bool {
+pub(crate) fn sanitize_textual_marker_field_in_message(
+    message: &mut Map<String, Value>,
+    key: &str,
+) -> bool {
     let Some(raw) = message
         .get(key)
         .and_then(Value::as_str)
@@ -849,7 +851,9 @@ fn sanitize_content_field_after_tool_markup(
     }
 }
 
-pub(crate) fn sanitize_reasoning_fields_after_tool_harvest(message: &mut Map<String, Value>) -> i64 {
+pub(crate) fn sanitize_reasoning_fields_after_tool_harvest(
+    message: &mut Map<String, Value>,
+) -> i64 {
     let mut changed = 0i64;
     let has_tool_calls = message
         .get("tool_calls")

@@ -1,9 +1,9 @@
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 
-use crate::shared_json_utils::read_trimmed_string;
 use super::super::AdapterContext;
 use super::user_id::apply_anthropic_claude_code_user_id;
+use crate::shared_json_utils::read_trimmed_string;
 
 const DEFAULT_SYSTEM_TEXT: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 

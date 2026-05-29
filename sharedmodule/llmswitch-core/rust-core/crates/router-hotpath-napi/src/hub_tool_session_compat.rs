@@ -157,7 +157,10 @@ fn find_tool_message_index(messages: &[Value], start_index: usize, call_id: &str
         if role != "tool" {
             continue;
         }
-        if read_first_object_trimmed_string(message_obj, &["tool_call_id", "call_id", "id"]).as_deref() == Some(call_id) {
+        if read_first_object_trimmed_string(message_obj, &["tool_call_id", "call_id", "id"])
+            .as_deref()
+            == Some(call_id)
+        {
             return Some(idx);
         }
     }
@@ -265,7 +268,9 @@ fn normalize_tool_call_ordering(
             let Some(call_obj) = call.as_object() else {
                 continue;
             };
-            let Some(call_id) = read_first_object_trimmed_string(call_obj, &["id", "tool_call_id", "call_id"]) else {
+            let Some(call_id) =
+                read_first_object_trimmed_string(call_obj, &["id", "tool_call_id", "call_id"])
+            else {
                 continue;
             };
             if let Some(existing_index) =
@@ -336,7 +341,9 @@ fn collect_valid_call_ids(messages: &[Value]) -> HashSet<String> {
         };
         for call in tool_calls {
             if let Some(call_obj) = call.as_object() {
-                if let Some(call_id) = read_first_object_trimmed_string(call_obj, &["id", "tool_call_id", "call_id"]) {
+                if let Some(call_id) =
+                    read_first_object_trimmed_string(call_obj, &["id", "tool_call_id", "call_id"])
+                {
                     valid.insert(call_id);
                 }
             }
@@ -360,7 +367,9 @@ fn filter_tool_outputs(
         let Some(row) = entry.as_object() else {
             continue;
         };
-        let Some(call_id) = read_first_object_trimmed_string(row, &["tool_call_id", "call_id", "id"]) else {
+        let Some(call_id) =
+            read_first_object_trimmed_string(row, &["tool_call_id", "call_id", "id"])
+        else {
             continue;
         };
         if !valid_call_ids.contains(call_id.as_str()) {
@@ -425,7 +434,9 @@ fn collect_tool_history_records(messages: &[Value], ts: &str) -> Vec<ToolHistory
                 let Some(call_obj) = call.as_object() else {
                     continue;
                 };
-                let Some(call_id) = read_first_object_trimmed_string(call_obj, &["id", "tool_call_id", "call_id"]) else {
+                let Some(call_id) =
+                    read_first_object_trimmed_string(call_obj, &["id", "tool_call_id", "call_id"])
+                else {
                     continue;
                 };
                 let name = read_tool_name_from_call(call_obj);
@@ -439,7 +450,9 @@ fn collect_tool_history_records(messages: &[Value], ts: &str) -> Vec<ToolHistory
             continue;
         }
         if role == "tool" {
-            let Some(call_id) = read_first_object_trimmed_string(message_obj, &["tool_call_id", "call_id", "id"]) else {
+            let Some(call_id) =
+                read_first_object_trimmed_string(message_obj, &["tool_call_id", "call_id", "id"])
+            else {
                 continue;
             };
             let name = read_tool_name_from_message(message_obj);

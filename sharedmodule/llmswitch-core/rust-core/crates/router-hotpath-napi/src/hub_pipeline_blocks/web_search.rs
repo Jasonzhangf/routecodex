@@ -186,4 +186,3 @@ fn build_builtin_web_search_tool(max_uses: i64) -> Value {
     );
     Value::Object(builtin_tool)
 }
-

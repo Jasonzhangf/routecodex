@@ -45,13 +45,7 @@ pub fn evaluate(input: LoopGuardInput) -> LoopGuardOutput {
 
     let elapsed_ms = input
         .started_at_ms
-        .map(|start| {
-            if now_ms > start {
-                now_ms - start
-            } else {
-                0
-            }
-        })
+        .map(|start| if now_ms > start { now_ms - start } else { 0 })
         .unwrap_or(0);
 
     let repeat_count = input

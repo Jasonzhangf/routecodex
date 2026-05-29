@@ -62,9 +62,11 @@ const TOOL_MARKER_PATTERN: &[&str] = &[
 pub fn inspect(payload: &serde_json::Value) -> StopGatewayContext {
     match classify_payload(payload) {
         Some(PayloadClass::Chat(choices)) => inspect_chat(choices),
-        Some(PayloadClass::Responses { status, output, required_action }) => {
-            inspect_responses(status, output, required_action)
-        }
+        Some(PayloadClass::Responses {
+            status,
+            output,
+            required_action,
+        }) => inspect_responses(status, output, required_action),
         None => StopGatewayContext {
             observed: false,
             eligible: false,
@@ -115,7 +117,10 @@ fn classify_payload(payload: &serde_json::Value) -> Option<PayloadClass> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let output = obj.get("output").and_then(|v| v.as_array()).cloned();
-    let required_action = obj.get("required_action").filter(|v| v.is_object()).cloned();
+    let required_action = obj
+        .get("required_action")
+        .filter(|v| v.is_object())
+        .cloned();
 
     Some(PayloadClass::Responses {
         status,
@@ -306,9 +311,7 @@ fn has_embedded_tool_markers(message: Option<&ChatMessage>) -> bool {
 
 fn contains_tool_marker(value: &serde_json::Value) -> bool {
     match value {
-        serde_json::Value::String(s) => TOOL_MARKER_PATTERN
-            .iter()
-            .any(|pat| s.contains(pat)),
+        serde_json::Value::String(s) => TOOL_MARKER_PATTERN.iter().any(|pat| s.contains(pat)),
         serde_json::Value::Array(arr) => arr.iter().any(|v| contains_tool_marker(v)),
         serde_json::Value::Object(obj) => obj.values().any(|v| contains_tool_marker(v)),
         _ => false,
@@ -374,7 +377,10 @@ fn is_reasoning_only_empty(message: Option<&ChatMessage>) -> bool {
         msg.reasoning_text.as_ref(),
     ];
 
-    reasoning_fields.iter().flatten().any(|v| has_visible_text(Some(v)))
+    reasoning_fields
+        .iter()
+        .flatten()
+        .any(|v| has_visible_text(Some(v)))
 }
 
 fn has_tool_like_output(value: &serde_json::Value) -> bool {

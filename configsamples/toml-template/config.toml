@@ -87,12 +87,12 @@ strategy = "weighted"
 "mini27.MiniMax-M2.7" = 8
 "deepseek.deepseek-v4-flash" = 3
 
-# longcontext → deepseek v4-flash
+# longcontext → deepseek v4-flash (先到 opencode-zen-free 的 free 模型, 兜底 deepseek)
 [[virtualrouter.routingPolicyGroups."coding".routing.longcontext]]
 id = "coding-longcontext-deepseek-flash"
 priority = 200
-mode = "weighted"
-targets = ["deepseek.deepseek-v4-flash"]
+mode = "priority"
+targets = ["opencode-zen-free.key1.deepseek-v4-flash-free", "deepseek.deepseek-v4-flash"]
 [virtualrouter.routingPolicyGroups."coding".routing.longcontext.loadBalancing]
 strategy = "weighted"
 [virtualrouter.routingPolicyGroups."coding".routing.longcontext.loadBalancing.weights]

@@ -18,12 +18,12 @@ use crate::resp_process_stage1_tool_governance_blocks::requested_tools::{
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_detection::{
     detect_unharvested_text_tool_markup, resolve_text_harvest_enabled,
 };
+use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::ensure_payload_tool_call_ids;
 use crate::resp_process_stage1_tool_governance_blocks::tool_call_governance::{
     count_normalized_tool_calls, drop_disallowed_tool_calls_from_payload,
     maybe_harvest_empty_tool_calls_from_json_content, normalize_apply_patch_tool_calls,
     remap_tool_calls_for_client_protocol,
 };
-use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::ensure_payload_tool_call_ids;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolGovernanceInput {
@@ -72,8 +72,6 @@ pub struct ToolGovernanceOutput {
     pub summary: ToolGovernanceSummary,
 }
 
-
-
 #[napi]
 pub fn strip_orphan_function_calls_tag_json(payload_json: String) -> napi::Result<String> {
     if payload_json.trim().is_empty() {
@@ -85,8 +83,6 @@ pub fn strip_orphan_function_calls_tag_json(payload_json: String) -> napi::Resul
     serde_json::to_string(&payload)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize payload: {}", e)))
 }
-
-
 
 pub(crate) fn prepare_payload_for_governance_with_requested_tool_names(
     payload: &Value,

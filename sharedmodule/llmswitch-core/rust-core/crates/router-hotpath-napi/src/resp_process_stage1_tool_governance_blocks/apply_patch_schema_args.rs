@@ -5,8 +5,8 @@ use crate::resp_process_stage1_tool_governance_blocks::apply_patch_guard::make_a
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_live_context::repair_line_number_update_hunks_with_live_context;
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_text::{
     decode_escaped_newlines_if_needed, extract_apply_patch_text, has_unified_like_header,
-    normalize_apply_patch_header_line, normalize_unified_header_path, strip_apply_patch_command_prefix,
-    trim_to_patch_window,
+    normalize_apply_patch_header_line, normalize_unified_header_path,
+    strip_apply_patch_command_prefix, trim_to_patch_window,
 };
 use crate::resp_process_stage1_tool_governance_blocks::json_args::{
     parse_json_record, try_parse_json_value_lenient,
@@ -53,7 +53,8 @@ fn build_current_apply_patch_schema_args(args: &Map<String, Value>) -> Option<(S
         .lines()
         .any(|l| l.starts_with('-') || l.starts_with('+'));
     if is_line_edit {
-        let canonical_patch = convert_servertool_line_edit_to_canonical_patch(&file_path, &patch_source);
+        let canonical_patch =
+            convert_servertool_line_edit_to_canonical_patch(&file_path, &patch_source);
         let mut out = Map::new();
         out.insert("patch".to_string(), Value::String(canonical_patch.clone()));
         out.insert("input".to_string(), Value::String(canonical_patch));
@@ -426,7 +427,9 @@ fn normalize_hashline_apply_patch_schema_args(
     ))
 }
 
-pub(crate) fn detect_hashline_apply_patch_guard_reason(raw_args: Option<&Value>) -> Option<&'static str> {
+pub(crate) fn detect_hashline_apply_patch_guard_reason(
+    raw_args: Option<&Value>,
+) -> Option<&'static str> {
     let args = parse_json_record(raw_args).unwrap_or_default();
     match normalize_hashline_apply_patch_schema_args(&args) {
         HashlineApplyPatchNormalization::Guarded { reason, .. } => Some(reason),
@@ -769,7 +772,9 @@ fn structured_stringish_is_non_empty(value: Option<&Value>) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn detect_structured_apply_patch_invalid_reason(args: &Map<String, Value>) -> Option<&'static str> {
+pub(crate) fn detect_structured_apply_patch_invalid_reason(
+    args: &Map<String, Value>,
+) -> Option<&'static str> {
     if args.is_empty() {
         return Some("invalid_json");
     }

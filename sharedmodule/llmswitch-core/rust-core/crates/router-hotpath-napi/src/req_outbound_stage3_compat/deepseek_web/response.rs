@@ -448,8 +448,10 @@ fn detect_plaintext_invalid_tool_calls_markup(payload: &Value) -> bool {
     let Some(choices) = payload.get("choices").and_then(Value::as_array) else {
         return false;
     };
-    let rcc_truncated_re = Regex::new(r"(?is)<<\s*RCC_TOOL_CALLS_JSON\b(?![\s\S]*RCC_TOOL_CALLS_JSON)").ok();
-    let quote_wrapped_re = Regex::new(r#"(?is)<\s*quote\s*>[\s\S]*?"tool_calls"[\s\S]*?<\s*/\s*quote\s*>"#).ok();
+    let rcc_truncated_re =
+        Regex::new(r"(?is)<<\s*RCC_TOOL_CALLS_JSON\b(?![\s\S]*RCC_TOOL_CALLS_JSON)").ok();
+    let quote_wrapped_re =
+        Regex::new(r#"(?is)<\s*quote\s*>[\s\S]*?"tool_calls"[\s\S]*?<\s*/\s*quote\s*>"#).ok();
     let plain_tool_calls_re = Regex::new(r#"(?is)\{[\s\S]*?"tool_calls"[\s\S]*?\}"#).ok();
     let wrapper_re = Regex::new(
         r"(?is)<\s*tool_call\s*>|<\s*/\s*tool_call\s*>|<\s*function_calls\s*>|<\s*/\s*function_calls\s*>|<<\s*RCC_TOOL_CALLS_JSON\b[\s\S]*?RCC_TOOL_CALLS_JSON",
@@ -686,7 +688,9 @@ pub(crate) fn apply_deepseek_web_response_compat(
             tool_choice_required, text_tool_fallback, strict_tool_required
         ));
     }
-    if (declared_tools_present || tool_choice_required) && plaintext_invalid_markup_before_governance {
+    if (declared_tools_present || tool_choice_required)
+        && plaintext_invalid_markup_before_governance
+    {
         return Err(format!(
             "DeepSeek declared tools present but no valid tool call was produced (toolChoiceRequired={}, fallbackEnabled={}, strictToolRequired={})",
             tool_choice_required, text_tool_fallback, strict_tool_required

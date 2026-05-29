@@ -13,8 +13,9 @@ use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::{
 };
 use crate::resp_process_stage1_tool_governance_blocks::xml_text_utils::{
     decode_basic_xml_entities, is_xml_named_tool_container_tag, normalize_dsml_tool_markup,
-    parse_xml_tag_attributes, resolve_xml_named_child_arg_key, resolve_xml_wrapper_tool_name_from_attrs,
-    should_attempt_xml_wrapper_harvest, strip_xml_tags_preserve_text, unwrap_xml_cdata_sections,
+    parse_xml_tag_attributes, resolve_xml_named_child_arg_key,
+    resolve_xml_wrapper_tool_name_from_attrs, should_attempt_xml_wrapper_harvest,
+    strip_xml_tags_preserve_text, unwrap_xml_cdata_sections,
 };
 
 fn looks_like_pathish_suffix(raw: &str) -> bool {
@@ -251,7 +252,10 @@ pub(crate) fn looks_like_exec_command_candidate(raw: &str) -> bool {
     })
 }
 
-pub(crate) fn extract_function_calls_shell_fence_tool_call(text: &str, fallback_id: usize) -> Option<Value> {
+pub(crate) fn extract_function_calls_shell_fence_tool_call(
+    text: &str,
+    fallback_id: usize,
+) -> Option<Value> {
     if !text.contains("<function_calls>") {
         return None;
     }
@@ -273,7 +277,10 @@ pub(crate) fn extract_function_calls_shell_fence_tool_call(text: &str, fallback_
     normalize_tool_call_entry(&entry, fallback_id)
 }
 
-pub(crate) fn extract_tool_prefixed_exec_command_block(text: &str, fallback_id: usize) -> Option<Value> {
+pub(crate) fn extract_tool_prefixed_exec_command_block(
+    text: &str,
+    fallback_id: usize,
+) -> Option<Value> {
     let pattern = Regex::new(
         r#"(?is)tool\s*:\s*exec_command\b.*?<command>\s*([\s\S]*?)\s*</command>(?:[\s\S]*?<workdir>\s*([\s\S]*?)\s*</workdir>)?"#,
     )
@@ -308,7 +315,10 @@ pub(crate) fn extract_tool_prefixed_exec_command_block(text: &str, fallback_id: 
     normalize_tool_call_entry(&entry, fallback_id)
 }
 
-pub(crate) fn extract_reasoning_inline_exec_command_arg_key(text: &str, fallback_id: usize) -> Option<Value> {
+pub(crate) fn extract_reasoning_inline_exec_command_arg_key(
+    text: &str,
+    fallback_id: usize,
+) -> Option<Value> {
     let pattern = Regex::new(
         r#"(?is)exec_command\s*<arg_key>\s*cmd\s*</arg_key>\s*<arg_value>\s*([\s\S]*?)\s*</arg_value>"#,
     )
@@ -446,7 +456,10 @@ fn build_xml_named_tool_call_entry(
     normalize_tool_call_entry(&entry, fallback_id)
 }
 
-pub(crate) fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: usize) -> Vec<Value> {
+pub(crate) fn extract_xml_named_tool_call_blocks(
+    text: &str,
+    fallback_start_id: usize,
+) -> Vec<Value> {
     let normalized_text = normalize_dsml_tool_markup(text);
     let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)(?:\s+[^<>]*?)?>") else {
         return Vec::new();
@@ -514,7 +527,6 @@ pub(crate) fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: 
     }
     recovered
 }
-
 
 pub(crate) fn extract_xml_tool_call_blocks(text: &str, fallback_start_id: usize) -> Vec<Value> {
     let Ok(pattern) = Regex::new(

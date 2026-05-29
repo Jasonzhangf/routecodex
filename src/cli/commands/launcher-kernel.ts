@@ -493,6 +493,22 @@ function resolveLauncherConfigRuntimeDir(
   return pathImpl.join(userDir, 'run', configSegment);
 }
 
+function configHasMultiplePorts(fsImpl: typeof fs, configPath: string): boolean {
+  try {
+    if (!configPath || !fsImpl.existsSync(configPath)) {
+      return false;
+    }
+    const raw = fsImpl.readFileSync(configPath, 'utf8');
+    const parsed = JSON.parse(String(raw || '{}')) as Record<string, unknown>;
+    const httpserver = parsed.httpserver && typeof parsed.httpserver === 'object'
+      ? parsed.httpserver as Record<string, unknown>
+      : undefined;
+    return Array.isArray(httpserver?.ports) && httpserver.ports.length > 1;
+  } catch {
+    return false;
+  }
+}
+
 type LauncherServerLeaseRecord = {
   version: 1;
   kind: 'launcher_autostart_server';
@@ -703,7 +719,9 @@ function ensureServerLogPath(
 ): string {
   const logsDir = resolveLauncherConfigLogDir(ctx, pathImpl, resolved.configPath);
   fsImpl.mkdirSync(logsDir, { recursive: true });
-  const logPath = pathImpl.join(logsDir, `server-${resolved.port}.log`);
+  const logPath = configHasMultiplePorts(fsImpl, resolved.configPath)
+    ? pathImpl.join(logsDir, 'server-multiport.log')
+    : pathImpl.join(logsDir, `server-${resolved.port}.log`);
   rotateLogFile(fsImpl, logPath);
   return logPath;
 }
@@ -733,6 +751,8 @@ async function ensureServerReady(
 
   spinner.info('RouteCodex server is not running, starting it in background...');
   const logPath = ensureServerLogPath(ctx, fsImpl, pathImpl, resolved);
+  const multiPortConfig = logPath.endsWith('server-multiport.log');
+  const portLogRoot = pathImpl.join(resolveLauncherConfigLogDir(ctx, pathImpl, resolved.configPath), 'ports');
   const runtimeDir = resolveLauncherConfigRuntimeDir(ctx, pathImpl, resolved.configPath);
   const leasePath = pathImpl.join(runtimeDir, `server-${resolved.port}.json`);
   const lockPath = pathImpl.join(runtimeDir, `server-${resolved.port}.lock`);
@@ -791,6 +811,8 @@ async function ensureServerReady(
     ROUTECODEX_CONFIG_PATH: resolved.configPath,
     ROUTECODEX_PORT: String(resolved.port),
     RCC_PORT: String(resolved.port),
+    ROUTECODEX_PORT_LOG_ROOT: portLogRoot,
+    RCC_PORT_LOG_ROOT: portLogRoot,
     ROUTECODEX_LAUNCHER_SERVER_LEASE_PATH: leasePath,
     RCC_LAUNCHER_SERVER_LEASE_PATH: leasePath,
     ...(bindServerToParent

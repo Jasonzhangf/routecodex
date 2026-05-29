@@ -1,8 +1,8 @@
+use crate::shared_json_utils::read_object_trimmed_string;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::shared_json_utils::read_object_trimmed_string;
 
 fn read_i64(raw: f64) -> i64 {
     if raw.is_finite() {

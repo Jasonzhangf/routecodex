@@ -1,7 +1,7 @@
+use crate::shared_json_utils::split_command_string;
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
-use crate::shared_json_utils::split_command_string;
 
 fn value_to_non_empty_text(value: Option<&Value>) -> Option<String> {
     match value {

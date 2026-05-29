@@ -1,17 +1,16 @@
+use crate::shared_json_utils::read_trimmed_string;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use crate::shared_json_utils::read_trimmed_string;
-use std::collections::HashMap;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -34,9 +33,10 @@ struct SnapshotHookOptions {
     channel: Option<String>,
     provider_key: Option<String>,
     group_request_id: Option<String>,
+    entry_protocol: Option<String>,
+    entry_port: Option<i64>,
 }
 
-static PROVIDER_INDEX: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static SNAPSHOT_WRITER_RUNTIME: OnceLock<Option<SnapshotWriterRuntime>> = OnceLock::new();
 static SNAPSHOT_DROPPED_JOBS: AtomicU64 = AtomicU64::new(0);
 static SNAPSHOT_LAST_DROP_LOG_AT_MS: AtomicI64 = AtomicI64::new(0);
@@ -44,10 +44,6 @@ static SNAPSHOT_LAST_DROP_LOG_AT_MS: AtomicI64 = AtomicI64::new(0);
 #[derive(Clone)]
 struct SnapshotWriterRuntime {
     sender: SyncSender<SnapshotHookOptions>,
-}
-
-fn provider_index() -> &'static Mutex<HashMap<String, String>> {
-    PROVIDER_INDEX.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn resolve_snapshot_async_enabled() -> bool {
@@ -271,6 +267,61 @@ fn resolve_snapshot_folder(endpoint: &str) -> String {
     "openai-chat".to_string()
 }
 
+fn resolve_entry_protocol(options: &SnapshotHookOptions, data: &Value) -> String {
+    if let Some(protocol) = options.entry_protocol.as_ref() {
+        let token = sanitize_token(protocol, "");
+        if !token.is_empty() {
+            return token;
+        }
+    }
+    let entry = extract_nested_entry_endpoint(data).unwrap_or_else(|| options.endpoint.clone());
+    resolve_snapshot_folder(entry.as_str())
+}
+
+fn extract_nested_entry_port(value: &Value) -> Option<i64> {
+    fn read_port_field(obj: &Map<String, Value>, key: &str) -> Option<i64> {
+        obj.get(key)
+            .and_then(|value| {
+                value
+                    .as_i64()
+                    .or_else(|| value.as_str()?.trim().parse::<i64>().ok())
+            })
+            .filter(|port| *port > 0)
+    }
+    if let Value::Object(obj) = value {
+        if let Some(port) = read_port_field(obj, "entryPort")
+            .or_else(|| read_port_field(obj, "matchedPort"))
+            .or_else(|| read_port_field(obj, "localPort"))
+        {
+            return Some(port);
+        }
+        for key in ["portContext", "meta", "metadata", "runtime"] {
+            if let Some(Value::Object(nested)) = obj.get(key) {
+                if let Some(port) = read_port_field(nested, "entryPort")
+                    .or_else(|| read_port_field(nested, "matchedPort"))
+                    .or_else(|| read_port_field(nested, "localPort"))
+                {
+                    return Some(port);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn resolve_entry_port(options: &SnapshotHookOptions, data: &Value) -> String {
+    let port = options
+        .entry_port
+        .filter(|value| *value > 0)
+        .or_else(|| extract_nested_entry_port(data))
+        .unwrap_or(0);
+    if port > 0 {
+        format!("port-{}", port)
+    } else {
+        "port-unknown".to_string()
+    }
+}
+
 fn sanitize_token(value: &str, fallback: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -294,38 +345,6 @@ fn channel_suffix(channel: &Option<String>) -> String {
         return format!("_{}", token);
     }
     String::new()
-}
-
-fn extract_nested_provider_key(value: &Value) -> Option<String> {
-    if let Value::Object(obj) = value {
-        if let Some(k) = read_trimmed_string(obj.get("providerKey"))
-            .or_else(|| read_trimmed_string(obj.get("providerId")))
-            .or_else(|| read_trimmed_string(obj.get("profileId")))
-        {
-            return Some(k);
-        }
-        if let Some(Value::Object(target)) = obj.get("target") {
-            if let Some(k) = read_trimmed_string(target.get("providerKey")) {
-                return Some(k);
-            }
-        }
-        if let Some(Value::Object(meta)) = obj.get("meta") {
-            if let Some(k) = read_trimmed_string(meta.get("providerKey"))
-                .or_else(|| read_trimmed_string(meta.get("providerId")))
-            {
-                return Some(k);
-            }
-            if let Some(Value::Object(ctx)) = meta.get("context") {
-                if let Some(k) = read_trimmed_string(ctx.get("providerKey"))
-                    .or_else(|| read_trimmed_string(ctx.get("providerId")))
-                    .or_else(|| read_trimmed_string(ctx.get("profileId")))
-                {
-                    return Some(k);
-                }
-            }
-        }
-    }
-    None
 }
 
 fn extract_nested_group_request_id(value: &Value) -> Option<String> {
@@ -653,7 +672,6 @@ fn write_json_file_if_missing_atomic(target: &Path, contents: &str) -> Result<()
 fn build_runtime_metadata_payload(
     options: &SnapshotHookOptions,
     group_request_token: &str,
-    provider_token: &str,
 ) -> Value {
     serde_json::json!({
       "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -666,7 +684,9 @@ fn build_runtime_metadata_payload(
       "endpoint": options.endpoint.clone(),
       "requestId": options.request_id.clone(),
       "groupRequestId": group_request_token,
-      "providerKey": provider_token
+      "providerKey": options.provider_key.clone(),
+      "entryProtocol": options.entry_protocol.clone(),
+      "entryPort": options.entry_port
     })
 }
 
@@ -814,89 +834,6 @@ fn prune_errorsample_files_keep_recent(dir: &Path, keep_recent: usize) {
     }
 }
 
-fn merge_dirs(src: &Path, dest: &Path) {
-    if let Err(e) = fs::create_dir_all(dest) {
-        eprintln!(
-            "[hub_snapshot_hooks] Failed to create directory {:?}: {}",
-            dest, e
-        );
-        return;
-    }
-    let entries = match fs::read_dir(src) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let from = entry.path();
-        let name = entry.file_name();
-        let to = dest.join(&name);
-        if let Err(_) = fs::rename(&from, &to) {
-            let stem = Path::new(&name)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("snapshot");
-            let ext = Path::new(&name)
-                .extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("");
-            let suffix = format!(
-                "{}_{}",
-                chrono::Utc::now().timestamp_millis(),
-                Uuid::new_v4()
-                    .simple()
-                    .to_string()
-                    .get(0..6)
-                    .unwrap_or("rand")
-            );
-            let ext_suffix = if ext.is_empty() {
-                String::new()
-            } else {
-                format!(".{}", ext)
-            };
-            let alt = dest.join(format!("{}_{}{}", stem, suffix, ext_suffix));
-            if let Err(e) = fs::rename(&from, &alt) {
-                eprintln!(
-                    "[hub_snapshot_hooks] Failed to rename file {:?} to {:?}: {}",
-                    from, alt, e
-                );
-            }
-        }
-    }
-    if let Err(e) = fs::remove_dir(src) {
-        eprintln!(
-            "[hub_snapshot_hooks] Failed to remove directory {:?}: {}",
-            src, e
-        );
-    }
-}
-
-fn promote_pending_dir(root: &Path, folder: &str, group_request_token: &str, provider_token: &str) {
-    if group_request_token.is_empty() || provider_token == "__pending__" {
-        return;
-    }
-    let pending = root
-        .join(folder)
-        .join("__pending__")
-        .join(group_request_token);
-    let dest = root
-        .join(folder)
-        .join(provider_token)
-        .join(group_request_token);
-    if !pending.exists() {
-        return;
-    }
-    if let Err(e) = fs::create_dir_all(dest.parent().unwrap_or(root)) {
-        eprintln!(
-            "[hub_snapshot_hooks] Failed to create directory for {:?}: {}",
-            dest, e
-        );
-        return;
-    }
-    if let Err(_) = fs::rename(&pending, &dest) {
-        merge_dirs(&pending, &dest);
-    }
-}
-
 fn write_snapshot_file(
     options: &SnapshotHookOptions,
     root_override: Option<&Path>,
@@ -904,9 +841,8 @@ fn write_snapshot_file(
     let root = root_override
         .map(|p| p.to_path_buf())
         .unwrap_or_else(resolve_snapshot_root);
-    let entry =
-        extract_nested_entry_endpoint(&options.data).unwrap_or_else(|| options.endpoint.clone());
-    let folder = resolve_snapshot_folder(entry.as_str());
+    let folder = resolve_entry_protocol(options, &options.data);
+    let entry_port_token = resolve_entry_port(options, &options.data);
     let stage_token = sanitize_token(options.stage.as_str(), "snapshot");
     let group_request_token = sanitize_token(
         options
@@ -917,35 +853,9 @@ fn write_snapshot_file(
             .as_str(),
         format!("req_{}", chrono::Utc::now().timestamp_millis()).as_str(),
     );
-    let provider_from_options = options.provider_key.clone();
-    let provider_from_data = extract_nested_provider_key(&options.data);
-    let mut provider_index = provider_index().lock().unwrap();
-    let known_provider = provider_index.get(group_request_token.as_str()).cloned();
-    let provider_token = sanitize_token(
-        provider_from_options
-            .or(provider_from_data)
-            .or(known_provider)
-            .unwrap_or_else(|| "__pending__".to_string())
-            .as_str(),
-        "__pending__",
-    );
-    if !provider_index.contains_key(group_request_token.as_str()) && provider_token != "__pending__"
-    {
-        provider_index.insert(group_request_token.clone(), provider_token.clone());
-        drop(provider_index);
-        promote_pending_dir(
-            &root,
-            folder.as_str(),
-            group_request_token.as_str(),
-            provider_token.as_str(),
-        );
-    } else {
-        drop(provider_index);
-    }
-
     let dir = root
         .join(folder)
-        .join(&provider_token)
+        .join(entry_port_token)
         .join(&group_request_token);
     if let Err(e) = fs::create_dir_all(&dir) {
         eprintln!(
@@ -954,11 +864,7 @@ fn write_snapshot_file(
         );
     }
     let meta_path = dir.join("__runtime.json");
-    let meta_payload = build_runtime_metadata_payload(
-        &options,
-        group_request_token.as_str(),
-        provider_token.as_str(),
-    );
+    let meta_payload = build_runtime_metadata_payload(&options, group_request_token.as_str());
     if let Ok(payload_str) = serde_json::to_string_pretty(&meta_payload) {
         if let Err(e) = write_json_file_if_missing_atomic(&meta_path, payload_str.as_str()) {
             eprintln!(
@@ -1145,11 +1051,13 @@ pub(crate) fn enqueue_payload_contract_errorsample(
         channel: Some(phase.to_string()),
         provider_key: provider_key.map(|value| value.to_string()),
         group_request_id: None,
+        entry_protocol: None,
+        entry_port: None,
     });
 }
 
 #[cfg(test)]
-mod tests {
+mod snapshot_entry_tests {
     use super::*;
 
     #[test]
@@ -1350,4 +1258,55 @@ pub fn normalize_snapshot_stage_payload_json(
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let normalized = normalize_snapshot_stage_payload(stage.trim(), payload);
     serde_json::to_string(&normalized).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_file_uses_entry_protocol_and_port_not_provider_directory() {
+        let root = env::temp_dir().join(format!(
+            "rcc-snapshot-entry-port-{}",
+            Uuid::new_v4().simple()
+        ));
+        let options = SnapshotHookOptions {
+            endpoint: "/v1/responses".to_string(),
+            stage: "provider-request".to_string(),
+            request_id: "req_1".to_string(),
+            data: serde_json::json!({
+                "providerKey": "mimo.key1.mimo-v2.5",
+                "meta": { "entryEndpoint": "/v1/responses" }
+            }),
+            verbosity: Some("minimal".to_string()),
+            channel: None,
+            provider_key: Some("mimo.key1.mimo-v2.5".to_string()),
+            group_request_id: Some("grp_1".to_string()),
+            entry_protocol: Some("openai-responses".to_string()),
+            entry_port: Some(5555),
+        };
+
+        write_snapshot_file(&options, Some(root.as_path())).expect("snapshot write should succeed");
+
+        let entry_dir = root
+            .join("openai-responses")
+            .join("port-5555")
+            .join("grp_1");
+        assert!(
+            entry_dir.exists(),
+            "entry protocol/port directory must exist"
+        );
+        assert!(
+            entry_dir.join("provider-request.json").exists(),
+            "stage snapshot must be written under the entry directory"
+        );
+        assert!(
+            !root
+                .join("openai-responses")
+                .join("mimo.key1.mimo-v2.5")
+                .exists(),
+            "provider directory must not be created for entry snapshots"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 }

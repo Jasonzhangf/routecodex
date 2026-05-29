@@ -214,10 +214,7 @@ mod tests {
             }
         });
         let row = args.as_object().expect("args object");
-        assert_eq!(
-            read_workdir_from_args(row),
-            Some("/tmp/nested".to_string())
-        );
+        assert_eq!(read_workdir_from_args(row), Some("/tmp/nested".to_string()));
     }
 
     #[test]

@@ -2,7 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::OnceLock};
 
 fn parse_lenient_string(value: &str) -> Value {
     let s0 = value.trim();
@@ -268,21 +268,52 @@ pub(crate) fn collapse_extra_newlines_and_trim(input: &str) -> String {
 }
 
 pub(crate) fn strip_terminal_right_gutter_noise(line: &str) -> String {
-    Regex::new(r"\s+[│┃]\s*[·.]{6,}\s*$")
-        .map(|re| re.replace(line, "").to_string())
-        .unwrap_or_else(|_| line.to_string())
+    terminal_right_gutter_noise_regex()
+        .replace(line, "")
+        .to_string()
 }
 
 fn strip_box_drawing_prefix(line: &str) -> String {
-    Regex::new(r"^[\s│└├─]+")
-        .map(|re| re.replace(line, "").to_string())
-        .unwrap_or_else(|_| line.trim_start().to_string())
+    box_drawing_prefix_regex().replace(line, "").to_string()
 }
 
 fn is_transcript_collapsed_placeholder(line: &str) -> bool {
-    Regex::new(r"(?i)^\s*[│└├─\s]*[.…·]+\s*\+\d+\s+lines\s*$")
-        .map(|re| re.is_match(line))
-        .unwrap_or(false)
+    transcript_collapsed_placeholder_regex().is_match(line)
+}
+
+fn terminal_right_gutter_noise_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\s+[│┃]\s*[·.]{6,}\s*$").expect("valid terminal right gutter regex")
+    })
+}
+
+fn box_drawing_prefix_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[\s│└├─]+").expect("valid box drawing prefix regex"))
+}
+
+fn transcript_collapsed_placeholder_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)^\s*[│└├─\s]*[.…·]+\s*\+\d+\s+lines\s*$")
+            .expect("valid transcript collapsed placeholder regex")
+    })
+}
+
+fn chunked_exec_transcript_header_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)^(?:\[工具结果\]|Command:\s+.*|Chunk ID:\s+.*|Wall time:\s+.*|Process exited with code\s+.*|Process running with session ID\s+.*|Original token count:\s+.*)$",
+        )
+        .expect("valid chunked exec transcript header regex")
+    })
+}
+
+fn ran_tree_body_line_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[\s]*[│└├]").expect("valid ran transcript tree body regex"))
 }
 
 fn transcript_tree_marker(line: &str) -> Option<char> {
@@ -293,11 +324,7 @@ fn transcript_tree_marker(line: &str) -> Option<char> {
 }
 
 pub(crate) fn is_chunked_exec_transcript_header_line(line: &str) -> bool {
-    Regex::new(
-        r"(?i)^(?:\[工具结果\]|Command:\s+.*|Chunk ID:\s+.*|Wall time:\s+.*|Process exited with code\s+.*|Process running with session ID\s+.*|Original token count:\s+.*)$",
-    )
-    .map(|re| re.is_match(line.trim()))
-    .unwrap_or(false)
+    chunked_exec_transcript_header_regex().is_match(line.trim())
 }
 
 pub(crate) fn unwrap_chunked_exec_transcript_shape(raw: &str) -> Option<String> {
@@ -337,11 +364,10 @@ pub(crate) fn unwrap_ran_transcript_shape(raw: &str) -> Option<String> {
     if lines.len() < 2 {
         return None;
     }
-    let has_tree_body = lines.iter().skip(1).any(|line| {
-        Regex::new(r"^[\s]*[│└├]")
-            .map(|re| re.is_match(line))
-            .unwrap_or(false)
-    });
+    let has_tree_body = lines
+        .iter()
+        .skip(1)
+        .any(|line| ran_tree_body_line_regex().is_match(line));
     if !has_tree_body {
         return None;
     }
@@ -433,7 +459,11 @@ pub(crate) fn find_last_user_message_index(messages: &[Value]) -> Option<usize> 
                 .unwrap_or("")
                 .trim()
                 .to_ascii_lowercase();
-            if role == "user" { Some(idx) } else { None }
+            if role == "user" {
+                Some(idx)
+            } else {
+                None
+            }
         })
 }
 

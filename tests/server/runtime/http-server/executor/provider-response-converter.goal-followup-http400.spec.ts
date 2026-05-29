@@ -4,7 +4,7 @@ const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockPersistStoplessGoalStateSnapshot = jest.fn();
 const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
-const mockSyncStoplessGoalStateFromRequest = jest.fn(() => ({ stickyKey: 'session:goal-followup-http400', hadDirective: false, directiveTypes: [] }));
+const mockSyncStoplessGoalStateFromRequest = jest.fn(() => ({ stateKey: 'session:goal-followup-http400', hadDirective: false, directiveTypes: [] }));
 const mockLoadRoutingInstructionStateSync = jest.fn(() => null);
 const mockRequireCoreDist = jest.fn(() => ({
   normalizeResponsesToolCallArgumentsForClientWithNative: () => ({}),
@@ -12,7 +12,7 @@ const mockRequireCoreDist = jest.fn(() => ({
 const mockReadStoplessGoalState = jest.fn((adapterContext: Record<string, unknown>) => {
   const sessionId = typeof adapterContext?.sessionId === 'string' ? adapterContext.sessionId : undefined;
   return {
-    ...(sessionId ? { stickyKey: `session:${sessionId}` } : {}),
+    ...(sessionId ? { stateKey: `session:${sessionId}` } : {}),
     state: mockLoadRoutingInstructionStateSync(sessionId ? `session:${sessionId}` : '')?.stoplessGoalState,
   };
 });
@@ -84,7 +84,7 @@ describe('provider-response-converter goal active stopless guard', () => {
     mockSyncReasoningStopModeFromRequest.mockReset();
     mockSyncReasoningStopModeFromRequest.mockReturnValue('off');
     mockSyncStoplessGoalStateFromRequest.mockReset();
-    mockSyncStoplessGoalStateFromRequest.mockReturnValue({ stickyKey: 'session:goal-followup-http400', hadDirective: false, directiveTypes: [] });
+    mockSyncStoplessGoalStateFromRequest.mockReturnValue({ stateKey: 'session:goal-followup-http400', hadDirective: false, directiveTypes: [] });
     mockLoadRoutingInstructionStateSync.mockReset();
     mockLoadRoutingInstructionStateSync.mockReturnValue(null);
 

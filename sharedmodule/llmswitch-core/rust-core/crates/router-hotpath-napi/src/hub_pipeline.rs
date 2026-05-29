@@ -2,9 +2,7 @@
 use crate::hub_pipeline_blocks::adapter_context::resolve_adapter_context_client_connection_state;
 use crate::hub_pipeline_blocks::metadata::resolve_stop_message_router_metadata;
 use crate::hub_pipeline_blocks::process_mode::resolve_active_process_mode;
-use crate::hub_pipeline_blocks::protocol::{
-    normalize_endpoint, resolve_provider_protocol,
-};
+use crate::hub_pipeline_blocks::protocol::{normalize_endpoint, resolve_provider_protocol};
 use chrono;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -266,15 +264,14 @@ pub use crate::hub_pipeline_blocks::napi_bindings::{
     normalize_hub_endpoint_json, prepare_runtime_metadata_for_servertools_json,
     read_responses_resume_from_metadata_json, read_responses_resume_from_request_semantics_json,
     resolve_active_process_mode_json, resolve_adapter_context_metadata_signals_json,
-    resolve_adapter_context_object_carriers_json, resolve_has_instruction_requested_passthrough_json,
-    resolve_hub_client_protocol_json, resolve_hub_policy_override_json,
-    resolve_hub_shadow_compare_config_json, resolve_outbound_stream_intent_json,
-    resolve_provider_protocol_json, resolve_router_metadata_runtime_flags_json,
-    resolve_sse_protocol_from_metadata_json, resolve_sse_protocol_json,
-    resolve_stop_message_router_metadata_json, run_hub_pipeline_json,
-    run_req_inbound_pipeline_json, run_req_process_pipeline_json,
-    run_resp_outbound_pipeline_json, sync_responses_context_from_canonical_messages_json,
-    sync_session_identifiers_to_metadata_json,
+    resolve_adapter_context_object_carriers_json,
+    resolve_has_instruction_requested_passthrough_json, resolve_hub_client_protocol_json,
+    resolve_hub_policy_override_json, resolve_hub_shadow_compare_config_json,
+    resolve_outbound_stream_intent_json, resolve_provider_protocol_json,
+    resolve_router_metadata_runtime_flags_json, resolve_sse_protocol_from_metadata_json,
+    resolve_sse_protocol_json, resolve_stop_message_router_metadata_json, run_hub_pipeline_json,
+    run_req_inbound_pipeline_json, run_req_process_pipeline_json, run_resp_outbound_pipeline_json,
+    sync_responses_context_from_canonical_messages_json, sync_session_identifiers_to_metadata_json,
 };
 
 #[cfg(test)]

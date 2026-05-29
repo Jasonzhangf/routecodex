@@ -81,7 +81,6 @@ pub(crate) fn flatten_content_to_string(value: &Value) -> Option<String> {
     }
 }
 
-
 fn sanitize_servertool_name_token(value: &str) -> String {
     sanitize_id_core(value.replace('.', "_").as_str())
 }

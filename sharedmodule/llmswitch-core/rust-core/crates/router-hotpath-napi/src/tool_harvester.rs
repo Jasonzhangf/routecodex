@@ -14,8 +14,7 @@ use crate::shared_tool_mapping::{
 };
 use crate::shared_tooling::{
     chunk_string_by_bytes, extract_rcc_tool_call_fence_segments,
-    extract_structured_apply_patch_payloads_with,
-    repair_arguments_to_string,
+    extract_structured_apply_patch_payloads_with, repair_arguments_to_string,
 };
 
 #[cfg(test)]
@@ -76,7 +75,6 @@ fn hash_string(value: &str) -> String {
     }
     out
 }
-
 
 fn gen_id(ctx: Option<&HarvestContext>, index: usize) -> String {
     let prefix = ctx
@@ -193,8 +191,8 @@ fn build_tool_events_from_entries(
             .unwrap_or("")
             .trim()
             .to_string();
-        let normalized_name = normalize_routecodex_tool_name(Some(name_raw.as_str()))
-            .unwrap_or_default();
+        let normalized_name =
+            normalize_routecodex_tool_name(Some(name_raw.as_str())).unwrap_or_default();
         if normalized_name.is_empty() {
             continue;
         }

@@ -1,5 +1,5 @@
-use serde::Serialize;
 use crate::shared_tooling::collapse_extra_newlines_and_trim;
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

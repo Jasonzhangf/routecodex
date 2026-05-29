@@ -3,8 +3,8 @@ use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 
 use crate::hub_bridge_actions::utils::{
-    can_servertool_own_tool_call_id, create_harvested_tool_call_id,
-    create_servertool_tool_call_id, is_synthetic_routecodex_tool_call_id,
+    can_servertool_own_tool_call_id, create_harvested_tool_call_id, create_servertool_tool_call_id,
+    is_synthetic_routecodex_tool_call_id,
 };
 use crate::resp_process_stage1_tool_governance_blocks::json_args::{
     parse_json_record, try_parse_json_value_lenient,
@@ -107,8 +107,7 @@ pub(crate) fn extract_json_candidates_from_text(text: &str) -> Vec<Value> {
             continue;
         };
         let open_idx = marker.end() + rel_open;
-        let Some((_, array_segment)) = extract_balanced_json_array_at_shared(text, open_idx)
-        else {
+        let Some((_, array_segment)) = extract_balanced_json_array_at_shared(text, open_idx) else {
             continue;
         };
         let normalized = array_segment.trim().to_string();
@@ -178,14 +177,16 @@ pub(crate) fn maybe_parse_tool_call_text_value(raw: &str) -> Option<Value> {
             return Some(parsed);
         }
         if unescaped.starts_with('{') {
-            if let Some((_, balanced)) = extract_balanced_json_object_at_shared(unescaped.as_str(), 0)
+            if let Some((_, balanced)) =
+                extract_balanced_json_object_at_shared(unescaped.as_str(), 0)
             {
                 if let Some(parsed) = try_parse_json_value_lenient(balanced.as_str()) {
                     return Some(parsed);
                 }
             }
         } else if unescaped.starts_with('[') {
-            if let Some((_, balanced)) = extract_balanced_json_array_at_shared(unescaped.as_str(), 0)
+            if let Some((_, balanced)) =
+                extract_balanced_json_array_at_shared(unescaped.as_str(), 0)
             {
                 if let Some(parsed) = try_parse_json_value_lenient(balanced.as_str()) {
                     return Some(parsed);
@@ -344,7 +345,10 @@ fn ensure_tool_call_id_fields(
     Ok(true)
 }
 
-pub(crate) fn ensure_payload_tool_call_ids(payload: &mut Value, request_id: &str) -> Result<i64, String> {
+pub(crate) fn ensure_payload_tool_call_ids(
+    payload: &mut Value,
+    request_id: &str,
+) -> Result<i64, String> {
     let mut assigned = 0i64;
     let mut sequence = 0usize;
 

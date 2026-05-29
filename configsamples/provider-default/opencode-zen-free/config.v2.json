@@ -44,6 +44,12 @@
         "supportsThinking": true,
         "maxContext": 262144,
         "description": "NVIDIA Nemotron-3 Super free route id."
+      },
+      "deepseek-v4-flash-free": {
+        "supportsStreaming": true,
+        "supportsThinking": true,
+        "maxContext": 1048576,
+        "description": "DeepSeek V4 Flash free route id in OpenCode Zen."
       }
     },
     "capabilities": {

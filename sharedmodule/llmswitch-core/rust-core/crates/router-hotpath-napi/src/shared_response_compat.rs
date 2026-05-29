@@ -593,7 +593,8 @@ fn normalize_tool_call_ids_value(root: &mut Value) {
             };
             let type_name = item_row.get("type").and_then(|v| v.as_str()).unwrap_or("");
             if type_name == "function_call" {
-                let id = pick_first_trimmed_string_value(&[item_row.get("id"), item_row.get("item_id")]);
+                let id =
+                    pick_first_trimmed_string_value(&[item_row.get("id"), item_row.get("item_id")]);
                 let call_id = pick_first_trimmed_string_value(&[item_row.get("call_id")]);
                 if call_id.is_some() && id.is_none() {
                     item_row.insert("id".to_string(), Value::String(call_id.unwrap()));

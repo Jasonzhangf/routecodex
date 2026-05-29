@@ -53,7 +53,6 @@ fn resolve_options(value: Option<&Value>) -> ThoughtSignatureValidationOptions {
     resolved
 }
 
-
 fn is_thinking_block_type(block_type: &str) -> bool {
     matches!(block_type, "thinking" | "reasoning" | "redacted_thinking")
 }

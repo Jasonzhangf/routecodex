@@ -90,7 +90,10 @@ pub(crate) fn resolve_anthropic_chat_completion_outcome(
     ]))
 }
 
-pub(crate) fn build_provider_tool_summary(tool_call_count: usize, tool_names: Vec<String>) -> Value {
+pub(crate) fn build_provider_tool_summary(
+    tool_call_count: usize,
+    tool_names: Vec<String>,
+) -> Value {
     let mut out = Map::new();
     out.insert(
         "toolCallCount".to_string(),
@@ -207,4 +210,3 @@ pub(crate) fn infer_provider_type_from_protocol(protocol_raw: Option<&str>) -> O
         _ => None,
     }
 }
-

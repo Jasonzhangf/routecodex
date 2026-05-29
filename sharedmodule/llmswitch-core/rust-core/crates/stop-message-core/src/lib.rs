@@ -75,7 +75,9 @@ impl SkipReason {
         match self {
             SkipReason::PortDisabled => "skip_port_stopmessage_disabled",
             SkipReason::ServertoolFollowupHop => "skip_servertool_followup_hop",
-            SkipReason::ResponsesSubmitToolOutputsResume => "skip_responses_submit_tool_outputs_resume",
+            SkipReason::ResponsesSubmitToolOutputsResume => {
+                "skip_responses_submit_tool_outputs_resume"
+            }
             SkipReason::ExplicitModeOff => "skip_stopmessage_mode_off",
             SkipReason::ExplicitModeWithoutSnapshot => "skip_explicit_mode_without_snapshot",
             SkipReason::GoalDefaultExhausted => "skip_goal_default_exhausted",
@@ -189,7 +191,10 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
 
     // 4. Explicit mode without snapshot?
     if let Some(mode) = &ctx.explicit_mode {
-        if matches!(mode, StageMode::On | StageMode::Auto) && ctx.persisted_snapshot.is_none() && ctx.runtime_snapshot.is_none() {
+        if matches!(mode, StageMode::On | StageMode::Auto)
+            && ctx.persisted_snapshot.is_none()
+            && ctx.runtime_snapshot.is_none()
+        {
             return skip(SkipReason::ExplicitModeWithoutSnapshot);
         }
     }
@@ -201,7 +206,8 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
         Some(s) => s,
         None => {
             // 5a. Default exhausted tombstone?
-            if !ctx.goal_status.is_active() && !ctx.empty_reply_continue_local
+            if !ctx.goal_status.is_active()
+                && !ctx.empty_reply_continue_local
                 && ctx.persisted_default_exhausted
             {
                 return skip(SkipReason::GoalDefaultExhausted);
@@ -304,17 +310,14 @@ fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnaps
 
 fn latest_finish_reason(finish_reasons: Option<&Vec<String>>) -> Option<String> {
     let reasons = finish_reasons?;
-    reasons
-        .iter()
-        .rev()
-        .find_map(|raw| {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_ascii_lowercase())
-            }
-        })
+    reasons.iter().rev().find_map(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_ascii_lowercase())
+        }
+    })
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -369,7 +372,10 @@ mod tests {
         ctx.port_stop_message_disabled = true;
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
-        assert_eq!(result.skip_reason.unwrap(), "skip_port_stopmessage_disabled");
+        assert_eq!(
+            result.skip_reason.unwrap(),
+            "skip_port_stopmessage_disabled"
+        );
     }
 
     #[test]
@@ -394,8 +400,8 @@ mod tests {
     #[test]
     fn triggers_when_no_followup_context_and_default_enabled() {
         let mut ctx = base_ctx();
-        ctx.followup_flow_id = None;  // NOT a followup context
-        ctx.default_enabled = true;   // Default is ON
+        ctx.followup_flow_id = None; // NOT a followup context
+        ctx.default_enabled = true; // Default is ON
         let result = decide(&ctx);
         // Default now applies even without followup flow context.
         assert_eq!(result.action, Action::Trigger);
@@ -543,7 +549,10 @@ mod tests {
         ctx.explicit_mode = Some(StageMode::On);
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
-        assert_eq!(result.skip_reason.unwrap(), "skip_explicit_mode_without_snapshot");
+        assert_eq!(
+            result.skip_reason.unwrap(),
+            "skip_explicit_mode_without_snapshot"
+        );
     }
 
     #[test]

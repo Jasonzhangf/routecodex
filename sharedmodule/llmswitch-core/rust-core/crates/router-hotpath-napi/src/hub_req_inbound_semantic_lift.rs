@@ -189,7 +189,7 @@ fn build_responses_continuation(
     }
 
     continuation.insert(
-        "stickyScope".to_string(),
+        "continuationScope".to_string(),
         Value::String("request_chain".to_string()),
     );
     continuation.insert(
@@ -231,7 +231,7 @@ fn build_generic_continuation(
     let mut continuation = Map::<String, Value>::new();
     continuation.insert("chainId".to_string(), Value::String(chain_id));
     continuation.insert(
-        "stickyScope".to_string(),
+        "continuationScope".to_string(),
         Value::String(sticky_scope.to_string()),
     );
     continuation.insert(

@@ -463,7 +463,11 @@ fn normalize_apply_patch_client_args_raw(args_raw: &Value) -> Option<Value> {
     Some(Value::String(normalized.0))
 }
 
-pub(crate) fn normalize_call_args(tool_name: &str, args_raw: &Value, spec: &ClientToolDefinition) -> Value {
+pub(crate) fn normalize_call_args(
+    tool_name: &str,
+    args_raw: &Value,
+    spec: &ClientToolDefinition,
+) -> Value {
     let Some(parameters) = spec.parameters.as_ref() else {
         return args_raw.clone();
     };

@@ -135,14 +135,16 @@ fn normalize_shell_like_tool_input(tool_name: &str, input: &Value) -> Value {
 pub(crate) fn build_anthropic_response_from_chat_full(
     input: BuildAnthropicFullInput,
 ) -> Result<BuildAnthropicFullOutput, String> {
-    let chat_response: Value = serde_json::from_str(&input.chat_response).map_err(|e| e.to_string())?;
+    let chat_response: Value =
+        serde_json::from_str(&input.chat_response).map_err(|e| e.to_string())?;
 
     let alias_map: Option<Value> = input
         .alias_map
         .as_ref()
         .and_then(|s| serde_json::from_str(s).ok());
 
-    let mut sanitized = build_anthropic_response_from_chat_value(&chat_response, alias_map.as_ref());
+    let mut sanitized =
+        build_anthropic_response_from_chat_value(&chat_response, alias_map.as_ref());
 
     if let Some(content) = sanitized.as_object_mut().and_then(|o| o.get_mut("content")) {
         if let Some(arr) = content.as_array_mut() {

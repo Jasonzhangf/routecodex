@@ -11,8 +11,8 @@ use crate::resp_process_stage1_tool_governance_blocks::requested_tools::{
     collect_requested_tool_name_keys, retain_allowed_tool_calls,
 };
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_extract::{
-    collect_harvest_text_variants, extract_reasoning_inline_exec_command_arg_key,
-    extract_rcc_tool_call_fence_segments, extract_tool_prefixed_exec_command_block,
+    collect_harvest_text_variants, extract_rcc_tool_call_fence_segments,
+    extract_reasoning_inline_exec_command_arg_key, extract_tool_prefixed_exec_command_block,
     extract_xml_named_tool_call_blocks, extract_xml_tool_call_blocks,
 };
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_shape::collect_stage1_harvest_input_texts;
@@ -89,7 +89,10 @@ pub(crate) fn extract_strict_wrapper_tool_calls_from_tool_calls_container(
     recovered
 }
 
-pub(crate) fn extract_strict_wrapper_tool_calls_from_rcc(text: &str, fallback_start_id: usize) -> Vec<Value> {
+pub(crate) fn extract_strict_wrapper_tool_calls_from_rcc(
+    text: &str,
+    fallback_start_id: usize,
+) -> Vec<Value> {
     let mut recovered: Vec<Value> = Vec::new();
     for inner in extract_rcc_tool_call_fence_segments(text) {
         let parsed = try_parse_json_value_lenient(inner.as_str());
@@ -107,7 +110,10 @@ pub(crate) fn extract_strict_wrapper_tool_calls_from_rcc(text: &str, fallback_st
     recovered
 }
 
-pub(crate) fn extract_tool_calls_from_text_candidate(text: &str, fallback_start_id: usize) -> Vec<Value> {
+pub(crate) fn extract_tool_calls_from_text_candidate(
+    text: &str,
+    fallback_start_id: usize,
+) -> Vec<Value> {
     if is_obviously_truncated_tool_calls_payload(text) {
         return Vec::new();
     }

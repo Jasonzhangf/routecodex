@@ -1,6 +1,8 @@
 use serde_json::{Map, Value};
 
-use super::super::qwen::tool_definitions::{append_description, normalize_qwen_family_tool_definitions};
+use super::super::qwen::tool_definitions::{
+    append_description, normalize_qwen_family_tool_definitions,
+};
 use crate::shared_json_utils::read_trimmed_string;
 
 pub(crate) fn normalize_qwenchat_tool_definitions(root: &Map<String, Value>) -> Option<Value> {

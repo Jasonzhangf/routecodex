@@ -78,7 +78,7 @@ export interface AdapterContext {
   [key: string]: unknown;
 }
 
-export type ChatContinuationStickyScope =
+export type ChatContinuationScope =
   | 'request_chain'
   | 'session'
   | 'conversation'
@@ -117,7 +117,7 @@ export interface ChatContinuationSemantics extends JsonObject {
   chainId?: string;
   previousTurnId?: string;
   resumeFrom?: ChatContinuationPointer;
-  stickyScope?: ChatContinuationStickyScope;
+  continuationScope?: ChatContinuationScope;
   stateOrigin?: ChatContinuationStateOrigin | string;
   restored?: boolean;
   toolContinuation?: ChatToolContinuation;

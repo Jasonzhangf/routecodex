@@ -1,8 +1,8 @@
-use napi::bindgen_prelude::Result as NapiResult;
-use serde_json::Value;
 use crate::shared_tool_mapping::{
     strip_function_namespace, to_canonical_tool_name, to_compact_tool_name,
 };
+use napi::bindgen_prelude::Result as NapiResult;
+use serde_json::Value;
 
 use super::bridge_input::{
     convert_bridge_input_to_chat_messages, extract_reasoning_segments_from_text, repair_tool_calls,

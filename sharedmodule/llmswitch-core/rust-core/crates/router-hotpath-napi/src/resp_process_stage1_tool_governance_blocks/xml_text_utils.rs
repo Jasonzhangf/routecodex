@@ -253,7 +253,10 @@ pub(crate) fn normalize_dsml_tool_markup(raw: &str) -> String {
     normalized
 }
 
-pub(crate) fn read_xml_tag_attribute<'a>(attrs: &'a [(String, String)], keys: &[&str]) -> Option<&'a str> {
+pub(crate) fn read_xml_tag_attribute<'a>(
+    attrs: &'a [(String, String)],
+    keys: &[&str],
+) -> Option<&'a str> {
     for key in keys {
         if let Some((_, value)) = attrs.iter().find(|(name, _)| name == key) {
             let trimmed = value.trim();

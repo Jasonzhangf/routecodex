@@ -337,10 +337,7 @@ pub(crate) fn find_mappable_semantics_keys(metadata: &Value) -> Vec<String> {
     ];
     banned
         .iter()
-        .filter(|key| {
-            row.get(**key)
-                .is_some_and(|value| !value.is_null())
-        })
+        .filter(|key| row.get(**key).is_some_and(|value| !value.is_null()))
         .map(|key| key.to_string())
         .collect()
 }

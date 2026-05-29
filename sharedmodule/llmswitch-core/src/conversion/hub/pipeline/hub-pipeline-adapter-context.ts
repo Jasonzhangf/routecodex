@@ -111,6 +111,8 @@ export function buildAdapterContextFromNormalized(
     entryEndpoint: normalized.entryEndpoint || "/v1/chat/completions",
     providerProtocol,
     providerId,
+    ...(typeof metadata.matchedPort === "number" ? { matchedPort: metadata.matchedPort, entryPort: metadata.matchedPort } : {}),
+    ...(metadata.portContext && typeof metadata.portContext === "object" ? { portContext: metadata.portContext } : {}),
     ...(providerKey ? { providerKey, targetProviderKey: providerKey } : {}),
     routeId,
     profileId,

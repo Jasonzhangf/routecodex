@@ -10,8 +10,30 @@ use regex::Regex;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 const MAX_RESPONSES_ITEM_ID_LENGTH: usize = 64;
+static REGEX_CACHE: OnceLock<Mutex<HashMap<&'static str, Regex>>> = OnceLock::new();
+
+fn cached_regex(pattern: &'static str) -> Regex {
+    let cache = REGEX_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = cache
+        .lock()
+        .expect("reasoning regex cache lock must not be poisoned");
+    guard
+        .entry(pattern)
+        .or_insert_with(|| Regex::new(pattern).expect("valid reasoning tool regex pattern"))
+        .clone()
+}
+
+#[cfg(test)]
+fn cached_regex_pattern_count_for_tests() -> usize {
+    REGEX_CACHE
+        .get()
+        .and_then(|cache| cache.lock().ok().map(|guard| guard.len()))
+        .unwrap_or(0)
+}
 
 #[derive(Debug, Clone)]
 struct ParsedToolCall {
@@ -114,12 +136,10 @@ fn read_trimmed_reasoning_string(value: Option<&Value>) -> Option<String> {
 }
 
 fn strip_reasoning_transport_noise(raw: &str) -> String {
-    let line_re = Regex::new(r"(?im)^\[(?:Time/Date)\]:.*$").expect("valid time/date strip regex");
-    let open_re =
-        Regex::new(r"(?i)^\s*\[(?:思考|thinking)\]\s*").expect("valid reasoning open regex");
-    let close_re =
-        Regex::new(r"(?i)\s*\[/(?:思考|thinking)\]\s*$").expect("valid reasoning close regex");
-    let multi_newline_re = Regex::new(r"\n{3,}").expect("valid newline collapse regex");
+    let line_re = cached_regex(r"(?im)^\[(?:Time/Date)\]:.*$");
+    let open_re = cached_regex(r"(?i)^\s*\[(?:思考|thinking)\]\s*");
+    let close_re = cached_regex(r"(?i)\s*\[/(?:思考|thinking)\]\s*$");
+    let multi_newline_re = cached_regex(r"\n{3,}");
 
     let stripped = line_re.replace_all(raw, "").to_string();
     let stripped = open_re.replace(&stripped, "").to_string();
@@ -197,8 +217,7 @@ fn prepare_reasoning_text_for_harvest(raw: &str) -> String {
     if !has_tool_call_open && has_tool_call_close && has_bare_tool_call_prefix(stripped.as_str()) {
         return format!("<tool_call>{}", stripped);
     }
-    let fence_re =
-        Regex::new(r"(?is)^```tool_call\s*([\s\S]*?)```$").expect("valid tool_call fence regex");
+    let fence_re = cached_regex(r"(?is)^```tool_call\s*([\s\S]*?)```$");
     if let Some(caps) = fence_re.captures(stripped.as_str()) {
         if let Some(body) = caps
             .get(1)
@@ -433,10 +452,9 @@ fn strip_reasoning_tags(text: &str) -> String {
     if text.is_empty() {
         return String::new();
     }
-    let think_pattern = Regex::new(r"(?i)</?think[^>]*>").expect("valid think pattern");
-    let reflection_pattern =
-        Regex::new(r"(?i)</?reflection[^>]*>").expect("valid reflection pattern");
-    let cn_think_tag = Regex::new(r"(?is)\[/?\s*思考\s*\]").expect("valid cn think tag pattern");
+    let think_pattern = cached_regex(r"(?i)</?think[^>]*>");
+    let reflection_pattern = cached_regex(r"(?i)</?reflection[^>]*>");
+    let cn_think_tag = cached_regex(r"(?is)\[/?\s*思考\s*\]");
     let without_think = think_pattern.replace_all(text, "");
     let without_reflection = reflection_pattern.replace_all(&without_think, "");
     let without_cn_think = cn_think_tag.replace_all(&without_reflection, "");
@@ -447,15 +465,12 @@ pub(crate) fn sanitize_reasoning_tagged_text(text: &str) -> String {
     if text.trim().is_empty() {
         return String::new();
     }
-    let fenced = Regex::new(r"(?is)```\s*(?:think|reflection)[\s\S]*?```")
-        .expect("valid fenced think pattern");
-    let think = Regex::new(r"(?is)<think>[\s\S]*?</think>").expect("valid think block pattern");
-    let reflection = Regex::new(r"(?is)<reflection>[\s\S]*?</reflection>")
-        .expect("valid reflection block pattern");
-    let open_close =
-        Regex::new(r"(?is)</?(?:think|reflection)>").expect("valid open/close pattern");
-    let cn_think_tag = Regex::new(r"(?is)\[/?\s*思考\s*\]").expect("valid cn think tag pattern");
-    let multiple_breaks = Regex::new(r"\n{3,}").expect("valid line break pattern");
+    let fenced = cached_regex(r"(?is)```\s*(?:think|reflection)[\s\S]*?```");
+    let think = cached_regex(r"(?is)<think>[\s\S]*?</think>");
+    let reflection = cached_regex(r"(?is)<reflection>[\s\S]*?</reflection>");
+    let open_close = cached_regex(r"(?is)</?(?:think|reflection)>");
+    let cn_think_tag = cached_regex(r"(?is)\[/?\s*思考\s*\]");
+    let multiple_breaks = cached_regex(r"\n{3,}");
 
     let without_fenced = fenced.replace_all(text, "");
     let without_think = think.replace_all(&without_fenced, "");
@@ -512,8 +527,7 @@ fn is_image_path(input: &str) -> bool {
     if lowered.is_empty() {
         return false;
     }
-    let re = Regex::new(r"\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$")
-        .expect("valid image suffix pattern");
+    let re = cached_regex(r"\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$");
     re.is_match(lowered.as_str())
 }
 
@@ -529,9 +543,9 @@ fn short_hash(input: &str) -> String {
 }
 
 fn sanitize_core(value: &str) -> String {
-    let non_word = Regex::new(r"[^A-Za-z0-9_-]").expect("valid non-word pattern");
+    let non_word = cached_regex(r"[^A-Za-z0-9_-]");
     let mut out = non_word.replace_all(value, "_").to_string();
-    let repeated = Regex::new(r"_{2,}").expect("valid repeated underscore pattern");
+    let repeated = cached_regex(r"_{2,}");
     out = repeated.replace_all(out.as_str(), "_").to_string();
     out.trim_matches('_').to_string()
 }
@@ -622,31 +636,28 @@ fn parse_lenient_string(value: &str) -> Value {
         return parsed;
     }
 
-    let fence_pattern =
-        Regex::new(r"(?is)```(?:json)?\s*([\s\S]*?)\s*```").expect("valid fence pattern");
+    let fence_pattern = cached_regex(r"(?is)```(?:json)?\s*([\s\S]*?)\s*```");
     let candidate = fence_pattern
         .captures(s0)
         .and_then(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
         .unwrap_or_else(|| s0.to_string());
 
-    let object_pattern = Regex::new(r"(?s)\{[\s\S]*\}").expect("valid object pattern");
+    let object_pattern = cached_regex(r"(?s)\{[\s\S]*\}");
     if let Some(matched) = object_pattern.find(candidate.as_str()) {
         if let Ok(parsed) = serde_json::from_str::<Value>(matched.as_str()) {
             return parsed;
         }
     }
 
-    let array_pattern = Regex::new(r"(?s)\[[\s\S]*\]").expect("valid array pattern");
+    let array_pattern = cached_regex(r"(?s)\[[\s\S]*\]");
     if let Some(matched) = array_pattern.find(candidate.as_str()) {
         if let Ok(parsed) = serde_json::from_str::<Value>(matched.as_str()) {
             return parsed;
         }
     }
 
-    let single_quote_pattern =
-        Regex::new(r#"'([^'\\]*(?:\\.[^'\\]*)*)'"#).expect("valid single quote pattern");
-    let unquoted_key_pattern =
-        Regex::new(r#"([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:"#).expect("valid key quote pattern");
+    let single_quote_pattern = cached_regex(r#"'([^'\\]*(?:\\.[^'\\]*)*)'"#);
+    let unquoted_key_pattern = cached_regex(r#"([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:"#);
     let quoted = single_quote_pattern
         .replace_all(candidate.as_str(), r#""$1""#)
         .to_string();
@@ -663,9 +674,8 @@ fn parse_lenient_string(value: &str) -> Value {
     }
 
     let mut object = Map::new();
-    let split_pattern = Regex::new(r"[\n,]+").expect("valid split pattern");
-    let pair_pattern =
-        Regex::new(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*[:=]\s*(.+)$").expect("valid pair pattern");
+    let split_pattern = cached_regex(r"[\n,]+");
+    let pair_pattern = cached_regex(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*[:=]\s*(.+)$");
     for piece in split_pattern
         .split(candidate.as_str())
         .map(|entry| entry.trim())
@@ -728,8 +738,7 @@ fn parse_lenient_string_preserving_shell(value: &str) -> Value {
         return join_command_array(parsed);
     }
 
-    let fence_pattern =
-        Regex::new(r"(?is)```(?:json)?\s*([\s\S]*?)\s*```").expect("valid fence pattern");
+    let fence_pattern = cached_regex(r"(?is)```(?:json)?\s*([\s\S]*?)\s*```");
     if let Some(inner) = fence_pattern
         .captures(trimmed)
         .and_then(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
@@ -909,9 +918,8 @@ fn looks_like_apply_patch(raw: &str) -> bool {
     if raw.is_empty() {
         return false;
     }
-    let begin_pattern =
-        Regex::new(r"(?m)^\s*\*{3}\s*Begin Patch\b").expect("valid begin patch pattern");
-    let end_pattern = Regex::new(r"(?m)^\s*\*{3}\s*End Patch\b").expect("valid end patch pattern");
+    let begin_pattern = cached_regex(r"(?m)^\s*\*{3}\s*Begin Patch\b");
+    let end_pattern = cached_regex(r"(?m)^\s*\*{3}\s*End Patch\b");
     begin_pattern.is_match(raw) || end_pattern.is_match(raw)
 }
 
@@ -982,11 +990,10 @@ fn parse_markup_argument_value(raw: &str) -> Value {
     }
     let trimmed = {
         let mut candidate = trimmed.to_string();
-        if let Ok(trailing_broken_close_re) = Regex::new(r"(?is)</\s*$") {
-            candidate = trailing_broken_close_re
-                .replace(candidate.as_str(), "")
-                .to_string();
-        }
+        let trailing_broken_close_re = cached_regex(r"(?is)</\s*$");
+        candidate = trailing_broken_close_re
+            .replace(candidate.as_str(), "")
+            .to_string();
         candidate.trim().to_string()
     };
     if trimmed.is_empty() {
@@ -1034,8 +1041,7 @@ fn normalize_tool_name(raw: &str) -> String {
         trimmed
     };
     let extracted_embedded =
-        Regex::new(r#"(?i)(?:^|[\s(<])(?:tool:|function:)([A-Za-z_][A-Za-z0-9_.-]*)"#)
-            .expect("valid embedded tool name pattern")
+        cached_regex(r#"(?i)(?:^|[\s(<])(?:tool:|function:)([A-Za-z_][A-Za-z0-9_.-]*)"#)
             .captures(without_prefix)
             .and_then(|caps| caps.get(1))
             .map(|value| value.as_str().trim().to_string())
@@ -1087,10 +1093,9 @@ fn read_markup_explicit_name_candidate(trimmed: &str, name_hint: Option<&str>) -
         return hinted;
     }
 
-    let name_tag_pattern = Regex::new(
+    let name_tag_pattern = cached_regex(
         r"(?is)<\s*(?:function|name|tool_name|toolname|tool)\s*>\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*</\s*(?:function|name|tool_name|toolname|tool)\s*>",
-    )
-    .expect("valid markup name tag pattern");
+    );
     if let Some(caps) = name_tag_pattern.captures(trimmed) {
         if let Some(captured) = caps.get(1) {
             let value = captured.as_str().trim();
@@ -1104,8 +1109,7 @@ fn read_markup_explicit_name_candidate(trimmed: &str, name_hint: Option<&str>) -
         return Some(candidate);
     }
 
-    let line_name_pattern =
-        Regex::new(r"^[A-Za-z_][A-Za-z0-9_.-]*$").expect("valid tool name line pattern");
+    let line_name_pattern = cached_regex(r"^[A-Za-z_][A-Za-z0-9_.-]*$");
     for line in trimmed.lines() {
         let candidate = line.trim();
         if candidate.is_empty() || candidate.starts_with('<') || candidate.starts_with('[') {
@@ -1389,11 +1393,10 @@ fn find_matching_double_quote(raw: &str, start_idx: usize) -> Option<usize> {
 }
 
 fn looks_like_inline_interpreter_eval_prefix(raw: &str) -> bool {
-    Regex::new(
+    cached_regex(
         r#"(?is)\b(?:node|bun|deno|python|python2|python3|python\d+(?:\.\d+)?|ruby|perl)\b[\s\S]*?(?:\s-e\b|\s-c\b|\s--eval\b)\s*$"#,
     )
-    .map(|re| re.is_match(raw))
-    .unwrap_or(false)
+    .is_match(raw)
 }
 
 fn repair_bash_lc_inline_eval_single_quotes(raw: &str) -> String {
@@ -1744,8 +1747,7 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
     }
 
     let name = read_markup_explicit_name_candidate(trimmed, name_hint);
-    let id = Regex::new(r"(?is)<\s*id\s*>\s*([^<\s]+)\s*</\s*id\s*>")
-        .expect("valid markup id pattern")
+    let id = cached_regex(r"(?is)<\s*id\s*>\s*([^<\s]+)\s*</\s*id\s*>")
         .captures(trimmed)
         .and_then(|caps| caps.get(1))
         .map(|value| value.as_str().trim().to_string())
@@ -1753,10 +1755,9 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
 
     let mut args_obj = Map::new();
 
-    let arg_pair_pattern = Regex::new(
+    let arg_pair_pattern = cached_regex(
         r"(?is)<\s*arg_key\s*>\s*([^<]+?)\s*</\s*arg_key\s*>\s*<\s*arg_value\s*>\s*([\s\S]*?)\s*</\s*arg_value\s*>",
-    )
-    .expect("valid arg pair pattern");
+    );
     for caps in arg_pair_pattern.captures_iter(trimmed) {
         let Some(raw_key) = caps.get(1).map(|m| m.as_str()) else {
             continue;
@@ -1773,10 +1774,9 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
         args_obj.insert(key, value);
     }
 
-    let parameter_name_pattern = Regex::new(
+    let parameter_name_pattern = cached_regex(
         r#"(?is)<\s*parameter\s+name\s*=\s*"([^"]+)"\s*>\s*([\s\S]*?)\s*</\s*<?\s*parameter\s*>"#,
-    )
-    .expect("valid parameter name pattern");
+    );
     for caps in parameter_name_pattern.captures_iter(trimmed) {
         let Some(raw_key) = caps.get(1).map(|m| m.as_str()) else {
             continue;
@@ -1789,9 +1789,9 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
         args_obj.insert(key, value);
     }
 
-    let parameter_eq_pattern =
-        Regex::new(r#"(?is)<\s*parameter\s*=\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*>\s*([\s\S]*?)\s*</\s*<?\s*parameter\s*>"#)
-            .expect("valid parameter equals pattern");
+    let parameter_eq_pattern = cached_regex(
+        r#"(?is)<\s*parameter\s*=\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*>\s*([\s\S]*?)\s*</\s*<?\s*parameter\s*>"#,
+    );
     for caps in parameter_eq_pattern.captures_iter(trimmed) {
         let Some(raw_key) = caps.get(1).map(|m| m.as_str()) else {
             continue;
@@ -1805,16 +1805,14 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
     }
 
     if args_obj.is_empty()
-        && !Regex::new(
+        && !cached_regex(
             r"(?is)<\s*(?:tool:[A-Za-z_][A-Za-z0-9_.-]*|tool_call|function_call|invoke)\b",
         )
-        .expect("valid outer tool wrapper pattern")
         .is_match(trimmed)
     {
-        let direct_field_pattern = Regex::new(
+        let direct_field_pattern = cached_regex(
             r"(?is)<\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*>([\s\S]*?)</\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*>",
-        )
-        .expect("valid direct field pattern");
+        );
         for caps in direct_field_pattern.captures_iter(trimmed) {
             let Some(raw_open) = caps.get(1).map(|m| m.as_str()) else {
                 continue;
@@ -2101,10 +2099,9 @@ fn collect_sentinel_tool_calls_candidates(text: &str) -> Vec<String> {
         out.push(candidate);
     };
 
-    let xml_tag_pattern = Regex::new(
+    let xml_tag_pattern = cached_regex(
         r"(?is)<\s*rcc_tool_calls(?:_json)?\s*>\s*([\s\S]*?)\s*<\s*/\s*rcc_tool_calls(?:_json)?\s*>",
-    )
-    .expect("valid rcc tool calls xml-like tag pattern");
+    );
     for caps in xml_tag_pattern.captures_iter(text) {
         if let Some(inner) = caps.get(1) {
             push(inner.as_str());
@@ -2115,9 +2112,9 @@ fn collect_sentinel_tool_calls_candidates(text: &str) -> Vec<String> {
         push(inner.as_str());
     }
 
-    let heredoc_json_pattern =
-        Regex::new(r"(?ims)^\s*<<\s*RCC_TOOL_CALLS_JSON\s*$([\s\S]*?)^\s*RCC_TOOL_CALLS_JSON\s*$")
-            .expect("valid rcc tool calls heredoc json pattern");
+    let heredoc_json_pattern = cached_regex(
+        r"(?ims)^\s*<<\s*RCC_TOOL_CALLS_JSON\s*$([\s\S]*?)^\s*RCC_TOOL_CALLS_JSON\s*$",
+    );
     for caps in heredoc_json_pattern.captures_iter(text) {
         if let Some(inner) = caps.get(1) {
             push(inner.as_str());
@@ -2125,8 +2122,7 @@ fn collect_sentinel_tool_calls_candidates(text: &str) -> Vec<String> {
     }
 
     let heredoc_pattern =
-        Regex::new(r"(?ims)^\s*<<\s*RCC_TOOL_CALLS\s*$([\s\S]*?)^\s*RCC_TOOL_CALLS\s*$")
-            .expect("valid rcc tool calls heredoc pattern");
+        cached_regex(r"(?ims)^\s*<<\s*RCC_TOOL_CALLS\s*$([\s\S]*?)^\s*RCC_TOOL_CALLS\s*$");
     for caps in heredoc_pattern.captures_iter(text) {
         if let Some(inner) = caps.get(1) {
             push(inner.as_str());
@@ -2140,10 +2136,12 @@ fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::<String>::new();
     let patterns = [
-        Regex::new(r"(?ims)^[^\S\r\n]*(?:[•*-]\s+)?<<\s*RCC_TOOL_CALLS_JSON\s*$([\s\S]*?)^[^\S\r\n]*RCC_TOOL_CALLS_JSON\s*$")
-            .expect("valid strict rcc tool calls json heredoc pattern"),
-        Regex::new(r"(?ims)^[^\S\r\n]*(?:[•*-]\s+)?<<\s*RCC_TOOL_CALLS\s*$([\s\S]*?)^[^\S\r\n]*RCC_TOOL_CALLS\s*$")
-            .expect("valid strict rcc tool calls heredoc pattern"),
+        cached_regex(
+            r"(?ims)^[^\S\r\n]*(?:[•*-]\s+)?<<\s*RCC_TOOL_CALLS_JSON\s*$([\s\S]*?)^[^\S\r\n]*RCC_TOOL_CALLS_JSON\s*$",
+        ),
+        cached_regex(
+            r"(?ims)^[^\S\r\n]*(?:[•*-]\s+)?<<\s*RCC_TOOL_CALLS\s*$([\s\S]*?)^[^\S\r\n]*RCC_TOOL_CALLS\s*$",
+        ),
     ];
 
     for pattern in patterns {
@@ -2329,10 +2327,9 @@ fn strip_trailing_orphan_tool_markup_suffix(text: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    let orphan_suffix_pattern = Regex::new(
+    let orphan_suffix_pattern = cached_regex(
         r"(?is)(?:\s*</\s*<?\s*(?:parameter|arg_value|tool_call|function_call|command)\s*>\s*)+$",
-    )
-    .expect("valid orphan suffix pattern");
+    );
     orphan_suffix_pattern
         .replace(trimmed, "")
         .trim_end()
@@ -2382,13 +2379,11 @@ fn canonicalize_dsml_tool_markup_variants(raw: &str) -> String {
     }
 
     let (masked_text, masked_cdata) = mask_xml_cdata_sections(raw);
-    let open_pattern = Regex::new(
+    let open_pattern = cached_regex(
         r#"(?is)<\s*[|｜│]+\s*DSML\s*[|｜│]+\s*(tool_calls|invoke|parameter)\b([^>]*)>"#,
-    )
-    .expect("valid dsml open canonicalization pattern");
+    );
     let close_pattern =
-        Regex::new(r#"(?is)</\s*[|｜│]+\s*DSML\s*[|｜│]+\s*(tool_calls|invoke|parameter)\s*>"#)
-            .expect("valid dsml close canonicalization pattern");
+        cached_regex(r#"(?is)</\s*[|｜│]+\s*DSML\s*[|｜│]+\s*(tool_calls|invoke|parameter)\s*>"#);
 
     let normalized_open = open_pattern
         .replace_all(masked_text.as_str(), |caps: &regex::Captures| {
@@ -2419,10 +2414,9 @@ fn strip_empty_tool_transport_wrappers(text: &str) -> String {
         return String::new();
     }
 
-    let empty_wrapper_pattern = Regex::new(
+    let empty_wrapper_pattern = cached_regex(
         r"(?is)<\s*(?:tool_calls|function_calls)\s*>\s*</\s*(?:tool_calls|function_calls)\s*>",
-    )
-    .expect("valid empty tool wrapper pattern");
+    );
 
     let mut current = trimmed.to_string();
     loop {
@@ -2447,10 +2441,9 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
 
     let mut matches: Vec<MatchEntry> = Vec::new();
 
-    let fence_pattern = Regex::new(
+    let fence_pattern = cached_regex(
         r"(?is)```\s*(?:tool_call|tool_calls|function_call|json)\s*\r?\n([\s\S]*?)\s*```",
-    )
-    .expect("valid fence pattern");
+    );
     consume_pattern(
         source,
         &fence_pattern,
@@ -2462,8 +2455,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     );
 
     let tag_tool_pattern =
-        Regex::new(r#"(?is)<tool_call(?:\s+name=\"([^\"]+)\")?\s*>([\s\S]*?)</tool_call>"#)
-            .expect("valid tool tag pattern");
+        cached_regex(r#"(?is)<tool_call(?:\s+name=\"([^\"]+)\")?\s*>([\s\S]*?)</tool_call>"#);
     consume_pattern(
         source,
         &tag_tool_pattern,
@@ -2475,9 +2467,9 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         &mut matches,
     );
 
-    let tag_function_pattern =
-        Regex::new(r#"(?is)<function_call(?:\s+name=\"([^\"]+)\")?\s*>([\s\S]*?)</function_call>"#)
-            .expect("valid function tag pattern");
+    let tag_function_pattern = cached_regex(
+        r#"(?is)<function_call(?:\s+name=\"([^\"]+)\")?\s*>([\s\S]*?)</function_call>"#,
+    );
     consume_pattern(
         source,
         &tag_function_pattern,
@@ -2490,8 +2482,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     );
 
     let function_equals_pattern =
-        Regex::new(r#"(?is)<function=([A-Za-z_][A-Za-z0-9_.-]*)\s*>([\s\S]*?)</function>"#)
-            .expect("valid function equals pattern");
+        cached_regex(r#"(?is)<function=([A-Za-z_][A-Za-z0-9_.-]*)\s*>([\s\S]*?)</function>"#);
     consume_pattern(
         source,
         &function_equals_pattern,
@@ -2504,8 +2495,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     );
 
     let invoke_pattern =
-        Regex::new(r#"(?is)<invoke(?:\s+name=\"([^\"]+)\")?\s*>([\s\S]*?)</invoke>"#)
-            .expect("valid invoke pattern");
+        cached_regex(r#"(?is)<invoke(?:\s+name=\"([^\"]+)\")?\s*>([\s\S]*?)</invoke>"#);
     consume_pattern(
         source,
         &invoke_pattern,
@@ -2517,10 +2507,9 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         &mut matches,
     );
 
-    let tool_namespace_pattern = Regex::new(
+    let tool_namespace_pattern = cached_regex(
         r#"(?is)<tool:([A-Za-z_][A-Za-z0-9_.-]*)\s*>([\s\S]*?)</tool:[A-Za-z_][A-Za-z0-9_.-]*\s*>"#,
-    )
-    .expect("valid tool namespace pattern");
+    );
     consume_pattern(
         source,
         &tool_namespace_pattern,
@@ -2532,10 +2521,9 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         &mut matches,
     );
 
-    let prefixed_markup_label_pattern = Regex::new(
+    let prefixed_markup_label_pattern = cached_regex(
         r#"(?is)(?:^|\n)\s*(?:tool|function):([A-Za-z_][A-Za-z0-9_.-]*)[^\n]*\n([\s\S]*?)</\s*(?:tool|function):[A-Za-z_][A-Za-z0-9_.-]*\s*>"#,
-    )
-    .expect("valid prefixed markup label pattern");
+    );
     consume_pattern(
         source,
         &prefixed_markup_label_pattern,
@@ -2548,8 +2536,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     );
 
     let bracket_tool_pattern =
-        Regex::new(r#"(?is)\[tool_call(?:\s+name=\"([^\"]+)\")?\]([\s\S]*?)\[/tool_call\]"#)
-            .expect("valid tool bracket pattern");
+        cached_regex(r#"(?is)\[tool_call(?:\s+name=\"([^\"]+)\")?\]([\s\S]*?)\[/tool_call\]"#);
     consume_pattern(
         source,
         &bracket_tool_pattern,
@@ -2561,10 +2548,9 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         &mut matches,
     );
 
-    let bracket_function_pattern = Regex::new(
+    let bracket_function_pattern = cached_regex(
         r#"(?is)\[function_call(?:\s+name=\"([^\"]+)\")?\]([\s\S]*?)\[/function_call\]"#,
-    )
-    .expect("valid function bracket pattern");
+    );
     consume_pattern(
         source,
         &bracket_function_pattern,
@@ -3066,17 +3052,15 @@ pub fn normalize_assistant_text_to_tool_calls_json(
             }
         }
         if candidate_ids.is_empty() {
-            if let Ok(re) = Regex::new(r"(?s)<tool_call>\s*([\s\S]*?)\s*</tool_call>") {
-                for caps in re.captures_iter(text.as_str()) {
-                    if let Some(body) = caps.get(1) {
-                        if let Ok(id_re) = Regex::new(r"<id>\s*([^<\s]+)\s*</id>") {
-                            if let Some(id_caps) = id_re.captures(body.as_str()) {
-                                if let Some(id_match) = id_caps.get(1) {
-                                    let id = id_match.as_str().trim().to_string();
-                                    if !id.is_empty() {
-                                        candidate_ids.push(id);
-                                    }
-                                }
+            let re = cached_regex(r"(?s)<tool_call>\s*([\s\S]*?)\s*</tool_call>");
+            let id_re = cached_regex(r"<id>\s*([^<\s]+)\s*</id>");
+            for caps in re.captures_iter(text.as_str()) {
+                if let Some(body) = caps.get(1) {
+                    if let Some(id_caps) = id_re.captures(body.as_str()) {
+                        if let Some(id_match) = id_caps.get(1) {
+                            let id = id_match.as_str().trim().to_string();
+                            if !id.is_empty() {
+                                candidate_ids.push(id);
                             }
                         }
                     }
@@ -4679,5 +4663,27 @@ exec_command
             tool_calls[0]["function"]["name"].as_str(),
             Some("apply_patch")
         );
+    }
+
+    #[test]
+    fn reasoning_tool_extraction_reuses_cached_regexes_on_repeated_second_hop_text() {
+        let text = r#"
+Thinking through the next step.
+<tool_call name="exec_command">
+<arg_key>cmd</arg_key><arg_value>rg "windsurf|provider" src tests</arg_value>
+</tool_call>
+"#;
+
+        let (_cleaned, tool_calls) = extract_tool_calls_from_reasoning_text(text, "reasoning");
+        assert_eq!(tool_calls.len(), 1);
+        let count_after_warmup = cached_regex_pattern_count_for_tests();
+        assert!(count_after_warmup > 0);
+
+        for _ in 0..128 {
+            let (_cleaned, tool_calls) = extract_tool_calls_from_reasoning_text(text, "reasoning");
+            assert_eq!(tool_calls.len(), 1);
+        }
+
+        assert_eq!(cached_regex_pattern_count_for_tests(), count_after_warmup);
     }
 }

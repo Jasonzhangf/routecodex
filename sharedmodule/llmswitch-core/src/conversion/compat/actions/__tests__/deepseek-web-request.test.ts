@@ -315,7 +315,7 @@ describe('deepseek-web-request action wrapper', () => {
         semantics: {
           continuation: {
             chainId: 'req_chain_1',
-            stickyScope: 'request_chain',
+            continuationScope: 'request_chain',
             stateOrigin: 'openai-responses',
             restored: true,
             toolContinuation: {

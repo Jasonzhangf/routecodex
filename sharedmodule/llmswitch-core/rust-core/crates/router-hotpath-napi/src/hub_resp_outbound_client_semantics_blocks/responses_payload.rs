@@ -4,16 +4,16 @@ use std::collections::HashSet;
 use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, normalize_message_reasoning_ssot,
 };
-use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
 use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::{
-    build_client_tool_index, normalize_call_args, normalize_responses_tool_call_arguments_for_client,
-    resolve_client_tool_name,
+    build_client_tool_index, normalize_call_args,
+    normalize_responses_tool_call_arguments_for_client, resolve_client_tool_name,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::now_unix_millis;
 use crate::hub_resp_outbound_client_semantics_blocks::responses_reasoning::{
     merge_responses_output_items, normalize_reasoning_summary_for_codex_display,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::normalize_responses_usage;
+use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
 
 fn now_unix_seconds() -> i64 {
     (now_unix_millis() / 1000) as i64

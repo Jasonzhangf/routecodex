@@ -45,7 +45,7 @@ const mockBridgeModule = () => ({
   readStoplessGoalState: jest.fn(() => null),
   requireCoreDist: jest.fn(() => ({})),
   syncReasoningStopModeFromRequest: jest.fn(() => 'off'),
-  syncStoplessGoalStateFromRequest: jest.fn(() => ({ stickyKey: 'session:test', hadDirective: false, directiveTypes: [] })),
+  syncStoplessGoalStateFromRequest: jest.fn(() => ({ stateKey: 'session:test', hadDirective: false, directiveTypes: [] })),
   loadRoutingInstructionStateSync: jest.fn(() => null),
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
 

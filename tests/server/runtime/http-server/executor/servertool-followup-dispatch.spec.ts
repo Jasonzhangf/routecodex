@@ -2,11 +2,28 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 
 const mockRunClientInjectionFlowBeforeReenter = jest.fn();
 const mockGetDefaultServertoolSkeletonDocumentWithNative = jest.fn();
+const mockCaptureResponsesRequestContext = jest.fn();
+const mockRebindResponsesConversationRequestId = jest.fn();
 
 jest.unstable_mockModule(
   '../../../../../src/server/runtime/http-server/executor/client-injection-flow.js',
   () => ({
     runClientInjectionFlowBeforeReenter: mockRunClientInjectionFlowBeforeReenter
+  })
+);
+
+jest.unstable_mockModule(
+  '../../../../../src/modules/llmswitch/bridge/module-loader.js',
+  () => ({
+    importCoreDist: jest.fn(async (subpath: string) => {
+      if (subpath === 'conversion/shared/responses-conversation-store') {
+        return {
+          captureResponsesRequestContext: mockCaptureResponsesRequestContext,
+          rebindResponsesConversationRequestId: mockRebindResponsesConversationRequestId
+        };
+      }
+      throw new Error(`unexpected importCoreDist ${subpath}`);
+    })
   })
 );
 
@@ -46,6 +63,8 @@ describe('servertool followup dispatch helper', () => {
     jest.resetModules();
     mockRunClientInjectionFlowBeforeReenter.mockReset();
     mockGetDefaultServertoolSkeletonDocumentWithNative.mockReset();
+    mockCaptureResponsesRequestContext.mockReset();
+    mockRebindResponsesConversationRequestId.mockReset();
     mockGetDefaultServertoolSkeletonDocumentWithNative.mockReturnValue({
       version: 1,
       servertool: {
@@ -1040,6 +1059,43 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.body?.input?.some((entry: any) => entry?.type === 'function_call_output')).toBe(true);
     expect(nestedInput?.body?.semantics?.toolOutputs?.length).toBe(1);
     expect(nestedInput?.metadata?.requestSemantics?.toolOutputs?.length).toBe(1);
+  });
+
+  it('RED: stop_followup continuation rebinds captured responses context to final response id', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async () => ({
+      status: 200,
+      body: {
+        id: 'resp_stop_followup_final_1',
+        object: 'response',
+        status: 'completed',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }]
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'openai-responses-mini27.key1-MiniMax-M2.7-20260529T130405241-233047-358:stop_followup',
+      body: {
+        model: 'MiniMax-M2.7',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }],
+        store: true
+      },
+      executeNested
+    });
+
+    expect(mockCaptureResponsesRequestContext).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'openai-responses-mini27.key1-MiniMax-M2.7-20260529T130405241-233047-358:stop_followup'
+    }));
+    expect(mockRebindResponsesConversationRequestId).toHaveBeenCalledWith(
+      'openai-responses-mini27.key1-MiniMax-M2.7-20260529T130405241-233047-358:stop_followup',
+      'resp_stop_followup_final_1'
+    );
   });
 
 
