@@ -166,6 +166,18 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ## 2026-05-27 调试精华（5555 主备/health/stopless）
 
+## 2026-05-29 调试精华（CompatProfileRegistry）
+
+- `/v1/responses` 报 `[CompatProfileRegistry] profile not found: "chat:openai"` 时，先查被选 provider 的 `compatibilityProfile` 是否为 registry JSON 真 id；通用 OpenAI-compatible provider 使用 `compat:passthrough`，不要新增 `chat:openai`/`chat:deepseek` 影子 profile。
+
+## 2026-05-29 架构硬规则（Hub/VR 与 Provider 边界）
+
+- Hub Pipeline / Virtual Router 永远不写 provider 特例：不得在 hub/VR 中加入 Windsurf、Cascade、某账号、某模型、某 provider shape 的分支、补偿、fallback 或上下文修补。
+- Windsurf 的云端 Cascade 自带上下文记忆；Windsurf Provider 发送层应按 WindsurfAPI/Cascade 形状只发送当前 delta，并在 provider runtime 内处理 native/MCP 映射，不能要求 Hub Pipeline 为 Windsurf 改 continuation 语义。
+- Windsurf resume/已有 cascade 时，`additionalSteps` 只能包含当轮新完成的 native/MCP tool result；历史 tool result 不得 replay。MCP result 对应 Cascade `CortexTrajectoryStep` field 47 `mcp_tool`，native result 走对应 native step field。
+- Windsurf native tool config 必须保留 protobuf zero-length message 字段（如 `run_command` field 8 空子消息）；生成 CascadeToolConfig 时禁止用“空 buffer 跳过字段”的 helper，否则二跳 additional_steps 可能触发 gRPC status 2。
+- Windsurf poll 看到 tool_calls 不能立即返回给 Hub；必须像 WindsurfAPI 一样继续 `GetCascadeTrajectory` 轮询到 Cascade IDLE 后再返回，否则下一跳会撞上 `executor is not idle: CASCADE_RUN_STATUS_RUNNING` 并变成 503/upstreamCode=2。
+
 ## 2026-05-28 回归测试新增硬规则（Jason）
 
 1. 任何功能修复/错误修复，**红测必须包含 HTTP/请求级黑盒红测**。
@@ -1529,3 +1541,11 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Router 端口是天然隔离边界：`matchedPort + routingPolicyGroup` 必须进入 Hub metadata、VR pool filter、Responses continuation store；禁止任何 group pipeline 缺失时 fallback 到 global pipeline。
 - 黑盒回归必须覆盖：端口 A 的 recoverable cooldown 不影响端口 B；端口 A 捕获的 Responses `response_id` 不能在端口 B resume；否则就是跨端口上下文/路由池泄漏。
 - 真源文件：`src/server/runtime/http-server/index.ts`、`sharedmodule/llmswitch-core/rust-core/.../virtual_router_engine/engine/selection.rs`、`sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`。
+
+### 2026-05-29 调试精华（OpenAI-chat 协议字段守恒 + stopless 断连）
+- opencode/DeepSeek OpenAI-chat 400 不只看 null 字段；必须检查真实 `provider-request.json` 是否混入 Anthropic 字段，尤其 assistant tool-call history 的 `content:[{type:"thinking"}]`。OpenAI-chat 允许 `reasoning_content`，但不得带 Anthropic thinking block；红测必须覆盖 inbound / chat process / outbound 三段协议字段守恒。
+- stopless/servertool followup 必须在 `executeNested` 启动前检查 client abort signal；不能只把 abort signal 传进 Promise.race，否则 nested 请求已发出，客户端断开后仍会续杯/重路由。
+
+- 2026-05-29 2095 DeepSeek/OpenCode 400：若 provider-request 里 `role=tool.content` 含 `data:image`/`image_url` 数组，先走 Rust `chat_process_media_semantics` 非多模态 placeholder 真源；不要只看 user 历史媒体。DeepSeek thinking tool-call 历史必须保留 `reasoning_content`。
+
+- 2026-05-29 历史图片清理：必须在 Rust outbound stage3 通用入口无条件 placeholder 历史 user/tool media；当前 user media 才看 `supportsMultimodal=false`。若 400 快照含 `role=tool.content data:image`，先查通用 `strip_historical_media`，禁止 provider 特例修。

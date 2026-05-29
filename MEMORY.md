@@ -1,5 +1,20 @@
 # RouteCodex Memory
 
+- 2026-05-27: Windsurf 账号管理 Phase 1 完成：删除 `WindsurfQuotaHealthSnapshot`、`WindsurfManagedCredentialEntry` 类型；删除 `readManagedWindsurfAuthConfigDetailed`、`extractQuotaHealthFromUserStatusPayload`、`isWindsurfAccountModelSupported`、`rankManagedCredentialsByHealth`、`selectManagedCredentialForSession`、`fetchWindsurfUserStatusForHealth`、`markCurrentAliasQuotaExhausted`、`computeAccountConcurrencyCapacity`、`assertManagedAccountPoolSelectable`、`resolveManagedAccountPoolCooldownMs` 等 17+ 方法；`selectWindsurfAccount` 简化取消旧多账号健康管理逻辑。Phase 2 新建：`windsurf-account-store.ts`（持久化账号状态，JSON 原子写）、`windsurf-account-pool.ts`（候选过滤 + sticky session + 排序）、`windsurf-account-session-manager.ts`（refresh 去重锁）。Provider 接入选 `selectWindsurfAccount` 使用 pool，`markWindsurfSessionActive/Stopped` 恢复真实实现，`clearManagedWindsurfSessionCredential` 回写 `pool.markAuthInvalid`。Phase 1 删除 ~350 行，Phase 2 新建 3 文件共 ~290 行。5 个测试已删除 Phase 1 API 的 context-continuity RED 测试已清理（15→10 个测试，全绿）。47 个 provider RED 测试不涉及 Phase 1 API，保留为已知失败的预写测试（登录链、RCC 文本协议、Cascade 生命周期）。VR 编译通过（0 新增错误，仅 2 pre-existing Rust native binding 错误），123 VR 测试全绿。
+
+Tags: windsurf, account-management, phase-1-cleanup, phase-2-pool, sticky-session, account-store, session-manager, red-test-cleanup, 2026-05-27
+
+- 2026-05-27: Virtual Router Prefer 指令完全删除（7 文件）：`instructions/types.rs`、`state.rs`、`parse_instructions.rs`、`routing_state_store.rs`、`routing/selection.rs`、`process_mode.rs`、`engine/route.rs`、`engine/selection.rs`。Direct Mode 双路径合并（`route.rs`），Route Queue 二次重建消除（`selection.rs`），Feature Turn-State 合并（`features.rs`）。Provider 特判移除（6 文件）：`routing/direct_model.rs`（Qwen 媒体回退改为通用能力检测）、`engine/events.rs`（series 冷却改为配置 `profile.series`，auth 黑名单改为 `authFamily` 字段）、`routing/config.rs`（删除 `build_route_candidates` 死代码）、`provider_registry.rs`（添加 `series`/`authFamily` 字段、删除 `has_default_capability`、新增 `list_by_auth_family()`）。Red-test 新增验证：`no_provider_ids_are_hardcoded_in_virtual_router_or_hub_pipeline_code` 扫描 `~/.rcc/provider/` 目录检测硬编码。
+
+Tags: virtual-router, prefer-removal, provider-hardcode-removal, direct-mode-merge, route-queue-cleanup, feature-state-merge, red-test, 2026-05-27
+
+- 2026-05-27: Responses→Chat 格式转换修复 deepseek 400 问题：transport 层两处转换入口 — `openai-sdk-transport.ts`（VercelAiSdk 路径 `executePreparedRequest`）和 `chat-protocol-client.ts`（HTTP 路径 `buildRequestBody`）。Responses 请求路由到 Chat completions provider 时做 `input`→`messages` 转换，不在 VR 或 provider 层做，避免重复转换。
+
+Tags: responses-to-chat, transport-layer, deepseek-400, format-conversion, vercel-ai-sdk, chat-protocol-client, no-duplicate-conversion, 2026-05-27
+
+- 2026-05-27: Provider 测试 store 隔离引入：context-continuity 测试使用 temp dir + `afterEach` 清空，避免跨测试污染账号状态。通过环境变量 `ROUTECODEX_WINDSURF_ACCOUNT_STORE_PATH` 覆盖默认路径。
+
+Tags: test-isolation, temp-dir, account-store, aftereach-cleanup, windsurf, 2026-05-27
 
 - 2026-05-23: Windsurf hybrid tool protocol 的当前目标真源是：native-supported tools 默认透明转译到 Cascade structured protocol（`windsurf_native_mode=true` + `tool_allowlist`），unsupported tools 走 RCC text-tool protocol；禁止引入 native bridge 默认 off / env-gated 这类能力路由 gating。
 
@@ -1692,3 +1707,20 @@ Tags: windsurf, managed-account, health-probe, extra-quota, no-request-account-s
 - Verified root cause for 5520 Windsurf `PROVIDER_NOT_AVAILABLE`: `~/.rcc/sessions/127.0.0.1_5520/provider-health.json` kept `windsurf.managed.gpt-5.5-low` under `__http_503_daily_cooldown__`, so Rust VR health filtering removed the only 5520 target before provider send.
 - Fix truth: Rust VR health manager clears sibling `windsurf.managed.*` persisted 503 cooldowns on managed family success, and `apply_standard_filters` allows singleton persisted-503 targets one passive reprobe selection while preserving multi-provider fallback semantics.
 - Live evidence: after build/install/restart, marker `RCC_WS_GREEN_081854` on `http://127.0.0.1:5520/v1/responses` selected `windsurf.managed.gpt-5.5-low`, chose account `ws-pro-4`, and returned HTTP 200/output `ok`.
+
+## 2026-05-29 Compat Profile Registry Baseline
+- Generic OpenAI-compatible provider configs must use `compatibilityProfile: "compat:passthrough"` unless a concrete profile JSON exists in `sharedmodule/llmswitch-core/src/conversion/compat/profiles/`; `chat:openai` and `chat:deepseek` are invalid ids and fail-fast in Hub Pipeline profile lookup.
+- Regression anchor: `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/provider-normalization.test.ts` normalizes every `configsamples/provider-default/*/config.v2.json` and fails on any unregistered compatibility profile.
+
+## 2026-05-29 OpenAI-Compatible Chat Null Field Guard
+- OpenAI-compatible `/chat/completions` provider payloads must not send top-level `reasoning: null`; opencode-zen-free returned HTTP_400 on this shape. The native `strip_private_fields` path removes this top-level null while preserving real values such as `parallel_tool_calls: false`.
+- Regression anchor: `tests/sharedmodule/provider-payload-openai-chat-null-fields.spec.ts`; live evidence marker `RCC_OPENCODE_400_FIX_193713` returned HTTP 200 via `opencode-zen-free.key1.deepseek-v4-flash-free`.
+
+## 2026-05-29 OpenAI Chat Protocol Field Contract
+- For DeepSeek-family OpenAI-chat outbound, `reasoning_content` is allowed but Anthropic `content: [{type:"thinking"}]` blocks are not; 2089 opencode snapshot proved 87 assistant tool-call history messages had Anthropic thinking arrays, causing OpenAI-compatible upstream HTTP_400.
+- Regression anchors: Rust `protocol_field_contract` covers inbound, chat process, and outbound protocol fields; `test_protocol_field_contract_outbound_openai_chat_strips_anthropic_thinking_blocks` must fail if OpenAI-chat outbound reintroduces Anthropic thinking blocks. 2089 replay after fix: `messages=201`, `assistantTool=87`, `thinkingArray=0`, `missingReasoning=0`.
+- Stopless/servertool nested followup must check client abort before starting `executeNested`; otherwise disconnected clients can still trigger reenter/reroute provider sends. Regression anchor: `provider-response-converter.unified-semantics.spec.ts` test `does not start stopless reenter followup after client disconnect`.
+
+- 2026-05-29: opencode-zen-free DeepSeek OpenAI-chat 2095 HTTP_400 的后续根因之一在历史 `view_image` tool result：`role=tool.content` 可含 inline `data:image` 数组，旧非多模态清理只处理 user 媒体，未把 tool 历史媒体替换为 placeholder；Rust `chat_process_media_semantics` 现在在 supportsMultimodal=false outbound 中把 tool result 媒体清为 `[Image omitted]`，DeepSeek-family OpenAI-chat 同时移除 top-level `parallel_tool_calls`，保留 `reasoning_content`。红测锚点：`test_protocol_field_contract_outbound_deepseek_openai_chat_sanitizes_2095_tool_media_shape`；整组 `protocol_field_contract` 4/4 通过。
+
+- 2026-05-29: 历史图片清理的唯一规则修正为无条件 placeholder：outbound stage3 先清历史 user media 与 `role=tool` media，再按 `supportsMultimodal=false` 清当前 user media；不要把历史图片清理绑到 provider 多模态能力，也不要做 DeepSeek 专用重复路径。红测：`test_protocol_field_contract_outbound_openai_chat_always_strips_historical_media`。

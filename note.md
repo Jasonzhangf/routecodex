@@ -13050,3 +13050,81 @@ Using skills: coding-principals + rcc-dev-skills
 - 2026-05-29: 用户要求把已验证可提交部分继续分拆提交，避免混在一起丢失；当前先审查 worktree，修正 Rust VR selection 测试语义后再按主题提交。
 - 2026-05-29: 继续 active goal；当前 HEAD fe02d9d4b，worktree 仍含大批未提交变更。下一步先跑已有黑盒矩阵确认当前语义，再只提交验证通过的主题。
 - 2026-05-29: 补 red/green：新增 Rust routing bootstrap 测试捕获 provider-level target 多 auth key 权重 remap 问题；红测先失败（weights 未扩展到 mimo.key1/key2），修复为按 provider+model 匹配 expanded targets 后通过。另修复 blackbox catch 中 unref exit 导致失败返回 0 的测试漏洞。
+
+## 2026-05-29 responses chat:openai profile missing
+- Symptom: /v1/responses hub_pipeline_failed profile not found chat:openai; VR selected deepseek-v4-flash-free.
+- Task: trace source, add red test, propose/fix solution after SSOT confirmation.
+
+## 2026-05-29 provider compat profile registry failure
+- Root cause verified: provider-default samples and WebUI default used `chat:openai` / `chat:deepseek`, but compat registry only registers concrete JSON ids under `sharedmodule/llmswitch-core/src/conversion/compat/profiles`; generic OpenAI-compatible providers must use `compat:passthrough` unless a real profile JSON exists.
+- Failure path: VR selects `opencode-zen-free.key1.deepseek-v4-flash-free` -> Hub Pipeline reads target `compatibilityProfile` -> policy/header profile lookup calls `getProfile()` -> fail-fast `[CompatProfileRegistry] profile not found: "chat:openai"`.
+- Fix applied: replace invalid sample/UI/default docs profile ids with `compat:passthrough`; add provider-default sample normalization regression to catch unregistered profiles.
+- Validation: `node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config jest.config.cjs --runTestsByPath src/router/virtual-router/bootstrap/provider-normalization.test.ts --runInBand` passed 14/14; frontend related Jest passed 8/8; static provider-default registry check passed.
+
+## 2026-05-29 live opencode profile fix
+- Authorized live config edit: ~/.rcc/provider/opencode-zen-free/config.v2.json and config.v2.toml changed compatibilityProfile from chat:openai to compat:passthrough.
+- Restart: rcc restart --port 5555 succeeded.
+- Smoke: marker RCC_PROFILE_FIX_192031 /v1/responses returned HTTP 200 and output_text marker; post-restart logs no CompatProfileRegistry failure.
+
+## 2026-05-29 opencode 400 after compat passthrough
+- User report: after fixing profile to compat:passthrough, selected opencode-zen-free deepseek-v4-flash-free now upstream HTTP_400 at provider.send, then reroutes to mimo.
+- Constraint: add red test before implementation fix.
+
+## 2026-05-29 Windsurf 503=2 tool result 调试
+- 现象：`windsurf.managed.kimi-k2-6` 持续 `503 WINDSURF_SERVICE_UNREACHABLE upstreamCode=2`，snapshot 显示 `textBytes≈2KB` 但 `additionalStepsCount=5/payloadBytes≈42KB`。
+- 结论：Windsurf/Cascade resume 已有云端上下文；provider 只能提交当轮 native/MCP tool result。历史 tool result 不应 replay 到 `additionalSteps`，MCP result 必须编码为 CortexTrajectoryStep field 47 `mcp_tool`。
+- 修复：`windsurf-chat-provider.ts` 增加 current tool-result window；resume 时 `additionalSteps` 只来自当轮窗口；MCP tool result 编码为 field 47；resume text 不再拼 tool result 文本。
+
+## 2026-05-29 opencode 400 null reasoning fix
+- Snapshot evidence: failing opencode provider-request `~/.rcc/codex-samples/openai-responses/opencode-zen-free.key1.deepseek-v4-flash-free/req_1780053754444_35a8f7d9/provider-request.json` sent `reasoning: null` to `/chat/completions`; upstream returned HTTP_400 and rerouted.
+- Red test first: `tests/sharedmodule/provider-payload-openai-chat-null-fields.spec.ts` failed because final provider payload retained `reasoning` key when value was null.
+- Fix: Rust native `strip_private_fields` now removes top-level `reasoning:null`; TS final provider payload block calls existing native strip before final observation.
+- Validation: Jest red test passes; Rust targeted test passes; `npm run build:min` + `npm run install:global` + `rcc restart --port 5555`; live marker `RCC_OPENCODE_400_FIX_193713` routed to opencode and returned HTTP 200; new provider-request snapshot has keys `max_tokens,messages,model,tools` and `has_reasoning=false`.
+
+## 2026-05-29 2089 opencode 400 + stopless disconnect
+- 目标：用真实 2089 provider-request 快照先红测，再修复；另补 client disconnect 后 stopless/followup 不应续杯的红测。
+
+- 用户纠正：不能只写 2089 单点红测；inbound / outbound / chat process 都必须有协议字段守恒红测，防止 OpenAI-chat 混入 Anthropic thinking block 这类基础协议污染。
+
+- 已验证修复：2089 replay 经 native req outbound 后 assistantTool=87、thinkingArray=0、missingReasoning=0；stopless 断连红测先失败再通过。build:min 被无关 Windsurf TS 错阻塞，未 install/restart。
+
+## 2026-05-29 Windsurf second-hop 503 upstreamCode=2 follow-up
+- Evidence: after 0.90.2480, live second hop `20260529T201029629-234780-2091` sent `text="继续"`, `additionalStepsCount=1`, `nativeMode=true`, `mcpMode=true`, but still got gRPC status 2 / `WINDSURF_SERVICE_UNREACHABLE`.
+- Root found in provider proto encoder: `writeProtoMessageField()` returned empty buffer for zero-length messages, so `CascadeToolConfig.run_command` / other native empty sub-configs were silently omitted. WindsurfAPI emits zero-length submessage fields (for example `run_command` field 8 as `42 00`) plus `tool_allowlist`.
+- Fix: keep zero-length protobuf message fields, remove premature MCP tool_config injection without server state, keep resume text as latest user delta only, and include trailing standard chat `role=tool` result window for current additional_steps.
+
+## 2026-05-29 2092 opencode still 400
+- 用户反馈：2092 仍 HTTP_400；先确认是否已部署本地 fix，再抓 2092 provider-request 快照。
+
+## 2026-05-29 2095 still 400 after strict fix
+- 用户反馈：203805/2095 真实长上下文仍 HTTP_400；203830 smoke routed to mimo，不证明 opencode。继续抓 2095 快照。
+
+## 2026-05-29 Windsurf 5520 204117 继续排查
+- 真实失败请求：`openai-responses-windsurf.managed-kimi-k2-6-20260529T204117029-234787-2098`，版本 `0.90.2484`。
+- 已确认不是 5555 `view_image`：本次 5520 provider snapshot 显示 `text="继续"`、`textBytes=6`、`additionalStepsCount=1`、`payloadBytes=6704`、`nativeAllowlist=["run_command"]`。
+- 前一跳 `204110027-234786-2097` 成功返回 `finish_reason=tool_calls`，二跳失败集中在当轮工具结果 additional step 形状或上游处理。
+- 已修复 stale additional_steps 回捞旧工具结果：`selectCurrentCascadeToolResultWindow()` 只取 latest user 前紧邻的一组 tool result，不再跨过后续 tool result 回捞更旧 native step。
+- 为下一轮 live 证据新增 snapshot debug 字段 `additionalStepDiagnostics`（只记录 bytes/typeEnum/oneofFields，不改传输 payload）。
+
+## 2026-05-29 opencode 2095 DeepSeek 400: tool image history + parallel_tool_calls
+- 官方 DeepSeek thinking 文档确认：thinking 默认 enabled；assistant tool-call history 的 reasoning_content 必须回传；2095 快照已满足 reasoning_content，剩余坏形状是 OpenAI-chat outbound 保留 parallel_tool_calls:false 以及 role=tool.content 内 view_image inline data:image 数组未 placeholder。
+- 红测：req_outbound_stage3_compat::tests::req_profiles::test_protocol_field_contract_outbound_deepseek_openai_chat_sanitizes_2095_tool_media_shape 先失败在 parallel_tool_calls，修后通过；protocol_field_contract 4/4 通过。
+- 修复点：Rust 非多模态 outbound 清理新增 tool result media placeholder；DeepSeek-family OpenAI-chat 移除 top-level parallel_tool_calls，同时保留 tool_choice:auto 与 reasoning_content。
+
+## 2026-05-29 Windsurf 5520 对比 WindsurfAPI 差异修复
+- 最新失败 `205351991-234790-2101` 已确认：`text="继续"`、`additionalStepsCount=1`，`additionalStepDiagnostics=[{typeEnum:28, oneofFields:[28], bytes:10524}]`，即二跳提交的是 native `run_command` tool result。
+- 对比 `/Volumes/extension/code/WindsurfAPI/src/client.js`：WindsurfAPI 在 resume 的 `SendUserCascadeMessage` 遇到 panel/cascade expired/untrusted 类失败时，会 fresh StartCascade 并 `rebuildFullHistoryText()`；RouteCodex 原实现 fresh cascade retry 仍复用 resume delta `继续`，这是明确差异。
+- 已补红测 `resumed SendUserCascadeMessage retry must rebuild full history for fresh cascade like WindsurfAPI`，先红后绿；修复点在 Windsurf provider 内，retry 重新按新 selected.stepOffset 计算 text/additionalSteps。
+- 已验证目标回归、build:min、install:global、5520 restart；当前 5520 health `0.90.2486`。
+
+## 2026-05-29 历史图片必须无条件 placeholder
+- 用户纠正：历史图片不应依赖 supportsMultimodal=false；当前 user 图片才按目标多模态能力决定保留/清理。
+- 红测 `test_protocol_field_contract_outbound_openai_chat_always_strips_historical_media` 先失败：generic openai-chat + rt=None 时历史 user image 与 tool image 未清。
+- 修复：Rust outbound stage3 入口先执行 `strip_historical_media`，无条件清历史 user media 与 tool-result media；再执行非多模态当前 user media 清理。DeepSeek 专用 tool media 清理已移除，避免双路径。
+- 验证：`cargo test -p router-hotpath-napi protocol_field_contract -- --nocapture` 5/5 通过；5520/5555 部署 0.90.2487；10000 health empty reply 且 scoped restart 超时，未确认。
+
+## 2026-05-29 Windsurf second-hop executor not idle
+- Live evidence: request `openai-responses-windsurf.managed-kimi-k2-6-20260529T211943266-234799-2110` logged `[windsurf.grpc.end] ... grpcMessage="executor is not idle: CASCADE_RUN_STATUS_RUNNING"` on `SendUserCascadeMessage` after a previous successful `finish_reason=tool_calls` hop.
+- Root cause: `pollCascadeTrajectorySteps()` returned tool calls immediately when visible, before `GetCascadeTrajectory` reached IDLE. The next Hub tool-result hop entered the same Cascade executor while it was still RUNNING.
+- Red/green: added `pollCascadeTrajectorySteps must wait for idle before returning visible tool calls`; it failed with `statusCalls=0` before the fix and passes after storing the tool-call candidate and returning only after IDLE.
+- Unique fix point: Windsurf provider poll lifecycle is the only layer that can observe Cascade executor status. Hub Pipeline / Virtual Router must not add Windsurf-specific waiting or retry semantics.

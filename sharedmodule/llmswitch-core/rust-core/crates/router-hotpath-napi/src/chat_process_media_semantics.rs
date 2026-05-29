@@ -231,6 +231,49 @@ fn placeholder_text_for_part(part: &Value, default_placeholder: &str) -> String 
     default_placeholder.to_string()
 }
 
+fn text_for_part(part: &Value) -> Option<String> {
+    let obj = part.as_object()?;
+    for key in ["text", "content"] {
+        let Some(value) = obj.get(key).and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if value.trim().is_empty() {
+            continue;
+        }
+        return Some(value.to_string());
+    }
+    None
+}
+
+fn string_contains_inline_media(value: &str) -> bool {
+    value.contains("data:image")
+        || value.contains("data:video")
+        || value.contains("\"image_url\"")
+        || value.contains("\"video_url\"")
+}
+
+fn tool_result_media_text_from_parts(parts: &[Value], placeholder: &str) -> Option<String> {
+    let mut has_media = false;
+    let mut text_parts: Vec<String> = Vec::new();
+    for part in parts {
+        if part_type_contains_media(part) {
+            has_media = true;
+            text_parts.push(placeholder_text_for_part(part, placeholder));
+            continue;
+        }
+        if let Some(text) = text_for_part(part) {
+            text_parts.push(text);
+        }
+    }
+    if !has_media {
+        return None;
+    }
+    if text_parts.is_empty() {
+        text_parts.push(placeholder.to_string());
+    }
+    Some(text_parts.join("\n"))
+}
+
 pub fn strip_chat_process_historical_images(
     messages: Vec<Value>,
     placeholder_text: String,
@@ -535,6 +578,66 @@ pub fn strip_latest_user_turn_media(
     ChatProcessMediaStripOutput {
         changed: true,
         messages: next_messages,
+    }
+}
+
+pub fn strip_tool_result_media_content(
+    messages: Vec<Value>,
+    placeholder_text: String,
+) -> ChatProcessMediaStripOutput {
+    if messages.is_empty() {
+        return ChatProcessMediaStripOutput {
+            changed: false,
+            messages,
+        };
+    }
+
+    let mut next_messages = messages.clone();
+    let placeholder = if placeholder_text.trim().is_empty() {
+        "[Image omitted]".to_string()
+    } else {
+        placeholder_text
+    };
+    let mut changed = false;
+
+    for message in next_messages.iter_mut() {
+        if read_role(message) != "tool" {
+            continue;
+        }
+        let Some(row) = message.as_object_mut() else {
+            continue;
+        };
+        let Some(content) = row.get("content") else {
+            continue;
+        };
+        if let Some(parts) = content.as_array() {
+            let Some(text) = tool_result_media_text_from_parts(parts, &placeholder) else {
+                continue;
+            };
+            row.insert("content".to_string(), Value::String(text));
+            changed = true;
+            continue;
+        }
+        let Some(content_text) = content.as_str() else {
+            continue;
+        };
+        if !string_contains_inline_media(content_text) {
+            continue;
+        }
+        if let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(content_text) {
+            let text = tool_result_media_text_from_parts(&parts, &placeholder)
+                .unwrap_or_else(|| placeholder.clone());
+            row.insert("content".to_string(), Value::String(text));
+            changed = true;
+            continue;
+        }
+        row.insert("content".to_string(), Value::String(placeholder.clone()));
+        changed = true;
+    }
+
+    ChatProcessMediaStripOutput {
+        changed,
+        messages: if changed { next_messages } else { messages },
     }
 }
 

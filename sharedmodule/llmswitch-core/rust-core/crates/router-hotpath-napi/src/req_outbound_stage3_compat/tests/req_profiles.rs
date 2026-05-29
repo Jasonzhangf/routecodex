@@ -3366,3 +3366,263 @@ fn test_req_profile_chat_gemini_claude_schema_and_shallow_pick() {
         "MODE_DYNAMIC"
     );
 }
+
+#[test]
+fn test_openai_chat_deepseek_v4_model_on_opencode_gets_tool_history_reasoning_content() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-flash-free",
+            "messages": [
+                {"role": "user", "content": "inspect cwd"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "id": "call_1",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"pwd\"}"
+                            }
+                        }
+                    ]
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": "/workspace"},
+                {"role": "user", "content": "继续"}
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {"type": "object", "properties": {}}
+                    }
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("compat:passthrough".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_opencode_deepseek_v4_history".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: Some("longcontext".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("deepseek-v4-flash-free".to_string()),
+            client_model_id: Some("gpt-5.5".to_string()),
+            original_model_id: None,
+            provider_id: Some("opencode-zen-free".to_string()),
+            provider_key: Some("opencode-zen-free.key1.deepseek-v4-flash-free".to_string()),
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: Some("compat:passthrough".to_string()),
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(result.payload["messages"][1]["content"], "");
+    assert!(result.payload["tools"][0]["function"].get("strict").is_none());
+}
+
+#[test]
+fn test_protocol_field_contract_outbound_openai_chat_strips_anthropic_thinking_blocks() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-flash-free",
+            "max_tokens": 8192,
+            "parallel_tool_calls": false,
+            "tool_choice": "auto",
+            "messages": [
+                {"role": "user", "content": "继续"},
+                {
+                    "role": "assistant",
+                    "content": [{"type": "thinking", "thinking": "."}],
+                    "reasoning_content": ".",
+                    "tool_calls": [{
+                        "type": "function",
+                        "id": "call_53600d11d0e44eb098b193b8",
+                        "function": {"name": "exec_command", "arguments": "{\"cmd\":\"git status --short\"}"}
+                    }]
+                },
+                {"role": "tool", "tool_call_id": "call_53600d11d0e44eb098b193b8", "content": " M android-client/app/src/main/assets/mobile-shell.html"},
+                {"role": "user", "content": "继续"}
+            ],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "parameters": {"type": "object", "properties": {}, "additionalProperties": false},
+                    "strict": false
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("compat:passthrough".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("openai-responses-opencode-zen-free.key1-deepseek-v4-flash-free-20260529T195142010-234778-2089".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: Some("longcontext".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("deepseek-v4-flash-free".to_string()),
+            client_model_id: Some("gpt-5.5".to_string()),
+            original_model_id: None,
+            provider_id: Some("opencode-zen-free".to_string()),
+            provider_key: Some("opencode-zen-free.key1.deepseek-v4-flash-free".to_string()),
+            runtime_key: None,
+            client_request_id: Some("req_1780055502010_7e948008".to_string()),
+            group_request_id: Some("req_1780055502010_7e948008".to_string()),
+            session_id: Some("019e733b-8c4d-74c0-93c1-0a33a3f2bd91".to_string()),
+            conversation_id: None,
+        },
+        explicit_profile: Some("compat:passthrough".to_string()),
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(result.payload["messages"][1]["content"], "");
+    assert!(result.payload["tools"][0]["function"].get("strict").is_none());
+}
+
+#[test]
+fn test_protocol_field_contract_outbound_deepseek_openai_chat_sanitizes_2095_tool_media_shape() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-flash-free",
+            "max_tokens": 8192,
+            "parallel_tool_calls": false,
+            "tool_choice": "auto",
+            "messages": [
+                {"role": "user", "content": "检查截图"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": ".",
+                    "tool_calls": [{
+                        "type": "function",
+                        "id": "call_view_image",
+                        "function": {"name": "view_image", "arguments": "{\"path\":\"/tmp/a.png\"}"}
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_view_image",
+                    "content": "[{\"detail\":\"high\",\"image_url\":\"data:image/png;base64,iVBORw0KGgo=\",\"type\":\"image_url\"}]"
+                },
+                {"role": "user", "content": "继续"}
+            ],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "view_image",
+                    "parameters": {"type": "object", "properties": {}, "additionalProperties": false}
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("compat:passthrough".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("openai-responses-opencode-zen-free.key1-deepseek-v4-flash-free-20260529T203805347-234784-2095".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: Some("longcontext".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("deepseek-v4-flash-free".to_string()),
+            client_model_id: Some("gpt-5.5".to_string()),
+            original_model_id: None,
+            provider_id: Some("opencode-zen-free".to_string()),
+            provider_key: Some("opencode-zen-free.key1.deepseek-v4-flash-free".to_string()),
+            runtime_key: None,
+            client_request_id: Some("req_1780058285347_86caf831".to_string()),
+            group_request_id: Some("req_1780058285347_86caf831".to_string()),
+            session_id: Some("019e733b-8c4d-74c0-93c1-0a33a3f2bd91".to_string()),
+            conversation_id: None,
+        },
+        explicit_profile: Some("compat:passthrough".to_string()),
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.payload.get("parallel_tool_calls").is_none());
+    assert_eq!(result.payload["tool_choice"], "auto");
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(result.payload["messages"][2]["content"], "[Image omitted]");
+}
+
+#[test]
+fn test_protocol_field_contract_outbound_openai_chat_always_strips_historical_media() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "generic-openai-chat-model",
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "text", "text": "old image"},
+                    {"type": "image_url", "image_url": "data:image/png;base64,old"}
+                ]},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": "current text"},
+                {"role": "assistant", "content": "", "tool_calls": [{
+                    "type": "function",
+                    "id": "call_view_image",
+                    "function": {"name": "view_image", "arguments": "{}"}
+                }]},
+                {"role": "tool", "tool_call_id": "call_view_image", "content": [{
+                    "type": "image_url",
+                    "image_url": "data:image/png;base64,tool"
+                }]},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "current image should remain for multimodal-capable targets"},
+                    {"type": "image_url", "image_url": "data:image/png;base64,current"}
+                ]}
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("compat:passthrough".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_generic_historical_media".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: Some("longcontext".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("generic-openai-chat-model".to_string()),
+            client_model_id: Some("gpt-5.5".to_string()),
+            original_model_id: None,
+            provider_id: Some("generic".to_string()),
+            provider_key: Some("generic.key1.generic-openai-chat-model".to_string()),
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: Some("compat:passthrough".to_string()),
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(result.payload["messages"][0]["content"][1]["text"], "[Image omitted]");
+    assert_eq!(result.payload["messages"][4]["content"], "[Image omitted]");
+    assert_eq!(
+        result.payload["messages"][5]["content"][1]["image_url"],
+        "data:image/png;base64,current"
+    );
+}

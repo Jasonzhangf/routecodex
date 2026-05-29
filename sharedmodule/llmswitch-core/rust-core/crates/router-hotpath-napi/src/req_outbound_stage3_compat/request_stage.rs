@@ -23,7 +23,9 @@ use super::thinking_history::{
 };
 use super::{CompatResult, ReqOutboundCompatInput};
 use crate::chat_process_media_semantics::{
-    strip_latest_responses_input_media, strip_latest_user_turn_media,
+    strip_chat_process_historical_images, strip_latest_responses_input_media,
+    strip_latest_user_turn_media, strip_responses_context_input_historical_media,
+    strip_tool_result_media_content,
 };
 use serde_json::Value;
 
@@ -62,6 +64,12 @@ fn strip_media_for_non_multimodal_target(
             next.insert("messages".to_string(), Value::Array(stripped.messages));
             return Value::Object(next);
         }
+        let stripped = strip_tool_result_media_content(messages.clone(), placeholder.clone());
+        if stripped.changed {
+            let mut next = root.clone();
+            next.insert("messages".to_string(), Value::Array(stripped.messages));
+            return Value::Object(next);
+        }
     }
     if let Some(input_entries) = root.get("input").and_then(Value::as_array) {
         let stripped = strip_latest_responses_input_media(input_entries.clone(), placeholder);
@@ -74,6 +82,50 @@ fn strip_media_for_non_multimodal_target(
     payload
 }
 
+fn strip_historical_media(payload: Value) -> Value {
+    let Some(root) = payload.as_object() else {
+        return payload;
+    };
+    let placeholder = "[Image omitted]".to_string();
+    let mut next_root = root.clone();
+    let mut changed = false;
+
+    if let Some(messages) = next_root.get("messages").and_then(Value::as_array) {
+        let stripped = strip_chat_process_historical_images(messages.clone(), placeholder.clone());
+        let mut messages_changed = stripped.changed;
+        let messages = if messages_changed {
+            stripped.messages
+        } else {
+            messages.clone()
+        };
+        let stripped = strip_tool_result_media_content(messages, placeholder.clone());
+        if stripped.changed {
+            messages_changed = true;
+        }
+        if messages_changed {
+            changed = true;
+            next_root.insert("messages".to_string(), Value::Array(stripped.messages));
+        }
+    }
+
+    if let Some(input_entries) = next_root.get("input").and_then(Value::as_array) {
+        let stripped = strip_responses_context_input_historical_media(
+            input_entries.clone(),
+            placeholder.clone(),
+        );
+        if stripped.changed {
+            changed = true;
+            next_root.insert("input".to_string(), Value::Array(stripped.messages));
+        }
+    }
+
+    if changed {
+        Value::Object(next_root)
+    } else {
+        payload
+    }
+}
+
 pub fn run_req_outbound_stage3_compat(
     input: ReqOutboundCompatInput,
 ) -> Result<CompatResult, String> {
@@ -84,7 +136,8 @@ pub fn run_req_outbound_stage3_compat(
         ..
     } = input;
 
-    let mut payload = strip_media_for_non_multimodal_target(input_payload, &adapter_context);
+    let payload = strip_historical_media(input_payload);
+    let mut payload = strip_media_for_non_multimodal_target(payload, &adapter_context);
     if should_apply_local_deepseek_thinking_history_compat(&payload, &adapter_context) {
         if let Some(root) = payload.as_object_mut() {
             ensure_reasoning_content_for_assistant_history(root);
@@ -93,7 +146,12 @@ pub fn run_req_outbound_stage3_compat(
     if should_apply_deepseek_thinking_history_compat(&payload, &adapter_context) {
         if let Some(root) = payload.as_object_mut() {
             ensure_deepseek_thinking_content_for_assistant_history(root);
-            ensure_deepseek_anthropic_thinking_block_for_tool_use_history(root);
+            if provider_protocol_matches(
+                adapter_context.provider_protocol.as_ref(),
+                "anthropic-messages",
+            ) {
+                ensure_deepseek_anthropic_thinking_block_for_tool_use_history(root);
+            }
         }
     }
     if should_apply_anthropic_thinking_history_compat(&payload, &adapter_context) {
