@@ -10,7 +10,6 @@ import {
 function createState(): RoutingInstructionState {
   return {
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set(),
     disabledProviders: new Set(),

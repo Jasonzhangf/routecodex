@@ -7,7 +7,7 @@ import type { RoutingInstructionState } from '../../sharedmodule/llmswitch-core/
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 import { persistStopMessageState } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 import {
   applyStopMessageSnapshotToState,
@@ -23,7 +23,6 @@ function createGoalOnlyState(): RoutingInstructionState {
       createdAt: 100
     },
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set<string>(),
     disabledProviders: new Set<string>(),
@@ -48,7 +47,7 @@ function createGoalOnlyState(): RoutingInstructionState {
 describe('stop_message_auto goal-state preservation', () => {
   const prevSessionDir = process.env.ROUTECODEX_SESSION_DIR;
   let sessionDir = '';
-  const stickyKey = 'session:goal-preserve';
+  const stateKey = 'session:goal-preserve';
 
   beforeEach(() => {
     sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-stopmsg-goal-'));
@@ -63,13 +62,13 @@ describe('stop_message_auto goal-state preservation', () => {
 
   test('does not delete sticky goal state when stop_message fields are cleared', () => {
     const state = createGoalOnlyState();
-    saveRoutingInstructionStateSync(stickyKey, state);
+    saveRoutingInstructionStateSync(stateKey, state);
 
-    const loaded = loadRoutingInstructionStateSync(stickyKey) as RoutingInstructionState;
+    const loaded = loadRoutingInstructionStateSync(stateKey) as RoutingInstructionState;
     clearStopMessageState(loaded, Date.now());
-    persistStopMessageState(stickyKey, loaded);
+    persistStopMessageState(stateKey, loaded);
 
-    const persisted = loadRoutingInstructionStateSync(stickyKey) as RoutingInstructionState | null;
+    const persisted = loadRoutingInstructionStateSync(stateKey) as RoutingInstructionState | null;
     expect(persisted?.stoplessGoalState).toMatchObject({
       status: 'active',
       objective: 'preserve goal state'

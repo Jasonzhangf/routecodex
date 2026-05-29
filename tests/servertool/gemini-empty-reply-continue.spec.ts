@@ -60,7 +60,7 @@ describe('gemini_empty_reply_continue servertool', () => {
     expect(followupRt?.serverToolFollowup).toBe(true);
     expect(sawFollowupPayload?.metadata?.stream).toBe(false);
     expect(followupRt?.preserveRouteHint).toBe(false);
-    expect(followupRt?.disableStickyRoutes).toBe(true);
+    expect(followupRt).toBeDefined();
     expect(followupRt?.serverToolOriginalEntryEndpoint).toBe('/v1/responses');
 
     const body = sawFollowupPayload?.body as any;

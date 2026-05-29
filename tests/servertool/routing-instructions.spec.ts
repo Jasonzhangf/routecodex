@@ -8,7 +8,7 @@ import {
   serializeRoutingInstructionState,
   deserializeRoutingInstructionState,
   type RoutingInstructionState
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+} from '../../sharedmodule/llmswitch-core/dist/router/virtual-router/routing-instructions.js';
 
 function buildMessages(content: string): StandardizedMessage[] {
   return [
@@ -22,7 +22,6 @@ function buildMessages(content: string): StandardizedMessage[] {
 function createState(overrides?: Partial<RoutingInstructionState>): RoutingInstructionState {
   return {
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set(),
     disabledProviders: new Set(),
@@ -87,18 +86,9 @@ describe('Routing instruction parsing and application', () => {
     expect(instruction.pathLength).toBe(2);
   });
 
-  test('sticky:provider.model instructions are parsed and persisted as stickyTarget', () => {
+  test('sticky:provider.model instructions are ignored because provider sticky is not a routing primitive', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**sticky:deepseek-web.deepseek-chat**>'));
-    expect(instructions).toHaveLength(1);
-    const instruction = instructions[0];
-    expect(instruction.type).toBe('sticky');
-    expect(instruction.provider).toBe('deepseek-web');
-    expect(instruction.model).toBe('deepseek-chat');
-    expect(instruction.pathLength).toBe(2);
-
-    const nextState = applyRoutingInstructions(instructions, createState());
-    expect(nextState.stickyTarget?.provider).toBe('deepseek-web');
-    expect(nextState.stickyTarget?.model).toBe('deepseek-chat');
+    expect(instructions).toHaveLength(0);
   });
 
   test('force:provider.model instructions are parsed as force target', () => {

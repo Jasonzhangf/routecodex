@@ -1,16 +1,9 @@
 import { RateLimitBackoffManager, RateLimitCooldownError } from '../../src/providers/core/runtime/rate-limit-manager.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
-import { deserializeRoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
-import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import type {
   VirtualRouterConfig,
-  ProviderErrorEvent,
-  RouterMetadataInput
+  ProviderErrorEvent
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
-import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 
 describe('Virtual router series cooldown', () => {
   it('blacklists an entire model series after repeated 429s', () => {
@@ -134,93 +127,5 @@ describe('VirtualRouterEngine series cooldown handling', () => {
     const status = engine.getStatus().health;
     expect(status.find((entry) => entry.providerKey === providerA)?.state).toBe('tripped');
     expect(status.find((entry) => entry.providerKey === providerB)?.state).not.toBe('tripped');
-  });
-});
-
-describe('Virtual router sticky fallback with excluded keys', () => {
-  const providerA = 'gemini.alias1.gemini-3-pro-high';
-  const providerB = 'gemini.alias2.gemini-3-pro-high';
-  const config: VirtualRouterConfig = {
-    routing: {
-      default: [
-        {
-          id: 'primary',
-          targets: [providerA, providerB],
-          priority: 1
-        }
-      ]
-    },
-    providers: {
-      [providerA]: {
-        providerKey: providerA,
-        providerType: 'gemini',
-        endpoint: 'https://example.invalid',
-        auth: { type: 'apiKey', value: 'test' },
-        outboundProfile: 'gemini-chat',
-        runtimeKey: 'runtime:a',
-        modelId: 'gemini-3-pro-high'
-      },
-      [providerB]: {
-        providerKey: providerB,
-        providerType: 'gemini',
-        endpoint: 'https://example.invalid',
-        auth: { type: 'apiKey', value: 'test' },
-        outboundProfile: 'gemini-chat',
-        runtimeKey: 'runtime:b',
-        modelId: 'gemini-3-pro-high'
-      }
-    },
-    classifier: {}
-  };
-
-  const baseRequest: StandardizedRequest = {
-    model: 'client-model',
-    messages: [{ role: 'user', content: 'hello' }],
-    parameters: {},
-    metadata: { originalEndpoint: '/v1/responses', processMode: 'chat' }
-  };
-
-  const baseMetadata: RouterMetadataInput = {
-    requestId: 'req_sticky',
-    entryEndpoint: '/v1/responses',
-    processMode: 'chat',
-    stream: true,
-    direction: 'request',
-    sessionId: 'sticky-session'
-  };
-
-  it('skips sticky alias when excludedProviderKeys contains the runtime key', () => {
-    const engine = new VirtualRouterEngine();
-    engine.initialize(config);
-    const stickyState = deserializeRoutingInstructionState({
-      stickyTarget: {
-        provider: 'gemini',
-        keyAlias: 'alias1',
-        pathLength: 3
-      }
-    });
-    const sessionKey = 'session:sticky-session';
-    const prevSessionDir = process.env.ROUTECODEX_SESSION_DIR;
-    const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-session-'));
-    process.env.ROUTECODEX_SESSION_DIR = sessionDir;
-    try {
-      saveRoutingInstructionStateSync(sessionKey, stickyState);
-
-      const first = engine.route(baseRequest, { ...baseMetadata });
-      expect(first.target.providerKey).toBe(providerA);
-
-      const second = engine.route(baseRequest, {
-        ...baseMetadata,
-        excludedProviderKeys: [providerA]
-      });
-      expect(second.target.providerKey).toBe(providerB);
-    } finally {
-      if (prevSessionDir === undefined) {
-        delete process.env.ROUTECODEX_SESSION_DIR;
-      } else {
-        process.env.ROUTECODEX_SESSION_DIR = prevSessionDir;
-      }
-      fs.rmSync(sessionDir, { recursive: true, force: true });
-    }
   });
 });

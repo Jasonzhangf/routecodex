@@ -7,7 +7,7 @@ import {
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 import { buildOpenAIChatFromAnthropicMessage } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime.js';
-import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-anthropic-stop-sequence');
 
@@ -31,8 +31,7 @@ describe('stopMessage trigger for /v1/messages (anthropic stop_sequence)', () =>
     const sessionId = 'sess-anthropic-stop-seq';
     writeRoutingStateForSession(sessionId, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),

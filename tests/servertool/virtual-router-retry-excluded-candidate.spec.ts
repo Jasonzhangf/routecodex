@@ -27,7 +27,7 @@ describe('virtual-router retry excluded candidates', () => {
         priority: 100,
         mode: 'round-robin'
       } as any,
-      stickyKey: undefined,
+      stateKey: undefined,
       candidates: [primary, backup],
       isSafePool: true,
       deps: {

@@ -157,7 +157,6 @@ function buildGoalOnlyStickyState(status: 'active' | 'completed'): RoutingInstru
       updatedAt: 100
     },
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set<string>(),
     disabledProviders: new Set<string>(),
@@ -416,7 +415,7 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
     expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
 
-  test('/goal active 即使来自 persisted sticky state 也不自动续', async () => {
+  test('/goal active 即使来自 persisted routing state 也不自动续', async () => {
     const sessionId = 'goal-active-persisted-skip';
     writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState('active'));
 

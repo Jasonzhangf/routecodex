@@ -45,7 +45,7 @@ describe('virtual-router search route routing', () => {
       },
       loadBalancer: new RouteLoadBalancer({ strategy: 'round-robin' }),
       isProviderCoolingDown: () => false,
-      resolveStickyKey: () => undefined,
+      resolveStateKey: () => undefined,
       quotaView: undefined
     };
 
@@ -69,7 +69,6 @@ describe('virtual-router search route routing', () => {
 
     const state = {
       forcedTarget: null,
-      stickyTarget: null,
       allowedProviders: new Set<string>(),
       disabledProviders: new Set<string>(),
       disabledKeys: new Map<string, Set<string | number>>(),

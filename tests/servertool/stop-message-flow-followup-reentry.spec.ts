@@ -9,7 +9,7 @@ import { runServertoolResponseStageOrchestrationShell } from '../../sharedmodule
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 import type { RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stop-message-flow-followup-sessions');
@@ -63,7 +63,6 @@ function buildToolCallsResponse(): JsonObject {
 function createEmptyRoutingInstructionState(): RoutingInstructionState {
   return {
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set<string>(),
     disabledProviders: new Set<string>(),
@@ -101,13 +100,13 @@ describe('stop_message_flow followup reentry', () => {
 
   test('uses stop_message_flow standard servertool reenter followup instead of client/tmux inject when the hop is already followup', async () => {
     const sessionId = 'stop-message-flow-followup-hop';
-    const stickyKey = `session:${sessionId}`;
+    const stateKey = `session:${sessionId}`;
     const state = createEmptyRoutingInstructionState();
     state.stopMessageText = '继续执行';
     state.stopMessageMaxRepeats = 3;
     state.stopMessageUsed = 0;
     state.stopMessageUpdatedAt = Date.now();
-    saveRoutingInstructionStateSync(stickyKey, state);
+    saveRoutingInstructionStateSync(stateKey, state);
 
     const clientInjectDispatch = jest.fn(async () => ({ ok: true } as const));
     const reenterPipeline = jest.fn(async () => ({
@@ -135,12 +134,12 @@ describe('stop_message_flow followup reentry', () => {
     expect(result.executed).toBe(true);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).toHaveBeenCalledTimes(1);
-    expect(loadRoutingInstructionStateSync(stickyKey)?.stopMessageUsed).toBe(1);
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
   });
 
   test('non-goal stopless default uses simple reenter for three consecutive stop turns then stops', async () => {
     const sessionId = 'stopless-default-three-turns';
-    const stickyKey = `session:${sessionId}`;
+    const stateKey = `session:${sessionId}`;
     const reenterPipeline = jest.fn(async () => ({
       body: buildStopResponse('reentered')
     }));
@@ -163,7 +162,7 @@ describe('stop_message_flow followup reentry', () => {
 
       expect(result.executed).toBe(true);
       expect(result.flowId).toBe('stop_message_flow');
-      expect(loadRoutingInstructionStateSync(stickyKey)?.stopMessageUsed).toBe(index + 1);
+      expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(index + 1);
     }
 
     const exhausted = await runServerToolOrchestration({
@@ -187,7 +186,7 @@ describe('stop_message_flow followup reentry', () => {
 
   test('stop followup tool_calls resets default consecutive stop budget', async () => {
     const sessionId = 'stopless-default-tool-calls-reset';
-    const stickyKey = `session:${sessionId}`;
+    const stateKey = `session:${sessionId}`;
     const state = createEmptyRoutingInstructionState();
     state.stopMessageText = '继续执行';
     state.stopMessageMaxRepeats = 3;
@@ -196,7 +195,7 @@ describe('stop_message_flow followup reentry', () => {
     state.stopMessageAiMode = 'off';
     state.stopMessageSource = 'default';
     state.stopMessageUpdatedAt = Date.now();
-    saveRoutingInstructionStateSync(stickyKey, state);
+    saveRoutingInstructionStateSync(stateKey, state);
 
     const reenterPipeline = jest.fn(async () => ({
       body: buildToolCallsResponse()
@@ -219,7 +218,7 @@ describe('stop_message_flow followup reentry', () => {
 
     expect(first.executed).toBe(true);
     expect(first.chat.choices).toEqual(buildToolCallsResponse().choices);
-    expect(loadRoutingInstructionStateSync(stickyKey)?.stopMessageUsed).toBe(0);
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(0);
 
     reenterPipeline.mockResolvedValueOnce({ body: buildStopResponse('continued-after-reset') });
     const second = await runServerToolOrchestration({
@@ -238,12 +237,12 @@ describe('stop_message_flow followup reentry', () => {
     });
 
     expect(second.executed).toBe(true);
-    expect(loadRoutingInstructionStateSync(stickyKey)?.stopMessageUsed).toBe(1);
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
   });
 
   test('servertool followup hop stop still triggers stopless simple reenter', async () => {
     const sessionId = 'stopless-after-apply-patch-followup-stop';
-    const stickyKey = `session:${sessionId}`;
+    const stateKey = `session:${sessionId}`;
     const reenterPipeline = jest.fn(async () => ({
       body: buildStopResponse('continued after apply_patch followup stop')
     }));
@@ -270,7 +269,7 @@ describe('stop_message_flow followup reentry', () => {
     expect(result.executed).toBe(true);
     expect(result.flowId).toBe('stop_message_flow');
     expect(reenterPipeline).toHaveBeenCalledTimes(1);
-    expect(loadRoutingInstructionStateSync(stickyKey)?.stopMessageUsed).toBe(1);
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
   });
 
   test('servertool loop-state followup stop still triggers stopless simple reenter', async () => {

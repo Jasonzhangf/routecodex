@@ -28,7 +28,7 @@ const TEST_SESSION_IDS = [
 
 type BootstrapModule = typeof import('../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.js');
 type EngineModule = typeof import('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js');
-type StickyModule = typeof import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
+type StickyModule = typeof import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
 type ServerToolModule = typeof import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
 
 let bootstrapVirtualRouterConfig: BootstrapModule['bootstrapVirtualRouterConfig'];
@@ -78,7 +78,7 @@ describe('stopMessage is tmux-scoped', () => {
 
     const bootstrapMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.js');
     const engineMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js');
-    const stickyMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
+    const stickyMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
     const servertoolMod = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
     bootstrapVirtualRouterConfig = bootstrapMod.bootstrapVirtualRouterConfig;
     VirtualRouterEngine = engineMod.VirtualRouterEngine;
@@ -141,8 +141,7 @@ describe('stopMessage is tmux-scoped', () => {
     const sessionId = 'sess-legacy-cleanup';
     saveRoutingInstructionStateSync(`session:${sessionId}`, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -235,8 +234,7 @@ describe('stopMessage is tmux-scoped', () => {
     const consumedAt = Date.now();
     saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -620,8 +618,7 @@ describe('stopMessage is tmux-scoped', () => {
     const clearedAt = Date.now();
     saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -680,8 +677,7 @@ describe('stopMessage is tmux-scoped', () => {
     const clearedAt = Date.now();
     saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -773,8 +769,7 @@ describe('stopMessage is tmux-scoped', () => {
     const exhaustedAt = Date.now();
     saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -817,8 +812,7 @@ describe('stopMessage is tmux-scoped', () => {
 
     saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),

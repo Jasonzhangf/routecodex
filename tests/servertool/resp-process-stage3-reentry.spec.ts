@@ -7,7 +7,7 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 import type { RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 import { runRespProcessStage3ServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage3_servertool_orchestration/index.js';
 
@@ -34,7 +34,6 @@ function buildStopResponse(content = 'done'): JsonObject {
 function createEmptyRoutingInstructionState(): RoutingInstructionState {
   return {
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set<string>(),
     disabledProviders: new Set<string>(),
@@ -61,8 +60,8 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
 }
 
 function setStoplessMode(sessionId: string, mode: 'on' | 'off' | 'endless'): void {
-  const stickyKey = `session:${sessionId}`;
-  const existing = loadRoutingInstructionStateSync(stickyKey);
+  const stateKey = `session:${sessionId}`;
+  const existing = loadRoutingInstructionStateSync(stateKey);
   const next = existing ?? createEmptyRoutingInstructionState();
   next.reasoningStopMode = mode;
   if (mode === 'off') {
@@ -70,7 +69,7 @@ function setStoplessMode(sessionId: string, mode: 'on' | 'off' | 'endless'): voi
     next.reasoningStopSummary = undefined;
     next.reasoningStopUpdatedAt = undefined;
   }
-  saveRoutingInstructionStateSync(stickyKey, next);
+  saveRoutingInstructionStateSync(stateKey, next);
 }
 
 describe('resp_process stage3 servertool followup reentry', () => {

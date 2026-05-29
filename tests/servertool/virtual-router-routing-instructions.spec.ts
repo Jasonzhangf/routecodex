@@ -195,8 +195,8 @@ function buildRequest(userContent: string): StandardizedRequest {
 }
 
 function buildMetadata(
-  overrides?: Partial<RouterMetadataInput> & { disableStickyRoutes?: boolean }
-): RouterMetadataInput & { disableStickyRoutes?: boolean } {
+  overrides?: Partial<RouterMetadataInput>
+): RouterMetadataInput {
   return {
     requestId: `req-${Math.random().toString(36).slice(2)}`,
     entryEndpoint: '/v1/chat/completions',
@@ -373,7 +373,7 @@ describe('VirtualRouterEngine routing instructions', () => {
 
   test('prefer provider.model instructions retain all aliases for retries', () => {
     const engine = buildEngine();
-    const sessionId = 'session-sticky-multi-key';
+    const sessionId = 'session-prefer-multi-key';
     const first = engine.route(
       buildRequest('<**!antigravity.claude-sonnet-4-5**>'),
       buildMetadata({ sessionId })
@@ -413,24 +413,6 @@ describe('VirtualRouterEngine routing instructions', () => {
     const second = engine.route(buildRequest('继续'), buildMetadata({ sessionId }));
     expect(second.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
     expect(second.target.providerKey).not.toBe(first.target.providerKey);
-  });
-
-  test('disableStickyRoutes metadata bypasses sticky decisions for that request only', () => {
-    const engine = buildEnginePreferFallback();
-    const sessionId = 'session-disable-sticky';
-    engine.route(
-      buildRequest('<**!antigravity[geminikey].gemini-3-pro-high**>'),
-      buildMetadata({ sessionId })
-    );
-
-    const sticky = engine.route(buildRequest('继续'), buildMetadata({ sessionId }));
-    expect(sticky.target.providerKey.includes('gemini-3-pro-high')).toBe(true);
-
-    const bypass = engine.route(
-      buildRequest('再次选择'),
-      buildMetadata({ sessionId, disableStickyRoutes: true })
-    );
-    expect(bypass.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
   });
 
   test('provider allowlist must match classifier candidates (fallback routes excluded)', () => {

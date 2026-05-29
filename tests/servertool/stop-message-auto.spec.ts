@@ -16,7 +16,7 @@ import {
   type StopMessageDecisionContext,
   type StopMessageDecision
 } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.js';
-import { resolveStickyKey } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
+import { resolveStateKey } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 import { resetStopMessageRuntimeConfigCacheForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
@@ -447,8 +447,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-red-default-scoped-snapshot';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -498,8 +497,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-1';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -577,8 +575,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-exact-provider-pin';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -705,8 +702,7 @@ describe('stop_message_auto servertool', () => {
 
       writeRoutingStateForSession(sessionId, {
         forcedTarget: undefined,
-        stickyTarget: undefined,
-        allowedProviders: new Set(),
+            allowedProviders: new Set(),
         disabledProviders: new Set(),
         disabledKeys: new Map(),
         disabledModels: new Map(),
@@ -793,8 +789,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-ai-followup-fallback';
     writeRoutingStateForSession(sessionId, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -885,8 +880,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-codex-followup';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1028,8 +1022,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-client-inject-only';
     writeRoutingStateForSession(sessionId, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1085,8 +1078,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-done-marker-review-reject';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1198,8 +1190,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-done-marker-review-approve';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1314,8 +1305,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-codex-followup-fallback';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1414,8 +1404,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-codex-followup-fallback-file';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1516,8 +1505,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-multi-choice-stop';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1578,8 +1566,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-multi-choice-latest-nonstop';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1636,8 +1623,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-metadata-scope';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1698,8 +1684,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-original-request-fallback';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1778,8 +1763,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-captured-context-only';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1841,8 +1825,8 @@ describe('stop_message_auto servertool', () => {
     expect(result.execution).toBeUndefined();
   });
 
-  test('stopMessage sticky key uses client inject scope', () => {
-    const key = resolveStickyKey({
+  test('stopMessage routing state key uses client inject scope', () => {
+    const key = resolveStateKey({
       providerProtocol: 'openai-responses',
       requestId: 'req-responses-stopmessage',
       clientTmuxSessionId: 'tmux-stop-1'
@@ -1851,8 +1835,8 @@ describe('stop_message_auto servertool', () => {
     expect(key).toBe('tmux:tmux-stop-1');
   });
 
-  test('stopMessage sticky key falls back to session scope without inject scope', () => {
-    const key = resolveStickyKey({
+  test('stopMessage routing state key falls back to session scope without inject scope', () => {
+    const key = resolveStateKey({
       providerProtocol: 'openai-responses',
       requestId: 'req-responses-stopmessage',
       sessionId: 'session-should-win'
@@ -1865,8 +1849,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-responses-mode-off';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1915,8 +1898,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-pin';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -1989,8 +1971,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-followup-allow';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2074,8 +2055,7 @@ describe('stop_message_auto servertool', () => {
     const prevCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
     writeRoutingStateForSession(sessionId, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      preferTarget: undefined,
+        preferTarget: undefined,
       allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
@@ -2169,8 +2149,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-followup-cross-flow';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2235,8 +2214,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-responses';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2300,7 +2278,7 @@ describe('stop_message_auto servertool', () => {
 
     expect(capturedFollowup).toBeTruthy();
     expect(capturedFollowup?.entryEndpoint).toBe('/v1/responses');
-    expect(capturedFollowup?.metadata?.__rt?.disableStickyRoutes).toBe(true);
+    expect(capturedFollowup?.metadata?.__rt).toBeDefined();
     expect(capturedFollowup?.metadata?.__rt?.preserveRouteHint).toBe(false);
     expect(capturedFollowup?.metadata?.stream).toBe(false);
     expect(capturedFollowup?.metadata?.__rt?.serverToolOriginalEntryEndpoint).toBe('/v1/responses');
@@ -2324,8 +2302,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-responses-captured';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2408,8 +2385,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-disconnected';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2475,8 +2451,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-disconnected-compare';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2543,8 +2518,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-disconnect-during-followup';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2625,8 +2599,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-client-inject-fail';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2665,7 +2638,7 @@ describe('stop_message_auto servertool', () => {
     });
     expect(enginePreview.mode).toBe('tool_flow');
     expect(enginePreview.execution?.flowId).toBe('stop_message_flow');
-    expect(enginePreview.execution?.stopMessageReservation?.stickyKey).toBe(`tmux:${sessionId}`);
+    expect(enginePreview.execution?.stopMessageReservation?.stateKey).toBe(`tmux:${sessionId}`);
 
     const clientInjectDispatch = jest.fn(async () => ({ ok: false as const, reason: 'inject_failed' }));
     await expect(
@@ -2710,8 +2683,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-stream-override';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2787,8 +2759,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-empty-retry';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2873,8 +2844,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-empty-error';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -2945,8 +2915,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-empty-error-empty-original';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -3016,8 +2985,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-loop-warn';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -3098,8 +3066,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-loop-fail';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -3190,8 +3157,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-stage-timeout';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -3283,8 +3249,7 @@ describe('stop_message_auto servertool', () => {
       const sessionId = 'stopmessage-spec-session-stage-1';
       const state: RoutingInstructionState = {
         forcedTarget: undefined,
-        stickyTarget: undefined,
-        allowedProviders: new Set(),
+            allowedProviders: new Set(),
         disabledProviders: new Set(),
         disabledKeys: new Map(),
         disabledModels: new Map(),
@@ -3390,8 +3355,7 @@ describe('stop_message_auto servertool', () => {
       const sessionId = 'stopmessage-spec-session-stage-mode-only';
       const state: RoutingInstructionState = {
         forcedTarget: undefined,
-        stickyTarget: undefined,
-        allowedProviders: new Set(),
+            allowedProviders: new Set(),
         disabledProviders: new Set(),
         disabledKeys: new Map(),
         disabledModels: new Map(),
@@ -3474,8 +3438,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-stage-mode-only-default';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -3534,8 +3497,7 @@ describe('stop_message_auto servertool', () => {
     const sessionId = 'stopmessage-spec-session-legacy-mode-only-no-max';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
@@ -3623,8 +3585,7 @@ describe('stop_message_auto servertool', () => {
       const sessionId = 'stopmessage-spec-session-stage-active';
       const state: RoutingInstructionState = {
         forcedTarget: undefined,
-        stickyTarget: undefined,
-        allowedProviders: new Set(),
+            allowedProviders: new Set(),
         disabledProviders: new Set(),
         disabledKeys: new Map(),
         disabledModels: new Map(),
@@ -3719,8 +3680,7 @@ describe('stop_message_auto servertool', () => {
       const sessionId = 'stopmessage-spec-session-stage-loop';
       const state: RoutingInstructionState = {
         forcedTarget: undefined,
-        stickyTarget: undefined,
-        allowedProviders: new Set(),
+            allowedProviders: new Set(),
         disabledProviders: new Set(),
         disabledKeys: new Map(),
         disabledModels: new Map(),

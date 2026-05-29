@@ -6,7 +6,7 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 import {
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
-import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-compaction-false-positive');
 
@@ -30,8 +30,7 @@ describe('stopMessage should not be disabled by compaction marker substring', ()
     const sessionId = 'sess-stopmessage-compaction-substring';
     writeRoutingStateForSession(sessionId, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
