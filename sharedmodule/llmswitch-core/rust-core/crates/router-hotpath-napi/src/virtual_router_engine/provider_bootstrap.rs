@@ -1659,6 +1659,17 @@ mod tests {
     use serde_json::{json, Value};
 
     #[test]
+    fn read_context_tokens_uses_largest_declared_context_window() {
+        let record = json!({
+            "maxContext": 1048576,
+            "maxContextTokens": 200000,
+            "contextWindow": 200000
+        });
+        let map = record.as_object().expect("record should be object");
+        assert_eq!(super::read_context_tokens(Some(map)), Some(1048576));
+    }
+
+    #[test]
     fn bootstrap_preserves_windsurf_account_credentials_in_runtime_auth() {
         let providers = json!({
             "windsurf": {
@@ -2542,19 +2553,22 @@ fn read_context_tokens(record: Option<&Map<String, Value>>) -> Option<i64> {
     let Some(record) = record else {
         return None;
     };
+    let mut best: Option<i64> = None;
     for key in [
-        "maxContextTokens",
-        "max_context_tokens",
         "maxContext",
         "max_context",
+        "contextWindow",
+        "context_window",
+        "maxContextTokens",
+        "max_context_tokens",
         "contextTokens",
         "context_tokens",
     ] {
         if let Some(value) = normalize_positive_integer(record.get(key)) {
-            return Some(value);
+            best = Some(best.map_or(value, |current| current.max(value)));
         }
     }
-    None
+    best
 }
 
 fn read_output_tokens(record: Option<&Map<String, Value>>) -> Option<i64> {

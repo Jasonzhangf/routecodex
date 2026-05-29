@@ -209,7 +209,6 @@ impl VirtualRouterEngineCore {
             }
         }
 
-
         if let Some(target) = &routing_state.prefer_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
                 let ordered_keys =
@@ -337,10 +336,8 @@ impl VirtualRouterEngineCore {
                 }
             }
             for pool in pools {
-                if !pool_matches_route_policy_group(
-                    &pool,
-                    requested_route_policy_group.as_deref(),
-                ) {
+                if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref())
+                {
                     continue;
                 }
                 if pool.targets.is_empty() {
@@ -370,9 +367,7 @@ impl VirtualRouterEngineCore {
                         available = safe_context;
                     } else if !risky_context.is_empty() {
                         available = risky_context;
-                    } else if self.context_hard_limit {
-                        continue;
-                    } else if route_name != DEFAULT_ROUTE && !overflow_context.is_empty() {
+                    } else if self.context_hard_limit || longcontext_candidate_active {
                         continue;
                     } else if !overflow_context.is_empty() {
                         available = overflow_context;
@@ -1049,6 +1044,84 @@ mod tests {
             )
             .expect("selection should succeed");
         assert_eq!(selected.provider_key, "mimo.key1.mimo-v2.5-pro");
+    }
+
+    #[test]
+    fn longcontext_active_does_not_fall_back_to_overflow_default_provider() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "big.mimo-pro".to_string(),
+            json!({
+                "providerKey": "big.mimo-pro",
+                "providerType": "openai",
+                "modelId": "mimo-pro",
+                "enabled": true,
+                "maxContextTokens": 100
+            }),
+        );
+        providers.insert(
+            "small.mini".to_string(),
+            json!({
+                "providerKey": "small.mini",
+                "providerType": "openai",
+                "modelId": "mini",
+                "enabled": true,
+                "maxContextTokens": 200
+            }),
+        );
+        core.provider_registry.load(&providers);
+        core.context_warn_ratio = 0.9;
+        core.context_hard_limit = false;
+
+        let routing = Map::from_iter([
+            (
+                "longcontext".to_string(),
+                Value::Array(vec![json!({
+                    "id": "longcontext",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["big.mimo-pro"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "default",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["small.mini"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let features = RoutingFeatures {
+            estimated_tokens: 250,
+            ..RoutingFeatures::default()
+        };
+        let result = core.select_provider(
+            "longcontext",
+            &json!({}),
+            &ClassificationResult {
+                route_name: "longcontext".to_string(),
+                confidence: 1.0,
+                reasoning: "longcontext:token-threshold".to_string(),
+                candidates: vec!["longcontext".to_string(), "default".to_string()],
+            },
+            &features,
+            &RoutingInstructionState::default(),
+            None,
+            unsafe { Env::from_raw(std::ptr::null_mut()) },
+        );
+
+        assert!(
+            result.is_err(),
+            "longcontext overflow must not be silently served by default overflow provider"
+        );
     }
 
     #[test]

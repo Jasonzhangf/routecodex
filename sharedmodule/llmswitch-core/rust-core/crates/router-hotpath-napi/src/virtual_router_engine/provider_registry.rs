@@ -227,7 +227,7 @@ impl ProviderRegistry {
         let responses_config = map.get("responsesConfig").cloned();
         let streaming = map.get("streaming").cloned();
         let model_capabilities = normalize_model_capabilities(map.get("modelCapabilities"));
-        let max_context_tokens = map.get("maxContextTokens").and_then(|v| v.as_i64());
+        let max_context_tokens = read_context_tokens(map);
         let server_tools_disabled = map
             .get("serverToolsDisabled")
             .and_then(|v| v.as_bool())
@@ -245,7 +245,14 @@ impl ProviderRegistry {
             "responsesConfig",
             "streaming",
             "modelCapabilities",
+            "maxContext",
+            "max_context",
+            "contextWindow",
+            "context_window",
             "maxContextTokens",
+            "max_context_tokens",
+            "contextTokens",
+            "context_tokens",
             "serverToolsDisabled",
         ];
         let mut provider_specific_config: HashMap<String, Value> = HashMap::new();
@@ -271,6 +278,32 @@ impl ProviderRegistry {
             provider_specific_config,
         })
     }
+}
+
+fn read_context_tokens(map: &Map<String, Value>) -> Option<i64> {
+    let mut best: Option<i64> = None;
+    for key in [
+        "maxContext",
+        "max_context",
+        "contextWindow",
+        "context_window",
+        "maxContextTokens",
+        "max_context_tokens",
+        "contextTokens",
+        "context_tokens",
+    ] {
+        let value = map.get(key).and_then(|raw| match raw {
+            Value::Number(number) => number
+                .as_i64()
+                .or_else(|| number.as_f64().map(|v| v as i64)),
+            Value::String(text) => text.trim().parse::<f64>().ok().map(|v| v as i64),
+            _ => None,
+        });
+        if let Some(value) = value.filter(|value| *value > 0) {
+            best = Some(best.map_or(value, |current| current.max(value)));
+        }
+    }
+    best
 }
 
 impl ProviderRegistry {
@@ -305,6 +338,28 @@ impl ProviderRegistry {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn profile_context_tokens_use_largest_declared_context_window() {
+        let mut registry = ProviderRegistry::default();
+        let providers = json!({
+            "mimo.key1.mimo-pro": {
+                "providerKey": "mimo.key1.mimo-pro",
+                "providerType": "openai",
+                "modelId": "mimo-pro",
+                "maxContext": 1048576,
+                "maxContextTokens": 200000,
+                "contextWindow": 200000
+            }
+        });
+        registry.load(providers.as_object().unwrap());
+        assert_eq!(
+            registry
+                .get("mimo.key1.mimo-pro")
+                .and_then(|profile| profile.max_context_tokens),
+            Some(1048576)
+        );
+    }
 
     #[test]
     fn responses_provider_defaults_to_multimodal_without_explicit_capabilities() {
