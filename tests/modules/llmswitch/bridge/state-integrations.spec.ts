@@ -1,7 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 describe('llmswitch bridge state-integrations', () => {
-  it('fails fast when sticky session load throws', async () => {
+  it('fails fast when routing state load throws', async () => {
     jest.resetModules();
 
     jest.unstable_mockModule(
@@ -9,7 +9,7 @@ describe('llmswitch bridge state-integrations', () => {
       () => ({
         importCoreDist: jest.fn(),
         requireCoreDist: jest.fn((subpath: string) => {
-          if (subpath === 'router/virtual-router/sticky-session-store') {
+          if (subpath === 'router/virtual-router/routing-state-store') {
             return {
               loadRoutingInstructionStateSync: () => {
                 throw new Error('sticky boom');
@@ -26,7 +26,7 @@ describe('llmswitch bridge state-integrations', () => {
     const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
 
     expect(() => mod.loadRoutingInstructionStateSync('session:test')).toThrow(
-      'sticky_session_store.load_state.invoke failed: Error: sticky boom'
+      'routing_state_store.load_state.invoke failed: Error: sticky boom'
     );
   });
 

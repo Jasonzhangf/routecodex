@@ -114,8 +114,8 @@ describe('syncStoplessGoalStateFromRequest', () => {
   });
 
   test('persists stopless start goal state and rewrites latest user text to body-forward text', async () => {
-    const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
-    const { saveRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
+    const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
+    const { saveRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
     const { syncStoplessGoalStateFromRequest } = await import('../../sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.js');
     saveRoutingInstructionStateSync('session:goal-sync-1', {
       reasoningStopMode: 'on',
@@ -164,7 +164,7 @@ describe('syncStoplessGoalStateFromRequest', () => {
 
 
   test('rewrites RCC fence inside multipart user content without rejecting non-fence text parts', async () => {
-    const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
+    const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
     const { syncStoplessGoalStateFromRequest } = await import('../../sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.js');
     const adapterContext = {
       sessionId: 'goal-sync-multipart',
@@ -195,7 +195,7 @@ describe('syncStoplessGoalStateFromRequest', () => {
 
 
   test('uses first RCC fence text part and clears duplicate fence parts without throwing', async () => {
-    const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
+    const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
     const { syncStoplessGoalStateFromRequest } = await import('../../sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.js');
     const adapterContext = {
       sessionId: 'goal-sync-multipart-multi-fence',
@@ -228,7 +228,7 @@ describe('syncStoplessGoalStateFromRequest', () => {
   });
 
   test('applies private-only pause directive without leaking RCC fence to upstream content', async () => {
-    const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
+    const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
     const { syncStoplessGoalStateFromRequest } = await import('../../sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.js');
     const startContext = {
       sessionId: 'goal-sync-2',

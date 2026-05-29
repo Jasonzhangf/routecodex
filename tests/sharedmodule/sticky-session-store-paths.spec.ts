@@ -4,9 +4,9 @@ import * as path from 'node:path';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 
-describe('sticky session store paths', () => {
+describe('routing state store paths', () => {
   const prevHome = process.env.RCC_HOME;
   const prevUserDir = process.env.ROUTECODEX_USER_DIR;
   const prevRouteCodexHome = process.env.ROUTECODEX_HOME;
@@ -15,7 +15,7 @@ describe('sticky session store paths', () => {
   let tempRoot = '';
 
   beforeEach(() => {
-    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-sticky-paths-'));
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-routing-paths-'));
     process.env.RCC_HOME = tempRoot;
     process.env.ROUTECODEX_USER_DIR = tempRoot;
     process.env.ROUTECODEX_HOME = tempRoot;

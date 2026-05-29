@@ -19,13 +19,13 @@ function formatError(error: unknown): string {
 function emitRoutingStateRefreshError(key: string, error: unknown): void {
   const errorMessage = formatError(error);
   reportProviderErrorToRouterPolicy({
-    code: 'STICKY_STATE_REFRESH_FAILED',
-    message: 'failed to refresh in-memory routing state from persisted sticky store',
-    stage: 'sticky_session.refresh',
+    code: 'ROUTING_STATE_REFRESH_FAILED',
+    message: 'failed to refresh in-memory routing state from persisted routing store',
+    stage: 'routing_state.refresh',
     timestamp: Date.now(),
     runtime: {
       requestId: 'routing-state-store',
-      providerProtocol: 'sticky-session-store',
+      providerProtocol: 'routing-state-store',
       providerType: 'internal'
     },
     details: {
@@ -35,7 +35,7 @@ function emitRoutingStateRefreshError(key: string, error: unknown): void {
     }
   });
   try {
-    console.warn(`[routing-state-store] STICKY_STATE_REFRESH_FAILED key=${key} error=${errorMessage}`);
+    console.warn(`[routing-state-store] ROUTING_STATE_REFRESH_FAILED key=${key} error=${errorMessage}`);
   } catch {
     // no-op
   }
@@ -99,7 +99,7 @@ export function getRoutingInstructionState(
   const existing = routingInstructionState.get(key);
 
   // 对 session:/conversation:/tmux: 作用域，在每次读取时尝试从磁盘刷新 stopMessage 相关字段，
-  // 确保 servertool（如 stop_message_auto）通过 sticky-session-store 更新的使用次数
+  // 确保 servertool（如 stop_message_auto）通过 routing-state-store 更新的使用次数
   // 能在 VirtualRouter 日志中实时反映出来。
   if (existing && isPersistentScopeKey(key)) {
     try {
@@ -140,7 +140,6 @@ export function getRoutingInstructionState(
     initial = {
       stoplessGoalState: undefined,
       forcedTarget: undefined,
-      stickyTarget: undefined,
       preferTarget: undefined,
       allowedProviders: new Set(),
       disabledProviders: new Set(),
@@ -171,7 +170,6 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
     return true;
   }
   const noForced = !state.forcedTarget;
-  const noSticky = !state.stickyTarget;
   const noPrefer = !state.preferTarget;
   const noAllowed = state.allowedProviders.size === 0;
   const noDisabledProviders = state.disabledProviders.size === 0;
@@ -189,7 +187,6 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
     (typeof state.preCommandUpdatedAt !== 'number' || !Number.isFinite(state.preCommandUpdatedAt));
   return (
     noForced &&
-    noSticky &&
     noPrefer &&
     noAllowed &&
     noDisabledProviders &&

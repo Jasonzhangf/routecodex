@@ -1,7 +1,7 @@
 /**
  * State Integrations Bridge
  *
- * Sticky session state, session identifier extraction, stats center, and
+ * Routing state, session identifier extraction, stats center, and
  * clock task store compatibility wrappers.
  */
 
@@ -48,13 +48,13 @@ function buildStateIntegrationFailure(stage: string, error: unknown, details?: R
 }
 
 export function loadRoutingInstructionStateSync(key: string): unknown | null {
-  const stickySessionStoreModule = requireCoreDist<{
+  const routingStateStoreModule = requireCoreDist<{
     loadRoutingInstructionStateSync?: (key: string) => unknown | null;
-  }>('router/virtual-router/sticky-session-store');
-  const fn = stickySessionStoreModule.loadRoutingInstructionStateSync;
+  }>('router/virtual-router/routing-state-store');
+  const fn = routingStateStoreModule.loadRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(
-      'sticky_session_store.load_state.api_unavailable',
+      'routing_state_store.load_state.api_unavailable',
       'loadRoutingInstructionStateSync not available',
       { key }
     );
@@ -62,18 +62,18 @@ export function loadRoutingInstructionStateSync(key: string): unknown | null {
   try {
     return fn(key);
   } catch (error) {
-    throw buildStateIntegrationFailure('sticky_session_store.load_state.invoke', error, { key });
+    throw buildStateIntegrationFailure('routing_state_store.load_state.invoke', error, { key });
   }
 }
 
 export function saveRoutingInstructionStateAsync(key: string, state: unknown | null): void {
-  const stickySessionStoreModule = requireCoreDist<{
+  const routingStateStoreModule = requireCoreDist<{
     saveRoutingInstructionStateAsync?: (key: string, state: unknown | null) => void;
-  }>('router/virtual-router/sticky-session-store');
-  const fn = stickySessionStoreModule.saveRoutingInstructionStateAsync;
+  }>('router/virtual-router/routing-state-store');
+  const fn = routingStateStoreModule.saveRoutingInstructionStateAsync;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(
-      'sticky_session_store.save_async.api_unavailable',
+      'routing_state_store.save_async.api_unavailable',
       'saveRoutingInstructionStateAsync not available',
       { key }
     );
@@ -81,18 +81,18 @@ export function saveRoutingInstructionStateAsync(key: string, state: unknown | n
   try {
     fn(key, state as Parameters<typeof fn>[1]);
   } catch (error) {
-    throw buildStateIntegrationFailure('sticky_session_store.save_async.invoke', error, { key });
+    throw buildStateIntegrationFailure('routing_state_store.save_async.invoke', error, { key });
   }
 }
 
 export function saveRoutingInstructionStateSync(key: string, state: unknown | null): void {
-  const stickySessionStoreModule = requireCoreDist<{
+  const routingStateStoreModule = requireCoreDist<{
     saveRoutingInstructionStateSync?: (key: string, state: unknown | null) => void;
-  }>('router/virtual-router/sticky-session-store');
-  const fn = stickySessionStoreModule.saveRoutingInstructionStateSync;
+  }>('router/virtual-router/routing-state-store');
+  const fn = routingStateStoreModule.saveRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(
-      'sticky_session_store.save_sync.api_unavailable',
+      'routing_state_store.save_sync.api_unavailable',
       'saveRoutingInstructionStateSync not available',
       { key }
     );
@@ -100,7 +100,7 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
   try {
     fn(key, state as Parameters<typeof fn>[1]);
   } catch (error) {
-    throw buildStateIntegrationFailure('sticky_session_store.save_sync.invoke', error, { key });
+    throw buildStateIntegrationFailure('routing_state_store.save_sync.invoke', error, { key });
   }
 }
 
@@ -121,18 +121,20 @@ export function syncStoplessGoalStateFromRequest(adapterContext: unknown): unkno
 }
 
 export function persistStoplessGoalStateSnapshot(adapterContext: unknown, state: unknown): unknown {
+  const stoplessGoalStateModule = requireCoreDist<{
+    persistStoplessGoalStateSnapshot?: (adapterContext: unknown, state: unknown) => unknown;
+  }>('servertool/handlers/stopless-goal-state');
+  const fn = stoplessGoalStateModule.persistStoplessGoalStateSnapshot;
+  if (typeof fn !== 'function') {
+    throw buildStateIntegrationFailure(
+      'stopless_goal_state.persist.api_unavailable',
+      'persistStoplessGoalStateSnapshot not available'
+    );
+  }
   try {
-    const stoplessGoalStateModule = requireCoreDist<{
-      persistStoplessGoalStateSnapshot?: (adapterContext: unknown, state: unknown) => unknown;
-    }>('servertool/handlers/stopless-goal-state');
-    const fn = stoplessGoalStateModule.persistStoplessGoalStateSnapshot;
-    if (typeof fn !== 'function') {
-      return null;
-    }
     return fn(adapterContext, state);
   } catch (error) {
-    logStateIntegrationsNonBlocking('stopless_goal_state.persist.invoke', error);
-    return null;
+    throw buildStateIntegrationFailure('stopless_goal_state.persist.invoke', error);
   }
 }
 

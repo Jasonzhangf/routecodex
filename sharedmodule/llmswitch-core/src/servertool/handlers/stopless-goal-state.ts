@@ -5,7 +5,7 @@ import type {
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../router/virtual-router/sticky-session-store.js';
+} from '../../router/virtual-router/routing-state-store.js';
 import {
   applyStoplessGoalDirectiveWithNative,
   parseRccFenceDocumentWithNative,

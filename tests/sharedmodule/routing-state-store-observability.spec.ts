@@ -34,7 +34,6 @@ describe('routing state store observability', () => {
     const key = 'session:observe-refresh';
     const existing = {
       forcedTarget: undefined,
-      stickyTarget: undefined,
       allowedProviders: new Set<string>(),
       disabledProviders: new Set<string>(),
       disabledKeys: new Map<string, number>(),
@@ -54,8 +53,8 @@ describe('routing state store observability', () => {
     expect(result).toBe(existing);
     expect(
       events.some((event) => (
-        event.code === 'STICKY_STATE_REFRESH_FAILED'
-        && event.stage === 'sticky_session.refresh'
+        event.code === 'ROUTING_STATE_REFRESH_FAILED'
+        && event.stage === 'routing_state.refresh'
         && event.details?.operation === 'refresh_existing_state'
         && event.details?.key === key
       ))

@@ -16,7 +16,7 @@ interface PersistedRoutingState {
 }
 
 const pendingWrites = new Map<string, Promise<void>>();
-const STICKY_RUNTIME_REQUEST_ID = 'sticky-session-store';
+const ROUTING_STATE_RUNTIME_REQUEST_ID = 'routing-state-store';
 
 function isNodeErrorWithCode(error: unknown): error is NodeJS.ErrnoException {
   return !!error && typeof error === 'object' && 'code' in error;
@@ -33,22 +33,22 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
-function logStickyStoreNonBlockingError(
+function logRoutingStateStoreNonBlockingError(
   stage: string,
   error: unknown,
   details?: Record<string, unknown>
 ): void {
   try {
     const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-    process.stderr.write(`[sticky-session-store] ${stage} failed (non-blocking): ${formatError(error)}${suffix}\n`);
+    process.stderr.write(`[routing-state-store] ${stage} failed (non-blocking): ${formatError(error)}${suffix}\n`);
   } catch {
     // Never throw from non-blocking logging.
   }
 }
 
-function emitStickyStoreError(
+function emitRoutingStateStoreError(
   code: string,
-  stage: 'sticky_session.persist' | 'sticky_session.read' | 'sticky_session.recover',
+  stage: 'routing_state.persist' | 'routing_state.read' | 'routing_state.recover',
   message: string,
   details: Record<string, unknown>
 ): void {
@@ -58,8 +58,8 @@ function emitStickyStoreError(
     stage,
     timestamp: Date.now(),
     runtime: {
-      requestId: STICKY_RUNTIME_REQUEST_ID,
-      providerProtocol: 'sticky-session-store',
+      requestId: ROUTING_STATE_RUNTIME_REQUEST_ID,
+      providerProtocol: 'routing-state-store',
       providerType: 'internal'
     },
     details
@@ -67,19 +67,19 @@ function emitStickyStoreError(
   try {
     const op = typeof details.operation === 'string' ? details.operation : 'unknown';
     const errMsg = typeof details.error === 'string' ? details.error : '';
-    console.warn(`[sticky-session-store] ${code} stage=${stage} op=${op}${errMsg ? ` error=${errMsg}` : ''}`);
+    console.warn(`[routing-state-store] ${code} stage=${stage} op=${op}${errMsg ? ` error=${errMsg}` : ''}`);
   } catch (warnError) {
-    logStickyStoreNonBlockingError('emitStickyStoreError.consoleWarn', warnError, {
+    logRoutingStateStoreNonBlockingError('emitRoutingStateStoreError.consoleWarn', warnError, {
       code,
       stage
     });
   }
 }
 
-export class StickySessionKeyMissingError extends Error {
+export class RoutingStateKeyMissingError extends Error {
   constructor(public readonly key: string | undefined, message: string) {
     super(message);
-    this.name = 'StickySessionKeyMissingError';
+    this.name = 'RoutingStateKeyMissingError';
   }
 }
 
@@ -96,7 +96,7 @@ function resolveDefaultSessionDir(scope: 'tmux' | 'routing'): string | null {
       ? resolveRccPath('sessions')
       : resolveRccPath('state', 'routing');
   } catch (error) {
-    console.warn(`[sticky-session-store] resolveDefaultSessionDir(${scope}) failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`[routing-state-store] resolveDefaultSessionDir(${scope}) failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
@@ -109,7 +109,7 @@ function resolveSessionDir(scope: 'tmux' | 'routing'): string | null {
     }
     return resolveDefaultSessionDir(scope);
   } catch (error) {
-    console.warn(`[sticky-session-store] resolveSessionDir(${scope}) failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`[routing-state-store] resolveSessionDir(${scope}) failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
@@ -157,10 +157,10 @@ function readPersistedStateFromFile(filepath: string): RoutingInstructionState |
     } catch (parseError) {
       const recovered = recoverPersistedJson(raw);
       if (!recovered) {
-        emitStickyStoreError(
-          'STICKY_STATE_READ_FAILED',
-          'sticky_session.read',
-          'failed to parse persisted sticky state JSON',
+        emitRoutingStateStoreError(
+          'ROUTING_STATE_READ_FAILED',
+          'routing_state.read',
+          'failed to parse persisted routing state JSON',
           {
             operation: 'read_parse_json',
             filepath,
@@ -177,10 +177,10 @@ function readPersistedStateFromFile(filepath: string): RoutingInstructionState |
             : ({ version: 1, state: parsed as Record<string, unknown> } as PersistedRoutingState);
         atomicWriteFileSync(filepath, JSON.stringify(payload));
       } catch (rewriteError) {
-        emitStickyStoreError(
-          'STICKY_STATE_RECOVER_FAILED',
-          'sticky_session.recover',
-          'failed to rewrite recovered sticky state payload',
+        emitRoutingStateStoreError(
+          'ROUTING_STATE_RECOVER_FAILED',
+          'routing_state.recover',
+          'failed to rewrite recovered routing state payload',
           {
             operation: 'recover_rewrite',
             filepath,
@@ -198,10 +198,10 @@ function readPersistedStateFromFile(filepath: string): RoutingInstructionState |
     }
     return deserializeRoutingInstructionState(payload);
   } catch (error) {
-    emitStickyStoreError(
-      'STICKY_STATE_READ_FAILED',
-      'sticky_session.read',
-      'failed to read sticky session state from disk',
+    emitRoutingStateStoreError(
+      'ROUTING_STATE_READ_FAILED',
+      'routing_state.read',
+      'failed to read routing state from disk',
       {
         operation: 'read_file',
         filepath,
@@ -214,13 +214,13 @@ function readPersistedStateFromFile(filepath: string): RoutingInstructionState |
 
 export function loadRoutingInstructionStateSync(key: string | undefined): RoutingInstructionState | null {
   if (!isPersistentKey(key)) {
-    const error = new StickySessionKeyMissingError(key, 'Sticky session key missing or invalid; failing fast per no-fallback policy');
+    const error = new RoutingStateKeyMissingError(key, 'Routing state key missing or invalid; failing fast per no-fallback policy');
     throw error;
   }
 
   const filepaths = resolveSessionFilepaths(key);
   if (filepaths.length === 0) {
-    const error = new StickySessionKeyMissingError(key, 'Unable to resolve session file path for sticky key; failing fast per no-fallback policy');
+    const error = new RoutingStateKeyMissingError(key, 'Unable to resolve session file path for routing state key; failing fast per no-fallback policy');
     throw error;
   }
 
@@ -251,10 +251,10 @@ export function saveRoutingInstructionStateAsync(
           await fs.promises.unlink(filepath);
         } catch (error) {
           if (!shouldIgnoreUnlinkError(error)) {
-            emitStickyStoreError(
-              'STICKY_STATE_PERSIST_FAILED',
-              'sticky_session.persist',
-              'failed to unlink sticky session state file',
+            emitRoutingStateStoreError(
+              'ROUTING_STATE_PERSIST_FAILED',
+              'routing_state.persist',
+              'failed to unlink routing state file',
               {
                 operation: 'unlink',
                 filepath,
@@ -279,10 +279,10 @@ export function saveRoutingInstructionStateAsync(
       try {
         await fs.promises.mkdir(dir, { recursive: true });
       } catch (error) {
-        emitStickyStoreError(
-          'STICKY_STATE_PERSIST_FAILED',
-          'sticky_session.persist',
-          'failed to create sticky session state directory',
+        emitRoutingStateStoreError(
+          'ROUTING_STATE_PERSIST_FAILED',
+          'routing_state.persist',
+          'failed to create routing state directory',
           {
             operation: 'mkdir',
             filepath,
@@ -294,10 +294,10 @@ export function saveRoutingInstructionStateAsync(
       try {
         await atomicWriteFile(filepath, JSON.stringify(payload));
       } catch (error) {
-        emitStickyStoreError(
-          'STICKY_STATE_PERSIST_FAILED',
-          'sticky_session.persist',
-          'failed to persist sticky session state file',
+        emitRoutingStateStoreError(
+          'ROUTING_STATE_PERSIST_FAILED',
+          'routing_state.persist',
+          'failed to persist routing state file',
           {
             operation: 'write',
             filepath,
@@ -329,10 +329,10 @@ export function saveRoutingInstructionStateSync(
         fs.unlinkSync(filepath);
       } catch (error) {
         if (!shouldIgnoreUnlinkError(error)) {
-          emitStickyStoreError(
-            'STICKY_STATE_PERSIST_FAILED',
-            'sticky_session.persist',
-            'failed to unlink sticky session state file',
+          emitRoutingStateStoreError(
+            'ROUTING_STATE_PERSIST_FAILED',
+            'routing_state.persist',
+            'failed to unlink routing state file',
             {
               operation: 'unlinkSync',
               filepath,
@@ -355,10 +355,10 @@ export function saveRoutingInstructionStateSync(
     try {
       fs.mkdirSync(dir, { recursive: true });
     } catch (error) {
-      emitStickyStoreError(
-        'STICKY_STATE_PERSIST_FAILED',
-        'sticky_session.persist',
-        'failed to create sticky session state directory',
+      emitRoutingStateStoreError(
+        'ROUTING_STATE_PERSIST_FAILED',
+        'routing_state.persist',
+        'failed to create routing state directory',
         {
           operation: 'mkdirSync',
           filepath,
@@ -371,10 +371,10 @@ export function saveRoutingInstructionStateSync(
     try {
       atomicWriteFileSync(filepath, JSON.stringify(payload));
     } catch (error) {
-      emitStickyStoreError(
-        'STICKY_STATE_PERSIST_FAILED',
-        'sticky_session.persist',
-        'failed to persist sticky session state file',
+      emitRoutingStateStoreError(
+        'ROUTING_STATE_PERSIST_FAILED',
+        'routing_state.persist',
+        'failed to persist routing state file',
         {
           operation: 'writeSync',
           filepath,
@@ -391,10 +391,10 @@ function scheduleWrite(filepath: string, task: () => Promise<void>): void {
   const next = previous
     .then(task)
     .catch((error) => {
-      emitStickyStoreError(
-        'STICKY_STATE_PERSIST_FAILED',
-        'sticky_session.persist',
-        'unexpected sticky session async write task failure',
+      emitRoutingStateStoreError(
+        'ROUTING_STATE_PERSIST_FAILED',
+        'routing_state.persist',
+        'unexpected routing state async write task failure',
         {
           operation: 'scheduleWrite',
           filepath,
@@ -421,10 +421,10 @@ async function atomicWriteFile(filepath: string, content: string): Promise<void>
         await fs.promises.unlink(filepath);
       } catch (unlinkError) {
         if (!shouldIgnoreUnlinkError(unlinkError)) {
-          logStickyStoreNonBlockingError('atomicWriteFile.unlinkBeforeRename', unlinkError, { filepath, tmp });
+          logRoutingStateStoreNonBlockingError('atomicWriteFile.unlinkBeforeRename', unlinkError, { filepath, tmp });
         }
       }
-      logStickyStoreNonBlockingError('atomicWriteFile.renamePrimary', renameError, { filepath, tmp });
+      logRoutingStateStoreNonBlockingError('atomicWriteFile.renamePrimary', renameError, { filepath, tmp });
       await fs.promises.rename(tmp, filepath);
     }
   } finally {
@@ -432,7 +432,7 @@ async function atomicWriteFile(filepath: string, content: string): Promise<void>
       await fs.promises.unlink(tmp);
     } catch (tmpCleanupError) {
       if (!shouldIgnoreUnlinkError(tmpCleanupError)) {
-        logStickyStoreNonBlockingError('atomicWriteFile.tmpCleanup', tmpCleanupError, { filepath, tmp });
+        logRoutingStateStoreNonBlockingError('atomicWriteFile.tmpCleanup', tmpCleanupError, { filepath, tmp });
       }
     }
   }
@@ -449,10 +449,10 @@ function atomicWriteFileSync(filepath: string, content: string): void {
         fs.unlinkSync(filepath);
       } catch (unlinkError) {
         if (!shouldIgnoreUnlinkError(unlinkError)) {
-          logStickyStoreNonBlockingError('atomicWriteFileSync.unlinkBeforeRename', unlinkError, { filepath, tmp });
+          logRoutingStateStoreNonBlockingError('atomicWriteFileSync.unlinkBeforeRename', unlinkError, { filepath, tmp });
         }
       }
-      logStickyStoreNonBlockingError('atomicWriteFileSync.renamePrimary', renameError, { filepath, tmp });
+      logRoutingStateStoreNonBlockingError('atomicWriteFileSync.renamePrimary', renameError, { filepath, tmp });
       fs.renameSync(tmp, filepath);
     }
   } finally {
@@ -460,7 +460,7 @@ function atomicWriteFileSync(filepath: string, content: string): void {
       fs.unlinkSync(tmp);
     } catch (tmpCleanupError) {
       if (!shouldIgnoreUnlinkError(tmpCleanupError)) {
-        logStickyStoreNonBlockingError('atomicWriteFileSync.tmpCleanup', tmpCleanupError, { filepath, tmp });
+        logRoutingStateStoreNonBlockingError('atomicWriteFileSync.tmpCleanup', tmpCleanupError, { filepath, tmp });
       }
     }
   }
@@ -491,7 +491,7 @@ function recoverPersistedJson(raw: string): PersistedRoutingState | Record<strin
     }
   }
   if (parseFailures > 0) {
-    logStickyStoreNonBlockingError('recoverPersistedJson.scan', `unable to recover JSON from truncated payload`, {
+    logRoutingStateStoreNonBlockingError('recoverPersistedJson.scan', `unable to recover JSON from truncated payload`, {
       parseFailures,
       maxScan
     });

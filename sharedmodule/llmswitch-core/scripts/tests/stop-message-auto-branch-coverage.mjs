@@ -185,7 +185,7 @@ async function main() {
   const { runServerToolOrchestration } = await importModule('servertool/engine.js');
   const { readStopMessageCompareContext } = await importModule('servertool/stop-message-compare-context.js');
   const { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } = await importModule(
-    'router/virtual-router/sticky-session-store.js'
+    'router/virtual-router/routing-state-store.js'
   );
 
   const originalHome = process.env.HOME;

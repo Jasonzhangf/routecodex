@@ -5,14 +5,14 @@ import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateAsync,
   saveRoutingInstructionStateSync
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 import {
   resetProviderRuntimeIngressForTests,
   setProviderRuntimeObserverHooks
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js';
 import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
-describe('sticky session store observability', () => {
+describe('routing state store observability', () => {
   const prevHome = process.env.RCC_HOME;
   const prevUserDir = process.env.ROUTECODEX_USER_DIR;
   const prevRouteCodexHome = process.env.ROUTECODEX_HOME;
@@ -31,7 +31,7 @@ describe('sticky session store observability', () => {
   } as any;
 
   beforeEach(() => {
-    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-sticky-observe-'));
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-routing-observe-'));
     process.env.RCC_HOME = tempRoot;
     process.env.ROUTECODEX_USER_DIR = tempRoot;
     process.env.ROUTECODEX_HOME = tempRoot;
@@ -71,8 +71,8 @@ describe('sticky session store observability', () => {
 
     expect(
       events.some((event) => (
-        event.code === 'STICKY_STATE_PERSIST_FAILED'
-        && event.stage === 'sticky_session.persist'
+        event.code === 'ROUTING_STATE_PERSIST_FAILED'
+        && event.stage === 'routing_state.persist'
         && event.details?.operation === 'mkdirSync'
       ))
     ).toBe(true);
@@ -87,8 +87,8 @@ describe('sticky session store observability', () => {
 
     expect(
       events.some((event) => (
-        event.code === 'STICKY_STATE_PERSIST_FAILED'
-        && event.stage === 'sticky_session.persist'
+        event.code === 'ROUTING_STATE_PERSIST_FAILED'
+        && event.stage === 'routing_state.persist'
         && event.details?.operation === 'unlink'
       ))
     ).toBe(true);
@@ -104,8 +104,8 @@ describe('sticky session store observability', () => {
     expect(loaded).toBeNull();
     expect(
       events.some((event) => (
-        event.code === 'STICKY_STATE_READ_FAILED'
-        && event.stage === 'sticky_session.read'
+        event.code === 'ROUTING_STATE_READ_FAILED'
+        && event.stage === 'routing_state.read'
         && event.details?.operation === 'read_parse_json'
       ))
     ).toBe(true);

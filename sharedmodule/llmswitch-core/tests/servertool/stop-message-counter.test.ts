@@ -8,7 +8,7 @@ import {
   applyStopMessageFinishReasonBudget,
   incrementStopMessageErrorBudget
 } from '../../src/servertool/stop-message-counter.js';
-import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from '../../src/router/virtual-router/sticky-session-store.js';
+import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from '../../src/router/virtual-router/routing-state-store.js';
 
 const STICKY_KEY = 'session:stop-counter-test';
 
