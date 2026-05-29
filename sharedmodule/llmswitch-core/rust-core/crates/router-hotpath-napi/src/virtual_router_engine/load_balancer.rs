@@ -63,7 +63,6 @@ impl RouteLoadBalancer {
         &mut self,
         route_name: &str,
         candidates: &[String],
-        _sticky_key: Option<&str>,
         weights: Option<&HashMap<String, i64>>,
         availability_check: impl Fn(&str) -> bool,
         strategy_override: Option<&str>,
@@ -153,7 +152,6 @@ impl RouteLoadBalancer {
         route_name: &str,
         ordered_group_ids: &[String],
         groups: &HashMap<String, Vec<String>>,
-        _sticky_key: Option<&str>,
         weights: Option<&HashMap<String, i64>>,
         availability_check: impl Fn(&str) -> bool,
         strategy_override: Option<&str>,
@@ -274,28 +272,6 @@ impl RouteLoadBalancer {
 mod tests {
     use super::*;
 
-
-    #[test]
-    fn sticky_strategy_is_treated_as_round_robin_for_non_continuation_requests() {
-        let mut lb = RouteLoadBalancer::new(Some(LoadBalancingPolicy {
-            strategy: Some("sticky".to_string()),
-            weights: None,
-            health_weighted: None,
-            context_weighted: None,
-        }));
-        let candidates = vec!["provider-a".to_string(), "provider-b".to_string()];
-
-        let first = lb
-            .select("thinking", &candidates, Some("session:same"), None, |_| true, None)
-            .expect("first selection");
-        let second = lb
-            .select("thinking", &candidates, Some("session:same"), None, |_| true, None)
-            .expect("second selection");
-
-        assert_eq!(first, "provider-a");
-        assert_eq!(second, "provider-b", "non-continuation requests must not be pinned by sticky load balancing");
-    }
-
     #[test]
     fn round_robin_covers_all_aliases_in_single_model_pool() {
         let mut lb = RouteLoadBalancer::new(None);
@@ -310,5 +286,55 @@ mod tests {
             );
         }
         assert_eq!(hits, candidates);
+    }
+
+    #[test]
+    fn weighted_selects_provider_model_groups_then_rotates_keys_inside_group() {
+        let mut lb = RouteLoadBalancer::new(None);
+        let groups = HashMap::from([
+            (
+                "mini27.MiniMax-M2.7".to_string(),
+                vec!["mini27.key1.MiniMax-M2.7".to_string()],
+            ),
+            (
+                "mimo.mimo-v2.5".to_string(),
+                vec![
+                    "mimo.key1.mimo-v2.5".to_string(),
+                    "mimo.key2.mimo-v2.5".to_string(),
+                ],
+            ),
+        ]);
+        let group_order = vec![
+            "mini27.MiniMax-M2.7".to_string(),
+            "mimo.mimo-v2.5".to_string(),
+        ];
+        let weights = HashMap::from([
+            ("mini27.MiniMax-M2.7".to_string(), 1),
+            ("mimo.mimo-v2.5".to_string(), 1),
+        ]);
+
+        let hits = (0..4)
+            .map(|_| {
+                lb.select_grouped(
+                    "search",
+                    &group_order,
+                    &groups,
+                    Some(&weights),
+                    |_| true,
+                    Some("weighted"),
+                )
+                .expect("selection")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            hits,
+            vec![
+                "mini27.key1.MiniMax-M2.7",
+                "mimo.key1.mimo-v2.5",
+                "mini27.key1.MiniMax-M2.7",
+                "mimo.key2.mimo-v2.5",
+            ]
+        );
     }
 }

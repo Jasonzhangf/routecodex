@@ -42,6 +42,14 @@ impl RoutingPools {
         pools.iter().any(|tier| !tier.targets.is_empty())
     }
 
+    pub(crate) fn get_opt(&self, route: &str) -> Option<&Vec<RoutePoolTier>> {
+        self.pools.get(route)
+    }
+
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &String> {
+        self.pools.keys()
+    }
+
     pub(crate) fn flatten_targets(&self, pools: &[RoutePoolTier]) -> Vec<String> {
         let mut out = Vec::new();
         for tier in pools {
@@ -58,7 +66,7 @@ impl RoutingPools {
 pub(crate) fn parse_routing(routing: &Map<String, Value>) -> RoutingPools {
     let mut pools = HashMap::new();
     for (route, value) in routing.iter() {
-        let tiers = value
+        let mut tiers = value
             .as_array()
             .map(|items| {
                 items
@@ -67,14 +75,28 @@ pub(crate) fn parse_routing(routing: &Map<String, Value>) -> RoutingPools {
                     .collect::<Vec<RoutePoolTier>>()
             })
             .unwrap_or_default();
+        tiers.sort_by(|left, right| right.priority.cmp(&left.priority));
         pools.insert(route.clone(), tiers);
     }
     RoutingPools { pools }
 }
 
 pub(crate) fn route_has_targets(routing: &RoutingPools, route: &str) -> bool {
-    let pools = routing.get(route);
-    pools.iter().any(|tier| !tier.targets.is_empty())
+    // Check bare route name AND any group-prefixed key ending with ":{route}"
+    if routing
+        .get(route)
+        .iter()
+        .any(|tier| !tier.targets.is_empty())
+    {
+        return true;
+    }
+    routing.keys().any(|key| {
+        key.ends_with(&format!(":{}", route))
+            && routing
+                .get(key.as_str())
+                .iter()
+                .any(|tier| !tier.targets.is_empty())
+    })
 }
 
 pub(crate) fn build_route_queue(
@@ -341,7 +363,11 @@ mod tests {
         };
         let queue = build_route_queue(
             "thinking",
-            &["thinking".to_string(), "tools".to_string(), "default".to_string()],
+            &[
+                "thinking".to_string(),
+                "tools".to_string(),
+                "default".to_string(),
+            ],
             &features,
             &routing,
         );
@@ -503,5 +529,34 @@ mod tests {
         let queue = build_route_queue("thinking", &["default".to_string()], &features, &routing);
 
         assert_eq!(queue, vec!["thinking".to_string(), "default".to_string()]);
+    }
+
+    #[test]
+    fn parse_routing_orders_pools_by_priority_descending() {
+        let routing = parse_routing(&Map::from_iter([(
+            "search".to_string(),
+            Value::Array(vec![
+                serde_json::json!({
+                    "id": "backup",
+                    "priority": 10,
+                    "targets": ["provider.backup"]
+                }),
+                serde_json::json!({
+                    "id": "primary",
+                    "priority": 100,
+                    "targets": ["provider.primary"]
+                }),
+            ]),
+        )]));
+
+        let pools = routing.get("search");
+
+        assert_eq!(
+            pools
+                .iter()
+                .map(|pool| pool.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["primary", "backup"]
+        );
     }
 }

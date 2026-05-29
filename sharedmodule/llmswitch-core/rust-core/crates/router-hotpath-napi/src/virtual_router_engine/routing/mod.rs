@@ -21,8 +21,8 @@ pub(crate) use key_utils::{extract_key_alias, extract_key_index, extract_provide
 #[allow(unused_imports)]
 pub(crate) use metadata::{
     build_scoped_session_key, extract_excluded_provider_keys, extract_runtime_now_ms,
-    is_continuation_request, is_server_tool_followup_request, resolve_session_scope, resolve_sticky_key,
-    resolve_stop_message_scope,
+    is_continuation_request, is_server_tool_followup_request, resolve_routing_state_key,
+    resolve_session_scope, resolve_stop_message_scope,
 };
 pub(crate) use selection::{
     filter_candidates_by_state, resolve_instruction_process_mode_for_selection,

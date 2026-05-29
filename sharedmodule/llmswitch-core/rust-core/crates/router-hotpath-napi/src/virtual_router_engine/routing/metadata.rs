@@ -9,8 +9,8 @@ fn read_conversation_scope(metadata: &Value) -> Option<String> {
 
 fn resolve_continuation_request_chain_key(metadata: &Value) -> Option<String> {
     let continuation = metadata.get("continuation").and_then(|v| v.as_object())?;
-    let sticky_scope = read_trimmed_string(continuation.get("stickyScope"))?;
-    if sticky_scope != "request_chain" {
+    let continuation_scope = read_trimmed_string(continuation.get("continuationScope"))?;
+    if continuation_scope != "request_chain" {
         return None;
     }
     read_trimmed_string(continuation.get("chainId")).or_else(|| {
@@ -32,7 +32,7 @@ pub(crate) fn is_continuation_request(metadata: &Value) -> bool {
         || resolve_legacy_responses_request_chain_key(metadata).is_some()
 }
 
-pub(crate) fn resolve_sticky_key(metadata: &Value) -> String {
+pub(crate) fn resolve_routing_state_key(metadata: &Value) -> String {
     if let Some(request_chain_key) = resolve_continuation_request_chain_key(metadata) {
         return request_chain_key;
     }
@@ -48,8 +48,7 @@ pub(crate) fn resolve_sticky_key(metadata: &Value) -> String {
             }
         }
     }
-    read_trimmed_string(metadata.get("requestId"))
-        .unwrap_or_else(|| "default".to_string())
+    read_trimmed_string(metadata.get("requestId")).unwrap_or_else(|| "default".to_string())
 }
 
 pub(crate) fn resolve_session_scope(metadata: &Value) -> Option<String> {
@@ -60,7 +59,8 @@ pub(crate) fn resolve_session_scope(metadata: &Value) -> Option<String> {
 }
 
 pub(crate) fn resolve_stop_message_scope(metadata: &Value) -> Option<String> {
-    let explicit = read_trimmed_string(metadata.get("stopMessageClientInjectSessionScope")).unwrap_or_default();
+    let explicit = read_trimmed_string(metadata.get("stopMessageClientInjectSessionScope"))
+        .unwrap_or_default();
     let explicit = if !explicit.is_empty() {
         explicit
     } else {
@@ -141,7 +141,7 @@ pub(crate) fn extract_runtime_now_ms(metadata: &Value) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_continuation_request, resolve_sticky_key, resolve_stop_message_scope};
+    use super::{is_continuation_request, resolve_routing_state_key, resolve_stop_message_scope};
     use serde_json::json;
 
     #[test]
@@ -152,7 +152,7 @@ mod tests {
             "sessionId": "session_should_lose",
             "continuation": {
                 "chainId": "req_chain_from_continuation",
-                "stickyScope": "request_chain",
+                "continuationScope": "request_chain",
                 "resumeFrom": {
                     "requestId": "req_chain_from_continuation"
                 }
@@ -160,39 +160,39 @@ mod tests {
         });
 
         assert_eq!(
-            resolve_sticky_key(&metadata),
+            resolve_routing_state_key(&metadata),
             "req_chain_from_continuation".to_string()
         );
     }
 
     #[test]
-    fn uses_explicit_session_sticky_scope() {
+    fn uses_explicit_session_continuation_scope() {
         let metadata = json!({
             "requestId": "req_session_scope",
             "sessionId": "session_should_win",
             "continuation": {
-                "stickyScope": "session"
+                "continuationScope": "session"
             }
         });
 
         assert_eq!(
-            resolve_sticky_key(&metadata),
+            resolve_routing_state_key(&metadata),
             "req_session_scope".to_string()
         );
     }
 
     #[test]
-    fn uses_explicit_request_sticky_scope() {
+    fn uses_explicit_request_continuation_scope() {
         let metadata = json!({
             "requestId": "req_request_scope",
             "sessionId": "session_should_lose",
             "continuation": {
-                "stickyScope": "request"
+                "continuationScope": "request"
             }
         });
 
         assert_eq!(
-            resolve_sticky_key(&metadata),
+            resolve_routing_state_key(&metadata),
             "req_request_scope".to_string()
         );
     }
@@ -208,7 +208,10 @@ mod tests {
             }
         });
 
-        assert_eq!(resolve_sticky_key(&metadata), "req_chain_root".to_string());
+        assert_eq!(
+            resolve_routing_state_key(&metadata),
+            "req_chain_root".to_string()
+        );
     }
 
     #[test]
@@ -219,11 +222,14 @@ mod tests {
             "sessionId": "session_1"
         });
 
-        assert_eq!(resolve_sticky_key(&metadata), "req_chat_1".to_string());
+        assert_eq!(
+            resolve_routing_state_key(&metadata),
+            "req_chat_1".to_string()
+        );
     }
 
     #[test]
-    fn non_continuation_request_is_not_sticky() {
+    fn non_continuation_request_is_not_continuation() {
         let metadata = json!({
             "providerProtocol": "openai-responses",
             "requestId": "req_1",

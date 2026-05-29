@@ -15,19 +15,44 @@ use crate::virtual_router_engine::instructions::{
     has_routing_instruction_marker_in_messages,
     has_routing_instruction_marker_in_responses_context, parse_routing_instructions_from_request,
     pre_command_state_snapshot, stop_message_state_snapshot, strip_client_inject_fields,
-    strip_stop_message_fields, RoutingInstruction, RoutingInstructionState,
+    strip_stop_message_fields, InstructionTarget, RoutingInstruction, RoutingInstructionState,
 };
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
     extract_excluded_provider_keys, extract_key_alias, filter_candidates_by_state,
     is_continuation_request, is_server_tool_followup_request, parse_direct_provider_model,
     resolve_instruction_process_mode_for_selection, resolve_instruction_target,
-    resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
+    resolve_routing_state_key, resolve_session_scope, resolve_stop_message_scope,
     should_fallback_direct_model_for_media,
 };
 use crate::virtual_router_engine::routing_state_store::{
     is_state_empty, load_routing_instruction_state, persist_routing_instruction_state,
 };
+
+fn parse_retry_provider_key_target(raw: &str) -> Option<InstructionTarget> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = trimmed.split('.').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let provider = parts[0].trim();
+    let alias = parts[1].trim();
+    let model = parts[2..].join(".");
+    if provider.is_empty() || alias.is_empty() || model.trim().is_empty() {
+        return None;
+    }
+    Some(InstructionTarget {
+        provider: Some(provider.to_string()),
+        key_alias: Some(alias.to_string()),
+        key_index: None,
+        model: Some(model.trim().to_string()),
+        path_length: Some(3),
+        process_mode: None,
+    })
+}
 
 fn normalize_instruction_target_against_registry(
     target: &crate::virtual_router_engine::instructions::InstructionTarget,
@@ -121,7 +146,6 @@ fn summarize_marker_instructions(
         let label = match inst.kind.as_str() {
             "clear" => "clear",
             "force" => "force",
-            "sticky" => "sticky",
             "prefer" => "prefer",
             "allow" => "allow",
             "disable" => "disable",
@@ -237,17 +261,19 @@ impl VirtualRouterEngineCore {
     ) -> Result<Value, String> {
         // Keep health selection state scoped to the current runtime override context
         // (sessionDir/rccUserDir). This prevents cross-port/session pollution.
-        self.refresh_provider_health_from_store();
+        self.refresh_provider_health_from_store(false);
         let mut request_working = request.clone();
         clean_malformed_routing_instruction_markers(&mut request_working);
         let is_continuation = is_continuation_request(metadata);
-        let sticky_key = resolve_sticky_key(metadata);
+        let request_routing_state_key = resolve_routing_state_key(metadata);
         let session_scope = resolve_session_scope(metadata);
         let stop_message_scope = resolve_stop_message_scope(metadata);
         let routing_state_key = if is_continuation {
-            session_scope.clone().unwrap_or_else(|| sticky_key.clone())
+            session_scope
+                .clone()
+                .unwrap_or_else(|| request_routing_state_key.clone())
         } else {
-            sticky_key.clone()
+            request_routing_state_key.clone()
         };
         let base_state = self.load_routing_state_for_scope(&routing_state_key);
         let mut persisted_routing_state = strip_stop_message_fields(&base_state);
@@ -256,19 +282,16 @@ impl VirtualRouterEngineCore {
         if !metadata_instructions.is_empty() {
             apply_routing_instructions(&metadata_instructions, &mut selection_routing_state)?;
         }
-        if metadata
-            .get("disableStickyRoutes")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            selection_routing_state.forced_target = None;
-            selection_routing_state.sticky_target = None;
-            selection_routing_state.prefer_target = None;
-        }
         if !is_continuation {
             selection_routing_state.forced_target = None;
-            selection_routing_state.sticky_target = None;
             selection_routing_state.prefer_target = None;
+        }
+        if let Some(target) = metadata
+            .get("__routecodexRetryProviderKey")
+            .and_then(|v| v.as_str())
+            .and_then(parse_retry_provider_key_target)
+        {
+            selection_routing_state.forced_target = Some(target);
         }
 
         let mut parsed_instructions = normalize_parsed_instructions_against_registry(
@@ -466,14 +489,7 @@ impl VirtualRouterEngineCore {
                     let route_key = format!("direct:{}.{}", provider_id, model_id);
                     let direct_key = self
                         .load_balancer
-                        .select(
-                            &route_key,
-                            &available,
-                            Some(&sticky_key),
-                            None,
-                            |_| true,
-                            Some("round-robin"),
-                        )
+                        .select(&route_key, &available, None, |_| true, Some("round-robin"))
                         .ok_or_else(|| {
                             format_virtual_router_error(
                                 "PROVIDER_NOT_AVAILABLE",
@@ -650,105 +666,6 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn disable_sticky_routes_clears_forced_and_sticky_targets_for_selection() {
-        let mut state = RoutingInstructionState::default();
-        let target = InstructionTarget {
-            provider: Some("deepseek-web".to_string()),
-            key_alias: Some("3".to_string()),
-            key_index: None,
-            model: Some("deepseek-r1-search".to_string()),
-            path_length: Some(3),
-            process_mode: None,
-        };
-        state.forced_target = Some(target.clone());
-        state.sticky_target = Some(target.clone());
-        state.prefer_target = Some(target);
-
-        let metadata = json!({ "disableStickyRoutes": true });
-        if metadata
-            .get("disableStickyRoutes")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            state.forced_target = None;
-            state.sticky_target = None;
-            state.prefer_target = None;
-        }
-
-        assert!(state.forced_target.is_none());
-        assert!(state.sticky_target.is_none());
-        assert!(state.prefer_target.is_none());
-    }
-
-    #[test]
-    fn non_continuation_request_clears_selection_sticky_targets() {
-        let mut state = RoutingInstructionState::default();
-        let target = InstructionTarget {
-            provider: Some("deepseek-web".to_string()),
-            key_alias: Some("3".to_string()),
-            key_index: None,
-            model: Some("deepseek-r1-search".to_string()),
-            path_length: Some(3),
-            process_mode: None,
-        };
-        state.forced_target = Some(target.clone());
-        state.sticky_target = Some(target.clone());
-        state.prefer_target = Some(target);
-
-        let metadata = json!({
-            "providerProtocol": "openai-responses",
-            "requestId": "req_current_turn",
-            "sessionId": "session_1"
-        });
-        let is_continuation =
-            crate::virtual_router_engine::routing::is_continuation_request(&metadata);
-        assert!(!is_continuation);
-        if !is_continuation {
-            state.forced_target = None;
-            state.sticky_target = None;
-            state.prefer_target = None;
-        }
-
-        assert!(state.forced_target.is_none());
-        assert!(state.sticky_target.is_none());
-        assert!(state.prefer_target.is_none());
-    }
-
-    #[test]
-    fn continuation_request_keeps_selection_sticky_targets() {
-        let mut state = RoutingInstructionState::default();
-        let target = InstructionTarget {
-            provider: Some("deepseek-web".to_string()),
-            key_alias: Some("3".to_string()),
-            key_index: None,
-            model: Some("deepseek-r1-search".to_string()),
-            path_length: Some(3),
-            process_mode: None,
-        };
-        state.forced_target = Some(target.clone());
-        state.sticky_target = Some(target.clone());
-        state.prefer_target = Some(target);
-
-        let metadata = json!({
-            "providerProtocol": "openai-responses",
-            "requestId": "req_current_turn",
-            "responsesResume": { "previousRequestId": "req_prev" }
-        });
-        let is_continuation =
-            crate::virtual_router_engine::routing::is_continuation_request(&metadata);
-        assert!(is_continuation);
-        if !is_continuation {
-            state.forced_target = None;
-            state.sticky_target = None;
-            state.prefer_target = None;
-        }
-
-        assert!(state.forced_target.is_some());
-        assert!(state.sticky_target.is_some());
-        assert!(state.prefer_target.is_some());
-    }
 
     #[test]
     fn load_routing_state_for_scope_reloads_disk_when_session_cache_is_stale_empty() {
