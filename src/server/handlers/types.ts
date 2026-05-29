@@ -57,6 +57,12 @@ export interface PipelineExecutionResult {
 export interface HandlerContext {
   executePipeline: ((input: PipelineExecutionInput) => Promise<PipelineExecutionResult>) | null;
   errorHandling?: ErrorHandlingCenter | null;
+  portContext?: {
+    localPort?: number;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+    logNamespace?: string;
+  };
 }
 
 export type EndpointHandler = (req: Request, res: Response, ctx: HandlerContext) => Promise<void>;

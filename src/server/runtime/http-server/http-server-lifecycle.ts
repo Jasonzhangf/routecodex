@@ -22,6 +22,7 @@ import { clearClockRuntimeHooks } from './clock-runtime-hooks.js';
 import { clearHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
 import { cleanupSessionStorageOnShutdown } from './session-storage-cleanup.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
+import { installPortLogConsoleRouter } from './port-log-context.js';
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
@@ -40,6 +41,7 @@ function logLifecycleNonBlockingError(stage: string, error: unknown, details?: R
 
 export async function initializeHttpServer(server: any): Promise<void> {
   try {
+    installPortLogConsoleRouter();
     console.log('[RouteCodexHttpServer] Starting initialization...');
 
     await server.errorHandling.initialize();
@@ -419,17 +421,26 @@ export function buildHttpHandlerContext(server: any, req: Request): HandlerConte
   // Priority: explicit Host header port (when valid configured listener) > socket local port.
   // This keeps per-port routing stable behind local proxies or shared-process multi-listener setups.
   const localPort = hasPortConfig(hostHeaderPort) ? hostHeaderPort : (socketLocalPort ?? hostHeaderPort);
+  const matchedPortConfig =
+    typeof server?.getPortConfigForLocalPort === 'function'
+      ? server.getPortConfigForLocalPort(localPort)
+      : undefined;
+  const portContext = {
+    ...(typeof socketLocalPort === 'number' ? { localPort: socketLocalPort } : {}),
+    ...(typeof matchedPortConfig?.port === 'number' ? { matchedPort: matchedPortConfig.port } : {}),
+    ...(typeof matchedPortConfig?.routingPolicyGroup === 'string' && matchedPortConfig.routingPolicyGroup.trim()
+      ? { routingPolicyGroup: matchedPortConfig.routingPolicyGroup.trim() }
+      : {}),
+    ...(typeof matchedPortConfig?.port === 'number' ? { logNamespace: `server-${matchedPortConfig.port}` } : {})
+  };
   try {
-    const matchedPortConfig =
-      typeof server?.getPortConfigForLocalPort === 'function'
-        ? server.getPortConfigForLocalPort(localPort)
-        : undefined;
     const requestPath =
       typeof req.path === 'string' && req.path.trim()
         ? req.path.trim()
         : (typeof req.originalUrl === 'string' ? req.originalUrl : '');
     const hostHeaderRaw = Array.isArray(req.headers?.host) ? req.headers.host[0] : req.headers?.host;
-    if (requestPath.includes('/v1/responses')) {
+    const shouldLogPortResolve = process.env.ROUTECODEX_PORT_RESOLVE_LOGS === '1' || process.env.RCC_PORT_RESOLVE_LOGS === '1';
+    if (shouldLogPortResolve && requestPath.includes('/v1/responses')) {
       console.log(
         `[port-resolve] host=${typeof hostHeaderRaw === 'string' ? hostHeaderRaw : '-'} `
         + `socket.localPort=${typeof socketLocalPort === 'number' ? socketLocalPort : '-'} `
@@ -446,7 +457,16 @@ export function buildHttpHandlerContext(server: any, req: Request): HandlerConte
     // non-blocking
   }
   return {
-    executePipeline: (input) => server.executePortAwarePipeline(localPort, input),
-    errorHandling: server.errorHandling
+    executePipeline: (input) => server.executePortAwarePipeline(localPort, {
+      ...input,
+      metadata: {
+        ...(input.metadata ?? {}),
+        portContext,
+        ...(typeof portContext.matchedPort === 'number' ? { matchedPort: portContext.matchedPort } : {}),
+        ...(portContext.routingPolicyGroup ? { routingPolicyGroup: portContext.routingPolicyGroup } : {})
+      }
+    }),
+    errorHandling: server.errorHandling,
+    portContext
   };
 }

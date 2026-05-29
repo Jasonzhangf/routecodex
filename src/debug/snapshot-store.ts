@@ -35,14 +35,26 @@ export class FileSnapshotStore implements SnapshotStore {
     this.baseDir = path.resolve(root);
   }
 
-  private sessionFile(sessionId: string): string {
+  private sessionFile(sessionId: string, metadata?: Record<string, unknown>): string {
+    const protocol = readSnapshotProtocol(metadata);
+    const port = readSnapshotPort(metadata);
+    if (protocol && port) {
+      return path.join(this.baseDir, protocol, 'ports', String(port), `${sessionId}.jsonl`);
+    }
+    if (protocol) {
+      return path.join(this.baseDir, protocol, `${sessionId}.jsonl`);
+    }
+    if (port) {
+      return path.join(this.baseDir, 'ports', String(port), `${sessionId}.jsonl`);
+    }
     return path.join(this.baseDir, `${sessionId}.jsonl`);
   }
 
   async save(snapshot: NodeSnapshot): Promise<void> {
-    ensureDir(this.baseDir);
+    const file = this.sessionFile(snapshot.sessionId, snapshot.metadata);
+    ensureDir(path.dirname(file));
     const payload = JSON.stringify(redactSensitiveData(snapshot));
-    await fsp.appendFile(this.sessionFile(snapshot.sessionId), `${payload}\n`, 'utf8');
+    await fsp.appendFile(file, `${payload}\n`, 'utf8');
   }
 
   async fetch(sessionId: string, query?: SnapshotQuery): Promise<NodeSnapshot[]> {
@@ -82,4 +94,42 @@ export class FileSnapshotStore implements SnapshotStore {
     const files = await fsp.readdir(this.baseDir);
     return files.filter((file) => file.endsWith('.jsonl')).map((file) => path.basename(file, '.jsonl'));
   }
+}
+
+function readSnapshotProtocol(metadata: Record<string, unknown> | undefined): string | undefined {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+  const value = metadata.entryProtocol;
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function readSnapshotPort(metadata: Record<string, unknown> | undefined): number | undefined {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+  const portContext = metadata.portContext && typeof metadata.portContext === 'object'
+    ? metadata.portContext as Record<string, unknown>
+    : undefined;
+  const candidates = [
+    metadata.entryPort,
+    metadata.matchedPort,
+    metadata.localPort,
+    portContext?.matchedPort,
+    portContext?.localPort
+  ];
+  for (const value of candidates) {
+    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.floor(numeric);
+    }
+  }
+  return undefined;
 }

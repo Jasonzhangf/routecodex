@@ -16,6 +16,7 @@ import { logProcessLifecycleSync } from '../../../utils/process-lifecycle-logger
 import { setShutdownCallerContext } from '../../../utils/shutdown-caller-context.js';
 import { loadProviderConfigsV2 } from '../../../config/provider-v2-loader.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
+import { runWithPortRequestContext } from './port-log-context.js';
 
 
 function logRoutesNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
@@ -605,7 +606,8 @@ export function registerHttpRoutes(options: RouteOptions): void {
 
   app.post('/v1/chat/completions', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
-    await handleChatCompletions(req, res, buildHandlerContext(req));
+    const ctx = buildHandlerContext(req);
+    await runWithPortRequestContext(ctx.portContext, () => handleChatCompletions(req, res, ctx));
   });
   app.post('/v1/images/generations', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
@@ -617,18 +619,21 @@ export function registerHttpRoutes(options: RouteOptions): void {
   });
   app.post('/v1/messages', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
-    await handleMessages(req, res, buildHandlerContext(req));
+    const ctx = buildHandlerContext(req);
+    await runWithPortRequestContext(ctx.portContext, () => handleMessages(req, res, ctx));
   });
   app.post('/v1/responses', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
-    await handleResponses(req, res, buildHandlerContext(req));
+    const ctx = buildHandlerContext(req);
+    await runWithPortRequestContext(ctx.portContext, () => handleResponses(req, res, ctx));
   });
   app.post('/v1/responses/:id/submit_tool_outputs', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
-    await handleResponses(req, res, buildHandlerContext(req), {
+    const ctx = buildHandlerContext(req);
+    await runWithPortRequestContext(ctx.portContext, () => handleResponses(req, res, ctx, {
       entryEndpoint: '/v1/responses.submit_tool_outputs',
       responseIdFromPath: req.params?.id
-    });
+    }));
   });
 
   app.use('*', (_req: Request, res: Response) => {
