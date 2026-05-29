@@ -2,7 +2,6 @@ import type { Response } from 'express';
 import type { IncomingHttpHeaders } from 'http';
 import type { HandlerContext } from './types.js';
 import { mapErrorToHttp, type HttpErrorPayload } from '../utils/http-error-mapper.js';
-import { buildInfo } from '../../build-info.js';
 import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
@@ -34,8 +33,8 @@ const CLIENT_HEADER_DENYLIST = new Set([
 
 type RequestLogMeta = Record<string, unknown> | undefined;
 
-const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
-  || process.env.ROUTECODEX_HTTP_LOG_VERBOSE === '1';
+const SHOULD_LOG_HTTP_EVENTS = process.env.ROUTECODEX_HTTP_LOG_DISABLE !== '1'
+  && process.env.RCC_HTTP_LOG_DISABLE !== '1';
 const RAW_REQUEST_PREVIEW_MAX_ARRAY_ITEMS = 32;
 
 function logHandlerNonBlockingError(operation: string, error: unknown): void {
@@ -224,7 +223,7 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
       })()
     : '';
   const line = `▶ [${endpoint}] ${timestamp} request ${resolvedId} started${suffix}`;
-  console.log(colorizeRequestLog(line, resolvedId));
+  console.warn(colorizeRequestLog(line, resolvedId));
 }
 
 export function logRequestComplete(
@@ -245,7 +244,7 @@ export function logRequestComplete(
     ? ''
     : formatRequestTimingSummary(resolvedId, { terminal: true });
   const line = `✅ [${endpoint}] ${timestamp} request ${resolvedId} completed (status=${status}${finishReasonLabel})${timingSuffix}`;
-  console.log(colorizeRequestLog(line, resolvedId));
+  console.warn(colorizeRequestLog(line, resolvedId));
 }
 
 
