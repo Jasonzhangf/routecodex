@@ -8,7 +8,6 @@ function parseFrom(text) {
 function createStateSnapshot() {
   return {
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set(),
     disabledProviders: new Set(),

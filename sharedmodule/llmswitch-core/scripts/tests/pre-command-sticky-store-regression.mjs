@@ -41,7 +41,6 @@ async function main() {
 
   saveRoutingInstructionStateSync('session:precommand-session', {
     forcedTarget: undefined,
-    stickyTarget: undefined,
     allowedProviders: new Set(),
     disabledProviders: new Set(),
     disabledKeys: new Map(),

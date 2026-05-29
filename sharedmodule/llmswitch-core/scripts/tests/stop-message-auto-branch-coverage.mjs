@@ -422,8 +422,7 @@ async function main() {
     const stickyOffSession = `${baseSession}-sticky-off`;
     saveRoutingInstructionStateSync(`tmux:tmux_${stickyOffSession}`, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),

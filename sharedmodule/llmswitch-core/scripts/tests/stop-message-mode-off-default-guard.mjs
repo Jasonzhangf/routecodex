@@ -98,8 +98,7 @@ async function main() {
     const stickyOffSessionId = `stop-off-sticky-${Date.now()}`;
     saveRoutingInstructionStateSync(`session:${stickyOffSessionId}`, {
       forcedTarget: undefined,
-      stickyTarget: undefined,
-      allowedProviders: new Set(),
+        allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),

@@ -99,7 +99,6 @@ async function main() {
 
   saveRoutingInstructionStateSync('tmux:tmux_stopmsg_captured_chat_seed', {
     forcedTarget: undefined,
-    stickyTarget: undefined,
     allowedProviders: new Set(),
     disabledProviders: new Set(),
     disabledKeys: new Map(),

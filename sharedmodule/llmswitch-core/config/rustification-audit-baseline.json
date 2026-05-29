@@ -2675,12 +2675,6 @@
       "topDir": "router"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-virtual-router-sticky-semantics.ts",
-      "loc": 56,
-      "nativeLinked": true,
-      "topDir": "router"
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-virtual-router-stop-message-actions-semantics.ts",
       "loc": 103,
       "nativeLinked": true,

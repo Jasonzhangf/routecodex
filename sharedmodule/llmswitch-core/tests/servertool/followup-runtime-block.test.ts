@@ -80,7 +80,6 @@ describe('servertool followup runtime block', () => {
         noFollowup: false,
         autoLimit: true,
         flowOnlyLoopLimit: true,
-        stickyProvider: true,
         clientInjectOnly: false,
         seedLoopPayload: false,
         retryEmptyFollowupOnce: false,
@@ -95,8 +94,8 @@ describe('servertool followup runtime block', () => {
       resolveProviderKey: () => 'mini27.key1.MiniMax-M2.7'
     });
     expect(metadata.routeHint).toBe('coding');
-    expect((metadata as any).__shadowCompareForcedProviderKey).toBe('mini27.key1.MiniMax-M2.7');
-    expect((metadata as any).__rt?.disableStickyRoutes).toBeUndefined();
+    expect((metadata as any).__shadowCompareForcedProviderKey).toBeUndefined();
+    expect((metadata as any).__rt).toBeUndefined();
   });
 
   test('falls back to runtime route name when adapter routeId/routeHint are absent', () => {
@@ -113,7 +112,6 @@ describe('servertool followup runtime block', () => {
         noFollowup: false,
         autoLimit: true,
         flowOnlyLoopLimit: true,
-        stickyProvider: true,
         clientInjectOnly: false,
         seedLoopPayload: false,
         retryEmptyFollowupOnce: false,
@@ -130,6 +128,6 @@ describe('servertool followup runtime block', () => {
       resolveProviderKey: () => 'mini27.key1.MiniMax-M2.7'
     });
     expect(metadata.routeHint).toBe('coding');
-    expect((metadata as any).__shadowCompareForcedProviderKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect((metadata as any).__shadowCompareForcedProviderKey).toBeUndefined();
   });
 });

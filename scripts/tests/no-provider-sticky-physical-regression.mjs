@@ -10,7 +10,13 @@ const roots = [
   'sharedmodule/llmswitch-core/src/router/virtual-router',
   'sharedmodule/llmswitch-core/src/servertool/followup-flow-policy.ts',
   'sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.ts',
-  'sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts'
+  'sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts',
+  'sharedmodule/llmswitch-core/docs',
+  'sharedmodule/llmswitch-core/scripts/tests',
+  'sharedmodule/llmswitch-core/tests',
+  'sharedmodule/llmswitch-core/config',
+  'tests/servertool',
+  'docs'
 ];
 const banned = [
   'stickyTarget',
@@ -41,7 +47,8 @@ function* filesUnder(target) {
 const hits = [];
 for (const root of roots) {
   for (const rel of filesUnder(root)) {
-    if (!/\.(rs|ts|tsx|mjs)$/.test(rel)) continue;
+    if (rel === 'scripts/tests/no-provider-sticky-physical-regression.mjs') continue;
+    if (!/\.(rs|ts|tsx|mjs|md|json)$/.test(rel)) continue;
     const text = fs.readFileSync(path.join(repo, rel), 'utf8');
     for (const term of banned) {
       if (text.includes(term)) hits.push({ file: rel, term });
