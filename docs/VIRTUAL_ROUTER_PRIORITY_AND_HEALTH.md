@@ -41,32 +41,15 @@ output: {
 When no `providerKey` is selectable in the current pool, the router continues to the next pool/route according to routing policy.
 This means selection output is always deterministic and explainable via `failureHint` and hit logs.
 
-## Session Binding (Claude/Gemini)
+## Provider stickiness
 
-`antigravitySessionBinding` is configured under:
+Provider sticky and alias sticky queues are not Virtual Router primitives.
+Non-continuation requests are routed only by the current request, pool policy, quota, and health.
 
-- `virtualrouter.loadBalancing.aliasSelection.antigravitySessionBinding`
-- Allowed values: `"lease"` (default), `"strict"`
+Continuation handling is separate:
 
-Current implementation scope:
-
-- Antigravity **Gemini** aliases use session binding/lease.
-- Antigravity **Claude** aliases are not bound by Gemini lease scope.
-- Strict binding depends on persisted Antigravity signature pin state (session ↔ alias pin).
-
-Rules:
-
-- `"lease"`:
-  - session prefers its last committed alias when that alias is still selectable;
-  - can rotate to another alias when needed (quota/health/exclusion), then commits the new alias on provider success.
-- `"strict"`:
-  - once a session has a pinned alias, it will not rotate to another Antigravity Gemini alias;
-  - if pinned alias becomes unavailable, router falls back to other providers/routes instead of cross-alias retry.
-
-Persistence behavior:
-
-- With persistence available: strict pin survives restart and binding is restored.
-- Without persistence / degraded persistence: host clears pins for safety, so router will not keep stale strict stickiness.
+- direct/remote Responses continuation restores the recorded provider key because upstream owns the context;
+- local/relay continuation restores local context only and does not pin a provider.
 
 ## quotaView Gating Principle
 
@@ -89,10 +72,6 @@ Use the same field names in JSON and WebUI forms:
   "virtualrouter": {
     "loadBalancing": {
       "strategy": "round-robin",
-      "aliasSelection": {
-        "sessionLeaseCooldownMs": 300000,
-        "antigravitySessionBinding": "lease"
-      },
       "healthWeighted": {
         "enabled": true,
         "baseWeight": 100,
@@ -106,20 +85,6 @@ Use the same field names in JSON and WebUI forms:
 }
 ```
 
-For strict mode:
-
-```json
-{
-  "virtualrouter": {
-    "loadBalancing": {
-      "aliasSelection": {
-        "antigravitySessionBinding": "strict"
-      }
-    }
-  }
-}
-```
-
 ## Migration Notes (legacy sticky/health -> current model)
 
 - Legacy sticky-first behavior:
@@ -127,7 +92,7 @@ For strict mode:
 - Legacy router-local health dominance:
   - in quota mode, replaced by `quotaView` gating to avoid split-brain decisions.
 - Legacy implicit alias stickiness:
-  - replaced by explicit `aliasSelection.antigravitySessionBinding` (`lease`/`strict`) and observable hit reasons.
+  - removed. Use normal pool priority/weighted routing plus shared health cooldown.
 
 ## Priority Pools (`mode: "priority"`)
 

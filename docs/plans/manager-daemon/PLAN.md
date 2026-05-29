@@ -18,7 +18,7 @@
 
 - `RoutingStateManager`（模块 id: `routing`）
   - 负责 session / conversation 级路由指令状态：
-    - sticky target（`forcedTarget` / `stickyTarget`）。
+    - forced target。
     - `disabledProviders` / `disabledKeys` / `disabledModels`。
     - stopMessage 状态（仅路由层视角）。
   - 与 `VirtualRouterEngine` 的 `RoutingInstructionState` 做双向同步：

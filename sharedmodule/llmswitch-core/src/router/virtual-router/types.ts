@@ -21,7 +21,7 @@ export const ROUTE_PRIORITY: string[] = [
   DEFAULT_ROUTE,
 ];
 
-export type RoutingInstructionMode = "force" | "sticky" | "none";
+export type RoutingInstructionMode = "force" | "none";
 
 export type RoutePoolMode = "round-robin" | "priority";
 
@@ -210,7 +210,6 @@ export interface LoadBalancingPolicy {
    * despite quota). Strategies are applied inside VirtualRouter selection only; providers remain
    * transport-only.
    */
-  aliasSelection?: AliasSelectionConfig;
   /**
    * AWRR: health-weighted selection.
    * - Deterministic (no randomness)
@@ -254,29 +253,6 @@ export interface HealthWeightedLoadBalancingConfig {
    * When true, a router-level retry attempt (excludedProviderKeys non-empty) prefers the healthiest candidate first.
    */
   recoverToBestOnRetry?: boolean;
-}
-
-export type AliasSelectionStrategy = "none" | "sticky-queue";
-
-export interface AliasSelectionConfig {
-  /**
-   * Global on/off switch. When false, no alias-level selection is applied.
-   */
-  enabled?: boolean;
-  /**
-   * Default strategy used when a provider has no explicit override.
-   */
-  defaultStrategy?: AliasSelectionStrategy;
-  /**
-   * Per-provider overrides keyed by providerId.
-   */
-  providers?: Record<string, AliasSelectionStrategy>;
-  /**
-   * Session isolation cooldown window (ms).
-   * Within this window, the same auth alias must not be reused by a different session.
-   * Default: 300000 (5 minutes).
-   */
-  sessionLeaseCooldownMs?: number;
 }
 
 export interface ContextWeightedLoadBalancingConfig {
@@ -403,6 +379,7 @@ export interface VirtualRouterApplyPatchConfig {
   mode: "client" | "servertool";
 }
 
+
 export interface VirtualRouterConfig {
   routing: RoutingPools;
   providers: Record<string, ProviderProfile>;
@@ -470,11 +447,6 @@ export interface RouterMetadataInput {
    */
   routingMode?: RoutingInstructionMode;
   /**
-   * 当 disableStickyRoutes=true 时，本次请求仍使用 sticky session 状态，
-   * 但不继承 sticky target，允许后续路由重新选择 provider。
-   */
-  disableStickyRoutes?: boolean;
-  /**
    * 允许的 provider 白名单
    */
   allowedProviders?: string[];
@@ -505,7 +477,7 @@ export interface RouterMetadataInput {
   /**
    * 本次请求内需要临时排除的 providerKey 列表。
    * 与 disabledProviders/disabledKeys 不同，这些 key 仅对当前路由决策生效，
-   * 不会写入或持久化到 RoutingInstructionState/sticky 存储中。
+   * 不会写入或持久化到 RoutingInstructionState 存储中。
    */
   excludedProviderKeys?: string[];
   sessionId?: string;

@@ -53,7 +53,7 @@ Rust `plan_servertool_followup_runtime_json(flow_id)` 已能输出：
 - `noFollowup`
 - `autoLimit`
 - `flowOnlyLoopLimit`
-- `stickyProvider`
+- `providerPinRemoved`
 - `clientInjectOnly`
 - `seedLoopPayload`
 - `retryEmptyFollowupOnce`
@@ -78,7 +78,7 @@ Rust `plan_servertool_followup_runtime_json(flow_id)` 已能输出：
 | `web_search_flow` | tool call / auto inject | Rust skeleton profile | `reenter` + summary decorate | 否 |
 | `vision_flow` | tool/backend | Rust skeleton profile 缺显式 outcome，仅 context mode | 依实现而定 | 轻微 |
 | `apply_patch_guard` | guard | Rust skeleton profile | `reenter` + autoLimit | 否 |
-| `apply_patch_read_before_retry_guard` | guard | Rust skeleton profile | `reenter` + stickyProvider | 否 |
+| `apply_patch_read_before_retry_guard` | guard | Rust skeleton profile | `reenter` | 否 |
 | `exec_command_guard` | guard | Rust skeleton profile | `reenter` + autoLimit | 否 |
 | `recursive_detection_guard` | auto hook | Rust skeleton profile 不完整 | 需要统一定义 | 轻微 |
 | `review_flow` | tool call | 目前更多靠 handler 结果 | 应补进 skeleton profile | **缺口** |
@@ -230,7 +230,7 @@ if ((args.flowId !== 'stop_message_flow' && !decision.clientInjectOnly) || ...)
 包含：
 - flowId
 - outcomeMode
-- stickyProvider
+- providerPinRemoved
 - clientInjectOnly
 - autoLimit
 - loopLimit mode
@@ -311,7 +311,7 @@ request_context
 1. `if flowId === 'stop_message_flow'`
 2. `if goal then ... else ...` 这类业务决策直接写在主线
 3. 手工拼 metadata 业务语义
-4. 手工决定某 flow 是否 stickyProvider/clientInjectOnly
+4. 手工决定某 flow 是否 clientInjectOnly
 
 ---
 
@@ -321,7 +321,7 @@ request_context
 - `noFollowup`
 - `autoLimit`
 - `flowOnlyLoopLimit`
-- `stickyProvider`
+- `providerPinRemoved`
 - `clientInjectOnly`
 - `seedLoopPayload`
 - `retryEmptyFollowupOnce`

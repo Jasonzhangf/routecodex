@@ -49,19 +49,6 @@ struct ClassifierConfigOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AliasSelectionConfigOutput {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    enabled: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    default_strategy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    session_lease_cooldown_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    providers: Option<BTreeMap<String, String>>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct HealthWeightedConfigOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     enabled: Option<bool>,
@@ -96,8 +83,6 @@ struct LoadBalancingConfigOutput {
     strategy: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     weights: Option<BTreeMap<String, f64>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    alias_selection: Option<AliasSelectionConfigOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     health_weighted: Option<HealthWeightedConfigOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -312,12 +297,8 @@ fn normalize_load_balancing(value: Option<&Value>) -> Option<LoadBalancingConfig
     let weights = normalize_weights(record.get("weights"));
     let health_weighted = normalize_health_weighted(record.get("healthWeighted"));
     let context_weighted = normalize_context_weighted(record.get("contextWeighted"));
-    let alias_selection = normalize_alias_selection(record.get("aliasSelection"));
 
-    let has_non_strategy = weights.is_some()
-        || health_weighted.is_some()
-        || context_weighted.is_some()
-        || alias_selection.is_some();
+    let has_non_strategy = weights.is_some() || health_weighted.is_some() || context_weighted.is_some();
     if strategy_raw.is_empty() && !has_non_strategy {
         return None;
     }
@@ -330,7 +311,6 @@ fn normalize_load_balancing(value: Option<&Value>) -> Option<LoadBalancingConfig
     Some(LoadBalancingConfigOutput {
         strategy,
         weights,
-        alias_selection,
         health_weighted,
         context_weighted,
     })
@@ -449,7 +429,11 @@ fn normalize_exec_command_guard(value: Option<&Value>) -> Option<ExecCommandGuar
     let policy_file = record
         .get("policyFile")
         .and_then(|value| read_trimmed_string(Some(value)))
-        .or_else(|| record.get("policy_file").and_then(|value| read_trimmed_string(Some(value))));
+        .or_else(|| {
+            record
+                .get("policy_file")
+                .and_then(|value| read_trimmed_string(Some(value)))
+        });
     Some(ExecCommandGuardConfigOutput {
         enabled: true,
         policy_file,
@@ -505,8 +489,14 @@ fn normalize_web_search(
             let provider_key_raw = node
                 .get("providerKey")
                 .and_then(|value| read_trimmed_string(Some(value)))
-                .or_else(|| node.get("provider").and_then(|value| read_trimmed_string(Some(value))))
-                .or_else(|| node.get("target").and_then(|value| read_trimmed_string(Some(value))));
+                .or_else(|| {
+                    node.get("provider")
+                        .and_then(|value| read_trimmed_string(Some(value)))
+                })
+                .or_else(|| {
+                    node.get("target")
+                        .and_then(|value| read_trimmed_string(Some(value)))
+                });
             let Some(provider_key) = provider_key_raw else {
                 continue;
             };
@@ -523,7 +513,10 @@ fn normalize_web_search(
             let execution_mode = node
                 .get("executionMode")
                 .and_then(|value| read_trimmed_string(Some(value)))
-                .or_else(|| node.get("mode").and_then(|value| read_trimmed_string(Some(value))))
+                .or_else(|| {
+                    node.get("mode")
+                        .and_then(|value| read_trimmed_string(Some(value)))
+                })
                 .map(|value| value.to_ascii_lowercase())
                 .map(|value| {
                     if value == "direct" {
@@ -536,7 +529,10 @@ fn normalize_web_search(
             let direct_activation = node
                 .get("directActivation")
                 .and_then(|value| read_trimmed_string(Some(value)))
-                .or_else(|| node.get("activation").and_then(|value| read_trimmed_string(Some(value))))
+                .or_else(|| {
+                    node.get("activation")
+                        .and_then(|value| read_trimmed_string(Some(value)))
+                })
                 .map(|value| value.to_ascii_lowercase())
                 .and_then(|value| match value.as_str() {
                     "builtin" => Some("builtin".to_string()),
@@ -610,7 +606,11 @@ fn normalize_web_search(
     let inject_policy = record
         .get("injectPolicy")
         .and_then(|value| read_trimmed_string(Some(value)))
-        .or_else(|| record.get("inject_policy").and_then(|value| read_trimmed_string(Some(value))))
+        .or_else(|| {
+            record
+                .get("inject_policy")
+                .and_then(|value| read_trimmed_string(Some(value)))
+        })
         .map(|value| value.to_ascii_lowercase())
         .filter(|value| value == "always" || value == "selective")
         .unwrap_or_else(|| "selective".to_string());
@@ -639,59 +639,6 @@ fn normalize_web_search(
         inject_policy,
         force,
     }))
-}
-
-fn normalize_alias_selection(value: Option<&Value>) -> Option<AliasSelectionConfigOutput> {
-    let record = value.and_then(Value::as_object)?;
-    let enabled = record.get("enabled").and_then(parse_bool_like);
-    let default_strategy = record
-        .get("defaultStrategy")
-        .and_then(|value| read_trimmed_string(Some(value)))
-        .and_then(|value| coerce_alias_selection_strategy(&value));
-    let session_lease_cooldown_ms = record
-        .get("sessionLeaseCooldownMs")
-        .and_then(normalize_non_negative_i64)
-        .or_else(|| {
-            record
-                .get("sessionLease_cooldown_ms")
-                .and_then(normalize_non_negative_i64)
-        });
-    let providers = record
-        .get("providers")
-        .and_then(Value::as_object)
-        .and_then(|providers_raw| {
-            let mut providers = BTreeMap::new();
-            for (provider_id, raw_strategy) in providers_raw {
-                let Some(strategy) = raw_strategy
-                    .as_str()
-                    .and_then(|value| coerce_alias_selection_strategy(value))
-                else {
-                    continue;
-                };
-                providers.insert(provider_id.clone(), strategy);
-            }
-            if providers.is_empty() {
-                None
-            } else {
-                Some(providers)
-            }
-        });
-
-    let output = AliasSelectionConfigOutput {
-        enabled,
-        default_strategy,
-        session_lease_cooldown_ms,
-        providers,
-    };
-    if output.enabled.is_none()
-        && output.default_strategy.is_none()
-        && output.session_lease_cooldown_ms.is_none()
-        && output.providers.is_none()
-    {
-        None
-    } else {
-        Some(output)
-    }
 }
 
 fn normalize_string_array(value: Option<&Value>, fallback: Vec<String>) -> Vec<String> {
@@ -777,6 +724,7 @@ fn parse_bool_like(value: &Value) -> Option<bool> {
 fn clamp_warn_ratio(value: f64) -> f64 {
     if !value.is_finite() {
         return DEFAULT_WARN_RATIO;
+
     }
     let clamped = value.max(0.1).min(0.99);
     if clamped.is_finite() {
@@ -842,15 +790,6 @@ fn resolve_web_search_engine_provider_key(
                 && target.ends_with(&format!(".{}", model_suffix))
         })
         .cloned()
-}
-
-fn coerce_alias_selection_strategy(value: &str) -> Option<String> {
-    let normalized = value.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "none" => Some("none".to_string()),
-        "sticky-queue" | "sticky_queue" | "stickyqueue" => Some("sticky-queue".to_string()),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

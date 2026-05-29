@@ -1,37 +1,30 @@
-# Antigravity 429 + sticky-queue contract (standard behavior)
+# Antigravity recoverable-error routing contract
 
-This document defines the *default* behavior for Antigravity routing under transient 429s. It is a hard requirement
-for the "standard" execution path; any alternative behavior is considered legacy compatibility.
+This document defines the default Antigravity routing behavior for recoverable provider errors.
+Provider sticky and alias queue pinning are no longer Virtual Router primitives.
 
-> Status: stable as of 2026-02-02.
+> Status: updated 2026-05-29.
 
-## Contract (3 rules)
+## Contract
 
-1) **Success sticks**  
-   Once an alias is selected for a `(providerId=antigravity, modelId)` group, routing keeps selecting that alias
-   until the alias becomes unavailable (error / cooldown / blacklist).
+1. **No provider sticky**
+   Antigravity aliases are selected by the same Virtual Router pool rules as every other provider.
+   A successful request does not pin the next non-continuation request to the same alias.
 
-2) **429/403 verify cool down + avoid all Antigravity on immediate retry**  
-   For Antigravity gateway-protected errors (notably **HTTP 429** and **403 verify**), the host:
-   - immediately excludes the current `providerKey` for the next retry attempt, and
-   - sets `__rt.antigravityAvoidAllOnRetry=true`, so Virtual Router will prefer **non-Antigravity** candidates if any exist.
+2. **Recoverable errors use the shared provider failure policy**
+   HTTP 429/5xx/network-style recoverable errors are classified by the common provider failure policy.
+   The first two attempts may retry the same provider key with backoff; the third consecutive recoverable
+   failure excludes that provider key for the current request and re-enters normal routing so backup pools can win.
 
-   Rationale: switching Antigravity accounts rapidly within a single request (especially during 4xx/429 states) can
-   cascade into cross-account verification (403 verify) events. Retrying within the same request should be conservative.
+3. **Cooldown removes the failing key from the candidate pool**
+   Cross-request health/cooldown follows the shared 10m/30m/5h ladder. A cooled key is not selectable until
+   passive reprobe makes it eligible again.
 
-3) **Alias rotation happens across requests, not within a single request**  
-   Multi-alias load balancing remains `sticky-queue` for Antigravity, but it is applied **across requests** (via per-providerKey cooldown/health),
-   not by hammering all aliases inside one request's retry loop.
+## Implementation truth
 
-## Where this is implemented
+- Error classification: `src/providers/core/runtime/provider-failure-policy-impl.ts`
+- Retry / reroute orchestration: `src/server/runtime/http-server/request-executor.ts`
+- Candidate selection and health gating: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/`
 
-- **Retry hint plumbing (`excludedProviderKeys`, `__rt.antigravityAvoidAllOnRetry`)**:
-  - `src/server/runtime/http-server/request-executor.ts`
-  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/tier-selection.ts`
-- **Sticky-queue selection (Antigravity default)**:
-  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/alias-selection.ts`
-  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/tier-selection.ts`
-  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/tier-selection-select.ts`
-- **Capacity-style 429 cooldown (per-providerKey, no alias fan-out)**:
-  - `src/manager/modules/quota/provider-quota-daemon.model-backoff.ts`
-  - `src/manager/modules/quota/provider-quota-daemon.events.ts`
+Do not reintroduce alias queue pinning or provider sticky rules for Antigravity. If a provider needs special
+transport handling, implement it below provider runtime without changing Virtual Router selection semantics.

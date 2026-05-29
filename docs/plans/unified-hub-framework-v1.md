@@ -124,7 +124,7 @@ PolicyEngine 的关键要求：
 - `buildClientResponseFromChat(envelope, spec, ctx)`：唯一回包入口
 - `buildFollowupFromCapturedEntry(capture, injection, ctx)`：唯一 followup 入口
   - followup 必须复用入口 capture（深拷贝），只做 injection
-  - `disableStickyRoutes: true` / `preserveRouteHint: false` / entry endpoint meta 等策略由框架统一注入，而不是散落在各 handler
+  - `preserveRouteHint: false` / entry endpoint meta 等策略由框架统一注入，而不是散落在各 handler
 
 ## 4. 迁移路线（逐步收敛、可回滚）
 
@@ -184,7 +184,7 @@ PolicyEngine 的关键要求：
 - 强制：所有 handler 只负责“决定 injection”，不得自行构造 payload。
 - `FollowupRequestBuilder` 从 capture 构造（深拷贝）并注入：
   - entry endpoint meta（保证回路正确）
-  - disableStickyRoutes / preserveRouteHint 等框架策略
+  - preserveRouteHint 等框架策略
   - route hint/stopMessage 状态推进策略
 
 验收标准：
