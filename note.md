@@ -13048,3 +13048,5 @@ Using skills: coding-principals + rcc-dev-skills
 
 ## note append
 - 2026-05-29: 用户要求把已验证可提交部分继续分拆提交，避免混在一起丢失；当前先审查 worktree，修正 Rust VR selection 测试语义后再按主题提交。
+- 2026-05-29: 继续 active goal；当前 HEAD fe02d9d4b，worktree 仍含大批未提交变更。下一步先跑已有黑盒矩阵确认当前语义，再只提交验证通过的主题。
+- 2026-05-29: 补 red/green：新增 Rust routing bootstrap 测试捕获 provider-level target 多 auth key 权重 remap 问题；红测先失败（weights 未扩展到 mimo.key1/key2），修复为按 provider+model 匹配 expanded targets 后通过。另修复 blackbox catch 中 unref exit 导致失败返回 0 的测试漏洞。
