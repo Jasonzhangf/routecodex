@@ -135,21 +135,13 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                             },
 
                             "stop_message_flow": {
-                                "stickyProvider": true,
                                 "seedLoopPayload": true,
                                 "retryEmptyFollowupOnce": true
                             },
-                            "reasoning_stop_guard_flow": {
-                                "stickyProvider": true
-                            },
-                            "reasoning_stop_continue_flow": {
-                                "stickyProvider": true
-                            },
-                            "reasoning_stop_finalize_flow": {
-                                "stickyProvider": true
-                            },
+                            "reasoning_stop_guard_flow": {},
+                            "reasoning_stop_continue_flow": {},
+                            "reasoning_stop_finalize_flow": {},
                             "clock_hold_flow": {
-                                "stickyProvider": true,
                                 "clientInjectOnly": true,
                                 "clientInjectSource": "servertool.clock"
                             },
@@ -158,7 +150,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                                 "clientInjectSource": "servertool.heartbeat"
                             },
                             "continue_execution_flow": {
-                                "stickyProvider": true,
                                 "contextDecorationMode": "continue_execution_summary"
                             },
 
@@ -224,7 +215,6 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
         "noFollowup": profile_obj.and_then(|v| v.get("noFollowup")).and_then(|v| v.as_bool()).unwrap_or(false),
         "autoLimit": profile_obj.and_then(|v| v.get("autoLimit")).and_then(|v| v.as_bool()).unwrap_or(false),
         "flowOnlyLoopLimit": profile_obj.and_then(|v| v.get("flowOnlyLoopLimit")).and_then(|v| v.as_bool()).unwrap_or(false),
-        "stickyProvider": profile_obj.and_then(|v| v.get("stickyProvider")).and_then(|v| v.as_bool()).unwrap_or(false),
         "clientInjectOnly": profile_obj.and_then(|v| v.get("clientInjectOnly")).and_then(|v| v.as_bool()).unwrap_or(false),
         "clearStateOnFollowupFailure": profile_obj.and_then(|v| v.get("clearStateOnFollowupFailure")).and_then(|v| v.as_bool()).unwrap_or(false),
         "seedLoopPayload": profile_obj.and_then(|v| v.get("seedLoopPayload")).and_then(|v| v.as_bool()).unwrap_or(false),

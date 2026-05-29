@@ -25,7 +25,6 @@ export function resolveFollowupFlowDecision(flowId: unknown): FollowupFlowDecisi
     noFollowup: plan?.noFollowup === true,
     autoLimit: plan?.autoLimit === true,
     flowOnlyLoopLimit: plan?.flowOnlyLoopLimit === true,
-    stickyProvider: plan?.stickyProvider === true,
     clientInjectOnly: plan?.clientInjectOnly === true,
     clearStateOnFollowupFailure: plan?.clearStateOnFollowupFailure === true,
     seedLoopPayload: plan?.seedLoopPayload === true,
@@ -51,9 +50,6 @@ export function isFlowOnlyLoopLimitFlowId(flowId: unknown): boolean {
   return resolveFollowupFlowDecision(flowId).flowOnlyLoopLimit;
 }
 
-export function isStickyProviderFollowupFlowId(flowId: unknown): boolean {
-  return resolveFollowupFlowDecision(flowId).stickyProvider;
-}
 
 export function isClientInjectOnlyFollowupFlowId(flowId: unknown): boolean {
   return resolveFollowupFlowDecision(flowId).clientInjectOnly;

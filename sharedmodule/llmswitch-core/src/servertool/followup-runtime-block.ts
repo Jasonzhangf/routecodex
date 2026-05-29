@@ -227,19 +227,10 @@ export function applyFollowupRuntimeMetadata(args: {
     delete (args.metadata as Record<string, unknown>).routeHint;
   }
   (rt as Record<string, unknown>).preserveRouteHint = false;
-  if ((args.metadata as Record<string, unknown>).disableStickyRoutes === true) {
-    (rt as Record<string, unknown>).disableStickyRoutes = true;
-  }
   (rt as Record<string, unknown>).serverToolOriginalEntryEndpoint =
     (typeof args.originalEntryEndpoint === 'string' && args.originalEntryEndpoint.trim().length
       ? args.originalEntryEndpoint
       : args.followupEntryEndpoint) as any;
-  if (decision.stickyProvider) {
-    const providerKey = args.resolveProviderKey(args.adapterContext);
-    if (providerKey) {
-      (args.metadata as any).__shadowCompareForcedProviderKey = providerKey;
-    }
-  }
 }
 
 export function resolveFollowupAttemptCount(flowId: string | undefined, decision?: FollowupFlowDecision): number {

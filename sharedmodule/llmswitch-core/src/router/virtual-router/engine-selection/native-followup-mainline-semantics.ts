@@ -22,7 +22,6 @@ export interface FollowupFlowDecision {
   noFollowup: boolean;
   autoLimit: boolean;
   flowOnlyLoopLimit: boolean;
-  stickyProvider: boolean;
   clientInjectOnly: boolean;
   clearStateOnFollowupFailure: boolean;
   seedLoopPayload: boolean;
@@ -137,7 +136,6 @@ export interface ServertoolSkeletonConfig {
         noFollowup?: boolean;
         autoLimit?: boolean;
         flowOnlyLoopLimit?: boolean;
-        stickyProvider?: boolean;
         clientInjectOnly?: boolean;
         clearStateOnFollowupFailure?: boolean;
         seedLoopPayload?: boolean;

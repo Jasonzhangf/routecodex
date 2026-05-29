@@ -202,7 +202,6 @@ export function buildServertoolFollowupConfig(): {
       noFollowup?: boolean;
       autoLimit?: boolean;
       flowOnlyLoopLimit?: boolean;
-      stickyProvider?: boolean;
       clientInjectOnly?: boolean;
       clearStateOnFollowupFailure?: boolean;
       seedLoopPayload?: boolean;
@@ -215,7 +214,6 @@ export function buildServertoolFollowupConfig(): {
     noFollowupFlowIds: string[];
     autoLimitFlowIds: string[];
     flowOnlyLoopLimitFlowIds: string[];
-    stickyProviderFlowIds: string[];
     clientInjectOnlyFlowIds: string[];
     seedLoopPayloadFlowIds: string[];
     retryEmptyFollowupOnceFlowIds: string[];
@@ -246,7 +244,6 @@ export function buildServertoolFollowupConfig(): {
               ...(profile.noFollowup === true ? { noFollowup: true } : {}),
               ...(profile.autoLimit === true ? { autoLimit: true } : {}),
               ...(profile.flowOnlyLoopLimit === true ? { flowOnlyLoopLimit: true } : {}),
-              ...(profile.stickyProvider === true ? { stickyProvider: true } : {}),
               ...(profile.clientInjectOnly === true ? { clientInjectOnly: true } : {}),
               ...(profile.clearStateOnFollowupFailure === true ? { clearStateOnFollowupFailure: true } : {}),
               ...(profile.seedLoopPayload === true ? { seedLoopPayload: true } : {}),
@@ -269,7 +266,6 @@ export function buildServertoolFollowupConfig(): {
         noFollowup?: boolean;
         autoLimit?: boolean;
         flowOnlyLoopLimit?: boolean;
-        stickyProvider?: boolean;
         clientInjectOnly?: boolean;
         clearStateOnFollowupFailure?: boolean;
         seedLoopPayload?: boolean;
@@ -282,7 +278,6 @@ export function buildServertoolFollowupConfig(): {
       noFollowupFlowIds: [],
       autoLimitFlowIds: [],
       flowOnlyLoopLimitFlowIds: [],
-      stickyProviderFlowIds: [],
       clientInjectOnlyFlowIds: [],
       seedLoopPayloadFlowIds: [],
       retryEmptyFollowupOnceFlowIds: [],
