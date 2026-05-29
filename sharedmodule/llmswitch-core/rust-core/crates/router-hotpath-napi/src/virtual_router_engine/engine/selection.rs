@@ -1125,7 +1125,7 @@ mod tests {
     }
 
     #[test]
-    fn singleton_provider_with_persisted_503_health_cooldown_gets_one_selection_probe() {
+    fn singleton_provider_with_active_503_health_cooldown_stays_filtered_until_startup_import_probe() {
         let provider_key = "windsurf.managed.gpt-5.5-low";
         let mut core = VirtualRouterEngineCore::new();
         let mut providers = Map::new();
@@ -1164,26 +1164,27 @@ mod tests {
                 &RoutingInstructionState::default(),
                 &std::collections::HashSet::new(),
             ),
-            vec![provider_key.to_string()]
+            Vec::<String>::new()
         );
 
-        let selected = core
-            .select_provider(
-                "thinking",
-                &json!({}),
-                &ClassificationResult {
-                    route_name: "thinking".to_string(),
-                    confidence: 1.0,
-                    reasoning: "test".to_string(),
-                    candidates: vec!["thinking".to_string()],
-                },
-                &RoutingFeatures::default(),
-                &RoutingInstructionState::default(),
-                None,
-                unsafe { Env::from_raw(std::ptr::null_mut()) },
-            )
-            .expect("singleton persisted 503 should allow one passive reprobe selection");
+        let selected = core.select_provider(
+            "thinking",
+            &json!({}),
+            &ClassificationResult {
+                route_name: "thinking".to_string(),
+                confidence: 1.0,
+                reasoning: "test".to_string(),
+                candidates: vec!["thinking".to_string()],
+            },
+            &RoutingFeatures::default(),
+            &RoutingInstructionState::default(),
+            None,
+            unsafe { Env::from_raw(std::ptr::null_mut()) },
+        );
 
-        assert_eq!(selected.provider_key, provider_key);
+        assert!(
+            selected.is_err(),
+            "runtime active 503 cooldown must stay out of the routing pool until startup import grants a passive reprobe"
+        );
     }
 }
