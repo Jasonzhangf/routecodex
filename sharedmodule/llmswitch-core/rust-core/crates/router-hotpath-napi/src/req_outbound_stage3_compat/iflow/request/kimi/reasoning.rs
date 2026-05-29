@@ -1,7 +1,5 @@
 use serde_json::{json, Map, Value};
 
-use crate::req_outbound_stage3_compat::thinking_history;
-
 fn parse_disabled_type(raw: Option<&Value>) -> bool {
     let Some(token) = raw.and_then(|v| v.as_str()) else {
         return false;
@@ -50,8 +48,4 @@ pub(super) fn normalize_thinking_for_kimi(root: &mut Map<String, Value>) -> bool
         }
     }
     true
-}
-
-pub(super) fn fill_reasoning_content_for_tool_calls(root: &mut Map<String, Value>) {
-    thinking_history::fill_reasoning_content_for_tool_calls(root);
 }

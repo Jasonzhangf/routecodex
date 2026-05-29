@@ -549,7 +549,7 @@ pub(crate) fn build_responses_payload_from_chat_core(
     let has_tool_calls = !tool_calls.is_empty();
     // Encrypted-only reasoning emits reasoning item but NOT message (P0 boundary fix)
     // Only emit message if has real content OR visible text reasoning; not for tool-call-only or empty reasoning
-    let should_emit_message = !content_parts.is_empty() || has_text_reasoning;
+    let should_emit_message = !content_parts.is_empty() || (has_text_reasoning && !has_tool_calls);
 
     let response_id = allocate_responses_id(response_row);
     let request_id_value = read_request_id(response_row, request_id_hint);

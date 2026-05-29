@@ -19,6 +19,10 @@ fn has_non_empty_tool_calls(row: &Map<String, Value>) -> bool {
         .unwrap_or(false)
 }
 
+fn has_reasoning_content_field(row: &Map<String, Value>) -> bool {
+    row.contains_key("reasoning_content")
+}
+
 fn find_last_user_index(messages: &[Value]) -> Option<usize> {
     let mut last_user_index: Option<usize> = None;
     for (index, message) in messages.iter().enumerate() {
@@ -204,31 +208,6 @@ pub(crate) fn should_apply_anthropic_thinking_history_compat(
     provider_protocol == "anthropic-messages" && is_anthropic_thinking_enabled(payload)
 }
 
-pub(crate) fn fill_reasoning_content_for_tool_calls(root: &mut Map<String, Value>) {
-    let Some(messages) = root.get_mut("messages").and_then(|v| v.as_array_mut()) else {
-        return;
-    };
-    for message in messages.iter_mut() {
-        let Some(row) = message.as_object_mut() else {
-            continue;
-        };
-        let role = row
-            .get("role")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if role != "assistant" || !has_non_empty_tool_calls(row) || !missing_reasoning_content(row)
-        {
-            continue;
-        }
-        row.insert(
-            "reasoning_content".to_string(),
-            Value::String(".".to_string()),
-        );
-    }
-}
-
 pub(crate) fn mirror_assistant_content_into_reasoning_content(root: &mut Map<String, Value>) {
     let Some(messages) = root.get_mut("messages").and_then(|v| v.as_array_mut()) else {
         return;
@@ -301,7 +280,6 @@ pub(crate) fn move_post_last_user_assistant_content_into_reasoning(root: &mut Ma
 }
 
 pub(crate) fn ensure_reasoning_content_for_assistant_history(root: &mut Map<String, Value>) {
-    fill_reasoning_content_for_tool_calls(root);
     mirror_assistant_content_into_reasoning_content(root);
     move_post_last_user_assistant_content_into_reasoning(root);
 }
@@ -520,7 +498,7 @@ pub(crate) fn ensure_reasoning_content_for_anthropic_assistant_history(
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-        if role != "assistant" || !missing_reasoning_content(row) {
+        if role != "assistant" || has_reasoning_content_field(row) {
             continue;
         }
         let Some(content) = row.get("content") else {

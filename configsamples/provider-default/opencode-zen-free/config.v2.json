@@ -6,7 +6,7 @@
     "enabled": true,
     "type": "openai",
     "baseURL": "https://opencode.ai/zen/v1",
-    "compatibilityProfile": "compat:passthrough",
+    "compatibilityProfile": "chat:deepseek",
     "transportBackend": "vercel-ai-sdk",
     "auth": {
       "type": "apikey",

@@ -24,6 +24,38 @@ describe('applyOpenCodeZenThinkingDefaults', () => {
     });
   });
 
+  it('does not synthesize metadata when thinking history lacks original reasoning_content', () => {
+    expect(
+      applyOpenCodeZenThinkingDefaults(
+        {
+          model: 'deepseek-v4-flash-free',
+          messages: [
+            { role: 'user', content: 'run pwd' },
+            {
+              role: 'assistant',
+              content: '',
+              tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'exec_command', arguments: '{}' } }]
+            }
+          ]
+        },
+        {
+          providerId: 'opencode-zen-free'
+        } as any
+      )
+    ).toEqual({
+      model: 'deepseek-v4-flash-free',
+      messages: [
+        { role: 'user', content: 'run pwd' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'exec_command', arguments: '{}' } }]
+        }
+      ],
+      enable_thinking: true
+    });
+  });
+
   it('does not override caller-provided thinking flags', () => {
     expect(
       applyOpenCodeZenThinkingDefaults(

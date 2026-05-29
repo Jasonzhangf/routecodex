@@ -421,6 +421,54 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
     expect(sendCalls[0].text).not.toContain('<assistant>');
   });
 
+  test('RED: fresh cascade send also uses latest delta text, not full replay history', async () => {
+    const provider = createProvider();
+
+    jest.spyOn(provider, 'resolveCascadeApiKey')
+      .mockResolvedValue('devin-session-token$fresh-delta' as never);
+    jest.spyOn(provider, 'resolveManagedRuntimeOptions')
+      .mockResolvedValue({ lsPort: 42104, csrfToken: 'csrf-test' } as never);
+    jest.spyOn(provider, 'selectUsablePinnedGrpcRuntime')
+      .mockResolvedValue({ sessionId: 'session-fresh-delta', cascadeId: 'cascade-fresh-delta', stepOffset: 0 } as never);
+
+    const sendCalls: Array<{ text: string; additionalSteps: unknown[] }> = [];
+    jest.spyOn(provider, 'sendCascadeMessage')
+      .mockImplementation(async (args: unknown) => {
+        const a = args as Record<string, unknown>;
+        sendCalls.push({
+          text: a.text as string,
+          additionalSteps: a.additionalSteps as unknown[],
+        });
+      });
+
+    jest.spyOn(provider, 'pollCascadeTrajectorySteps')
+      .mockResolvedValue({
+        candidate: { role: 'assistant', content: 'ok' },
+        usage: { inputTokens: 5, outputTokens: 1 },
+        stepOffset: 6,
+      } as never);
+
+    await provider.sendRequestInternal({
+      body: {
+        model: 'kimi-k2-6',
+        messages: [
+          { role: 'system', content: 'The assistant is a coding tool. '.repeat(500) },
+          { role: 'user', content: 'old user request with huge AGENTS context' },
+          { role: 'assistant', content: 'old assistant response that must not replay' },
+          { role: 'user', content: 'continue only this latest user delta' },
+        ],
+      },
+    });
+
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0].text).toBe('continue only this latest user delta');
+    expect(sendCalls[0].additionalSteps).toHaveLength(0);
+    expect(sendCalls[0].text).not.toContain('The assistant is a coding tool');
+    expect(sendCalls[0].text).not.toContain('old user request');
+    expect(sendCalls[0].text).not.toContain('old assistant response');
+    expect(sendCalls[0].text).not.toContain('The following is a multi-turn conversation');
+  });
+
   test('delta: materialized resume delta input is appended to the latest user prompt without replaying full prior output', () => {
     const provider = createProvider();
     const body = {

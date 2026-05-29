@@ -1381,6 +1381,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Responses retention cleanup（2026-05-23）：`retainedInputItems` 与 `pendingNoResponseId` 同步增长时，唯一先查 `handler-response-utils.ts` 在拿到 client `resp_*` 后是否清掉 superseded router/provider requestId；释放 payload 只能保留工具定义与 pending tool-call ids 摘要，禁止保留完整 input prefix 伪装指标下降。
 - Windsurf RCC text-tool typed args（2026-05-23）：若 unsupported tool 经 RCC fence 后工具层报 `plan expected sequence` / 参数类型错，先查 `windsurf-chat-provider.ts` harvester 是否按 JSON schema 还原 array/object/boolean/number；禁止把所有 `<|RCC|parameter>` 都当 string。guidance 必须列出所有 required 参数，不能只示例第一个。
 - Windsurf managed-account 请求内账号固定（2026-05-28）：健康/extra quota 探测结果只在启动/首次缓存填充时进入 `windsurfHealthCache`；单次请求内 transient retry 必须复用第一次 `resolveCascadeApiKey()` 的账号，不得重新 health probe 或静默切账号。quota exhausted 只标记 alias 并显式抛给外层 provider/VR 策略处理。
+- Windsurf latest-delta 铁律（2026-05-30）：Windsurf 云端 Cascade 自带上下文，`SendUserCascadeMessage.text` 永远只发最新用户 delta；历史 system/developer/assistant/tool-result 不得重放进 text。当前轮 native/MCP tool result 只走 `additional_steps` 当前窗口；`WINDSURF_CASCADE_STALLED` 是本轮 Cascade 闭环失败，provider 内 non-retryable，禁止 provider-switch 重发造成风暴。
 - apply_patch samples 排查（2026-05-23）：若 codex-samples 里反复 `APPLY_PATCH_ERROR`，先看 provider-request history 是否有 synthetic `__APPLY_PATCH_ERROR__` tool_call；真源可能是 response governance 生成旧 `{input,patch}` guard + request inbound 未剪历史。当前 schema `{filePath,patch}` 必须原样保留，不能被归一成旧 `{input,patch}`。
 
 ## Provider 错误统一码表与归一化指引（2026-05-27）
@@ -1555,3 +1556,9 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 2026-05-29 mimo/Anthropic 历史图片：若 500 快照无 `role=tool`，继续查 `role=user.content[]` 里的字符串化 JSON；`content` 字段可包含 `[{\"image_url\":\"data:image...\"}]`。修复必须在 Rust `chat_process_media_semantics` 通用 part 判定，禁止只修 OpenAI-chat tool role。
 
 - 2026-05-29 opencode DeepSeek thinking 400：看到 `reasoning_content ... must be passed back` 时，不要只在 outbound 填点号；先查 Responses store 是否把 `reasoning` output item 和后续 `function_call` 拆开。真源修复顺序：store 绑定 reasoning→function_call，chat process 保留 function_call 顶层 `reasoning_content`，opencode DeepSeek outbound 禁止发送 `reasoning_content:"."`。
+
+- 2026-05-29 DeepSeek reasoning_content 精华修正：禁止用工具名合成 `I need to call ...`，也禁止为缺失 tool-call history 新补 `"."`；必须追原始上游 `reasoning_content`。红测锚点：Chat response `reasoning_content` → Responses `reasoning` item 必须紧邻 `function_call`，store 才能绑定并在 chat process/outbound 原样回放。
+
+- 2026-05-29 opencode DeepSeek session replay rule: for `reasoning_content must be passed back`, do not fabricate reasoning. Inspect final `provider-request.json`; if assistant tool-call history lacks original non-empty `reasoning_content`, suppress only `x-opencode-session` so opencode does not replay a tainted server-side thinking session. This must run at header finalization against the final outbound body; setting metadata inside SDK transport is too late because headers are already built. Required red/green: outbound HTTP blackbox capturing real upstream headers/body.
+
+- 2026-05-30 Responses store missing context rule: if logs show `recordResponse: missing request context` for provider-shaped request ids or `:stop_followup`, check whether core response recording passes scope fields into `recordResponsesResponse`. Do not add fallback replay; bind via existing `scopeIndex` by carrying `sessionId`, `conversationId`, `matchedPort`, `routingPolicyGroup`, and `providerKey` from AdapterContext.

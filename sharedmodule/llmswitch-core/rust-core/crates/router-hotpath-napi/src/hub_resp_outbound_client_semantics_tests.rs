@@ -1007,6 +1007,53 @@ fn build_responses_payload_from_chat_preserves_structured_message_reasoning() {
 }
 
 #[test]
+fn build_responses_payload_from_chat_preserves_deepseek_reasoning_before_tool_call() {
+    let payload = serde_json::json!({
+        "id": "chatcmpl_deepseek_tool_reasoning",
+        "model": "deepseek-v4-flash-free",
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "Need original upstream reasoning before calling pwd.",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"pwd\"}"
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+    });
+
+    let output = build_responses_payload_from_chat_core(
+        &payload,
+        Some("req_deepseek_tool_reasoning"),
+        &serde_json::json!({ "toolsRaw": [] }),
+    )
+    .expect("build responses payload");
+
+    let output_items = output["output"].as_array().expect("output array");
+    assert_eq!(output_items[0]["type"], Value::String("reasoning".to_string()));
+    assert_eq!(
+        output_items[0]["content"][0]["text"],
+        Value::String("Need original upstream reasoning before calling pwd.".to_string())
+    );
+    assert_eq!(
+        output_items[1]["type"],
+        Value::String("function_call".to_string())
+    );
+    assert_eq!(output_items[1]["name"], Value::String("exec_command".to_string()));
+}
+
+#[test]
 fn build_responses_payload_from_chat_backfills_reasoning_summary_from_content() {
     let payload = serde_json::json!({
         "id": "resp_reasoning_backfill",

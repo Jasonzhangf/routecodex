@@ -113,6 +113,16 @@ const INTERNAL_POLICY_DEBUG_BLACKLIST_PATHS = [
   'anthropicToolNameMap'
 ] as const;
 
+function readContextString(context: AdapterContext, key: string): string | undefined {
+  const value = (context as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readContextNumber(context: AdapterContext, key: string): number | undefined {
+  const value = (context as Record<string, unknown>)[key];
+  return typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : undefined;
+}
+
 function normalizeHubStageTopEntries(raw: unknown): HubStageTopEntry[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     return [];
@@ -540,6 +550,13 @@ export async function convertProviderResponse(
       recordResponsesResponse({
         requestId: options.context.requestId,
         response: clientPayload,
+        sessionId: readContextString(options.context, 'sessionId'),
+        conversationId: readContextString(options.context, 'conversationId'),
+        providerKey:
+          readContextString(options.context, 'providerKey')
+          ?? readContextString(options.context, 'targetProviderKey'),
+        matchedPort: readContextNumber(options.context, 'matchedPort'),
+        routingPolicyGroup: readContextString(options.context, 'routingPolicyGroup'),
       });
     } catch (error) {
       if (error instanceof ProviderProtocolError) {

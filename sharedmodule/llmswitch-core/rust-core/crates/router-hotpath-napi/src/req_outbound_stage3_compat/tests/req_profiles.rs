@@ -798,7 +798,9 @@ fn test_req_profile_chat_iflow_normalizes_thinking_and_reasoning() {
     assert_eq!(result.applied_profile, Some("chat:iflow".to_string()));
     assert_eq!(result.payload["thinking"]["type"], "enabled");
     assert_eq!(result.payload["temperature"], 1.0);
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert!(result.payload["messages"][1]
+        .get("reasoning_content")
+        .is_none());
 }
 
 #[test]
@@ -899,10 +901,9 @@ fn test_req_profile_chat_local_deepseek_thinking_history_injects_reasoning_conte
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
     assert!(result.applied_profile.is_none());
-    assert_eq!(
-        result.payload["messages"][1]["reasoning_content"],
-        "I need to call view_image."
-    );
+    assert!(result.payload["messages"][1]
+        .get("reasoning_content")
+        .is_none());
     assert_eq!(
         result.payload["messages"][2]["reasoning_content"],
         "The user asked me to review and then commit the code. Let me review the code first."
@@ -1014,7 +1015,9 @@ fn test_req_profile_chat_local_deepseek_thinking_history_still_applies_under_unk
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert!(result.payload["messages"][1]
+        .get("reasoning_content")
+        .is_none());
     assert_eq!(
         result.payload["messages"][2]["reasoning_content"],
         "Jason，我已通读整个项目。以下是 `/goal` 提示词设计。"
@@ -3431,10 +3434,9 @@ fn test_openai_chat_deepseek_v4_model_on_opencode_gets_tool_history_reasoning_co
     };
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(
-        result.payload["messages"][1]["reasoning_content"],
-        "I need to call exec_command."
-    );
+    assert!(result.payload["messages"][1]
+        .get("reasoning_content")
+        .is_none());
     assert_eq!(result.payload["messages"][1]["content"], "");
     assert!(result.payload["tools"][0]["function"]
         .get("strict")
@@ -3500,10 +3502,7 @@ fn test_protocol_field_contract_outbound_openai_chat_strips_anthropic_thinking_b
     };
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(
-        result.payload["messages"][1]["reasoning_content"],
-        "I need to call exec_command."
-    );
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
     assert_eq!(result.payload["messages"][1]["content"], "");
     assert!(result.payload["tools"][0]["function"]
         .get("strict")
@@ -3574,10 +3573,7 @@ fn test_protocol_field_contract_outbound_deepseek_openai_chat_sanitizes_2095_too
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.payload.get("parallel_tool_calls").is_none());
     assert_eq!(result.payload["tool_choice"], "auto");
-    assert_eq!(
-        result.payload["messages"][1]["reasoning_content"],
-        "I need to call view_image."
-    );
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
     assert_eq!(result.payload["messages"][2]["content"], "[Image omitted]");
 }
 

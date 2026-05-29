@@ -42,7 +42,7 @@ describe('RequestHeaderBuilder transparency', () => {
     expect(headers.conversation_id).toBeUndefined();
   });
 
-  test('does not reuse opencode session when reasoning history is tainted', async () => {
+  test('does not reuse opencode session when runtime suppresses session replay', async () => {
     const headers = await RequestHeaderBuilder.buildHeaders({
       baseHeaders: { 'Content-Type': 'application/json' },
       serviceHeaders: {},
@@ -65,7 +65,7 @@ describe('RequestHeaderBuilder transparency', () => {
         routeName: 'longcontext',
         metadata: {
           sessionId: 'sess-tainted',
-          opencodeTaintedReasoning: true
+          opencodeSuppressSession: true
         }
       } as any,
       defaultUserAgent: 'RouteCodex/test',

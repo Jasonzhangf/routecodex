@@ -10,6 +10,55 @@ import { HeaderUtils, OAuthHeaderPreflight, RequestHeaderBuilder, SessionHeaderU
 
 type ProviderConfigInternal = OpenAIStandardConfig['config'];
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function isOpenCodeZenRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
+  const providerId = String(runtimeMetadata?.providerId || runtimeMetadata?.providerKey || '').trim().toLowerCase();
+  return providerId === 'opencode-zen' || providerId === 'opencode-zen-free' || providerId.startsWith('opencode-zen-');
+}
+
+function isAssistantToolCallMessage(message: unknown): message is Record<string, unknown> {
+  const row = asRecord(message);
+  return row.role === 'assistant' && asArray(row.tool_calls ?? row.toolCalls).length > 0;
+}
+
+function hasOriginalReasoningContent(message: Record<string, unknown>): boolean {
+  const value = message.reasoning_content ?? message.reasoningContent;
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function opencodeZenThinkingHistoryLacksReasoning(request: UnknownObject): boolean {
+  return asArray(asRecord(request).messages).some((message) => {
+    if (!isAssistantToolCallMessage(message)) {
+      return false;
+    }
+    return !hasOriginalReasoningContent(message);
+  });
+}
+
+function suppressOpenCodeZenSessionIfHistoryLacksReasoning(
+  headers: Record<string, string>,
+  request: UnknownObject,
+  runtimeMetadata?: ProviderRuntimeMetadata
+): void {
+  if (!runtimeMetadata || !isOpenCodeZenRuntime(runtimeMetadata) || !opencodeZenThinkingHistoryLacksReasoning(request)) {
+    return;
+  }
+  if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
+    runtimeMetadata.metadata = {};
+  }
+  runtimeMetadata.metadata.opencodeSuppressSession = true;
+  HeaderUtils.deleteHeader(headers, 'x-opencode-session');
+}
+
 function isQwenHeaderProfile(options: {
   config: ProviderConfigInternal;
   familyProfile?: ProviderFamilyProfile;
@@ -149,7 +198,9 @@ export async function finalizeProviderRequestHeaders(options: {
   providerType: string;
 }): Promise<Record<string, string>> {
   const { headers, request, finalizeHeaders, runtimeMetadata, familyProfile, providerType } = options;
+  suppressOpenCodeZenSessionIfHistoryLacksReasoning(headers, request, runtimeMetadata);
   const finalized = await finalizeHeaders(headers, request);
+  suppressOpenCodeZenSessionIfHistoryLacksReasoning(finalized, request, runtimeMetadata);
 
   const profileResolvedUa = await familyProfile?.resolveUserAgent?.({
     uaFromConfig: HeaderUtils.findHeaderValue(finalized, 'User-Agent'),

@@ -124,8 +124,12 @@ export class HttpRequestExecutor {
     const wantsSse = this.deps.wantsUpstreamSse(processedRequest, context);
     const defaultEndpoint = this.deps.getEffectiveEndpoint();
     const endpoint = this.deps.resolveRequestEndpoint(processedRequest, defaultEndpoint);
+    const finalBody = this.deps.buildHttpRequestBody(processedRequest);
+    if (wantsSse) {
+      this.deps.prepareSseRequestBody(finalBody, context);
+    }
     const headers = await this.deps.buildRequestHeaders();
-    let finalHeaders = await this.deps.finalizeRequestHeaders(headers, processedRequest);
+    let finalHeaders = await this.deps.finalizeRequestHeaders(headers, finalBody);
     finalHeaders = this.deps.applyStreamModeHeaders(finalHeaders, wantsSse);
     const baseUrlPrimary = this.deps.getEffectiveBaseUrl().replace(/\/$/, '');
     const endpointSuffix = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
@@ -145,7 +149,6 @@ export class HttpRequestExecutor {
     );
     const targetUrl = targets[0] || `${baseUrlPrimary}/${endpointSuffix}`;
     const targetUrls = targets.length > 1 ? targets : undefined;
-    const finalBody = this.deps.buildHttpRequestBody(processedRequest);
     const meta = (context as { metadata?: unknown }).metadata;
     const metaEntryEndpoint =
       meta && typeof meta === 'object' && typeof (meta as Record<string, unknown>).entryEndpoint === 'string'
@@ -154,9 +157,6 @@ export class HttpRequestExecutor {
     const entryEndpoint =
       this.deps.getEntryEndpointFromPayload(processedRequest) ||
       metaEntryEndpoint;
-    if (wantsSse) {
-      this.deps.prepareSseRequestBody(finalBody, context);
-    }
     const clientRequestId = this.deps.getClientRequestIdFromContext(context);
     await this.captureVisionDebugRequest(processedRequest, finalBody, {
       wantsSse,

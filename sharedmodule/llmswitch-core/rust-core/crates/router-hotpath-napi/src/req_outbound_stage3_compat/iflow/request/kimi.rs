@@ -4,7 +4,7 @@ mod reasoning;
 use serde_json::{Map, Number, Value};
 
 use media::apply_kimi_history_media_placeholder;
-use reasoning::{fill_reasoning_content_for_tool_calls, normalize_thinking_for_kimi};
+use reasoning::normalize_thinking_for_kimi;
 
 fn model_is_kimi_k25(model: Option<&Value>) -> bool {
     let Some(token) = model.and_then(|v| v.as_str()) else {
@@ -57,8 +57,5 @@ pub(super) fn apply_iflow_kimi_request_compat(root: &mut Map<String, Value>) -> 
     );
     mirror_max_tokens(root);
 
-    if thinking_enabled {
-        fill_reasoning_content_for_tool_calls(root);
-    }
     true
 }

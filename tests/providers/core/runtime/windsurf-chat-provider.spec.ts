@@ -7386,7 +7386,6 @@ print('{"ok":true}')
         const fields = (provider as any).parseProtoFields(payload);
         const offset = (provider as any).readProtoNumber(fields, 2) ?? 0;
         calls.push({ path: 'steps', offset });
-        if (offset > 0) return Buffer.alloc(0);
         return calls.filter((c) => c.path === 'status').length >= 2
           ? encodeSteps('complete answer, not truncated')
           : encodeSteps('partial active text');
@@ -7399,8 +7398,7 @@ print('{"ok":true}')
     });
     const result = await (provider as any).pollCascadeTrajectorySteps({ cascadeId: 'cid-1', model: 'gpt-5.4-medium' });
     const stepOffsets = calls.filter((c) => c.path === 'steps').map((c) => c.offset);
-    expect(stepOffsets[0]).toBe(0);
-    expect(stepOffsets).toContain(1);
+    expect(stepOffsets.slice(0, 2)).toEqual([0, 0]);
     expect(stepOffsets.at(-1)).toBe(0);
     expect(result.candidate.content).toBe('complete answer, not truncated');
   });
@@ -7428,6 +7426,76 @@ print('{"ok":true}')
     const rejection = expect(promise).rejects.toMatchObject({ code: 'WINDSURF_CASCADE_STALLED', status: 504 });
     await jest.advanceTimersByTimeAsync(3_000);
     await rejection;
+    await expect(promise).rejects.toMatchObject({ retryable: false });
+    expect(stepsCalls).toBeLessThan(20);
+    jest.useRealTimers();
+  });
+
+  test('RED: pollCascadeTrajectorySteps must fail on active no-output no-growth stall before long prompt maxWait', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    (provider as any).windsurfRuntime = {
+      ...((provider as any).windsurfRuntime || {}),
+      pollMaxWaitMs: 120_000,
+      coldStallBaseMs: 2_000,
+    };
+    const markerStep = encodeTrajectoryStepEnvelope({ type: 1, status: 3 });
+    const activeStatus = encodeProtoFieldVarint(2, 2);
+    let stepsCalls = 0;
+    jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string) => {
+      if (String(pathName).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        return markerStep;
+      }
+      if (String(pathName).includes('GetCascadeTrajectory')) return activeStatus;
+      throw new Error(`unexpected ${pathName}`);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({
+      cascadeId: 'cid-cold-no-growth',
+      model: 'gpt-5.4-medium',
+      promptChars: 120_000,
+    });
+    const rejection = expect(promise).rejects.toMatchObject({ code: 'WINDSURF_CASCADE_STALLED', status: 504 });
+    await jest.advanceTimersByTimeAsync(3_000);
+    await rejection;
+    await expect(promise).rejects.toMatchObject({ retryable: false });
+    expect(stepsCalls).toBeLessThan(20);
+    jest.useRealTimers();
+  });
+
+  test('RED: pollCascadeTrajectorySteps must return stable tool calls without waiting for never-idle cascade', async () => {
+    jest.useFakeTimers();
+    const provider = createProvider();
+    (provider as any).windsurfRuntime = {
+      ...((provider as any).windsurfRuntime || {}),
+      pollMaxWaitMs: 120_000,
+      stableToolCallReturnMs: 2_000,
+    };
+    const toolStep = encodeTrajectoryStepEnvelope({
+      type: 15,
+      status: 1,
+      customToolCall: { id: 'call_exec_1', name: 'exec_command', argumentsJson: '{"cmd":"pwd"}' },
+    });
+    const activeStatus = encodeProtoFieldVarint(2, 2);
+    let stepsCalls = 0;
+    jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string) => {
+      if (String(pathName).includes('GetCascadeTrajectorySteps')) {
+        stepsCalls += 1;
+        return toolStep;
+      }
+      if (String(pathName).includes('GetCascadeTrajectory')) return activeStatus;
+      throw new Error(`unexpected ${pathName}`);
+    });
+    const promise = (provider as any).pollCascadeTrajectorySteps({ cascadeId: 'cid-stable-tool-active', model: 'gpt-5.4-medium' });
+    let settled = false;
+    promise.finally(() => { settled = true; });
+    for (let i = 0; i < 20 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+    }
+    const result = await promise;
+    expect(result.candidate.tool_calls).toHaveLength(1);
+    expect(result.candidate.tool_calls[0].function.name).toBe('exec_command');
     expect(stepsCalls).toBeLessThan(20);
     jest.useRealTimers();
   });
@@ -7446,7 +7514,6 @@ print('{"ok":true}')
         calls.push('steps');
         const fields = (provider as any).parseProtoFields(payload);
         const offset = (provider as any).readProtoNumber(fields, 2) ?? 0;
-        if (offset > 0) return Buffer.alloc(0);
         const statusCount = calls.filter((x) => x === 'status').length;
         return statusCount >= 2 ? encodeSteps('partial answer with final tail') : encodeSteps('partial answer');
       }
@@ -7475,7 +7542,6 @@ print('{"ok":true}')
         calls.push('steps');
         const fields = (provider as any).parseProtoFields(payload);
         const offset = (provider as any).readProtoNumber(fields, 2) ?? 0;
-        if (offset > 0) return Buffer.alloc(0);
         return calls.filter((x) => x === 'status').length < 2 ? emptySteps : finalSteps;
       }
       if (String(pathName).includes('GetCascadeTrajectory')) {

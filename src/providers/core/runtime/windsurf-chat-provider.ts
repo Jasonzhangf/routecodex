@@ -1549,9 +1549,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
           deltaSeedParts,
           nativeDeclaredTools,
           body.windsurf_tool_choice,
-          selected.stepOffset > 0,
+          true,
         );
-        let additionalSteps = this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools, { currentOnly: selected.stepOffset > 0, mcpMode });
+        let additionalSteps = this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools, { currentOnly: true, mcpMode });
         if (process.env.RCC_DEBUG_WINDSURF_TOOLS === '1') {
           console.log('[windsurf-tools] outbound-shape', JSON.stringify({
             nativeMode,
@@ -1603,9 +1603,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             deltaSeedParts,
             nativeDeclaredTools,
             body.windsurf_tool_choice,
-            selected.stepOffset > 0,
+            true,
           );
-          additionalSteps = this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools, { currentOnly: selected.stepOffset > 0, mcpMode });
+          additionalSteps = this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools, { currentOnly: true, mcpMode });
           await this.sendCascadeMessage({
             apiKey,
             cascadeId,
@@ -2061,6 +2061,16 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     } catch {
       console.warn(`[windsurf.${stage}]`);
     }
+  }
+
+  private shouldLogWindsurfGrpc(pathName: string, grpcStatus = '0'): boolean {
+    if (grpcStatus !== '0') return true;
+    const enabled = String(process.env.ROUTECODEX_WINDSURF_DEBUG || process.env.RCC_WINDSURF_DEBUG || '').trim();
+    if (!enabled || enabled === '0' || enabled.toLowerCase() === 'false') return false;
+    if (pathName.endsWith('/GetCascadeTrajectory') || pathName.endsWith('/GetCascadeTrajectorySteps')) {
+      return enabled.toLowerCase() === 'trace';
+    }
+    return true;
   }
 
   private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -3632,11 +3642,16 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       const warmStallToolActiveMs = Number.isFinite(configuredToolWarmStallMs) && configuredToolWarmStallMs > 0
         ? configuredToolWarmStallMs
         : 180_000;
+      const configuredStableToolCallReturnMs = Number((this.windsurfRuntime as Record<string, unknown>)?.stableToolCallReturnMs);
+      const stableToolCallReturnMs = Number.isFinite(configuredStableToolCallReturnMs) && configuredStableToolCallReturnMs > 0
+        ? configuredStableToolCallReturnMs
+        : 5_000;
       const promptChars = Math.max(0, Number.isFinite(Number(args.promptChars)) ? Number(args.promptChars) : 0);
       const coldStallMs = Math.min(maxWaitMs, coldStallBaseMs + Math.floor(promptChars / 1500) * 5_000);
       const startedAt = Date.now();
       let lastText = '';
       let lastThinking = '';
+      let lastToolCallSignature = '';
       let usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } | null = null;
       let sawActive = false;
       let sawText = false;
@@ -3647,29 +3662,27 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       const stepOffset = Number.isFinite(Number(args.stepOffset)) && Number(args.stepOffset) >= 0
         ? Math.floor(Number(args.stepOffset))
         : 0;
-      let lastObservedStepOffset = stepOffset;
-      let pollStepOffset = stepOffset;
+      let lastStepCount = 0;
+      let lastPollLogAt = 0;
+      let lastPollLogKey = '';
       let pendingToolCandidate: Record<string, unknown> | null = null;
       let pendingToolStepOffset = stepOffset;
 
       while (Date.now() - startedAt < maxWaitMs) {
         const stepsResponse = await this.grpcUnaryLocal(
           `${WINDSURF_LS_SERVICE}/GetCascadeTrajectorySteps`,
-          this.buildGetTrajectoryStepsRequest(args.cascadeId, pollStepOffset),
+          this.buildGetTrajectoryStepsRequest(args.cascadeId, stepOffset),
         );
         const steps = this.parseTrajectorySteps(stepsResponse);
-        const nextStepOffset = pollStepOffset + steps.length;
+        const nextStepOffset = stepOffset + steps.length;
         let accumulatedText = '';
         let accumulatedThinking = '';
         const toolCalls: Array<Record<string, unknown>> = [];
         const seenToolCallIds = new Set<string>();
 
-        if (nextStepOffset > lastObservedStepOffset) {
-          lastObservedStepOffset = nextStepOffset;
+        if (steps.length > lastStepCount) {
+          lastStepCount = steps.length;
           lastGrowthAt = Date.now();
-        }
-        if (steps.length > 0) {
-          pollStepOffset = nextStepOffset;
         }
 
         for (const step of steps) {
@@ -3727,7 +3740,11 @@ export class WindsurfChatProvider extends HttpTransportProvider {
           }
         }
 
-        if (accumulatedText.length > lastText.length || accumulatedThinking.length > lastThinking.length || toolCalls.length > 0) {
+        const toolCallSignature = toolCalls.map((toolCall) => {
+          const fn = toolCall.function && typeof toolCall.function === 'object' ? toolCall.function as Record<string, unknown> : {};
+          return `${String(toolCall.id || '')}:${String(fn.name || '')}:${String(fn.arguments || '')}`;
+        }).join('|');
+        if (accumulatedText.length > lastText.length || accumulatedThinking.length > lastThinking.length || toolCallSignature !== lastToolCallSignature) {
           lastGrowthAt = Date.now();
         }
         if (accumulatedText) sawText = true;
@@ -3744,26 +3761,62 @@ export class WindsurfChatProvider extends HttpTransportProvider {
 
         lastText = accumulatedText || lastText;
         lastThinking = accumulatedThinking || lastThinking;
+        lastToolCallSignature = toolCallSignature;
 
         const statusResponse = await this.grpcUnaryLocal(
           `${WINDSURF_LS_SERVICE}/GetCascadeTrajectory`,
           this.buildGetTrajectoryRequest(args.cascadeId),
         );
         const status = this.parseTrajectoryStatus(statusResponse);
-        console.log(`[windsurf.poll.status] ${JSON.stringify({ cascadeId: args.cascadeId, status, steps: steps.length, pollStepOffset, textBytes: Buffer.byteLength(accumulatedText, 'utf8'), thinkingBytes: Buffer.byteLength(accumulatedThinking, 'utf8'), toolCalls: toolCalls.length, idleCount, elapsedMs: Date.now() - startedAt })}`);
+        const elapsedMs = Date.now() - startedAt;
+        const textBytes = Buffer.byteLength(accumulatedText, 'utf8');
+        const thinkingBytes = Buffer.byteLength(accumulatedThinking, 'utf8');
+        const pollLogKey = [status, steps.length, textBytes, thinkingBytes, toolCalls.length, idleCount].join(':');
+        const pollTraceEnabled = /^(1|true|trace)$/i.test(String(process.env.ROUTECODEX_WINDSURF_DEBUG || process.env.RCC_WINDSURF_DEBUG || '').trim());
+        if (pollLogKey !== lastPollLogKey || (pollTraceEnabled && Date.now() - lastPollLogAt >= 10_000)) {
+          lastPollLogKey = pollLogKey;
+          lastPollLogAt = Date.now();
+          console.log(`[windsurf.poll.status] ${JSON.stringify({ cascadeId: args.cascadeId, status, steps: steps.length, pollStepOffset: stepOffset, textBytes, thinkingBytes, toolCalls: toolCalls.length, idleCount, elapsedMs })}`);
+        }
         if (status !== 1) {
           sawActive = true;
           idleCount = 0;
           const elapsed = Date.now() - startedAt;
+          const msSinceGrowth = Date.now() - lastGrowthAt;
           if (elapsed > coldStallMs && !sawText && !lastThinking && toolCalls.length === 0) {
             throw createWindsurfProviderError(`[windsurf] Cascade planner stalled with no output after ${Math.round(coldStallMs / 1000)}s`, {
               code: 'WINDSURF_CASCADE_STALLED',
               status: 504,
-              retryable: true,
+              retryable: false,
             });
           }
-          const msSinceGrowth = Date.now() - lastGrowthAt;
+          if (!sawText && !lastThinking && !pendingToolCandidate && msSinceGrowth > coldStallBaseMs) {
+            this.logWindsurfStage('poll.coldNoGrowthStall', {
+              cascadeId: args.cascadeId,
+              status,
+              msSinceGrowth,
+              coldStallBaseMs,
+              pollStepOffset: stepOffset,
+            });
+            throw createWindsurfProviderError(`[windsurf] Cascade planner stalled with no visible output and no new steps for ${Math.round(coldStallBaseMs / 1000)}s`, {
+              code: 'WINDSURF_CASCADE_STALLED',
+              status: 504,
+              retryable: false,
+            });
+          }
           const hasActiveStep = steps.some((step) => step && typeof step === 'object' && Number((step as Record<string, unknown>).status) === 1);
+          if (pendingToolCandidate && msSinceGrowth > stableToolCallReturnMs) {
+            this.logWindsurfStage('poll.stableToolCallReturn', {
+              cascadeId: args.cascadeId,
+              status,
+              msSinceGrowth,
+              stableToolCallReturnMs,
+              toolCalls: toolCalls.length,
+              pendingToolStepOffset,
+              hasActiveStep,
+            });
+            return { candidate: pendingToolCandidate, usage, stepOffset: pendingToolStepOffset };
+          }
           const warmSignal = sawText || Boolean(lastThinking) || Boolean(pendingToolCandidate);
           const warmCeilingMs = pendingToolCandidate && hasActiveStep
             ? warmStallToolActiveMs
@@ -3780,12 +3833,12 @@ export class WindsurfChatProvider extends HttpTransportProvider {
               thinkingBytes: Buffer.byteLength(lastThinking, 'utf8'),
               pendingTool: Boolean(pendingToolCandidate),
               hasActiveStep,
-              pollStepOffset,
+              pollStepOffset: stepOffset,
             });
             throw createWindsurfProviderError(`[windsurf] Cascade planner stalled after progress — no new output for ${Math.round(warmCeilingMs / 1000)}s`, {
               code: 'WINDSURF_CASCADE_STALLED',
               status: 504,
-              retryable: true,
+              retryable: false,
             });
           }
         } else {
@@ -4429,7 +4482,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         payloadBytes: payload.length,
         payloadPrefixHex: payload.subarray(0, 48).toString('hex'),
       });
-      console.log(`[windsurf.grpc.start] ${JSON.stringify({ pathName, timeout, payloadBytes: payload.length })}`);
+      if (this.shouldLogWindsurfGrpc(pathName)) {
+        console.log(`[windsurf.grpc.start] ${JSON.stringify({ pathName, timeout, payloadBytes: payload.length })}`);
+      }
       const req = session.request({
         ':method': 'POST',
         ':path': pathName,
@@ -4457,7 +4512,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       });
       req.on('end', () => {
         this.logWindsurfStage('grpc.end', { pathName, grpcStatus, grpcMessage, bytes: chunks.reduce((sum, chunk) => sum + chunk.length, 0) });
-        console.log(`[windsurf.grpc.end] ${JSON.stringify({ pathName, grpcStatus, grpcMessage: grpcMessage ? decodeURIComponent(grpcMessage) : '', bytes: chunks.reduce((sum, chunk) => sum + chunk.length, 0) })}`);
+        if (this.shouldLogWindsurfGrpc(pathName, grpcStatus)) {
+          console.log(`[windsurf.grpc.end] ${JSON.stringify({ pathName, grpcStatus, grpcMessage: grpcMessage ? decodeURIComponent(grpcMessage) : '', bytes: chunks.reduce((sum, chunk) => sum + chunk.length, 0) })}`);
+        }
         if (grpcStatus !== '0') {
           const message = grpcMessage ? decodeURIComponent(grpcMessage) : `gRPC status ${grpcStatus}`;
           console.warn(`[windsurf.grpc.end] ${JSON.stringify({ pathName, grpcStatus, grpcMessage: message, bytes: chunks.reduce((sum, chunk) => sum + chunk.length, 0) })}`);

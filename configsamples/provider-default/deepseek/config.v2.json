@@ -6,7 +6,7 @@
     "enabled": true,
     "type": "openai",
     "baseURL": "https://api.deepseek.com",
-    "compatibilityProfile": "compat:passthrough",
+    "compatibilityProfile": "chat:deepseek",
     "auth": {
       "type": "apikey",
       "entries": [
