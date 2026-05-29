@@ -1665,3 +1665,30 @@ Tags: virtual-router, quota-health, shadow-gate, native-path, multikey-resetat, 
 
 - 2026-05-27: focused native regression（10 suites / 56 tests）在当前仓库是 `native required` 形态，执行时必须显式提供 `ROUTECODEX_LLMS_ROUTER_NATIVE_PATH` 指向 `sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node`；否则会统一报 `missing native proxy constructor`，这属于执行入口环境缺失，不应误判为 quota/health 语义回归。
 Tags: virtual-router, native-required, focused-regression, router-hotpath, env-contract, 2026-05-27
+
+- 2026-05-28: sticky 语义废弃基线：RouteCodex 不再支持 provider/route sticky。`stickyTarget` / `stickyProvider` / 基于上一跳 provider 的 followup pin 都是错误语义；continuation 也不能 sticky provider，只能根据 continuation store 的 direct/local ownership 选择链路。修复必须同时清 Rust VR state/parse/selection、TS servertool flow policy/followup metadata、测试与 docs 旧事实；验证至少包含 routing-instructions 对 `sticky:` 被忽略的回归和 HTTP 黑盒非 sticky 路由验证。
+Tags: routecodex, virtual-router, sticky-removed, continuation-store-routing, servertool-followup
+
+- 2026-05-28: Windsurf managed-account 请求内重试必须复用同一次 `resolveCascadeApiKey()` 选择出的账号；健康/extra quota 探测结果一旦进入 `windsurfHealthCache`，请求选择阶段不得按 60s TTL 每次刷新。若账号真实 quota exhausted，应标记该 alias 并把错误交给外层 provider/VR 策略，禁止在同一上游请求内静默换账号重跑。回归锚点：`tests/providers/core/runtime/windsurf-account-health-routing.spec.ts` 的 account health probe cache 测试；`tests/providers/core/runtime/windsurf-chat-provider-regression.spec.ts` 的 transient cascade retry selected account 测试。
+Tags: windsurf, managed-account, health-probe, extra-quota, no-request-account-switch, red-green, 2026-05-28
+
+- 2026-05-28: Responses submit_tool_outputs 附件续轮规则已验证：当前轮 `tool_outputs` 中的附件必须原样进入本轮；store 中重放的历史 `input` 附件必须在 Rust Responses conversation resume 真源替换为 `[Image omitted]`。唯一修复点是 `router-hotpath-napi/src/shared_responses_conversation_utils.rs` 重建 `merged_input` 前调用 stored-context media strip；HTTP 黑盒在 `/v1/responses/:id/submit_tool_outputs` 断言历史 base64 消失、本轮 base64 保留。
+
+## 2026-05-29 Windsurf model-aware health / MCP shape
+- Verified live on installed `5520`: `gpt-5.5-low` must select a model-compatible account before quota sorting; `ws-pro-3` can show quota 100 but fail the model, while `ws-pro-4` succeeds and is selected after model-aware health parsing.
+- Windsurf continuity for explicit `session_id` is proven by same `cascadeId/sessionId` across turns; provider-request outbound text should contain only the new turn delta, not replay prior assistant/user text.
+- Windsurf MCP compatibility metadata may arrive as `function.mcp_compat` in OpenAI tool shape; the Cascade field-10 source must read both top-level `tool.mcp_compat` and nested `function.mcp_compat`.
+- Caveat: preserving `previous_response_id` into providerPayload is necessary but not sufficient for Windsurf cascade reuse; live `store:true` previous-response continuation still needs a response-id-to-provider-session alias after final `resp_*` creation. Until that alias exists, explicit `session_id` is the proven continuity path.
+
+## 2026-05-29 Stopless / Router Direct SSOT
+- stopless 触发后必须由 HTTP server 统一 reenter：router direct 只允许优化同协议 provider send，响应仍必须回到 `executor-response`/llmswitch bridge 运行 response-side servertool；禁止 direct response passthrough 绕过 stop_message_flow。
+- direct 与 relay 的 servertool reenter 语义一致：followup nested request 通过 `executePortAwarePipeline` 进入 HTTP inbound；旧 `direct_mode_no_followup` 是错误死语义，必须删除而不是闲置。
+
+- 2026-05-29: Windsurf provider is chat-protocol at Hub boundary. Standard chat `tools` enter provider unchanged, then Windsurf provider alone splits them into native Cascade allowlist/additionalSteps and MCP field-10 payloads; response tool calls must be rejoined to standard chat tool names/args before returning to Hub Pipeline. Regression anchor: `tests/providers/core/runtime/windsurf-mcp-only.spec.ts` native `run_command` -> standard `shell_command` rejoin test.
+
+- 2026-05-29: Full Windsurf E2E validation must include a real forced tool_call, not only request-shape smoke. Verified after fix: `RCC_WS_TOOLCALL2_075039` final `/v1/responses` output preserves requested standard `shell_command`; `RCC_WS_E2E1_075108`/`RCC_WS_E2E2_075108` prove explicit `session_id` continuity with same cascade/session and delta-only text. Rust response governance must not canonicalize requested `shell_command` back to `exec_command` when client requested `shell_command`.
+
+## 2026-05-29 Windsurf 5520 provider-health routing fix
+- Verified root cause for 5520 Windsurf `PROVIDER_NOT_AVAILABLE`: `~/.rcc/sessions/127.0.0.1_5520/provider-health.json` kept `windsurf.managed.gpt-5.5-low` under `__http_503_daily_cooldown__`, so Rust VR health filtering removed the only 5520 target before provider send.
+- Fix truth: Rust VR health manager clears sibling `windsurf.managed.*` persisted 503 cooldowns on managed family success, and `apply_standard_filters` allows singleton persisted-503 targets one passive reprobe selection while preserving multi-provider fallback semantics.
+- Live evidence: after build/install/restart, marker `RCC_WS_GREEN_081854` on `http://127.0.0.1:5520/v1/responses` selected `windsurf.managed.gpt-5.5-low`, chose account `ws-pro-4`, and returned HTTP 200/output `ok`.

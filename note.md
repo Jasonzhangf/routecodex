@@ -12552,3 +12552,499 @@ Using skills: coding-principals + rcc-dev-skills
 - 用户观察：新 session 不 sticky，fin 老 session sticky 到 sdfv；更符合旧 meta 污染，而不是 classifier/LB 全局问题。
 - 查证：tmux-rcc-fin.json 没有 routeHint/forcedTarget/stickyTarget，只保留 stopless/chatProcess state；说明污染更可能来自 responses conversation store 恢复 payload/basePayload 内的 routeHint 或请求 body metadata.routeHint。
 - 修复点：handler mergePipelineMetadata 丢弃客户端/恢复态 routeHint；executor metadata 只信 x-route-hint；responses conversation store 不再记录/恢复 routeHint，只保留 providerKey 用于真正 continuation ownership。
+
+## 2026-05-28 sticky 语义清理过程记录
+- 用户确认：provider/route sticky 语义整体废弃；continuation 也不能 sticky provider，只能根据 store 是 direct/local 决定链路。
+- 已定位残留真源：Rust VR `RoutingInstructionState.sticky_target`、`parse sticky:`、selection sticky branch、load balancer continuation sticky key、servertool flow `stickyProvider` 与 followup metadata 自动写 `__shadowCompareForcedProviderKey`。
+- 红测：`tests/servertool/routing-instructions.spec.ts` 新断言 `sticky:` 指令被忽略；`tests/server/http-server/stopmessage-scope-rebind.spec.ts` 验证 stopMessage scope state 不依赖 stickyTarget。
+- 构建发现：Rust 仍有 `resolve_sticky_key` import（`chat_servertool_orchestration.rs`、`lib.rs`）需要迁移到 request-state key 命名，说明清理必须覆盖 native exports/bridge 命名。
+
+
+## 2026-05-28 sticky physical deletion continuation
+- User clarified: not nulling references; physically delete sticky semantics. Continue by grepping residual sticky terms, removing only wrong sticky semantic code/docs/tests, then build + blackbox.
+
+## 2026-05-28 weighted/failover broken investigation
+- User reports virtual router scheduling broken: weighted scheduling and error switch both ineffective. Inspect VR selection + executor exclusion/cooldown chain first.
+
+- Added mandatory HTTP blackbox gate: verify:virtual-router-scheduling-blackbox in test:regressions. Current red: weighted passes, recoverable failover fails due to outer handler HTTP_REQUEST_TIMEOUT before retry/reroute completes.
+
+## 2026-05-28 continuation/sticky/runtime-resolve follow-up
+- 接手后先跑 HTTP 黑盒 virtual-router-scheduling，目标先复现 minimax runtime_resolve 红测，再定位 sticky 物理残留与 continuation store 漏点。
+- 约束：sticky 全删；continuation 仅按 remote/local store 决定路由；黑盒必须 HTTP 入口。
+
+- 证据：HTTP 黑盒 weightedMinimax 在首个 search 请求即 45000ms timeout；provider-failure-ban 黑盒 502 场景首请求 40000ms timeout。说明 recoverable reroute/resolve 在真实入口下未闭环。
+- 观察：503 场景可切 backup；502 场景不切。优先检查 provider-failure exclusion decision 对 recoverable(含502) 的统一出口。
+
+- 用户要求：继续以黑盒定位。策略调整为：保留大黑盒（完整 HTTP 调度），新增更小 HTTP 黑盒，仅锁 request-executor recoverable reroute 闭环，避免大黑盒噪音掩盖真源。
+
+- 继续：在不改业务语义前，先给微黑盒增加 request-executor 交界观测，抓 exclusion 是否进入下一轮 pipeline / metadata。
+
+## 2026-05-28 dev build correction
+- 用户纠正：本轮应使用 npm run build:dev / dev build 链路，不用 release/min。后续黑盒验证先 build:dev，再跑 HTTP 微黑盒。
+
+## 2026-05-28 recoverable 502 reroute micro blackbox
+- 黑盒证据：HTTP 微黑盒原先无限重复 primary；debug 证明 executor metadata.excludedProviderKeys 已有 primary，但 Hub Rust router_metadata_input 白名单丢弃该字段，导致 VR 看不到排除键。
+- 唯一真源修复：sharedmodule/llmswitch-core/rust-core/.../hub_pipeline_blocks/router_metadata_input.rs 透传 normalized excludedProviderKeys。
+- 策略修正：recoverable/HTTP_503 先 retry_same_provider；三次后由 request-executor-retry-decision 统一 exclude/reroute，避免 503 特例绕过三击规则。
+- 验证：cargo --lib router metadata test 绿；node scripts/tests/provider-failure-reroute-micro-blackbox.mjs EXIT:0，primaryHits=3 backupHits=1。
+- build:dev 当前被 repo-sanity 阻塞，原因是前序新增 TS 文件 sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.ts 触发 rustification audit，不是本次 502 修复编译错误；已跑 build-core/vendor/tsc 局部链路。
+
+## 2026-05-28 Windsurf 链路 review scratch
+- 用户现象：Windsurf 请求长时间无响应，重复打印 managed-auth entries=0 / selected accountsAvailable=6/6，随后 provider-switch attempt 1/6 -> 2/6 retry_same_provider status=502 WINDSURF_UPSTREAM_TRANSIENT。
+- 用户期望：健康探测启动时一次；请求命中最健康账号（带 extra）；请求期间不切换账号持续运行。
+- 初始假设：重复日志可能来自每次 retry 重新 select/account auth；需确认 account selection、health probe、provider retry 三处唯一真源，禁止凭日志直接改。
+
+### Correction intake
+- Jason 指正：必须先设计红测、运行确认红，再修复、运行确认绿；不能先改实现再补测。
+- 纠正动作：保留新增红测，临时撤回刚才实现改动，先跑目标测试确认失败，再重新应用唯一真源修复并跑绿。
+
+### Red/green evidence
+- RED 1: `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-account-health-routing.spec.ts tests/providers/core/runtime/windsurf-chat-provider-regression.spec.ts --runInBand` 中新增 health probe 测试失败：期望 health fetch 2 次，实际 4 次，证明旧逻辑每次选择按 TTL 刷新。
+- RED 2: `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider-regression.spec.ts --runInBand -t "transient cascade retry"` 失败：期望 `resolveCascadeApiKey` 1 次，实际 2 次，证明旧逻辑请求内 transient retry 会重新选择账号。
+- GREEN: 修复后 `account health probe` 与 `transient cascade retry` 单测均通过；`windsurf-account-health-routing.spec.ts` 整文件 7/7 通过。
+## 2026-05-28 attachment history trim investigation
+- Red test confirmed: resume_replaces_historical_attachments_with_placeholders_but_keeps_current_tool_output fails because historical data:image remains in resumed payload; current tool output expectation not reached yet.
+- Fix verified: stored Responses conversation input is now media-stripped at resume, while submit_tool_outputs current output remains intact. Evidence: Rust shared_responses_conversation tests and HTTP blackbox responses-handler attachment-history-placeholder pass.
+
+## 2026-05-28 VR weighted double-selection investigation
+- Symptom from live `~/.rcc/logs/server-5555.log`: request `openai-responses-router-gpt-5.5-20260528T232920124-231312-900` logs two `[VR-SEL-RES]` before any `[provider.traffic.acquire]`; first selects `mini27.key1.MiniMax-M2.7`, second selects `mimo.key1.mimo-v2.5`, and executor acquires/sends only the second target.
+- Current hypothesis: not provider.traffic.acquire rejection. The overwrite happens before acquire, likely duplicate route selection inside Hub Pipeline for one logical request.
+- Evidence to preserve: VR SWRR state alternates correctly; group route key is scoped to `gateway_priority_5555:search`; `mimo.pool` alias no longer appears in live selected provider key.
+
+## 2026-05-28 VR selection simplification closeout
+- Implemented config-driven route pool selection in Rust: pool priority ordering is normalized at `parse_routing`, then selected pool uses exactly one of `priority`, `weighted`, or `round-robin` branches.
+- Weighted now operates on provider/model group ids (pre-expanded key level such as `mini27.MiniMax-M2.7`, `mimo.mimo-v2.5`), then rotates concrete expanded keys only inside the selected group.
+- Removed dynamic health/context/key-level weight coupling from the selection branch; cooldown/health remains an availability filter only, and startup clears runtime quota state for first-chance recovery.
+
+## 2026-05-28 Windsurf health/session/delta verification
+- Red tests added in `tests/providers/core/runtime/windsurf-context-continuity.spec.ts`: `previous_response_id` session key, same-session cascade reuse, trajectory `stepOffset`, materialized resume delta input.
+- Root cause: `resolveWindsurfSessionStateKeyFromRequest()` did not read `previous_response_id`/`previousResponseId`; `selectUsablePinnedGrpcRuntime()` always called `StartCascade`, so same logical session did not reuse cascade or poll from delta offset.
+- Fix SSOT: `src/providers/core/runtime/windsurf-chat-provider.ts` now keeps `windsurfCascadeSessionBindings` keyed by resolved session key, reuses `sessionId/cascadeId`, and advances `stepOffset` from `pollCascadeTrajectorySteps()`.
+- Verification: Windsurf focused Jest matrix passed 22/22; `npm run build` blocked by unrelated untracked repo-sanity files, direct core build + `npx tsc --noEmit` passed.
+
+## 2026-05-29 correction: VR still double-routes before acquire
+- User-provided live log proves current fix did NOT change final routing to mini27: for request `20260529T000029064-231398-986`, first VR route selected `mini27.key1.MiniMax-M2.7`, second VR route selected `mimo.key2.mimo-v2.5`, and provider acquire/send used only the second target.
+- Corrected conclusion: weighted branch is active (`mode=weighted`, `strategy=weighted`), but the request is routed twice before acquire. The first selection mutates SWRR state and is then discarded, causing final visible provider to be mimo.
+- `gateway-priority-5555-search` is currently pool/group naming, not proof of priority strategy, but it is confusing and should not be used as a strategy conclusion.
+- Next root-cause target: find why one logical Hub request invokes `routerEngine.route()` twice before provider traffic acquire.
+
+## 2026-05-29 VR direct/weighted 调试
+- 用户确认 direct/relay 路由入口一致：请求 inbound 后进入 VR；relay 命中后直接前进；direct 命中后从端口入口复入 direct，但必须携带首次路由结果，复入不再进 inbound/VR。
+- 因此同一请求两次 [VR-SEL-*] 是错误：第二次 direct 复入没有复用 route result，导致 weighted 状态推进并覆盖 mini27。
+
+## 2026-05-29 Windsurf minimal request investigation
+- 用户目标：找到 Windsurf 最小请求失败原因；必须对齐 `/Volumes/extension/code/WindsurfAPI`，先红测再修复再绿测，并线上验证。
+- 现有证据：最小 live 请求进入 `windsurf.managed.gpt-5.5-low` 后返回 `WINDSURF_UPSTREAM_TRANSIENT`，Router retry 后 `PROVIDER_NOT_AVAILABLE`；样本路径 `~/.rcc/codex-samples/openai-responses/windsurf.managed.gpt-5.5-low/openai-responses-windsurf.managed-gpt-5.5-low-20260529T001115144-231433-1021/`。
+- 待验证假设 A：RouteCodex 的 `cascade_config` 缺少 WindsurfAPI 参考实现中的 field 5 `memory_config.enabled=false`，导致最小请求 shape 不等价。
+- 待验证假设 B：同一最小请求内部 retry 重新创建 `sessionId/cascadeId`，不符合 session/cascade 绑定要求，并污染最小请求定位。
+
+### 2026-05-29 Windsurf minimal request verified findings
+- 红测 1：`SendUserCascadeMessage` transient retry 原先会重新进入 selection 并可能换 `sessionId/cascadeId`；已改为同一请求内保留首次选中的 cascade/session，只有 panel missing / expired cascade / untrusted workspace 这类显式 rewarm 才清空绑定。
+- 红测 2：WindsurfAPI 源码注释写 `memory_config enabled=false`，但实际 `src/proto.js::writeBoolField(false)` 返回空 Buffer，所以真实参考字节中 **没有** cascade_config field 5；RCC 必须跟随实际字节而不是注释。
+- 线上验证：`5520` 安装 `0.90.2410` 后，最小请求样本 `20260529T003218524-231488-1076` 的 6 个 provider-request 均保持同一个 `sessionId=5b84...` 和 `cascadeId=879f...`，payloadBytes 回到 `2003`，与 WindsurfAPI false-bool elision 对齐。
+- 仍未成功：最小请求仍在 `SendUserCascadeMessage` 返回 `WINDSURF_UPSTREAM_TRANSIENT`，随后 Router same-provider retry，客户端 45s/120s 会先超时关闭；当前可确认的最小错误不是账号切换或 shape 多出的 memory_config，而是 upstream transient + retry/traffic 等待链路导致无响应。
+
+### 2026-05-29 Windsurf model-aware health rule
+- 用户确认方向：当前问题是健康监测/排序错误。已验证 `ws-pro-3` Free 账号 quota=100/100 但不支持 `gpt-5.5-low`，WindsurfAPI 基础请求失败；`ws-pro-4` Trial quota=100/76 支持并可成功请求。
+- 红测目标：构造 `ws-free` quota 100 但 allowedModels 不含 `gpt-5-5-low`，以及 `ws-trial` quota 76 且 allowedModels 含 `gpt-5-5-low`；RCC 选择 `gpt-5.5-low` 时必须选 `ws-trial`，当前预期会红。
+
+## 2026-05-29 stopless rcc-fin investigation
+- 目标：检查 rcc-fin stop 样本为何 stopless 未激发；需先加红测捕获样本，再修复并验证变绿。
+- 已知样本：/Volumes/extension/.rcc/codex-samples/openai-responses/mini27.key1.MiniMax-M2.7/req_1780008495552_8fd2d63e/；日志 request openai-responses-mini27.key1-MiniMax-M2.7-20260529T064815552-231498-1086。
+
+## 2026-05-29 Windsurf installed smoke closeout
+- Installed smoke after model-aware health fix: `RCC_WS_MIN_071524` returned HTTP 200 and `~/.rcc/logs/server-5520.log` selected `alias=ws-pro-4 model=gpt-5-5-low`; this proves quota-only `ws-pro-3` is no longer chosen for GPT 5.5 low.
+- Continuity installed smoke after final install: `RCC_WS_F1_072122` and `RCC_WS_F2_072122` both HTTP 200; provider samples use same `cascadeId=276176fc-3f0b-402f-87ce-9f226ba7be89` and same `sessionId=b332aa04-1d90-479c-9568-e3d67d57a2f6`, while each provider-request text contains only the new marker. This validates session binding and outbound delta-only text for explicit `session_id`.
+- Tool shape installed smoke: `RCC_WS_TOOL2_072101` HTTP 200; provider sample has `nativeMode=true`, `nativeAllowlist=["run_command"]`, and `mcpCompatCount=1`. New red/green proved `function.mcp_compat` must be extracted from the OpenAI function object, not only from top-level tool metadata.
+- Additional `previous_response_id` audit: even after Rust standardizedRequest now preserves `previous_response_id` into providerPayload, live `store:true -> previous_response_id` still starts a new Windsurf `cascadeId/sessionId`. Root cause remaining: first turn is keyed before the final client `resp_*` id exists, so provider-local Windsurf session state is not aliased from final response id back to the first cascade. Explicit `session_id` remains the verified continuous-conversation path.
+- 2026-05-29 stopless root cause: rcc-fin 样本 stop_message_flow 已 trigger，但命中 router same-protocol direct 后 buildRouterDirectResult 直接 passthrough provider response，未进统一 response converter/servertool reenter，因此没有 convert.reenter.start。
+- 修复点：router direct 仅保留同协议 provider send；direct response 回到 HTTP executor 的 convertProviderResponseIfNeeded，servertool reenter 继续通过 executePortAwarePipeline 进入 HTTP inbound。
+- 红测：router-direct-response-conversion.spec 捕获 direct response 必须进入 unified response bridge；servertool-followup-dispatch.spec 覆盖 chat/messages/responses 三入口 nested entry；stopless-direct-mode-guard.spec 确认删除 direct_mode_no_followup 死语义。
+
+## 2026-05-29 Windsurf standard chat tool split/rejoin
+- User architecture rule: Windsurf provider is an `openai-chat` provider. Hub/provider entry must keep the standard chat `tools` list; only inside Windsurf provider can it split into native Cascade tools and MCP field-10 payloads. Provider response must be converted back to standard chat `tool_calls` before returning to Hub Pipeline.
+- RED/GREEN: added `windsurf-mcp-only.spec.ts` red test where input standard tool `shell_command` is sent to Windsurf as native `run_command`, but upstream candidate returns `run_command`; fixed provider response rejoin so Hub receives standard `shell_command` with standard `{command,cwd}` args.
+- Installed smoke: `RCC_WS_STD_TOOL_074118` on port 5520 HTTP 200, selected `ws-pro-4`, provider sample shows `nativeMode=true`, `nativeAllowlist=["run_command"]`, `mcpCompatCount=1`.
+
+## 2026-05-29 Windsurf full E2E validation after standard tool correction
+- User challenged whether standard tools / continuous dialog / response parsing were truly E2E verified. Initial answer: not fully; previous smoke did not force a real tool_call.
+- Live forced tool-call RED after provider fix: provider stage4 emitted `shell_command`, but Rust response governance stage7 remapped it back to `exec_command`; final HTTP response was `exec_command`, violating Windsurf chat-provider boundary.
+- Rust red/green fix: `resp_process_stage1_tool_governance` now preserves raw requested `shell_command` for openai-chat/openai-responses when requestedToolNames explicitly contains `shell_command`.
+- Installed E2E proof after reinstall/restart 5520: `RCC_WS_TOOLCALL2_075039` returned HTTP 200 `status=requires_action`; final response output call name is `shell_command` with standard args, selected `ws-pro-4`.
+- Continuous dialog proof: `RCC_WS_E2E1_075108` and `RCC_WS_E2E2_075108` both HTTP 200; provider samples use same `cascadeId=84591908-b2d7-44f9-9e79-c2a60e206b39` and `sessionId=dc676ca4-5c48-40bd-802d-4752aef2dec0`; each request text is only the new marker.
+
+## 2026-05-29 Windsurf 5520 routing health aggregation red test
+- 现象：5520 `/v1/responses` 已命中 `gateway_priority_5520`，但 `windsurf.gpt-5.5-low` 返回 `All providers unavailable`；`~/.rcc/sessions/127.0.0.1_5520/provider-health.json` 中 `windsurf.managed.gpt-5.5-low` 仍有 `__http_503_daily_cooldown__` 到 2026-05-29T16:00:00Z。
+- 红测：`windsurf_managed_health_success_clears_sibling_model_persisted_503_cooldown` 复现 low 模型 503 persisted cooldown 后，startup health probe 成功在 sibling medium 模型上，但 low 仍 `tripped`；说明 Windsurf managed 健康聚合只清了探测模型，没有清同一 managed account family 的 persisted 503。
+- 第二层红测：`singleton_provider_with_persisted_503_health_cooldown_gets_one_selection_probe` 复现 5520 单 provider 目标被 persisted `__http_503_daily_cooldown__` 直接筛空，导致没有机会做“启动后/首个真实请求重新校验”。修复点在 Rust VR `apply_standard_filters`：仅当路由候选是 singleton 且 blocker 是 persisted 503 daily cooldown 时允许一次 passive selection；多 provider pool 仍会 fallback，不放宽。
+
+## 2026-05-29 entry port/protocol snapshot isolation
+- 现象证据：5555 请求可在 5520 日志中出现，说明日志上下文不能绑定启动主端口，必须由 HTTP request 的 matchedPort/localPort 决定。
+- 已红测覆盖：`tests/server/runtime/http-server/entry-port-snapshot-isolation.red.spec.ts` 用同一 Express app 多 listener 覆盖 `/v1/chat/completions`、`/v1/messages`、`/v1/responses`，断言 pipeline metadata、port log、snapshot 都按入口协议+端口隔离。
+- Snapshot 唯一真源：TS `FileSnapshotStore.sessionFile()` 和 Rust `hub_snapshot_hooks::write_snapshot_file()` 都按 entry protocol + entry port 写目录；provider 仅保留 metadata，不参与目录分区；旧 `PROVIDER_INDEX/__pending__/promote_pending_dir` 已删除。
+- 验证：`npm run jest:run -- --runTestsByPath tests/cli/launcher-multiport-isolation.red.spec.ts tests/server/runtime/http-server/port-context-isolation.red.spec.ts tests/server/runtime/http-server/entry-port-snapshot-isolation.red.spec.ts tests/debug/snapshot-store-port-isolation.red.spec.ts --runInBand` 通过；`cargo test -p router-hotpath-napi snapshot_file_uses_entry_protocol_and_port_not_provider_directory` 通过。
+
+## 2026-05-29 Windsurf sticky / health latency follow-up
+- Red test reproduced global account sticky pollution: `selectManagedCredentialForSession` used one provider-level selected alias, so a prior test/default session could occupy a healthier account for unrelated sessions.
+- Fix truth point: account sticky is now keyed by normalized session (`windsurfSelectedAccountAliasesBySession`), and the pinned alias is deleted when no longer healthy/model-supported.
+- Regression evidence: `npm run jest:run -- tests/providers/core/runtime/windsurf-account-health-routing.spec.ts --runInBand` passes with cross-session non-pollution and unavailable-pin release cases; `npx tsc --noEmit` passes.
+- Live 5520 evidence after install/restart 0.90.2428: selected `ws-pro-4` for `gpt-5-5-low`, `extra=false score=75`; ranked log shows `ws-pro-3 score=100` but `model=false`, so it is intentionally not selected for this model; current windsurf provider-traffic files have no active leases after the request.
+- Install note: plain `npm run build` is blocked by existing untracked repo-sanity files; used `npm run build:min` and `ROUTECODEX_INSTALL_SKIP_E2E=1 npm run install:global`, then port-scoped `routecodex stop --port 5520` + `routecodex start --port 5520`.
+
+## 2026-05-29 Windsurf managed self-lock cleanup
+
+- Root cause verified from live 5520 logs/state: `windsurf.managed` was acquiring executor-level provider traffic permits and writing `~/.rcc/state/provider-traffic/state/windsurf.managed.json` leases; retries could be blocked by the same request's stale/in-flight lease (`PROVIDER_TRAFFIC_SATURATED`).
+- Fix truth: Windsurf managed owns account/session/concurrency internally, so executor must not add global traffic governor leases or executor transport backoff for `windsurf.managed.*`; provider transient errors are thrown once and unified retry remains in request executor.
+- Removed dead self-lock code: `WindsurfChatProvider.cascadeRuntimeQueues` and `runExclusiveCascadeRuntime()`; no provider-wide serial queue remains for cascade sends.
+- Regression evidence: `provider-traffic-governor.spec.ts`, `windsurf-chat-provider-regression.spec.ts`, `request-executor.spec.ts`, `windsurf-account-health-routing.spec.ts`, and `npx tsc --noEmit` passed.
+- Live evidence after global install `0.90.2430` and 5520 restart: two `/v1/responses` calls to `127.0.0.1:5520` returned `pong-1` in 9.79s and `pong-2` in 4.42s; `~/.rcc/state/provider-traffic/state/windsurf.managed.json` showed `leases: []`.
+
+## 2026-05-29 CPU high-frequency native regex investigation
+- Live process evidence: high CPU PID `34414` is `/opt/homebrew/.../node .../dist/index.js .../config/modules.json`, parent `34298 node /opt/homebrew/bin/routecodex start --snap`; it is an active server child, not a PPID=1 orphan. Ports `5520/5555/10000` are held by PID `34414`; BaiduNetdisk also listens on `127.0.0.1:10000` and must not be killed as RouteCodex.
+- Sample evidence `/tmp/rcc-34414.sample.txt`: hot stack is `hub_bridge_actions::bridge_input::convert_bridge_input_to_chat_messages -> shared_tooling::normalize_tool_result_text -> strip_terminal_right_gutter_noise -> regex::Regex::new`, proving repeated regex compilation in Rust hot path.
+- Red test added: `shared_tooling_hot_path_regexes_are_not_compiled_per_line` scans per-line transcript hot-path function bodies and fails if `Regex::new` is compiled inside them.
+- Fix truth: `shared_tooling.rs` now caches terminal gutter, box prefix, collapsed placeholder, chunked header, and ran-tree body regexes with `OnceLock<Regex>`; hot-path functions only call cached regex accessors.
+- Verification: red test failed before fix and passed after fix; related normalizer/unwrap/strip/header tests passed. Full `shared_tooling` filter still has unrelated existing deletion-gate failures in clone-removal tests.
+- Live post-install verification: global `routecodex --version` reports `0.90.2433`; server is running in tmux session `rcc-server-0902433-094025` with PID `66213`, listening on `5520/5555/10000` from `/opt/homebrew/lib/node_modules/routecodex/dist/index.js`.
+- Post-fix CPU evidence: PID `66213` observed at ~2.4% CPU after warmup. `sample 66213 2` wrote `/tmp/rcc-66213.sample.txt`; grep for `strip_terminal_right_gutter_noise`, `normalize_tool_result_text`, `Regex::new`, and `convert_bridge_input_to_chat_messages` returned no hotspot lines.
+- Orphan cleanup evidence: old high-CPU PID `34414` is gone. Current guardian PID `56555` is PPID=1 but is the intended guardian daemon, CPU 0%; no RouteCodex high-CPU PPID=1 orphan was killed.
+
+## 2026-05-29 Windsurf second-hop slow follow-up
+
+- User correction: first hop fast but second hop still slow. Live evidence while slow: `/health` timed out in 5s and server Node process CPU was ~118%, proving local event-loop/CPU blocking, not upstream-only latency.
+- `sample <pid>` hotspot: `router_hotpath_napi::hub_reasoning_tool_normalizer::extract_tool_calls_from_reasoning_text_json` repeatedly compiling `regex::Regex::new`, especially explicit JSON/tool markup parsing during second-hop response governance.
+- Fix truth: Rust hub reasoning tool normalizer must cache static regex patterns; compiling regex on every response chunk/tool-harvest pass is the unique CPU self-lock source for the observed second-hop stall.
+- Regression: added `reasoning_tool_extraction_reuses_cached_regexes_on_repeated_second_hop_text`; `cargo test ... reasoning_tool_extraction_reuses_cached_regexes_on_repeated_second_hop_text -- --nocapture` passed.
+- Build/deploy evidence: manually ran `cargo build -p router-hotpath-napi --release` and `node ../scripts/build-native-hotpath.mjs` after `npm run build:min` skipped cargo; installed `0.90.2433`, restarted 5520 in snap mode.
+- Live evidence after restart: 5520 `/v1/responses` returned `hotfix-1` in 4.54s and `hotfix-2` in 3.13s; `/health` after each returned in 0.01s; `windsurf.managed` traffic state still `leases: []`; native hotpath local 500 iterations took 172ms; server pid CPU 0.0%.
+
+## 2026-05-29 install-global artifact isolation / windsurf second-hop
+- 现象：`routecodex start --port 5520` 曾从 repo `dist/` 启动，构建过程中 `dist/error-handling/route-error-hub.js` 缺失会导致启动失败；根因不是业务代码，而是 `install-global.sh` 在仓库目录直接 `rm -rf dist && build`，且 `npm install -g <临时目录>` 会生成指向临时目录的全局 symlink，临时目录清理后 shim 回落 repo dist。
+- 修复：`scripts/install-global.sh` 改为复制必需源码到 `mktemp` 隔离 build root，在隔离目录构建；`npm pack` 生成 tarball 后再 `npm install -g <tarball>`；snapshot 从隔离 build root 生成；`link-global-llms-local` 支持 `--skip-install-current`，避免 install/current snapshot 被重链回源码。
+- 验证：`ROUTECODEX_INSTALL_SKIP_E2E=1 npm run install:global` 通过；`/opt/homebrew/lib/node_modules/routecodex` 为 directory 不是 symlink；`dist/error-handling/route-error-hub.js` 存在；5520 重启后 `/health` 0.01s，进程入口为 `/opt/homebrew/lib/node_modules/routecodex/dist/index.js`。
+- Windsurf 第二跳红测：`previous_response_id` 不应替代稳定 session key；同一 `sessionId` 下不同 response id 必须复用同一 Cascade 并推进 stepOffset。
+
+## 2026-05-29 continuation
+- User asks: restore virtual-router-hit color logs and continue priority recoverable-error switch to next provider. Current handoff: VR hit suppress removed; provider-failure-reroute-micro blackbox still fails with 504 after primary 3x 502, no backup reroute.
+- Verified fix: `node scripts/tests/provider-failure-reroute-micro-blackbox.mjs` now passes through HTTP `/v1/responses`: primary returns 502 exactly 3 times, request logs `provider-switch ... attempt=3/3 -> 4/3 switch=exclude_and_reroute`, then `virtual-router-hit` routes to backup and response 200 `ok-backup`.
+- Verified `virtual-router-hit` colored runtime logs restored; `[VR-*]` temporary Rust debug prints and `[mock-hit]` test debug print removed.
+- `node scripts/tests/no-sticky-routing-blackbox.mjs` passes: same session search hint then normal request routes searcher -> defaultp, no route inheritance.
+- Remaining unrelated blackbox gaps observed: `provider-failure-ban-blackbox` restart passive probe expectation does not match current persisted cooldown behavior; `virtual-router-scheduling-blackbox` weighted-minimax scenario still times out on ra before provider send details. Do not claim those closed yet.
+
+## 2026-05-29 Windsurf stopped-session release window
+- 现象：Windsurf session sticky 命中后成功 stop/error stop 不释放，测试会话可能长期占用最健康账号/cascade。
+- 决策：按用户要求实现统一窗口：stop/error/finally 后 session 进入 idle；0-2min 仍占用账号，2-5min pre-release（新 session 可重新命中该账号，旧 session 恢复仍优先命中原账号/cascade），>=5min full release（删除 account pin + cascade binding）。
+- 验证：`npm run jest:run -- tests/providers/core/runtime/windsurf-context-continuity.spec.ts --runInBand` 9/9 passed；`npx tsc --noEmit --pretty false` 仍失败于既有 `src/providers/core/runtime/windsurf/native-windsurf-tool-history-projection.ts` 的 `rcc-llmswitch-core/...native-router-hotpath...` 类型解析，非本次修改文件。
+- 2026-05-29 logging fix: runtime request lifecycle logs must not depend on release/dev build mode; `ROUTECODEX_HTTP_LOG_DISABLE=1` is the explicit off switch. Minimal runtime filter must keep `[provider-switch]` and request lifecycle, suppress default noisy `[port-resolve]` and `[mem-observer]` unless `ROUTECODEX_PORT_RESOLVE_LOGS=1` / `ROUTECODEX_MEM_OBSERVER_LOGS=1`.
+- Install script fix: global/release install scripts must not run endpoint/tool e2e verification; install verifies CLI/shim/version only, then managed restart if requested. E2E can hang on live provider/servertool state and is not part of install.
+2026-05-29 11:24:59 请求日志仍未打印：开始检查运行版本、dist/source 日志 tee 与 console suppress 链路。
+2026-05-29 11:28:18 新现象：全局 rcc-llmswitch-core 缺 stopless-goal-state.js，检查 sharedmodule/core dist 与全局 vendor 同步。
+2026-05-29 11:33:53 已修：/v1/responses start 日志提前到 handler 入口解析 stream 后、runtime/check/resume/capture 之前，避免早退/阻塞导致无请求打印；验证 0.90.2468 smoke 已在 tmux 出现 start + virtual-router-hit。
+2026-05-29 11:48:20 VR audit initial: no-sticky blackbox pass; provider-failure-reroute-micro blackbox pass; virtual-router-scheduling-blackbox fails in weighted-minimax-presence at first ra request with 504 after virtual-router-hit before visible traffic acquire, needs split small/large blackbox to distinguish harness timeout vs route/load-balance issue.
+
+## 2026-05-29 VR audit resume
+- 已验证请求日志恢复：真实 runtime 已出现 early started + virtual-router-hit + session-request；本轮开始回归 VR 命中/切换机制审计。
+- 当前不先改代码，先梳理现有命中、retry/reroute、health/cooldown、continuation/历史 sticky 残留真源，形成待确认流程。
+
+## 2026-05-29 VR audit add coding rule
+- 用户确认需要把 coding 命中规则纳入审计：当前命中太广；目标语义是只有当前轮写操作/修改意图命中 coding，读操作/历史工具/工具声明不得命中 coding。
+
+## 2026-05-29 VR cleanup confirmed execution plan
+- 用户确认执行方向：coding 只由当前最新轮实际写操作触发；工具声明/历史工具/读操作/update_plan 不触发 coding。
+- sticky 语义继续按已确认方向物理删除；continuation 改为上下文恢复路由语义，不叫 sticky。
+- mem-observer 打印必须保留，用于观测 pendingNoResponseId/retainedInputItems；后续回归要覆盖错误请求不永久 store、pending 输入能释放。
+- 下一步先补 HTTP 黑盒红测，再清理 VR classifier/selection/error handling 冗余实现。
+
+## 2026-05-29 VR coding current-turn red/green
+- Added HTTP blackbox `scripts/tests/virtual-router-coding-current-turn-blackbox.mjs`. Before fix, latest read_file after earlier apply_patch in same segment still routed `coding/... -> codingp` and failed assertion.
+- Rust fix in `features.rs`/`features/tools.rs`: current tool category now follows latest valid function/tool call instead of highest-priority historical tool in the segment. After build-core/vendor, blackbox passes: declared apply_patch -> default, actual apply_patch -> coding, read_file/update_plan after old patch -> tools/default.
+
+## 2026-05-29 VR sticky partial cleanup
+- Removed Rust routing selection sticky target state path: `RoutingInstructionState.sticky_target`, sticky selection branch, sticky load-balancer parameter/test, stickyTarget persist/deserialize, disableStickyRoutes selection clearing tests.
+- Verified build-core passes after cleanup; blackboxes pass: coding-current-turn, no-sticky-routing, provider-failure-reroute-micro.
+- Remaining sticky strings are mostly continuation/state-scope naming and TS/types/tests/docs; next cleanup must rename/remove without breaking stopless/continuation persistence.
+- Mem observer visibility restored as default-on: `[mem-observer]` is no longer suppressed unless `ROUTECODEX_MEM_OBSERVER_DISABLE=1`/`RCC_MEM_OBSERVER_DISABLE=1`; this preserves pendingNoResponseId/retainedInputItems leak visibility.
+
+## 2026-05-29 5520 windsurf storm/account selection
+- 现象：5520 在 windsurf 账号连续 transient 后进入 `PROVIDER_NOT_AVAILABLE`，客户端快速 reconnect 形成风暴；日志阶段为 `router-direct.hub_pipeline_failed`，未进入 provider send。
+- 真源：session storm backoff 只在 provider send failure 中记录；Hub/VR 空选路属于 pre-provider failure，外层 catch 未记录 backoff，所以下一跳不会等待。
+- 账号选择缺口：所有 managed account transient/quota cooling 时，旧逻辑 fallback 到 ranked[0]，会选中 `exhausted=true` 账号继续打上游。
+- 修复：pre-provider/pipeline failure 也写入 session storm backoff；windsurf managed account pool 全冷却时显式抛 `WINDSURF_ACCOUNT_POOL_COOLDOWN`，不再选择 exhausted 账号。
+
+## 2026-05-29 VR cleanup continuation
+- Goal resumed: audit/clean Virtual Router hit/switching; blackbox first; mem-observer must remain default-visible.
+- Initial audit: current worktree already has blackbox tests for coding current turn, scheduling, failure reroute, no-sticky, store error release; sticky naming still remains in Rust routing metadata/parser/lib exports and TS virtual-router types/native wrappers. Need distinguish wrong VR sticky from servertool/continuation scope before physical deletion/rename.
+- Added/extended no-sticky HTTP blackbox: legacy `<**sticky:...**>` marker must be ignored and route by current request only. Green after Rust parser sticky branch removal and continuationScope rename.
+
+## 2026-05-29 5520 Windsurf storm / account cooldown live closeout
+- 红测：`WINDSURF_ACCOUNT_POOL_COOLDOWN` 原先在 request-executor 被当作 blocking recoverable，导致线上最小 5520 请求挂到 90s 超时；新增执行层红测要求该错误 fail-fast，不进入同 provider 重试等待。
+- 修复真源：`request-executor-retry-execution-plan.ts` 对 Windsurf managed account pool cooldown 直接返回 `shouldRetry=false`；账号池冷却是 provider 内账号选择终态，不是 executor 可恢复重试。
+- 安装/重启：`ROUTECODEX_INSTALL_SKIP_E2E=1 npm run install:global` 成功，`routecodex restart --port 5520` 成功，`/health` 返回 ready true version 0.90.2468。
+- Live 证据：5520 最小 windsurf 请求 `openai-responses-windsurf.managed-gpt-5.5-low-20260529T123649608-232911-222` 从 90s 挂住变为 5.54s 返回 HTTP 429 `WINDSURF_ACCOUNT_POOL_COOLDOWN`；日志显示一次 transient 后 pool cooldown fail-fast，无连续客户端 502 风暴。
+- 编译阻塞修正：旧 sticky 删除后 `chat_servertool_orchestration.rs` 仍 import `resolve_sticky_key`，导致 install native build 失败；改用 `resolve_session_scope`/`resolve_routing_state_key` 后 `cargo build -p router-hotpath-napi --release` 通过。
+- Added red/green HTTP blackbox for direct/remote Responses continuation provider key: first tool_calls response on p1, submit_tool_outputs must route back to p1. Red showed second request round-robin to p2; fix: persist providerKey into ResponsesConversationStore capture/record and inject __shadowCompareForcedProviderKey from resumeMeta for submit continuation. Green: hits ["p1","p1"].
+
+## 2026-05-29 VR audit execution plan freeze
+- User confirmed direction: execute as plan + provide /goal.
+- Must preserve `[mem-observer]` default-visible output because it is the guardrail for detecting leaked `pendingNoResponseId` / `retainedInputItems` after failed or orphaned requests.
+- Current target semantics:
+  1. No sticky semantics anywhere; physically delete route sticky code/fields/branches, not just leave unused.
+  2. Continuation is not sticky: direct/remote resumes must restore same provider key; relay/local resumes should only restore local context and allow normal routing.
+  3. Coding route only from current-turn actual write operations; declarations/history/read/search/update_plan must not trigger coding.
+  4. Recoverable errors use unified failure entry/exit: same request retries current provider, third failure excludes it and reroutes backup; cross-request cooldown ladder remains 10m/30m/5h cycle.
+  5. Error requests must not permanently retain store input; mem-observer remains enabled by default.
+- Execution order: blackbox red tests -> audit true source -> surgical fix -> blackbox green -> build dev/install/restart -> live log proof -> docs/skills/memory update.
+
+## 2026-05-29 Windsurf provider internal tool leak
+- 现象：Windsurf `preprocessRequest()` 把 `windsurf_custom_tools` / `windsurf_declared_native_tools` / `windsurf_native_allowlist` / `windsurf_native_mode` 以 enumerable 字段写到 request body，导致 `node_repl` 与 `function.mcp_compat` 可被 Hub Pipeline snapshot/JSON 观察到。
+- 红测：`tests/providers/core/runtime/windsurf-mcp-only.spec.ts` 的 `RED: preprocess keeps Windsurf custom tool partition private from Hub Pipeline`，用 `node_repl + mcp_compat` 断言 preprocess 后 `Object.keys/JSON.stringify(body)` 不出现 Windsurf 内部字段、`mcp_compat` 或 `node_repl`。
+- 修复真源：`src/providers/core/runtime/windsurf-chat-provider.ts` 中 provider 内部拆分结果改用 `Object.defineProperty(... enumerable:false ...)` 写入；`sendRequestInternal()` 仍能通过同一 body 私有字段读取并转发 MCP field-10/native allowlist。
+- 验证：Windsurf MCP 回归 8/8 通过；Windsurf context continuity 14/14 通过；`npx tsc --noEmit` 通过；全局安装并 `routecodex restart --port 5520` 后 `/health` ready=true；安装产物 `/opt/homebrew/lib/node_modules/routecodex/dist/providers/core/runtime/windsurf-chat-provider.js` 含 hidden 字段实现。
+
+## 2026-05-29 stop_followup continuation responses context rebind
+- 现象：`stop_followup` 是正常 continuation relay 请求，但 nested reenter 只把 Responses context capture 到 `originalRequestId:stop_followup`；最终 provider response 以外层 requestId 进入 `recordResponse()`，store 无法通过 outer requestId 找到 context，出现 `missing_request_context`，后续 `previous_response_id`/submit continuation 可能断上下文。
+- 红测：`tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts` 的 `RED: stop_followup continuation rebinds captured responses context to final response id`，要求 nested responses followup 返回 `resp_*` 后调用 `rebindResponsesConversationRequestId(:stop_followup, resp_*)`。
+- 修复真源：`src/server/runtime/http-server/executor/servertool-followup-dispatch.ts` 在 nested followup 成功拿到 response body 后，读取 `id/response_id/response.id` 并把 `:stop_followup` request context rebind 到最终 responseId；随后现有 response conversion/store record 能用 responseId 找回 context 并记录 assistant output。
+- 验证：followup dispatch 全文件 23/23 通过；`npx tsc --noEmit` 通过；全局安装并 `routecodex restart --port 5520` 后 `/health` ready=true。`request-executor.responses-store-cleanup.spec.ts` 仍被测试环境缺 native `prepareResponsesConversationEntryJson` 阻塞，非本次改动路径。
+
+## 2026-05-29 VR audit plan doc
+- Added `docs/goals/virtual-router-routing-audit-plan.md` as execution plan truth for VR hit/switch/sticky/continuation/recoverable-error audit.
+- Mem observer must remain default-visible; acceptance must include `pendingNoResponseId` and `retainedInputItems` observation.
+
+## 2026-05-29 Windsurf transient retry same-account fix
+- Live 5520 evidence: request `openai-responses-router-gpt-5.4-20260529T131633524-233048-359` entered Windsurf provider, selected `ws-pro-3` for `gpt-5-5-low`, then got `WINDSURF_UPSTREAM_TRANSIENT` 502; provider code incorrectly treated transient as account failure, force-cooled `ws-pro-3`, deleted the session account binding, and retried same provider with `ws-pro-4` -> `ws-pro-2` -> `ws-pro-5`.
+- Root cause: `windsurf-chat-provider.ts` catch block force-called `markCurrentAliasTransientFailure(..., { forceCooldown: true })` and deleted `windsurfSelectedAccountAliasesBySession` / `windsurfCascadeSessionBindings` on transient/rate/service errors. This violated the desired invariant: once a request/session hits the healthiest account, provider retry must not switch accounts unless explicit quota/auth/account-unavailable is proven.
+- Red test: `tests/providers/core/runtime/windsurf-context-continuity.spec.ts` now asserts transient upstream error keeps the same account for continuation retry and does not create transient cooldown.
+- Fix: removed provider-local transient cooldown/release for recoverable upstream transient/service/rate errors; quota exhaustion still marks quota cooldown explicitly. Verification: Windsurf context continuity 14/14, account health routing 11/11, `npm run llmswitch:ensure && npx tsc --noEmit`, global install, `routecodex restart --port 5520`, `/health ready=true`.
+
+## 2026-05-29 VR continuation blackbox + dev build/install
+- `responses-continuation-provider-key-blackbox.mjs` root cause: direct and relay scenarios in one Node process polluted singleton runtime/bridge state while swapping HOME/RCC_HOME; real server does not hot-swap config roots mid-process. Test now runs direct and relay in isolated child processes while preserving HTTP blackbox semantics.
+- Continuation blackbox evidence: direct/remote hits `[p1,p1]`; relay/local hits `[p1,p2]`, proving direct restores provider key and relay/local does not pin provider.
+- Dev build/install evidence: `npm run build:dev` succeeded with BUILD_MODE=dev, global install produced routecodex `0.90.2470`, and managed `routecodex restart --port 5555` completed. Live log shows request start, virtual-router-hit, session-request, and mem-observer with pending/retained fields after restart.
+
+## 2026-05-29 Windsurf ws-pro-3 token 错配
+- 现象：`ws-pro-3` 配置账号是 `frost89409@gmail.com`，但健康探测读 `~/.rcc/auth/windsurf-ws-pro-3.json` 后返回邮箱 `2094423@qq.com`，导致 `extra=false/Free` 且错误命中旧 token。
+- 红测：`tests/providers/core/runtime/windsurf-account-health-routing.spec.ts` 增加 `managed entry must reject persisted token when probed email differs from configured account`，证明配置账号与探测邮箱不一致时旧 token 不能作为该 alias 参与排序。
+- 修复：账号池 entry 带上 configured account/password；健康探测 snapshot 记录 `accountEmail`；选择账号时若邮箱不匹配，优先用该 entry 密码重登并覆盖 alias token，否则把该 entry 标记 exhausted，禁止静默用错账号。
+- 唯一真源：必须在 `selectWindsurfAccount()`/managed entry health 阶段修，因为日志里的 `extra=false` 是健康探测读取了错误 persisted token；路由器、retry、模型排序都只能消费这里产出的账号事实。
+
+
+## 2026-05-29 VR provider-failure blackbox red
+- `node scripts/tests/provider-failure-ban-blackbox.mjs` red at line 408: after simulated restart, persisted 503 cooldown primary was skipped (`primaryHitsDelta=0`) instead of passive one-shot reprobe (`=1`).
+- 真源定位：Rust VR `apply_standard_filters` 只在 `route_candidates.len()==1` 时允许 persisted 503 daily cooldown provider soft-available；priority pool 有 backup 时不会给启动后首次命中机会，违反“每次启动第一次被动探测一次”。
+- 修复方向：在 Rust `ProviderHealthManager` import persisted cooldown 时标记 one-shot passive reprobe allowance；标准过滤对所有候选按顺序消费一次 allowance，失败后由现有 provider failure 重新写 cooldown，backup 仍可用。
+
+## 2026-05-29 Windsurf startup probe 卡住 `/v1/responses`
+- 现象：`/health` 显示 ready，但 POST `/v1/responses` TCP/body 已发送后 0 字节等待，日志没有 `▶ [/v1/responses] started`。
+- 真源：routes.ts 在 handler 前执行 `holdUntilReady()`，等待 `runtimeReadyPromise`；Windsurf startup probe 的 `checkHealth()` 继承 Cascade 300s 超时，导致 runtimeReady 长时间不 resolve，请求看起来“根本进不去”。
+- 修复：`enforceWindsurfStartupProbeForHandle()` 对 Windsurf `checkHealth()` 增加独立 startup probe timeout（默认 15s，可用 `ROUTECODEX_WINDSURF_STARTUP_PROBE_TIMEOUT_MS` 调整），超时显式 `WINDSURF_STARTUP_PROBE_TIMEOUT`，避免启动门被 Cascade 长超时拖死。
+- 修正：Windsurf startup health probe 不应靠短超时阻塞启动门；正确形态是只启动一次后台 reprobe，runtimeReady 不等待 Windsurf 健康探测。
+
+
+### 2026-05-29 progress update
+- 已把 HTTP 503 从“第一次失败立即 persisted cooldown”改向 recoverable threshold 语义：同请求可见 3 次 primary hit 后 `provider-switch exclude_and_reroute` 到 backup；第二个请求跳过 primary。
+- 新暴露问题：restart 后 passive reprobe 能选中 primary，但第一次 503 后 executor 只打印 `provider-switch retry_same_provider` 随即 502，没有进入下一 attempt；怀疑 provider send failure retry loop 被某个 failure path 中断，不是 VR selection 本身。
+- 已移除 provider failure retry path 的 source-request reenter 分支，并给 runtime-resolve failure plan 透传 routePool，但 restart case 仍红，需要继续追 request-executor send failure 返回后为何没有 loop continue。
+- 2026-05-29 extra 修正：Windsurf `overageBalanceMicros` 线上可返回字符串（如 frost Trial 的 `"44023249"`），extra 判断必须解析 number|string，不能只认 number。
+
+## 2026-05-29 retry branch simplification audit
+- User要求：provider recoverable/retry/reroute 逻辑走同一个简单分支；不要 catch 内分支套分支；最好每轮结束后重新进入统一分支，用不同选项驱动。
+- 当前目标：先确认 provider-failure-ban 黑盒红点，定位唯一 retry 状态推进点，再收敛。
+
+## 2026-05-29 Windsurf Cascade shape alignment
+- 已对比 `/Volumes/extension/code/WindsurfAPI`：`StartCascade`、`SendUserCascadeMessage`、`GetCascadeTrajectorySteps`、`GetCascadeTrajectory` 的 proto payload 在随机 metadata request id 归零后与本仓 builder 字节级一致。
+- 新红测发现缺口：RCC 本地 Cascade warmup 未像 WindsurfAPI 的 `getUserStatus()` 链路一样把 `GetUserStatus` 返回的 `userStatus` 注入 `UpdatePanelStateWithUserStatus`，导致 LS panel 缺账号/tier/model 状态后再 `StartCascade/SendUserCascadeMessage`。
+- 唯一修复点：`src/providers/core/runtime/windsurf-chat-provider.ts` 的 `ensureWindsurfCascadeWarmup()`；在同一 warmup 单次生命周期中加入 `GetUserStatus -> UpdatePanelStateWithUserStatus -> InitializeCascadePanelState -> AddTrackedWorkspace -> UpdateWorkspaceTrust -> Heartbeat -> StartCascade`。
+- 验证：`tests/providers/core/runtime/windsurf-request-shape-sample.spec.ts` 红转绿；Windsurf 相关 5 个测试文件 42/42 passed；`npx tsc --noEmit --pretty false` passed。
+
+- 端口隔离新约束：不同监听端口是天然隔离边界；每个 port/routingPolicyGroup 的路由池、provider candidates、health/cooldown/error-switch 状态不允许互相可见。后续黑盒必须覆盖跨端口失败不污染另一端口。
+- 继续黑盒对齐发现：WindsurfAPI 直发到同一 LS 时，隐藏 workspace 会被 LS 拒绝：`is hidden: ignore uri`。RCC 原默认 workspace 在 `~/.rcc/windsurf-workspaces`，与 WindsurfAPI 的非隐藏 workspace 形状不一致。
+- 唯一修复点：`resolveManagedWorkspacePath()` 默认改到 `os.tmpdir()/routecodex-windsurf-workspaces/workspace-*`；新增红测保证默认 path 不在 `/.rcc/`。
+- 对照证据：使用 WindsurfAPI builder + 同一 LS/账号，非隐藏 workspace 可完成 `GetUserStatus -> UpdatePanelStateWithUserStatus -> Initialize -> AddWorkspace -> Trust -> Heartbeat -> Start -> Send`，但最终 trajectory 仍返回 Windsurf 上游 `an internal error occurred`，说明剩余 live 失败不是 RCC builder 字节差异。
+
+- 真源定位：Rust selection 的 pool_matches_route_policy_group 之前在 requested_group 存在时仍允许 untagged pool (None=>true)，这会让端口 scoped route 看见全局/其它池。已改为 requested_group 下 None=>false，端口组成为硬隔离边界。
+
+## 2026-05-29 port isolation reminder
+- User restated routing invariant: different listener ports are natural isolation boundaries. Route pools/candidates/health-cooldown/error-switch state for one port/routingPolicyGroup must not be visible to another port. Current provider-failure blackbox port-isolation redpoint should be traced against this invariant before code changes.
+
+## 2026-05-29 provider failure blackbox checkpoint
+- provider-failure-ban blackbox now covers HTTP-level recoverable 503 same-provider retries, reroute to backup, restart passive reprobe, and port/routingPolicyGroup isolation.
+- Redpoint root cause during harness: shared ProviderTrafficGovernor is process-global; multiple blackbox scenarios swap HOME/RCC state dirs in one Node process, leaving shared governor rooted in previous temp dir. This made acquire loop against a deleted root and caused handler timeout before provider.send. Added test-only resetSharedProviderTrafficGovernorForTests and call it per scenario; not a production routing fallback.
+- Evidence: `timeout 30 node scripts/tests/provider-failure-ban-blackbox.mjs` printed ok=true and exited 0 after showing virtual-router-hit and provider-switch logs.
+## 2026-05-29 VR audit continuation
+- Resumed active goal: audit VR routing/failover semantics; current safe step is evidence-only audit before any further code edits.
+- Current known committed milestone: 3942e0fca provider failover/port isolation blackbox and fixes. Worktree still large/mixed; do not bulk stage or bulk checkout.
+- Targeted blackbox matrix rerun passed at 2026-05-29 15:41 local: no-sticky-routing, coding-current-turn, scheduling, continuation-provider-key, store-error-release, provider-failure-ban all exited 0.
+- Evidence observed: [virtual-router-hit] visible, coding declared-only -> default, actual apply_patch -> coding, read/update_plan after write -> default/tools not coding, provider-failure 503 primary hits 3 then backup, port isolation A/B maintained.
+- Added/strengthened stopless-followup HTTP blackbox to assert servertool followup is not provider-pinned: two round-robin providers must see crs1 -> crs2. Initial run against current dist passed (dist already routes followup via VR rather than same-provider pin), and script now exits explicitly to avoid timer hang.
+- Removed servertool followup stickyProvider source semantics from Rust skeleton config and TS followup policy/runtime types; followup no longer injects __shadowCompareForcedProviderKey from stickyProvider. direct continuation still uses explicit resume provider key path, not stickyProvider.
+- Verified after build-core + tsc: stopless HTTP blackbox providers crs1->crs2->crs1, no-sticky/coding/scheduling/continuation/store-release/provider-failure blackbox matrix exited 0.
+
+## 2026-05-29 15:56 5520 Kimi K2.6 基线
+- 按 Jason 要求将 `~/.rcc/config.toml` 的 `gateway_priority_5520` 六个 route 临时切到 `whitedrem.kimi-k2.6`。
+- `routecodex restart --port 5520` 成功；`/health` 返回 `ready=true,pipelineReady=true`。
+- `/v1/responses` smoke 命中 `thinking/gateway-priority-5520-round-robin-thinking -> whitedrem.key1.kimi-k2.6.kimi-k2.6`，证明 5520 路由/Hub/Provider 入口可达。
+- 请求失败为上游鉴权：HTTP 403 `GROUP_DELETED` / `API Key 所属分组已删除`，不是 5520 路由不可用。
+- 本机 provider 配置里目前只发现 `whitedrem.kimi-k2.6` 一个 Kimi K2.6 target；其他 Kimi 多为 `kimi-k2.5` 或 `kimi-for-coding`。
+- Committed d78b67219 fix(servertool): remove followup provider pin. Scope: stopless followup blackbox strengthened; stickyProvider removed from servertool skeleton/followup runtime and TS native payload types.
+## 2026-05-29 VR sticky cleanup continuation
+- Continue after d78b67219. Next audit target: leftover `sticky-queue` alias strategy and servertool `stickyKey` naming. Need separate provider-sticky semantics from state-scope naming before edits.
+
+## 2026-05-29 16:06 Windsurf Kimi K2.6 5520 结论
+- 用户纠正：这里不是测外部 whitedrem Kimi，而是测 Windsurf provider 里的 Kimi K2.6。
+- 直连 `GetUserStatus`（ws-pro-3/frost89409@gmail.com）拿到真实 Windsurf UID：`kimi-k2-6`，label `Kimi K2.6`，disabled=false；不是 `kimi-k2.6`。
+- 直连 ws-pro-3 LS `42103`，用 Windsurf.app minimal planner shape + `modelUid=kimi-k2-6`，返回 `RCC_WS_APP_SHAPE_OK`。
+- provider 源码补 `kimi-k2-6 -> modelTag kimi-k2-6`，红测 `Windsurf Kimi K2.6 UID must resolve before account selection` 已红转绿。
+- 5520 配置 `gateway_priority_5520` 六个 route 指向 `windsurf.kimi-k2-6`，home provider config 注册 `[provider.models."kimi-k2-6"]`。
+- 全局安装被既有 Rust native `config_bootstrap.rs` 编译错误阻断；为线上验证已对 `/opt/homebrew/lib/node_modules/routecodex/dist/providers/core/runtime/windsurf-chat-provider.js` 做同一映射热补丁。
+- `routecodex restart --port 5520` 后 `/v1/responses` smoke 成功：route `thinking/gateway-priority-5520-round-robin-thinking -> windsurf.managed.kimi-k2-6.kimi-k2-6`，账号 `ws-pro-3 extra=true score=100`，响应 `RCC_WS_5520_KIMI_OK`，HTTP 200。
+- Removed remaining VR alias sticky queue surface: aliasSelection/sticky-queue native wrappers, config bootstrap normalization, provider-key queue pin helpers, and stale docs. Added `scripts/tests/no-provider-sticky-physical-regression.mjs`, which first failed on leftover generated/source sticky term and now passes.
+- Verified: build-core dev, npm run llmswitch:ensure, npx tsc, no-provider-sticky physical regression, no-sticky blackbox, scheduling blackbox, continuation provider-key blackbox.
+- Committed b76f48125 refactor(router): remove alias sticky queues. Full targeted blackbox matrix passed after commit: no-provider-sticky physical, stopless followup, no-sticky, coding current-turn, scheduling, continuation provider-key, store-error-release, provider-failure-ban.
+
+## 2026-05-29 16:24 Windsurf internal account isolation + no self-lock
+- 根因确认：5520 Windsurf retry 时，首跳 session key 可能是 provider-default/unknown，后续 retry 才带 router session；旧 `isWindsurfAccountHeldByAnotherLiveSession` 会把首跳选中的 `ws-pro-3` 当作“其他 live session 占用”，导致同请求 retry 切到 `ws-pro-4`。
+- 修复：删除跨 session live-holder 避让，只保留最简单规则：同 session pinned alias 可用则继续用；否则按健康排序选第一个可用账号。内部账号不参与外部 provider selection。
+- 外部不可观测回归：Rust provider bootstrap 中 Windsurf account auth 一律生成 `windsurf.managed` runtime/aliasIndex，不暴露 `windsurf.ws-pro-*`。
+- 验证：`windsurf-account-health-routing` + `windsurf-request-shape-sample` 共 23 tests passed；Rust `bootstrap_keeps_windsurf_accounts_internal_to_managed_runtime` passed；全局安装成功；5520 smoke 成功返回 `RCC_WS_ACCOUNT_STICKY_OK`，route `windsurf.managed.kimi-k2-6`，内部账号 `ws-pro-3 extra=true`。
+
+## 2026-05-29 port/routing-pool isolation audit
+- 用户强调：不同端口天然隔离；端口错误/冷却状态、可见路由池、路由池候选都不能互相可见。
+- 当前代码证据：`buildHttpHandlerContext` 从 Host/socket 解析 matchedPort/routingPolicyGroup，并通过 metadata 写入 `matchedPort`/`routingPolicyGroup`；`executePortAwarePipeline` 注入 `routecodexLocalPort`/`routecodexRoutingPolicyGroup`/`allowedProviders`；每个 router port 用 `resolveHubPipelineForRoutingPolicyGroup` 拿 group 专属 HubPipeline。
+- Rust 证据：VR selection 读取 `routecodexRoutingPolicyGroup`，优先 `{group}:{route}` key，并用 `routePolicyGroup` 做硬过滤；`allowedProviders` 在 routing instruction state 中按 provider id 过滤候选。
+- 黑盒/回归证据：`provider-failure-ban-blackbox.mjs` 的 portIsolation 已证明 5555 group A 的 503/cooldown 不影响 6666 group B；`launcher-multiport-isolation.red.spec.ts`、`port-context-isolation.red.spec.ts`、`entry-port-snapshot-isolation.red.spec.ts`、`snapshot-store-port-isolation.red.spec.ts` 当前通过。
+- 待继续：回到线上 5555 `PROVIDER_NOT_AVAILABLE` 时，先判定是不是端口 group 专属路由池被过滤空，而不是跨端口污染；需要看对应 group 的 provider-health/candidate diagnostics。
+- 隔离审计发现两个需要收紧的点：1) `resolveHubPipelineForRoutingPolicyGroup` 对缺失 group pipeline 回退全局 hubPipeline，属于端口隔离 fail-open；2) Rust selection 对“只有一个 group-prefixed route”的情况跳过 `routePolicyGroup` 校验，极端情况下可能把请求 group 路由到唯一其它 group。
+- 已修：group pipeline 缺失时返回 null，并在 `executePortAwarePipeline` 对 router port fail-fast，不再回退全局 pipeline；Rust selection 对所有 pool 统一执行 `pool_matches_route_policy_group`。
+- 验证：端口隔离 jest 4 个文件 7 tests 通过；`BUILD_MODE=dev node scripts/build-core.mjs` 通过；`npm run llmswitch:ensure && npx tsc --noEmit false` 通过；`timeout 90 node scripts/tests/provider-failure-ban-blackbox.mjs` 通过，portIsolation hits={primarya:3,backupa:2,primaryb:1,backupb:0}。
+
+## 2026-05-29 Windsurf 单账号直发止血验证
+- 目标：按 Jason 要求先只保留唯一 extra 账号 `ws-pro-3`，移除健康探测/切号/冷却对发送链路的影响，先证明上下文通信 OK。
+- 真源问题：单账号配置时旧逻辑要求 `entries.length >= 2`，并会扫描 `~/.rcc/auth/windsurf-ws-pro-*.json` 把旧账号加回池；runtime managed auth 日志仍可能显示 `entries=0`，必须从 `~/.rcc/provider/windsurf/config.v2.toml` 的唯一 `tokenFile` 恢复账号。
+- 已改：`readManagedWindsurfAuthConfigDetailed()` 不再扫描旧 token 文件，允许 1 个账号；`selectWindsurfAccount()` 单账号直发，不 health probe、不 ranking；quota/transient cooldown 写入改为 no-op。
+- 配置：`~/.rcc/provider/windsurf/config.v2.toml` 与 `/Volumes/extension/.rcc/provider/windsurf/config.v2.toml` 只保留 `ws-pro-3 / frost89409@gmail.com`，并显式 `tokenFile = "~/.rcc/auth/windsurf-ws-pro-3.json"`。
+- 回归：`npm run jest:run -- --runTestsByPath tests/providers/core/runtime/windsurf-account-health-routing.spec.ts tests/providers/core/runtime/windsurf-request-shape-sample.spec.ts --runInBand`，14/14 passed。
+- Live：`POST http://127.0.0.1:5520/v1/responses` model `kimi-k2-6` 单跳返回 `RCC_WS_SINGLE_DIRECT_OK`，HTTP 200，日志 `single-account selected alias=ws-pro-3 ... accountsConfigured=1`。
+- 连续上下文：同 session `rcc-ws-continuity-smoke` 两跳，第一跳记住 `CTX_TOKEN_5520_ALPHA`，第二跳正确返回 `CTX_TOKEN_5520_ALPHA`，两跳均 `windsurf.managed.kimi-k2-6` 且 `ws-pro-3`。
+
+## 2026-05-29 port/router isolation verification
+- Confirmed SSOT for port route-pool isolation:
+  1. `RouteCodexHttpServer.resolveHubPipelineForRoutingPolicyGroup` must not fallback from a port routing group to global hub pipeline.
+  2. `executePortAwarePipeline` injects per-port `routecodexRoutingPolicyGroup` + `allowedProviders`; missing group pipeline is fail-fast.
+  3. Rust VR selection must always apply `routePolicyGroup` pool filtering; the old single-group shortcut was removed.
+  4. Responses continuation store now scopes HTTP-visible conversation entries by matched port/routing group; a response_id captured on port A is not visible on port B.
+- Blackbox evidence added: `scripts/tests/responses-continuation-port-isolation-blackbox.mjs` seeds a direct Responses tool call on port 5555/group A, then submits the response_id through port 6666/group B. Expected and observed: second request returns 400 and only group A upstream is hit once; no cross-port context/provider visibility.
+- Regression evidence: provider failure port isolation keeps hits `{ primarya:3, backupa:2, primaryb:1, backupb:0 }`; group A cooldown does not affect group B.
+
+## 2026-05-29 context routing investigation
+- Start: investigate longcontext/context-window route selecting MiniMax/default; no code changes yet.
+- Evidence: live 5555 logs show route=default/gateway-priority-5555-priority-default with reason=longcontext:token-threshold|tools:tool-request-detected, then MiniMax context window 2013.
+- Config: 5555 longcontext only targets mimo.mimo-v2.5-pro; default includes mimo pro + mini27 + sdfv.
+- MIMO provider config has conflicting context fields: maxContext=1048576 but maxContextTokens/contextWindow=200000.
+- Rust read_context_tokens currently prioritizes maxContextTokens over maxContext, so MIMO is registered as 200K context.
+- Selection rule: when longcontext candidate is active, non-default overflow pools are skipped if hardLimit=false, then default overflow candidates can still be selected. Repro with native VR: maxContextTokens=200000 => route default; maxContextTokens=1048576 => route longcontext.
+- Initial conclusion: current longcontext misroute is caused by context field precedence + default overflow fallback; not caused by latest sticky-removal/port-isolation commits, but recent changes did not guard this path.
+
+## 2026-05-29 Windsurf MCP truth-source trace
+- 用户要求：先确认 Windsurf.app 如何把 MCP 映射到远端 Cascade；禁止 prompt/text fallback，禁止瞎改。
+- 当前假设：SendUserCascadeMessage top-level field10 不是 MCP 入口；需追踪 CascadeToolConfig.field16 + McpServerState 注入路径。
+- Added HTTP blackbox scripts/tests/virtual-router-longcontext-context-window-blackbox.mjs. Red evidence before fix: request with >180K estimated tokens routed default/gateway-priority-5555-priority-default -> small.key1.mini-200k, not longcontext/big.
+- Fix implemented in Rust SSOT:
+  1) provider_bootstrap::read_context_tokens now reads all known context fields and uses largest declared positive value, so MIMO maxContext=1048576 is not masked by stale maxContextTokens=200000/contextWindow=200000.
+  2) selection.rs no longer permits overflow candidates when longcontext candidate is active, including default route; oversized longcontext requests must use a safe/risky provider or fail explicitly.
+- Green evidence after fix/build-core: longcontext blackbox logs longcontext/gateway-priority-5555-priority-longcontext -> big.key1.mimo-pro, smallHits=0.
+- Focused Rust tests added: read_context_tokens_uses_largest_declared_context_window; longcontext_active_does_not_fall_back_to_overflow_default_provider.
+
+- 验证：新增/更新 Windsurf MCP 红测，证明旧 field10 锚点会红；修复后 custom tools 开启 CascadeToolConfig.field16.mcp 且不再写 SendUserCascadeMessage field10。
+
+## 2026-05-29 Windsurf latest sample tool propagation check
+- 用户观察：latest sample 有响应但模型不知道 apply_patch 等工具。需要追踪工具是否从 Hub 到 provider，再到 Cascade。
+
+## 2026-05-29 Hub Pipeline Rustification 代码审计（LIVE_MCP_SHAPE_5520_0958）
+
+### 审计方法
+- 直接查看 `sharedmodule/llmswitch-core/src/conversion/hub/`、`src/server/runtime/http-server/`、`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/` 的实际代码，不依赖嘴炮。
+- 验证已有 `.codex-work/hub-pipeline-rustification-audit.md` 的准确性。
+
+### 关键验证结论
+
+1. **Operation Table Runner** (`operation-table/operation-table-runner.ts`) — 已确认 P0 违规
+   - `filterToolOnlyActionsWhenNoToolSignals`：遍历 messages，按 role/tool_call_id/tool_calls 检测 tool signals，过滤 bridge actions。
+   - `applyBridgePolicy`：根据 protocol 选择 messages source，执行 bridge action pipeline，回写 `chatEnvelope.messages`。
+   - `rebuildGeminiToolOutputsFromMessages`：遍历 messages，按 role === 'tool' 提取 tool_call_id/content/name，重建 `chatEnvelope.toolOutputs`。
+   - 审计原结论正确，需 Rust 化。
+
+2. **Response Mappers** (`response/response-mappers.ts`) — 已确认 P0 违规
+   - `injectResponsesReasoningExtension`：直接修改 payload.choices[0].message，注入 `reasoning` / `reasoning_content` 字段。
+   - `OpenAIChatResponseMapper.toChatCompletion`：先调用 TS 的 `injectResponsesReasoningExtension`，再调用 native `restoreResponseContinuationSemanticsWithNative`。
+   - `AnthropicResponseMapper` / `GeminiResponseMapper`：先调用 TS codec（`buildOpenAIChatFromAnthropicMessage` / `buildOpenAIChatFromGeminiResponse`），再调用 native。
+   - 审计原结论正确，reasoning inject 和 codec fallback 需在 Rust 中完成。
+
+3. **HubPipeline TS Class** (`pipeline/hub-pipeline.ts`) — 已确认编排层但含 TS 真源
+   - 仍是 TS 类，构造时初始化 `VirtualRouterEngine`（来自 `router/virtual-router/engine.ts`）。
+   - `executeHubPipelineRequest` 调用 `normalizeHubPipelineRequest` → `executeChatProcessEntryPipeline` / `executeRequestStagePipeline`。
+   - 虽然大量 stage 已 native，但 HubPipeline 类本身仍在 TS 中编排整个 pipeline 生命周期。
+   - **补充发现**：`VirtualRouterEngine` 在 TS 中仍有完整实现（`router/virtual-router/engine.ts`），Rust 有 `virtual_router_engine.rs` 但 TS 侧未完全退化为薄壳。
+
+4. **Rust 已覆盖范围** — 从 `lib.rs` 和 `hub_pipeline.rs` 验证
+   - `hub_pipeline.rs` 提供 `run_hub_pipeline`, `run_req_inbound_pipeline`, `run_req_process_pipeline`, `run_resp_outbound_pipeline` 等入口函数。
+   - 但这些函数在 Rust 中主要是 metadata 归一和 thin dispatch；真正的 heavy semantic work（format parse、semantic lift、tool governance、codec conversion）分散在各自的 `*_blocks.rs` 子模块中。
+   - `lib.rs` 列出 100+ 个 Rust 模块，涵盖：Virtual Router、Tool Governance、Route Select、Response Compat、Codecs、Clock、ServerTool、Media、SSE 等。
+   - 审计原结论“约 60% 语义已 Rust 化”基本准确，但需注意 Rust 侧的 `hub_pipeline.rs` 本身并非完整的 pipeline orchestrator，而是提供 napi 绑定的薄层。
+
+5. **TS 核心库剩余代码量** — 实测
+   - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/`：111 文件（含大量 `native-*.ts` 薄壳和 stage 计时/编排文件）
+   - `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/`：1 文件 + 26 个 semantic mapper（anthropic/responses/gemini 各 to-chat/from-chat）
+   - `sharedmodule/llmswitch-core/src/conversion/hub/response/`：9 文件（含 codec、runtime helper、policy）
+   - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/`：81 个 `native-*.ts` 文件（这些是 thin wrappers，非真源）
+   - `sharedmodule/llmswitch-core/src/conversion/hub/process/`：29 文件（chat process governance、marker strip、heartbeat directives、clock runtime bridge）
+   - `sharedmodule/llmswitch-core/src/conversion/hub/tool-governance/`：4 文件
+   - `sharedmodule/llmswitch-core/src/conversion/hub/tool-surface/`：3 文件
+   - **结论**：TS 代码量仍然庞大，但大量是薄壳（native-* 文件、stage 计时、snapshot recorder）。真正的语义代码集中在 operation-table、semantic-mappers、response-mappers、process/ 中的 marker/heartbeat/clock 逻辑。
+
+6. **Host 层（RouteCodex 主仓库）** — 边界确认
+   - `src/server/runtime/http-server/executor/` 下有 58 个文件，总大小约 ~500KB。
+   - 这些属于 host/provider runtime，不在 llmswitch-core 范围内。
+   - 根据 AGENTS.md rule 9："Hub Pipeline / Chat Process 必须 Rust-only"，但 host/provider 层不受此限制。
+   - `src/server/runtime/http-server/executor/provider-response-converter.ts`（1256 行）包含大量 provider response 转换和 servertool followup 逻辑——这是 host 层，非 core。
+   - `src/server/runtime/http-server/request-executor.ts`（1518 行）是请求执行器——host 层。
+   - `src/modules/pipeline/` 实际内容很少（interfaces + provider），不是 hub pipeline 真源。
+   - **结论**：host 层代码量大但不在 Rust 化范围内；核心关注 `sharedmodule/llmswitch-core/src/conversion/hub/`。
+
+7. **Native exports / Bridge 层** — 验证合规
+   - `src/modules/llmswitch/bridge/native-exports.ts`：100% 薄壳，调用 `requireCoreDist` / `importCoreDist` 获取 native 实现。
+   - `src/modules/llmswitch/bridge/routing-integrations.ts`：薄壳，动态加载 `conversion/hub/pipeline/hub-pipeline`。
+   - `src/modules/llmswitch/bridge/runtime-integrations.ts`：薄壳，但包含 responses conversation store 的全局 TS 缓存逻辑（`readGlobalResponsesConversationStore`）。
+   - **结论**：bridge 层基本合规，但 responses conversation store 的全局缓存是一个 TS 残留点。
+
+### 审计修正与补充
+
+1. **VirtualRouterEngine 双真源**：原有审计未明确指出 `router/virtual-router/engine.ts` 仍是 TS 真源。Rust 有 `virtual_router_engine.rs`，但 TS 侧未完全委托。需要确认 TS `VirtualRouterEngine` 是否已改为 Rust 代理模式。
+
+2. **Semantic Mappers 工作量修正**：原有审计估计 3-4 周/协议。实际查看 `operation-table/semantic-mappers/` 有 26 个文件，每个 mapper 文件 200-500 行，涉及大量协议特定逻辑。建议修正为 4-6 周/协议，尤其 Gemini mapper 涉及 contents/systemInstruction/toolConfig/safetySettings，最为复杂。
+
+3. **新增违规点**：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-route-and-outbound.ts`（18729 bytes）—— 路由与 outbound 编排，含 provider payload 观察、policy apply、tool surface 调用。这是 pipeline 核心编排文件，需要重点审查。
+
+4. **新增合规点**：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/` 下的各 stage index.ts 确实大多是薄壳（计时 + native 调用 + stage recorder），审计原结论正确。
+
+### 最终工作量修正
+
+- **P0 核心语义**：18-28 周（原 18-25 周，因 VirtualRouterEngine 确认需 Rust 化 + Gemini mapper 复杂度上调）
+- **P1 运行时桥接**：3-5 周（不变）
+- **P2 收尾测试**：4-6 周（不变）
+- **总计**：25-39 周（原 20-30 周，因 VirtualRouterEngine 和 mapper 复杂度修正）
+
+### 下一步建议
+
+1. 先确认 `VirtualRouterEngine` TS → Rust 委托状态：读 `router/virtual-router/engine.ts` 前 100 行，确认它是否已调用 Rust native。
+2. 如果 VirtualRouterEngine 仍是 TS 真源，应将其列为 P0 最高优先级（因为它是路由核心）。
+3. 然后按原审计 Phase 1 执行：Policy Engine → Tool Surface → Operation Table → Responses Mapper → Client Remap。
+
+## 2026-05-29 Windsurf native tools double-preprocess fix
+- 现象：5520 Windsurf `tools=[shell_command]` 请求返回纯文本嘴炮，日志 `nativeMode=false nativeTools=[]`，但 Hub Pipeline dry-run 证明 providerPayload 保留了 `tools/tool_choice`。
+- 真源：`BaseProvider.processIncoming()` 先调用 `preprocessRequest()`，随后公共 `sendRequest()` 又二次调用 `preprocessRequest()`；Windsurf 第一次把工具分区保存为 non-enumerable hidden 字段并删除 `tools`，第二次 `const req={...request}` 丢掉 hidden 字段，导致发送阶段无 native/MCP 工具。
+- 修复：`WindsurfChatProvider.preprocessRequest()` 不再 shallow-spread 克隆请求，保留 provider 内部 hidden 工具字段；新增回归 `repeated provider preprocess preserves private Windsurf native tool fields`。
+- 验证：`tests/providers/core/runtime/windsurf-mcp-only.spec.ts` 10/10 通过；`npm run build:min` 通过；安装 `0.90.2475` 并 `routecodex restart --port 5520`；live `/tmp/windsurf-native-live.json` 返回 `status=requires_action`、`function_call name=shell_command arguments={"command":"pwd"}`。
+
+## note append
+- 2026-05-29: 用户要求把已验证可提交部分继续分拆提交，避免混在一起丢失；当前先审查 worktree，修正 Rust VR selection 测试语义后再按主题提交。
