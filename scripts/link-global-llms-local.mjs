@@ -12,13 +12,18 @@ const localLlms = path.join(projectRoot, 'sharedmodule', 'llmswitch-core');
 function parseArgs(argv) {
   const out = {
     packageNames: [],
-    requireTarget: false
+    requireTarget: false,
+    skipInstallCurrent: false
   };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = String(argv[i] || '').trim();
     if (!arg) continue;
     if (arg === '--require-target') {
       out.requireTarget = true;
+      continue;
+    }
+    if (arg === '--skip-install-current') {
+      out.skipInstallCurrent = true;
       continue;
     }
     if (arg === '--package' || arg === '-p') {
@@ -100,7 +105,9 @@ function main() {
   ensureLocalLlmsReady();
   const globalRoot = npmRootGlobal();
   const results = targets.map((name) => linkForPackage(globalRoot, name));
-  const installResults = buildInstallCurrentRoots().map((root) => linkForInstallCurrentRoot(root));
+  const installResults = args.skipInstallCurrent
+    ? []
+    : buildInstallCurrentRoots().map((root) => linkForInstallCurrentRoot(root));
   const changed = results.filter((it) => it.changed);
 
   if (args.requireTarget && changed.length <= 0) {
@@ -127,6 +134,9 @@ function main() {
     } else if (row.skipped && row.reason !== 'install-root-missing') {
       console.log(`[link-global-llms-local] skip install current ${row.installRoot} (${row.reason})`);
     }
+  }
+  if (args.skipInstallCurrent) {
+    console.log('[link-global-llms-local] skip install current roots (--skip-install-current)');
   }
 }
 

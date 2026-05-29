@@ -16,6 +16,7 @@ import {
   type WindsurfProviderRuntimeOptions,
 } from '../contracts/windsurf-provider-contract.js';
 import { HttpTransportProvider } from './http-transport-provider.js';
+import { extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import { ApiKeyAuthProvider } from '../../auth/apikey-auth.js';
 import { resolveRccAuthDir } from '../../../config/user-data-paths.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
@@ -2226,15 +2227,34 @@ export class WindsurfChatProvider extends HttpTransportProvider {
 
   private resolveWindsurfSessionStateKeyFromRequest(request: UnknownObject): string {
     const body = this.readRequestBodyRecord(request);
+    const bodyMetadata = body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
+      ? body.metadata as Record<string, unknown>
+      : undefined;
+    const runtimeMetadata = extractProviderRuntimeMetadata(request);
+    const routeMetadata = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
+      ? runtimeMetadata.metadata as Record<string, unknown>
+      : undefined;
+    const responsesResume = routeMetadata?.responsesResume && typeof routeMetadata.responsesResume === 'object' && !Array.isArray(routeMetadata.responsesResume)
+      ? routeMetadata.responsesResume as Record<string, unknown>
+      : undefined;
+    const restoredScope = typeof responsesResume?.restoredFromScopeKey === 'string' ? responsesResume.restoredFromScopeKey.trim() : '';
+    const scopeSession = restoredScope.startsWith('session:') ? restoredScope.slice('session:'.length).trim() : '';
+    const scopeConversation = restoredScope.startsWith('conversation:') ? restoredScope.slice('conversation:'.length).trim() : '';
     const candidates: Array<unknown> = [
       body.session_id,
       body.sessionId,
       body.conversation_id,
       body.conversationId,
-      body.response_id,
-      body.responseId,
-      body.parent_response_id,
-      body.parentResponseId,
+      bodyMetadata?.session_id,
+      bodyMetadata?.sessionId,
+      bodyMetadata?.conversation_id,
+      bodyMetadata?.conversationId,
+      routeMetadata?.session_id,
+      routeMetadata?.sessionId,
+      routeMetadata?.conversation_id,
+      routeMetadata?.conversationId,
+      scopeSession,
+      scopeConversation,
     ];
     for (const candidate of candidates) {
       if (typeof candidate === 'string' && candidate.trim()) {

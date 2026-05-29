@@ -4,6 +4,16 @@ set -euo pipefail
 
 echo "🌍 全局安装 routecodex..."
 
+SOURCE_ROOT="$(pwd -P)"
+INSTALL_BUILD_ROOT=""
+
+cleanup_isolated_build_root() {
+    if [ -n "${INSTALL_BUILD_ROOT:-}" ] && [ "$INSTALL_BUILD_ROOT" != "$SOURCE_ROOT" ] && [ -d "$INSTALL_BUILD_ROOT" ]; then
+        rm -rf "$INSTALL_BUILD_ROOT"
+    fi
+}
+trap cleanup_isolated_build_root EXIT
+
 # 检查npm配置
 echo "📋 npm配置信息:"
 NPM_PREFIX=$(npm config get prefix)
@@ -60,12 +70,81 @@ check_tmux() {
     exit 1
 }
 
+prepare_isolated_build_root() {
+    if [ -n "${INSTALL_BUILD_ROOT:-}" ]; then
+        return
+    fi
+    if [ "${ROUTECODEX_INSTALL_INPLACE_BUILD:-0}" = "1" ]; then
+        INSTALL_BUILD_ROOT="$SOURCE_ROOT"
+        echo "⚠️  ROUTECODEX_INSTALL_INPLACE_BUILD=1: 使用仓库目录构建（非隔离）"
+        return
+    fi
+
+    INSTALL_BUILD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/routecodex-install-build.XXXXXX")"
+    echo "🧱 使用隔离构建目录: $INSTALL_BUILD_ROOT"
+
+    copy_isolated_path() {
+        local relative="$1"
+        local source_path="$SOURCE_ROOT/$relative"
+        local target_path="$INSTALL_BUILD_ROOT/$relative"
+        if [ ! -e "$source_path" ]; then
+            return
+        fi
+        mkdir -p "$(dirname "$target_path")"
+        if [ -d "$source_path" ]; then
+            if command -v rsync >/dev/null 2>&1; then
+                rsync -a --delete "$source_path/" "$target_path/"
+            else
+                mkdir -p "$target_path"
+                (cd "$source_path" && tar -cf - .) | (cd "$target_path" && tar -xf -)
+            fi
+        else
+            cp -p "$source_path" "$target_path"
+        fi
+    }
+
+    copy_llmswitch_core() {
+        local relative="sharedmodule/llmswitch-core"
+        local source_path="$SOURCE_ROOT/$relative"
+        local target_path="$INSTALL_BUILD_ROOT/$relative"
+        mkdir -p "$(dirname "$target_path")"
+        mkdir -p "$target_path"
+        (cd "$source_path" && COPYFILE_DISABLE=1 tar \
+            --exclude './rust-core/target' \
+            --exclude './node_modules' \
+            --exclude './dist' \
+            --exclude './coverage' \
+            --exclude './test-results' \
+            --exclude './tsconfig.tsbuildinfo' \
+            -cf - .) | (cd "$target_path" && tar -xf -)
+        if [ -d "$SOURCE_ROOT/$relative/rust-core/target" ]; then
+            ln -s "$SOURCE_ROOT/$relative/rust-core/target" "$target_path/rust-core/target"
+        fi
+        if [ -d "$SOURCE_ROOT/$relative/node_modules" ]; then
+            ln -s "$SOURCE_ROOT/$relative/node_modules" "$target_path/node_modules"
+        fi
+    }
+
+    for item in \
+        package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js eslint.config.js rcc README.md LICENSE \
+        src scripts config configsamples docs webui vendor package; do
+        copy_isolated_path "$item"
+    done
+    copy_isolated_path "samples/mock-provider"
+    copy_llmswitch_core
+
+    if [ -d "$SOURCE_ROOT/node_modules" ]; then
+        ln -s "$SOURCE_ROOT/node_modules" "$INSTALL_BUILD_ROOT/node_modules"
+    fi
+}
+
 # 构建项目
 build_project() {
     echo "🔨 构建项目..."
+    prepare_isolated_build_root
+    pushd "$INSTALL_BUILD_ROOT" >/dev/null
 
-    # 清理旧的构建文件
-    rm -rf dist
+    rm -rf .install-build-dist-check
 
     # 检查是否已有依赖
     if [ ! -d "node_modules" ]; then
@@ -111,7 +190,12 @@ build_project() {
         echo "❌ 构建失败：找不到 dist/cli.js"
         exit 1
     fi
+    if [ ! -f "dist/error-handling/route-error-hub.js" ]; then
+        echo "❌ 构建失败：找不到 dist/error-handling/route-error-hub.js"
+        exit 1
+    fi
     echo "✅ 构建完成"
+    popd >/dev/null
 }
 
 # 全局安装
@@ -140,12 +224,21 @@ global_install() {
         fi
     fi
 
-    # 依赖本地已完成的 dist，跳过 install 阶段脚本，避免二次触发 repo 审计/构建。
-    npm install -g . --no-audit --no-fund --omit=optional --ignore-scripts
+    # 依赖隔离 build root 中已完成的 dist；先 pack 再安装，避免 npm 把临时目录装成全局 symlink。
+    local pack_dir="$INSTALL_BUILD_ROOT/.install-pack"
+    mkdir -p "$pack_dir"
+    local packed_name
+    packed_name="$(cd "$INSTALL_BUILD_ROOT" && npm pack --pack-destination "$pack_dir" --silent | awk '/\.tgz$/ { name=$0 } END { print name }')"
+    local packed_path="$pack_dir/$packed_name"
+    if [ ! -f "$packed_path" ]; then
+        echo "❌ 全局安装失败：npm pack 未生成 tarball: $packed_path"
+        exit 1
+    fi
+    npm install -g "$packed_path" --no-audit --no-fund --omit=optional --ignore-scripts
 
     # 全局安装后再次修复可执行位（解决偶发 permission denied）
-    node scripts/ensure-cli-executable.mjs || true
-    node scripts/ensure-cli-command-shim.mjs || true
+    node "$INSTALL_BUILD_ROOT/scripts/ensure-cli-executable.mjs" || true
+    node "$SOURCE_ROOT/scripts/ensure-cli-command-shim.mjs" || true
 
     if [ $? -eq 0 ]; then
         echo "✅ 全局安装成功"
@@ -157,7 +250,7 @@ global_install() {
 
 link_global_llms_dev() {
     echo "🔗 链接全局 rcc-llmswitch-core 到本地 sharedmodule (dev 模式)..."
-    node scripts/link-global-llms-local.mjs --package routecodex --require-target
+    node scripts/link-global-llms-local.mjs --package routecodex --require-target --skip-install-current
 }
 
 refresh_rcc_install_current_snapshots() {
@@ -193,7 +286,7 @@ refresh_rcc_install_current_snapshots() {
         seen="$seen $root"
         mkdir -p "$root"
         echo "   -> $root"
-        RCC_HOME="$root" ROUTECODEX_HOME="$root" ROUTECODEX_USER_DIR="$root" node scripts/install-release-snapshot.mjs
+        (cd "$INSTALL_BUILD_ROOT" && RCC_HOME="$root" ROUTECODEX_HOME="$root" ROUTECODEX_USER_DIR="$root" node scripts/install-release-snapshot.mjs)
         refreshed=$((refreshed + 1))
     done
     if [ "$refreshed" -eq 0 ]; then

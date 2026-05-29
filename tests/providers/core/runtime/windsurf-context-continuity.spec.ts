@@ -12,10 +12,12 @@ const deps: any = {
 
 describe('Windsurf context continuity — sticky session + delta growth', () => {
   let WindsurfChatProvider: any;
+  let attachProviderRuntimeMetadata: any;
   const createdProviders: any[] = [];
 
   beforeAll(async () => {
     ({ WindsurfChatProvider } = await import('../../../../src/providers/core/runtime/windsurf-chat-provider.ts'));
+    ({ attachProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.ts'));
   });
 
   afterEach(async () => {
@@ -110,6 +112,106 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
     expect(round2).toMatchObject({
       choices: [{ message: { role: 'assistant', content: 'file content: hello world' }, finish_reason: 'stop' }],
     });
+  });
+
+  test('RED: previous_response_id must not replace stable Windsurf session key', () => {
+    const provider = createProvider();
+    const request = {
+      body: { previous_response_id: 'resp_prev_001' },
+    } as Record<string, unknown>;
+    attachProviderRuntimeMetadata(request, {
+      metadata: { sessionId: 'codex-session-stable' },
+    });
+
+    expect((provider as any).resolveWindsurfSessionStateKeyFromRequest(request)).toBe('codex-session-stable');
+  });
+
+  test('RED: changing previous_response_id under one session reuses one cascade and offset', async () => {
+    const provider = createProvider();
+
+    jest.spyOn(provider, 'resolveCascadeApiKey')
+      .mockResolvedValue('devin-session-token$previous-id-delta' as never);
+    jest.spyOn(provider, 'resolveManagedRuntimeOptions')
+      .mockResolvedValue({ lsPort: 42101, csrfToken: 'csrf-session', sessionId: 'configured-session' } as never);
+    const startSpy = jest.spyOn(provider, 'sendStartCascade')
+      .mockResolvedValue('cascade-session-prev-stable' as never);
+    jest.spyOn(provider, 'sendCascadeMessage').mockResolvedValue(undefined as never);
+    const pollSpy = jest.spyOn(provider, 'pollCascadeTrajectorySteps')
+      .mockResolvedValueOnce({
+        candidate: { role: 'assistant', content: 'first' },
+        usage: { inputTokens: 4, outputTokens: 1 },
+        stepOffset: 4,
+      } as never)
+      .mockResolvedValueOnce({
+        candidate: { role: 'assistant', content: 'second' },
+        usage: { inputTokens: 6, outputTokens: 1 },
+        stepOffset: 7,
+      } as never);
+
+    const round1 = {
+      body: { model: 'gpt-5.4-medium', previous_response_id: 'resp_first', messages: [{ role: 'user', content: 'first turn' }] },
+    } as Record<string, unknown>;
+    attachProviderRuntimeMetadata(round1, { metadata: { sessionId: 'codex-session-stable' } });
+    const round2 = {
+      body: { model: 'gpt-5.4-medium', previous_response_id: 'resp_second', messages: [{ role: 'user', content: 'second turn' }] },
+    } as Record<string, unknown>;
+    attachProviderRuntimeMetadata(round2, { metadata: { sessionId: 'codex-session-stable' } });
+
+    await provider.sendRequestInternal(round1);
+    await provider.sendRequestInternal(round2);
+
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect(pollSpy).toHaveBeenNthCalledWith(1, expect.objectContaining({ cascadeId: 'cascade-session-prev-stable', stepOffset: 0 }));
+    expect(pollSpy).toHaveBeenNthCalledWith(2, expect.objectContaining({ cascadeId: 'cascade-session-prev-stable', stepOffset: 4 }));
+  });
+
+  test('session: same request session reuses one cascade and advances trajectory offset', async () => {
+    const provider = createProvider();
+
+    jest.spyOn(provider, 'resolveCascadeApiKey')
+      .mockResolvedValue('devin-session-token$session' as never);
+    jest.spyOn(provider, 'resolveManagedRuntimeOptions')
+      .mockResolvedValue({ lsPort: 42101, csrfToken: 'csrf-session', sessionId: 'configured-session' } as never);
+    const startSpy = jest.spyOn(provider, 'sendStartCascade')
+      .mockResolvedValue('cascade-session-1' as never);
+    const sendCalls: Array<Record<string, unknown>> = [];
+    jest.spyOn(provider, 'sendCascadeMessage')
+      .mockImplementation(async (args: unknown) => {
+        sendCalls.push(args as Record<string, unknown>);
+      });
+    const pollSpy = jest.spyOn(provider, 'pollCascadeTrajectorySteps')
+      .mockResolvedValueOnce({
+        candidate: { role: 'assistant', content: 'first' },
+        usage: { inputTokens: 4, outputTokens: 1 },
+        stepOffset: 3,
+      } as never)
+      .mockResolvedValueOnce({
+        candidate: { role: 'assistant', content: 'second' },
+        usage: { inputTokens: 6, outputTokens: 1 },
+        stepOffset: 5,
+      } as never);
+
+    await provider.sendRequestInternal({
+      body: { model: 'gpt-5.4-medium', session_id: 'ws-session-1', messages: [{ role: 'user', content: 'first turn' }] },
+    });
+    await provider.sendRequestInternal({
+      body: {
+        model: 'gpt-5.4-medium',
+        session_id: 'ws-session-1',
+        messages: [
+          { role: 'user', content: 'first turn' },
+          { role: 'assistant', content: 'first' },
+          { role: 'user', content: 'second turn' },
+        ],
+      },
+    });
+
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[0]).toMatchObject({ cascadeId: 'cascade-session-1', sessionId: expect.any(String) });
+    expect(sendCalls[1]).toMatchObject({ cascadeId: 'cascade-session-1', sessionId: sendCalls[0].sessionId });
+    expect(pollSpy).toHaveBeenNthCalledWith(1, expect.objectContaining({ cascadeId: 'cascade-session-1', stepOffset: 0 }));
+    expect(pollSpy).toHaveBeenNthCalledWith(2, expect.objectContaining({ cascadeId: 'cascade-session-1', stepOffset: 3 }));
   });
 
   // --- Test 2: Account rotation ---
