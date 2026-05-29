@@ -200,8 +200,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
                 },
                 metadata: {
                   stream: false,
-                  preserveRouteHint: false,
-                  disableStickyRoutes: true
+                  preserveRouteHint: false
                 }
               }
             }

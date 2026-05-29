@@ -200,6 +200,8 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   beforeEach(() => {
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     mockCreateSnapshotRecorder.mockClear();
+    mockCaptureResponsesRequestContext.mockClear();
+    mockRecordResponsesResponseForRequest.mockClear();
     mockResumeResponsesConversation.mockReset();
     mockResumeLatestResponsesContinuationByScope.mockReset();
   });
@@ -725,6 +727,85 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     }
   });
 
+  it('blackbox keeps streamed tool_call continuation context under response id without missing request context', async () => {
+    const pipelineExecute = jest.fn(async (_input: any) => ({
+      status: 200,
+      body: {
+        id: 'resp_stream_capture_tool_1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'call_stream_shell_1',
+            name: 'shell_command',
+            arguments: JSON.stringify({ command: 'pwd' })
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: { tool_calls: [] }
+        }
+      },
+      usageLogInfo: {
+        finishReason: 'tool_calls',
+        routeName: 'coding/gateway-priority-5555-coding',
+        providerKey: 'mimo.pool.mimo-v2.5-pro',
+        timingRequestIds: ['openai-responses-mimo.pool-mimo-v2.5-pro-20260528T153512919-230769-357'],
+        sessionId: 'rcc-zterm'
+      }
+    }));
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses', (req, res) => {
+      void handleResponses(req as any, res as any, {
+        executePipeline: pipelineExecute,
+        errorHandling: null
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const payload = {
+        model: 'gpt-5.4',
+        stream: true,
+        store: true,
+        metadata: { session_id: 'rcc-zterm' },
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'call shell_command' }] }],
+        tools: [{ type: 'function', name: 'shell_command', parameters: { type: 'object' } }]
+      };
+
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+        body: JSON.stringify(payload)
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('resp_stream_capture_tool_1');
+      await waitForMockCalls(mockCaptureResponsesRequestContext, 1);
+      await waitForMockCalls(mockRecordResponsesResponseForRequest, 1);
+      expect(mockCaptureResponsesRequestContext).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'resp_stream_capture_tool_1',
+        payload: expect.objectContaining({ model: 'gpt-5.4', store: true }),
+        sessionId: 'rcc-zterm',
+        providerKey: 'mimo.pool.mimo-v2.5-pro'
+      }));
+      expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'resp_stream_capture_tool_1',
+        response: expect.objectContaining({ id: 'resp_stream_capture_tool_1' }),
+        sessionId: 'rcc-zterm',
+        providerKey: 'mimo.pool.mimo-v2.5-pro'
+      }));
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+
   it('auto-detects submit_tool_outputs payload posted to /v1/responses and resumes the conversation', async () => {
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {
@@ -998,10 +1079,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         model: 'gpt-5.3-codex',
         metadata: {
           session_id: 'sess-1',
-          __shadowCompareForcedProviderKey: 'crs.key2.gpt-5.3-codex',
-          __rt: {
-            disableStickyRoutes: true
-          }
+          __shadowCompareForcedProviderKey: 'crs.key2.gpt-5.3-codex'
         },
         input: [
           {
@@ -1046,9 +1124,6 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineInput.metadata?.__raw_request_body?.input).toHaveLength(3);
       expect(pipelineInput.metadata?.session_id).toBe('sess-1');
       expect(pipelineInput.metadata?.__shadowCompareForcedProviderKey).toBe('crs.key2.gpt-5.3-codex');
-      expect(pipelineInput.metadata?.__rt).toMatchObject({
-        disableStickyRoutes: true
-      });
     } finally {
       await closeServer(server);
     }

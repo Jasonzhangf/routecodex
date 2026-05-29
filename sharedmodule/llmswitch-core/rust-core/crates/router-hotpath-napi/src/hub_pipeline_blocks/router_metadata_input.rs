@@ -125,13 +125,6 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
         }
     }
     if let Some(runtime_flags_obj) = runtime_flags.as_object() {
-        if runtime_flags_obj
-            .get("disableStickyRoutes")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            out.insert("disableStickyRoutes".to_string(), Value::Bool(true));
-        }
         if include_estimated_input_tokens {
             if let Some(value) = runtime_flags_obj.get("estimatedInputTokens") {
                 out.insert("estimatedInputTokens".to_string(), value.clone());

@@ -30,7 +30,8 @@ pub(crate) fn resolve_stop_message_router_metadata(metadata: &Value) -> Value {
         metadata_obj,
         &["clientTmuxSessionId", "client_tmux_session_id"],
     );
-    let tmux = read_first_object_trimmed_string(metadata_obj, &["tmuxSessionId", "tmux_session_id"]);
+    let tmux =
+        read_first_object_trimmed_string(metadata_obj, &["tmuxSessionId", "tmux_session_id"]);
     let resolved_tmux = client_tmux.or(tmux);
     if let Some(tmux_id) = resolved_tmux {
         out.insert(
@@ -54,16 +55,6 @@ pub(crate) fn resolve_router_metadata_runtime_flags(metadata: &Value) -> Value {
         Some(v) => v,
         None => return Value::Object(out),
     };
-
-    let disable_sticky_routes = metadata_obj
-        .get("__rt")
-        .and_then(|v| v.as_object())
-        .and_then(|row| row.get("disableStickyRoutes"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    if disable_sticky_routes {
-        out.insert("disableStickyRoutes".to_string(), Value::Bool(true));
-    }
 
     if let Some(raw_estimated_tokens) = metadata_obj
         .get("estimatedInputTokens")
@@ -190,7 +181,6 @@ pub(crate) fn build_hub_pipeline_result_metadata(input: &Value) -> Result<Value,
 
     Ok(Value::Object(out))
 }
-
 
 fn normalize_hub_policy_mode(raw: Option<&str>) -> String {
     let token = raw.unwrap_or("").trim().to_ascii_lowercase();

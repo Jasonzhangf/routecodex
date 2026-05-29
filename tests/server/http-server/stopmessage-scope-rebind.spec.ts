@@ -38,7 +38,6 @@ function createRoutingState(seed: {
 } = {}): Record<string, unknown> {
   return {
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set<string>(),
     disabledProviders: new Set<string>(),

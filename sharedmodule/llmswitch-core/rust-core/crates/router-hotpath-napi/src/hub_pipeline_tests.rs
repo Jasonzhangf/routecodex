@@ -490,17 +490,10 @@ fn test_resolve_stop_message_router_metadata_empty_input_returns_empty_object() 
 #[test]
 fn test_resolve_router_metadata_runtime_flags_extracts_values() {
     let metadata = json!({
-        "__rt": {
-            "disableStickyRoutes": true
-        },
         "estimatedInputTokens": 1234
     });
     let output = resolve_router_metadata_runtime_flags(&metadata);
     let row = output.as_object().expect("object output");
-    assert_eq!(
-        row.get("disableStickyRoutes").and_then(|v| v.as_bool()),
-        Some(true)
-    );
     assert_eq!(
         row.get("estimatedInputTokens").and_then(|v| v.as_f64()),
         Some(1234.0)
@@ -508,16 +501,12 @@ fn test_resolve_router_metadata_runtime_flags_extracts_values() {
 }
 
 #[test]
-fn test_resolve_router_metadata_runtime_flags_ignores_false_or_non_numeric() {
+fn test_resolve_router_metadata_runtime_flags_ignores_non_numeric() {
     let metadata = json!({
-        "__rt": {
-            "disableStickyRoutes": false
-        },
         "estimatedInputTokens": "1234"
     });
     let output = resolve_router_metadata_runtime_flags(&metadata);
     let row = output.as_object().expect("object output");
-    assert!(!row.contains_key("disableStickyRoutes"));
     assert!(!row.contains_key("estimatedInputTokens"));
 }
 
@@ -538,7 +527,6 @@ fn test_build_router_metadata_input_extracts_runtime_flags_and_stop_message_fiel
         "conversationId": "conv-1",
         "includeEstimatedInputTokens": true,
         "metadata": {
-            "__rt": { "disableStickyRoutes": true },
             "estimatedInputTokens": 88,
             "stopMessageClientInjectScope": " tmux:abc "
         }
@@ -562,10 +550,6 @@ fn test_build_router_metadata_input_extracts_runtime_flags_and_stop_message_fiel
         row.get("stopMessageClientInjectScope")
             .and_then(|v| v.as_str()),
         Some("tmux:abc")
-    );
-    assert_eq!(
-        row.get("disableStickyRoutes").and_then(|v| v.as_bool()),
-        Some(true)
     );
     assert_eq!(
         row.get("estimatedInputTokens").and_then(|v| v.as_f64()),
@@ -598,7 +582,9 @@ fn test_lift_responses_resume_into_semantics_emits_null_tombstone_for_metadata_m
         "native metadata patch must include explicit tombstone so TS Object.assign clears stale key"
     );
     assert!(
-        next_metadata.get("responsesResume").is_some_and(|v| v.is_null()),
+        next_metadata
+            .get("responsesResume")
+            .is_some_and(|v| v.is_null()),
         "responsesResume tombstone must be null for shape-preserving merge semantics"
     );
     assert_eq!(
@@ -617,16 +603,11 @@ fn test_build_router_metadata_input_hides_estimated_tokens_when_not_requested() 
     let input = json!({
         "requestId": "req-2",
         "metadata": {
-            "__rt": { "disableStickyRoutes": true },
             "estimatedInputTokens": 123
         }
     });
     let output = build_router_metadata_input(&input).expect("router metadata input");
     let row = output.as_object().expect("output object");
-    assert_eq!(
-        row.get("disableStickyRoutes").and_then(|v| v.as_bool()),
-        Some(true)
-    );
     assert!(!row.contains_key("estimatedInputTokens"));
 }
 
@@ -728,8 +709,7 @@ fn test_build_hub_pipeline_result_metadata_applies_shadow_compare() {
         "effectivePolicy": { "mode": "enforce" },
         "shadowBaselineProviderPayload": { "messages": [] }
     });
-    let output =
-        build_hub_pipeline_result_metadata(&input).expect("hub pipeline result metadata");
+    let output = build_hub_pipeline_result_metadata(&input).expect("hub pipeline result metadata");
     let row = output.as_object().expect("output object");
     assert_eq!(row.get("existing").and_then(|v| v.as_bool()), Some(true));
     assert_eq!(
@@ -778,8 +758,7 @@ fn test_build_hub_pipeline_result_metadata_defaults_candidate_mode_off() {
         "effectivePolicy": { "mode": "bad-mode" },
         "shadowBaselineProviderPayload": { "x": 1 }
     });
-    let output =
-        build_hub_pipeline_result_metadata(&input).expect("hub pipeline result metadata");
+    let output = build_hub_pipeline_result_metadata(&input).expect("hub pipeline result metadata");
     let row = output.as_object().expect("output object");
     assert_eq!(
         row.get("hubShadowCompare")
@@ -1225,8 +1204,8 @@ fn test_coerce_standardized_request_from_payload_accepts_responses_input_shape()
 }
 
 #[test]
-fn test_coerce_standardized_request_from_payload_allows_submit_tool_output_with_previous_response_id()
-{
+fn test_coerce_standardized_request_from_payload_allows_submit_tool_output_with_previous_response_id(
+) {
     let input = json!({
         "payload": {
             "model": "gpt-5.3-codex",
@@ -1288,6 +1267,12 @@ fn test_coerce_standardized_request_from_payload_allows_submit_tool_output_with_
     );
     assert_eq!(previous_response_id, Some("resp_prev_1"));
     assert_eq!(
+        standardized
+            .get("previous_response_id")
+            .and_then(|v| v.as_str()),
+        Some("resp_prev_1")
+    );
+    assert_eq!(
         raw_payload
             .get("previous_response_id")
             .and_then(|v| v.as_str()),
@@ -1296,8 +1281,7 @@ fn test_coerce_standardized_request_from_payload_allows_submit_tool_output_with_
 }
 
 #[test]
-fn test_coerce_standardized_request_from_payload_normalizes_exec_command_and_apply_patch_shapes(
-) {
+fn test_coerce_standardized_request_from_payload_normalizes_exec_command_and_apply_patch_shapes() {
     let input = json!({
         "payload": {
             "model": "glm-5",
@@ -1468,8 +1452,8 @@ fn test_apply_has_image_attachment_flag_adds_and_removes_flag() {
         },
         "hasImageAttachment": false
     });
-    let remove_output = apply_has_image_attachment_flag(&remove_input)
-        .expect("apply has-image-attachment flag");
+    let remove_output =
+        apply_has_image_attachment_flag(&remove_input).expect("apply has-image-attachment flag");
     let remove_row = remove_output.as_object().expect("object output");
     assert!(!remove_row.contains_key("hasImageAttachment"));
     assert_eq!(
@@ -1484,8 +1468,7 @@ fn test_apply_has_image_attachment_flag_normalizes_invalid_metadata() {
         "metadata": "invalid",
         "hasImageAttachment": true
     });
-    let output =
-        apply_has_image_attachment_flag(&input).expect("apply has-image-attachment flag");
+    let output = apply_has_image_attachment_flag(&input).expect("apply has-image-attachment flag");
     let row = output.as_object().expect("object output");
     assert_eq!(
         row.get("hasImageAttachment").and_then(|v| v.as_bool()),
@@ -1500,8 +1483,8 @@ fn test_sync_session_identifiers_to_metadata_injects_trimmed_values() {
         "sessionId": "  session-1  ",
         "conversationId": " conv-1 "
     });
-    let output = sync_session_identifiers_to_metadata(&input)
-        .expect("sync session identifiers to metadata");
+    let output =
+        sync_session_identifiers_to_metadata(&input).expect("sync session identifiers to metadata");
     let row = output.as_object().expect("object output");
     assert_eq!(row.get("existing").and_then(|v| v.as_bool()), Some(true));
     assert_eq!(
@@ -1524,8 +1507,8 @@ fn test_sync_session_identifiers_to_metadata_ignores_blank_or_missing_values() {
         "sessionId": "   ",
         "conversationId": null
     });
-    let output = sync_session_identifiers_to_metadata(&input)
-        .expect("sync session identifiers to metadata");
+    let output =
+        sync_session_identifiers_to_metadata(&input).expect("sync session identifiers to metadata");
     let row = output.as_object().expect("object output");
     assert_eq!(
         row.get("sessionId").and_then(|v| v.as_str()),
@@ -2326,8 +2309,8 @@ fn test_sync_responses_context_from_canonical_messages_allows_terminal_pending_t
 }
 
 #[test]
-fn test_sync_responses_context_from_canonical_messages_allows_orphan_tool_result_with_previous_response_id()
-{
+fn test_sync_responses_context_from_canonical_messages_allows_orphan_tool_result_with_previous_response_id(
+) {
     let request = json!({
         "previous_response_id": "resp_prev_1",
         "messages": [
@@ -2361,8 +2344,8 @@ fn test_sync_responses_context_from_canonical_messages_allows_orphan_tool_result
 }
 
 #[test]
-fn test_sync_responses_context_from_canonical_messages_allows_orphan_tool_result_with_semantics_resume()
-{
+fn test_sync_responses_context_from_canonical_messages_allows_orphan_tool_result_with_semantics_resume(
+) {
     let request = json!({
         "messages": [
             {
@@ -2650,11 +2633,8 @@ fn test_attach_passthrough_provider_input_audit_sets_provider_input_and_outbound
         "messages": [],
         "custom_field": "x"
     });
-    let output = attach_passthrough_provider_input_audit(
-        &audit,
-        &provider_payload,
-        "anthropic-messages",
-    );
+    let output =
+        attach_passthrough_provider_input_audit(&audit, &provider_payload, "anthropic-messages");
     assert_eq!(
         output
             .get("raw")
@@ -2703,12 +2683,22 @@ fn test_run_hub_pipeline_json_matches_core_shape() {
     };
     let core = serde_json::to_value(run_hub_pipeline(input.clone()).expect("core")).unwrap();
     let json_out: serde_json::Value = serde_json::from_str(
-        &run_hub_pipeline_json(serde_json::to_string(&input).unwrap()).expect("json")
-    ).unwrap();
+        &run_hub_pipeline_json(serde_json::to_string(&input).unwrap()).expect("json"),
+    )
+    .unwrap();
     assert_eq!(json_out["requestId"], core["requestId"]);
     assert_eq!(json_out["success"], core["success"]);
     assert_eq!(json_out["payload"], core["payload"]);
-    assert_eq!(json_out["metadata"]["entryEndpoint"], core["metadata"]["entryEndpoint"]);
-    assert_eq!(json_out["metadata"]["providerProtocol"], core["metadata"]["providerProtocol"]);
-    assert_eq!(json_out["metadata"]["routeHint"], core["metadata"]["routeHint"]);
+    assert_eq!(
+        json_out["metadata"]["entryEndpoint"],
+        core["metadata"]["entryEndpoint"]
+    );
+    assert_eq!(
+        json_out["metadata"]["providerProtocol"],
+        core["metadata"]["providerProtocol"]
+    );
+    assert_eq!(
+        json_out["metadata"]["routeHint"],
+        core["metadata"]["routeHint"]
+    );
 }

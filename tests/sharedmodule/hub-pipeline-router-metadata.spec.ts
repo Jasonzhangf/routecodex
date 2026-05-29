@@ -1,5 +1,5 @@
 import { buildRouterMetadataInputWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-builders.js';
-import { resolveStickyKey } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/keys.js';
+import { resolveRoutingStateKey } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/keys.js';
 
 describe('hub pipeline router metadata builder', () => {
   it('preserves followup routing directives required by virtual router', () => {
@@ -14,7 +14,7 @@ describe('hub pipeline router metadata builder', () => {
         __shadowCompareForcedProviderKey: 'ali-coding-plan.key1.kimi-k2.5',
         disabledProviderKeyAliases: ['qwen.1', 'qwen.2'],
         __rt: {
-          disableStickyRoutes: true
+          estimatedInputTokens: 123
         }
       }
     });
@@ -23,7 +23,7 @@ describe('hub pipeline router metadata builder', () => {
       requestId: 'req-followup-router-meta',
       __shadowCompareForcedProviderKey: 'ali-coding-plan.key1.kimi-k2.5',
       disabledProviderKeyAliases: ['qwen.1', 'qwen.2'],
-      disableStickyRoutes: true
+      estimatedInputTokens: 123
     });
   });
 
@@ -92,6 +92,6 @@ describe('hub pipeline router metadata builder', () => {
         restoredFromResponseId: 'resp_from_semantics'
       }
     });
-    expect(resolveStickyKey(output as any)).toBe('chain_from_semantics');
+    expect(resolveRoutingStateKey(output as any)).toBe('chain_from_semantics');
   });
 });

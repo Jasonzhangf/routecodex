@@ -1,11 +1,11 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { resolveStickyKey } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/keys.js';
+import { resolveRoutingStateKey } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/keys.js';
 
 describe('routing-state continuation matrix', () => {
   it('uses continuation request_chain across non-responses protocols', () => {
     expect(
-      resolveStickyKey({
+      resolveRoutingStateKey({
         requestId: 'req_chat_1',
         providerProtocol: 'openai-chat',
         sessionId: 'session_should_lose',
@@ -23,7 +23,7 @@ describe('routing-state continuation matrix', () => {
 
   it('uses continuation session scope when unified semantics says session', () => {
     expect(
-      resolveStickyKey({
+      resolveRoutingStateKey({
         requestId: 'req_anthropic_1',
         providerProtocol: 'anthropic-messages',
         sessionId: 'session_scope_1',
@@ -38,7 +38,7 @@ describe('routing-state continuation matrix', () => {
 
   it('uses continuation conversation scope when unified semantics says conversation', () => {
     expect(
-      resolveStickyKey({
+      resolveRoutingStateKey({
         requestId: 'req_gemini_1',
         providerProtocol: 'gemini-chat',
         conversationId: 'conversation_scope_1',
@@ -52,7 +52,7 @@ describe('routing-state continuation matrix', () => {
 
   it('uses request scope when unified semantics says request', () => {
     expect(
-      resolveStickyKey({
+      resolveRoutingStateKey({
         requestId: 'req_scope_only_1',
         providerProtocol: 'openai-chat',
         sessionId: 'session_should_not_win',
@@ -66,7 +66,7 @@ describe('routing-state continuation matrix', () => {
 
   it('keeps legacy responses resume only as migration fallback', () => {
     expect(
-      resolveStickyKey({
+      resolveRoutingStateKey({
         requestId: 'req_responses_legacy_1',
         providerProtocol: 'openai-responses',
         sessionId: 'session_should_lose_to_legacy_chain',

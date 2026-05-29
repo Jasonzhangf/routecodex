@@ -4,14 +4,13 @@ import { jest } from '@jest/globals';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+} from '../../../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-executor-response-stopless-sessions');
 
 function createEmptyRoutingInstructionState() {
   return {
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set<string>(),
     disabledProviders: new Set<string>(),
@@ -38,8 +37,8 @@ function createEmptyRoutingInstructionState() {
 }
 
 function persistReasoningStopMode(sessionId: string, mode: 'on' | 'off' | 'endless'): void {
-  const stickyKey = `session:${sessionId}`;
-  const existing = loadRoutingInstructionStateSync(stickyKey);
+  const stateKey = `session:${sessionId}`;
+  const existing = loadRoutingInstructionStateSync(stateKey);
   const next = existing ?? createEmptyRoutingInstructionState();
   next.reasoningStopMode = mode;
   if (mode === 'off') {
@@ -47,7 +46,7 @@ function persistReasoningStopMode(sessionId: string, mode: 'on' | 'off' | 'endle
     next.reasoningStopSummary = undefined;
     next.reasoningStopUpdatedAt = undefined;
   }
-  saveRoutingInstructionStateSync(stickyKey, next as any);
+  saveRoutingInstructionStateSync(stateKey, next as any);
 }
 
 const mockSyncReasoningStopModeFromRequest = jest.fn((baseContext: Record<string, unknown>) => {

@@ -5,7 +5,6 @@ import {
 
 type MutableRoutingState = {
   forcedTarget?: unknown;
-  stickyTarget?: unknown;
   preferTarget?: unknown;
   allowedProviders: Set<string>;
   disabledProviders: Set<string>;
@@ -66,7 +65,6 @@ function normalizeRoutingState(raw: unknown): MutableRoutingState | null {
 
   const state: MutableRoutingState = {
     forcedTarget: record.forcedTarget,
-    stickyTarget: record.stickyTarget,
     preferTarget: record.preferTarget,
     allowedProviders,
     disabledProviders,
@@ -149,7 +147,6 @@ function clearStopMessage(state: MutableRoutingState): void {
 function isRoutingStateEffectivelyEmpty(state: MutableRoutingState): boolean {
   return Boolean(
     !state.forcedTarget &&
-      !state.stickyTarget &&
       !state.preferTarget &&
       state.allowedProviders.size < 1 &&
       state.disabledProviders.size < 1 &&
@@ -165,7 +162,6 @@ function isRoutingStateEffectivelyEmpty(state: MutableRoutingState): boolean {
 function createEmptyRoutingState(): MutableRoutingState {
   return {
     forcedTarget: undefined,
-    stickyTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set<string>(),
     disabledProviders: new Set<string>(),
