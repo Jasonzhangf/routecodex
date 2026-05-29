@@ -1,11 +1,10 @@
+use crate::chat_process_media_semantics::strip_responses_stored_context_input_media;
 use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
 use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, collect_reasoning_content_segments,
     collect_reasoning_summary_segments, project_message_reasoning_text,
 };
-use crate::shared_json_utils::{
-    read_string_array_command, read_workdir_from_args,
-};
+use crate::shared_json_utils::{read_string_array_command, read_workdir_from_args};
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 
@@ -532,7 +531,11 @@ fn resume_responses_conversation_payload(
     let entry_obj = entry.as_object().cloned().unwrap_or_default();
     let base_payload = clone_object(entry_obj.get("basePayload"));
     let mut payload = base_payload.clone();
-    let mut merged_input = clone_array(entry_obj.get("input"));
+    let mut merged_input = strip_responses_stored_context_input_media(
+        clone_array(entry_obj.get("input")),
+        "[Image omitted]".to_string(),
+    )
+    .messages;
     let tool_outputs = clone_array(
         submit_payload
             .as_object()
@@ -835,7 +838,10 @@ fn find_delta_from_released_pending_tool_outputs(
         return Some(incoming_items.to_vec());
     }
     for start_index in 0..incoming_items.len() {
-        if leading_input_consumes_pending_tool_calls(&incoming_items[start_index..], pending_call_ids) {
+        if leading_input_consumes_pending_tool_calls(
+            &incoming_items[start_index..],
+            pending_call_ids,
+        ) {
             return Some(incoming_items[start_index..].to_vec());
         }
     }
@@ -864,9 +870,10 @@ fn restore_responses_continuation_payload(
     let delta_input = if prefix.is_empty() {
         let released_pending_call_ids = read_released_pending_tool_call_ids(&entry_obj);
         if !released_pending_call_ids.is_empty() {
-            let Some(delta_input) =
-                find_delta_from_released_pending_tool_outputs(&input_items, &released_pending_call_ids)
-            else {
+            let Some(delta_input) = find_delta_from_released_pending_tool_outputs(
+                &input_items,
+                &released_pending_call_ids,
+            ) else {
                 return Value::Null;
             };
             delta_input
@@ -1174,6 +1181,52 @@ mod tests {
         );
         let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
         assert_eq!(meta.get("toolOutputs").and_then(Value::as_u64), Some(1));
+    }
+
+    #[test]
+    fn resume_replaces_historical_attachments_with_placeholders_but_keeps_current_tool_output() {
+        let payload = json!({
+            "model": "gpt-base",
+            "stream": true,
+            "tools": [{ "type": "function", "function": { "name": "view_image" } }]
+        });
+        let context = json!({
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        { "type": "input_image", "image_url": "data:image/png;base64,HISTORY" },
+                        { "type": "input_text", "text": "look" }
+                    ]
+                },
+                { "type": "function_call", "id": "fc_view_1", "call_id": "call_view_1", "name": "view_image", "arguments": "{\"path\":\"/tmp/current.png\"}" }
+            ]
+        });
+        let entry = prepare_responses_conversation_entry(&payload, &context);
+
+        let resumed = resume_responses_conversation_payload(
+            &json!({
+                "requestId": "req_1",
+                "basePayload": entry.get("basePayload").cloned().unwrap_or(Value::Null),
+                "input": entry.get("input").cloned().unwrap_or(Value::Null),
+                "tools": entry.get("tools").cloned().unwrap_or(Value::Null)
+            }),
+            "resp_1",
+            &json!({
+                "tool_outputs": [{
+                    "call_id": "call_view_1",
+                    "output": "[{\"type\":\"input_image\",\"image_url\":\"data:image/png;base64,CURRENT\"}]"
+                }],
+                "stream": true
+            }),
+            Some("req_2"),
+        );
+
+        let serialized = serde_json::to_string(resumed.get("payload").unwrap()).unwrap();
+        assert!(!serialized.contains("data:image/png;base64,HISTORY"));
+        assert!(serialized.contains("[Image omitted]"));
+        assert!(serialized.contains("data:image/png;base64,CURRENT"));
     }
 
     #[test]

@@ -131,20 +131,6 @@ function assertDirectProviderOwnership(args: {
   }
 }
 
-function syncProviderKeyToRoutingPin(
-  normalizedMetadata: Record<string, unknown> | undefined,
-  meta: Record<string, unknown> | undefined
-): void {
-  if (!normalizedMetadata || !meta) {
-    return;
-  }
-  const providerKey = readScopeToken(meta.providerKey);
-  if (!providerKey) {
-    return;
-  }
-  normalizedMetadata['__shadowCompareForcedProviderKey'] = providerKey;
-}
-
 function convertInputToMessages(input: unknown): Array<Record<string, unknown>> {
   return convertBridgeInputToChatMessages({
     input: Array.isArray(input) ? (cloneJson(input) as BridgeInputItem[]) : [],
@@ -187,7 +173,6 @@ export function resolveRouteAwareResponsesContinuation(args: {
     if (!resumed || !isRecord(resumed.meta)) {
       return args.request;
     }
-    syncProviderKeyToRoutingPin(args.normalizedMetadata, resumed.meta);
     return applyUnifiedResponsesResumeSemantics(args.request, resumed.meta, {
       deltaInput: Array.isArray((resumed.payload as Record<string, unknown>)?.input)
         ? cloneJson((resumed.payload as Record<string, unknown>).input)
@@ -202,8 +187,6 @@ export function resolveRouteAwareResponsesContinuation(args: {
   if (!materialized || !isRecord(materialized.payload) || !isRecord(materialized.meta)) {
     return args.request;
   }
-
-  syncProviderKeyToRoutingPin(args.normalizedMetadata, materialized.meta);
 
   let next = cloneJson(args.request);
   if (Array.isArray(materialized.payload.input)) {
