@@ -38,6 +38,22 @@ type ResponsesPayload = {
   [key: string]: unknown;
 };
 
+
+function buildResponsesConversationPortScope(ctx: HandlerContext): { matchedPort?: number; routingPolicyGroup?: string } {
+  const matchedPort = typeof ctx.portContext?.matchedPort === 'number'
+    ? ctx.portContext.matchedPort
+    : typeof ctx.portContext?.localPort === 'number'
+      ? ctx.portContext.localPort
+      : undefined;
+  const routingPolicyGroup = typeof ctx.portContext?.routingPolicyGroup === 'string' && ctx.portContext.routingPolicyGroup.trim()
+    ? ctx.portContext.routingPolicyGroup.trim()
+    : undefined;
+  return {
+    ...(typeof matchedPort === 'number' ? { matchedPort } : {}),
+    ...(routingPolicyGroup ? { routingPolicyGroup } : {})
+  };
+}
+
 function isResponsesSubmitToolOutputsPayload(payload: ResponsesPayload | undefined): boolean {
   if (!payload || typeof payload !== 'object') {
     return false;
@@ -195,26 +211,19 @@ export async function handleResponses(
       timeoutHandle = undefined;
     }
   };
-  try {
-    if (!ctx.executePipeline) {
-      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
+  let requestStartLogged = false;
+  const emitRequestStart = (meta: Record<string, unknown> | undefined): void => {
+    if (requestStartLogged) {
       return;
     }
+    requestStartLogged = true;
+    logRequestStart(entryEndpoint, requestId, meta);
+  };
+
+  try {
     let payload = (req.body && typeof req.body === 'object'
       ? req.body
       : {}) as ResponsesPayload;
-    isSubmitToolOutputs =
-      entryEndpoint === '/v1/responses.submit_tool_outputs'
-      || (
-        entryEndpoint === '/v1/responses'
-        && isResponsesSubmitToolOutputsPayload(payload)
-      );
-    const originalPayload = captureRawRequestBodyForMetadata(payload) as ResponsesPayload;
-    const requestBodyMetadata = readRequestBodyMetadata(originalPayload);
-    const sessionIdForResume = readResponsesSessionId(requestBodyMetadata);
-    if (options.responseIdFromPath && !payload.response_id) {
-      payload.response_id = options.responseIdFromPath;
-    }
     const clientHeaders = captureClientHeaders(req.headers);
     const clientConnectionState = trackClientConnectionState(req, res);
     const acceptsSse = typeof req.headers['accept'] === 'string'
@@ -227,6 +236,32 @@ export async function handleResponses(
     // submit_tool_outputs is a synthetic entrypoint: keep transport intent aligned with outbound stream.
     // Some upstreams do not implement streaming on submit paths; we must not infer it from Accept headers.
     const inboundStream = outboundStream;
+    emitRequestStart({
+      clientRequestId,
+      inboundStream: outboundStream,
+      outboundStream,
+      clientAcceptsSse: acceptsSse,
+      originalStream,
+      type: payload?.type,
+      timeoutMs: requestTimeoutMs
+    });
+    if (!ctx.executePipeline) {
+      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
+      return;
+    }
+    isSubmitToolOutputs =
+      entryEndpoint === '/v1/responses.submit_tool_outputs'
+      || (
+        entryEndpoint === '/v1/responses'
+        && isResponsesSubmitToolOutputsPayload(payload)
+      );
+    const originalPayload = captureRawRequestBodyForMetadata(payload) as ResponsesPayload;
+    const requestBodyMetadata = readRequestBodyMetadata(originalPayload);
+    const sessionIdForResume = readResponsesSessionId(requestBodyMetadata);
+    const responsesConversationPortScope = buildResponsesConversationPortScope(ctx);
+    if (options.responseIdFromPath && !payload.response_id) {
+      payload.response_id = options.responseIdFromPath;
+    }
     let resumeMeta: Record<string, unknown> | undefined;
     if (isSubmitToolOutputs) {
       const payloadMetadata =
@@ -254,7 +289,7 @@ export async function handleResponses(
         return;
       }
       try {
-        const resumeResult = await resumeResponsesConversation(responseId, payload, { requestId });
+        const resumeResult = await resumeResponsesConversation(responseId, payload, { requestId, ...responsesConversationPortScope });
         payload = (resumeResult.payload ?? {}) as ResponsesPayload;
         resumeMeta = resumeResult.meta;
         // Keep the synthetic submit endpoint through the pipeline.
@@ -354,6 +389,7 @@ export async function handleResponses(
               toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
             },
             sessionId: readResponsesSessionId(requestBodyMetadata),
+            ...responsesConversationPortScope,
           },
 	        ...(mockSampleReqId ? { mockSampleReqId } : {})
 	      })
@@ -373,6 +409,7 @@ export async function handleResponses(
           toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
         },
         sessionId: readResponsesSessionId(requestBodyMetadata),
+        ...responsesConversationPortScope,
         providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
       }).catch((error) => {
         logResponsesHandlerNonBlockingError('responses_context.capture_inbound', error, { requestId });
@@ -444,16 +481,6 @@ export async function handleResponses(
       timeoutHandle.unref?.();
     }
 
-    logRequestStart(entryEndpoint, requestId, {
-      clientRequestId,
-      inboundStream: wantsStream,
-      outboundStream,
-      clientAcceptsSse: acceptsSse,
-      originalStream,
-      type: payload?.type,
-      videoRequest: isVideoRequest || undefined,
-      timeoutMs: requestTimeoutMs
-    });
     const result = await ctx.executePipeline(pipelineInput);
     clearTimeoutHandle();
     if (timedOut || res.headersSent) {
@@ -500,6 +527,8 @@ export async function handleResponses(
             context?: Record<string, unknown>;
             sessionId?: string;
             conversationId?: string;
+            matchedPort?: number;
+            routingPolicyGroup?: string;
           } | undefined;
           if (requestContext?.payload && requestContext?.context) {
             await captureResponsesRequestContextForRequest({
@@ -508,6 +537,8 @@ export async function handleResponses(
               context: requestContext.context,
               sessionId: requestContext.sessionId,
               conversationId: requestContext.conversationId,
+              matchedPort: requestContext.matchedPort,
+              routingPolicyGroup: requestContext.routingPolicyGroup,
               providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
             });
             if (result.body && typeof result.body === 'object' && !Array.isArray(result.body)) {
@@ -515,6 +546,8 @@ export async function handleResponses(
                 requestId: responseId,
                 response: result.body as Record<string, unknown>,
                 providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined,
+                matchedPort: requestContext.matchedPort,
+                routingPolicyGroup: requestContext.routingPolicyGroup,
                 sessionId: requestContext.sessionId,
                 conversationId: requestContext.conversationId
               });

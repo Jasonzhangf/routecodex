@@ -7,7 +7,10 @@ export interface CaptureContextArgs {
   sessionId?: string;
   conversationId?: string;
   providerKey?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
 }
+
 
 export interface RecordResponseArgs {
   requestId?: string;
@@ -15,10 +18,15 @@ export interface RecordResponseArgs {
   sessionId?: string;
   conversationId?: string;
   providerKey?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
 }
+
 
 export interface ResumeOptions {
   requestId?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
 }
 
 export interface ResumeResult {
@@ -31,6 +39,8 @@ export interface RestoreByScopeArgs {
   sessionId?: string;
   conversationId?: string;
   requestId?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
 }
 
 export interface ConversationEntry {
@@ -50,4 +60,5 @@ export interface ConversationEntry {
   sessionId?: string;
   conversationId?: string;
   scopeKeys: string[];
+  portScopeKey?: string;
 }

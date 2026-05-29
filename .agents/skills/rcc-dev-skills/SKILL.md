@@ -1473,6 +1473,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 触发信号：Node 进程 CPU 高频但 sample 栈落在 `router_hotpath_napi::shared_tooling::normalize_tool_result_text` / `strip_terminal_right_gutter_noise` / `regex::Regex::new`。
 - 处理规则：优先检查 Rust hot path 是否在逐行/逐 tool-result 循环内重复 `Regex::new`；固定正则必须用 `OnceLock<Regex>` 静态缓存，并用结构红测禁止 hot-path 函数体内直接编译 regex。
 - Windsurf “第二跳慢但第一跳快”若伴随 `/health` 超时和 Node CPU 飙高，先用 `sample <pid>` 查 native hotpath；2026-05-29 真源是 Rust `hub_reasoning_tool_normalizer` 每次响应治理重复 `Regex::new`，必须静态缓存 regex，不要再从 provider/上游等待方向误判。
+- Windsurf managed alias 不能盲信 `~/.rcc/auth/windsurf-<alias>.json`：配置里有 `account` 时，健康探测返回的 `userStatus.email` 必须匹配该账号；不匹配则用 entry password 重登覆盖 token，没密码则该 entry exhausted，禁止把旧 token 的 quota/extra 当成目标账号事实。
+- Windsurf 请求“进不去 provider”但 `/health` ready 时，先查 `routes.ts::holdUntilReady()`/`runtimeReadyPromise`：Windsurf startup health probe 必须后台异步执行，不能阻塞 runtimeReady；否则日志不会出现 `▶ [/v1/responses] started`。
 
 ### 2026-05-29 调试精华（install/global artifact 隔离）
 - 触发信号：启动报 `dist/error-handling/route-error-hub.js` 缺失，或 `routecodex start` 从 repo `dist/` 回落启动；优先查 `install-global.sh` 是否在仓库内清理/重建 `dist`，以及全局包是否是指向临时 build 目录的 symlink。
@@ -1490,3 +1492,39 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Tool declarations are not routing triggers. Declaring `apply_patch` or `web_search` in `tools` must not route by itself; only current user intent or current actual tool activity may route.
 - Regression for VR route changes must include HTTP blackbox evidence from `/v1/responses` or an equivalent handler harness, asserting real route/provider/log/body, not only unit tests.
 - Memory observer is a leak-detection signal and must remain visible by default; only explicit `ROUTECODEX_MEM_OBSERVER_DISABLE=1`/`RCC_MEM_OBSERVER_DISABLE=1` may hide `[mem-observer]` lines. Do not gate it behind opt-in logs because pendingNoResponseId/retainedInputItems regressions must be observable in runtime.
+
+### 2026-05-29 Windsurf Cascade live 对齐补充
+- Cascade shape 对齐要覆盖 warmup lifecycle，不只比 `SendUserCascadeMessage`：`GetUserStatus -> UpdatePanelStateWithUserStatus -> InitializeCascadePanelState -> AddTrackedWorkspace -> UpdateWorkspaceTrust -> Heartbeat -> StartCascade -> SendUserCascadeMessage`。
+- 默认 workspace 不得放在 `~/.rcc` 等隐藏目录；LS 会对 AddTrackedWorkspace 返回 `is hidden: ignore uri`。默认使用非隐藏临时 workspace，并用红测锁住路径形状。
+- 若 RCC 与 `/Volumes/extension/code/WindsurfAPI` 使用同一 LS、同一 apiKey、同一 modelUid 都在 trajectory 返回 `an internal error occurred (trace ID: ...)`，不要继续改 RCC 请求 shape；这时真源已转为 Windsurf 上游/账号/model 可用性，需要换模型或账号做黑盒矩阵。
+
+## 2026-05-29 Provider failover / port isolation blackbox rule
+- Recoverable provider failure routing must be proven with HTTP blackbox: first request hits primary three times, emits `[provider-switch] ... exclude_and_reroute`, then returns backup 200; next request skips cooled primary; restart passive reprobe gets exactly one primary chance before cooling again.
+- Multi-port VR tests must isolate `routingPolicyGroup` at the route-pool boundary and at traffic/error-state observations. A 5555 failure/cooldown must not let 5555 see 6666 candidates, and must not block 6666 from selecting its own group.
+- In same-process blackbox harnesses that swap temporary `HOME`/RCC roots, reset the shared `ProviderTrafficGovernor` before constructing each server; otherwise the singleton can retain a deleted state root and hang at `provider.traffic.acquire` before provider send. This is a test isolation reset, not a production fallback.
+
+## 2026-05-29 Servertool followup no-provider-pin rule
+- Servertool followup is not a provider sticky mechanism. Do not add `stickyProvider` flow policy or inject `__shadowCompareForcedProviderKey` from followup runtime; followup must re-enter VR and let normal current-route scheduling pick the provider.
+- Direct/remote Responses continuation is the only case that may restore the exact provider key, and that belongs to continuation resume metadata, not servertool followup flow policy.
+- Blackbox proof: `scripts/tests/stopless-followup-blackbox.mjs` uses two round-robin providers and must observe `crs1 -> crs2` for initial request then stopless followup.
+
+### 2026-05-29 Windsurf Kimi K2.6 UID 对齐
+- Windsurf provider 内测 Kimi K2.6 时，必须先直连 Windsurf `GetUserStatus`/LS 拿真实 Cascade `modelUid`；当前 ws-pro-3 证实 UID 是 `kimi-k2-6`，不是外部 provider 常见的 `kimi-k2.6`。
+- 5520 Windsurf 配置应使用已在 Windsurf provider 注册的 target（如 `windsurf.kimi-k2-6`）；若 VR 报 unknown model，先补 provider model registry + runtime modelTag 映射，再重启验证。
+
+## 2026-05-29 Alias sticky queue removal rule
+- `aliasSelection` / alias sticky queues are removed from Virtual Router. Do not add `sticky-queue`, `pinAliasQueue`, or alias-selection provider pinning back; weighted/priority plus health cooldown is the only alias/provider scheduling path.
+- Use `scripts/tests/no-provider-sticky-physical-regression.mjs` with the HTTP blackbox matrix whenever touching VR routing/followup code, so provider sticky semantics cannot re-enter through Rust/TS wrappers.
+
+### 2026-05-29 Windsurf managed account isolation
+- Windsurf account aliases (`ws-pro-*`) 是 provider 内部实现细节，外部 Virtual Router/Hub/stats 当前请求链路只能看到 `windsurf.managed.<model>`；新增账号选择逻辑时必须补 bootstrap 回归防止账号 alias 外漏。
+- Windsurf session sticky 禁止跨 session “账号占用避让”自锁：同 session pinned 可用则用 pinned，否则按健康排序选最优账号；不要因为另一个 session 活跃而切走最健康账号。
+
+## 2026-05-29 Windsurf 单账号直发止血规则
+- 当用户要求先恢复 Windsurf 通信时，优先切到唯一账号直发：配置只保留 `ws-pro-3 / frost89409@gmail.com`，显式 `tokenFile = "~/.rcc/auth/windsurf-ws-pro-3.json"`，禁止健康排序、旧 token 自动扫描、账号冷却和内部切号影响发送。
+- 验证必须包含：定向回归 `windsurf-account-health-routing.spec.ts` + `windsurf-request-shape-sample.spec.ts`，全局安装/5520 restart，真实 `/v1/responses` 单跳 200，以及同 session 两跳上下文 token 回读；日志必须有 `single-account selected alias=ws-pro-3`，不能有 `ranked`/`cooldown`/切到 `ws-pro-*` 外部 provider。
+
+## 2026-05-29 调试精华（端口/路由池隔离）
+- Router 端口是天然隔离边界：`matchedPort + routingPolicyGroup` 必须进入 Hub metadata、VR pool filter、Responses continuation store；禁止任何 group pipeline 缺失时 fallback 到 global pipeline。
+- 黑盒回归必须覆盖：端口 A 的 recoverable cooldown 不影响端口 B；端口 A 捕获的 Responses `response_id` 不能在端口 B resume；否则就是跨端口上下文/路由池泄漏。
+- 真源文件：`src/server/runtime/http-server/index.ts`、`sharedmodule/llmswitch-core/rust-core/.../virtual_router_engine/engine/selection.rs`、`sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`。

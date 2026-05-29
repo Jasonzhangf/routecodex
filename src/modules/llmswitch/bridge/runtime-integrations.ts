@@ -74,7 +74,7 @@ type ResponsesConversationStoreLike = {
   resumeConversation?: (
     responseId: string,
     submitPayload: AnyRecord,
-    options?: { requestId?: string },
+    options?: { requestId?: string; matchedPort?: number; routingPolicyGroup?: string },
   ) => { payload: AnyRecord; meta: AnyRecord };
   resumeLatestContinuationByScope?: (args: {
     payload: AnyRecord;
@@ -109,7 +109,7 @@ type ResponsesConversationModule = {
   resumeResponsesConversation?: (
     responseId: string,
     submitPayload: AnyRecord,
-    options?: { requestId?: string },
+    options?: { requestId?: string; matchedPort?: number; routingPolicyGroup?: string },
   ) => Promise<{ payload: AnyRecord; meta: AnyRecord }>;
   resumeLatestResponsesContinuationByScope?: (args: {
     payload: AnyRecord;
@@ -155,6 +155,8 @@ export async function captureResponsesRequestContextForRequest(args: {
   conversationId?: string;
   routeHint?: string;
   providerKey?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
 }): Promise<void> {
   const globalStore = readGlobalResponsesConversationStore();
   if (typeof globalStore?.captureRequestContext === "function") {
@@ -178,6 +180,8 @@ export async function recordResponsesResponseForRequest(args: {
   sessionId?: string;
   conversationId?: string;
   providerKey?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
 }): Promise<void> {
   const globalStore = readGlobalResponsesConversationStore();
   const fn =
@@ -217,7 +221,7 @@ export async function recordResponsesResponseForRequest(args: {
 export async function resumeResponsesConversation(
   responseId: string,
   submitPayload: AnyRecord,
-  options?: { requestId?: string },
+  options?: { requestId?: string; matchedPort?: number; routingPolicyGroup?: string },
 ): Promise<{ payload: AnyRecord; meta: AnyRecord }> {
   const globalStore = readGlobalResponsesConversationStore();
   if (typeof globalStore?.resumeConversation === "function") {

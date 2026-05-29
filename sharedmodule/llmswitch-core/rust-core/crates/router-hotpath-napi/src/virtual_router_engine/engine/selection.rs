@@ -84,14 +84,6 @@ fn resolve_route_pools_for_selection(
     Vec::new()
 }
 
-fn has_single_group_prefixed_route(
-    routing: &crate::virtual_router_engine::routing::RoutingPools,
-    route_name: &str,
-) -> bool {
-    let suffix = format!(":{}", route_name);
-    routing.keys().filter(|key| key.ends_with(&suffix)).count() == 1
-}
-
 fn order_instruction_keys_by_default_route(
     keys: &[String],
     routing: &crate::virtual_router_engine::routing::RoutingPools,
@@ -345,12 +337,10 @@ impl VirtualRouterEngineCore {
                 }
             }
             for pool in pools {
-                if !has_single_group_prefixed_route(&self.routing, &route_name)
-                    && !pool_matches_route_policy_group(
-                        &pool,
-                        requested_route_policy_group.as_deref(),
-                    )
-                {
+                if !pool_matches_route_policy_group(
+                    &pool,
+                    requested_route_policy_group.as_deref(),
+                ) {
                     continue;
                 }
                 if pool.targets.is_empty() {

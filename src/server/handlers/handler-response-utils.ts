@@ -9,7 +9,6 @@ import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
-import { buildInfo } from '../../build-info.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../utils/finish-reason.js';
 import { STREAM_CONTRACT_PROBE_BODY_KEY } from '../runtime/http-server/executor/servertool-response-normalizer.js';
 import {
@@ -32,6 +31,8 @@ interface DispatchOptions {
     context: Record<string, unknown>;
     sessionId?: string;
     conversationId?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
   };
 }
 
@@ -211,8 +212,8 @@ type ClientVisibleResponseRestoreContext = {
   reasoningEffort?: string;
 };
 
-const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
-  || process.env.ROUTECODEX_HTTP_LOG_VERBOSE === '1';
+const SHOULD_LOG_HTTP_EVENTS = process.env.ROUTECODEX_HTTP_LOG_DISABLE !== '1'
+  && process.env.RCC_HTTP_LOG_DISABLE !== '1';
 
 function logResponseNonBlockingError(operation: string, error: unknown): void {
   const reason = error instanceof Error ? error.message : String(error);
@@ -419,6 +420,9 @@ async function recordResponsesConversationToolCallResponse(args: {
       response: recordBody,
       sessionId: effectiveSessionId,
       conversationId: effectiveConversationId,
+      providerKey: args.providerKey,
+      matchedPort: args.requestContext?.matchedPort,
+      routingPolicyGroup: args.requestContext?.routingPolicyGroup,
     }).catch((error) => {
       logResponseNonBlockingError(`responses-conversation-record:${recordRequestId}`, error);
     });
@@ -508,6 +512,9 @@ async function captureResponsesConversationToolCallRequestContext(args: {
       context: args.requestContext.context,
       sessionId: args.requestContext.sessionId,
       conversationId: args.requestContext.conversationId,
+      providerKey: args.providerKey,
+      matchedPort: args.requestContext?.matchedPort,
+      routingPolicyGroup: args.requestContext?.routingPolicyGroup,
     }).catch((error) => {
       logResponseNonBlockingError(`responses-conversation-capture:${requestId}`, error);
     });
@@ -567,7 +574,7 @@ function logStreamRequestComplete(
   const finishReasonLabel = formatHighlightedFinishReasonLabel(finishReason);
   const timingSuffix = formatRequestTimingSummary(requestLabel);
   const line = `✅ [${targetEndpoint}] ${formatTimestamp()} request ${requestLabel} completed (status=${status}${finishReasonLabel})${timingSuffix}`;
-  console.log(colorizeRequestLog(line, requestLabel, context));
+  console.warn(colorizeRequestLog(line, requestLabel, context));
 }
 
 function formatRequestId(value?: string): string {

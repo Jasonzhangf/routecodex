@@ -48,6 +48,18 @@ function readPreselectedRoute(
       code: 'ERR_PRESELECTED_ROUTE_DECISION_INVALID'
     });
   }
+  const targetRecord = target as Record<string, unknown>;
+  const targetProviderKey = typeof targetRecord.providerKey === 'string' ? targetRecord.providerKey.trim() : '';
+  const excludedProviderKeys = [
+    ...((metadataInput as unknown as Record<string, unknown>).excludedProviderKeys as unknown[] | undefined ?? []),
+    ...(normalizedMetadata.excludedProviderKeys as unknown[] | undefined ?? [])
+  ]
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (targetProviderKey && excludedProviderKeys.includes(targetProviderKey)) {
+    return undefined;
+  }
   return {
     target: target as TargetMetadata,
     decision: decision as RoutingDecision,

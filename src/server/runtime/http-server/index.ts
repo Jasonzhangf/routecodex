@@ -468,10 +468,7 @@ export class RouteCodexHttpServer {
   private resolveHubPipelineForRoutingPolicyGroup(routingPolicyGroup?: string): HubPipeline | null {
     const group = typeof routingPolicyGroup === 'string' ? routingPolicyGroup.trim() : '';
     if (group) {
-      const pipeline = this.hubPipelinesByRoutingPolicyGroup.get(group);
-      if (pipeline) {
-        return pipeline;
-      }
+      return this.hubPipelinesByRoutingPolicyGroup.get(group) ?? null;
     }
     return this.hubPipeline;
   }
@@ -997,6 +994,16 @@ export class RouteCodexHttpServer {
         ? String(routeHintHeader[0]).trim()
         : undefined;
 
+    if (portConfig?.mode === 'router' && portConfig.routingPolicyGroup) {
+      const groupPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
+      if (!groupPipeline) {
+        throw Object.assign(
+          new Error(`Routing policy group pipeline not available for port ${portConfig.port}: ${portConfig.routingPolicyGroup}`),
+          { code: 'PROVIDER_NOT_AVAILABLE' }
+        );
+      }
+    }
+
     // Build per-port metadata: routecodexLocalPort + mode always present.
     // Router ports: inject allowedProviders derived from routingPolicyGroup to
     // restrict routing to that group'''s provider pool (replaces global active group).
@@ -1010,7 +1017,7 @@ export class RouteCodexHttpServer {
       ? portConfig.stopMessage.enabled
       : true;
 
-    const metadata = {
+    const metadata: Record<string, unknown> = {
       ...(input.metadata ?? {}),
       routecodexLocalPort: localPort,
       routecodexPortMode: portConfig?.mode ?? 'router',
@@ -1021,6 +1028,15 @@ export class RouteCodexHttpServer {
       ...(routeHint ? { routeHint } : {}),
       ...(allowedProviders ? { allowedProviders } : {}),
     };
+    const resumeProviderKey = (() => {
+      const resume = metadata.responsesResume;
+      if (!resume || typeof resume !== 'object' || Array.isArray(resume)) return undefined;
+      const value = (resume as Record<string, unknown>).providerKey;
+      return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+    })();
+    if (resumeProviderKey && portConfig?.mode === 'router' && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct') {
+      metadata.__shadowCompareForcedProviderKey = resumeProviderKey;
+    }
     const nextInput: PipelineExecutionInput = {
       ...input,
       metadata,
@@ -1053,6 +1069,8 @@ export class RouteCodexHttpServer {
             metadata: {
               ...(nextInput.metadata ?? {}),
               routecodexSameProtocolDirectDisabled: true,
+              __routecodexProviderFailureAttemptOffset: 1,
+              ...(directResult.preselectedRoute ? { __routecodexPreselectedRoute: directResult.preselectedRoute } : {}),
             },
           });
         }

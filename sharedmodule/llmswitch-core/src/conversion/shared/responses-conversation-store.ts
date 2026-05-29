@@ -68,17 +68,37 @@ function collectPendingToolCallIds(input: AnyRecord[]): string[] {
   return pending;
 }
 
-function buildScopeKeys(scope: { sessionId?: unknown; conversationId?: unknown }): string[] {
+function readPortScopeKey(scope: { matchedPort?: unknown; routingPolicyGroup?: unknown } | undefined): string | undefined {
+  if (!scope) return undefined;
+  const port = typeof scope.matchedPort === 'number' && Number.isFinite(scope.matchedPort) && scope.matchedPort > 0
+    ? Math.floor(scope.matchedPort)
+    : undefined;
+  if (port !== undefined) return `port:${port}`;
+  const group = readScopeToken(scope.routingPolicyGroup);
+  return group ? `group:${group}` : undefined;
+}
+
+function qualifyScopeKey(portScopeKey: string | undefined, key: string): string {
+  return portScopeKey ? `${portScopeKey}|${key}` : key;
+}
+
+function buildScopeKeys(scope: { sessionId?: unknown; conversationId?: unknown; matchedPort?: unknown; routingPolicyGroup?: unknown }): string[] {
   const keys: string[] = [];
+  const portScopeKey = readPortScopeKey(scope);
   const sessionId = readScopeToken(scope.sessionId);
   const conversationId = readScopeToken(scope.conversationId);
   if (sessionId) {
-    keys.push(`session:${sessionId}`);
+    keys.push(qualifyScopeKey(portScopeKey, `session:${sessionId}`));
   }
   if (conversationId) {
-    keys.push(`conversation:${conversationId}`);
+    keys.push(qualifyScopeKey(portScopeKey, `conversation:${conversationId}`));
   }
   return [...new Set(keys)];
+}
+
+function entryMatchesPortScope(entry: ConversationEntry, requestedPortScopeKey: string | undefined): boolean {
+  if (!requestedPortScopeKey) return true;
+  return entry.portScopeKey === requestedPortScopeKey;
 }
 
 function readResumeScopeKeysFromSubmitPayload(payload: AnyRecord | undefined): string[] {
@@ -98,7 +118,12 @@ function readResumeScopeKeysFromSubmitPayload(payload: AnyRecord | undefined): s
     ?? readScopeToken(payload.conversationId)
     ?? readScopeToken(metadata?.conversation_id)
     ?? readScopeToken(metadata?.conversationId);
-  return buildScopeKeys({ sessionId, conversationId });
+  return buildScopeKeys({
+    sessionId,
+    conversationId,
+    matchedPort: metadata?.matchedPort ?? (metadata?.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext) ? (metadata.portContext as AnyRecord).matchedPort : undefined),
+    routingPolicyGroup: metadata?.routingPolicyGroup ?? (metadata?.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext) ? (metadata.portContext as AnyRecord).routingPolicyGroup : undefined)
+  });
 }
 
 
@@ -167,6 +192,7 @@ class ResponsesConversationStore {
     }
     const prepared = prepareConversationEntry(payload, context);
     const scopeKeys = buildScopeKeys(args);
+    const portScopeKey = readPortScopeKey(args);
     for (const candidate of scopeKeys.length ? this.requestMap.values() : []) {
       if (
         candidate
@@ -186,6 +212,7 @@ class ResponsesConversationStore {
       sessionId: readScopeToken(args.sessionId),
       conversationId: readScopeToken(args.conversationId),
       scopeKeys,
+      portScopeKey,
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
@@ -211,7 +238,9 @@ class ResponsesConversationStore {
     if (!entry) {
       const fallbackScopeKeys = buildScopeKeys({
         sessionId: args.sessionId,
-        conversationId: args.conversationId
+        conversationId: args.conversationId,
+        matchedPort: args.matchedPort,
+        routingPolicyGroup: args.routingPolicyGroup
       });
       for (const scopeKey of fallbackScopeKeys) {
         const candidate = this.scopeIndex.get(scopeKey);
@@ -231,6 +260,10 @@ class ResponsesConversationStore {
       return;
     }
     if (!responseId) return;
+    const responsePortScopeKey = readPortScopeKey(args);
+    if (responsePortScopeKey && !entry.portScopeKey) {
+      entry.portScopeKey = responsePortScopeKey;
+    }
     const responseProviderKey = readScopeToken(args.providerKey);
     if (responseProviderKey) {
       entry.providerKey = responseProviderKey;
@@ -238,7 +271,9 @@ class ResponsesConversationStore {
     }
     const nextScopeKeys = buildScopeKeys({
       sessionId: args.sessionId,
-      conversationId: args.conversationId
+      conversationId: args.conversationId,
+      matchedPort: args.matchedPort,
+      routingPolicyGroup: args.routingPolicyGroup
     });
     for (const scopeKey of nextScopeKeys) {
       if (!entry.scopeKeys.includes(scopeKey)) {
@@ -271,7 +306,11 @@ class ResponsesConversationStore {
       });
     }
     this.prune();
+    const requestedPortScopeKey = readPortScopeKey(options);
     let entry = this.responseIndex.get(responseId);
+    if (entry && !entryMatchesPortScope(entry, requestedPortScopeKey)) {
+      entry = undefined;
+    }
     if (!entry) {
       for (const scopeKey of readResumeScopeKeysFromSubmitPayload(submitPayload)) {
         const candidate = this.scopeIndex.get(scopeKey);
@@ -279,6 +318,7 @@ class ResponsesConversationStore {
           candidate
           && typeof candidate.lastResponseId === 'string'
           && candidate.lastResponseId === responseId
+          && entryMatchesPortScope(candidate, requestedPortScopeKey)
         ) {
           entry = candidate;
           break;
@@ -347,6 +387,7 @@ class ResponsesConversationStore {
   resumeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
     this.prune();
     const scopeKeys = buildScopeKeys(args);
+    const portScopeKey = readPortScopeKey(args);
     for (const scopeKey of scopeKeys) {
       const entry = this.scopeIndex.get(scopeKey);
       if (!entry || entry.allowContinuation !== true || !entry.lastResponseId) {
@@ -368,6 +409,7 @@ class ResponsesConversationStore {
   materializeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
     this.prune();
     const scopeKeys = buildScopeKeys(args);
+    const portScopeKey = readPortScopeKey(args);
     for (const scopeKey of scopeKeys) {
       const entry = this.scopeIndex.get(scopeKey);
       if (!entry || entry.allowContinuation !== true) {
