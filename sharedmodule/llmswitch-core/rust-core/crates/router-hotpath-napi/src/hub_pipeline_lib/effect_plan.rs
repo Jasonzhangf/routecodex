@@ -14,6 +14,12 @@ impl HubPipelineEffectPlan {
             effects: Vec::new(),
         }
     }
+
+    pub fn single(effect: HubPipelineEffect) -> Self {
+        Self {
+            effects: vec![effect],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -22,6 +28,15 @@ pub struct HubPipelineEffect {
     pub kind: HubPipelineEffectKind,
     #[serde(default)]
     pub payload: Value,
+}
+
+impl HubPipelineEffect {
+    pub fn stream_pipe(payload: Value) -> Self {
+        Self {
+            kind: HubPipelineEffectKind::StreamPipe,
+            payload,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

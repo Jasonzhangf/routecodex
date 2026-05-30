@@ -87,6 +87,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).toContain('finalize_chat_response');
     expect(engineSource).toContain('build_client_payload_for_protocol');
     expect(engineSource).toContain('process_sse_stream');
+    expect(engineSource).toContain('HubPipelineEffectKind::StreamPipe');
     expect(engineSource).toContain('HubPipelineStageId::RespInboundFormatParse');
     expect(engineSource).toContain('HubPipelineStageId::RespProcessToolGovernance');
     expect(engineSource).toContain('HubPipelineStageId::RespProcessFinalize');

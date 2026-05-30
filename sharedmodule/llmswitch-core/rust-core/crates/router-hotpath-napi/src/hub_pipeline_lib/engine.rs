@@ -32,7 +32,7 @@ use crate::resp_process_stage1_tool_governance::{
 use crate::resp_process_stage2_finalize::{finalize_chat_response, FinalizeInput};
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
-use super::effect_plan::HubPipelineEffectPlan;
+use super::effect_plan::{HubPipelineEffect, HubPipelineEffectKind, HubPipelineEffectPlan};
 use super::errors::{HubPipelineError, HubPipelineResult};
 use super::stage_catalog::HubPipelineStageId;
 use super::types::{HubPipelineConfig, HubPipelineExecutionOutput, HubPipelineRequest};
@@ -480,17 +480,30 @@ impl HubPipelineEngine {
                 "payloadObject": stream_decision.payload.is_object(),
             })),
         ));
+        let effect_plan = if stream_decision.should_stream {
+            HubPipelineEffectPlan::single(HubPipelineEffect {
+                kind: HubPipelineEffectKind::StreamPipe,
+                payload: serde_json::json!({
+                    "codec": client_protocol,
+                    "requestId": output.request_id,
+                    "payload": stream_decision.payload.clone(),
+                    "body": stream_decision.payload.clone(),
+                }),
+            })
+        } else {
+            HubPipelineEffectPlan::empty()
+        };
         diagnostics.push(diagnostic(
             HubPipelineStageId::EffectPlan,
             HubPipelineDiagnosticStatus::Completed,
-            Some(serde_json::json!({ "effects": 0 })),
+            Some(serde_json::json!({ "effects": effect_plan.effects.len() })),
         ));
         Ok(HubPipelineExecutionOutput {
             request_id: output.request_id,
             success: output.success,
             payload: Some(stream_decision.payload),
             metadata: Some(normalized_metadata),
-            effect_plan: HubPipelineEffectPlan::empty(),
+            effect_plan,
             diagnostics,
             error: output.error.map(|error| HubPipelineError {
                 code: error.code,

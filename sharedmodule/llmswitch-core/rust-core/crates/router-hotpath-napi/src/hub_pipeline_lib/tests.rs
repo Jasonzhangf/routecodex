@@ -88,3 +88,44 @@ fn execute_hub_pipeline_json_uses_total_entry_contract() {
         Some(0)
     );
 }
+
+#[test]
+fn response_stream_path_returns_stream_pipe_effect_plan() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stream-1".to_string(),
+            endpoint: "/v1/chat/completions".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stream",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "hi" },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-chat",
+                "entryEndpoint": "/v1/chat/completions",
+                "stream": true
+            }),
+            stream: true,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(output.effect_plan.effects.len(), 1);
+    let effect = &output.effect_plan.effects[0];
+    assert_eq!(
+        serde_json::to_value(&effect.kind).unwrap(),
+        json!("streamPipe")
+    );
+    assert_eq!(effect.payload["codec"], json!("openai-chat"));
+    assert_eq!(effect.payload["requestId"], json!("req-stream-1"));
+    assert_eq!(effect.payload["payload"], output.payload.unwrap());
+}
