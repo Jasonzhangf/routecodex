@@ -13,7 +13,6 @@ import { findMappableSemanticsKeysWithNative, prepareRuntimeMetadataForServertoo
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import { requireJsonObjectPayload } from "./hub-pipeline-shared-guards.js";
 import {
-  resolveActiveProcessModeAndAudit,
   sanitizeStandardizedRequestMessages,
 } from "./hub-pipeline-chat-process-request-utils.js";
 import { runReqInboundStage1FormatParse } from "./stages/req_inbound/req_inbound_stage1_format_parse/index.js";
@@ -24,7 +23,7 @@ import { writeCacheEntryForRequest } from "./stages/req_inbound/req_inbound_stag
 import { captureResponsesRequestContext } from "../../shared/responses-conversation-store.js";
 import { buildReqInboundNodeResultWithNative, readResponsesResumeFromMetadataWithNative, resolveHubClientProtocolWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { recordHubPolicyObservation } from "../policy/policy-engine.js";
-import { annotatePassthroughAuditSkipped, appendPassthroughGovernanceSkippedNode, appendToolGovernanceNodeResult, propagateClockReservationToMetadata } from "./hub-pipeline-chat-process-governance-utils.js";
+import { appendToolGovernanceNodeResult, propagateClockReservationToMetadata } from "./hub-pipeline-chat-process-governance-utils.js";
 import { runReqProcessStage1ToolGovernance } from "./stages/req_process/req_process_stage1_tool_governance/index.js";
 import { measureHubStage } from "./hub-stage-timing.js";
 
@@ -132,7 +131,7 @@ function appendInboundNodeResult(args: {
   args.nodeResults.push(buildReqInboundNodeResultWithNative({ inboundStart: args.inboundStart, inboundEnd: args.inboundEnd, messages: args.standardizedMessages, tools: args.standardizedTools }) as unknown as HubPipelineNodeResult);
 }
 
-export interface RequestStageInboundResult<TContext = Record<string, unknown>> { rawRequest: JsonObject; semanticMapper: ReturnType<RequestStageHooks<TContext>["createSemanticMapper"]>; effectivePolicy: HubPolicyConfig | undefined; shadowCompareBaselineMode: NormalizedRequest["shadowCompare"] extends { baselineMode: infer T } ? T : never; inboundRecorder?: StageRecorder; contextSnapshot?: Record<string, unknown>; standardizedRequest: StandardizedRequest; processedRequest?: ProcessedRequest; workingRequest: StandardizedRequest | ProcessedRequest; activeProcessMode: "chat" | "passthrough"; passthroughAudit?: Record<string, unknown>; nodeResults: HubPipelineNodeResult[]; hasImageAttachment: boolean; serverToolRequired: boolean; }
+export interface RequestStageInboundResult<TContext = Record<string, unknown>> { rawRequest: JsonObject; semanticMapper: ReturnType<RequestStageHooks<TContext>["createSemanticMapper"]>; effectivePolicy: HubPolicyConfig | undefined; shadowCompareBaselineMode: NormalizedRequest["shadowCompare"] extends { baselineMode: infer T } ? T : never; inboundRecorder?: StageRecorder; contextSnapshot?: Record<string, unknown>; standardizedRequest: StandardizedRequest; processedRequest?: ProcessedRequest; workingRequest: StandardizedRequest | ProcessedRequest;  nodeResults: HubPipelineNodeResult[]; hasImageAttachment: boolean; serverToolRequired: boolean; }
 
 async function executeInboundSemanticStages<TContext = Record<string, unknown>>(args: { normalized: NormalizedRequest; hooks: RequestStageHooks<TContext>; semanticMapper: ReturnType<RequestStageHooks<TContext>["createSemanticMapper"]>; rawRequest: JsonObject; effectivePolicy: HubPolicyConfig | undefined; inboundAdapterContext: ReturnType<typeof buildAdapterContextFromNormalized>; inboundRecorder?: StageRecorder; }) {
   observeClientInboundPayload({ normalized: args.normalized, effectivePolicy: args.effectivePolicy, rawRequest: args.rawRequest, inboundRecorder: args.inboundRecorder });
@@ -142,18 +141,16 @@ async function executeInboundSemanticStages<TContext = Record<string, unknown>>(
   clearResponsesResumeMetadata(args.normalized.metadata as Record<string, unknown> | undefined, responsesResumeFromMetadata);
   const contextSnapshot = await measureHubStage(args.normalized.id, "req_inbound.stage3_context_capture", () => captureInboundContextSnapshot({ inboundStage2ResponsesContext: inboundStage2.responsesContext as Record<string, unknown> | undefined, rawRequest: args.rawRequest, inboundAdapterContext: args.inboundAdapterContext, hooks: args.hooks, inboundRecorder: args.inboundRecorder }));
   const standardizedRequest = sanitizeStandardizedRequestMessages(inboundStage2.standardizedRequest as unknown as StandardizedRequest);
-  const { activeProcessMode, passthroughAudit } = resolveActiveProcessModeAndAudit({ normalized: args.normalized, requestMessages: standardizedRequest.messages, rawPayload: args.rawRequest });
-  return { contextSnapshot: contextSnapshot as Record<string, unknown> | undefined, standardizedRequest, activeProcessMode, passthroughAudit };
+  return { contextSnapshot: contextSnapshot as Record<string, unknown> | undefined, standardizedRequest };
 }
 
-async function executeInboundGovernanceStage(args: { normalized: NormalizedRequest; config: HubPipelineConfig; standardizedRequest: StandardizedRequest; rawRequest: JsonObject; inboundRecorder?: StageRecorder; inboundStart: number; activeProcessMode: "chat" | "passthrough"; passthroughAudit?: Record<string, unknown>; }) {
+async function executeInboundGovernanceStage(args: { normalized: NormalizedRequest; config: HubPipelineConfig; standardizedRequest: StandardizedRequest; rawRequest: JsonObject; inboundRecorder?: StageRecorder; inboundStart: number;  }) {
   const inboundEnd = Date.now(); const nodeResults: HubPipelineNodeResult[] = [];
   appendInboundNodeResult({ nodeResults, inboundStart: args.inboundStart, inboundEnd, standardizedMessages: args.standardizedRequest.messages.length, standardizedTools: args.standardizedRequest.tools?.length ?? 0 });
   const metadata = prepareRuntimeMetadataForServertoolsWithNative({ metadata: args.normalized.metadata, webSearchConfig: args.config.virtualRouter?.webSearch as any, execCommandGuard: args.config.virtualRouter?.execCommandGuard as any, clockConfig: args.config.virtualRouter?.clock as any, applyPatchConfig: (args.config.virtualRouter as any)?.applyPatch as any });
   args.normalized.metadata = metadata;
-  if (args.activeProcessMode !== "passthrough") { const present = findMappableSemanticsKeysWithNative(metadata); if (present.length) throw new Error(`[HubPipeline][semantic_gate] Mappable semantics must not be stored in metadata (request_stage.inbound): ${present.join(", ")}`); }
+  { const present = findMappableSemanticsKeysWithNative(metadata); if (present.length) throw new Error(`[HubPipeline][semantic_gate] Mappable semantics must not be stored in metadata (request_stage.inbound): ${present.join(", ")}`); }
   const processedRequest = await measureHubStage(args.normalized.id, "req_process.stage1_tool_governance", async () => {
-    if (args.activeProcessMode === "passthrough") { appendPassthroughGovernanceSkippedNode(nodeResults); annotatePassthroughAuditSkipped(args.passthroughAudit); return undefined; }
     const processResult = await runReqProcessStage1ToolGovernance({ request: args.standardizedRequest, rawPayload: args.rawRequest as any, metadata, entryEndpoint: args.normalized.entryEndpoint, requestId: args.normalized.id, stageRecorder: args.inboundRecorder });
     const processed = processResult.processedRequest; propagateClockReservationToMetadata(processed, metadata); appendToolGovernanceNodeResult(nodeResults, processResult.nodeResult as any); return processed;
   });
@@ -209,8 +206,8 @@ export async function executeRequestStageInbound<TContext = Record<string, unkno
   const shadowCompareBaselineMode = normalized.shadowCompare?.baselineMode;
   const inboundRecorder = createHubSnapshotStageRecorder({ normalized, adapterContext: inboundAdapterContext, warningLabel: "Inbound snapshot recorder creation" });
   const inboundStart = Date.now();
-  const { contextSnapshot, standardizedRequest, activeProcessMode, passthroughAudit } = await executeInboundSemanticStages({ normalized, hooks, semanticMapper: hooks.createSemanticMapper(), rawRequest, effectivePolicy, inboundAdapterContext, inboundRecorder });
-  const { processedRequest, nodeResults } = await executeInboundGovernanceStage({ normalized, config, standardizedRequest, rawRequest, inboundRecorder, inboundStart, activeProcessMode, passthroughAudit });
+  const { contextSnapshot, standardizedRequest } = await executeInboundSemanticStages({ normalized, hooks, semanticMapper: hooks.createSemanticMapper(), rawRequest, effectivePolicy, inboundAdapterContext, inboundRecorder });
+  const { processedRequest, nodeResults } = await executeInboundGovernanceStage({ normalized, config, standardizedRequest, rawRequest, inboundRecorder, inboundStart });
   const { workingRequest, hasImageAttachment, serverToolRequired } = finalizeWorkingRequestForOutbound({ request: (processedRequest ?? standardizedRequest) as unknown as Record<string, unknown>, normalized });
-  return { rawRequest, semanticMapper: hooks.createSemanticMapper(), effectivePolicy, shadowCompareBaselineMode, inboundRecorder, contextSnapshot: contextSnapshot as Record<string, unknown> | undefined, standardizedRequest, processedRequest, workingRequest, activeProcessMode, passthroughAudit, nodeResults, hasImageAttachment, serverToolRequired };
+  return { rawRequest, semanticMapper: hooks.createSemanticMapper(), effectivePolicy, shadowCompareBaselineMode, inboundRecorder, contextSnapshot: contextSnapshot as Record<string, unknown> | undefined, standardizedRequest, processedRequest, workingRequest, nodeResults, hasImageAttachment, serverToolRequired };
 }

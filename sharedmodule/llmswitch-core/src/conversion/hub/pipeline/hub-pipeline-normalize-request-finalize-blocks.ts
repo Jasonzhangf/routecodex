@@ -41,8 +41,10 @@ export function buildPreOrchestrationRequestShape(args: {
   const providerProtocol = resolveProviderProtocolOrThrow(
     metadataRecord.providerProtocol,
   );
-  const processMode =
-    metadataRecord.processMode === "passthrough" ? "passthrough" : "chat";
+  const processMode = (() => {
+    if (metadataRecord.processMode === "passthrough") { throw new Error(`[HubPipeline] processMode='passthrough' is no longer supported. (requestId=${metadataRecord.requestId ?? "unknown"})`); }
+    return "chat" as const;
+  })();
   const direction =
     metadataRecord.direction === "response" ? "response" : "request";
   const stage = metadataRecord.stage === "outbound" ? "outbound" : "inbound";

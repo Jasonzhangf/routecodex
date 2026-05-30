@@ -3,7 +3,6 @@ import type { JsonObject } from "../types/json.js";
 import type { HubPipelineConfig, NormalizedRequest } from "./hub-pipeline.js";
 import type { HubPolicyConfig } from "../policy/policy-engine.js";
 import { recordOutboundToolParityObservation } from "./hub-pipeline-provider-payload-observation.js";
-import { syncPassthroughAudit } from "./hub-pipeline-provider-payload-policy-blocks.js";
 import {
   buildShadowBaselineProviderPayload,
   finalizeProviderPayloadWithPolicy,
@@ -18,7 +17,6 @@ export function buildFinalProviderPayloadBundle(args: {
   config: HubPipelineConfig;
   outboundAdapterContext: Record<string, unknown>;
   rawRequest: JsonObject;
-  passthroughAudit?: Record<string, unknown>;
   outboundRecorder?: StageRecorder;
   shadowCompareBaselineMode?: NormalizedRequest["shadowCompare"] extends {
     baselineMode: infer T;
@@ -60,12 +58,6 @@ export function buildFinalProviderPayloadBundle(args: {
     requestId: args.normalized.id,
     stageRecorder: args.outboundRecorder,
   });
-
-  syncPassthroughAudit(
-    args.passthroughAudit,
-    providerPayload,
-    args.outboundProtocol,
-  );
 
   return {
     providerPayload,

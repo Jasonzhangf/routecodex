@@ -44,8 +44,6 @@ export function buildRequestStageInboundResult<TContext = Record<string, unknown
   standardizedRequest: StandardizedRequest;
   processedRequest?: ProcessedRequest;
   workingRequest: StandardizedRequest | ProcessedRequest;
-  activeProcessMode: "chat" | "passthrough";
-  passthroughAudit?: Record<string, unknown>;
   nodeResults: HubPipelineNodeResult[];
   hasImageAttachment: boolean;
   serverToolRequired: boolean;
@@ -63,8 +61,6 @@ export function buildRequestStageInboundResult<TContext = Record<string, unknown
   standardizedRequest: StandardizedRequest;
   processedRequest?: ProcessedRequest;
   workingRequest: StandardizedRequest | ProcessedRequest;
-  activeProcessMode: "chat" | "passthrough";
-  passthroughAudit?: Record<string, unknown>;
   nodeResults: HubPipelineNodeResult[];
   hasImageAttachment: boolean;
   serverToolRequired: boolean;
@@ -79,8 +75,6 @@ export function buildRequestStageInboundResult<TContext = Record<string, unknown
     standardizedRequest: args.standardizedRequest,
     processedRequest: args.processedRequest,
     workingRequest: args.workingRequest,
-    activeProcessMode: args.activeProcessMode,
-    passthroughAudit: args.passthroughAudit,
     nodeResults: args.nodeResults,
     hasImageAttachment: args.hasImageAttachment,
     serverToolRequired: args.serverToolRequired,

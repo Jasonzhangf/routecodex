@@ -4,7 +4,6 @@ import type { ProcessedRequest, StandardizedRequest } from "../types/standardize
 import type { HubPipelineConfig, HubPipelineNodeResult, NormalizedRequest } from "./hub-pipeline.js";
 import type { RequestStageHooks } from "./hub-pipeline-stage-hooks.js";
 import {
-  resolveActiveProcessModeAndAudit,
   sanitizeStandardizedRequestMessages,
 } from "./hub-pipeline-chat-process-request-utils.js";
 import type { AdapterContext } from "../types/chat-envelope.js";
@@ -26,9 +25,7 @@ export async function executeInboundSemanticStages<TContext = Record<string, unk
 }): Promise<{
   contextSnapshot?: Record<string, unknown>;
   standardizedRequest: StandardizedRequest;
-  activeProcessMode: "chat" | "passthrough";
-  passthroughAudit?: Record<string, unknown>;
-}> {
+  }> {
   const { contextSnapshot, standardizedRequestBase } =
     await runInboundSemanticPipeline({
       normalized: args.normalized,
@@ -44,18 +41,9 @@ export async function executeInboundSemanticStages<TContext = Record<string, unk
     standardizedRequestBase as unknown as StandardizedRequest,
   );
 
-  const { activeProcessMode, passthroughAudit } =
-    resolveActiveProcessModeAndAudit({
-      normalized: args.normalized,
-      requestMessages: standardizedRequest.messages,
-      rawPayload: args.rawRequest,
-    });
-
   return {
     contextSnapshot: contextSnapshot as Record<string, unknown> | undefined,
     standardizedRequest,
-    activeProcessMode,
-    passthroughAudit,
   };
 }
 
@@ -66,9 +54,7 @@ export async function executeInboundGovernanceStage(args: {
   rawRequest: JsonObject;
   inboundRecorder?: StageRecorder;
   inboundStart: number;
-  activeProcessMode: "chat" | "passthrough";
-  passthroughAudit?: Record<string, unknown>;
-}): Promise<{
+  }): Promise<{
   processedRequest?: ProcessedRequest;
   nodeResults: HubPipelineNodeResult[];
 }> {
@@ -77,7 +63,6 @@ export async function executeInboundGovernanceStage(args: {
     config: args.config,
     standardizedRequest: args.standardizedRequest,
     inboundStart: args.inboundStart,
-    activeProcessMode: args.activeProcessMode,
   });
 
   const processedRequest = await runInboundGovernancePipeline({
@@ -85,8 +70,6 @@ export async function executeInboundGovernanceStage(args: {
     standardizedRequest: args.standardizedRequest,
     rawRequest: args.rawRequest,
     inboundRecorder: args.inboundRecorder,
-    activeProcessMode: args.activeProcessMode,
-    passthroughAudit: args.passthroughAudit,
     nodeResults,
     metadata,
   });

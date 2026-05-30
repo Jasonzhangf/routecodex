@@ -12,7 +12,7 @@ type ProviderType = 'openai' | 'anthropic' | 'responses' | 'gemini';
 
 export interface AdapterOptions {
   baseDir?: string;
-  processMode?: 'passthrough' | 'chat' | string;
+  processMode?: 'chat' | string;
   providerProtocol?: string;
   providerType?: ProviderType;
   entryEndpoint?: string;

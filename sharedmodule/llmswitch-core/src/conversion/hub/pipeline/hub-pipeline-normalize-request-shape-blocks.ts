@@ -29,10 +29,10 @@ export function resolveNormalizedRouteShape(args: {
   const normalizedProviderProtocol = resolveProviderProtocolOrThrow(
     args.orchestrationMetadata.providerProtocol,
   );
-  const normalizedProcessMode: NormalizedRequest["processMode"] =
-    args.orchestrationMetadata.processMode === "passthrough"
-      ? "passthrough"
-      : "chat";
+  const normalizedProcessMode: NormalizedRequest["processMode"] = (() => {
+    if (args.orchestrationMetadata.processMode === "passthrough") { throw new Error(`[HubPipeline] processMode='passthrough' is no longer supported. (requestId=${args.orchestrationMetadata.requestId ?? "unknown"})`); }
+    return "chat" as const;
+  })();
   const normalizedDirection: NormalizedRequest["direction"] =
     args.orchestrationMetadata.direction === "response"
       ? "response"

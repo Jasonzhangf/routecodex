@@ -125,7 +125,7 @@ export interface ProviderProfile {
   compatibilityProfile?: string;
   runtimeKey?: string;
   modelId?: string;
-  processMode?: "chat" | "passthrough";
+  processMode?: "chat";
   responsesConfig?: ResponsesProviderConfig;
   streaming?: StreamingPreference;
   maxOutputTokens?: number;
@@ -161,7 +161,7 @@ export interface ProviderRuntimeProfile {
   outboundProfile: string;
   compatibilityProfile?: string;
   modelId?: string;
-  processMode?: "chat" | "passthrough";
+  processMode?: "chat";
   responsesConfig?: ResponsesProviderConfig;
   streaming?: StreamingPreference;
   modelStreaming?: Record<string, StreamingPreference>;
@@ -429,7 +429,7 @@ export interface VirtualRouterBootstrapResult {
 export interface RouterMetadataInput {
   requestId: string;
   entryEndpoint: string;
-  processMode: "chat" | "passthrough";
+  processMode: "chat";
   stream: boolean;
   direction: "request" | "response";
   providerProtocol?: string;
@@ -552,7 +552,7 @@ export interface TargetMetadata {
   runtimeKey?: string;
   concurrencyScopeKey?: string;
   modelId: string;
-  processMode?: "chat" | "passthrough";
+  processMode?: "chat";
   responsesConfig?: ResponsesProviderConfig;
   streaming?: StreamingPreference;
   maxOutputTokens?: number;

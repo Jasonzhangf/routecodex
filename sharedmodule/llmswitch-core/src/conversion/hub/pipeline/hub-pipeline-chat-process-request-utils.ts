@@ -2,10 +2,6 @@ import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import type { StandardizedRequest } from "../types/standardized.js";
 import type { NormalizedRequest } from "./hub-pipeline.js";
 import {
-  buildPassthroughAuditWithNative,
-  resolveActiveProcessModeWithNative,
-} from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
-import {
   stripHistoricalImageAttachments,
   stripHistoricalVisualToolOutputs,
 } from "../process/chat-process-media.js";
@@ -27,22 +23,12 @@ export function resolveActiveProcessModeAndAudit(args: {
   requestMessages: StandardizedRequest["messages"];
   rawPayload: Record<string, unknown>;
 }): {
-  activeProcessMode: "chat" | "passthrough";
-  passthroughAudit?: Record<string, unknown>;
+  activeProcessMode: "chat";
 } {
-  const { normalized, requestMessages, rawPayload } = args;
-  const activeProcessMode = resolveActiveProcessModeWithNative(
-    normalized.processMode,
-    requestMessages,
-  );
-  if (activeProcessMode !== normalized.processMode) {
-    normalized.processMode = activeProcessMode;
+  if (args.normalized.processMode === "passthrough") {
+    throw new Error(`[HubPipeline] processMode='passthrough' is no longer supported. Input metadata.processMode='passthrough' must be removed.`);
   }
-  const passthroughAudit =
-    activeProcessMode === "passthrough"
-      ? buildPassthroughAuditWithNative(rawPayload, normalized.providerProtocol)
-      : undefined;
-  return { activeProcessMode, passthroughAudit };
+  return { activeProcessMode: "chat" };
 }
 
 export function attachHubStageTopSummary(args: {

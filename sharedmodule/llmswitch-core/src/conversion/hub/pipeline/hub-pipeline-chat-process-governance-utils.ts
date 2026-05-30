@@ -1,8 +1,6 @@
 import type { ProcessedRequest } from "../types/standardized.js";
 import type { HubPipelineNodeResult } from "./hub-pipeline.js";
 import {
-  annotatePassthroughGovernanceSkipWithNative,
-  buildPassthroughGovernanceSkippedNodeWithNative,
   buildToolGovernanceNodeResultWithNative,
   mergeClockReservationIntoMetadataWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
@@ -49,20 +47,4 @@ export function appendToolGovernanceNodeResult(
   );
 }
 
-export function appendPassthroughGovernanceSkippedNode(
-  nodeResults: HubPipelineNodeResult[],
-): void {
-  nodeResults.push(
-    buildPassthroughGovernanceSkippedNodeWithNative() as unknown as HubPipelineNodeResult,
-  );
-}
 
-export function annotatePassthroughAuditSkipped(
-  passthroughAudit: Record<string, unknown> | undefined,
-): void {
-  if (!passthroughAudit) {
-    return;
-  }
-  const next = annotatePassthroughGovernanceSkipWithNative(passthroughAudit);
-  replaceMutableRecord(passthroughAudit, next);
-}

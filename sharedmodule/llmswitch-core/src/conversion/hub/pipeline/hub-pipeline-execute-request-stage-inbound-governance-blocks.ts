@@ -17,7 +17,6 @@ export function prepareInboundGovernanceContext(args: {
   config: HubPipelineConfig;
   standardizedRequest: StandardizedRequest;
   inboundStart: number;
-  activeProcessMode: "chat" | "passthrough";
 }): {
   nodeResults: HubPipelineNodeResult[];
   metadata: Record<string, unknown>;
@@ -36,9 +35,7 @@ export function prepareInboundGovernanceContext(args: {
     normalized: args.normalized,
     config: args.config,
   });
-  if (args.activeProcessMode !== "passthrough") {
-    assertNoMappableSemanticsInMetadata(metadata);
-  }
+  assertNoMappableSemanticsInMetadata(metadata);
 
   return {
     nodeResults,
@@ -51,8 +48,6 @@ export async function runInboundGovernancePipeline(args: {
   standardizedRequest: StandardizedRequest;
   rawRequest: JsonObject;
   inboundRecorder?: StageRecorder;
-  activeProcessMode: "chat" | "passthrough";
-  passthroughAudit?: Record<string, unknown>;
   nodeResults: HubPipelineNodeResult[];
   metadata: Record<string, unknown>;
 }): Promise<ProcessedRequest | undefined> {
@@ -67,8 +62,6 @@ export async function runInboundGovernancePipeline(args: {
         rawPayload: args.rawRequest,
         metadata: args.metadata,
         stageRecorder: args.inboundRecorder,
-        activeProcessMode: args.activeProcessMode,
-        passthroughAudit: args.passthroughAudit,
         nodeResults: args.nodeResults,
       }),
   );

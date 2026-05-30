@@ -54,7 +54,11 @@ function resolveNormalizedRouteShape(args: {
     ? normalizeHubEndpointWithNative(args.orchestrationMetadata.entryEndpoint)
     : args.base.entryEndpoint;
   const normalizedProviderProtocol = resolveProviderProtocolOrThrow(args.orchestrationMetadata.providerProtocol);
-  const normalizedProcessMode: NormalizedRequest["processMode"] = args.orchestrationMetadata.processMode === "passthrough" ? "passthrough" : "chat";
+  const normalizedProcessMode: NormalizedRequest["processMode"] = (() => {
+    const raw = typeof args.orchestrationMetadata.processMode === "string" ? args.orchestrationMetadata.processMode.trim() : undefined;
+    if (raw === "passthrough") { throw new Error(`[HubPipeline] processMode='passthrough' is no longer supported. (requestId=${args.orchestrationMetadata.requestId ?? "unknown"})`); }
+    return "chat" as const;
+  })();
   const normalizedDirection: NormalizedRequest["direction"] = args.orchestrationMetadata.direction === "response" ? "response" : "request";
   const normalizedStage: NormalizedRequest["stage"] = args.orchestrationMetadata.stage === "outbound" ? "outbound" : "inbound";
   const normalizedStream = Boolean(typeof args.orchestrationMetadata.stream === "boolean" ? args.orchestrationMetadata.stream : args.base.stream);
@@ -143,8 +147,10 @@ function buildPreOrchestrationRequestShape(args: {
   const providerProtocol = resolveProviderProtocolOrThrow(
     metadataRecord.providerProtocol,
   );
-  const processMode =
-    metadataRecord.processMode === "passthrough" ? "passthrough" : "chat";
+  const processMode = (() => {
+    if (metadataRecord.processMode === "passthrough") { throw new Error(`[HubPipeline] processMode='passthrough' is no longer supported. (requestId=${metadataRecord.requestId ?? "unknown"})`); }
+    return "chat" as const;
+  })();
   const direction =
     metadataRecord.direction === "response" ? "response" : "request";
   const stage = metadataRecord.stage === "outbound" ? "outbound" : "inbound";

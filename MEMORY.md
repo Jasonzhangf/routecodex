@@ -1790,3 +1790,6 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 ## 2026-05-30 VR excludedProviderKeys 空池规则
 - 已验证：`excludedProviderKeys` 是 retry/避让信号，不是硬性删除路由池的真源；若 exclusion 覆盖当前 route pool 全部可用目标，Rust Virtual Router 必须保持 routing-state 后的候选池非空并继续按 priority/weighted 选择，禁止抛 `PROVIDER_NOT_AVAILABLE`。
 - 回归锚点：HTTP 黑盒 `tests/server/handlers/responses-handler.routing-empty-pool.spec.ts` 必须先红后绿；Rust 锚点 `routing_exclusions_do_not_empty_pool_when_all_targets_excluded`。
+
+## 2026-05-30 VR recoverable busy 统一错误路径
+- 已验证：Virtual Router 全池 recoverable busy/cooldown 不是无 provider；必须分类为 `HTTP_429` recoverable，RequestExecutor 用现有 recoverable backoff 阻塞指数退避重试 3 次，仍 busy 才向客户端返回 429。禁止把该状态映射成 `PROVIDER_NOT_AVAILABLE` 或新增 fallback 分支。

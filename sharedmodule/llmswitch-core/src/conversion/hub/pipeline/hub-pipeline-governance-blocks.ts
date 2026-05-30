@@ -8,8 +8,6 @@ import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import { runReqProcessStage1ToolGovernance } from "./stages/req_process/req_process_stage1_tool_governance/index.js";
 import { peekHubStageTopSummary } from "./hub-stage-timing.js";
 import {
-  annotatePassthroughAuditSkipped,
-  appendPassthroughGovernanceSkippedNode,
   appendToolGovernanceNodeResult,
   propagateClockReservationToMetadata,
 } from "./hub-pipeline-chat-process-governance-utils.js";
@@ -21,16 +19,8 @@ export async function executeToolGovernanceOrPassthrough(args: {
   rawPayload: Record<string, unknown>;
   metadata: Record<string, unknown>;
   stageRecorder?: StageRecorder;
-  activeProcessMode: "chat" | "passthrough";
-  passthroughAudit?: Record<string, unknown>;
   nodeResults: HubPipelineNodeResult[];
 }): Promise<ProcessedRequest | undefined> {
-  if (args.activeProcessMode === "passthrough") {
-    appendPassthroughGovernanceSkippedNode(args.nodeResults);
-    annotatePassthroughAuditSkipped(args.passthroughAudit);
-    return undefined;
-  }
-
   const processResult = await runReqProcessStage1ToolGovernance({
     request: args.standardizedRequest,
     rawPayload: args.rawPayload,

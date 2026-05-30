@@ -7,7 +7,6 @@ import { type HubPolicyConfig } from "../policy/policy-engine.js";
 import { jsonClone } from "../types/json.js";
 import {
   applyDirectBuiltinWebSearchToolWithNative,
-  attachPassthroughProviderInputAuditWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { replaceMutableRecord } from "./hub-pipeline-mutable-record-utils.js";
 import { recordOutboundToolParityObservation } from "./hub-pipeline-provider-payload-observation.js";
@@ -127,8 +126,6 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
   workingRequest: StandardizedRequest | ProcessedRequest;
   rawRequest: JsonObject;
   contextSnapshot?: Record<string, unknown>;
-  activeProcessMode: "chat" | "passthrough";
-  passthroughAudit?: Record<string, unknown>;
   outboundProtocol: NormalizedRequest["providerProtocol"];
   outboundAdapterContext: Record<string, unknown>;
   outboundStream: boolean;
@@ -150,8 +147,6 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
     workingRequest,
     rawRequest,
     contextSnapshot,
-    activeProcessMode,
-    passthroughAudit,
     outboundProtocol,
     outboundAdapterContext,
     outboundStream,
@@ -161,25 +156,7 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
     shadowCompareBaselineMode,
   } = args;
 
-  if (activeProcessMode === "passthrough") {
-    let passthroughPayload = jsonClone(rawRequest as any) as Record<string, unknown>;
-    if (typeof outboundStream === "boolean") passthroughPayload.stream = outboundStream;
-    passthroughPayload = stripUnsupportedBuiltinWebSearchToolsForProtocol(
-      passthroughPayload,
-      outboundProtocol,
-    );
-    if (passthroughAudit) {
-      const auditNext = attachPassthroughProviderInputAuditWithNative(passthroughAudit, passthroughPayload, outboundProtocol);
-      replaceMutableRecord(passthroughAudit, auditNext);
-    }
-    return {
-      providerPayload: passthroughPayload,
-      shadowBaselineProviderPayload: undefined,
-      outboundWorkingRequest: workingRequest,
-    };
-  }
-
-  const outboundHooks = outboundProtocol !== normalized.providerProtocol
+const outboundHooks = outboundProtocol !== normalized.providerProtocol
     ? requireRequestStageHooks<TContext>(outboundProtocol)
     : hooks;
   const outboundSemanticMapper = outboundProtocol !== normalized.providerProtocol
@@ -264,11 +241,6 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
     requestId: normalized.id,
     stageRecorder: outboundRecorder,
   });
-
-  if (passthroughAudit) {
-    const auditNext = attachPassthroughProviderInputAuditWithNative(passthroughAudit, providerPayload, outboundProtocol);
-    replaceMutableRecord(passthroughAudit, auditNext);
-  }
 
   return {
     providerPayload,

@@ -311,26 +311,3 @@ export function buildToolGovernanceNodeResultWithNative(
   });
 }
 
-export function buildPassthroughGovernanceSkippedNodeWithNative(): Record<string, unknown> {
-  const capability = 'buildPassthroughGovernanceSkippedNodeJson';
-  const fail = (reason?: string): Record<string, unknown> =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  try {
-    const raw = fn();
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseRecord(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}

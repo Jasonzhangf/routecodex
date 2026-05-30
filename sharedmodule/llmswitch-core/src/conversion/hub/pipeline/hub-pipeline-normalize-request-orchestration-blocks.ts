@@ -10,7 +10,7 @@ export function runNormalizedRequestOrchestration(args: {
   payload: Record<string, unknown>;
   metadata: Record<string, unknown>;
   stream: boolean;
-  processMode: "chat" | "passthrough";
+  processMode: "chat";
   direction: "request" | "response";
   stage: "inbound" | "outbound";
 }): {

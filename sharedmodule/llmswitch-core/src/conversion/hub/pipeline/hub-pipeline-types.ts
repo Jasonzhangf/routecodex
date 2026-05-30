@@ -34,7 +34,7 @@ export interface HubPipelineConfig {
 export interface HubPipelineRequestMetadata extends Record<string, unknown> {
   entryEndpoint?: string;
   providerProtocol?: string;
-  processMode?: "chat" | "passthrough";
+  processMode?: "chat";
   stage?: "inbound" | "outbound";
   direction?: "request" | "response";
   stream?: boolean;
@@ -88,7 +88,7 @@ export interface NormalizedRequest {
   shadowCompare?: HubShadowCompareRequestConfig;
   disableSnapshots?: boolean;
   externalStageRecorder?: StageRecorder;
-  processMode: "chat" | "passthrough";
+  processMode: "chat";
   direction: "request" | "response";
   stage: "inbound" | "outbound";
   stream: boolean;

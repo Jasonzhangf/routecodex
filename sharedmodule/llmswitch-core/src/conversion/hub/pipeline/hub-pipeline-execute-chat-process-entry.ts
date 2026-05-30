@@ -13,8 +13,6 @@ import {
 import { requireJsonObjectPayload, requireRequestStageHooks } from "./hub-pipeline-shared-guards.js";
 import { finalizeWorkingRequestForOutbound } from "./hub-pipeline-execute-request-stage-inbound.js";
 import {
-  annotatePassthroughAuditSkipped,
-  appendPassthroughGovernanceSkippedNode,
   appendToolGovernanceNodeResult,
   propagateClockReservationToMetadata,
 } from './hub-pipeline-chat-process-governance-utils.js';
@@ -35,10 +33,10 @@ function mergeRuntimeMetadataPatch(base: Record<string, unknown>, patch: Record<
 
 function createChatProcessEntryNodeResults(): HubPipelineNodeResult[] { return [buildReqInboundSkippedNodeWithNative({ reason: "stage=outbound" }) as unknown as HubPipelineNodeResult]; }
 
-function prepareChatProcessEntryExecutionContext(args: { normalized: NormalizedRequest; config: HubPipelineConfig; standardizedRequestBase: StandardizedRequest; rawPayload: Record<string, unknown>; }): { metaBase: Record<string, unknown>; standardizedRequest: StandardizedRequest; activeProcessMode: "chat" | "passthrough"; passthroughAudit?: Record<string, unknown>; stageRecorder: ReturnType<typeof createHubSnapshotStageRecorder>; } {
+function prepareChatProcessEntryExecutionContext(args: { normalized: NormalizedRequest; config: HubPipelineConfig; standardizedRequestBase: StandardizedRequest; rawPayload: Record<string, unknown>; }): { metaBase: Record<string, unknown>; standardizedRequest: StandardizedRequest; stageRecorder: ReturnType<typeof createHubSnapshotStageRecorder>; } {
   const metaBase = prepareChatProcessRuntimeMetadata({ normalized: args.normalized, config: args.config });
   let standardizedRequest: StandardizedRequest = args.standardizedRequestBase;
-  const { activeProcessMode, passthroughAudit } = resolveActiveProcessModeAndAudit({ normalized: args.normalized, requestMessages: standardizedRequest.messages, rawPayload: args.rawPayload });
+  void resolveActiveProcessModeAndAudit({ normalized: args.normalized, requestMessages: standardizedRequest.messages, rawPayload: args.rawPayload });
   standardizedRequest = sanitizeStandardizedRequestMessages(standardizedRequest);
   try {
     const lifted = liftResponsesResumeIntoSemanticsWithNative(standardizedRequest as any, metaBase);
@@ -50,11 +48,10 @@ function prepareChatProcessEntryExecutionContext(args: { normalized: NormalizedR
   }
   const adapterContext = buildAdapterContextFromNormalized(args.normalized);
   const stageRecorder = createChatProcessSnapshotRecorder({ normalized: args.normalized, adapterContext, warningLabel: "Snapshot recorder creation" });
-  return { metaBase, standardizedRequest, activeProcessMode, passthroughAudit, stageRecorder };
+  return { metaBase, standardizedRequest, stageRecorder };
 }
 
-async function executeChatProcessGovernancePhase(args: { normalized: NormalizedRequest; standardizedRequest: StandardizedRequest; rawPayload: Record<string, unknown>; metadata: Record<string, unknown>; stageRecorder: unknown; activeProcessMode: "chat" | "passthrough"; passthroughAudit?: Record<string, unknown>; nodeResults: HubPipelineNodeResult[]; }): Promise<ProcessedRequest | undefined> {
-  if (args.activeProcessMode === "passthrough") { appendPassthroughGovernanceSkippedNode(args.nodeResults); annotatePassthroughAuditSkipped(args.passthroughAudit); return undefined; }
+async function executeChatProcessGovernancePhase(args: { normalized: NormalizedRequest; standardizedRequest: StandardizedRequest; rawPayload: Record<string, unknown>; metadata: Record<string, unknown>; stageRecorder: unknown; nodeResults: HubPipelineNodeResult[]; }): Promise<ProcessedRequest | undefined> {
   const processResult = await runReqProcessStage1ToolGovernance({ request: args.standardizedRequest, rawPayload: args.rawPayload, metadata: args.metadata, entryEndpoint: args.normalized.entryEndpoint, requestId: args.normalized.id, stageRecorder: args.stageRecorder as any });
   const processedRequest = processResult.processedRequest;
   propagateClockReservationToMetadata(processedRequest, args.metadata);
@@ -82,12 +79,10 @@ export async function executeChatProcessEntryPipeline(args: { normalized: Normal
   const hooks = requireRequestStageHooks(normalized.providerProtocol);
   const nodeResults: HubPipelineNodeResult[] = createChatProcessEntryNodeResults();
   const { rawPayloadInput, rawPayload, standardizedRequestBase } = normalizeChatProcessEntryPayload(normalized);
-  const { metaBase, standardizedRequest, activeProcessMode, passthroughAudit, stageRecorder } = prepareChatProcessEntryExecutionContext({ normalized, config, standardizedRequestBase, rawPayload });
-  if (activeProcessMode !== "passthrough") {
-    assertNoMappableSemanticsInMetadata(metaBase);
-  }
-  const processedRequest = await executeChatProcessGovernancePhase({ normalized, standardizedRequest, rawPayload, metadata: metaBase, stageRecorder, activeProcessMode, passthroughAudit, nodeResults });
+  const { metaBase, standardizedRequest, stageRecorder } = prepareChatProcessEntryExecutionContext({ normalized, config, standardizedRequestBase, rawPayload });
+  assertNoMappableSemanticsInMetadata(metaBase);
+  const processedRequest = await executeChatProcessGovernancePhase({ normalized, standardizedRequest, rawPayload, metadata: metaBase, stageRecorder, nodeResults });
   const { workingRequest, hasImageAttachment, serverToolRequired } = finalizeWorkingRequestForOutbound({ request: (processedRequest ?? standardizedRequest) as unknown as Record<string, unknown>, normalized });
-  const outbound = await executeRouteAndBuildOutbound({ normalized, hooks, routerEngine, config, workingRequest, nodeResults, inboundRecorder: stageRecorder, activeProcessMode, serverToolRequired, hasImageAttachment, passthroughAudit, rawRequest: rawPayloadInput, contextSnapshot: undefined, semanticMapper: hooks.createSemanticMapper(), effectivePolicy: resolveChatProcessEffectivePolicy(normalized, config), shadowCompareBaselineMode: undefined, routeSelectTiming: { enabled: false } });
+  const outbound = await executeRouteAndBuildOutbound({ normalized, hooks, routerEngine, config, workingRequest, nodeResults, inboundRecorder: stageRecorder, serverToolRequired, hasImageAttachment, rawRequest: rawPayloadInput, contextSnapshot: undefined, semanticMapper: hooks.createSemanticMapper(), effectivePolicy: resolveChatProcessEffectivePolicy(normalized, config), shadowCompareBaselineMode: undefined, routeSelectTiming: { enabled: false } });
   return buildChatProcessEntryPipelineResult({ normalized, standardizedRequest, processedRequest, outbound, nodeResults });
 }

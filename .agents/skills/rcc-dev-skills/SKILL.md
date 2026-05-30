@@ -1581,3 +1581,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-05-30 VR empty-pool / excludedProviderKeys 精华
 - 看到 `No available providers after applying routing instructions` 且日志有 `excludedProviderKeys`/retry 避让/并发满时，先查 Rust `apply_standard_filters`；`excludedProviderKeys` 只能避让，不能把 routing-state 后的 route pool 删空。
 - 红测必须包含真实 `/v1/responses` HTTP handler + HubPipeline：metadata exclusion 覆盖 default pool 全部目标时仍返回 200 并选回池内 provider。
+
+### 2026-05-30 VR recoverable busy 精华
+- 全池 provider 临时 busy/冷却必须走唯一 recoverable 错误处理路径：Rust VR 输出 `HTTP_429` details，RequestExecutor 阻塞指数退避重试 3 次后才返回 429；禁止 `PROVIDER_NOT_AVAILABLE`，禁止 fallback/旁路。

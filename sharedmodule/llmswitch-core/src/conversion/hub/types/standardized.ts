@@ -71,7 +71,7 @@ export interface StandardizedMetadata {
   toolChoice?: ToolChoice;
   providerKey?: string;
   providerType?: string;
-  processMode?: 'chat' | 'passthrough';
+  processMode?: 'chat';
   routeHint?: string;
   webSearchEnabled?: boolean;
   [key: string]: unknown;

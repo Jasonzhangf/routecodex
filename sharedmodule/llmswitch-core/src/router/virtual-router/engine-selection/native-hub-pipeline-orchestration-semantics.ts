@@ -6,7 +6,7 @@ export interface NativeHubPipelineOrchestrationInput {
   payload: Record<string, unknown>;
   metadata: Record<string, unknown>;
   stream: boolean;
-  processMode: 'chat' | 'passthrough';
+  processMode: 'chat';
   direction: 'request' | 'response';
   stage: 'inbound' | 'outbound';
 }
@@ -71,7 +71,7 @@ export interface NativeLiftResponsesResumeIntoSemanticsOutput {
 export interface NativeRouterMetadataInputBuildInput {
   requestId: string;
   entryEndpoint: string;
-  processMode: 'chat' | 'passthrough';
+  processMode: 'chat';
   stream: boolean;
   direction: 'request' | 'response';
   providerProtocol: string;
@@ -91,14 +91,13 @@ export interface NativeHubPipelineResultMetadataBuildInput {
     metadata: Record<string, unknown>;
     entryEndpoint: string;
     stream: boolean;
-    processMode: 'chat' | 'passthrough';
+    processMode: 'chat';
     routeHint?: string;
   };
   outboundProtocol: string;
   target?: unknown;
   outboundStream?: boolean;
   capturedChatRequest: Record<string, unknown>;
-  passthroughAudit?: Record<string, unknown>;
   shadowCompareBaselineMode?: 'off' | 'observe' | 'enforce';
   effectivePolicy?: { mode?: 'off' | 'observe' | 'enforce' };
   shadowBaselineProviderPayload?: Record<string, unknown>;
@@ -135,7 +134,7 @@ export interface NativeCoerceStandardizedRequestInput {
     id: string;
     entryEndpoint: string;
     stream: boolean;
-    processMode: 'chat' | 'passthrough';
+    processMode: 'chat';
     routeHint?: string;
   };
 }
@@ -205,7 +204,6 @@ export {
   applyHasImageAttachmentFlagWithNative,
   buildCapturedChatRequestSnapshotWithNative,
   buildHubPipelineResultMetadataWithNative,
-  buildPassthroughGovernanceSkippedNodeWithNative,
   buildReqInboundNodeResultWithNative,
   buildReqInboundSkippedNodeWithNative,
   buildReqOutboundNodeResultWithNative,
@@ -228,10 +226,5 @@ export {
 } from './native-hub-pipeline-orchestration-semantics-search-resume.js';
 
 export {
-  annotatePassthroughGovernanceSkipWithNative,
-  attachPassthroughProviderInputAuditWithNative,
-  buildPassthroughAuditWithNative,
   findMappableSemanticsKeysWithNative,
-  resolveActiveProcessModeWithNative,
-  resolveHasInstructionRequestedPassthroughWithNative
-} from './native-hub-pipeline-orchestration-semantics-passthrough.js';
+} from './native-hub-pipeline-orchestration-semantics-semantic-gate.js';
