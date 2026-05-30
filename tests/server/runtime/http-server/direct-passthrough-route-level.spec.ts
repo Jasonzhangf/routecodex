@@ -1,6 +1,177 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 describe('direct passthrough route-level', () => {
+  it('HTTP BLACKBOX: provider-mode keyless chat binding sends bound provider model', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    let sentPayload: Record<string, unknown> | undefined;
+    const runtimeKey = 'opencode-zen-free.key1.deepseek-v4-flash-free';
+    (server as any).providerHandles = new Map([[runtimeKey, {
+      runtimeKey,
+      providerId: 'opencode-zen-free',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-chat',
+      runtime: {},
+      instance: {
+        initialize: async () => {},
+        cleanup: async () => {},
+        processIncoming: jest.fn(),
+        processIncomingDirect: jest.fn(async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          if (payload.model !== 'deepseek-v4-flash-free') {
+            return {
+              status: 401,
+              data: {
+                error: {
+                  type: 'ModelError',
+                  message: `Model ${String(payload.model)} is not supported`,
+                },
+              },
+            };
+          }
+          return {
+            status: 200,
+            data: {
+              id: 'chatcmpl_provider_direct_keyless_model_blackbox',
+              object: 'chat.completion',
+              model: 'deepseek-v4-flash-free',
+              choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+            },
+          };
+        }),
+      },
+    }]]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'provider',
+      protocolBehavior: 'auto',
+      providerBinding: 'opencode-zen-free.deepseek-v4-flash-free',
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'deepseek-v4-flash',
+          stream: false,
+          messages: [{ role: 'user', content: 'hello' }],
+        }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual(expect.objectContaining({
+        id: 'chatcmpl_provider_direct_keyless_model_blackbox',
+        model: 'deepseek-v4-flash',
+      }));
+      expect(sentPayload?.model).toBe('deepseek-v4-flash-free');
+    } finally {
+      await server.stop();
+    }
+  }, 15000);
+
+  it('HTTP BLACKBOX: provider-mode chat direct preserves stream flag when stream_options is present', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    let sentPayload: Record<string, unknown> | undefined;
+    const runtimeKey = 'opencode-zen-free.key1.deepseek-v4-flash-free';
+    (server as any).providerHandles = new Map([[runtimeKey, {
+      runtimeKey,
+      providerId: 'opencode-zen-free',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-chat',
+      runtime: {},
+      instance: {
+        initialize: async () => {},
+        cleanup: async () => {},
+        processIncoming: jest.fn(),
+        processIncomingDirect: jest.fn(async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          if (payload.stream_options && payload.stream !== true) {
+            return {
+              status: 400,
+              data: {
+                error: {
+                  message: 'stream_options should be set along with stream = true',
+                  type: 'invalid_request_error',
+                },
+              },
+            };
+          }
+          return {
+            status: 200,
+            data: {
+              id: 'chatcmpl_provider_direct_stream_options_blackbox',
+              object: 'chat.completion',
+              model: 'deepseek-v4-flash-free',
+              choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+            },
+          };
+        }),
+      },
+    }]]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'provider',
+      protocolBehavior: 'auto',
+      providerBinding: 'opencode-zen-free.deepseek-v4-flash-free',
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+        body: JSON.stringify({
+          model: 'deepseek-v4-flash',
+          stream_options: { include_usage: true },
+          messages: [{ role: 'user', content: 'hello' }],
+        }),
+      });
+      const bodyText = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(bodyText).not.toContain('stream_options should be set along with stream = true');
+      expect(sentPayload?.model).toBe('deepseek-v4-flash-free');
+      expect(sentPayload?.stream).toBe(true);
+      expect(sentPayload?.stream_options).toEqual({ include_usage: true });
+    } finally {
+      await server.stop();
+    }
+  }, 15000);
+
   it('provider-mode direct sends metadata.__raw_request_body instead of mutated body', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');

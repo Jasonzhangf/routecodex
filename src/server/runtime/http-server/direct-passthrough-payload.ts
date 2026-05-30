@@ -14,7 +14,11 @@ export function resolveRawPayloadForDirect(
 ): Record<string, unknown> {
   const raw = metadata?.__raw_request_body;
   if (isRecord(raw)) {
-    return cloneRecord(raw);
+    const next = cloneRecord(raw);
+    if ((isRecord(body) && body.stream === true || metadata?.stream === true || metadata?.outboundStream === true) && next.stream !== true) {
+      next.stream = true;
+    }
+    return next;
   }
   if (isRecord(body)) {
     return cloneRecord(body);

@@ -7,6 +7,7 @@ import { jest } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { HttpTransportProvider } from '../../../../src/providers/core/runtime/http-transport-provider.js';
+import { HttpRequestExecutor } from '../../../../src/providers/core/runtime/http-request-executor.js';
 import { ResponsesProvider } from '../../../../src/providers/core/runtime/responses-provider.js';
 import { AnthropicProtocolClient } from '../../../../src/client/anthropic/anthropic-protocol-client.js';
 import { DeepSeekHttpProvider } from '../../../../src/providers/core/runtime/deepseek-http-provider.js';
@@ -72,6 +73,67 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     const provider = new HttpTransportProvider(config, emptyDeps, 'openai-http-provider');
     expect(provider.providerType).toBe('responses');
     expect(provider.type).toBe('openai-http-provider');
+  });
+
+  test('HTTP TRANSPORT RED: openai chat preserves stream protocol field through final provider body', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-openai-chat-stream-preserve',
+      type: 'openai-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'test-openai-chat-stream-preserve',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/chat/completions' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new HttpTransportProvider(config, emptyDeps, 'openai-http-provider') as any;
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.postprocessResponse = async (response: unknown) => response;
+
+    let sentBody: Record<string, unknown> | undefined;
+    let sentHeaders: Record<string, string> | undefined;
+    const fakeHttpClient = {
+      post: async (_url: string, body: Record<string, unknown>, headers: Record<string, string>) => {
+        sentBody = body;
+        sentHeaders = headers;
+        return { status: 200, data: { id: 'chatcmpl_test', choices: [] } };
+      },
+      postStream: async (_url: string, body: Record<string, unknown>, headers: Record<string, string>) => {
+        sentBody = body;
+        sentHeaders = headers;
+        return { pipe: () => undefined } as unknown as NodeJS.ReadableStream;
+      }
+    };
+    await provider.initialize();
+    provider.httpClient = fakeHttpClient;
+    provider.requestExecutor = new HttpRequestExecutor(
+      provider.httpClient,
+      provider.createRequestExecutorDeps()
+    );
+
+    const request: Record<string, unknown> = {
+      model: 'deepseek-v4-flash-free',
+      stream: true,
+      stream_options: { include_usage: true },
+      messages: [{ role: 'user', content: 'ping' }]
+    };
+    attachProviderRuntimeMetadata(request, {
+      requestId: 'req_openai_chat_stream_preserve',
+      providerType: 'openai',
+      providerProtocol: 'openai-chat',
+      providerId: 'opencode-zen-free',
+      providerKey: 'opencode-zen-free.deepseek-v4-flash-free',
+      metadata: { stream: true }
+    });
+
+    const processed = await provider.preprocessRequest(request);
+    await provider.sendRequestInternal(processed);
+
+    expect(sentBody?.model).toBe('deepseek-v4-flash-free');
+    expect(sentBody?.stream).toBe(true);
+    expect(sentBody?.stream_options).toEqual({ include_usage: true });
+    expect(sentHeaders?.Accept).toBe('text/event-stream');
   });
 
   test('ResponsesProvider forces providerType=responses', () => {

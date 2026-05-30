@@ -4,6 +4,50 @@ import type { ProviderFamilyProfile } from '../../profile/profile-contracts.js';
 import type { ProviderContext } from '../api/provider-types.js';
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function readStreamIntentFromMetadata(value: unknown): boolean | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return readBoolean(value.stream)
+    ?? readBoolean(value.outboundStream)
+    ?? readBoolean(value.inboundStream);
+}
+
+function readStreamIntentFromRequest(request: UnknownObject): boolean | undefined {
+  if (!isRecord(request)) {
+    return undefined;
+  }
+  const direct = readBoolean(request.stream);
+  if (typeof direct === 'boolean') {
+    return direct;
+  }
+  if (isRecord(request.data)) {
+    const dataStream = readBoolean(request.data.stream);
+    if (typeof dataStream === 'boolean') {
+      return dataStream;
+    }
+  }
+  return readStreamIntentFromMetadata(request.metadata);
+}
+
+function resolveGenericStreamIntent(args: {
+  request: UnknownObject;
+  context?: ProviderContext;
+  runtimeMetadata?: ProviderRuntimeMetadata;
+}): boolean | undefined {
+  return readStreamIntentFromRequest(args.request)
+    ?? readStreamIntentFromMetadata(args.context?.metadata)
+    ?? readStreamIntentFromMetadata(args.runtimeMetadata?.metadata);
+}
+
 export function resolveProviderWantsUpstreamSse(args: {
   request: UnknownObject;
   context: ProviderContext;
@@ -15,7 +59,10 @@ export function resolveProviderWantsUpstreamSse(args: {
     context: args.context,
     runtimeMetadata: args.runtimeMetadata
   });
-  return typeof profileResolved === 'boolean' ? profileResolved : false;
+  if (typeof profileResolved === 'boolean') {
+    return profileResolved;
+  }
+  return resolveGenericStreamIntent(args) === true;
 }
 
 export function applyProviderStreamModeHeaders(args: {
@@ -183,10 +230,39 @@ export function buildProviderHttpRequestBody(args: {
     runtimeMetadata: args.runtimeMetadata
   });
   if (profileBody && typeof profileBody === 'object') {
-    return profileBody as UnknownObject;
+    return ensureGenericStreamField({
+      body: profileBody as UnknownObject,
+      request: args.request,
+      runtimeMetadata: args.runtimeMetadata
+    });
   }
   if (args.legacyBody && typeof args.legacyBody === 'object') {
-    return args.legacyBody;
+    return ensureGenericStreamField({
+      body: args.legacyBody,
+      request: args.request,
+      runtimeMetadata: args.runtimeMetadata
+    });
   }
-  return defaultBody;
+  return ensureGenericStreamField({
+    body: defaultBody,
+    request: args.request,
+    runtimeMetadata: args.runtimeMetadata
+  });
+}
+
+function ensureGenericStreamField(args: {
+  body: UnknownObject;
+  request: UnknownObject;
+  runtimeMetadata?: ProviderRuntimeMetadata;
+}): UnknownObject {
+  if (resolveGenericStreamIntent({ request: args.request, runtimeMetadata: args.runtimeMetadata }) !== true) {
+    return args.body;
+  }
+  if (!isRecord(args.body) || args.body.stream === true) {
+    return args.body;
+  }
+  return {
+    ...args.body,
+    stream: true
+  };
 }
