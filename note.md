@@ -13247,3 +13247,9 @@ Using skills: coding-principals + rcc-dev-skills
 - 删除内容：TS `runRespInboundStage2FormatParse` / `runRespInboundStage3SemanticMap` / `runRespProcessStage1ToolGovernance` / `runRespProcessStage2Finalize` / `runRespProcessStage3ServerToolOrchestration` / `runRespOutboundStage1ClientRemap` 旧路径、TS response mapper registry、provider-response 内部 `hasNewGovernedServerToolCalls` wrapper、old outbound SSE stage path。
 - 保留内容：TS 只执行 native response plan 的 runtime side effects（stream codec、runtimeStateWrite、servertoolRuntimeAction fail-fast、usage/conversation/clock side effect）。
 - 验证：red gate 先失败确认旧 residue；删除后 `provider-response rust plan + residue + resp outbound monitoring` 38/38 passed；`cd sharedmodule/llmswitch-core && npm run build` passed；Rust `hub_pipeline_lib` 7/7 passed。
+
+## 2026-05-31 Provider response helper mapper residue deletion
+- 当前切片：删除 `provider-response-helpers.ts` 中旧 TS response mapper/canonicalization/business-error parsing residue；helper 仅保留 native context signal 解析与 clock reservation side effect glue。
+- 删除内容：`response-mappers` type import、`ProviderResponsePlan`、`normalizeClientPayloadToCanonicalChatCompletionOrThrow`、TS `detectProviderResponseShape`/canonical check 编排、TS structured provider business error parser。
+- 说明：provider response 主链已直接进 Rust `HubPipelineEngine`，bad shape/business error 由 Rust response path fail-fast；TS helper 不再做 mapper 语义。
+- 验证：red gate 先失败确认 residue；删除后 `provider-response rust plan + residue + resp outbound monitoring` 39/39 passed；Rust `hub_pipeline_lib` 7/7 passed；`sharedmodule/llmswitch-core npm run build` passed。

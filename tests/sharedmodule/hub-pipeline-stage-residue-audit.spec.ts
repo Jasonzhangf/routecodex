@@ -150,6 +150,26 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('effectPlan.effects.length !== 1');
   });
 
+  it('provider response helper must not retain TS mapper canonicalization residue', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-helpers.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+
+    expect(source).toContain('resolveProviderResponseContextSignals');
+    expect(source).toContain('maybeCommitClockReservationFromContext');
+    expect(source).not.toContain('response-mappers');
+    expect(source).not.toContain('ResponseMapper');
+    expect(source).not.toContain('ProviderResponsePlan');
+    expect(source).not.toContain('normalizeClientPayloadToCanonicalChatCompletionOrThrow');
+    expect(source).not.toContain('detectProviderResponseShapeWithNative');
+    expect(source).not.toContain('isCanonicalChatCompletionPayloadWithNative');
+    expect(source).not.toContain('buildStructuredProviderBusinessError');
+    expect(source).not.toContain('readStructuredProviderBusinessError');
+    expect(source).not.toContain('createMapper');
+  });
+
   it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
     const wrapperPath = path.join(
       process.cwd(),

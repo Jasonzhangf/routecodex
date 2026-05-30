@@ -1828,3 +1828,6 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 ## 2026-05-31 provider-response TS residue deletion
 - 已验证：`sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` 的最终角色是 native call shell + runtime effect glue；不得重新引入 TS resp inbound semantic map、resp_process governance/finalize/servertool orchestration、resp outbound remap 或 response mapper registry。
 - 回归锚点：`tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 禁止 `runRespInboundStage2FormatParse`、`runRespInboundStage3SemanticMap`、`runRespProcessStage1ToolGovernance`、`runRespProcessStage2Finalize`、`runRespProcessStage3ServerToolOrchestration`、`runRespOutboundStage1ClientRemap` 等 provider-response residue。
+
+## 2026-05-31 provider-response helper residue rule
+- 已验证：`provider-response-helpers.ts` 只允许保留 native context signal 解析与 clock reservation side effect glue；禁止重新引入 `response-mappers`、`ProviderResponsePlan`、TS response canonicalization、TS provider business-error parsing。
