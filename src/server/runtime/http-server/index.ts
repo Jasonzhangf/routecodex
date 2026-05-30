@@ -1060,6 +1060,13 @@ export class RouteCodexHttpServer {
           });
           return await this.executePipeline(nextInput);
         }
+        this.logStage('router-direct.entry', input.requestId, {
+          routingPolicyGroup: portConfig.routingPolicyGroup,
+          sameProtocolBehavior: portConfig.sameProtocolBehavior,
+          model: input.body && typeof input.body === 'object' && !Array.isArray(input.body) && typeof (input.body as Record<string, unknown>).model === 'string'
+            ? (input.body as Record<string, unknown>).model
+            : undefined,
+        });
         const directResult = await this.executeRouterDirectPipelineForPort(portConfig, nextInput);
         if (directResult.used) {
           return this.buildRouterDirectResult(directResult, input);
@@ -1151,6 +1158,18 @@ export class RouteCodexHttpServer {
       pipelineResult = await runHubPipeline(hubPipeline, input, metadataForHub);
     } catch (error) {
       if (isPoolExhaustedPipelineError(error)) {
+        this.logStage('router-direct.pool_exhausted_reenter_executor', input.requestId, {
+          error: error instanceof Error ? error.message : String(error),
+          code: error && typeof error === 'object' && typeof (error as Record<string, unknown>).code === 'string'
+            ? (error as Record<string, unknown>).code
+            : undefined,
+          statusCode: extractStatusCodeFromError(error),
+          routecodexRoutingPolicyGroup: metadataForHub.routecodexRoutingPolicyGroup,
+          allowedProviders: metadataForHub.allowedProviders,
+          model: input.body && typeof input.body === 'object' && !Array.isArray(input.body) && typeof (input.body as Record<string, unknown>).model === 'string'
+            ? (input.body as Record<string, unknown>).model
+            : undefined,
+        });
         this.logStage('router-direct.skipped', input.requestId, {
           reason: 'route_pool_error_reenter_executor',
           code: error && typeof error === 'object' && typeof (error as Record<string, unknown>).code === 'string'
