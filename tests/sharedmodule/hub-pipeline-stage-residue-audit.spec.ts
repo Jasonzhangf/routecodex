@@ -127,8 +127,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('executeProviderResponseNativeOutboundEffects');
     expect(source).toContain('runtimeStateWrite');
     expect(source).toContain('executeProviderResponseNativeRuntimeStateEffect');
+    expect(source).toContain('inspectStopGatewaySignalWithNative');
     expect(source).toContain('if (nativeResponsePlan)');
-    expect(source).toContain('options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch');
+    expect(source).toContain('stopGateway.eligible');
+    expect(source).not.toContain('if (options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch) {\n    return false;');
     expect(source).not.toContain('runtime.clock');
     expect(source).not.toContain('runtime.webSearch');
     expect(source).not.toContain('effectPlan.effects.length !== 1');

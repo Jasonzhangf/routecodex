@@ -222,4 +222,75 @@ describe('provider response Rust native plan', () => {
       'chat_process.resp.stage10.sse_stream'
     ]);
   });
+
+  it('does not bypass Rust native response plan when executor callbacks exist but response has no runnable servertool action', async () => {
+    const recorder = new StubStageRecorder();
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_native_callbacks_no_tool_plan_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_native_callbacks_no_tool_plan_1',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native callbacks no tool ok' },
+          finish_reason: 'length'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false,
+      stageRecorder: recorder,
+      providerInvoker: async () => ({ response: {} as any })
+    });
+
+    expect(result.body?.choices?.[0]?.message?.content).toBe('native callbacks no tool ok');
+    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
+      effectPlan: expect.objectContaining({
+        effects: expect.arrayContaining([
+          expect.objectContaining({ kind: 'runtimeStateWrite' })
+        ])
+      })
+    }));
+    expect(recorder.entries.map((entry) => entry.stage)).toEqual([
+      'chat_process.resp.stage9.client_remap',
+      'chat_process.resp.stage10.sse_stream'
+    ]);
+  });
+
+  it('keeps servertool stop eligible callback path out of native response plan', async () => {
+    const recorder = new StubStageRecorder();
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_servertool_stop_guard_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    };
+
+    await expect(convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_servertool_stop_guard_1',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'stop needs servertool' },
+          finish_reason: 'stop'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false,
+      stageRecorder: recorder,
+      providerInvoker: async () => ({ response: {} as any })
+    })).rejects.toThrow('[servertool] followup requires reenter pipeline');
+
+    expect(context.__nativeResponsePlan).toBeUndefined();
+  });
 });

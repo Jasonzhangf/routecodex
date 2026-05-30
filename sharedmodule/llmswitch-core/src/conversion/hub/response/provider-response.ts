@@ -72,6 +72,7 @@ import {
   recordToolSurfaceShadowMismatch
 } from './provider-response-observation.js';
 import { isRegisteredServerToolName } from '../../../servertool/registry.js';
+import { inspectStopGatewaySignalWithNative } from '../../../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
 
 type ProviderResponsePlan = {
   createFormatAdapter: () => ChatFormatAdapter | ResponsesFormatAdapter | AnthropicFormatAdapter | GeminiFormatAdapter;
@@ -235,7 +236,13 @@ function responsesPayloadRequiresSubmitToolOutputs(payload: unknown): boolean {
 
 function shouldRunProviderResponseRustHubPipeline(options: ProviderResponseConversionOptions): boolean {
   if (options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch) {
-    return false;
+    const stopGateway = inspectStopGatewaySignalWithNative(options.providerResponse);
+    if (stopGateway.eligible || stopGateway.hasToolCalls === true || stopGateway.reason === 'responses_required_action') {
+      return false;
+    }
+    if (!stopGateway.observed) {
+      return false;
+    }
   }
   const rt = (options.context as Record<string, unknown>).__rt;
   if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
