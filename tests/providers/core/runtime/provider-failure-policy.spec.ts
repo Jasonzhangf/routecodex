@@ -595,3 +595,19 @@ describe('provider failure policy ssot', () => {
     })).toBe(false);
   });
 });
+
+describe('WINDSURF_CASCADE_BUSY health-neutrality', () => {
+  it('treats WINDSURF_CASCADE_BUSY as health-neutral (affectsHealth=false)', () => {
+    expect(isProviderFailureHealthNeutral({
+      errorCode: 'WINDSURF_CASCADE_BUSY',
+      classification: 'unrecoverable'
+    })).toBe(true);
+  });
+
+  it('treats WINDSURF_CASCADE_NO_PROGRESS as health-neutral (affectsHealth=false)', () => {
+    expect(isProviderFailureHealthNeutral({
+      errorCode: 'WINDSURF_CASCADE_NO_PROGRESS',
+      classification: 'unrecoverable'
+    })).toBe(true);
+  });
+});

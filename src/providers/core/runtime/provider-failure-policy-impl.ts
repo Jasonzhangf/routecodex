@@ -892,6 +892,12 @@ export function isProviderFailureHealthNeutral(args: {
   if (errorCode === 'PROVIDER_TRAFFIC_SATURATED' || upstreamCode === 'PROVIDER_TRAFFIC_SATURATED') {
     return true;
   }
+  if (errorCode === 'WINDSURF_CASCADE_BUSY' || upstreamCode === 'WINDSURF_CASCADE_BUSY') {
+    return true;
+  }
+  if (errorCode === 'WINDSURF_CASCADE_NO_PROGRESS' || upstreamCode === 'WINDSURF_CASCADE_NO_PROGRESS') {
+    return true;
+  }
   if (args.classification === 'recoverable') {
     // Unified policy: all recoverable failures are health-affecting so they can
     // enter the same VR cooldown/quarantine pipeline (3 strikes + ladder cooldown).
