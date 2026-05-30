@@ -388,4 +388,55 @@ describe('provider response Rust native plan', () => {
       'chat_process.resp.stage10.sse_stream'
     ]);
   });
+
+  it('uses Rust servertoolRuntimeAction effect for tool_call callback path', async () => {
+    const recorder = new StubStageRecorder();
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_servertool_tool_call_guard_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    };
+
+    await expect(convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_servertool_tool_call_guard_1',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [{
+              id: 'call_servertool_apply_patch_1',
+              type: 'function',
+              function: { name: 'apply_patch', arguments: '{"patch":"*** Begin Patch\\n*** End Patch"}' }
+            }]
+          },
+          finish_reason: 'tool_calls'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false,
+      stageRecorder: recorder,
+      providerInvoker: async () => ({ response: {} as any })
+    })).rejects.toThrow('Rust HubPipeline servertoolRuntimeAction requires runtime executor');
+
+    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
+      effectPlan: expect.objectContaining({
+        effects: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'servertoolRuntimeAction',
+            payload: expect.objectContaining({
+              action: 'requireRuntimeExecutor',
+              reason: 'tool_call_dispatch',
+              requestId: 'req_provider_response_servertool_tool_call_guard_1'
+            })
+          })
+        ])
+      })
+    }));
+  });
 });

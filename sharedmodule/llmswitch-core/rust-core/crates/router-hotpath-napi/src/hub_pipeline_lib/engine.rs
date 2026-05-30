@@ -486,21 +486,35 @@ impl HubPipelineEngine {
             .ok()
             .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
             .unwrap_or(Value::Null);
-        if should_plan_servertool_runtime_action(&normalized_metadata)
-            && stop_gateway
-            .get("eligible")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            effects.push(HubPipelineEffect {
-                kind: HubPipelineEffectKind::ServertoolRuntimeAction,
-                payload: serde_json::json!({
-                    "action": "requireReenterPipeline",
-                    "reason": "stop_eligible_followup",
-                    "requestId": output.request_id,
-                    "stopGateway": stop_gateway,
-                }),
-            });
+        if should_plan_servertool_runtime_action(&normalized_metadata) {
+            if stop_gateway
+                .get("eligible")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                effects.push(HubPipelineEffect {
+                    kind: HubPipelineEffectKind::ServertoolRuntimeAction,
+                    payload: serde_json::json!({
+                        "action": "requireReenterPipeline",
+                        "reason": "stop_eligible_followup",
+                        "requestId": output.request_id,
+                        "stopGateway": stop_gateway,
+                    }),
+                });
+            }
+            if response_has_tool_calls(&stream_decision.payload)
+                || response_requires_submit_tool_outputs(&stream_decision.payload)
+            {
+                effects.push(HubPipelineEffect {
+                    kind: HubPipelineEffectKind::ServertoolRuntimeAction,
+                    payload: serde_json::json!({
+                        "action": "requireRuntimeExecutor",
+                        "reason": "tool_call_dispatch",
+                        "requestId": output.request_id,
+                        "payload": stream_decision.payload.clone(),
+                    }),
+                });
+            }
         }
         if stream_decision.should_stream {
             effects.push(HubPipelineEffect {
@@ -556,6 +570,21 @@ fn response_requires_submit_tool_outputs(payload: &Value) -> bool {
         .and_then(|required_action| required_action.get("type"))
         .and_then(Value::as_str)
         .is_some_and(|kind| kind == "submit_tool_outputs")
+}
+
+fn response_has_tool_calls(payload: &Value) -> bool {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .is_some_and(|choices| {
+            choices.iter().any(|choice| {
+                choice
+                    .get("message")
+                    .and_then(|message| message.get("tool_calls"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|tool_calls| !tool_calls.is_empty())
+            })
+        })
 }
 
 fn should_plan_servertool_runtime_action(metadata: &Value) -> bool {

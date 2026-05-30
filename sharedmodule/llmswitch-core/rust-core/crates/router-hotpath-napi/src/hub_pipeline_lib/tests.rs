@@ -185,3 +185,57 @@ fn response_stop_with_runtime_callbacks_returns_servertool_effect_plan() {
     assert_eq!(effect.payload["reason"], json!("stop_eligible_followup"));
     assert_eq!(effect.payload["requestId"], json!("req-servertool-effect-1"));
 }
+
+#[test]
+fn response_tool_call_with_runtime_callbacks_returns_servertool_executor_effect_plan() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-servertool-tool-call-effect-1".to_string(),
+            endpoint: "/v1/chat/completions".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_servertool_tool_call_effect",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_servertool_apply_patch_1",
+                            "type": "function",
+                            "function": { "name": "apply_patch", "arguments": "{}" }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-chat",
+                "entryEndpoint": "/v1/chat/completions",
+                "runtimeEffects": { "providerInvoker": true }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let effect = output
+        .effect_plan
+        .effects
+        .iter()
+        .find(|effect| {
+            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+                && effect.payload["action"] == json!("requireRuntimeExecutor")
+        })
+        .unwrap();
+    assert_eq!(effect.payload["reason"], json!("tool_call_dispatch"));
+    assert_eq!(
+        effect.payload["requestId"],
+        json!("req-servertool-tool-call-effect-1")
+    );
+}

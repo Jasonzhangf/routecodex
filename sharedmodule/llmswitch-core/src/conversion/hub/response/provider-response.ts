@@ -364,6 +364,16 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         }
       });
     }
+    if (effect.action === 'requireRuntimeExecutor') {
+      throw new ProviderProtocolError('Rust HubPipeline servertoolRuntimeAction requires runtime executor', {
+        code: 'SERVERTOOL_HANDLER_FAILED',
+        category: 'INTERNAL_ERROR',
+        details: {
+          requestId: typeof effect.requestId === 'string' ? effect.requestId : undefined,
+          reason: typeof effect.reason === 'string' ? effect.reason : 'unknown'
+        }
+      });
+    }
     throw new Error('Rust HubPipeline servertoolRuntimeAction returned unsupported action');
   }
 }
