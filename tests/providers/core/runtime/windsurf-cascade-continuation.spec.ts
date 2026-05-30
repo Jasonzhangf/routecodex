@@ -346,4 +346,66 @@ function mockInstantSleep(provider: any): void {
 
     expect(startSpy).not.toHaveBeenCalled();
   });
+
+// Context preservation: hasActiveStep gate prevents premature return while tool is running
+test('hasActiveStep-gate-prevents-premature-return-while-tool-running', async () => {
+  const p = createProvider();
+  jest.spyOn(p, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$test');
+  jest.spyOn(p, 'selectUsablePinnedGrpcRuntime').mockResolvedValue({ sessionId: 's1', cascadeId: 'c1', stepOffset: 3 });
+  jest.spyOn(p, 'sendCascadeMessage').mockResolvedValue(undefined);
+  // Mock poll returns a running tool step (status=1)
+  jest.spyOn(p, 'pollCascadeTrajectorySteps').mockImplementation(async () => {
+    return {
+      candidate: { role: 'assistant', content: '', tool_calls: [{ id: 'tc1', type: 'function', function: { name: 'run_command', arguments: '{}' } }] },
+      usage: { inputTokens: 10, outputTokens: 5 },
+      stepOffset: 4,
+    };
+  });
+
+  const result = await p.sendRequestInternal({
+    body: {
+      model: 'gpt-5.4-medium',
+      messages: [{ role: 'user', content: 'run a command' }],
+    },
+  });
+  expect(result).not.toBeNull();
+  const choice = (result as any)?.choices?.[0];
+  expect(choice).toBeDefined();
+});
+
+// Error recovery: busy retry preserves cascadeId, poll uses same cascadeId
+test('error-then-recovery-preserves-cascadeId-and-stepOffset', async () => {
+  const p = createProvider();
+  jest.spyOn(p, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$test');
+  jest.spyOn(p, 'selectUsablePinnedGrpcRuntime').mockResolvedValue({ sessionId: 's1', cascadeId: 'c1', stepOffset: 0 });
+  mockInstantSleep(p);
+  mockInstantGrpcIdle(p);
+
+  let sendCallIdx = 0;
+  const sendArgs: any[] = [];
+  jest.spyOn(p, 'sendCascadeMessage').mockImplementation(async (args: any) => {
+    sendArgs.push(args);
+    sendCallIdx++;
+    if (sendCallIdx === 1) throw busyError();
+  });
+
+  const pollArgs: any[] = [];
+  jest.spyOn(p, 'pollCascadeTrajectorySteps').mockImplementation(async (args: any) => {
+    pollArgs.push(args);
+    return { candidate: { role: 'assistant', content: 'recovered' }, usage: { inputTokens: 5, outputTokens: 3 }, stepOffset: args.stepOffset + 1 };
+  });
+
+  const result = await p.sendRequestInternal({
+    body: { model: 'gpt-5.4-medium', messages: [{ role: 'user', content: 'busy then recover' }] },
+  });
+
+  // sendCascadeMessage called twice: first busy, then retry
+  expect(sendArgs.length).toBe(2);
+  expect(sendArgs[0]?.cascadeId).toBe('c1');
+  expect(sendArgs[1]?.cascadeId).toBe('c1');
+  // pollCascadeTrajectorySteps called with same cascadeId
+  expect(pollArgs[0]?.cascadeId).toBe('c1');
+  expect(result).not.toBeNull();
+  expect((result as any)?.choices?.[0]?.message?.content).toBe('recovered');
+});
 });
