@@ -1054,9 +1054,11 @@ export function classifyWindsurfUpstreamPayloadError(payloadError: Record<string
   const normalizedMessage = errorMessage.toLowerCase();
   const looksLikeInternalError = normalizedMessage.includes('an internal error occurred') || normalizedMessage.includes('internal error occurred');
   const looksLikePolicyBlocked = /cyber\s*verification|content[\s_-]+policy|policy[\s_-]+(?:violation|blocked|denied)|safety[\s_-]+(?:policy|blocked)|prompt[\s_-]+(?:rejected|blocked)\s+by[\s_-]+policy|usage[\s_-]+policy[\s_-]+violation/i.test(errorMessage);
+  const looksLikeCascadeBusy = normalizedMessage.includes('cascade_run_status_running') || normalizedMessage.includes('executor is not idle');
   const looksLikeTransportTransient = normalizedMessage.includes('err_http2') || normalizedMessage.includes('pending stream has been canceled') || normalizedMessage.includes('stream cancel') || normalizedMessage.includes('stream closed') || normalizedMessage.includes('session closed') || normalizedMessage.includes('econnreset') || normalizedMessage.includes('econnrefused') || normalizedMessage.includes('connect');
   const isTrueRateLimit = errorCodeText === 'resource_exhausted' && !looksLikeInternalError;
   if (looksLikePolicyBlocked) return { code: 'WINDSURF_POLICY_BLOCKED', status: 451, retryable: false, upstreamCode, upstreamStatus };
+  if (looksLikeCascadeBusy) return { code: 'WINDSURF_CASCADE_BUSY', status: 429, retryable: true, upstreamCode, upstreamStatus, rateLimitKind: 'short_lived' };
   if (looksLikeInternalError || looksLikeTransportTransient) return { code: 'WINDSURF_UPSTREAM_TRANSIENT', status: 502, retryable: true, upstreamCode, upstreamStatus };
   return {
     code: isTrueRateLimit ? 'WINDSURF_RATE_LIMITED' : 'WINDSURF_SERVICE_UNREACHABLE',

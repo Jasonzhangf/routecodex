@@ -130,6 +130,35 @@ describe('Hub provider response pipeline', () => {
     });
   });
 
+  test('openai-chat chat-shaped provider business error 2056 preserves retryable upstream status', async () => {
+    await expect(convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'minimax_usage_limit',
+        object: 'chat.completion',
+        choices: [],
+        base_resp: {
+          status_code: 2056,
+          status_msg: 'usage limit exceeded, weekly usage limit reached'
+        }
+      } as unknown as JsonObject,
+      context: baseContext,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false
+    })).rejects.toMatchObject({
+      code: 'HTTP_429_2056',
+      upstreamCode: 'provider_status_2056',
+      statusCode: 429,
+      details: {
+        detected: 'provider_business_error',
+        reason: 'provider_business_error',
+        upstreamCode: 'provider_status_2056',
+        providerStatusCode: 2056,
+        providerStatusMessage: 'usage limit exceeded, weekly usage limit reached'
+      }
+    });
+  });
+
   test('openai-chat provider emits SSE stream when requested', async () => {
     const chatResponse = buildChatResponse();
     const result = await convertProviderResponse({

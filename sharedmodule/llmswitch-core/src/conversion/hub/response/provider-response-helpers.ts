@@ -107,6 +107,48 @@ function readStructuredProviderBusinessError(payload: ChatCompletionLike): {
   return null;
 }
 
+function buildStructuredProviderBusinessError(args: {
+  payload: ChatCompletionLike;
+  scope: string;
+  protocol?: string;
+}): ProviderProtocolError | null {
+  const structuredError = readStructuredProviderBusinessError(args.payload);
+  if (!structuredError) {
+    return null;
+  }
+  const providerStatusMessage = structuredError.statusMessage || 'provider business error';
+  const isProviderStatus2056 = structuredError.statusCode === 2056;
+  const upstreamCode = structuredError.contextLengthExceeded
+    ? 'context_length_exceeded'
+    : (structuredError.statusCode !== undefined ? `provider_status_${structuredError.statusCode}` : 'provider_business_error');
+  const error = new ProviderProtocolError(
+    `[hub_response] Upstream provider returned structured business error at ${args.scope}: ${providerStatusMessage}`,
+    {
+      code: isProviderStatus2056 ? 'HTTP_429_2056' : 'MALFORMED_RESPONSE',
+      protocol: (args.protocol ?? 'unknown') as ProviderProtocol,
+      providerType: resolveProviderTypeFromProtocolWithNative(args.protocol ?? 'unknown'),
+      details: {
+        detected: 'provider_business_error',
+        reason: structuredError.contextLengthExceeded ? 'context_length_exceeded' : 'provider_business_error',
+        upstreamCode,
+        ...(structuredError.statusCode !== undefined ? { providerStatusCode: structuredError.statusCode } : {}),
+        ...(structuredError.statusMessage ? { providerStatusMessage: structuredError.statusMessage } : {}),
+        payloadType: typeof (args.payload as any),
+        payloadKeys:
+          args.payload && typeof args.payload === 'object' && !Array.isArray(args.payload)
+            ? Object.keys(args.payload as any).slice(0, 20)
+            : undefined
+      }
+    }
+  ) as ProviderProtocolError & { upstreamCode?: string; statusCode?: number; status?: number };
+  error.upstreamCode = upstreamCode;
+  if (isProviderStatus2056) {
+    error.statusCode = 429;
+    error.status = 429;
+  }
+  return error;
+}
+
 export async function normalizeClientPayloadToCanonicalChatCompletionOrThrow(args: {
   payload: ChatCompletionLike;
   scope: string;
@@ -122,36 +164,12 @@ export async function normalizeClientPayloadToCanonicalChatCompletionOrThrow(arg
   const detected = detectProviderResponseShapeWithNative(normalizedPayload);
   if (detected === 'unknown') {
     const protocol = context?.providerProtocol;
-    const structuredError = readStructuredProviderBusinessError(payload);
-    if (structuredError) {
-      const providerStatusMessage = structuredError.statusMessage || 'provider business error';
-      throw new ProviderProtocolError(
-        `[hub_response] Upstream provider returned structured business error at ${scope}: ${providerStatusMessage}`,
-        {
-          code: 'MALFORMED_RESPONSE',
-          protocol,
-          providerType: resolveProviderTypeFromProtocolWithNative(protocol),
-          details: {
-            detected: 'provider_business_error',
-            reason: structuredError.contextLengthExceeded ? 'context_length_exceeded' : 'provider_business_error',
-            upstreamCode: structuredError.contextLengthExceeded
-              ? 'context_length_exceeded'
-              : (structuredError.statusCode !== undefined ? `provider_status_${structuredError.statusCode}` : 'provider_business_error'),
-            ...(structuredError.statusCode !== undefined ? { providerStatusCode: structuredError.statusCode } : {}),
-            ...(structuredError.statusMessage ? { providerStatusMessage: structuredError.statusMessage } : {}),
-            payloadType: typeof (normalizedPayload as any),
-            payloadKeys:
-              normalizedPayload && typeof normalizedPayload === 'object' && !Array.isArray(normalizedPayload)
-                ? Object.keys(normalizedPayload as any).slice(0, 20)
-                : undefined
-          }
-        }
-      );
-    }
+    const structuredError = buildStructuredProviderBusinessError({ payload, scope, protocol });
+    if (structuredError) throw structuredError;
     throw new ProviderProtocolError(`[hub_response] Non-canonical response payload at ${scope}`, {
       code: 'MALFORMED_RESPONSE',
-      protocol,
-      providerType: resolveProviderTypeFromProtocolWithNative(protocol),
+      protocol: (protocol ?? 'unknown') as ProviderProtocol,
+      providerType: resolveProviderTypeFromProtocolWithNative(protocol ?? 'unknown'),
       details: {
         detected,
         payloadType: typeof (normalizedPayload as any),
@@ -173,10 +191,12 @@ export async function normalizeClientPayloadToCanonicalChatCompletionOrThrow(arg
     return coerced as ChatCompletionLike;
   }
   const protocol = context?.providerProtocol;
+  const structuredError = buildStructuredProviderBusinessError({ payload, scope, protocol });
+  if (structuredError) throw structuredError;
   throw new ProviderProtocolError(`[hub_response] Failed to canonicalize response payload at ${scope}`, {
     code: 'MALFORMED_RESPONSE',
-    protocol,
-    providerType: resolveProviderTypeFromProtocolWithNative(protocol),
+      protocol: (protocol ?? 'unknown') as ProviderProtocol,
+      providerType: resolveProviderTypeFromProtocolWithNative(protocol ?? 'unknown'),
     details: { detected }
   });
 }

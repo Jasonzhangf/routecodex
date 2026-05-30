@@ -40,7 +40,43 @@ describe('Windsurf cascade continuation — same session multi-turn alignment', 
     return p;
   }
 
-  function mockInstantSleep(provider: any): void {
+  
+function mockTrajectoryStatusProto(status: number): Buffer {
+  // Proto field 2, wire type 0 (varint): tag = (2 << 3) | 0 = 16
+  const tag = Buffer.from([16]);
+  const val = Buffer.from([status]);
+  return Buffer.concat([tag, val]);
+}
+
+function mockInstantGrpcIdle(p: any): void {
+  jest.spyOn(p, "grpcUnaryLocal").mockResolvedValue(mockTrajectoryStatusProto(1));
+}
+
+
+function buildMockTrajectorySteps(lines: string[], toolCalls: any[] = []): Buffer {
+  const parts: Buffer[] = [];
+  for (const text of lines) {
+    const tag = Buffer.from([(2 << 3) | 2]);
+    const val = Buffer.from(text, 'utf8');
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(val.length, 0);
+    parts.push(Buffer.concat([tag, len, val]));
+  }
+  for (const tc of toolCalls) {
+    const funcCall = JSON.stringify(tc.function || tc);
+    const innerTag = Buffer.from([(1 << 3) | 2]);
+    const innerVal = Buffer.from(funcCall, 'utf8');
+    const innerLen = Buffer.alloc(4);
+    innerLen.writeUInt32BE(innerVal.length, 0);
+    const innerBuf = Buffer.concat([innerTag, innerLen, innerVal]);
+    const outerTag = Buffer.from([(8 << 3) | 2]);
+    const outerLen = Buffer.alloc(4);
+    outerLen.writeUInt32BE(innerBuf.length, 0);
+    parts.push(Buffer.concat([outerTag, outerLen, innerBuf]));
+  }
+  return Buffer.concat(parts);
+}
+function mockInstantSleep(provider: any): void {
     jest.spyOn(provider, 'sleepWindsurfCascadeBusyRetry').mockResolvedValue(undefined);
   }
 
@@ -87,6 +123,8 @@ describe('Windsurf cascade continuation — same session multi-turn alignment', 
       candidate: { role: 'assistant', content: 'ok' },
       usage: { inputTokens: 10, outputTokens: 5 },
     });
+    mockInstantSleep(p);
+    mockInstantGrpcIdle(p);
 
     await p.sendRequestInternal({
       body: { model: 'gpt-5.4-medium', messages: [{ role: 'user', content: 'retry me' }] },
@@ -105,6 +143,7 @@ describe('Windsurf cascade continuation — same session multi-turn alignment', 
       .mockRejectedValueOnce(busyError())
       .mockImplementation(async (...args: any[]) => { sendArgs.push(args[0]); return undefined; });
     mockInstantSleep(p);
+    mockInstantGrpcIdle(p);
 
     jest.spyOn(p, 'pollCascadeTrajectorySteps').mockResolvedValue({
       candidate: { role: 'assistant', content: 'ok' },
@@ -121,6 +160,7 @@ describe('Windsurf cascade continuation — same session multi-turn alignment', 
   test('retry-success-preserves-stepOffset', async () => {
     const p = createProvider();
     mockInstantSleep(p);
+    mockInstantGrpcIdle(p);
     jest.spyOn(p, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$test');
     jest.spyOn(p, 'selectUsablePinnedGrpcRuntime').mockResolvedValue({ sessionId: 's1', cascadeId: 'c1', stepOffset: 3 });
 
@@ -174,6 +214,8 @@ describe('Windsurf cascade continuation — same session multi-turn alignment', 
     expect(pool.markAuthInvalid).not.toHaveBeenCalled();
     expect(pool.markRuntimeFailure).not.toHaveBeenCalled();
   });
+
+
 
   test('running-does-not-trigger-rebuild', async () => {
     const p = createProvider();

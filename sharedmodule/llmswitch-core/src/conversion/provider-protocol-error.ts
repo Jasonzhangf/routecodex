@@ -4,6 +4,7 @@ export type ProviderProtocolErrorCode =
   | 'TOOL_PROTOCOL_ERROR'
   | 'SSE_DECODE_ERROR'
   | 'HTTP_502'
+  | 'HTTP_429_2056'
   | 'MALFORMED_RESPONSE'
   | 'MALFORMED_REQUEST'
   | 'SERVERTOOL_FOLLOWUP_FAILED'

@@ -14,22 +14,31 @@ import { resolveProviderBusinessResponseError } from '../../../../src/providers/
 
 describe('Auto-retry business error detection', () => {
   describe('resolveAutoRetryErrorCode maps provider_status_2056', () => {
-    it('maps MALFORMED_RESPONSE + upstreamCode=provider_status_2056 to 429.2056', () => {
+    it('maps MALFORMED_RESPONSE + upstreamCode=provider_status_2056 to 0.8200', () => {
       const error = Object.assign(new Error('[hub_response] Upstream provider returned structured business error at chat_process.response.entry: usage limit exceeded'), {
         code: 'MALFORMED_RESPONSE',
         upstreamCode: 'provider_status_2056',
       });
       const code = resolveAutoRetryErrorCode(error);
-      expect(code).toBe('429.2056');
+      expect(code).toBe('0.8200');
     });
 
-    it('maps MALFORMED_RESPONSE + upstreamCode=PROVIDER_STATUS_2056 (upper) to 429.2056', () => {
+    it('maps MALFORMED_RESPONSE + upstreamCode=PROVIDER_STATUS_2056 (upper) to 0.8200', () => {
       const error = Object.assign(new Error('business error'), {
         code: 'MALFORMED_RESPONSE',
         upstreamCode: 'PROVIDER_STATUS_2056',
       });
       const code = resolveAutoRetryErrorCode(error);
-      expect(code).toBe('429.2056');
+      expect(code).toBe('0.8200');
+    });
+
+    it('maps HTTP_429_2056 to 0.8200 before catalog normalization', () => {
+      const error = Object.assign(new Error('business error'), {
+        code: 'HTTP_429_2056',
+        upstreamCode: 'provider_status_2056',
+      });
+      const code = resolveAutoRetryErrorCode(error);
+      expect(code).toBe('0.8200');
     });
 
     it('returns undefined for unrelated upstreamCode', () => {

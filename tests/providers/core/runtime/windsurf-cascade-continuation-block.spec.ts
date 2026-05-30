@@ -57,11 +57,11 @@ describe('resolveWindsurfCascadeBusyDelayMs', () => {
     expect(resolveWindsurfCascadeBusyDelayMs(0)).toBe(1000);
     expect(resolveWindsurfCascadeBusyDelayMs(1)).toBe(2000);
     expect(resolveWindsurfCascadeBusyDelayMs(2)).toBe(4000);
-    expect(resolveWindsurfCascadeBusyDelayMs(3)).toBe(8000);
+    expect(resolveWindsurfCascadeBusyDelayMs(3)).toBe(4000);
   });
 
   test('returns last backoff for overflow attempts', () => {
-    expect(resolveWindsurfCascadeBusyDelayMs(10)).toBe(8000);
+    expect(resolveWindsurfCascadeBusyDelayMs(10)).toBe(4000);
   });
 
   test('respects custom config', () => {
@@ -144,5 +144,85 @@ describe('executeWindsurfCascadeBusyRetry', () => {
       attempt: 1,
       delayMs: 1000,
     });
+  });
+});
+
+
+describe('executeWindsurfCascadeBusyRetry — trajectory polling (RED)', () => {
+  const ctx = { cascadeId: 'c1', sessionId: 's1' };
+  const noopLog = jest.fn();
+
+  test('RED: calls pollIdle on busy and waits for idle before retrying send', async () => {
+    const busyErr = Object.assign(new Error('CASCADE_RUN_STATUS_RUNNING'), { code: 'WINDSURF_CASCADE_BUSY' });
+    const send = jest.fn()
+      .mockRejectedValueOnce(busyErr)
+      .mockResolvedValue(undefined);
+    const pollIdle = jest.fn()
+      .mockResolvedValueOnce({ idle: false })
+      .mockResolvedValueOnce({ idle: true });
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    await executeWindsurfCascadeBusyRetry(ctx, {
+      sendMessage: send,
+      sleep,
+      log: noopLog,
+      pollIdle,
+      config: { maxRetries: 4, backoffsMs: [1000], totalWaitMs: 120_000, pollIntervalMs: 100 },
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(pollIdle).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledWith(100);
+  });
+
+  test('RED: waits per-attempt then retries until maxRetries exhausted', async () => {
+    const busyErr = Object.assign(new Error('not idle'), { code: 'WINDSURF_CASCADE_BUSY' });
+    const send = jest.fn().mockRejectedValue(busyErr);
+    const pollIdle = jest.fn().mockResolvedValue({ idle: false });
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    const config = { maxRetries: 3, backoffsMs: [100], perAttemptWaitMs: 200, pollIntervalMs: 50 };
+    await expect(
+      executeWindsurfCascadeBusyRetry(ctx, { sendMessage: send, sleep, log: noopLog, pollIdle, config }),
+    ).rejects.toMatchObject({ code: 'WINDSURF_CASCADE_BUSY', status: 429 });
+    // 4 attempts (0..3), each polls for 200ms at 50ms interval = 4 polls per attempt = 16 total sleeps
+    expect(send).toHaveBeenCalledTimes(4);
+    expect(pollIdle.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(sleep).toHaveBeenCalledTimes(16);
+  });
+
+  test('RED: logs cascade.busy.wait_idle with poll details', async () => {
+    const busyErr = Object.assign(new Error('busy'), { code: 'WINDSURF_CASCADE_BUSY' });
+    const send = jest.fn()
+      .mockRejectedValueOnce(busyErr)
+      .mockResolvedValue(undefined);
+    const pollIdle = jest.fn().mockResolvedValue({ idle: true });
+    const log = jest.fn();
+    await executeWindsurfCascadeBusyRetry(ctx, {
+      sendMessage: send,
+      sleep: jest.fn(),
+      log,
+      pollIdle,
+      config: { maxRetries: 4, backoffsMs: [1000], totalWaitMs: 120_000, pollIntervalMs: 100 },
+    });
+    expect(log).toHaveBeenCalledWith('cascade.busy.wait_idle', expect.objectContaining({
+      cascadeId: 'c1',
+      sessionId: 's1',
+    }));
+  });
+
+  test('RED: totalWaitMs defaults to 120000 (2 minutes)', async () => {
+    const cfg = WINDSURF_CASCADE_BUSY_DEFAULT_CONFIG;
+    expect(cfg.totalWaitMs).toBe(120_000);
+    expect(cfg.pollIntervalMs).toBe(1_000);
+  });
+
+  test('RED: falls back to blind sleep when pollIdle is not provided', async () => {
+    const busyErr = Object.assign(new Error('busy'), { code: 'WINDSURF_CASCADE_BUSY' });
+    const send = jest.fn()
+      .mockRejectedValueOnce(busyErr)
+      .mockResolvedValue(undefined);
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    await executeWindsurfCascadeBusyRetry(ctx, { sendMessage: send, sleep, log: noopLog });
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledWith(1000);
   });
 });

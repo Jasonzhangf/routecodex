@@ -455,19 +455,22 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-21 SSE 断流纠偏（新增硬规则）
 
-1. **不要把“链路中存在 SSE”本身当成 bug**
+1. **不要把"链路中存在 SSE"本身当成 bug**
    - 对 `/v1/responses`：即使客户端请求 `stream=false`，内部 upstream/provider 仍可使用 SSE；这属于实现细节，不是故障。
    - 真正要验证的是**客户端出站契约**：
      - `stream=false` → 客户端最终必须拿到 JSON，而不是可见 SSE。
-     - `stream=true` → 客户端最终必须稳定收到完整 SSE，直到 `response.completed`。
+     - `stream=true` → 客户端最终必须稳定收到完整 SSE，直到 `response.done`（**不是** `response.completed`）。
 
 2. **看到客户端 SSE 反馈，不得误判为断流根因**
    - Codex/TUI/调试客户端在流式阶段显示 SSE 反馈是正常现象。
-   - 只有在缺失 `response.completed`、过早 close、或 JSON/SSE 收口契约错误时，才算真 bug。
+   - 只有在缺失 `response.done`、过早 close、或 JSON/SSE 收口契约错误时，才算真 bug。
 
 3. **5555/5520 断流排查优先级**
    - 先查公共层的 response contract / handler dispatch / SSE->JSON 或 JSON->SSE 收口。
    - 禁止先把 provider 内部使用 SSE 定性为错误，更禁止为此把 provider 强行改成懂 SSE 的耦合实现。
+   - decoder terminal event 只认 `response.done` / `response.error` / `response.cancelled`；`response.completed` 不是 terminal。
+   - `buildResponseDoneEvent` 必须发完整 `{ response: {...} }` 对象，禁止发 `data: [DONE]`（Chat API 格式）。
+   - client disconnect detection：Symbol-keyed AbortSignal 不可序列化，只能轮询 `clientConnectionState.disconnected` 布尔值。
 
 ### 最近一次多轮事故修复沉淀（2026-05-19）
 
@@ -1585,3 +1588,12 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-05-30 VR recoverable busy 精华
 - 全池 provider 临时 busy/冷却必须走唯一 recoverable 错误处理路径：Rust VR 输出 `HTTP_429` details，RequestExecutor 阻塞指数退避重试 3 次后才返回 429；禁止 `PROVIDER_NOT_AVAILABLE`，禁止 fallback/旁路。
 - 2026-05-30 router-mode relay 注意：5555 MiniMax 是 relay/HubPipeline/VR；`router-direct.hub_pipeline_failed` 只是 same-protocol direct 预选日志。预选遇到 route-pool recoverable 错误必须让请求回 RequestExecutor 唯一错误链处理，禁止吞成普通 direct skip 或改成 direct fallback。
+
+
+### 2026-05-30 Windsurf cascade busy polling fix (verified)
+- WINDSURF_CASCADE_BUSY 不再直接 429：provider runtime 轮询 GetCascadeTrajectory 直到 status=1 (IDLE)，最多 2 分钟
+- totalWaitMs=120000, pollIntervalMs=1000（cascade-continuation-block.ts）
+- 有 pollIdle 回调 → 轮询等待 idle → 重试 send；无 pollIdle → 降级 blind sleep（向后兼容）
+- 日志信号：cascade.busy.wait_idle（轮询中）、cascade.busy.final_timeout（2min 超时后）
+- 回归测试：28/28 passed（含 5 个 RED→GREEN 轮询行为测试）
+- 构建验证：v0.90.2569, build:min + install:global + restart 成功

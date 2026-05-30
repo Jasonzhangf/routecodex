@@ -92,7 +92,12 @@ export function resolveAutoRetryErrorCode(error: unknown): string | undefined {
 
   // 上游状态码 2056 必须在 catalog 查找之前检查，确保返回 '0.8200'
   // （catalog 会返回 '429.2056'，auto-retry 配置不认得这个值）
-  if (upstreamCode === 'PROVIDER_STATUS_2056' || code === 'PROVIDER_STATUS_2056') {
+  if (
+    upstreamCode === 'PROVIDER_STATUS_2056'
+    || code === 'PROVIDER_STATUS_2056'
+    || upstreamCode === 'HTTP_429_2056'
+    || code === 'HTTP_429_2056'
+  ) {
     return AUTO_RETRY_UPSTREAM_STATUS_2056;
   }
 

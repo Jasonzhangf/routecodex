@@ -27,6 +27,7 @@ import { WindsurfAccountSessionManager } from './windsurf/windsurf-account-sessi
 import {
   executeWindsurfCascadeBusyRetry,
 } from './windsurf/cascade-continuation-block.js';
+import type { WindsurfCascadeBusyRetryConfig } from './windsurf/cascade-continuation-block.js';
 import type {
   WindsurfSemanticTurn,
   WindsurfCascadeToolStepKind,
@@ -2703,7 +2704,8 @@ export class WindsurfChatProvider extends HttpTransportProvider {
 
   private handleWindsurfCascadeTransportFailure(error: unknown): Error {
     const classified = this.classifyWindsurfCascadeError(error) as Error & Record<string, unknown>;
-    if (classified.retryable === true) {
+    const code = typeof classified.code === 'string' ? classified.code : '';
+    if (classified.retryable === true && code !== 'WINDSURF_CASCADE_BUSY') {
       this.resetWindsurfCascadeTransportState('transport-failure');
     }
     return classified;
@@ -2737,6 +2739,21 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, delayMs)));
   }
 
+  private resolveCascadeBusyRetryConfig(): WindsurfCascadeBusyRetryConfig | undefined {
+    const rt = this.windsurfRuntime as Record<string, unknown> | undefined;
+    if (!rt) return undefined;
+    const maxRetries = Number(rt.cascadeBusyMaxRetries);
+    const perAttemptWaitMs = Number(rt.cascadeBusyPerAttemptWaitMs);
+    const pollIntervalMs = Number(rt.cascadeBusyPollIntervalMs);
+    const hasAny = Number.isFinite(maxRetries) || Number.isFinite(perAttemptWaitMs) || Number.isFinite(pollIntervalMs);
+    if (!hasAny) return undefined;
+    const cfg: Partial<WindsurfCascadeBusyRetryConfig> = {};
+    if (Number.isFinite(maxRetries) && maxRetries > 0) cfg.maxRetries = Math.floor(maxRetries);
+    if (Number.isFinite(perAttemptWaitMs) && perAttemptWaitMs > 0) cfg.perAttemptWaitMs = perAttemptWaitMs;
+    if (Number.isFinite(pollIntervalMs) && pollIntervalMs > 0) cfg.pollIntervalMs = pollIntervalMs;
+    return cfg as WindsurfCascadeBusyRetryConfig;
+  }
+
   private async sendCascadeMessageWithBusyRetry(args: {
     apiKey: string;
     cascadeId: string;
@@ -2749,12 +2766,26 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     additionalSteps?: Buffer[];
     mcpMode?: boolean;
   }): Promise<void> {
+    const busyRetryCfg = this.resolveCascadeBusyRetryConfig();
     await executeWindsurfCascadeBusyRetry(
       { cascadeId: args.cascadeId, sessionId: args.sessionId },
       {
         sendMessage: () => this.sendCascadeMessage(args),
         sleep: (ms) => this.sleepWindsurfCascadeBusyRetry(ms),
         log: (stage, details) => this.logWindsurfStage(stage, details),
+        config: busyRetryCfg,
+        pollIdle: async () => {
+          try {
+            const statusResponse = await this.grpcUnaryLocal(
+              `${WINDSURF_LS_SERVICE}/GetCascadeTrajectory`,
+              this.buildGetTrajectoryRequest(args.cascadeId),
+            );
+            const status = this.parseTrajectoryStatus(statusResponse);
+            return { idle: status === 1 };
+          } catch {
+            return { idle: false };
+          }
+        },
       },
     );
   }
@@ -3019,7 +3050,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             });
           }
           const hasActiveStep = steps.some((step) => step && typeof step === 'object' && Number((step as Record<string, unknown>).status) === 1);
-          if (pendingToolCandidate && msSinceGrowth > stableToolCallReturnMs) {
+          if (pendingToolCandidate && msSinceGrowth > stableToolCallReturnMs && !hasActiveStep) {
             this.logWindsurfStage('poll.stableToolCallReturn', {
               cascadeId: args.cascadeId,
               status,
