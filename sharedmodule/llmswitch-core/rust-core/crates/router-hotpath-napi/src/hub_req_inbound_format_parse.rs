@@ -4,14 +4,14 @@ use serde_json::Value;
 
 const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024; // 50MB limit
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FormatParseInput {
     pub raw_request: Value,
     pub protocol: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FormatEnvelope {
     pub format: String,
@@ -21,7 +21,7 @@ pub struct FormatEnvelope {
     pub metadata: Option<Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FormatParseOutput {
     pub envelope: FormatEnvelope,

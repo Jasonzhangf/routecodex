@@ -13210,3 +13210,4 @@ Using skills: coding-principals + rcc-dev-skills
 - 验证：`cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi hub_pipeline_lib -- --nocapture` 通过（3 passed）；`cd sharedmodule/llmswitch-core && npm run build` 通过。
 - 缺口：`HubPipelineEngine` 当前只包裹 existing `run_hub_pipeline` normalize-level skeleton；TS 主链未切换；req/resp/chat_process/mapper semantic residue 尚未删除。
 - 用户补充硬要求：每阶段都提交但不推送；最后验证以后再推送；黑盒红测非常重要。已记录到 `MEMORY.md`。
+- 2026-05-31 stage: req path Rust engine 调度开始落地。新增 red gate 要求 `hub_pipeline_lib/engine.rs` 调用 Rust `parse_format_envelope` + `build_format_request`，禁止通过 TS req stage shell。实现后 red gate 5/5 passed，Rust `hub_pipeline_lib` 3/3 passed，`sharedmodule/llmswitch-core npm run build` passed。root `npm run build` 仍被既有 llmswitch rustification baseline audit 阻断（new TS file semantic-gate / nonNativeLoc baseline），非本阶段新增。

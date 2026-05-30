@@ -127,3 +127,5 @@ Build/matrix：
 - 已新增 TS fail-fast wrapper：`executeHubPipelineWithNative`，并加入 `native-router-hotpath-required-exports.ts` required gate。
 - 当前刻意未切 TS `HubPipeline.execute()` 主链；下一步需把 Rust engine 从 normalize skeleton 扩到 req path stage 调度，再切入口，避免半成品总入口形成第二运行路径。
 - 验证：`cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi hub_pipeline_lib -- --nocapture` 通过；`npm run build`（`sharedmodule/llmswitch-core`）通过。
+- 已新增 req path red gate：Rust lib engine 必须调用 Rust `parse_format_envelope` 与 `build_format_request`，不得通过 TS req stage shell；实现后 red gate 5/5 通过，Rust `hub_pipeline_lib` 3/3 通过，`sharedmodule/llmswitch-core` build 通过。
+- root `npm run build` 当前仍被既有 llmswitch rustification baseline audit 阻断（new TS file `native-hub-pipeline-orchestration-semantics-semantic-gate.ts` / nonNativeLoc baseline），不是本阶段 Rust lib req path 改动引入。

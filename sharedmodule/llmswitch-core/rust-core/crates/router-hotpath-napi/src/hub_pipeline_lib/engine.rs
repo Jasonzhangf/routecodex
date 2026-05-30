@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
+use crate::hub_req_inbound_format_parse::{parse_format_envelope, FormatParseInput};
+use crate::hub_req_outbound_format_build::{build_format_request, FormatBuildInput};
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
 use super::effect_plan::HubPipelineEffectPlan;
@@ -72,6 +74,50 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Completed,
             None,
         ));
+        let normalized_payload = output.payload.clone().ok_or_else(|| {
+            HubPipelineError::new(
+                "hub_pipeline_missing_normalized_payload",
+                "Rust HubPipeline normalize stage returned no payload",
+            )
+        })?;
+        let normalized_metadata = output.metadata.clone().unwrap_or(Value::Null);
+        let provider_protocol = normalized_metadata
+            .get("providerProtocol")
+            .and_then(Value::as_str)
+            .unwrap_or("openai-chat")
+            .to_string();
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqInboundFormatParse,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({ "protocol": provider_protocol })),
+        ));
+        let parsed = parse_format_envelope(FormatParseInput {
+            raw_request: normalized_payload.clone(),
+            protocol: provider_protocol.clone(),
+        })
+        .map_err(HubPipelineError::from)?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqInboundFormatParse,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({ "format": parsed.envelope.format })),
+        ));
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqOutboundFormatBuild,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({ "protocol": provider_protocol })),
+        ));
+        let outbound = build_format_request(FormatBuildInput {
+            format_envelope: serde_json::to_value(&parsed.envelope)?,
+            protocol: provider_protocol,
+        })
+        .map_err(HubPipelineError::from)?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqOutboundFormatBuild,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({
+                "payloadObject": outbound.payload.is_object(),
+            })),
+        ));
         diagnostics.push(diagnostic(
             HubPipelineStageId::EffectPlan,
             HubPipelineDiagnosticStatus::Completed,
@@ -80,7 +126,7 @@ impl HubPipelineEngine {
         Ok(HubPipelineExecutionOutput {
             request_id: output.request_id,
             success: output.success,
-            payload: output.payload,
+            payload: Some(outbound.payload),
             metadata: output.metadata,
             effect_plan: HubPipelineEffectPlan::empty(),
             diagnostics,
