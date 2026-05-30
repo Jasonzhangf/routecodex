@@ -59,10 +59,12 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).toContain('apply_req_inbound_semantic_lift');
     expect(engineSource).toContain('apply_route_selection');
     expect(engineSource).toContain('build_format_request');
+    expect(engineSource).toContain('run_req_outbound_stage3_compat');
     expect(engineSource).toContain('HubPipelineStageId::ReqInboundFormatParse');
     expect(engineSource).toContain('HubPipelineStageId::ReqInboundSemanticLift');
     expect(engineSource).toContain('HubPipelineStageId::ReqProcessRouteSelect');
     expect(engineSource).toContain('HubPipelineStageId::ReqOutboundFormatBuild');
+    expect(engineSource).toContain('HubPipelineStageId::ReqOutboundCompat');
     expect(engineSource).not.toContain('stages/req_inbound');
     expect(engineSource).not.toContain('stages/req_outbound');
   });

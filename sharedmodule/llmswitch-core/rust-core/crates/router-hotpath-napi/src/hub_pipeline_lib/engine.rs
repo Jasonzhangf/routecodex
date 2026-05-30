@@ -7,6 +7,9 @@ use crate::hub_req_inbound_semantic_lift::{
     apply_req_inbound_semantic_lift, ReqInboundSemanticLiftApplyInput,
 };
 use crate::hub_req_outbound_format_build::{build_format_request, FormatBuildInput};
+use crate::req_outbound_stage3_compat::{
+    run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
+};
 use crate::req_process_stage2_route_select::{apply_route_selection, RouteSelectionApplyInput};
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
@@ -185,7 +188,7 @@ impl HubPipelineEngine {
         ));
         let outbound = build_format_request(FormatBuildInput {
             format_envelope,
-            protocol: provider_protocol,
+            protocol: provider_protocol.clone(),
         })
         .map_err(HubPipelineError::from)?;
         diagnostics.push(diagnostic(
@@ -196,6 +199,34 @@ impl HubPipelineEngine {
             })),
         ));
         diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqOutboundCompat,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({ "protocol": provider_protocol })),
+        ));
+        let compat = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+            payload: outbound.payload,
+            adapter_context: build_adapter_context(
+                &routed.normalized_metadata,
+                &provider_protocol,
+                &output.request_id,
+            ),
+            explicit_profile: self
+                .config
+                .virtual_router
+                .get("compatibilityProfile")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        })
+        .map_err(HubPipelineError::from)?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqOutboundCompat,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({
+                "nativeApplied": compat.native_applied,
+                "appliedProfile": compat.applied_profile,
+            })),
+        ));
+        diagnostics.push(diagnostic(
             HubPipelineStageId::EffectPlan,
             HubPipelineDiagnosticStatus::Completed,
             Some(serde_json::json!({ "effects": 0 })),
@@ -203,8 +234,8 @@ impl HubPipelineEngine {
         Ok(HubPipelineExecutionOutput {
             request_id: output.request_id,
             success: output.success,
-            payload: Some(outbound.payload),
-            metadata: output.metadata,
+            payload: Some(compat.payload),
+            metadata: Some(routed.normalized_metadata),
             effect_plan: HubPipelineEffectPlan::empty(),
             diagnostics,
             error: output.error.map(|error| HubPipelineError {
@@ -213,6 +244,85 @@ impl HubPipelineEngine {
                 details: error.details,
             }),
         })
+    }
+}
+
+fn build_adapter_context(
+    metadata: &Value,
+    provider_protocol: &str,
+    request_id: &str,
+) -> AdapterContext {
+    AdapterContext {
+        provider_protocol: Some(provider_protocol.to_string()),
+        request_id: Some(request_id.to_string()),
+        entry_endpoint: metadata
+            .get("entryEndpoint")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        route_id: metadata
+            .get("routeId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        rt: metadata.get("__rt").cloned(),
+        model_id: metadata
+            .get("assignedModelId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        client_model_id: metadata
+            .get("clientModelId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        original_model_id: metadata
+            .get("originalModelId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        provider_key: metadata
+            .get("providerKey")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        runtime_key: metadata
+            .get("runtimeKey")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        client_request_id: metadata
+            .get("clientRequestId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        group_request_id: metadata
+            .get("groupRequestId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        session_id: metadata
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        conversation_id: metadata
+            .get("conversationId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        ..AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: None,
+            request_id: None,
+            entry_endpoint: None,
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        }
     }
 }
 
