@@ -17,7 +17,8 @@ import {
   writeProviderSnapshot
 } from '../utils/snapshot-writer.js';
 import {
-  createResponsesSseToJsonConverter
+  createResponsesSseToJsonConverter,
+  sanitizeProviderOutboundPayload
 } from '../../../modules/llmswitch/bridge.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
@@ -105,9 +106,10 @@ export class ResponsesProvider extends HttpTransportProvider {
     }
 
     const targetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
-    const finalBody = extractResponsesDirectPassthroughFlag(request)
+    const builtBody = extractResponsesDirectPassthroughFlag(request)
       ? this.buildPassthroughResponsesBody(request)
       : this.responsesClient.buildRequestBody(request);
+    const finalBody = await this.sanitizeResponsesProviderOutboundBody(builtBody, context);
     this.assertResponsesWireShape(finalBody);
 
     const explicitStream = extractStreamFlagFromBody(finalBody);
@@ -181,7 +183,8 @@ export class ResponsesProvider extends HttpTransportProvider {
     const context = this.createProviderContext();
     const entryEndpoint = extractEntryEndpoint(directRequest) ?? '/v1/responses';
     const targetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
-    const finalBody = this.buildPassthroughResponsesBody(directRequest);
+    const builtBody = this.buildPassthroughResponsesBody(directRequest);
+    const finalBody = await this.sanitizeResponsesProviderOutboundBody(builtBody, context);
     this.applyDirectProviderOverrides(finalBody, directRequest);
     const explicitStream = extractStreamFlagFromBody(finalBody);
 
@@ -464,10 +467,11 @@ export class ResponsesProvider extends HttpTransportProvider {
     providerStream: boolean | undefined;
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
-    const { context, headers, targetUrl, entryEndpoint, body } = options;
+    const { context, headers, targetUrl, entryEndpoint } = options;
+    const body = await this.sanitizeResponsesProviderOutboundBody(options.body, context);
     await this.snapshotPhase('provider-request', context, body, headers, targetUrl, entryEndpoint);
     try {
-      return await this.executeSseStream(options);
+      return await this.executeSseStream({ ...options, body });
     } catch (error) {
       const normalizedError = normalizeUpstreamError(error);
       await this.snapshotPhase(
@@ -503,6 +507,40 @@ export class ResponsesProvider extends HttpTransportProvider {
     await this.snapshotPhase('provider-response', context, response, headers, targetUrl, entryEndpoint);
     this.reportResponsesFailureIfNeeded(response, context);
     return response;
+  }
+
+  private resolveCompatibilityProfile(context: ProviderContext): string | undefined {
+    const target = context.target && typeof context.target === 'object'
+      ? context.target as Record<string, unknown>
+      : undefined;
+    const metadata = context.metadata && typeof context.metadata === 'object'
+      ? context.metadata as Record<string, unknown>
+      : undefined;
+    const runtimeMetadata = context.runtimeMetadata && typeof context.runtimeMetadata === 'object'
+      ? context.runtimeMetadata as Record<string, unknown>
+      : undefined;
+    for (const candidate of [
+      target?.compatibilityProfile,
+      metadata?.compatibilityProfile,
+      runtimeMetadata?.compatibilityProfile,
+      (this.config.config as { compatibilityProfile?: unknown }).compatibilityProfile,
+    ]) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim().toLowerCase();
+      }
+    }
+    return undefined;
+  }
+
+  private async sanitizeResponsesProviderOutboundBody(
+    body: Record<string, unknown>,
+    context: ProviderContext,
+  ): Promise<Record<string, unknown>> {
+    return await sanitizeProviderOutboundPayload({
+      protocol: 'openai-responses',
+      compatibilityProfile: this.resolveCompatibilityProfile(context),
+      payload: body,
+    });
   }
 
   private async loadResponsesSseConverter(): Promise<ResponsesSseConverter> {

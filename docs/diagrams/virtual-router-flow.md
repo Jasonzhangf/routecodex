@@ -7,7 +7,7 @@ flowchart TB
     PRE2 --> PRE3["确定 routing_state_key<br/>(continuation→session, 否则 request scope)"]
     PRE3 --> PRE4["加载路由指令状态<br/>(load_routing_state_for_scope)"]
     PRE4 --> PRE5["解析 metadata 指令<br/>(allowedProviders, force/prefer)"]
-    PRE5 --> PRE6["处理重试场景<br/>(__routecodexRetryProviderKey)"]
+    PRE5 --> PRE6["处理重试场景<br/>(excludedProviderKeys)"]
     PRE6 --> PRE7["解析用户消息 &lt;**...**&gt; 指令标记<br/>(parse_routing_instructions_from_request)"]
     PRE7 --> PRE8["构建路由特征<br/>(build_routing_features)"]
     PRE8 --> PRE9["拆分指令: core vs stop<br/>应用 core 指令到 routing_state"]

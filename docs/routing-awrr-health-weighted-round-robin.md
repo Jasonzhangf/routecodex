@@ -121,12 +121,9 @@ We compute `weights` per request from quotaView, then select via SWRR within:
 - the current route tier bucket (priorityTier grouping), and
 - the current pool’s candidate ordering (after filtering).
 
-### Retry path: “recover-to-best”
+### Retry path
 
-If a request is a retry attempt (detected via routing metadata, e.g. `excludedProviderKeys` is non-empty):
-
-- Bypass SWRR; pick the candidate with the highest `m` (healthiest).
-- Tie-break deterministically (stable order or round-robin pointer).
+Retry attempts keep the same pool strategy after standard filters remove `excludedProviderKeys`; retry selection must not bypass the configured order based on health score.
 
 Note: this “retry” is **router-level re-routing** after a providerKey failed (to avoid picking the same key again in the same
 request chain). It is not the same thing as provider HTTP retries to the same upstream endpoint.
@@ -161,8 +158,7 @@ Add deterministic tests that cover:
 2) **Penalty reduces share**: a higher `consecutiveErrorCount` produces fewer hits over a fixed window.
 3) **Floor enforced**: under extreme penalty, the degraded key still gets hits (non-zero) and does not starve.
 4) **Time recovery**: with a mocked clock, as `nowMs` advances without errors, the key’s computed `m` increases.
-5) **Retry recover-to-best**: when retry metadata is present, selection should be the healthiest candidate.
-6) **Alias isolation**: two providerKeys with the same underlying “model name” must not share penalty/cooldown.
+5) **Alias isolation**: two providerKeys with the same underlying “model name” must not share penalty/cooldown.
 
 ## Rollout Plan
 

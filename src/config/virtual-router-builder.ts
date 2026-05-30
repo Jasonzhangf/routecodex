@@ -31,6 +31,13 @@ function resolveReferencedProviderIdsFromRouting(routing: VirtualRouterRoutingCo
         }
       }
 
+      if (typeof entry.target === 'string' && entry.target.trim()) {
+        const providerId = entry.target.trim().split('.', 1)[0];
+        if (providerId) {
+          providerIds.add(providerId);
+        }
+      }
+
       const loadBalancing = isRecord(entry.loadBalancing) ? (entry.loadBalancing as UnknownRecord) : undefined;
       const weights = isRecord(loadBalancing?.weights) ? (loadBalancing.weights as UnknownRecord) : undefined;
       if (!weights) {

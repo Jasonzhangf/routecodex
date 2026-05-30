@@ -22,7 +22,7 @@ jest.unstable_mockModule('../../../../../src/server/utils/stage-logger.js', () =
 }));
 
 describe('provider-response-converter error logging', () => {
-  it('surfaces SSE wrapper error even when processMode=passthrough', async () => {
+  it('surfaces SSE wrapper error in chat mode', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -37,8 +37,8 @@ describe('provider-response-converter error logging', () => {
       {
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses',
-        requestId: 'req_passthrough_wrapper_error_1',
-        processMode: 'passthrough',
+        requestId: 'req_chat_wrapper_error_1',
+        processMode: 'chat',
         wantsStream: true,
         serverToolsEnabled: true,
         response: {
@@ -68,62 +68,6 @@ describe('provider-response-converter error logging', () => {
     });
 
     expect(mockConvertProviderResponse).not.toHaveBeenCalled();
-  });
-
-  it('bypasses local conversion for passthrough streaming responses', async () => {
-    jest.resetModules();
-    mockConvertProviderResponse.mockReset();
-    mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
-    logStageSpy.mockReset();
-
-    const { convertProviderResponseIfNeeded } = await import(
-      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
-    );
-
-    const upstreamResponse = {
-      status: 200,
-      body: {
-        id: 'resp_passthrough_stream_1',
-        object: 'response',
-        status: 'requires_action',
-        output: [
-          {
-            type: 'function_call',
-            call_id: 'call_passthrough_1',
-            name: 'update_plan',
-            arguments: '{"plan":[]}'
-          }
-        ],
-        required_action: {
-          type: 'submit_tool_outputs',
-          submit_tool_outputs: { tool_calls: [] }
-        }
-      }
-    } as any;
-
-    const converted = await convertProviderResponseIfNeeded(
-      {
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
-        requestId: 'req_passthrough_stream_bypass_1',
-        processMode: 'passthrough',
-        wantsStream: true,
-        serverToolsEnabled: true,
-        response: upstreamResponse,
-        pipelineMetadata: {}
-      },
-      {
-        runtimeManager: {
-          resolveRuntimeKey: () => undefined,
-          getHandleByRuntimeKey: () => undefined
-        },
-        executeNested: async () => ({ body: { ok: true } } as any)
-      }
-    );
-
-    expect(mockConvertProviderResponse).not.toHaveBeenCalled();
-    expect(converted).toBe(upstreamResponse);
   });
 
   it('does not emit convert.bridge.error stage for provider business error 2056', async () => {

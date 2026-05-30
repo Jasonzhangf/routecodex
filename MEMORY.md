@@ -1742,3 +1742,47 @@ Tags: opencode, deepseek, reasoning_content, responses-store, no-synthesis, prot
 
 - 2026-05-30: OpenAI-chat `stream_options` 400 根因不是 DeepSeek 特例，而是通用传输层丢协议字段：`OpenAIChatProtocolClient.buildRequestBody()` 删除 `stream`，且 `resolveProviderWantsUpstreamSse()` 未读取 request/data/metadata 的 stream intent。修复点在 `src/providers/core/runtime/provider-request-shaping-utils.ts`：通用读取 stream intent，并在最终 provider HTTP body 保留 `stream:true`；不得给 DeepSeek 写硬编码。红测必须打到最终 provider body，不能只 mock provider-direct payload。live 证据：0.90.2520 `/v1/chat/completions` SSE 200，快照 `req_1780102494281_f4d8f0e3/provider-request.json` 中 `model=deepseek-v4-flash-free`、`stream=true`、`stream_options.include_usage=true`。
 Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-body, no-hardcode, deepseek, 2026-05-30
+
+## 2026-05-30 chat SSE protocol guard
+- Verified: OpenAI/DeepSeek-compatible chat SSE wire must be data-only frames (`data: ...`), no named `event: chat_chunk`/`event: chat.done`; named response events belong only to Responses SSE.
+- Fix point: `sharedmodule/llmswitch-core/src/sse/shared/chat-serializer.ts` emits data-only chat SSE; `resp_outbound_stage1_client_remap/client-remap-protocol-switch.ts` strips cross-protocol top-level fields at client outbound.
+- Tests: `tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts` locks data-only chat SSE + tool_call roundtrip; `tests/sharedmodule/client-remap-protocol-fields.spec.ts` locks chat/responses top-level field separation.
+
+## 2026-05-30 Snapshot request 目录长度护栏
+- 已验证：`hub_snapshot_hooks` 曾将完整 `group_request_id/request_id` 作为 snapshot request 目录名；`_stop_followup` 递归追加会在 macOS 上触发 `File name too long (os error 63)`。
+- 修复基线：只对 snapshot/debug path token 做 bounded prefix + sha256 短 hash；`__runtime.json` 继续保留原始 `requestId`，真实传输 payload 不裁剪、不改写。
+
+## 2026-05-30 retry priority order
+- 已验证：retry/reroute 不应实现 “healthiest first / recoverToBestOnRetry”。`excludedProviderKeys` 只用于标准过滤，过滤后必须继续按配置 pool strategy/order 选路；`sdfv -> cc -> mimo` 排除 `sdfv` 后应命中 `cc`。
+- 红测：`tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts` 覆盖 TS retry plan 不得清理既有 excluded provider；Rust 单测 `priority_pool_retry_exclusion_preserves_next_configured_target` 覆盖 VR priority 排除后取下一个配置目标。
+
+- 2026-05-30: Windsurf Cascade 多轮调用对齐 Windsurf.app 行为定义与实测结论（术语真源）
+  **多轮调用对齐（Cascade Continuation）**：RouteCodex 对齐 Windsurf.app 的行为：用户在同一 session 中发送多条消息时，复用同一个 `cascadeId`，在同一个 Cascade 会话中续杯，不每轮 `StartCascade` 重建。这是主目标。
+  **Reentry（实现细节）**：对同一个 `cascadeId` 再次调用 `SendUserCascadeMessage`，向同一个 Cascade 会话追加消息。这是多轮调用对齐的底层实现动作，不是目标本身。
+  **非续杯的替代路径**：每次用户消息都走 `StartCascade` 新建一个 cascade，不复用旧 cascadeId。这等价于 Windsurf.app 的"新建会话"。
+  **实测数据**（真实 LS gRPC，ws-pro-1，gpt-5-4-medium）：
+  1. `send1` → OK，poll 即见 `GetCascadeTrajectory.status=2`（IDLE），steps=2
+  2. 此时立即 `SendUserCascadeMessage`（reentry）→ 返回 `CASCADE_RUN_STATUS_RUNNING`（executor busy）
+  3. 继续 poll `GetCascadeTrajectory`：status 从 2→1 持续约 40 秒，表明 executor 在 trajectory IDLE 后仍在后台工作
+  4. ~40 秒后 reentry 成功（`send2-reentry=ok`）
+  **结论**：
+  - Q1（单账号能否 reentry）：可以，但 executor settle 代价 ~40s
+  - Q2（对 RUNNING cascade 发 Send 返回什么）：`CASCADE_RUN_STATUS_RUNNING`
+  - Q3（同 session 续杯 vs 不同 session 重建）：新 cascade（`StartCascade`）瞬时完成，reentry 要等 ~40s executor settle
+  - `GetCascadeTrajectory.status` 字段 ≠ executor idle 状态：status=2（IDLE）后 executor 仍在工作
+  **架构影响**：当前 provider 的 sticky cascade（复用 cascadeId across rounds）会引入 ~40s 延迟。需评估是否改为每次都 `StartCascade` 新建。
+  Tags: windsurf, cascade, reentry, executor-settle, trajectory-status, start-cascade, 40s-delay, 2026-05-30
+
+- 2026-05-30: Windsurf Cascade reentry 测试方法真源
+  **测试脚本**：`scripts/windsurf-provider-private-probe.ts`
+  **测试方法**：直接调用 provider 私有方法（`provider['sendStartCascade']`、`provider['sendCascadeMessage']`、`provider['grpcUnaryLocal']`、`provider['buildGetTrajectoryStepsRequest']`、`provider['buildGetTrajectoryRequest']`、`provider['parseTrajectorySteps']`、`provider['parseTrajectoryStatus']`）绕过 provider 公共 API，直接验证 LS gRPC 行为。
+  **关键 gRPC 调用链**：
+  - `StartCascade` → field 1 metadata（含 apiKey/platform/version/sessionId）+ field 4=1
+  - `SendUserCascadeMessage` → field 1 cascade_id + field 2 items(text) + field 3 metadata + field 5 cascade_config
+  - `GetCascadeTrajectorySteps` → field 1 cascade_id + field 2 stepOffset
+  - `GetCascadeTrajectory` → field 1 cascade_id，返回 field 2 status（0=unknown, 1=RUNNING, 2=IDLE）
+  Tags: windsurf, cascade, grpc, test-harness, provider-private-methods, 2026-05-30
+
+## 2026-05-30 minimonth / provider outbound sanitizer 真相
+- `minimonth` 日志里的 `provider.traffic.acquire ... wait` 不是失败；本次失败真源是 route 到 `sdfv/cc` 后 bridge 调 `sanitizeProviderOutboundPayloadWithNative`，但 llmswitch-core native/wrapper 符号缺失。
+- provider outbound sanitizer 必须同时具备：Rust NAPI `sanitizeProviderOutboundPayloadJson`、core TS wrapper `sanitizeProviderOutboundPayloadWithNative`、RouteCodex bridge `sanitizeProviderOutboundPayload`、`native-router-hotpath-required-exports.ts` required export。缺任一处会 fail-fast，不允许 fallback。

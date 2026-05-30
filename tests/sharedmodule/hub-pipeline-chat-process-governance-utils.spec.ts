@@ -4,24 +4,17 @@ const mergeClockReservationIntoMetadataWithNative = jest.fn(({ metadata }: { met
   ...metadata,
   clockReservationApplied: true,
 }));
-const annotatePassthroughGovernanceSkipWithNative = jest.fn((audit: Record<string, unknown>) => ({
-  ...audit,
-  skipped: true,
-}));
-const buildPassthroughGovernanceSkippedNodeWithNative = jest.fn(() => ({ stage: 'req_process_skipped' }));
 const buildToolGovernanceNodeResultWithNative = jest.fn((value: unknown) => value);
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js',
   () => ({
     mergeClockReservationIntoMetadataWithNative,
-    annotatePassthroughGovernanceSkipWithNative,
-    buildPassthroughGovernanceSkippedNodeWithNative,
     buildToolGovernanceNodeResultWithNative,
   }),
 );
 
-const { propagateClockReservationToMetadata, annotatePassthroughAuditSkipped } = await import(
+const { propagateClockReservationToMetadata } = await import(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-chat-process-governance-utils.js'
 );
 
@@ -44,15 +37,4 @@ describe('hub pipeline chat-process governance utils', () => {
     });
   });
 
-  it('annotates passthrough audit in place', () => {
-    const audit: Record<string, unknown> = { mode: 'passthrough' };
-
-    annotatePassthroughAuditSkipped(audit);
-
-    expect(annotatePassthroughGovernanceSkipWithNative).toHaveBeenCalledWith(audit);
-    expect(audit).toEqual({
-      mode: 'passthrough',
-      skipped: true,
-    });
-  });
 });

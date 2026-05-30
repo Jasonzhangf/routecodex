@@ -1,7 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-const resolveActiveProcessModeWithNative = jest.fn();
-const buildPassthroughAuditWithNative = jest.fn();
 const stripHistoricalImageAttachments = jest.fn();
 const stripHistoricalVisualToolOutputs = jest.fn();
 const peekHubStageTopSummary = jest.fn();
@@ -12,14 +10,6 @@ const ensureRuntimeMetadata = jest.fn((metadata: unknown) => {
   }
   return record.__rt as Record<string, unknown>;
 });
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js',
-  () => ({
-    resolveActiveProcessModeWithNative,
-    buildPassthroughAuditWithNative,
-  }),
-);
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.js',
@@ -65,9 +55,7 @@ describe('hub pipeline chat process shared blocks', () => {
     expect(sanitized.messages).toEqual([{ role: 'user', content: 'visual-stripped' }]);
   });
 
-  it('resolves passthrough mode and emits passthrough audit', () => {
-    resolveActiveProcessModeWithNative.mockReturnValueOnce('passthrough');
-    buildPassthroughAuditWithNative.mockReturnValueOnce({ reason: 'passthrough_detected' });
+  it('always resolves chat mode', () => {
     const normalized = { processMode: 'chat', providerProtocol: 'openai-chat' } as any;
 
     const result = resolveActiveProcessModeAndAudit({
@@ -76,10 +64,8 @@ describe('hub pipeline chat process shared blocks', () => {
       rawPayload: { messages: [] },
     });
 
-    expect(normalized.processMode).toBe('passthrough');
-    expect(result.activeProcessMode).toBe('passthrough');
-    expect(result.passthroughAudit).toEqual({ reason: 'passthrough_detected' });
-    expect(buildPassthroughAuditWithNative).toHaveBeenCalledWith({ messages: [] }, 'openai-chat');
+    expect(normalized.processMode).toBe('chat');
+    expect(result.activeProcessMode).toBe('chat');
   });
 
   it('attaches hubStageTop into runtime metadata without dropping existing runtime fields', () => {
@@ -105,4 +91,3 @@ describe('hub pipeline chat process shared blocks', () => {
     expect((rt.hubStageTop as Array<Record<string, unknown>>)[0]?.stage).toBe('req_inbound.stage2_semantic_map');
   });
 });
-

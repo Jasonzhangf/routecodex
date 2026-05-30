@@ -664,9 +664,6 @@ export async function convertProviderResponseIfNeeded(
       throw error;
     }
   }
-  if (options.processMode === 'passthrough') {
-    return options.response;
-  }
   const entry = (options.entryEndpoint || '').toLowerCase();
   const needsAnthropicConversion = entry.includes('/v1/messages');
   const needsResponsesConversion = entry.includes('/v1/responses');

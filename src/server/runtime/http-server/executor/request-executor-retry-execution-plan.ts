@@ -121,14 +121,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     };
   }
 
-  if (classification === 'recoverable' && args.attempt >= 3 && args.providerKey && Array.isArray(args.routePool)) {
-    for (const candidate of args.routePool) {
-      if (typeof candidate === 'string' && candidate && candidate !== args.providerKey) {
-        args.excludedProviderKeys.delete(candidate);
-      }
-    }
-  }
-
   const exclusionPlan = hostContractFailure
     ? {
         excludedCurrentProvider: false

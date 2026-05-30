@@ -158,7 +158,7 @@ describe('request continuation semantics', () => {
           toolOutputsDetailed: [{ callId: 'native:run_command:3', outputText: '/Users/fanzhang/Documents/github/routecodex\n' }]
         }
       },
-      processMode: 'passthrough',
+      processMode: 'chat',
       direction: 'request',
       stage: 'inbound',
       stream: false
@@ -201,7 +201,7 @@ describe('request continuation semantics', () => {
           toolOutputsDetailed: [{ callId: 'tool_cleanup_1', outputText: 'ok' }]
         }
       },
-      processMode: 'passthrough',
+      processMode: 'chat',
       direction: 'request',
       stage: 'inbound',
       stream: false
@@ -262,7 +262,7 @@ describe('request continuation semantics', () => {
           ]
         },
         metadata: {},
-        processMode: 'passthrough',
+        processMode: 'chat',
         direction: 'request',
         stage: 'inbound',
         stream: false

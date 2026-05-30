@@ -35,7 +35,6 @@ jest.unstable_mockModule(
   () => ({
     buildReqInboundNodeResultWithNative: jest.fn(() => ({ stage: 'req_inbound' })),
     buildReqInboundSkippedNodeWithNative: jest.fn(() => ({ stage: 'req_inbound_skipped' })),
-    buildPassthroughAuditWithNative: jest.fn(() => ({ mode: 'passthrough' })),
     buildToolGovernanceNodeResultWithNative: jest.fn((value: unknown) => value),
     coerceStandardizedRequestFromPayloadWithNative: jest.fn(({ payload }: { payload: Record<string, unknown> }) => ({
       standardizedRequest: {
@@ -52,7 +51,6 @@ jest.unstable_mockModule(
     prepareRuntimeMetadataForServertoolsWithNative: jest.fn(
       ({ metadata }: { metadata?: Record<string, unknown> }) => ({ ...(metadata || {}) }),
     ),
-    resolveActiveProcessModeWithNative: jest.fn(() => 'chat'),
     readResponsesResumeFromMetadataWithNative: jest.fn(() => undefined),
     resolveHubClientProtocolWithNative: jest.fn(() => 'openai-chat'),
     syncResponsesContextFromCanonicalMessagesWithNative: jest.fn((value: unknown) => value),
@@ -79,7 +77,6 @@ jest.unstable_mockModule(
     attachHubStageTopSummary: jest.fn(),
     resolveActiveProcessModeAndAudit: jest.fn(() => ({
       activeProcessMode: 'chat',
-      passthroughAudit: undefined,
     })),
     sanitizeStandardizedRequestMessages: jest.fn((value: unknown) => value),
   }),
@@ -88,8 +85,6 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-chat-process-governance-utils.js',
   () => ({
-    annotatePassthroughAuditSkipped: jest.fn(),
-    appendPassthroughGovernanceSkippedNode: jest.fn(),
     appendToolGovernanceNodeResult: jest.fn(),
     propagateClockReservationToMetadata: jest.fn(),
   }),

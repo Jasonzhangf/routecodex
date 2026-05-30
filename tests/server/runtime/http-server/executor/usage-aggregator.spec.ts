@@ -105,6 +105,27 @@ describe('usage log text', () => {
     });
   });
 
+  it('extracts cache hits from DeepSeek prompt_cache_hit_tokens', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        usage: {
+          prompt_tokens: 50000,
+          completion_tokens: 200,
+          total_tokens: 50200,
+          prompt_cache_hit_tokens: 48000
+        }
+      }
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 50000,
+      completion_tokens: 200,
+      total_tokens: 50200,
+      cache_read_input_tokens: 48000,
+      cache_creation_input_tokens: undefined
+    });
+  });
+
   it('extracts cache hits from prompt_tokens_details.cached_tokens', () => {
     const usage = extractUsageFromResult({
       body: {

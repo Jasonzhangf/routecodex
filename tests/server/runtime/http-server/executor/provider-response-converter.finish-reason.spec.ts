@@ -16,6 +16,57 @@ jest.mock('../../../../../src/modules/llmswitch/bridge.js', () => ({
 }));
 
 describe('provider-response-converter finish reason wrapper metadata', () => {
+  it('does not bypass response-side servertool for streamed passthrough relay', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const sseStream = { pipe: () => undefined };
+    mockConvertProviderResponse.mockResolvedValue({
+      __sse_responses: sseStream,
+      body: {
+        id: 'chatcmpl_passthrough_stream_stop',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: { role: 'assistant', content: '阶段完成' }
+          }
+        ]
+      }
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        providerType: 'openai',
+        requestId: 'req_stream_chat_must_still_run_servertool',
+        wantsStream: true,
+        processMode: 'chat',
+        serverToolsEnabled: true,
+        response: { body: { __sse_responses: sseStream } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    expect((converted.body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY]).toBe('stop');
+    expect((converted.body as Record<string, unknown>).__sse_responses).toBe(sseStream);
+  });
+
   it('preserves derived finish_reason for streamed responses logs', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();

@@ -77,8 +77,7 @@ Use the same field names in JSON and WebUI forms:
         "baseWeight": 100,
         "minMultiplier": 0.5,
         "beta": 0.1,
-        "halfLifeMs": 600000,
-        "recoverToBestOnRetry": true
+        "halfLifeMs": 600000
       }
     }
   }
@@ -159,7 +158,6 @@ Key knobs (configurable under `loadBalancing.healthWeighted`):
 - `minMultiplier` (default `0.5`)
 - `beta` (default `0.1`) — one error reduces weight by ~10%
 - `halfLifeMs` (default `10min`)
-- `recoverToBestOnRetry` — on router retries, prefer the healthiest key first
 
 ## Model-capacity 429 handling (host quota)
 

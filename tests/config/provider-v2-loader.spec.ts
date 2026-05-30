@@ -181,6 +181,42 @@ describe('buildVirtualRouterInputV2', () => {
     expect(input.routing.default[0].targets).toEqual(['demo.mock-1']);
   });
 
+  it('keeps provider configs referenced by singular route target', async () => {
+    const root = await createTempDir('provider-v2-');
+    const providerDir = path.join(root, 'mini27');
+    await fs.mkdir(providerDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.json'),
+      `${JSON.stringify({
+        version: '2.0.0',
+        providerId: 'mini27',
+        provider: {
+          id: 'mini27',
+          type: 'openai',
+          baseURL: 'https://mini27.example.test/v1',
+          defaultModel: 'MiniMax-M2.7'
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+
+    const input = await buildVirtualRouterInputV2({
+      virtualrouter: {
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              default: [{ id: 'default-mini27', target: 'mini27.MiniMax-M2.7' }]
+            }
+          }
+        }
+      }
+    }, root);
+
+    expect(Object.keys(input.providers)).toEqual(['mini27']);
+    expect(input.routing.default?.[0]?.target).toBe('mini27.MiniMax-M2.7');
+  });
+
 
   it('carries top-level servertool.apply_patch mode into virtual router input', async () => {
     const root = await createTempDir('provider-v2-');

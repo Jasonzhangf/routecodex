@@ -53,10 +53,19 @@ type FollowupSanitizeModule = {
   sanitizeFollowupText?: (raw: unknown) => string;
 };
 
+type NativeHubBridgePolicySemantics = {
+  sanitizeProviderOutboundPayloadWithNative?: (input: {
+    protocol?: string;
+    compatibilityProfile?: string;
+    payload: Record<string, unknown>;
+  }) => Record<string, unknown>;
+};
+
 let cachedSharedSemantics: NativeSharedConversionSemantics | null | undefined;
 let cachedRespSemantics: NativeHubPipelineRespSemantics | null | undefined;
 let cachedFollowupSanitize: FollowupSanitizeModule | null | undefined;
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
+let cachedHubBridgePolicySemantics: NativeHubBridgePolicySemantics | null | undefined;
 let sharedBindingsChecked: boolean | undefined;
 let respBindingsChecked: boolean | undefined;
 
@@ -177,6 +186,26 @@ async function getFollowupSanitizeModule(): Promise<FollowupSanitizeModule> {
   return cachedFollowupSanitize;
 }
 
+async function getHubBridgePolicySemantics(): Promise<NativeHubBridgePolicySemantics> {
+  if (cachedHubBridgePolicySemantics !== undefined) {
+    if (!cachedHubBridgePolicySemantics) {
+      throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
+    }
+    return cachedHubBridgePolicySemantics;
+  }
+  try {
+    cachedHubBridgePolicySemantics = await importCoreDist<NativeHubBridgePolicySemantics>(
+      'router/virtual-router/engine-selection/native-hub-bridge-policy-semantics'
+    );
+  } catch {
+    cachedHubBridgePolicySemantics = null;
+  }
+  if (!cachedHubBridgePolicySemantics) {
+    throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
+  }
+  return cachedHubBridgePolicySemantics;
+}
+
 export async function mapChatToolsToBridgeJson(rawTools: unknown): Promise<AnyRecord[]> {
   await assertSharedBindings();
   const mod = await getSharedConversionSemantics();
@@ -246,6 +275,19 @@ export async function sanitizeFollowupText(raw: unknown): Promise<string> {
     throw new Error('[llmswitch-bridge] sanitizeFollowupText not available');
   }
   return fn(raw);
+}
+
+export async function sanitizeProviderOutboundPayload(input: {
+  protocol?: string;
+  compatibilityProfile?: string;
+  payload: Record<string, unknown>;
+}): Promise<AnyRecord> {
+  const mod = await getHubBridgePolicySemantics();
+  const fn = mod.sanitizeProviderOutboundPayloadWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] sanitizeProviderOutboundPayloadWithNative not available');
+  }
+  return fn(input) as AnyRecord;
 }
 
 export function classifyProviderFailure(

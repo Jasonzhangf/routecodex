@@ -237,8 +237,7 @@ describe('provider payload builtin web_search gating', () => {
         ],
       } as any,
       contextSnapshot: undefined,
-      activeProcessMode: 'passthrough',
-      passthroughAudit: undefined,
+      activeProcessMode: 'chat',
       outboundProtocol: 'openai-responses',
       outboundAdapterContext: {
         routeId: 'thinking.default',

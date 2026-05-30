@@ -217,19 +217,4 @@ describe('native semantics parser observability', () => {
     warnSpy.mockRestore();
   });
 
-  it('logs passthrough parser JSON failures before fail-fasting native capability', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const mod = await importWithNativeParseFailureMock<{
-      resolveHasInstructionRequestedPassthroughWithNative: (messages: unknown) => boolean;
-    }>(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-passthrough.js',
-      'resolveHasInstructionRequestedPassthroughJson'
-    );
-
-    expect(() => mod.resolveHasInstructionRequestedPassthroughWithNative([])).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseBoolean failed (non-blocking)');
-
-    warnSpy.mockRestore();
-  });
 });

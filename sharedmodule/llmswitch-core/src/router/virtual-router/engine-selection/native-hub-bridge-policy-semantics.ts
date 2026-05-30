@@ -513,3 +513,29 @@ export function resolveHubProtocolAllowlistsWithNative(): NativeHubProtocolAllow
     return fail(reason);
   }
 }
+
+export function sanitizeProviderOutboundPayloadWithNative(input: {
+  protocol?: string;
+  compatibilityProfile?: string;
+  enforceLayout?: boolean;
+  payload: Record<string, unknown>;
+}): Record<string, unknown> {
+  const capability = 'sanitizeProviderOutboundPayloadJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{
+      protocol: input?.protocol,
+      compatibilityProfile: input?.compatibilityProfile,
+      enforceLayout: input?.enforceLayout,
+      payload: input?.payload ?? {}
+    }]);
+    const parsed = parseJson('sanitizeProviderOutboundPayload', raw);
+    if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}

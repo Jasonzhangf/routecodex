@@ -107,6 +107,7 @@ export {
   injectMcpToolsForChatJson,
   injectMcpToolsForResponsesJson,
   sanitizeFollowupText,
+  sanitizeProviderOutboundPayload,
   classifyProviderFailure,
   getNetworkErrorCodes
 } from './bridge/native-exports.js';

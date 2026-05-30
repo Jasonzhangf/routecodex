@@ -268,20 +268,6 @@ export async function processProviderSendFailure(
   }
 
   const shouldPreserveSameProviderRetry = retryExecutionPlan.retrySwitchPlan?.switchAction === 'retry_same_provider';
-  if (shouldPreserveSameProviderRetry && args.providerKey && Array.isArray(args.routePoolForAttempt)) {
-    for (const candidate of args.routePoolForAttempt) {
-      if (typeof candidate === 'string' && candidate && candidate !== args.providerKey) {
-        args.excludedProviderKeys.add(candidate);
-      }
-    }
-    args.excludedProviderKeys.delete(args.providerKey);
-  } else if (retryExecutionPlan.retrySwitchPlan?.switchAction === 'exclude_and_reroute' && args.providerKey && Array.isArray(args.routePoolForAttempt)) {
-    for (const candidate of args.routePoolForAttempt) {
-      if (typeof candidate === 'string' && candidate && candidate !== args.providerKey) {
-        args.excludedProviderKeys.delete(candidate);
-      }
-    }
-  }
   const blockingRecoverableRouteHoldState =
     (retryExecutionPlan.blockingRecoverable || shouldPreserveSameProviderRetry)
       ? {

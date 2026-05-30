@@ -137,6 +137,13 @@ export function emitRequestExecutorVirtualRouterConcurrencyLog(args: {
   stoplessArmed?: boolean;
   activeInFlight: number;
   maxInFlight: number;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    total_tokens?: number;
+  };
 }): void {
   recordVirtualRouterHitRollup({
     routeName: args.routeName,
@@ -149,7 +156,12 @@ export function emitRequestExecutorVirtualRouterConcurrencyLog(args: {
     stoplessMode: args.stoplessMode,
     stoplessArmed: args.stoplessArmed,
     activeInFlight: args.activeInFlight,
-    maxInFlight: args.maxInFlight
+    maxInFlight: args.maxInFlight,
+    promptTokens: args.usage?.prompt_tokens,
+    completionTokens: args.usage?.completion_tokens,
+    cacheReadTokens: args.usage?.cache_read_input_tokens,
+    cacheCreationTokens: args.usage?.cache_creation_input_tokens,
+    totalTokens: args.usage?.total_tokens
   });
 }
 

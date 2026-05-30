@@ -4321,7 +4321,7 @@ describe('HubRequestExecutor failover', () => {
       execute: jest.fn(async (input: any) => ({
         requestId: input.id,
         providerPayload: {},
-        processMode: 'passthrough',
+        processMode: 'chat',
         target: {
           providerKey,
           providerType: 'openai',

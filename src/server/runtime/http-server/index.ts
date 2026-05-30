@@ -1172,6 +1172,7 @@ export class RouteCodexHttpServer {
             : undefined,
       },
     );
+    let capturedUsage: Record<string, unknown> | undefined;
     // Try the router-direct pipeline
     let directOutcome: RouterDirectOutcome = { used: false, reason: 'uninitialized' };
     const maxDirectAttempts = 2;
@@ -1233,6 +1234,39 @@ export class RouteCodexHttpServer {
           onSnapshotAfter: (response, ctx) => {
             const responseRecord =
               response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
+            const handle = this.providerHandles.get(ctx.providerKey) ?? this.providerHandles.get(target.runtimeKey ?? target.providerKey);
+            if (handle) {
+              const normalized = normalizeProviderResponse(response);
+              const usage = extractUsageFromResult(normalized, {
+                ...(input.metadata ?? {}),
+                providerProtocol: handle.providerProtocol,
+                providerType: handle.providerType,
+                providerKey: ctx.providerKey,
+              });
+              if (usage) {
+                capturedUsage = usage as Record<string, unknown>;
+              }
+            }
+            const meta = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+              ? (input.metadata as Record<string, unknown>)
+              : {};
+            emitRequestExecutorVirtualRouterConcurrencyLog({
+              sessionId: readTrimmedString(meta.sessionId as string | undefined) ?? readTrimmedString(meta.conversationId as string | undefined),
+              projectPath:
+                readTrimmedString(meta.clientWorkdir as string | undefined)
+                ?? readTrimmedString(meta.client_workdir as string | undefined)
+                ?? readTrimmedString(meta.workdir as string | undefined)
+                ?? readTrimmedString(meta.cwd as string | undefined),
+              routeName: ctx.routingDecision?.routeName,
+              providerKey: ctx.providerKey,
+              model: readTrimmedString(handle?.runtime?.defaultModel)
+                ?? readTrimmedString((responseRecord?.body as Record<string, unknown> | undefined)?.model as string | undefined)
+                ?? readTrimmedString((providerPayload as Record<string, unknown> | undefined)?.model as string | undefined),
+              reason: readTrimmedString((ctx.routingDecision as Record<string, unknown> | undefined)?.reasoning as string | undefined),
+              activeInFlight: 1,
+              maxInFlight: 1,
+              usage: capturedUsage,
+            });
             this.logStage('router-direct.send.completed', input.requestId, {
               port: portConfig.port,
               providerKey: ctx.providerKey,
@@ -1314,6 +1348,7 @@ export class RouteCodexHttpServer {
       response: directOutcome.response,
       providerHandle: directOutcome.providerHandle,
       auditContext: directOutcome.auditContext,
+      capturedUsage,
       providerPayload,
       standardizedRequest: pipelineResult.standardizedRequest,
       processedRequest: pipelineResult.processedRequest,
@@ -1359,7 +1394,7 @@ export class RouteCodexHttpServer {
     const { response, providerHandle, auditContext } = directResult;
 
     const normalized = normalizeProviderResponse(response);
-    const usage = extractUsageFromResult(normalized, {
+    const usage = directResult.capturedUsage ?? extractUsageFromResult(normalized, {
       ...(input.metadata ?? {}),
       providerProtocol: providerHandle.providerProtocol,
       providerType: providerHandle.providerType,
@@ -1445,9 +1480,11 @@ export class RouteCodexHttpServer {
     input: PipelineExecutionInput,
     payload: Record<string, unknown>,
     providerBinding?: string,
+    capturedUsage?: Record<string, unknown>,
   ): Promise<PipelineExecutionResult> {
     const normalized = normalizeProviderResponse(directResult.response);
-    const usage = extractUsageFromResult(normalized, {
+    // Prefer usage extracted by the onSnapshotAfter hook; fall back to extraction here
+    const usage = capturedUsage ?? extractUsageFromResult(normalized, {
       ...(input.metadata ?? {}),
       providerProtocol: directResult.providerProtocol,
       providerType: directResult.providerHandle.providerType,
@@ -1508,6 +1545,9 @@ export class RouteCodexHttpServer {
       runtimeKey,
       entryEndpoint: input.entryEndpoint,
     });
+    // Closure vars for usage data captured by hooks
+    let capturedUsage: Record<string, unknown> | undefined;
+
     const directResult = await executeProviderDirectPipeline(
       payload,
       {
@@ -1555,6 +1595,19 @@ export class RouteCodexHttpServer {
                 ? responseRecord.status
                 : undefined,
           });
+          // Extract usage/cache from response inline in the output hook
+          const handle = this.resolveProviderHandleForBinding(context.providerKey);
+          if (handle) {
+            const normalized = normalizeProviderResponse(response);
+            const usage = extractUsageFromResult(normalized, {
+              providerProtocol: handle.providerProtocol,
+              providerType: handle.providerType,
+              providerKey: context.providerKey,
+            });
+            if (usage) {
+              capturedUsage = usage as Record<string, unknown>;
+            }
+          }
         },
       },
     );
@@ -1564,6 +1617,7 @@ export class RouteCodexHttpServer {
       input,
       payload,
       providerBinding,
+      capturedUsage,
     );
   }
 

@@ -23,6 +23,62 @@ const emptyDeps: ModuleDependencies = {
 } as ModuleDependencies;
 
 describe('ResponsesProvider direct passthrough', () => {
+  test('strips reasoning.content before provider HTTP send for non-DeepSeek responses provider', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-reasoning-filter',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'cc',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+
+    let capturedBody: any;
+    provider.httpClient = {
+      postStream: async (_url: string, body: any) => {
+        capturedBody = body;
+        const badReasoning = Array.isArray(body.input)
+          && body.input.some((item: any) => item?.type === 'reasoning' && Array.isArray(item.content) && item.content.length > 0);
+        if (badReasoning) {
+          const error = new Error("HTTP 400: Invalid 'input[6].content': array too long") as Error & { status?: number; code?: string };
+          error.status = 400;
+          error.code = 'HTTP_400';
+          throw error;
+        }
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] },
+        {
+          type: 'reasoning',
+          content: [{ type: 'reasoning_text', text: 'must not reach provider runtime' }],
+          encrypted_content: null,
+          summary: [{ type: 'summary_text', text: 'summary stays' }]
+        }
+      ],
+      stream: true,
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    } as any;
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(capturedBody.input[1].type).toBe('reasoning');
+    expect(capturedBody.input[1].content).toBeUndefined();
+    expect(capturedBody.input[1].encrypted_content).toBeUndefined();
+    expect(JSON.stringify(capturedBody)).not.toContain('must not reach provider runtime');
+  });
+
   test('preserves inbound responses payload without rebuilding input/history/model', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct',

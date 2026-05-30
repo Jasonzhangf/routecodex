@@ -2,6 +2,7 @@ import type { JsonObject } from '../types/json.js';
 import type { StageRecorder } from '../format-adapters/index.js';
 import { resolveHubProtocolSpec } from './protocol-spec.js';
 import { normalizeProviderProtocolTokenWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+import { sanitizeProviderOutboundPayloadWithNative } from '../../../router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.js';
 import { loadCompatProfileRegistry, getPolicyOverrides } from '../../compat/profile-registry/registry.js';
 import { shouldSkipPolicy } from '../../compat/profile-registry/policy-overrides.js';
 
@@ -338,25 +339,30 @@ export function applyHubProviderOutboundPolicy(options: {
   stageRecorder?: StageRecorder;
   requestId?: string;
 }): JsonObject {
-  const effectivePolicy = resolveEffectivePolicy(options.policy);
-  const mode = effectivePolicy?.mode ?? 'off';
-  if (mode !== 'enforce') {
-    return options.payload;
-  }
-
   const normalizedProviderProtocol = normalizeHubProviderProtocol(options.providerProtocol);
   const compatibilityProfile =
     typeof options.compatibilityProfile === 'string' ? options.compatibilityProfile.trim().toLowerCase() : '';
+  const mandatorySanitized = sanitizeProviderOutboundPayloadWithNative({
+    protocol: normalizedProviderProtocol,
+    compatibilityProfile,
+    enforceLayout: false,
+    payload: options.payload as Record<string, unknown>
+  }) as JsonObject;
+  const effectivePolicy = resolveEffectivePolicy(options.policy);
+  const mode = effectivePolicy?.mode ?? 'off';
+  if (mode !== 'enforce') {
+    return mandatorySanitized;
+  }
   if (compatibilityProfile) {
     const overrides = getPolicyOverrides(policyCompatRegistry, compatibilityProfile);
     if (shouldSkipPolicy(overrides, 'enforce')) {
-      return options.payload;
+      return mandatorySanitized;
     }
   }
 
-  const result = applyProviderOutboundPolicy(normalizedProviderProtocol, options.payload);
+  const result = applyProviderOutboundPolicy(normalizedProviderProtocol, mandatorySanitized);
   if (!result.changed) {
-    return options.payload;
+    return mandatorySanitized;
   }
   try {
     options.stageRecorder?.record('hub_policy.enforce.provider_outbound', {

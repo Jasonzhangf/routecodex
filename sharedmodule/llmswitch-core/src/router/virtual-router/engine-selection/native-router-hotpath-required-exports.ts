@@ -285,6 +285,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "resolveHubClientProtocolJson",
   "resolveHubProtocolSpecJson",
   "resolveHubProtocolAllowlistsJson",
+  "sanitizeProviderOutboundPayloadJson",
   "resolveOutboundStreamIntentJson",
   "resolveProviderProtocolJson",
   "resolveSseTimeoutOptionsJson",

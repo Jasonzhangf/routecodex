@@ -12,6 +12,7 @@ import {
   summarizeVisionMessages
 } from './vision-debug-utils.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
+import { Readable } from 'node:stream';
 
 const formatUnknownError = (error: unknown): string => {
   if (error instanceof Error) {
@@ -38,6 +39,87 @@ const logHttpRequestExecutorNonBlockingError = (
     // Never throw from non-blocking logging.
   }
 };
+
+const MAX_SSE_BUSINESS_ERROR_PEEK_BYTES = 64 * 1024;
+
+function parseFirstSseDataPayload(frame: string): UnknownObject | undefined {
+  const dataLines = frame
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart());
+  if (dataLines.length === 0) {
+    return undefined;
+  }
+  const raw = dataLines.join('\n').trim();
+  if (!raw || raw === '[DONE]') {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as UnknownObject)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function detectProviderBusinessErrorBeforeStreaming(args: {
+  stream: NodeJS.ReadableStream;
+  context: ProviderContext;
+  resolveBusinessResponseError?: (response: unknown, context: ProviderContext) => Error | undefined;
+}): Promise<NodeJS.ReadableStream> {
+  if (!args.resolveBusinessResponseError) {
+    return args.stream;
+  }
+  const asyncIterable = args.stream as unknown as AsyncIterable<Buffer | string | Uint8Array>;
+  if (!asyncIterable || typeof asyncIterable[Symbol.asyncIterator] !== 'function') {
+    return args.stream;
+  }
+  const iterator = asyncIterable[Symbol.asyncIterator]();
+  const buffered: Array<Buffer | string | Uint8Array> = [];
+  let bufferedText = '';
+  let inspected = false;
+
+  while (!inspected && Buffer.byteLength(bufferedText, 'utf8') <= MAX_SSE_BUSINESS_ERROR_PEEK_BYTES) {
+    const next = await iterator.next();
+    if (next.done) {
+      inspected = true;
+      break;
+    }
+    const chunk = next.value;
+    buffered.push(chunk);
+    bufferedText += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    const frameEnd = bufferedText.indexOf('\n\n');
+    if (frameEnd < 0) {
+      continue;
+    }
+    inspected = true;
+    const firstPayload = parseFirstSseDataPayload(bufferedText.slice(0, frameEnd));
+    if (firstPayload) {
+      const businessError = args.resolveBusinessResponseError(firstPayload, args.context);
+      if (businessError) {
+        throw businessError;
+      }
+    }
+  }
+
+  async function* replay(): AsyncGenerator<Buffer | string | Uint8Array> {
+    for (const chunk of buffered) {
+      yield chunk;
+    }
+    while (true) {
+      const next = await iterator.next();
+      if (next.done) {
+        return;
+      }
+      yield next.value;
+    }
+  }
+
+  return Readable.from(replay());
+}
 
 export type PreparedHttpRequest = {
   endpoint: string;
@@ -385,8 +467,13 @@ export class HttpRequestExecutor {
               undefined,
               requestInfo.abortSignal
             );
+            const businessCheckedStream = await detectProviderBusinessErrorBeforeStreaming({
+              stream: upstreamStream,
+              context,
+              resolveBusinessResponseError: this.deps.resolveBusinessResponseError
+            });
             const streamForHost = captureSse
-              ? attachProviderSseSnapshotStream(upstreamStream, {
+              ? attachProviderSseSnapshotStream(businessCheckedStream, {
                   requestId: context.requestId,
                   headers: requestInfo.headers,
                   url: requestInfo.targetUrl,
@@ -395,7 +482,7 @@ export class HttpRequestExecutor {
                   providerKey: context.providerKey,
                   providerId: context.providerId
                 })
-              : upstreamStream;
+              : businessCheckedStream;
             const wrapped = await this.deps.wrapUpstreamSseResponse(streamForHost, context);
             try {
               await writeProviderSnapshot({
@@ -437,8 +524,13 @@ export class HttpRequestExecutor {
       const sseStream = responseRecord?.__sse_responses;
       if (sseStream && typeof (sseStream as NodeJS.ReadableStream).pipe === 'function') {
         const upstreamStream = sseStream as NodeJS.ReadableStream;
+        const businessCheckedStream = await detectProviderBusinessErrorBeforeStreaming({
+          stream: upstreamStream,
+          context,
+          resolveBusinessResponseError: this.deps.resolveBusinessResponseError
+        });
         const streamForHost = captureSse
-          ? attachProviderSseSnapshotStream(upstreamStream, {
+          ? attachProviderSseSnapshotStream(businessCheckedStream, {
               requestId: context.requestId,
               headers: requestInfo.headers,
               url: requestInfo.targetUrl,
@@ -447,7 +539,7 @@ export class HttpRequestExecutor {
               providerKey: context.providerKey,
               providerId: context.providerId
             })
-          : upstreamStream;
+          : businessCheckedStream;
         const wrapped = await this.deps.wrapUpstreamSseResponse(streamForHost, context);
         try {
           await writeProviderSnapshot({

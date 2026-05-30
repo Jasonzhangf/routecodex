@@ -1570,3 +1570,10 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 审计卡死时同时看 provider poll 状态和请求层 retry 分类：若 provider 已抛 `retryable:false` 但仍出现 `provider-switch retry_same_provider`，根因在 failure-policy 分类，不在 Windsurf payload shape。
 
 - 2026-05-30 chat stream_options 400 精华：若上游报 `stream_options should be set along with stream = true`，必须查最终 `provider-request.json`，不要只看 direct payload mock。OpenAI-chat 通用真源在 `provider-request-shaping-utils`：从 request/data/metadata/runtime metadata 读取 stream intent，并在最终 provider HTTP body 保留 `stream:true`；禁止 DeepSeek/provider 硬编码。
+
+## 2026-05-30 snapshot 路径长度精华
+- `hub_snapshot_hooks` 写目录时，request/group id 只能作为 bounded debug path token；长 stop_followup 链必须 prefix+hash，不能原样当目录名。
+- 该限制只允许作用于 snapshot/debug 路径；`__runtime.json` 和真实传输 payload 必须保留原始 requestId/语义。
+
+### 2026-05-30 调试精华（minimonth / provider outbound sanitizer）
+- 看到 `sanitizeProviderOutboundPayloadWithNative not available` 时，先查 `sharedmodule/llmswitch-core` native + wrapper + required-export 三点是否同步；`minimonth provider.traffic.acquire wait` 单独不是失败证据。

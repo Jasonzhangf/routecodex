@@ -34,9 +34,6 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js',
   () => ({
     buildReqInboundSkippedNodeWithNative: jest.fn(() => ({ stage: 'req_inbound_skipped' })),
-    annotatePassthroughGovernanceSkipWithNative: jest.fn((value: unknown) => value),
-    buildPassthroughGovernanceSkippedNodeWithNative: jest.fn(() => ({ stage: 'tool_governance_skipped' })),
-    buildPassthroughAuditWithNative: jest.fn(() => ({ mode: 'passthrough' })),
     buildToolGovernanceNodeResultWithNative: jest.fn((value: unknown) => value),
     coerceStandardizedRequestFromPayloadWithNative: jest.fn(({ payload }: { payload: Record<string, unknown> }) => ({
       standardizedRequest: {
@@ -69,7 +66,6 @@ jest.unstable_mockModule(
     mergeClockReservationIntoMetadataWithNative: jest.fn(({ metadata }: { metadata: Record<string, unknown> }) => ({
       ...metadata,
     })),
-    resolveActiveProcessModeWithNative: jest.fn((_processMode: unknown) => 'chat'),
     syncResponsesContextFromCanonicalMessagesWithNative: jest.fn((value: unknown) => value),
   }),
 );

@@ -193,6 +193,13 @@ export function normalizeUsage(
       cacheRead = cached;
     }
   }
+  // DeepSeek-style cache hit field
+  if (cacheRead === undefined) {
+    const deepseekCacheHit = readNumeric(usageRecord.prompt_cache_hit_tokens);
+    if (deepseekCacheHit !== undefined) {
+      cacheRead = deepseekCacheHit;
+    }
+  }
 
   const cacheCreation: number | undefined =
     readNumeric(usageRecord.cache_creation_input_tokens);

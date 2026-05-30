@@ -42,11 +42,6 @@ const DEFAULT_SM_MAX_REPEATS =
     ? SM_DEFAULT_REPEAT_PROBE.stopMessageMaxRepeats
     : 2_147_483_647;
 const DEFAULT_STOPMESSAGE_MAX_REPEATS = 10;
-const PASSTHROUGH_PREFER_PROBE = parseRoutingInstructions(
-  buildMessages('<**!tab.gpt-5.3-codex:passthrough**>')
-)[0] as any;
-const SUPPORTS_PREFER_PROCESSMODE_SUFFIX =
-  PASSTHROUGH_PREFER_PROBE?.type === 'prefer' && PASSTHROUGH_PREFER_PROBE?.processMode === 'passthrough';
 const SUPPORTS_HISTORY_MARKER_REPLAY =
   parseRoutingInstructions([
     { role: 'user', content: '<**sm:on/10**>继续执行' },
@@ -101,55 +96,12 @@ describe('Routing instruction parsing and application', () => {
     expect(instruction.pathLength).toBe(2);
   });
 
-  testIf(SUPPORTS_PREFER_PROCESSMODE_SUFFIX)('prefer instruction supports :passthrough mode suffix', () => {
+  test('prefer instruction rejects :passthrough mode suffix', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**!tab.gpt-5.3-codex:passthrough**>'));
-    expect(instructions).toHaveLength(1);
-    const instruction = instructions[0];
-    expect(instruction.type).toBe('prefer');
-    expect(instruction.provider).toBe('tab');
-    expect(instruction.model).toBe('gpt-5.3-codex');
-    expect(instruction.processMode).toBe('passthrough');
-  });
-
-  testIf(SUPPORTS_PREFER_PROCESSMODE_SUFFIX)(
-    'prefer instruction ignores unknown mode suffix and keeps regular mode',
-    () => {
-      const instructions = parseRoutingInstructions(buildMessages('<**!tab.gpt-5.3-codex:unknown_mode**>'));
-      expect(instructions).toHaveLength(1);
-      const instruction = instructions[0];
-      expect(instruction.type).toBe('prefer');
-      expect(instruction.provider).toBe('tab');
-      expect(instruction.model).toBe('gpt-5.3-codex');
-      expect(instruction.processMode).toBeUndefined();
-    }
-  );
-
-  testIf(!SUPPORTS_PREFER_PROCESSMODE_SUFFIX)(
-    'prefer instruction with mode suffix gracefully degrades when unsupported',
-    () => {
-      const instructions = parseRoutingInstructions(buildMessages('<**!tab.gpt-5.3-codex:passthrough**>'));
-      expect(instructions).toHaveLength(0);
-      const nextState = applyRoutingInstructions(instructions, createState());
-      expect(nextState.preferTarget).toBeUndefined();
-    }
-  );
-
-  testIf(SUPPORTS_PREFER_PROCESSMODE_SUFFIX)('applyRoutingInstructions persists processMode on prefer target', () => {
-    const instructions = parseRoutingInstructions(buildMessages('<**!tab.gpt-5.3-codex:passthrough**>'));
+    expect(instructions).toHaveLength(0);
     const nextState = applyRoutingInstructions(instructions, createState());
-    expect(nextState.preferTarget?.provider).toBe('tab');
-    expect(nextState.preferTarget?.model).toBe('gpt-5.3-codex');
-    expect(nextState.preferTarget?.processMode).toBe('passthrough');
+    expect(nextState.preferTarget).toBeUndefined();
   });
-
-  testIf(!SUPPORTS_PREFER_PROCESSMODE_SUFFIX)(
-    'applyRoutingInstructions keeps state unchanged for unsupported mode suffix',
-    () => {
-      const instructions = parseRoutingInstructions(buildMessages('<**!tab.gpt-5.3-codex:passthrough**>'));
-      const nextState = applyRoutingInstructions(instructions, createState());
-      expect(nextState.preferTarget).toBeUndefined();
-    }
-  );
 
   test('disable instructions override previous blacklist entries', () => {
     const initialState = createState({

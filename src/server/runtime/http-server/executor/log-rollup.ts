@@ -44,6 +44,11 @@ type VirtualRouterHitRecord = {
   stoplessArmed?: boolean;
   activeInFlight?: number;
   maxInFlight?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  totalTokens?: number;
 };
 
 type UsageRollupRecord = {
@@ -409,6 +414,11 @@ function emitRealtimeVirtualRouterHitLog(args: {
   activeInFlight: number;
   maxInFlight: number;
   sessionVirtualHits: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  totalTokens?: number;
 }): void {
   const sessionColor = resolveSessionAnsiColor(args.sessionId) || ANSI_SESSION;
   const sessionLabel = shortSessionId(args.sessionId);
@@ -543,7 +553,12 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
         stoplessArmed: event.stoplessArmed,
         activeInFlight: Math.max(0, Math.floor(event.activeInFlight ?? 0)),
         maxInFlight: Math.max(0, Math.floor(event.maxInFlight ?? 0)),
-        sessionVirtualHits: sessionExisting.virtualHits
+        sessionVirtualHits: sessionExisting.virtualHits,
+        promptTokens: event.promptTokens,
+        completionTokens: event.completionTokens,
+        cacheReadTokens: event.cacheReadTokens,
+        cacheCreationTokens: event.cacheCreationTokens,
+        totalTokens: event.totalTokens
       });
     }
     return;
@@ -586,7 +601,12 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
       stoplessArmed: event.stoplessArmed,
       activeInFlight: Math.max(0, Math.floor(event.activeInFlight ?? 0)),
       maxInFlight: Math.max(0, Math.floor(event.maxInFlight ?? 0)),
-      sessionVirtualHits: 1
+      sessionVirtualHits: 1,
+      promptTokens: event.promptTokens,
+      completionTokens: event.completionTokens,
+      cacheReadTokens: event.cacheReadTokens,
+      cacheCreationTokens: event.cacheCreationTokens,
+      totalTokens: event.totalTokens
     });
   }
 }

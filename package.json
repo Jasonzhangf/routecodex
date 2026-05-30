@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.2534",
+  "version": "0.90.2559",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -43,6 +43,7 @@
     "test": "npm run test:routing-instructions && npm run mock:regressions",
     "test:regressions": "npm run test:unified-hub-shadow && npm run verify:provider-failure-ban-blackbox && npm run mock:regressions && npm run verify:errorsamples",
     "test:ci:jest": "node scripts/tests/ci-jest.mjs",
+    "probe:windsurf-continuation": "node --import tsx scripts/windsurf-provider-private-probe.ts",
     "test:ci:jest:coverage": "node scripts/tests/ci-jest.mjs --coverage",
     "test:ci": "npm run test:ci:jest && npm run mock:regressions",
     "test:ci:coverage": "npm run test:ci:jest:coverage",

@@ -2,6 +2,7 @@ import { describe, it, expect, jest } from '@jest/globals';
 import { Readable } from 'node:stream';
 import { ChatJsonToSseConverterRefactored } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.js';
 import { ChatSseToJsonConverter } from '../../sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.js';
+import { serializeChatEventToSSE } from '../../sharedmodule/llmswitch-core/src/sse/shared/chat-serializer.js';
 import type { ChatCompletionChunk, ChatCompletionResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
 async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
@@ -32,7 +33,141 @@ function extractChatChunksFromWireText(sseText: string): ChatCompletionChunk[] {
   return chunks;
 }
 
+function expectChatChunkOnlyFields(chunk: ChatCompletionChunk): void {
+  expect(Object.keys(chunk).sort()).toEqual(
+    expect.arrayContaining(['choices', 'created', 'id', 'model', 'object'])
+  );
+  for (const forbidden of ['output', 'output_text', 'required_action', 'status', 'type']) {
+    expect(chunk).not.toHaveProperty(forbidden);
+  }
+  expect(chunk.object).toBe('chat.completion.chunk');
+  for (const choice of chunk.choices ?? []) {
+    expect(choice).toHaveProperty('delta');
+    expect(choice).not.toHaveProperty('message');
+    expect(choice).not.toHaveProperty('content');
+    expect(choice).not.toHaveProperty('item');
+  }
+}
+
 describe('chat SSE usage compatibility', () => {
+  it('emits OpenAI/DeepSeek compatible chat SSE wire frames without named response events', async () => {
+    const sseText = [
+      serializeChatEventToSSE({
+        event: 'chat_chunk',
+        type: 'chat_chunk',
+        timestamp: 1,
+        sequenceNumber: 0,
+        protocol: 'chat',
+        direction: 'json_to_sse',
+        data: JSON.stringify({
+          id: 'chatcmpl_tool_call_wire_contract',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 'gpt-5.5',
+          choices: [{
+            index: 0,
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+              }]
+            },
+            finish_reason: null
+          }]
+        })
+      }),
+      serializeChatEventToSSE({
+        event: 'chat.done',
+        type: 'chat.done',
+        timestamp: 2,
+        sequenceNumber: 1,
+        protocol: 'chat',
+        direction: 'json_to_sse',
+        data: '[DONE]'
+      })
+    ].join('');
+
+    const chunks = extractChatChunksFromWireText(sseText);
+
+    expect(chunks[0]?.choices?.[0]?.delta?.tool_calls?.[0]?.function?.name).toBe('exec_command');
+    expect(chunks[0]?.choices?.[0]?.delta?.tool_calls?.[0]?.function?.arguments).toBe('{"cmd":"pwd"}');
+    for (const frame of sseText.split(/\r?\n\r?\n/).filter(Boolean)) {
+      expect(frame).not.toMatch(/^event:/m);
+      expect(frame).not.toMatch(/^id:/m);
+      expect(frame).toMatch(/^data: /m);
+    }
+    for (const forbidden of [
+      'response.output_item',
+      'response.completed',
+      '"object":"response"',
+      '"output"',
+      '"required_action"'
+    ]) {
+      expect(sseText).not.toContain(forbidden);
+    }
+    expect(sseText).toContain('data: [DONE]');
+    expect(sseText).toContain('"object":"chat.completion.chunk"');
+  });
+
+  it('round-trips chat tool_calls through data-only SSE without responses protocol fields', async () => {
+    const toolCallChunk: ChatCompletionChunk = {
+      id: 'chatcmpl_roundtrip_tool_call',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'gpt-5.5',
+      choices: [{
+        index: 0,
+        delta: {
+          tool_calls: [{
+            index: 0,
+            id: 'call_roundtrip_1',
+            type: 'function',
+            function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+          }]
+        },
+        finish_reason: null
+      }]
+    };
+    const finishChunk: ChatCompletionChunk = {
+      id: 'chatcmpl_roundtrip_tool_call',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'gpt-5.5',
+      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }]
+    };
+    const wire = [toolCallChunk, finishChunk]
+      .map((chunk, index) => serializeChatEventToSSE({
+        event: 'chat_chunk',
+        type: 'chat_chunk',
+        timestamp: index + 1,
+        sequenceNumber: index,
+        protocol: 'chat',
+        direction: 'json_to_sse',
+        data: JSON.stringify(chunk)
+      }))
+      .join('') + serializeChatEventToSSE({
+        event: 'chat.done',
+        type: 'chat.done',
+        timestamp: 3,
+        sequenceNumber: 2,
+        protocol: 'chat',
+        direction: 'json_to_sse',
+        data: '[DONE]'
+      });
+
+    const parsed = extractChatChunksFromWireText(wire);
+
+    expect(parsed).toHaveLength(2);
+    for (const chunk of parsed) expectChatChunkOnlyFields(chunk);
+    expect(parsed[0]?.choices?.[0]?.delta?.tool_calls?.[0]?.id).toBe('call_roundtrip_1');
+    expect(parsed[0]?.choices?.[0]?.delta?.tool_calls?.[0]?.function?.arguments).toBe('{"cmd":"pwd"}');
+    expect(parsed[1]?.choices?.[0]?.finish_reason).toBe('tool_calls');
+    expect(wire).not.toMatch(/^event:/m);
+    expect(wire).not.toContain('response.completed');
+  });
+
   it('emits standard usage in the final chat completion chunk', async () => {
     const response: ChatCompletionResponse = {
       id: 'chatcmpl_usage_final_chunk',

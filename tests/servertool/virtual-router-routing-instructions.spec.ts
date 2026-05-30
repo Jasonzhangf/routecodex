@@ -210,16 +210,6 @@ function buildMetadata(
   };
 }
 
-function supportsPreferPassthroughSuffix(): boolean {
-  const engine = buildEngine();
-  const request = buildRequest('<**!antigravity.gemini-3-pro-high:passthrough**>');
-  const { target, decision } = engine.route(request, buildMetadata({ sessionId: 'session-probe-passthrough' }));
-  return decision.routeName === 'prefer' && target.providerKey.includes('gemini-3-pro-high') && target.processMode === 'passthrough';
-}
-
-const SUPPORTS_PREFER_PROCESSMODE_SUFFIX = supportsPreferPassthroughSuffix();
-const testIf = (condition: boolean) => (condition ? test : test.skip);
-
 describe('VirtualRouterEngine routing instructions', () => {
   let previousSessionDir: string | undefined;
   let tempSessionDir: string | null = null;
@@ -250,24 +240,12 @@ describe('VirtualRouterEngine routing instructions', () => {
     expect(target.providerKey.includes('gemini-3-pro-high')).toBe(true);
   });
 
-  testIf(SUPPORTS_PREFER_PROCESSMODE_SUFFIX)('prefer instructions propagate :passthrough mode to target metadata', () => {
+  test('prefer instructions reject :passthrough mode suffix', () => {
     const engine = buildEngine();
     const request = buildRequest('<**!antigravity.gemini-3-pro-high:passthrough**>');
-    const { target, decision } = engine.route(request, buildMetadata({ sessionId: 'session-prefer-passthrough' }));
-    expect(decision.routeName).toBe('prefer');
-    expect(target.providerKey.includes('gemini-3-pro-high')).toBe(true);
-    expect(target.processMode).toBe('passthrough');
+    const { target } = engine.route(request, buildMetadata({ sessionId: 'session-prefer-passthrough-rejected' }));
+    expect(target.processMode).toBe('chat');
   });
-
-  testIf(!SUPPORTS_PREFER_PROCESSMODE_SUFFIX)(
-    'prefer mode suffix degrades safely when passthrough unsupported in current llms build',
-    () => {
-      const engine = buildEngine();
-      const request = buildRequest('<**!antigravity.gemini-3-pro-high:passthrough**>');
-      const { target } = engine.route(request, buildMetadata({ sessionId: 'session-prefer-passthrough-compat' }));
-      expect(target.processMode).toBe('chat');
-    }
-  );
 
   test('prefer instructions without :passthrough keep regular chat mode', () => {
     const engine = buildEngine();

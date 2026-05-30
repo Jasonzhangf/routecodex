@@ -248,37 +248,6 @@ export interface RequestExecutor {
   execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
 }
 
-
-
-
-
-function releaseSameProviderRetryHoldForReroute(args: {
-  holdState: BlockingRecoverableRouteHoldState | null;
-  routePool: string[] | null;
-  excludedProviderKeys: Set<string>;
-  logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
-  requestId: string;
-  attempt: number;
-}): boolean {
-  const providerKey = args.holdState?.providerKey;
-  if (args.holdState?.preserveSameProviderRetry !== true || !providerKey) {
-    return false;
-  }
-  for (const candidate of args.routePool ?? []) {
-    if (typeof candidate === 'string' && candidate && candidate !== providerKey) {
-      args.excludedProviderKeys.delete(candidate);
-    }
-  }
-  args.excludedProviderKeys.add(providerKey);
-  args.logStage('provider.retry.same_provider_route_released', args.requestId, {
-    providerKey,
-    attempt: args.attempt,
-    excluded: Array.from(args.excludedProviderKeys),
-    reason: 'same_provider_retry_target_unavailable'
-  });
-  return true;
-}
-
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
 const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
@@ -552,18 +521,6 @@ export class HubRequestExecutor implements RequestExecutor {
           forcedRouteHint,
           throwIfClientAbortSignalAborted
         });
-        const holdStateForSameProviderRetry = blockingRecoverableRouteHoldState as BlockingRecoverableRouteHoldState | null;
-        if (
-          holdStateForSameProviderRetry?.preserveSameProviderRetry === true
-          && holdStateForSameProviderRetry.providerKey
-        ) {
-          excludedProviderKeys.delete(holdStateForSameProviderRetry.providerKey);
-          metadataForAttempt.__routecodexRetryProviderKey = holdStateForSameProviderRetry.providerKey;
-          logStage('provider.retry.same_provider_route_lock', providerRequestId, {
-            providerKey: holdStateForSameProviderRetry.providerKey,
-            attempt
-          });
-        }
         const hubStartedAtMs = Date.now();
         logStageLazy(`${pipelineLabel}.start`, providerRequestId, () => ({
           endpoint: input.entryEndpoint,
@@ -656,20 +613,6 @@ export class HubRequestExecutor implements RequestExecutor {
                 logRequestExecutorNonBlockingError
               );
               attempt = Math.max(0, attempt - 1);
-              continue;
-            }
-            if (
-              releaseSameProviderRetryHoldForReroute({
-                holdState: blockingRecoverableRouteHoldState,
-                routePool: initialRoutePool,
-                excludedProviderKeys,
-                logStage: (stage, requestId, details) => logStage(stage, requestId, details),
-                requestId: providerRequestId,
-                attempt
-              })
-            ) {
-              blockingRecoverableRouteHoldState = null;
-              allowBlockingRecoverableRetryBeyondAttemptBudget = true;
               continue;
             }
             if (blockingSingletonRecoverablePoolCooldown && lastError) {
@@ -1084,6 +1027,22 @@ export class HubRequestExecutor implements RequestExecutor {
             source: 'provider_response',
             hasUsage: Boolean(usageFromProvider),
             attempt
+          });
+          emitRequestExecutorVirtualRouterConcurrencyLog({
+            sessionId: readString(mergedMetadata.sessionId) ?? readString(mergedMetadata.conversationId),
+            projectPath:
+              readString(mergedMetadata.clientWorkdir)
+              ?? readString(mergedMetadata.client_workdir)
+              ?? readString(mergedMetadata.workdir)
+              ?? readString(mergedMetadata.cwd),
+            routeName: pipelineResult.routingDecision?.routeName,
+            poolId: readString(routingDecisionRecord?.poolId),
+            providerKey: target.providerKey,
+            model: providerModel,
+            reason: readString(routingDecisionRecord?.reasoning),
+            activeInFlight: trafficActiveInFlightAtAcquire,
+            maxInFlight: trafficPolicyMaxInFlight,
+            usage: usageFromProvider as Record<string, unknown> | undefined
           });
           logStageLazy('provider.request_semantics.start', input.requestId, () => ({
             providerKey: target.providerKey,

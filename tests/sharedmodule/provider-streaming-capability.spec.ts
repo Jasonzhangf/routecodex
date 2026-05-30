@@ -35,6 +35,17 @@ describe('provider streaming capability normalization', () => {
     expect(normalized.streaming).toBe('auto');
   });
 
+  test('rejects provider process passthrough because Hub Pipeline is chat-only', () => {
+    expect(() => normalizeProvider('bad-passthrough', {
+      id: 'bad-passthrough',
+      type: 'openai',
+      process: 'passthrough',
+      baseURL: 'https://example.test/openai',
+      auth: { type: 'apikey', apiKey: 'test-key' },
+      models: { 'default-model': {} }
+    })).toThrow(/Hub Pipeline only supports process="chat"/i);
+  });
+
   test('real qwenchat config no longer forces qwen3.6-plus outbound streaming', () => {
     const raw = JSON.parse(fs.readFileSync('/Volumes/extension/.rcc/provider/qwenchat/config.v2.json', 'utf8'));
     const normalized = normalizeProvider('qwenchat', raw.provider ?? raw);

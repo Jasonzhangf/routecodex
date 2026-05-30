@@ -117,60 +117,6 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockB
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
 
 describe('provider-response-converter unified semantics handoff', () => {
-  it('RED: processMode=passthrough + streaming must bypass local response conversion', async () => {
-    jest.resetModules();
-    mockConvertProviderResponse.mockReset();
-    mockConvertProviderResponse.mockImplementation(() => {
-      throw new Error('local converter should not run for direct passthrough stream');
-    });
-
-    const { convertProviderResponseIfNeeded } = await import(
-      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
-    );
-
-    const upstreamResponse = {
-      status: 200,
-      body: {
-        id: 'resp_passthrough_stream_1',
-        object: 'response',
-        status: 'requires_action',
-        output: [{
-          type: 'function_call',
-          call_id: 'call_passthrough_1',
-          name: 'update_plan',
-          arguments: '{"plan":[]}'
-        }],
-        required_action: {
-          type: 'submit_tool_outputs',
-          submit_tool_outputs: { tool_calls: [] }
-        }
-      }
-    } as any;
-
-    const converted = await convertProviderResponseIfNeeded(
-      {
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
-        requestId: 'req_passthrough_stream_bypass_1',
-        wantsStream: true,
-        processMode: 'passthrough',
-        serverToolsEnabled: true,
-        response: upstreamResponse,
-        pipelineMetadata: {}
-      },
-      {
-        runtimeManager: {
-          resolveRuntimeKey: () => undefined,
-          getHandleByRuntimeKey: () => undefined,
-        },
-        executeNested: async () => ({ body: { ok: true } } as any)
-      }
-    );
-
-    expect(mockConvertProviderResponse).not.toHaveBeenCalled();
-    expect(converted).toBe(upstreamResponse);
-  });
-
   it('forwards unified continuation/audit semantics into bridge conversion and returns bridge-remapped client body', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();

@@ -40,9 +40,6 @@ export async function convertProviderResponseIfNeeded(
   options: ConvertProviderResponseOptions,
   deps: ConvertProviderResponseDeps
 ): Promise<PipelineExecutionResult> {
-  if (options.processMode === 'passthrough' && !options.wantsStream && options.serverToolsEnabled === false) {
-    return options.response;
-  }
   const entry = (options.entryEndpoint || '').toLowerCase();
   const needsAnthropicConversion = entry.includes('/v1/messages');
   const needsResponsesConversion = entry.includes('/v1/responses');

@@ -58,6 +58,7 @@ export interface RouterDirectResult {
   response: unknown;
   providerHandle: ProviderHandle;
   auditContext: RouterDirectAuditContext;
+  capturedUsage?: Record<string, unknown>;
   providerPayload?: Record<string, unknown>;
   standardizedRequest?: Record<string, unknown>;
   processedRequest?: Record<string, unknown>;
