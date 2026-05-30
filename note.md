@@ -13253,3 +13253,9 @@ Using skills: coding-principals + rcc-dev-skills
 - 删除内容：`response-mappers` type import、`ProviderResponsePlan`、`normalizeClientPayloadToCanonicalChatCompletionOrThrow`、TS `detectProviderResponseShape`/canonical check 编排、TS structured provider business error parser。
 - 说明：provider response 主链已直接进 Rust `HubPipelineEngine`，bad shape/business error 由 Rust response path fail-fast；TS helper 不再做 mapper 语义。
 - 验证：red gate 先失败确认 residue；删除后 `provider-response rust plan + residue + resp outbound monitoring` 39/39 passed；Rust `hub_pipeline_lib` 7/7 passed；`sharedmodule/llmswitch-core npm run build` passed。
+
+## 2026-05-31 Runtime response-mappers import detachment
+- 当前切片：断开 runtime `src/` 对 `response-mappers.ts` 的类型/import 依赖，避免旧 TS mapper 文件继续作为运行时类型真源。
+- 改动：`response-stage-orchestration-shell.ts`、`canonical-chat.ts`、`resp_process_stage1_tool_governance`、`resp_process_stage3_servertool_orchestration`、`resp_inbound_stage3_semantic_map` 改用本地 `JsonObject`/局部接口，不再 import `response-mappers`。
+- Gate：`hub-pipeline-stage-residue-audit` 新增 runtime source 扫描，除 `response-mappers.ts` 自身外禁止 `src/**/*.ts` 引用 `response-mappers`。
+- 验证：`rg response-mappers sharedmodule/llmswitch-core/src` 仅剩 `response-mappers.ts` 自身；`provider-response rust plan + residue + resp outbound monitoring` 40/40 passed；Rust `hub_pipeline_lib` 7/7 passed；`sharedmodule/llmswitch-core npm run build` passed。

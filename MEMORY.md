@@ -1831,3 +1831,6 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 
 ## 2026-05-31 provider-response helper residue rule
 - 已验证：`provider-response-helpers.ts` 只允许保留 native context signal 解析与 clock reservation side effect glue；禁止重新引入 `response-mappers`、`ProviderResponsePlan`、TS response canonicalization、TS provider business-error parsing。
+
+## 2026-05-31 runtime response-mappers dependency rule
+- 已验证：runtime `sharedmodule/llmswitch-core/src/**/*.ts` 除待删除的 `conversion/hub/response/response-mappers.ts` 自身外，不得再 import `response-mappers`; 运行时类型应使用 `JsonObject` 或局部 shell interface，语义真源在 Rust。

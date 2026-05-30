@@ -1,7 +1,6 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
-import type { ChatCompletionLike } from '../conversion/hub/response/response-mappers.js';
 import { recordStage } from '../conversion/hub/pipeline/stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../conversion/hub/pipeline/hub-stage-timing.js';
 import type { ProviderInvoker } from './types.js';
@@ -13,6 +12,7 @@ import {
 } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
+type ChatCompletionLike = JsonObject;
 
 type ReenterPipeline = (options: {
   entryEndpoint: string;

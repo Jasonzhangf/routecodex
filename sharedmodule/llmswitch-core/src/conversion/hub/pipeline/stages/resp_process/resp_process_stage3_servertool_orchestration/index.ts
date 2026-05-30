@@ -1,9 +1,10 @@
 import type { AdapterContext } from '../../../../types/chat-envelope.js';
 import type { JsonObject } from '../../../../types/json.js';
 import type { StageRecorder } from '../../../../format-adapters/index.js';
-import type { ChatCompletionLike } from '../../../../response/response-mappers.js';
 import type { ProviderInvoker } from '../../../../../../servertool/types.js';
 import { runServertoolResponseStageOrchestrationShell } from '../../../../../../servertool/response-stage-orchestration-shell.js';
+
+type ChatCompletionLike = JsonObject;
 
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 

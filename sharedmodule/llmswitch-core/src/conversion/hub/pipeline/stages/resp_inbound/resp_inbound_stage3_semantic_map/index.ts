@@ -2,10 +2,19 @@ import type { AdapterContext } from '../../../../types/chat-envelope.js';
 import type { FormatEnvelope } from '../../../../types/format-envelope.js';
 import type { JsonObject } from '../../../../types/json.js';
 import type { StageRecorder } from '../../../../format-adapters/index.js';
-import type { ResponseMapper, ChatCompletionLike } from '../../../../response/response-mappers.js';
 import { recordStage } from '../../../stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 import { sanitizeChatCompletionLikeWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
+
+type ChatCompletionLike = JsonObject;
+
+interface ResponseMapper {
+  toChatCompletion(
+    format: FormatEnvelope<JsonObject>,
+    ctx: AdapterContext,
+    options?: { requestSemantics?: JsonObject }
+  ): Promise<ChatCompletionLike> | ChatCompletionLike;
+}
 
 export interface RespInboundStage3SemanticMapOptions {
   adapterContext: AdapterContext;

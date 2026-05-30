@@ -170,6 +170,30 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('createMapper');
   });
 
+  it('runtime source outside response-mappers must not import response mapper residue', () => {
+    const sourceRoot = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src');
+    const findings: string[] = [];
+    const visit = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          visit(fullPath);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
+        const relativePath = path.relative(sourceRoot, fullPath);
+        if (relativePath === 'conversion/hub/response/response-mappers.ts') continue;
+        const source = fs.readFileSync(fullPath, 'utf8');
+        if (source.includes('response-mappers')) {
+          findings.push(relativePath);
+        }
+      }
+    };
+
+    visit(sourceRoot);
+    expect(findings).toEqual([]);
+  });
+
   it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
     const wrapperPath = path.join(
       process.cwd(),

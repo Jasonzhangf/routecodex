@@ -1,6 +1,5 @@
 import type { StageRecorder } from '../../../../format-adapters/index.js';
 import type { JsonObject } from '../../../../types/json.js';
-import type { ChatCompletionLike } from '../../../../response/response-mappers.js';
 import { recordStage } from '../../../stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 import {
@@ -10,6 +9,7 @@ import {
 } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
 
 type ClientProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
+type ChatCompletionLike = JsonObject;
 
 export interface RespProcessStage1ToolGovernanceOptions {
   payload: ChatCompletionLike;

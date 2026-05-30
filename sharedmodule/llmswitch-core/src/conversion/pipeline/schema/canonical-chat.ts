@@ -1,5 +1,5 @@
 import type { ProcessedRequest, StandardizedRequest } from '../../hub/types/standardized.js';
-import type { ChatCompletionLike } from '../../hub/response/response-mappers.js';
+import type { JsonObject } from '../../hub/types/json.js';
 
 /**
  * Canonical request payload used by the Chat Process. The structure already
@@ -18,4 +18,4 @@ export type CanonicalProcessedRequest = ProcessedRequest;
  * Canonical response payloads follow the OpenAI ChatCompletion-like structure
  * that the existing format adapters emit.
  */
-export type CanonicalChatResponse = ChatCompletionLike;
+export type CanonicalChatResponse = JsonObject;
