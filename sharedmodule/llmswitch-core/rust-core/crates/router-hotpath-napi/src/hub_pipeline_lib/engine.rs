@@ -480,8 +480,9 @@ impl HubPipelineEngine {
                 "payloadObject": stream_decision.payload.is_object(),
             })),
         ));
-        let effect_plan = if stream_decision.should_stream {
-            HubPipelineEffectPlan::single(HubPipelineEffect {
+        let mut effects = Vec::new();
+        if stream_decision.should_stream {
+            effects.push(HubPipelineEffect {
                 kind: HubPipelineEffectKind::StreamPipe,
                 payload: serde_json::json!({
                     "codec": client_protocol,
@@ -489,10 +490,24 @@ impl HubPipelineEngine {
                     "payload": stream_decision.payload.clone(),
                     "body": stream_decision.payload.clone(),
                 }),
-            })
-        } else {
-            HubPipelineEffectPlan::empty()
-        };
+            });
+        }
+        effects.push(HubPipelineEffect {
+            kind: HubPipelineEffectKind::RuntimeStateWrite,
+            payload: serde_json::json!({
+                "requestId": output.request_id,
+                "clientProtocol": client_protocol,
+                "payload": stream_decision.payload.clone(),
+                "usage": stream_decision.payload.get("usage").cloned().unwrap_or(Value::Null),
+                "keepForSubmitToolOutputs": response_requires_submit_tool_outputs(&stream_decision.payload),
+                "responseRecord": build_response_record_effect_payload(
+                    &normalized_metadata,
+                    &stream_decision.payload,
+                    output.request_id.as_str(),
+                ),
+            }),
+        });
+        let effect_plan = HubPipelineEffectPlan { effects };
         diagnostics.push(diagnostic(
             HubPipelineStageId::EffectPlan,
             HubPipelineDiagnosticStatus::Completed,
@@ -512,6 +527,43 @@ impl HubPipelineEngine {
             }),
         })
     }
+}
+
+fn response_requires_submit_tool_outputs(payload: &Value) -> bool {
+    payload
+        .get("required_action")
+        .and_then(|required_action| required_action.get("type"))
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind == "submit_tool_outputs")
+}
+
+fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {
+    metadata
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn build_response_record_effect_payload(
+    metadata: &Value,
+    payload: &Value,
+    request_id: &str,
+) -> Value {
+    if metadata.get("clientProtocol").and_then(Value::as_str) != Some("openai-responses") {
+        return Value::Null;
+    }
+    serde_json::json!({
+        "requestId": request_id,
+        "response": payload,
+        "sessionId": read_trimmed_metadata_string(metadata, "sessionId"),
+        "conversationId": read_trimmed_metadata_string(metadata, "conversationId"),
+        "providerKey": read_trimmed_metadata_string(metadata, "providerKey")
+            .or_else(|| read_trimmed_metadata_string(metadata, "targetProviderKey")),
+        "matchedPort": metadata.get("matchedPort").and_then(Value::as_i64),
+        "routingPolicyGroup": read_trimmed_metadata_string(metadata, "routingPolicyGroup"),
+    })
 }
 
 fn resolve_context_snapshot(metadata: &Value) -> Option<Value> {

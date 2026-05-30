@@ -119,13 +119,28 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
         })
         .unwrap();
 
-    assert_eq!(output.effect_plan.effects.len(), 1);
-    let effect = &output.effect_plan.effects[0];
+    assert_eq!(output.effect_plan.effects.len(), 2);
+    let effect = output
+        .effect_plan
+        .effects
+        .iter()
+        .find(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("streamPipe"))
+        .unwrap();
     assert_eq!(
         serde_json::to_value(&effect.kind).unwrap(),
         json!("streamPipe")
     );
     assert_eq!(effect.payload["codec"], json!("openai-chat"));
     assert_eq!(effect.payload["requestId"], json!("req-stream-1"));
-    assert_eq!(effect.payload["payload"], output.payload.unwrap());
+    let payload = output.payload.unwrap();
+    assert_eq!(effect.payload["payload"], payload);
+    let runtime_effect = output
+        .effect_plan
+        .effects
+        .iter()
+        .find(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("runtimeStateWrite"))
+        .unwrap();
+    assert_eq!(runtime_effect.payload["requestId"], json!("req-stream-1"));
+    assert_eq!(runtime_effect.payload["payload"], payload);
+    assert_eq!(runtime_effect.payload["keepForSubmitToolOutputs"], json!(false));
 }

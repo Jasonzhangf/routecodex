@@ -296,16 +296,10 @@ function readNativeStreamPipeEffect(effectPlan: { effects: Array<Record<string, 
   requestId: string;
   payload: JsonObject;
 } | null {
-  if (effectPlan.effects.length === 0) {
-    return null;
-  }
-  if (effectPlan.effects.length !== 1) {
-    throw new Error('Rust HubPipeline response effect plan must contain at most one effect');
-  }
-  const effect = effectPlan.effects[0];
-  if (effect?.kind !== 'streamPipe') {
-    throw new Error('Rust HubPipeline response effect plan returned unsupported effect kind');
-  }
+  const streamEffects = effectPlan.effects.filter((effect) => effect?.kind === 'streamPipe');
+  if (streamEffects.length === 0) return null;
+  if (streamEffects.length !== 1) throw new Error('Rust HubPipeline response effect plan returned duplicate streamPipe effects');
+  const effect = streamEffects[0];
   const payload = effect.payload;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Rust HubPipeline streamPipe effect missing payload');
@@ -335,19 +329,65 @@ function readNativeStreamPipeEffect(effectPlan: { effects: Array<Record<string, 
   };
 }
 
+function assertKnownNativeResponseEffectKinds(effectPlan: { effects: Array<Record<string, unknown>> }): void {
+  for (const effect of effectPlan.effects) {
+    if (effect?.kind === 'streamPipe' || effect?.kind === 'runtimeStateWrite') continue;
+    throw new Error('Rust HubPipeline response effect plan returned unsupported effect kind');
+  }
+}
+
+function readNativeRuntimeStateWriteEffect(effectPlan: { effects: Array<Record<string, unknown>> }): Record<string, unknown> | null {
+  const runtimeEffects = effectPlan.effects.filter((effect) => effect?.kind === 'runtimeStateWrite');
+  if (runtimeEffects.length === 0) return null;
+  if (runtimeEffects.length !== 1) throw new Error('Rust HubPipeline response effect plan returned duplicate runtimeStateWrite effects');
+  const payload = runtimeEffects[0]?.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Rust HubPipeline runtimeStateWrite effect missing payload');
+  }
+  return payload as Record<string, unknown>;
+}
+
+async function executeProviderResponseNativeRuntimeStateEffect(args: {
+  effectPlan: { effects: Array<Record<string, unknown>> };
+  context: AdapterContext;
+}): Promise<void> {
+  const runtimeEffect = readNativeRuntimeStateWriteEffect(args.effectPlan);
+  if (!runtimeEffect) return;
+  const responseRecord = runtimeEffect.responseRecord;
+  if (responseRecord && typeof responseRecord === 'object' && !Array.isArray(responseRecord)) {
+    recordResponsesResponse(responseRecord as Parameters<typeof recordResponsesResponse>[0]);
+  }
+  finalizeResponsesConversationRequestRetention(args.context.requestId, {
+    keepForSubmitToolOutputs: runtimeEffect.keepForSubmitToolOutputs === true
+  });
+  await maybeCommitClockReservationFromContext(args.context);
+  saveChatProcessSessionActualUsage({
+    context: args.context,
+    usage: runtimeEffect.usage && typeof runtimeEffect.usage === 'object' && !Array.isArray(runtimeEffect.usage)
+      ? runtimeEffect.usage as Record<string, unknown>
+      : undefined
+  });
+}
+
 async function executeProviderResponseNativeOutboundEffects(args: {
   nativeResponsePlan: {
     payload?: JsonObject;
     effectPlan: { effects: Array<Record<string, unknown>> };
   };
   requestId: string;
+  context: AdapterContext;
   stageRecorder?: StageRecorder;
 }): Promise<ProviderResponseConversionResult> {
   const clientPayload = args.nativeResponsePlan.payload;
   if (!clientPayload || typeof clientPayload !== 'object') {
     throw new Error('Rust HubPipeline native response payload unavailable');
   }
+  assertKnownNativeResponseEffectKinds(args.nativeResponsePlan.effectPlan);
   const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.effectPlan);
+  await executeProviderResponseNativeRuntimeStateEffect({
+    effectPlan: args.nativeResponsePlan.effectPlan,
+    context: args.context
+  });
   if (!streamEffect) {
     recordStage(args.stageRecorder, 'chat_process.resp.stage9.client_remap', clientPayload);
     recordStage(args.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
@@ -439,6 +479,7 @@ export async function convertProviderResponse(
     return executeProviderResponseNativeOutboundEffects({
       nativeResponsePlan,
       requestId,
+      context: options.context,
       stageRecorder: options.stageRecorder
     });
   }

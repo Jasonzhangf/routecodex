@@ -48,7 +48,17 @@ describe('provider response Rust native plan', () => {
     expect(result.body?.choices?.[0]?.message?.content).toBe('native ok');
     expect(result.__sse_responses).toBeUndefined();
     expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: { effects: [] },
+      effectPlan: {
+        effects: [expect.objectContaining({
+          kind: 'runtimeStateWrite',
+          payload: expect.objectContaining({
+            requestId: 'req_provider_response_native_plan_1',
+            clientProtocol: 'openai-chat',
+            payload: result.body,
+            keepForSubmitToolOutputs: false
+          })
+        })]
+      },
       diagnostics: expect.any(Array)
     }));
     expect(recorder.entries.map((entry) => entry.stage)).toContain('chat_process.resp.stage9.client_remap');
@@ -88,16 +98,27 @@ describe('provider response Rust native plan', () => {
     expect(sseBody).toContain('native stream ok');
     expect(sseBody).toContain('[DONE]');
     expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: {
-        effects: [expect.objectContaining({
-          kind: 'streamPipe',
-          payload: expect.objectContaining({
-            codec: 'openai-chat',
-            requestId: 'req_provider_response_native_stream_plan_1',
-            payload: result.body
+      effectPlan: expect.objectContaining({
+        effects: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'streamPipe',
+            payload: expect.objectContaining({
+              codec: 'openai-chat',
+              requestId: 'req_provider_response_native_stream_plan_1',
+              payload: result.body
+            })
+          }),
+          expect.objectContaining({
+            kind: 'runtimeStateWrite',
+            payload: expect.objectContaining({
+              requestId: 'req_provider_response_native_stream_plan_1',
+              clientProtocol: 'openai-chat',
+              payload: result.body,
+              keepForSubmitToolOutputs: false
+            })
           })
-        })]
-      },
+        ])
+      }),
       diagnostics: expect.any(Array)
     }));
     expect(recorder.entries.map((entry) => entry.stage)).toEqual([

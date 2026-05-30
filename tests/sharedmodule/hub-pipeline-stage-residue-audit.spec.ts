@@ -125,8 +125,11 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('nativeResponsePlan.effectPlan.effects');
     expect(source).toContain('__nativeResponsePlan');
     expect(source).toContain('executeProviderResponseNativeOutboundEffects');
+    expect(source).toContain('runtimeStateWrite');
+    expect(source).toContain('executeProviderResponseNativeRuntimeStateEffect');
     expect(source).toContain('if (nativeResponsePlan)');
     expect(source).toContain('options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch');
+    expect(source).not.toContain('effectPlan.effects.length !== 1');
   });
 
   it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
