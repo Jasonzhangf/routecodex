@@ -324,10 +324,24 @@ export class ChatSseToJsonConverter {
     const context = this.createContext(options);
     this.contexts.set(options.requestId, context);
 
+    // Client abort signal: 当客户端断开连接时，立即中断 SSE 读取，不再等内部超时。
+    const abortSignal = options.abortSignal;
+    let abortHandler: (() => void) | null = null;
+    if (abortSignal && !abortSignal.aborted) {
+      const onAbort = () => {
+        context.isCompleted = true;
+      };
+      abortSignal.addEventListener('abort', onAbort);
+      abortHandler = () => abortSignal.removeEventListener('abort', onAbort);
+    }
+
     try {
       // 处理SSE流
       for await (const event of this.ensureEventStream(sseStream, context)) {
         await this.processSseEvent(event, context);
+        if (context.isCompleted) {
+          break;
+        }
       }
 
       // 验证并返回最终响应
@@ -348,6 +362,10 @@ export class ChatSseToJsonConverter {
       options.onError?.(error as Error);
       throw this.wrapSseError(error, 'SSE to JSON conversion failed');
     } finally {
+      if (abortHandler) {
+        abortHandler();
+        abortHandler = null;
+      }
       this.cleanup(options.requestId);
     }
   }

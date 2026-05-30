@@ -153,17 +153,41 @@ export async function runRespInboundStage1SseDecode(
     });
   }
 
-  try {
-    const codec = defaultSseCodecRegistry.get(options.providerProtocol as SseProtocol);
-    logHubStageTiming(requestId, 'resp_inbound.stage1_codec_decode', 'start', {
-      providerProtocol: options.providerProtocol
-    });
-    const codecDecodeStart = Date.now();
-    const decoded = (await codec.convertSseToJson(stream, {
-      requestId: options.adapterContext.requestId,
-      model: (options.adapterContext as Record<string, unknown>).modelId as string | undefined,
-      ...resolveSseTimeoutOptionsWithNative(options.adapterContext as Record<string, unknown>)
-    })) as JsonObject;
+    try {
+      const codec = defaultSseCodecRegistry.get(options.providerProtocol as SseProtocol);
+      logHubStageTiming(requestId, 'resp_inbound.stage1_codec_decode', 'start', {
+        providerProtocol: options.providerProtocol
+      });
+      const codecDecodeStart = Date.now();
+      // AbortSignal extraction: the live Symbol-keyed signal from trackClientConnectionState
+      // is lost through Rust bridge JSON serialization. We use:
+      // 1. clientDisconnected boolean snapshot (immediate disconnect at pipeline start)
+      // 2. Live polling of clientConnectionState.disconnected (mid-stream disconnect)
+      const clientAbortSignal = (() => {
+        const clientDisconnected = (options.adapterContext as Record<string, unknown>).clientDisconnected === true;
+        if (clientDisconnected) {
+          return AbortSignal.abort(Object.assign(new Error('CLIENT_DISCONNECTED'), { code: 'CLIENT_DISCONNECTED', name: 'AbortError' }));
+        }
+        const ac = (options.adapterContext as Record<string, unknown>).clientConnectionState;
+        if (ac && typeof ac === 'object' && !Array.isArray(ac)) {
+          const controller = new AbortController();
+          const check = setInterval(() => {
+            if ((ac as Record<string, unknown>).disconnected === true && !controller.signal.aborted) {
+              controller.abort(Object.assign(new Error('CLIENT_DISCONNECTED'), { code: 'CLIENT_DISCONNECTED', name: 'AbortError' }));
+            }
+          }, 200);
+          check.unref?.();
+          setTimeout(() => clearInterval(check), 300_000).unref?.();
+          return controller.signal;
+        }
+        return undefined;
+      })();
+      const decoded = (await codec.convertSseToJson(stream, {
+        requestId: options.adapterContext.requestId,
+        model: (options.adapterContext as Record<string, unknown>).modelId as string | undefined,
+        ...resolveSseTimeoutOptionsWithNative(options.adapterContext as Record<string, unknown>),
+        abortSignal: clientAbortSignal
+      })) as JsonObject;
     const decodeStats = extractDecodeStatsWithNative(decoded as Record<string, unknown>);
     logHubStageTiming(requestId, 'resp_inbound.stage1_codec_decode', 'completed', {
       elapsedMs: Date.now() - codecDecodeStart,

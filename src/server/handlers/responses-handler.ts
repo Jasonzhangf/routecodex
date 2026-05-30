@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import type { Request, Response } from 'express';
 import type { HandlerContext } from './types.js';
 import {
@@ -369,13 +371,25 @@ export async function handleResponses(
 	      headers: req.headers as Record<string, unknown>,
 	      query: req.query as Record<string, unknown>,
 	      body: payload,
-	      metadata: mergePipelineMetadata(requestBodyMetadata, {
+      metadata: mergePipelineMetadata(requestBodyMetadata, {
         stream: wantsStream,
         clientRequestId,
         clientStream: acceptsSse || undefined,
         inboundStream: wantsStream,
         outboundStream,
         providerProtocol: 'openai-responses',
+        clientAbortSignal: (() => {
+          const ac = clientConnectionState;
+          if (!ac) return undefined;
+          const sym = Reflect.ownKeys(ac as object).find(
+            (k) => typeof k === 'symbol' && k.description === 'routecodex.clientConnectionAbortSignal'
+          );
+          if (sym) {
+            const s = Reflect.get(ac as object, sym);
+            if (s && typeof s === 'object' && 'aborted' in (s as object)) return s as AbortSignal;
+          }
+          return undefined;
+        })(),
         __raw_request_body: isSubmitToolOutputs
           ? buildResponsesResumeRawRequestBody(originalPayload, typeof payload.previous_response_id === 'string' ? payload.previous_response_id : options.responseIdFromPath)
           : originalPayload,
@@ -598,6 +612,22 @@ export async function handleResponses(
       });
     }
     logRequestError(entryEndpoint, requestId, error);
+    try {
+      const diagDir = path.join(process.env.HOME || '/tmp', '.rcc', 'diag');
+      fs.mkdirSync(diagDir, { recursive: true });
+      const errRec = error as Record<string, unknown>;
+      fs.writeFileSync(path.join(diagDir, `error-${requestId}.json`), JSON.stringify({
+        endpoint: entryEndpoint,
+        requestId,
+        message: error instanceof Error ? error.message : String(error),
+        code: typeof errRec?.code === 'string' ? errRec.code : undefined,
+        statusCode: typeof errRec?.statusCode === 'number' ? errRec.statusCode : undefined,
+        status: typeof errRec?.status === 'number' ? errRec.status : undefined,
+        details: errRec?.details,
+        stack: error instanceof Error ? error.stack : undefined,
+        timestamp: new Date().toISOString(),
+      }, null, 2));
+    } catch {}
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const originalStream = Boolean(req.body && typeof req.body === 'object' && (req.body as ResponsesPayload).stream === true);

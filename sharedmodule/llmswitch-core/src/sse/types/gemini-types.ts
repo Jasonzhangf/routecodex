@@ -111,6 +111,7 @@ export interface GeminiJsonToSseContext {
 export interface SseToGeminiJsonOptions {
   requestId: string;
   model?: string;
+  abortSignal?: AbortSignal;
   reasoningMode?: ChatReasoningMode;
   reasoningTextPrefix?: string;
 }

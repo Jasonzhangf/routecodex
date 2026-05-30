@@ -111,6 +111,7 @@ export interface AnthropicJsonToSseOptions {
 export interface SseToAnthropicJsonOptions {
   requestId: string;
   model?: string;
+  abortSignal?: AbortSignal;
   firstFrameTimeoutMs?: number;
   noContentTimeoutMs?: number;
   preAnchorIdleTimeoutMs?: number;

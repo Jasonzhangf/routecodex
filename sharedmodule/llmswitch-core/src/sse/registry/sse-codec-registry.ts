@@ -23,6 +23,7 @@ export interface SseToJsonContext {
   requestId: string;
   model?: string;
   direction?: 'request' | 'response';
+  abortSignal?: AbortSignal;
   firstFrameTimeoutMs?: number;
   noContentTimeoutMs?: number;
   preAnchorIdleTimeoutMs?: number;
@@ -104,6 +105,7 @@ function createChatCodec(): SseCodec {
       return chatConverters.sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
         model: context.model ?? 'unknown',
+        abortSignal: context.abortSignal,
         firstFrameTimeoutMs: context.firstFrameTimeoutMs,
         noContentTimeoutMs: context.noContentTimeoutMs,
         preAnchorIdleTimeoutMs: context.preAnchorIdleTimeoutMs,
@@ -132,6 +134,7 @@ function createResponsesCodec(): SseCodec {
       return responsesConverters.sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
         model: context.model ?? 'unknown',
+        abortSignal: context.abortSignal,
         firstFrameTimeoutMs: context.firstFrameTimeoutMs,
         noContentTimeoutMs: context.noContentTimeoutMs,
         preAnchorIdleTimeoutMs: context.preAnchorIdleTimeoutMs,
@@ -159,6 +162,7 @@ function createAnthropicCodec(): SseCodec {
       return anthropicConverters.sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
         model: context.model,
+        abortSignal: context.abortSignal,
         firstFrameTimeoutMs: context.firstFrameTimeoutMs,
         noContentTimeoutMs: context.noContentTimeoutMs,
         preAnchorIdleTimeoutMs: context.preAnchorIdleTimeoutMs,
@@ -185,7 +189,8 @@ function createGeminiCodec(): SseCodec {
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
       return geminiConverters.sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
-        model: context.model
+        model: context.model,
+        abortSignal: context.abortSignal
       });
     },
     async normalize(stream: SseStreamInput): Promise<SseStreamInput> {

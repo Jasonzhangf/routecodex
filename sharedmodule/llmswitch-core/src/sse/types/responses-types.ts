@@ -294,6 +294,7 @@ export interface SseToResponsesJsonOptions {
   requestId: string;
   model: string;
   timeoutMs?: number;
+  abortSignal?: AbortSignal;
   firstFrameTimeoutMs?: number;
   noContentTimeoutMs?: number;
   preAnchorIdleTimeoutMs?: number;

@@ -71,6 +71,9 @@ export class ResponsesSseToJsonConverterRefactored {
     this.contexts.set(options.requestId, context);
 
     let responseBuilder: ReturnType<typeof createResponseBuilder> | null = null;
+    const abortSignal = options.abortSignal;
+    let abortHandler: (() => void) | null = null;
+    let abortableStream: Readable | null = null;
 
     try {
       // 2. 创建解析器
@@ -89,9 +92,20 @@ export class ResponsesSseToJsonConverterRefactored {
 
       // 4. 创建可读流（适配不同的输入源）
       const readableStream = this.createReadableStream(sseStream);
+      abortableStream = readableStream;
 
       // 5. 流式处理SSE数据（按增量缓冲解析，避免跨 chunk 的事件被截断）
       // 注意：不要对每个 chunk 独立 parse；必须使用一个持续的 async 解析器维持缓冲区。
+      // Client abort signal: 当客户端断开连接时，立即中断 SSE 读取，不再等内部超时。
+      if (abortSignal && !abortSignal.aborted) {
+        const onAbort = () => {
+          context.isCompleted = true;
+          try { abortableStream?.destroy(); } catch { /* best-effort */ }
+        };
+        abortSignal.addEventListener('abort', onAbort);
+        abortHandler = () => abortSignal.removeEventListener('abort', onAbort);
+      }
+
       for await (const parseResult of parser.parseStreamAsync(this.chunkStrings(readableStream, context))) {
         if (context.isCompleted) {
           break;
@@ -124,7 +138,14 @@ export class ResponsesSseToJsonConverterRefactored {
           // 必须立即结束读取，不能继续等待上游自己关闭连接。
           // 否则 DeepSeek Web 这类上游会把已可恢复的 tool_calls / completed 长时间挂住，
           // 导致 decode.sse 虚高甚至命中后续超时。
-          if (responseBuilder.getState() === 'completed') {
+          // response.done 是 OpenAI Responses API 的唯一真 terminal event。
+          // response.completed 只表示"回复已构建完成"，但 client SDK 仍需要 response.done
+          // 来判定 stream 正常结束。过早 break 会丢失 response.done → client 报 upstream_stream_incomplete。
+          const eventType = event.type as string;
+          const isTerminalEvent = eventType === 'response.done'
+            || eventType === 'response.error'
+            || eventType === 'response.cancelled';
+          if (isTerminalEvent) {
             context.isCompleted = true;
             break;
           }
@@ -134,6 +155,14 @@ export class ResponsesSseToJsonConverterRefactored {
       }
 
       // 6. 获取最终结果
+      // Abort check: 客户端已断开且上游未产出完整 response → fail-fast，不返回半成品
+      if (abortSignal?.aborted && responseBuilder.getState() !== 'completed') {
+        const reason = (abortSignal as { reason?: unknown }).reason;
+        const err = reason instanceof Error ? reason : new Error(String(reason ?? 'CLIENT_DISCONNECTED'));
+        Object.assign(err, { code: 'CLIENT_DISCONNECTED', name: 'AbortError' });
+        throw err;
+      }
+
       const result = responseBuilder.getResult();
 
       if (!result.success) {
@@ -196,6 +225,10 @@ export class ResponsesSseToJsonConverterRefactored {
       throw this.wrapError('SSE_TO_JSON_ERROR', error as Error, options.requestId);
     } finally {
       // 清理上下文
+      if (abortHandler) {
+        abortHandler();
+        abortHandler = null;
+      }
       this.clearContext(options.requestId);
     }
   }

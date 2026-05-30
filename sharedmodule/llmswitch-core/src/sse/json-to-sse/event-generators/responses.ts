@@ -932,7 +932,18 @@ export function buildResponseDoneEvent(
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: '[DONE]',
+    data: {
+      response: {
+        id: response.id,
+        object: response.object ?? 'response',
+        created_at: response.created_at,
+        status: response.status ?? 'completed',
+        model: response.model,
+        output: response.output ?? [],
+        usage: response.usage,
+        ...((response as unknown as Record<string, unknown>).required_action ? { required_action: (response as unknown as Record<string, unknown>).required_action } : {})
+      }
+    },
     sequenceNumber: baseEvent.sequenceNumber
   };
 }

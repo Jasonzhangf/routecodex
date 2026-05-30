@@ -13152,3 +13152,50 @@ Using skills: coding-principals + rcc-dev-skills
 - 红测：`test_protocol_field_contract_outbound_deepseek_openai_chat_trailing_tool_has_real_reasoning_text` 先失败；新增 `converts_reasoning_item_before_function_call_attaches_reasoning_to_call` 与 `convert_bridge_input_function_call_preserves_reasoning_content` 覆盖 store/chat process 协议字段保留。
 - 修复：Rust Responses store 将 `reasoning` output item 绑定到紧随的 `function_call` input；bridge input 将 function_call 顶层 `reasoning_content` 写回 assistant tool-call message；opencode DeepSeek outbound 将 `"."` tool-call 占位替换为确定性 tool reasoning 文本。
 - 验证：`protocol_field_contract` 7/7 通过；两个新增定点测试通过；`cargo build --release -p router-hotpath-napi` 通过。
+
+## 2026-05-30 Hub Pipeline processMode passthrough removal progress
+- 提交 `8cf645683`: 物理删除 Hub Pipeline `processMode='passthrough'` 执行模式。
+- 删除分支：inbound semantic gate passthrough bypass、tool governance skip、provider payload raw clone、route/outbound protocol-match passthrough。
+- 删除文件：`hub-pipeline-provider-payload-passthrough-blocks.ts`、`native-hub-pipeline-orchestration-semantics-passthrough.ts`。
+- 删除 native required exports：`resolveActiveProcessModeJson`、`buildPassthroughAuditJson`、`annotatePassthroughGovernanceSkipJson`、`attachPassthroughProviderInputAuditJson`、`buildPassthroughGovernanceSkippedNodeJson`、`resolveHasInstructionRequestedPassthroughJson`。
+- 验证：`npx tsc --noEmit` 只剩既有 Windsurf native module 缺失；hub-pipeline/passthrough 相关 0 错。
+- 验证：Jest `virtual-router-hit-log`、`virtual-router-routing-model-validation`、`hub-v1-single-path-imports`、`executor-provider.retryable` 通过。
+- 已知非本次失败：`request-executor.single-attempt` 在提交前后都 8 failed（excludedProviderKeys 期望），`servertool/routing-instructions` dist export stale。
+
+## 2026-05-30 Hub Pipeline passthrough removal - verification summary
+- **验证门禁通过**：`npx tsc --noEmit` hub-pipeline 相关 0 错（仅 Windsurf native module 既有缺失）
+- **Rust 测试**：`routing_exclusions_do_not_empty_pool_when_all_targets_excluded` PASS
+- **Jest 测试**：`virtual-router-hit-log` / `virtual-router-routing-model-validation` / `hub-v1-single-path-imports` / `executor-provider.retryable` 全 PASS
+- **Grep 守卫**：Hub Pipeline 内 `passthrough` 仅剩 4 处 fail-fast throw message（预期行为）
+- **已知非本次失败**：
+  - `request-executor.single-attempt` 8 failed（excludedProviderKeys 期望，提交前后一致，非本次引入）
+  - `servertool/routing-instructions` dist export stale（`applyRoutingInstructions` 未从 dist 导出，需 rebuild）
+- **推送**：4 commits pushed to `main`（`49dbce099..6dc0c4abe`）
+
+## 2026-05-30 malformed auto-retry display investigation
+- User log shows `[auto-retry] provider:mini27.key1 code=0.8200 attempt=1/5`, then next attempt fails `[convert.bridge] error {code:MALFORMED_RESPONSE,message:"[hub_response] Failed to canonicalize response payload at chat_process.response.entry"}` and `[host.contract_failure] classified` exposes generic MALFORMED_RESPONSE.
+- Target: correctly parse underlying provider error and display specific error, not generic canonicalization wrapper.
+- Fix: `normalizeClientPayloadToCanonicalChatCompletionOrThrow` now parses `base_resp.status_code` business errors both before unknown-shape throw and after chat-shape canonicalization failure. 2056 now surfaces as `HTTP_429_2056` with direct `upstreamCode=provider_status_2056` and `statusCode=429`, not generic `MALFORMED_RESPONSE`.
+- Fix: `resolveAutoRetryErrorCode` maps `HTTP_429_2056` to `0.8200` before catalog normalization, preserving MiniMax provider internal auto-retry semantics.
+- Fix: request executor report plan reads `error.details.upstreamCode`, so host contract logs can show `upstreamCode=PROVIDER_STATUS_2056`.
+- Verification: focused jest auto-retry mappings passed; focused request-executor report-plan test passed; standalone tsx conversion sample showed `ProviderProtocolError code=HTTP_429_2056 upstreamCode=provider_status_2056 statusCode=429`; `npm run llmswitch:ensure && npx tsc --noEmit` passed.
+- 2026-05-30: installed RouteCodex start fails: global dist cannot load llmswitch core module router/virtual-router/bootstrap (ts). Need audit install/package core vendor path before runtime restart.
+
+## 2026-05-30 SSE 断流修复
+
+### 根因
+1. **decoder 过早 break**：`responses-sse-to-json-converter.ts` 在 `response.completed` 时 break，丢掉 `response.done` → outbound SSE 无 terminal event → client 报 `upstream_stream_incomplete`
+2. **`response.done` 格式错误**：`buildResponseDoneEvent` 发 `data: [DONE]`（Chat API 格式），Responses SDK 不认
+3. **abort 信号丢失**：Symbol-keyed AbortSignal 在 Rust bridge JSON 序列化时丢失，SSE decoder 无法感知 client disconnect
+
+### 修复
+- `sharedmodule/.../event-generators/responses.ts`：`buildResponseDoneEvent` 改为发完整 response 对象
+- `sharedmodule/.../responses-sse-to-json-converter.ts`：decoder 只在 `response.done`/`response.error`/`response.cancelled` 时 break；abort signal + stream destroy
+- `sharedmodule/.../sse-codec-registry.ts` + 所有 protocol options：`abortSignal` 透传
+- `sharedmodule/.../resp_inbound_stage1_sse_decode/index.ts`：从 adapterContext 提取 `clientDisconnected` 轮询 abort
+- `src/server/handlers/responses-handler.ts`：传 `clientAbortSignal` 到 metadata
+- `sharedmodule/.../chat-sse-to-json-converter.ts`：abort listener + `isCompleted` break
+
+### 注意
+- Symbol-keyed abort signal 不可序列化，只能通过 `clientDisconnected` 布尔值轮询（200ms interval）检测 mid-stream disconnect
+- `response.completed` vs `response.done`：`completed` 表示"回复已构建完成"，`done` 是真 terminal event（OpenAI Responses API 规范）

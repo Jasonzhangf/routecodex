@@ -1793,3 +1793,14 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 
 ## 2026-05-30 VR recoverable busy 统一错误路径
 - 已验证：Virtual Router 全池 recoverable busy/cooldown 不是无 provider；必须分类为 `HTTP_429` recoverable，RequestExecutor 用现有 recoverable backoff 阻塞指数退避重试 3 次，仍 busy 才向客户端返回 429。禁止把该状态映射成 `PROVIDER_NOT_AVAILABLE` 或新增 fallback 分支。
+
+## 2026-05-30 — MiniMax 2056 provider business error display
+- Verified fix: Hub response canonicalization must parse `base_resp.status_code` business errors both when shape is unknown and when chat-like payload fails canonical validation (for example `choices: []`). MiniMax 2056 should surface as `HTTP_429_2056` with `upstreamCode=provider_status_2056` and `statusCode=429`, not generic `MALFORMED_RESPONSE`.
+- Verified retry rule: `resolveAutoRetryErrorCode()` must map both `PROVIDER_STATUS_2056` and `HTTP_429_2056` to `0.8200` before catalog normalization, otherwise provider internal auto-retry misses MiniMax 2056.
+- Verified display rule: request-executor provider failure report must read `ProviderProtocolError.details.upstreamCode` so `host.contract_failure.classified` can show `upstreamCode=PROVIDER_STATUS_2056`.
+
+## 2026-05-30 SSE Responses 断流根因与修复
+- **根因 1（包协议）**：`response.done` 事件发 `data: [DONE]`（Chat API 格式），Responses SDK 不认 → client 收不到 terminal event → 报 `upstream_stream_incomplete`。修复：改为发完整 `{ response: {...} }` 对象。
+- **根因 2（decoder 过早 break）**：`responses-sse-to-json-converter` 在 `response.completed` 时 break，丢掉 `response.done`。OpenAI Responses API 中 `completed` ≠ terminal，`done` 才是真 terminal event。修复：decoder 只在 `response.done`/`response.error`/`response.cancelled` 时 break。
+- **根因 3（abort 信号丢失）**：`trackClientConnectionState` 用 Symbol-keyed 存 AbortSignal，Rust bridge JSON 序列化丢失 → decoder 无法感知 client disconnect。修复：轮询 `clientConnectionState.disconnected` 布尔值（200ms interval）。
+- **铁律**：Responses API 的 terminal event 是 `response.done`，不是 `response.completed`。`completed` 只表示回复构建完成，client SDK 仍需 `done` 判定 stream 结束。
