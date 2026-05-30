@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
+use crate::hub_req_inbound_context_capture::{
+    capture_req_inbound_responses_context_snapshot, ResponsesContextCaptureInput,
+};
 use crate::hub_req_inbound_format_parse::{parse_format_envelope, FormatParseInput};
 use crate::hub_req_inbound_semantic_lift::{
     apply_req_inbound_semantic_lift, ReqInboundSemanticLiftApplyInput,
@@ -139,6 +142,24 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Completed,
             Some(serde_json::json!({ "envelopeObject": lifted_envelope.is_object() })),
         ));
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqInboundContextCapture,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({ "protocol": provider_protocol })),
+        ));
+        let context_snapshot = capture_context_snapshot(
+            &provider_protocol,
+            &normalized_payload,
+            &normalized_metadata,
+            &request_id,
+        )?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqInboundContextCapture,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({
+                "hasContextSnapshot": context_snapshot.is_some(),
+            })),
+        ));
         let target = self
             .config
             .virtual_router
@@ -155,7 +176,7 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "targetObject": target.is_object() })),
         ));
-        let routed = apply_route_selection(RouteSelectionApplyInput {
+        let mut routed = apply_route_selection(RouteSelectionApplyInput {
             request: normalized_payload,
             normalized_metadata,
             target,
@@ -173,6 +194,7 @@ impl HubPipelineEngine {
             thinking: None,
         })
         .map_err(HubPipelineError::from)?;
+        attach_context_snapshot_to_metadata(&mut routed.normalized_metadata, context_snapshot)?;
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqProcessRouteSelect,
             HubPipelineDiagnosticStatus::Completed,
@@ -282,6 +304,54 @@ fn resolve_context_snapshot(metadata: &Value) -> Option<Value> {
         .or_else(|| metadata_obj.get("contextSnapshot"))
         .filter(|value| value.is_object())
         .cloned()
+}
+
+fn capture_context_snapshot(
+    provider_protocol: &str,
+    normalized_payload: &Value,
+    normalized_metadata: &Value,
+    request_id: &str,
+) -> HubPipelineResult<Option<Value>> {
+    if provider_protocol != "openai-responses" {
+        return Ok(None);
+    }
+    let tool_call_id_style = normalized_metadata
+        .get("toolCallIdStyle")
+        .or_else(|| {
+            normalized_metadata
+                .get("metadata")
+                .and_then(|metadata| metadata.get("toolCallIdStyle"))
+        })
+        .cloned();
+    let snapshot = capture_req_inbound_responses_context_snapshot(ResponsesContextCaptureInput {
+        raw_request: normalized_payload.clone(),
+        request_id: Some(request_id.to_string()),
+        tool_call_id_style,
+    })
+    .map_err(|message| HubPipelineError::new("hub_pipeline_context_capture_failed", message))?;
+    Ok(Some(snapshot))
+}
+
+fn attach_context_snapshot_to_metadata(
+    metadata: &mut Value,
+    context_snapshot: Option<Value>,
+) -> HubPipelineResult<()> {
+    let Some(snapshot) = context_snapshot else {
+        return Ok(());
+    };
+    let metadata_obj = metadata.as_object_mut().ok_or_else(|| {
+        HubPipelineError::new(
+            "hub_pipeline_invalid_route_metadata",
+            "Rust HubPipeline context capture requires route metadata object",
+        )
+    })?;
+    metadata_obj.insert(
+        "contextMetadataKey".to_string(),
+        Value::String("responsesContext".to_string()),
+    );
+    metadata_obj.insert("responsesContext".to_string(), snapshot.clone());
+    metadata_obj.insert("contextSnapshot".to_string(), snapshot);
+    Ok(())
 }
 
 fn apply_context_snapshot_to_format_envelope(

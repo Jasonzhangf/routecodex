@@ -15,10 +15,10 @@ struct FollowupSnapshotOutput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ResponsesContextCaptureInput {
-    raw_request: Value,
-    request_id: Option<String>,
-    tool_call_id_style: Option<Value>,
+pub struct ResponsesContextCaptureInput {
+    pub raw_request: Value,
+    pub request_id: Option<String>,
+    pub tool_call_id_style: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -702,7 +702,7 @@ fn has_responses_submit_tool_outputs(raw_request_row: &Map<String, Value>) -> bo
     has_previous_response_id && has_tool_outputs
 }
 
-fn capture_req_inbound_responses_context_snapshot(
+pub fn capture_req_inbound_responses_context_snapshot(
     input: ResponsesContextCaptureInput,
 ) -> Result<Value, String> {
     let raw_request_row = input
