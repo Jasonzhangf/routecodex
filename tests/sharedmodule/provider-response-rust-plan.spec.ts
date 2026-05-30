@@ -10,6 +10,14 @@ class StubStageRecorder implements StageRecorder {
   }
 }
 
+async function readStreamBody(stream: NodeJS.ReadableStream): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 describe('provider response Rust native plan', () => {
   it('uses Rust HubPipeline native response plan for non-side-effect response path', async () => {
     const recorder = new StubStageRecorder();
@@ -45,5 +53,56 @@ describe('provider response Rust native plan', () => {
     }));
     expect(recorder.entries.map((entry) => entry.stage)).toContain('chat_process.resp.stage9.client_remap');
     expect(recorder.entries.map((entry) => entry.stage)).toContain('chat_process.resp.stage10.sse_stream');
+  });
+
+  it('uses Rust streamPipe effect plan for streaming response path', async () => {
+    const recorder = new StubStageRecorder();
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_native_stream_plan_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_native_stream_plan_1',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native stream ok' },
+          finish_reason: 'stop'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: true,
+      stageRecorder: recorder
+    });
+
+    expect(result.body?.choices?.[0]?.message?.content).toBe('native stream ok');
+    expect(result.__sse_responses).toBeDefined();
+    const sseBody = await readStreamBody(result.__sse_responses!);
+    expect(sseBody).toContain('data:');
+    expect(sseBody).toContain('native stream ok');
+    expect(sseBody).toContain('[DONE]');
+    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
+      effectPlan: {
+        effects: [expect.objectContaining({
+          kind: 'streamPipe',
+          payload: expect.objectContaining({
+            codec: 'openai-chat',
+            requestId: 'req_provider_response_native_stream_plan_1',
+            payload: result.body
+          })
+        })]
+      },
+      diagnostics: expect.any(Array)
+    }));
+    expect(recorder.entries.map((entry) => entry.stage)).toEqual([
+      'chat_process.resp.stage9.client_remap',
+      'chat_process.resp.stage10.sse_stream'
+    ]);
   });
 });
