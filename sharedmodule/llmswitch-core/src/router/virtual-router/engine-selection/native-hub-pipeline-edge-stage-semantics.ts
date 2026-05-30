@@ -357,6 +357,65 @@ export function processSseStreamWithNative(input: {
   }
 }
 
+export function planSseStreamEffectWithNative(input: {
+  clientPayload: Record<string, unknown>;
+  clientProtocol: string;
+  requestId: string;
+  wantsStream: boolean;
+}): { effectPlan: { effects: Array<Record<string, unknown>> }; payload: Record<string, unknown>; clientProtocol: string } {
+  const capability = "planSseStreamEffectJson";
+  const fail = (reason?: string) =>
+    failNativeRequired<{ effectPlan: { effects: Array<Record<string, unknown>> }; payload: Record<string, unknown>; clientProtocol: string }>(
+      capability,
+      reason,
+    );
+  if (isNativeDisabledByEnv()) {
+    return fail("native disabled");
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(input);
+  if (!payloadJson) {
+    return fail("json stringify failed");
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw !== "string" || !raw) {
+      return fail("empty result");
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed) {
+      return fail("invalid payload");
+    }
+    const effectPlan = parsed.effectPlan;
+    const effects = effectPlan && typeof effectPlan === "object" && !Array.isArray(effectPlan)
+      ? (effectPlan as Record<string, unknown>).effects
+      : null;
+    const payload = parsed.payload;
+    const clientProtocol = parsed.clientProtocol;
+    if (!Array.isArray(effects)) {
+      return fail("invalid effectPlan.effects");
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return fail("invalid payload object");
+    }
+    if (typeof clientProtocol !== "string" || !clientProtocol.trim()) {
+      return fail("invalid clientProtocol");
+    }
+    return {
+      effectPlan: { effects: effects as Array<Record<string, unknown>> },
+      payload: payload as Record<string, unknown>,
+      clientProtocol,
+    };
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : String(error ?? "unknown");
+    return fail(reason);
+  }
+}
+
 export function parseReqInboundFormatEnvelopeWithNative(input: {
   rawRequest: Record<string, unknown>;
   protocol: string;

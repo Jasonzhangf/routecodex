@@ -98,6 +98,20 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).not.toContain('stages/resp_outbound');
   });
 
+  it('resp outbound SSE TS shell must consume Rust effect plan instead of deciding stream mode', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+
+    expect(source).toContain('planSseStreamEffectWithNative');
+    expect(source).toContain('effectPlan.effects');
+    expect(source).not.toContain('processSseStreamWithNative');
+    expect(source).not.toContain('normalizeProviderProtocolTokenWithNative');
+    expect(source).not.toContain('const shouldStream');
+  });
+
   it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
     const wrapperPath = path.join(
       process.cwd(),

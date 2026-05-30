@@ -578,7 +578,7 @@ describe('resp_outbound stages snapshot payloads', () => {
     });
   });
 
-  it('keeps unknown protocol in non-stream path even when wantsStream=true', async () => {
+  it('fails fast on unknown protocol instead of silently disabling stream', async () => {
     const recorder = new StubStageRecorder();
     const clientPayload = {
       id: 'unknown_protocol_non_stream',
@@ -593,25 +593,17 @@ describe('resp_outbound stages snapshot payloads', () => {
       ]
     } as any;
 
-    const result = await runRespOutboundStage2SseStream({
+    await expect(runRespOutboundStage2SseStream({
       clientPayload,
       clientProtocol: ' UNKNOWN-PROTOCOL ' as any,
       requestId: 'req-unknown-protocol-non-stream',
       wantsStream: true,
       stageRecorder: recorder
-    });
-
-    expect(result.body).toEqual(clientPayload);
-    expect(result.stream).toBeUndefined();
-    expect(recorder.entries).toHaveLength(1);
-    expect(recorder.entries[0]?.payload).toEqual({
-      passthrough: false,
-      protocol: ' UNKNOWN-PROTOCOL ',
-      payload: clientPayload
-    });
+    })).rejects.toThrow(/Unsupported providerProtocol|planSseStreamEffectJson/);
+    expect(recorder.entries).toHaveLength(0);
   });
 
-  it('keeps near-known protocol variant in non-stream path when wantsStream=true', async () => {
+  it('fails fast on near-known protocol variant instead of silently disabling stream', async () => {
     const recorder = new StubStageRecorder();
     const clientPayload = {
       id: 'near_known_protocol_non_stream',
@@ -626,22 +618,14 @@ describe('resp_outbound stages snapshot payloads', () => {
       ]
     } as any;
 
-    const result = await runRespOutboundStage2SseStream({
+    await expect(runRespOutboundStage2SseStream({
       clientPayload,
       clientProtocol: ' OPENAI-CHAT-PREVIEW ' as any,
       requestId: 'req-near-known-protocol-non-stream',
       wantsStream: true,
       stageRecorder: recorder
-    });
-
-    expect(result.body).toEqual(clientPayload);
-    expect(result.stream).toBeUndefined();
-    expect(recorder.entries).toHaveLength(1);
-    expect(recorder.entries[0]?.payload).toEqual({
-      passthrough: false,
-      protocol: ' OPENAI-CHAT-PREVIEW ',
-      payload: clientPayload
-    });
+    })).rejects.toThrow(/Unsupported providerProtocol|planSseStreamEffectJson/);
+    expect(recorder.entries).toHaveLength(0);
   });
 
   it('normalizes anthropic-messages protocol token in non-stream branch', async () => {

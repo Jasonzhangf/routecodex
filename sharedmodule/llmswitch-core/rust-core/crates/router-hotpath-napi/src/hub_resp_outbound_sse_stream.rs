@@ -2,6 +2,11 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::hub_pipeline_blocks::protocol::resolve_provider_protocol;
+use crate::hub_pipeline_lib::effect_plan::{
+    HubPipelineEffect, HubPipelineEffectKind, HubPipelineEffectPlan,
+};
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SseStreamInput {
@@ -16,6 +21,14 @@ pub struct SseStreamInput {
 pub struct SseStreamOutput {
     pub should_stream: bool,
     pub payload: Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SseStreamEffectPlanOutput {
+    pub effect_plan: HubPipelineEffectPlan,
+    pub payload: Value,
+    pub client_protocol: String,
 }
 
 pub(crate) fn resolve_sse_stream_mode(
@@ -35,11 +48,36 @@ pub(crate) fn resolve_sse_stream_mode(
 }
 
 pub fn process_sse_stream(input: SseStreamInput) -> Result<SseStreamOutput, String> {
-    let should_stream = resolve_sse_stream_mode(input.wants_stream, &input.client_protocol)?;
+    let client_protocol = resolve_provider_protocol(&input.client_protocol)?;
+    let should_stream = resolve_sse_stream_mode(input.wants_stream, &client_protocol)?;
 
     Ok(SseStreamOutput {
         should_stream,
         payload: input.client_payload,
+    })
+}
+
+pub fn plan_sse_stream_effect(input: SseStreamInput) -> Result<SseStreamEffectPlanOutput, String> {
+    let request_id = input.request_id.clone();
+    let client_protocol = resolve_provider_protocol(&input.client_protocol)?;
+    let output = process_sse_stream(input)?;
+    let effect_plan = if output.should_stream {
+        HubPipelineEffectPlan::single(HubPipelineEffect {
+            kind: HubPipelineEffectKind::StreamPipe,
+            payload: serde_json::json!({
+                "codec": client_protocol,
+                "requestId": request_id,
+                "payload": output.payload.clone(),
+                "body": output.payload.clone(),
+            }),
+        })
+    } else {
+        HubPipelineEffectPlan::empty()
+    };
+    Ok(SseStreamEffectPlanOutput {
+        effect_plan,
+        payload: output.payload,
+        client_protocol,
     })
 }
 
@@ -53,6 +91,21 @@ pub fn process_sse_stream_json(input_json: String) -> napi::Result<String> {
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
 
     let output = process_sse_stream(input).map_err(|e| napi::Error::from_reason(e))?;
+
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+#[napi]
+pub fn plan_sse_stream_effect_json(input_json: String) -> napi::Result<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+
+    let input: SseStreamInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+
+    let output = plan_sse_stream_effect(input).map_err(napi::Error::from_reason)?;
 
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
