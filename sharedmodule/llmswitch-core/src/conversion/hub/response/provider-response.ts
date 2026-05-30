@@ -241,13 +241,6 @@ function shouldRunProviderResponseRustHubPipeline(options: ProviderResponseConve
       return false;
     }
   }
-  const rt = (options.context as Record<string, unknown>).__rt;
-  if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
-    const runtime = rt as Record<string, unknown>;
-    if (runtime.serverToolFollowup) {
-      return false;
-    }
-  }
   return true;
 }
 

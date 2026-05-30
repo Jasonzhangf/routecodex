@@ -347,4 +347,45 @@ describe('provider response Rust native plan', () => {
       'chat_process.resp.stage10.sse_stream'
     ]);
   });
+
+  it('does not bypass Rust native response plan for inert serverToolFollowup metadata', async () => {
+    const recorder = new StubStageRecorder();
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_native_followup_inert_plan_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      __rt: { serverToolFollowup: true, serverToolFollowupSource: 'servertool.reasoning_stop_continue' }
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_native_followup_inert_plan_1',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native followup inert ok' },
+          finish_reason: 'length'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false,
+      stageRecorder: recorder
+    });
+
+    expect(result.body?.choices?.[0]?.message?.content).toBe('native followup inert ok');
+    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
+      effectPlan: expect.objectContaining({
+        effects: expect.arrayContaining([
+          expect.objectContaining({ kind: 'runtimeStateWrite' })
+        ])
+      })
+    }));
+    expect(recorder.entries.map((entry) => entry.stage)).toEqual([
+      'chat_process.resp.stage9.client_remap',
+      'chat_process.resp.stage10.sse_stream'
+    ]);
+  });
 });
