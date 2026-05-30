@@ -83,8 +83,10 @@ describe('hub pipeline stage residue audit', () => {
     const engineSource = fs.readFileSync(path.join(crateRoot, 'hub_pipeline_lib/engine.rs'), 'utf8');
 
     expect(engineSource).toContain('parse_resp_format_envelope');
+    expect(engineSource).toContain('govern_response');
     expect(engineSource).toContain('finalize_chat_response');
     expect(engineSource).toContain('HubPipelineStageId::RespInboundFormatParse');
+    expect(engineSource).toContain('HubPipelineStageId::RespProcessToolGovernance');
     expect(engineSource).toContain('HubPipelineStageId::RespProcessFinalize');
     expect(engineSource).not.toContain('stages/resp_inbound');
     expect(engineSource).not.toContain('stages/resp_process');

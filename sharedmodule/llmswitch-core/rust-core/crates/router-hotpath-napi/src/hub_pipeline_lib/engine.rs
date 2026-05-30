@@ -21,6 +21,9 @@ use crate::req_process_stage1_tool_governance::{
     apply_req_process_tool_governance, ToolGovernanceInput,
 };
 use crate::req_process_stage2_route_select::{apply_route_selection, RouteSelectionApplyInput};
+use crate::resp_process_stage1_tool_governance::{
+    govern_response, ToolGovernanceInput as RespToolGovernanceInput,
+};
 use crate::resp_process_stage2_finalize::{finalize_chat_response, FinalizeInput};
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
@@ -355,12 +358,51 @@ impl HubPipelineEngine {
             Some(serde_json::json!({ "format": parsed.envelope.format })),
         ));
         diagnostics.push(diagnostic(
+            HubPipelineStageId::RespProcessToolGovernance,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({ "protocol": parsed.envelope.format })),
+        ));
+        let governed = govern_response(RespToolGovernanceInput {
+            payload: parsed.envelope.payload,
+            client_protocol: normalized_metadata
+                .get("clientProtocol")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    HubPipelineError::new(
+                        "hub_pipeline_missing_client_protocol",
+                        "Rust HubPipeline resp governance requires metadata.clientProtocol",
+                    )
+                })?,
+            entry_endpoint: normalized_metadata
+                .get("entryEndpoint")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    HubPipelineError::new(
+                        "hub_pipeline_missing_entry_endpoint",
+                        "Rust HubPipeline resp governance requires metadata.entryEndpoint",
+                    )
+                })?,
+            request_id: output.request_id.clone(),
+        })
+        .map_err(|message| {
+            HubPipelineError::new("hub_pipeline_resp_tool_governance_failed", message)
+        })?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::RespProcessToolGovernance,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({
+                "summary": governed.summary,
+            })),
+        ));
+        diagnostics.push(diagnostic(
             HubPipelineStageId::RespProcessFinalize,
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "stream": normalized_metadata.get("stream").and_then(Value::as_bool).unwrap_or(false) })),
         ));
         let finalized_payload = finalize_chat_response(FinalizeInput {
-            payload: parsed.envelope.payload,
+            payload: governed.governed_payload,
             stream: normalized_metadata
                 .get("stream")
                 .and_then(Value::as_bool)
