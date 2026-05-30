@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import { defaultSseCodecRegistry, type SseProtocol } from '../../../sse/index.js';
 import type { AdapterContext } from '../types/chat-envelope.js';
 import type { JsonObject } from '../types/json.js';
 import type { StageRecorder } from '../format-adapters/index.js';
@@ -50,6 +51,7 @@ import {
 } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js';
 import {
   measureHubStage,
+  logHubStageTiming,
   peekHubStageTopSummary
 } from '../pipeline/hub-stage-timing.js';
 import {
@@ -289,6 +291,97 @@ function runProviderResponseRustHubPipeline(options: ProviderResponseConversionO
   };
 }
 
+function readNativeStreamPipeEffect(effectPlan: { effects: Array<Record<string, unknown>> }): {
+  codec: SseProtocol;
+  requestId: string;
+  payload: JsonObject;
+} | null {
+  if (effectPlan.effects.length === 0) {
+    return null;
+  }
+  if (effectPlan.effects.length !== 1) {
+    throw new Error('Rust HubPipeline response effect plan must contain at most one effect');
+  }
+  const effect = effectPlan.effects[0];
+  if (effect?.kind !== 'streamPipe') {
+    throw new Error('Rust HubPipeline response effect plan returned unsupported effect kind');
+  }
+  const payload = effect.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Rust HubPipeline streamPipe effect missing payload');
+  }
+  const record = payload as Record<string, unknown>;
+  const codec = record.codec;
+  const requestId = record.requestId;
+  const streamPayload = record.payload;
+  if (
+    codec !== 'openai-chat'
+    && codec !== 'openai-responses'
+    && codec !== 'anthropic-messages'
+    && codec !== 'gemini-chat'
+  ) {
+    throw new Error('Rust HubPipeline streamPipe effect returned unsupported codec');
+  }
+  if (typeof requestId !== 'string' || !requestId.trim()) {
+    throw new Error('Rust HubPipeline streamPipe effect missing requestId');
+  }
+  if (!streamPayload || typeof streamPayload !== 'object' || Array.isArray(streamPayload)) {
+    throw new Error('Rust HubPipeline streamPipe effect missing stream payload');
+  }
+  return {
+    codec,
+    requestId,
+    payload: streamPayload as JsonObject
+  };
+}
+
+async function executeProviderResponseNativeOutboundEffects(args: {
+  nativeResponsePlan: {
+    payload?: JsonObject;
+    effectPlan: { effects: Array<Record<string, unknown>> };
+  };
+  requestId: string;
+  stageRecorder?: StageRecorder;
+}): Promise<ProviderResponseConversionResult> {
+  const clientPayload = args.nativeResponsePlan.payload;
+  if (!clientPayload || typeof clientPayload !== 'object') {
+    throw new Error('Rust HubPipeline native response payload unavailable');
+  }
+  const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.effectPlan);
+  if (!streamEffect) {
+    recordStage(args.stageRecorder, 'chat_process.resp.stage9.client_remap', clientPayload);
+    recordStage(args.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
+      passthrough: false,
+      protocol: 'native-effect-plan',
+      payload: clientPayload
+    });
+    return { body: clientPayload };
+  }
+  const codec = defaultSseCodecRegistry.get(streamEffect.codec);
+  logHubStageTiming(args.requestId, 'resp_outbound.stage2_codec_stream', 'start', {
+    clientProtocol: streamEffect.codec
+  });
+  const codecStart = Date.now();
+  const stream = await codec.convertJsonToSse(streamEffect.payload, {
+    requestId: streamEffect.requestId
+  });
+  logHubStageTiming(args.requestId, 'resp_outbound.stage2_codec_stream', 'completed', {
+    elapsedMs: Date.now() - codecStart,
+    clientProtocol: streamEffect.codec
+  });
+  recordStage(args.stageRecorder, 'chat_process.resp.stage9.client_remap', clientPayload);
+  recordStage(args.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
+    passthrough: false,
+    protocol: streamEffect.codec,
+    payload: streamEffect.payload
+  });
+  return {
+    __sse_responses: stream,
+    body: clientPayload,
+    format: streamEffect.codec
+  };
+}
+
 export interface ProviderResponseConversionOptions {
   providerProtocol: ProviderProtocol;
   providerResponse: JsonObject;
@@ -343,6 +436,11 @@ export async function convertProviderResponse(
   }
   if (nativeResponsePlan) {
     (options.context as Record<string, unknown>).__nativeResponsePlan = nativeResponsePlan;
+    return executeProviderResponseNativeOutboundEffects({
+      nativeResponsePlan,
+      requestId,
+      stageRecorder: options.stageRecorder
+    });
   }
   const contextSignals = resolveProviderResponseContextSignals(options.context, options.entryEndpoint);
   const isFollowup = contextSignals.isFollowup;

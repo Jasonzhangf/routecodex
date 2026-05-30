@@ -124,6 +124,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('runProviderResponseRustHubPipeline');
     expect(source).toContain('nativeResponsePlan.effectPlan.effects');
     expect(source).toContain('__nativeResponsePlan');
+    expect(source).toContain('executeProviderResponseNativeOutboundEffects');
+    expect(source).toContain('if (nativeResponsePlan)');
     expect(source).toContain('options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch');
   });
 
