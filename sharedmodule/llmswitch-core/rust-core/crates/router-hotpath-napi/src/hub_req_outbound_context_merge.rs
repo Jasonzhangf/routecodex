@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use crate::shared_json_utils::read_trimmed_string;
 
 #[derive(Debug, Clone, Serialize)]
-struct MergedToolOutput {
+pub struct MergedToolOutput {
     #[serde(rename = "tool_call_id")]
     tool_call_id: String,
     content: String,
@@ -35,18 +35,18 @@ struct ReqOutboundContextMergePlanOutput {
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct ReqOutboundContextSnapshotApplyInput {
-    chat_envelope: Option<Value>,
-    snapshot: Option<Value>,
+pub struct ReqOutboundContextSnapshotApplyInput {
+    pub chat_envelope: Option<Value>,
+    pub snapshot: Option<Value>,
 }
 
 #[derive(Debug, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct ReqOutboundContextSnapshotApplyOutput {
+pub struct ReqOutboundContextSnapshotApplyOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_outputs: Option<Vec<MergedToolOutput>>,
+    pub tool_outputs: Option<Vec<MergedToolOutput>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<Value>>,
+    pub tools: Option<Vec<Value>>,
 }
 
 fn normalize_tool_output(entry: &Value) -> Option<MergedToolOutput> {
@@ -305,7 +305,7 @@ fn resolve_has_existing_tools_from_chat_envelope(chat_envelope: &Value) -> bool 
         .unwrap_or(false)
 }
 
-fn apply_req_outbound_context_snapshot(
+pub fn apply_req_outbound_context_snapshot(
     input: &ReqOutboundContextSnapshotApplyInput,
 ) -> ReqOutboundContextSnapshotApplyOutput {
     let chat_envelope = input.chat_envelope.as_ref().unwrap_or(&Value::Null);

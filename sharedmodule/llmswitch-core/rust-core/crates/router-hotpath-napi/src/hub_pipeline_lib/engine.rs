@@ -6,6 +6,9 @@ use crate::hub_req_inbound_format_parse::{parse_format_envelope, FormatParseInpu
 use crate::hub_req_inbound_semantic_lift::{
     apply_req_inbound_semantic_lift, ReqInboundSemanticLiftApplyInput,
 };
+use crate::hub_req_outbound_context_merge::{
+    apply_req_outbound_context_snapshot, ReqOutboundContextSnapshotApplyInput,
+};
 use crate::hub_req_outbound_format_build::{build_format_request, FormatBuildInput};
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
@@ -182,6 +185,24 @@ impl HubPipelineEngine {
             envelope.insert("payload".to_string(), routed.request);
         }
         diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqOutboundContextMerge,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({
+                "hasContextSnapshot": resolve_context_snapshot(&routed.normalized_metadata).is_some(),
+            })),
+        ));
+        apply_context_snapshot_to_format_envelope(
+            &mut format_envelope,
+            &routed.normalized_metadata,
+        )?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqOutboundContextMerge,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({
+                "payloadObject": format_envelope.get("payload").is_some_and(Value::is_object),
+            })),
+        ));
+        diagnostics.push(diagnostic(
             HubPipelineStageId::ReqOutboundFormatBuild,
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "protocol": provider_protocol })),
@@ -245,6 +266,65 @@ impl HubPipelineEngine {
             }),
         })
     }
+}
+
+fn resolve_context_snapshot(metadata: &Value) -> Option<Value> {
+    let metadata_obj = metadata.as_object()?;
+    let key = metadata_obj
+        .get("contextMetadataKey")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("responsesContext");
+    metadata_obj
+        .get(key)
+        .or_else(|| metadata_obj.get("responsesContext"))
+        .or_else(|| metadata_obj.get("contextSnapshot"))
+        .filter(|value| value.is_object())
+        .cloned()
+}
+
+fn apply_context_snapshot_to_format_envelope(
+    format_envelope: &mut Value,
+    metadata: &Value,
+) -> HubPipelineResult<()> {
+    let Some(snapshot) = resolve_context_snapshot(metadata) else {
+        return Ok(());
+    };
+    let payload = format_envelope.get_mut("payload").ok_or_else(|| {
+        HubPipelineError::new(
+            "hub_pipeline_missing_format_payload",
+            "Rust HubPipeline req outbound context merge requires format envelope payload",
+        )
+    })?;
+    let patch = apply_req_outbound_context_snapshot(&ReqOutboundContextSnapshotApplyInput {
+        chat_envelope: Some(payload.clone()),
+        snapshot: Some(snapshot),
+    });
+    let payload_obj = payload.as_object_mut().ok_or_else(|| {
+        HubPipelineError::new(
+            "hub_pipeline_invalid_format_payload",
+            "Rust HubPipeline req outbound context merge requires object payload",
+        )
+    })?;
+    if let Some(tool_outputs) = patch.tool_outputs {
+        payload_obj.insert(
+            "toolOutputs".to_string(),
+            serde_json::to_value(tool_outputs)?,
+        );
+    }
+    let has_existing_tools = payload_obj
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| !tools.is_empty());
+    if !has_existing_tools {
+        if let Some(tools) = patch.tools {
+            if !tools.is_empty() {
+                payload_obj.insert("tools".to_string(), Value::Array(tools));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn build_adapter_context(
