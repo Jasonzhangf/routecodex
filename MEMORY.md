@@ -1820,3 +1820,7 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 ## 2026-05-31 Hub Pipeline Rust 化执行规则
 - Rust 化按阶段推进：每一阶段完成验证后必须本地 `git commit`，但不 push；最终全量验证通过后再 push。
 - 黑盒红测是关键门禁：每阶段先补/运行能证明边界的黑盒或 residue red test，再实现/收口，禁止只靠白盒改动声称完成。
+
+## 2026-05-31 Hub Pipeline response native fail-fast rule
+- 已验证：provider-response callbacks 存在时也不得回 TS path；Rust response path 必须先观测/校验 provider response shape，OpenAI chat response 至少需要 object + 非空 `choices` array，否则返回 `success:false + error` 并由 TS native shell fail-fast。
+- 已删除规则：Rust resp inbound format parse 禁止 unknown protocol generic envelope fallback；未知 response protocol 必须 unsupported fail-fast，避免 raw payload 被误当完成响应透传。

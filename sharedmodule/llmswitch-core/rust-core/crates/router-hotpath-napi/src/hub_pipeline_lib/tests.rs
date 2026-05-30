@@ -90,6 +90,39 @@ fn execute_hub_pipeline_json_uses_total_entry_contract() {
 }
 
 #[test]
+fn execute_hub_pipeline_json_serializes_response_path_errors() {
+    let input = json!({
+        "config": {},
+        "request": {
+            "requestId": "req-invalid-response",
+            "endpoint": "/v1/chat/completions",
+            "entryEndpoint": "/v1/chat/completions",
+            "providerProtocol": "openai-chat",
+            "payload": { "id": "raw_unobservable_shape" },
+            "metadata": {
+                "clientProtocol": "openai-chat",
+                "entryEndpoint": "/v1/chat/completions"
+            },
+            "processMode": "chat",
+            "direction": "response",
+            "stage": "outbound"
+        }
+    });
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+
+    assert_eq!(output.get("success").and_then(|value| value.as_bool()), Some(false));
+    assert_eq!(
+        output.pointer("/error/code").and_then(|value| value.as_str()),
+        Some("hub_pipeline_error")
+    );
+    assert!(output
+        .pointer("/error/message")
+        .and_then(|value| value.as_str())
+        .is_some_and(|message| message.contains("choices array")));
+}
+
+#[test]
 fn response_stream_path_returns_stream_pipe_effect_plan() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine

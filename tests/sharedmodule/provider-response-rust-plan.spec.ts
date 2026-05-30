@@ -439,4 +439,25 @@ describe('provider response Rust native plan', () => {
       })
     }));
   });
+
+  it('fails fast instead of falling back to TS path when callback response shape is not Rust-observable', async () => {
+    const recorder = new StubStageRecorder();
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_unobservable_callback_plan_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    };
+
+    await expect(convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: { id: 'raw_unobservable_shape' },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false,
+      stageRecorder: recorder,
+      providerInvoker: async () => ({ response: {} as any })
+    })).rejects.toThrow('Rust HubPipeline response path');
+
+    expect(context.__nativeResponsePlan).toBeUndefined();
+  });
 });

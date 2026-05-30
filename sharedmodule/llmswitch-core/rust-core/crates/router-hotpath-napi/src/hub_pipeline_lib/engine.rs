@@ -892,8 +892,20 @@ pub fn execute_hub_pipeline_json(input_json: String) -> HubPipelineResult<String
         ));
     }
     let input: ExecuteHubPipelineInput = serde_json::from_str(&input_json)?;
+    let request_id = input.request.request_id.clone();
     let mut engine = HubPipelineEngine::new(input.config)?;
-    let output = engine.execute(input.request)?;
+    let output = match engine.execute(input.request) {
+        Ok(output) => output,
+        Err(error) => HubPipelineExecutionOutput {
+            request_id,
+            success: false,
+            payload: None,
+            metadata: None,
+            effect_plan: HubPipelineEffectPlan::empty(),
+            diagnostics: Vec::new(),
+            error: Some(error),
+        },
+    };
     serde_json::to_string(&output).map_err(HubPipelineError::from)
 }
 

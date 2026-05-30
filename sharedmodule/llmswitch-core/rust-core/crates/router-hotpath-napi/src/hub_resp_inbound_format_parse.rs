@@ -65,6 +65,44 @@ fn parse_openai_responses_response(payload: &Value) -> Result<FormatEnvelope, St
     })
 }
 
+fn parse_openai_chat_response(payload: &Value) -> Result<FormatEnvelope, String> {
+    validate_payload_size(payload)?;
+
+    if !payload.is_object() {
+        return Err("OpenAI chat response must be a JSON object".to_string());
+    }
+    let choices = payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "OpenAI chat response must contain choices array".to_string())?;
+    if choices.is_empty() {
+        return Err("OpenAI chat response choices array must not be empty".to_string());
+    }
+
+    let model = payload
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Ok(FormatEnvelope {
+        format: "openai-chat".to_string(),
+        version: "v1".to_string(),
+        payload: payload.clone(),
+        metadata: Some(serde_json::json!({
+            "model": model,
+            "extracted_at": "resp_format_parse"
+        })),
+    })
+}
+
+fn unsupported_protocol_error(protocol: &str) -> String {
+    format!(
+        "Unsupported response protocol for Rust HubPipeline resp format parse: {}",
+        protocol
+    )
+}
+
 fn parse_anthropic_messages_response(payload: &Value) -> Result<FormatEnvelope, String> {
     validate_payload_size(payload)?;
 
@@ -111,20 +149,11 @@ pub fn parse_resp_format_envelope(
     input: RespFormatParseInput,
 ) -> Result<RespFormatParseOutput, String> {
     let envelope = match input.protocol.as_str() {
+        "openai-chat" => parse_openai_chat_response(&input.payload)?,
         "openai-responses" => parse_openai_responses_response(&input.payload)?,
         "anthropic-messages" => parse_anthropic_messages_response(&input.payload)?,
         "gemini-chat" => parse_gemini_chat_response(&input.payload)?,
-        _ => {
-            // Default fallback - create generic envelope
-            FormatEnvelope {
-                format: input.protocol.clone(),
-                version: "v1".to_string(),
-                payload: input.payload.clone(),
-                metadata: Some(serde_json::json!({
-                    "extracted_at": "resp_format_parse"
-                })),
-            }
-        }
+        _ => return Err(unsupported_protocol_error(&input.protocol)),
     };
 
     Ok(RespFormatParseOutput { envelope })
@@ -164,6 +193,43 @@ mod tests {
         assert_eq!(result.envelope.format, "openai-responses");
         assert_eq!(result.envelope.version, "v1");
         assert_eq!(result.envelope.metadata.as_ref().unwrap()["model"], "gpt-4");
+    }
+
+    #[test]
+    fn test_parse_openai_chat_response() {
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "id": "chatcmpl_123",
+                "model": "gpt-4",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "hello"},
+                    "finish_reason": "stop"
+                }]
+            }),
+            protocol: "openai-chat".to_string(),
+        };
+
+        let result = parse_resp_format_envelope(input).unwrap();
+        assert_eq!(result.envelope.format, "openai-chat");
+        assert_eq!(result.envelope.version, "v1");
+        assert_eq!(result.envelope.metadata.as_ref().unwrap()["model"], "gpt-4");
+    }
+
+    #[test]
+    fn test_openai_chat_missing_choices_fails_fast() {
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "id": "raw_unobservable_shape"
+            }),
+            protocol: "openai-chat".to_string(),
+        };
+
+        let result = parse_resp_format_envelope(input);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("OpenAI chat response must contain choices array"));
     }
 
     #[test]
@@ -223,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_protocol_fallback() {
+    fn test_unknown_protocol_fails_fast() {
         let input = RespFormatParseInput {
             payload: serde_json::json!({
                 "custom_field": "value"
@@ -231,9 +297,9 @@ mod tests {
             protocol: "custom-protocol".to_string(),
         };
 
-        let result = parse_resp_format_envelope(input).unwrap();
-        assert_eq!(result.envelope.format, "custom-protocol");
-        assert_eq!(result.envelope.version, "v1");
+        let result = parse_resp_format_envelope(input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unsupported response protocol"));
     }
 
     #[test]

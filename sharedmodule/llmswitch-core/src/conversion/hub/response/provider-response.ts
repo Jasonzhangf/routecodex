@@ -235,12 +235,7 @@ function responsesPayloadRequiresSubmitToolOutputs(payload: unknown): boolean {
 }
 
 function shouldRunProviderResponseRustHubPipeline(options: ProviderResponseConversionOptions): boolean {
-  if (options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch) {
-    const stopGateway = inspectStopGatewaySignalWithNative(options.providerResponse);
-    if (!stopGateway.observed) {
-      return false;
-    }
-  }
+  void options;
   return true;
 }
 
@@ -277,7 +272,7 @@ function runProviderResponseRustHubPipeline(options: ProviderResponseConversionO
   if (!nativeResponsePlan.success) {
     const code = nativeResponsePlan.error?.code ?? 'hub_pipeline_response_native_failed';
     const message = nativeResponsePlan.error?.message ?? 'Rust HubPipeline response path failed';
-    throw new Error(`${code}: ${message}`);
+    throw new Error(`Rust HubPipeline response path failed: ${code}: ${message}`);
   }
   if (!nativeResponsePlan.payload || typeof nativeResponsePlan.payload !== 'object') {
     throw new Error('Rust HubPipeline response path returned no payload');
