@@ -4,7 +4,7 @@ import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-ho
 type RouterMetadataInputBuildInput = {
   requestId: string;
   entryEndpoint: string;
-  processMode: 'chat' | 'passthrough';
+  processMode: 'chat';
   stream: boolean;
   direction: 'request' | 'response';
   providerProtocol: string;
@@ -24,14 +24,14 @@ type HubPipelineResultMetadataBuildInput = {
     metadata: Record<string, unknown>;
     entryEndpoint: string;
     stream: boolean;
-    processMode: 'chat' | 'passthrough';
+    processMode: 'chat';
     routeHint?: string;
   };
   outboundProtocol: string;
   target?: unknown;
   outboundStream?: boolean;
   capturedChatRequest: Record<string, unknown>;
-  passthroughAudit?: Record<string, unknown>;
+  
   shadowCompareBaselineMode?: 'off' | 'observe' | 'enforce';
   effectivePolicy?: { mode?: 'off' | 'observe' | 'enforce' };
   shadowBaselineProviderPayload?: Record<string, unknown>;
@@ -66,7 +66,7 @@ type CoerceStandardizedRequestInput = {
     id: string;
     entryEndpoint: string;
     stream: boolean;
-    processMode: 'chat' | 'passthrough';
+    processMode: 'chat';
     routeHint?: string;
   };
 };

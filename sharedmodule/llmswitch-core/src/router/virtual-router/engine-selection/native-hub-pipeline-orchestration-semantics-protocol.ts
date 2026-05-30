@@ -10,7 +10,7 @@ type HubPipelineInput = {
   payload: Record<string, unknown>;
   metadata: Record<string, unknown>;
   stream: boolean;
-  processMode: 'chat' | 'passthrough';
+  processMode: 'chat';
   direction: 'request' | 'response';
   stage: 'inbound' | 'outbound';
 };
@@ -272,7 +272,7 @@ export function resolveOutboundStreamIntentWithNative(
 export function applyOutboundStreamPreferenceWithNative(
   request: Record<string, unknown>,
   stream: boolean | undefined,
-  processMode?: 'chat' | 'passthrough'
+  processMode?: 'chat'
 ): Record<string, unknown> {
   const capability = 'applyOutboundStreamPreferenceJson';
   const fail = (reason?: string): Record<string, unknown> =>

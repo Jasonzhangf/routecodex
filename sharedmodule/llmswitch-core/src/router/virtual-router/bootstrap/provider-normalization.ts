@@ -57,7 +57,7 @@ export interface NormalizedProvider {
   enabled?: boolean;
   outboundProfile: string;
   compatibilityProfile: string;
-  processMode: 'chat' | 'passthrough';
+  processMode: 'chat';
   responsesConfig?: ResponsesProviderConfig;
   streaming?: 'always' | 'auto' | 'never';
   modelStreaming?: Record<string, 'always' | 'auto' | 'never'>;
@@ -138,7 +138,7 @@ export function normalizeProvider(providerId: string, raw: unknown): NormalizedP
   } = normalizeAnthropicThinking(provider, providerType);
   const defaultOutputTokens =
     explicitDefaultOutputTokens ??
-    (processMode === 'passthrough' ? undefined : DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS);
+    DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS;
   const deepseek = normalizeDeepSeekOptions(provider);
   const serverToolsDisabled =
     provider.serverToolsDisabled === true ||
@@ -308,14 +308,11 @@ function normalizeDeepSeekOptions(
   };
 }
 
-function normalizeProcessMode(value: unknown): 'chat' | 'passthrough' {
+function normalizeProcessMode(value: unknown): 'chat' {
   if (typeof value !== 'string') {
     return 'chat';
   }
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'passthrough') {
-    return 'passthrough';
-  }
   return 'chat';
 }
 

@@ -39,7 +39,7 @@ export interface RoutingInstruction {
   keyIndex?: number;
   model?: string;
   pathLength?: number;
-  processMode?: 'chat' | 'passthrough';
+  processMode?: 'chat';
   stopMessageText?: string;
   stopMessageMaxRepeats?: number;
   stopMessageStageMode?: 'on' | 'off' | 'auto';
@@ -61,7 +61,7 @@ export interface RoutingInstructionState {
     keyIndex?: number;
     model?: string;
     pathLength?: number;
-    processMode?: 'chat' | 'passthrough';
+    processMode?: 'chat';
   };
   preferTarget?: {
     provider?: string;
@@ -69,7 +69,7 @@ export interface RoutingInstructionState {
     keyIndex?: number;
     model?: string;
     pathLength?: number;
-    processMode?: 'chat' | 'passthrough';
+    processMode?: 'chat';
   };
   allowedProviders: Set<string>;
   disabledProviders: Set<string>;
