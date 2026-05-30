@@ -48,6 +48,18 @@ function extractProviderRateLimitKind(error: unknown): 'synthetic_cooldown' | 'd
   return undefined;
 }
 
+function readProviderProtocolErrorDetailUpstreamCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return undefined;
+  }
+  const details = (error as { details?: unknown }).details;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) {
+    return undefined;
+  }
+  const upstreamCode = (details as { upstreamCode?: unknown }).upstreamCode;
+  return typeof upstreamCode === 'string' && upstreamCode.trim() ? upstreamCode : undefined;
+}
+
 export function resolveRequestExecutorProviderErrorClassification(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;
@@ -105,6 +117,7 @@ export function resolveRequestExecutorProviderErrorReportPlan(args: {
     ?? normalizeCodeKey(args.retryError.errorCode);
   const upstreamCode =
     normalizeCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode)
+    ?? normalizeCodeKey(readProviderProtocolErrorDetailUpstreamCode(args.error))
     ?? normalizeCodeKey(args.retryError.upstreamCode);
   const statusCode =
     typeof args.retryError.statusCode === 'number'

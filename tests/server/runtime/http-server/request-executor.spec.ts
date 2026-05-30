@@ -208,6 +208,33 @@ describe('HubRequestExecutor failover', () => {
     expect(pipeline.execute).toHaveBeenCalledTimes(1);
   });
 
+  test('reports provider business upstream status from protocol details', () => {
+    const providerBusinessReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+      error: Object.assign(new Error('[hub_response] Upstream provider returned structured business error'), {
+        code: 'HTTP_429_2056',
+        statusCode: 429,
+        requestExecutorProviderErrorStage: 'host.response_contract',
+        details: {
+          upstreamCode: 'provider_status_2056',
+          providerStatusCode: 2056,
+          providerStatusMessage: 'usage limit exceeded, weekly usage limit reached'
+        }
+      }),
+      retryError: {
+        statusCode: 429,
+        errorCode: 'HTTP_429_2056',
+        reason: '[hub_response] Upstream provider returned structured business error'
+      },
+      stage: 'provider.send'
+    });
+    expect(providerBusinessReportPlan).toEqual({
+      errorCode: 'HTTP_429_2056',
+      upstreamCode: 'PROVIDER_STATUS_2056',
+      statusCode: 429,
+      stageHint: 'host.response_contract'
+    });
+  });
+
 
   test('keeps windsurf provider-account ownership out of executor retry routing', async () => {
     const recordAttempt = () => undefined;
