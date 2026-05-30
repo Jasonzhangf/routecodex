@@ -130,6 +130,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('if (nativeResponsePlan)');
     expect(source).toContain('options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch');
     expect(source).not.toContain('runtime.clock');
+    expect(source).not.toContain('runtime.webSearch');
     expect(source).not.toContain('effectPlan.effects.length !== 1');
   });
 

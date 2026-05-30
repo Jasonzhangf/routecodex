@@ -174,4 +174,52 @@ describe('provider response Rust native plan', () => {
       'chat_process.resp.stage10.sse_stream'
     ]);
   });
+
+  it('does not bypass Rust native response plan for webSearch runtime config without executors', async () => {
+    const recorder = new StubStageRecorder();
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_native_websearch_plan_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      __rt: { webSearch: { enabled: true, engines: [] } }
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_native_websearch_plan_1',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native websearch ok' },
+          finish_reason: 'stop'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false,
+      stageRecorder: recorder
+    });
+
+    expect(result.body?.choices?.[0]?.message?.content).toBe('native websearch ok');
+    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
+      effectPlan: expect.objectContaining({
+        effects: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'runtimeStateWrite',
+            payload: expect.objectContaining({
+              requestId: 'req_provider_response_native_websearch_plan_1',
+              clientProtocol: 'openai-chat',
+              payload: result.body
+            })
+          })
+        ])
+      })
+    }));
+    expect(recorder.entries.map((entry) => entry.stage)).toEqual([
+      'chat_process.resp.stage9.client_remap',
+      'chat_process.resp.stage10.sse_stream'
+    ]);
+  });
 });
