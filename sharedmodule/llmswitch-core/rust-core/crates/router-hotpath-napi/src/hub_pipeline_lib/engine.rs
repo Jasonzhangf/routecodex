@@ -16,6 +16,9 @@ use crate::hub_req_outbound_format_build::{build_format_request, FormatBuildInpu
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
 };
+use crate::req_process_stage1_tool_governance::{
+    apply_req_process_tool_governance, ToolGovernanceInput,
+};
 use crate::req_process_stage2_route_select::{apply_route_selection, RouteSelectionApplyInput};
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
@@ -64,6 +67,7 @@ impl HubPipelineEngine {
         } else {
             request.request_id.clone()
         };
+        let entry_endpoint = request.entry_endpoint.clone();
         let mut diagnostics = vec![diagnostic(
             HubPipelineStageId::NormalizeRequest,
             HubPipelineDiagnosticStatus::Started,
@@ -160,6 +164,32 @@ impl HubPipelineEngine {
                 "hasContextSnapshot": context_snapshot.is_some(),
             })),
         ));
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqProcessToolGovernance,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({ "metadataObject": normalized_metadata.is_object() })),
+        ));
+        let governed = apply_req_process_tool_governance(ToolGovernanceInput {
+            request: normalized_payload,
+            raw_payload: output.payload.clone().ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_missing_raw_payload",
+                    "Rust HubPipeline req governance requires normalized raw payload",
+                )
+            })?,
+            metadata: normalized_metadata.clone(),
+            entry_endpoint: entry_endpoint.clone(),
+            request_id: output.request_id.clone(),
+            has_active_stop_message_for_continue_execution: Some(true),
+        })
+        .map_err(|message| HubPipelineError::new("hub_pipeline_tool_governance_failed", message))?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqProcessToolGovernance,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({
+                "nodeResult": governed.node_result,
+            })),
+        ));
         let target = self
             .config
             .virtual_router
@@ -177,7 +207,7 @@ impl HubPipelineEngine {
             Some(serde_json::json!({ "targetObject": target.is_object() })),
         ));
         let mut routed = apply_route_selection(RouteSelectionApplyInput {
-            request: normalized_payload,
+            request: governed.processed_request,
             normalized_metadata,
             target,
             route_name: self
