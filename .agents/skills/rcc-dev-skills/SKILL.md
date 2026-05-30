@@ -1584,3 +1584,4 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-30 VR recoverable busy 精华
 - 全池 provider 临时 busy/冷却必须走唯一 recoverable 错误处理路径：Rust VR 输出 `HTTP_429` details，RequestExecutor 阻塞指数退避重试 3 次后才返回 429；禁止 `PROVIDER_NOT_AVAILABLE`，禁止 fallback/旁路。
+- 2026-05-30 router-mode relay 注意：5555 MiniMax 是 relay/HubPipeline/VR；`router-direct.hub_pipeline_failed` 只是 same-protocol direct 预选日志。预选遇到 route-pool recoverable 错误必须让请求回 RequestExecutor 唯一错误链处理，禁止吞成普通 direct skip 或改成 direct fallback。
