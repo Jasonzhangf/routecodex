@@ -134,4 +134,5 @@ Build/matrix：
 - 已把 req inbound context capture 接入 Rust engine：engine 对 `openai-responses` 调用 Rust `capture_req_inbound_responses_context_snapshot`，并把 snapshot 写入 route metadata 供 outbound merge 消费；验证 red gate 5/5、Rust `hub_pipeline_lib` 3/3、`sharedmodule/llmswitch-core` build 均通过。
 - 已把 req_process tool governance 接入 Rust engine：engine 调用 Rust `apply_req_process_tool_governance`，route stage 消费 governed `processed_request`；验证 red gate 5/5、Rust `hub_pipeline_lib` 3/3、`sharedmodule/llmswitch-core` build 均通过。
 - 已把 resp inbound format parse 接入 Rust engine：`direction == "response"` 分支调用 Rust `parse_resp_format_envelope` 并记录 `RespInboundFormatParse`；验证 red gate 6/6、Rust `hub_pipeline_lib` 3/3、`sharedmodule/llmswitch-core` build 均通过。
+- 已把 resp_process finalize 接入 Rust engine：response path 调用 Rust `finalize_chat_response` 并记录 `RespProcessFinalize`，输出 finalized payload；验证 red gate 6/6、Rust `hub_pipeline_lib` 3/3、`sharedmodule/llmswitch-core` build 均通过。
 - root `npm run build` 当前仍被既有 llmswitch rustification baseline audit 阻断（new TS file `native-hub-pipeline-orchestration-semantics-semantic-gate.ts` / nonNativeLoc baseline），不是本阶段 Rust lib req path 改动引入。

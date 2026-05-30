@@ -21,6 +21,7 @@ use crate::req_process_stage1_tool_governance::{
     apply_req_process_tool_governance, ToolGovernanceInput,
 };
 use crate::req_process_stage2_route_select::{apply_route_selection, RouteSelectionApplyInput};
+use crate::resp_process_stage2_finalize::{finalize_chat_response, FinalizeInput};
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
 use super::effect_plan::HubPipelineEffectPlan;
@@ -354,6 +355,32 @@ impl HubPipelineEngine {
             Some(serde_json::json!({ "format": parsed.envelope.format })),
         ));
         diagnostics.push(diagnostic(
+            HubPipelineStageId::RespProcessFinalize,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({ "stream": normalized_metadata.get("stream").and_then(Value::as_bool).unwrap_or(false) })),
+        ));
+        let finalized_payload = finalize_chat_response(FinalizeInput {
+            payload: parsed.envelope.payload,
+            stream: normalized_metadata
+                .get("stream")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            reasoning_mode: normalized_metadata
+                .get("reasoningMode")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            endpoint: normalized_metadata
+                .get("entryEndpoint")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            request_id: Some(output.request_id.clone()),
+        });
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::RespProcessFinalize,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({ "payloadObject": finalized_payload.is_object() })),
+        ));
+        diagnostics.push(diagnostic(
             HubPipelineStageId::EffectPlan,
             HubPipelineDiagnosticStatus::Completed,
             Some(serde_json::json!({ "effects": 0 })),
@@ -361,7 +388,7 @@ impl HubPipelineEngine {
         Ok(HubPipelineExecutionOutput {
             request_id: output.request_id,
             success: output.success,
-            payload: Some(serde_json::to_value(parsed.envelope)?),
+            payload: Some(finalized_payload),
             metadata: Some(normalized_metadata),
             effect_plan: HubPipelineEffectPlan::empty(),
             diagnostics,
