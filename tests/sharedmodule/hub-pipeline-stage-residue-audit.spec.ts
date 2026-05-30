@@ -75,6 +75,20 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).not.toContain('stages/req_outbound');
   });
 
+  it('rust lib response path must call Rust resp stage modules instead of TS stage shells', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const engineSource = fs.readFileSync(path.join(crateRoot, 'hub_pipeline_lib/engine.rs'), 'utf8');
+
+    expect(engineSource).toContain('parse_resp_format_envelope');
+    expect(engineSource).toContain('HubPipelineStageId::RespInboundFormatParse');
+    expect(engineSource).not.toContain('stages/resp_inbound');
+    expect(engineSource).not.toContain('stages/resp_process');
+    expect(engineSource).not.toContain('stages/resp_outbound');
+  });
+
   it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
     const wrapperPath = path.join(
       process.cwd(),

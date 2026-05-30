@@ -13,6 +13,7 @@ use crate::hub_req_outbound_context_merge::{
     apply_req_outbound_context_snapshot, ReqOutboundContextSnapshotApplyInput,
 };
 use crate::hub_req_outbound_format_build::{build_format_request, FormatBuildInput};
+use crate::hub_resp_inbound_format_parse::{parse_resp_format_envelope, RespFormatParseInput};
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
 };
@@ -68,6 +69,7 @@ impl HubPipelineEngine {
             request.request_id.clone()
         };
         let entry_endpoint = request.entry_endpoint.clone();
+        let direction = request.direction.clone();
         let mut diagnostics = vec![diagnostic(
             HubPipelineStageId::NormalizeRequest,
             HubPipelineDiagnosticStatus::Started,
@@ -103,6 +105,15 @@ impl HubPipelineEngine {
             .and_then(Value::as_str)
             .unwrap_or("openai-chat")
             .to_string();
+        if direction == "response" {
+            return self.execute_response_path(
+                output,
+                normalized_payload,
+                normalized_metadata,
+                provider_protocol,
+                diagnostics,
+            );
+        }
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqInboundFormatParse,
             HubPipelineDiagnosticStatus::Started,
@@ -309,6 +320,49 @@ impl HubPipelineEngine {
             success: output.success,
             payload: Some(compat.payload),
             metadata: Some(routed.normalized_metadata),
+            effect_plan: HubPipelineEffectPlan::empty(),
+            diagnostics,
+            error: output.error.map(|error| HubPipelineError {
+                code: error.code,
+                message: error.message,
+                details: error.details,
+            }),
+        })
+    }
+
+    fn execute_response_path(
+        &mut self,
+        output: crate::hub_pipeline::HubPipelineOutput,
+        normalized_payload: Value,
+        normalized_metadata: Value,
+        provider_protocol: String,
+        mut diagnostics: Vec<HubPipelineDiagnostic>,
+    ) -> HubPipelineResult<HubPipelineExecutionOutput> {
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::RespInboundFormatParse,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({ "protocol": provider_protocol })),
+        ));
+        let parsed = parse_resp_format_envelope(RespFormatParseInput {
+            payload: normalized_payload,
+            protocol: provider_protocol,
+        })
+        .map_err(HubPipelineError::from)?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::RespInboundFormatParse,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({ "format": parsed.envelope.format })),
+        ));
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::EffectPlan,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({ "effects": 0 })),
+        ));
+        Ok(HubPipelineExecutionOutput {
+            request_id: output.request_id,
+            success: output.success,
+            payload: Some(serde_json::to_value(parsed.envelope)?),
+            metadata: Some(normalized_metadata),
             effect_plan: HubPipelineEffectPlan::empty(),
             diagnostics,
             error: output.error.map(|error| HubPipelineError {
