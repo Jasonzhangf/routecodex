@@ -167,6 +167,10 @@ export class RouteErrorHub {
       payload.originalError && typeof payload.originalError === 'object'
         ? (payload.originalError as Record<string, unknown>)
         : undefined;
+    const nestedErrorDetails =
+      payload.details?.details && typeof payload.details.details === 'object' && !Array.isArray(payload.details.details)
+        ? (payload.details.details as Record<string, unknown>)
+        : undefined;
     const status =
       typeof originalError?.status === 'number'
         ? originalError.status
@@ -174,7 +178,13 @@ export class RouteErrorHub {
           ? originalError.statusCode
           : typeof payload.details?.status === 'number'
             ? payload.details.status
-            : undefined;
+            : typeof payload.details?.statusCode === 'number'
+              ? payload.details.statusCode
+              : typeof nestedErrorDetails?.status === 'number'
+                ? nestedErrorDetails.status
+                : typeof nestedErrorDetails?.statusCode === 'number'
+                  ? nestedErrorDetails.statusCode
+                  : undefined;
     return {
       message: payload.message,
       code: payload.code,
@@ -184,7 +194,9 @@ export class RouteErrorHub {
       providerType: payload.providerType,
       routeName: payload.routeName,
       details: {
+        ...nestedErrorDetails,
         ...payload.details,
+        ...(typeof status === 'number' ? { status, statusCode: status } : {}),
         requestId: payload.requestId,
         providerKey: payload.providerKey,
         providerType: payload.providerType,

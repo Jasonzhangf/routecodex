@@ -25,9 +25,7 @@ export function resolveActiveProcessModeAndAudit(args: {
 }): {
   activeProcessMode: "chat";
 } {
-  if (args.normalized.processMode === "passthrough") {
-    throw new Error(`[HubPipeline] processMode='passthrough' is no longer supported. Input metadata.processMode='passthrough' must be removed.`);
-  }
+  void args;
   return { activeProcessMode: "chat" };
 }
 
