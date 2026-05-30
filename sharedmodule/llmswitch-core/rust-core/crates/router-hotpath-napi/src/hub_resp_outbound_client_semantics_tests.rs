@@ -1442,11 +1442,11 @@ fn resolve_provider_response_context_helpers_parses_followup_and_tool_surface_mo
 
 #[test]
 fn resolve_sse_stream_mode_supports_gemini_chat() {
-    assert!(resolve_sse_stream_mode(true, "gemini-chat"));
-    assert!(resolve_sse_stream_mode(true, " gemini-chat "));
-    assert!(!resolve_sse_stream_mode(false, "gemini-chat"));
-    assert!(!resolve_sse_stream_mode(true, " unknown-protocol "));
-    assert!(!resolve_sse_stream_mode(true, "gemini-chat-preview"));
+    assert!(resolve_sse_stream_mode(true, "gemini-chat").unwrap());
+    assert!(resolve_sse_stream_mode(true, " gemini-chat ").unwrap());
+    assert!(!resolve_sse_stream_mode(false, "gemini-chat").unwrap());
+    assert!(resolve_sse_stream_mode(true, " unknown-protocol ").is_err());
+    assert!(resolve_sse_stream_mode(true, "gemini-chat-preview").is_err());
 }
 
 #[test]

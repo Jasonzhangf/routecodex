@@ -18,16 +18,24 @@ pub struct SseStreamOutput {
     pub payload: Value,
 }
 
-pub(crate) fn resolve_sse_stream_mode(wants_stream: bool, client_protocol: &str) -> bool {
-    // SSE streaming is only supported for specific protocols
+pub(crate) fn resolve_sse_stream_mode(
+    wants_stream: bool,
+    client_protocol: &str,
+) -> Result<bool, String> {
     match client_protocol.trim() {
-        "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini-chat" => wants_stream,
-        _ => false,
+        "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini-chat" => {
+            Ok(wants_stream)
+        }
+        "" => Err("Rust HubPipeline SSE stream requires client protocol".to_string()),
+        protocol => Err(format!(
+            "Rust HubPipeline SSE stream unsupported client protocol: {}",
+            protocol
+        )),
     }
 }
 
 pub fn process_sse_stream(input: SseStreamInput) -> Result<SseStreamOutput, String> {
-    let should_stream = resolve_sse_stream_mode(input.wants_stream, &input.client_protocol);
+    let should_stream = resolve_sse_stream_mode(input.wants_stream, &input.client_protocol)?;
 
     Ok(SseStreamOutput {
         should_stream,
@@ -56,40 +64,39 @@ mod tests {
 
     #[test]
     fn test_resolve_sse_stream_mode_openai_chat() {
-        assert!(resolve_sse_stream_mode(true, "openai-chat"));
-        assert!(!resolve_sse_stream_mode(false, "openai-chat"));
+        assert!(resolve_sse_stream_mode(true, "openai-chat").unwrap());
+        assert!(!resolve_sse_stream_mode(false, "openai-chat").unwrap());
     }
 
     #[test]
     fn test_resolve_sse_stream_mode_openai_responses() {
-        assert!(resolve_sse_stream_mode(true, "openai-responses"));
-        assert!(!resolve_sse_stream_mode(false, "openai-responses"));
+        assert!(resolve_sse_stream_mode(true, "openai-responses").unwrap());
+        assert!(!resolve_sse_stream_mode(false, "openai-responses").unwrap());
     }
 
     #[test]
     fn test_resolve_sse_stream_mode_anthropic_messages() {
-        assert!(resolve_sse_stream_mode(true, "anthropic-messages"));
-        assert!(!resolve_sse_stream_mode(false, "anthropic-messages"));
+        assert!(resolve_sse_stream_mode(true, "anthropic-messages").unwrap());
+        assert!(!resolve_sse_stream_mode(false, "anthropic-messages").unwrap());
     }
 
     #[test]
     fn test_resolve_sse_stream_mode_gemini_chat() {
-        assert!(resolve_sse_stream_mode(true, "gemini-chat"));
-        assert!(!resolve_sse_stream_mode(false, "gemini-chat"));
+        assert!(resolve_sse_stream_mode(true, "gemini-chat").unwrap());
+        assert!(!resolve_sse_stream_mode(false, "gemini-chat").unwrap());
     }
 
     #[test]
     fn test_resolve_sse_stream_mode_trims_protocol_whitespace() {
-        assert!(resolve_sse_stream_mode(true, " gemini-chat "));
-        assert!(resolve_sse_stream_mode(true, " openai-chat "));
-        assert!(!resolve_sse_stream_mode(false, " anthropic-messages "));
+        assert!(resolve_sse_stream_mode(true, " gemini-chat ").unwrap());
+        assert!(resolve_sse_stream_mode(true, " openai-chat ").unwrap());
+        assert!(!resolve_sse_stream_mode(false, " anthropic-messages ").unwrap());
     }
 
     #[test]
     fn test_resolve_sse_stream_mode_unknown_protocol() {
-        // Unknown protocols should not stream
-        assert!(!resolve_sse_stream_mode(true, "unknown-protocol"));
-        assert!(!resolve_sse_stream_mode(false, "unknown-protocol"));
+        assert!(resolve_sse_stream_mode(true, "unknown-protocol").is_err());
+        assert!(resolve_sse_stream_mode(false, "unknown-protocol").is_err());
     }
 
     #[test]
@@ -128,8 +135,8 @@ mod tests {
             wants_stream: true,
         };
 
-        let result = process_sse_stream(input).unwrap();
-        assert!(!result.should_stream); // Unknown protocol should not stream
+        let result = process_sse_stream(input);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -181,9 +188,9 @@ mod tests {
     fn test_process_sse_stream_json_outputs_camel_case_fields() {
         let input_json = serde_json::json!({
             "clientPayload": { "result": "ok" },
-            "clientProtocol": "unknown-protocol",
+            "clientProtocol": "openai-chat",
             "requestId": "req_output_case",
-            "wantsStream": true
+            "wantsStream": false
         })
         .to_string();
 

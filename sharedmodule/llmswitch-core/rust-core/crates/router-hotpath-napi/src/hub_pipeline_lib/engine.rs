@@ -18,6 +18,7 @@ use crate::hub_resp_outbound_client_semantics::{
     apply_client_passthrough_patch, build_anthropic_response_from_chat_value,
     build_responses_payload_from_chat_core, normalize_openai_chat_reasoning_outbound,
 };
+use crate::hub_resp_outbound_sse_stream::{process_sse_stream, SseStreamInput};
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
 };
@@ -443,6 +444,42 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Completed,
             Some(serde_json::json!({ "payloadObject": client_payload.is_object() })),
         ));
+        let client_protocol = normalized_metadata
+            .get("clientProtocol")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_missing_client_protocol",
+                    "Rust HubPipeline resp SSE stream requires metadata.clientProtocol",
+                )
+            })?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::RespOutboundSseStream,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({
+                "clientProtocol": client_protocol,
+                "wantsStream": normalized_metadata.get("stream").and_then(Value::as_bool).unwrap_or(false),
+            })),
+        ));
+        let stream_decision = process_sse_stream(SseStreamInput {
+            client_payload,
+            client_protocol: client_protocol.clone(),
+            request_id: output.request_id.clone(),
+            wants_stream: normalized_metadata
+                .get("stream")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        })
+        .map_err(|message| HubPipelineError::new("hub_pipeline_resp_sse_stream_failed", message))?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::RespOutboundSseStream,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({
+                "shouldStream": stream_decision.should_stream,
+                "payloadObject": stream_decision.payload.is_object(),
+            })),
+        ));
         diagnostics.push(diagnostic(
             HubPipelineStageId::EffectPlan,
             HubPipelineDiagnosticStatus::Completed,
@@ -451,7 +488,7 @@ impl HubPipelineEngine {
         Ok(HubPipelineExecutionOutput {
             request_id: output.request_id,
             success: output.success,
-            payload: Some(client_payload),
+            payload: Some(stream_decision.payload),
             metadata: Some(normalized_metadata),
             effect_plan: HubPipelineEffectPlan::empty(),
             diagnostics,
