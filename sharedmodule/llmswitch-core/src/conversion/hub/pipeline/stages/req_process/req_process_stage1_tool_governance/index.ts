@@ -4,7 +4,6 @@ import type { HubProcessNodeResult } from '../../../../process/chat-process.js';
 import { recordStage } from '../../../stages/utils.js';
 import { applyReqProcessToolGovernanceWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.js';
 import { applyHeartbeatDirectiveRuntimeSideEffectsFromProcessedRequest } from '../../../../process/blocks/chat-process-heartbeat-runtime-side-effects.js';
-import { applyChatProcessClockRuntimeBridge } from '../../../../process/blocks/chat-process-clock-runtime-bridge.js';
 import { isRecord } from '../../../../../../shared/common-utils.js';
 
 export interface ReqProcessStage1ToolGovernanceOptions {
@@ -61,15 +60,9 @@ export async function runReqProcessStage1ToolGovernance(
     hasActiveStopMessageForContinueExecution
   });
 
-  let processedRequest = parseProcessedRequest(nativeResult.processedRequest);
+  const processedRequest = parseProcessedRequest(nativeResult.processedRequest);
   const nodeResult = parseNodeResult(nativeResult.nodeResult);
   await applyHeartbeatDirectiveRuntimeSideEffectsFromProcessedRequest(processedRequest);
-
-  processedRequest = await applyChatProcessClockRuntimeBridge(
-    processedRequest as unknown as StandardizedRequest,
-    options.metadata,
-    options.requestId
-  ) as ProcessedRequest;
 
   const nodeResultMetadata =
     nodeResult.metadata && typeof nodeResult.metadata === 'object'

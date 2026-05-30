@@ -1,0 +1,70 @@
+use serde_json::json;
+
+use super::{execute_hub_pipeline_json, HubPipelineConfig, HubPipelineEngine, HubPipelineRequest};
+
+#[test]
+fn engine_execute_normalizes_request_and_returns_empty_effect_plan() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-1".to_string(),
+            endpoint: "/v1/chat/completions".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({ "model": "m", "messages": [{ "role": "user", "content": "hi" }] }),
+            metadata: json!({}),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "request".to_string(),
+            stage: "inbound".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(output.request_id, "req-1");
+    assert!(output.success);
+    assert_eq!(output.effect_plan.effects.len(), 0);
+    assert!(output
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("providerProtocol"))
+        .and_then(|value| value.as_str())
+        .is_some_and(|protocol| protocol == "openai-chat"));
+}
+
+#[test]
+fn execute_hub_pipeline_json_fails_fast_on_empty_input() {
+    let error = execute_hub_pipeline_json("   ".to_string()).unwrap_err();
+    assert_eq!(error.code, "hub_pipeline_empty_input");
+}
+
+#[test]
+fn execute_hub_pipeline_json_uses_total_entry_contract() {
+    let input = json!({
+        "config": {},
+        "request": {
+            "requestId": "req-2",
+            "endpoint": "/v1/chat/completions",
+            "entryEndpoint": "/v1/chat/completions",
+            "providerProtocol": "openai-chat",
+            "payload": { "messages": [{ "role": "user", "content": "hi" }] },
+            "metadata": {},
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+
+    assert_eq!(
+        output.get("requestId").and_then(|value| value.as_str()),
+        Some("req-2")
+    );
+    assert_eq!(
+        output
+            .pointer("/effectPlan/effects")
+            .and_then(|value| value.as_array())
+            .map(|items| items.len()),
+        Some(0)
+    );
+}

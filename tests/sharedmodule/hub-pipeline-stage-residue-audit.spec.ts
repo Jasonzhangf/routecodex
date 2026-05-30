@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { describe, expect, it } from '@jest/globals';
 
 interface ResidueCheck {
   label: string;
@@ -20,6 +21,56 @@ function collectMatches(source: string, checks: ResidueCheck[]): string[] {
 }
 
 describe('hub pipeline stage residue audit', () => {
+  it('rust lib total entry must exist before HubPipeline mainline can be switched', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const requiredFiles = [
+      'hub_pipeline_lib/mod.rs',
+      'hub_pipeline_lib/engine.rs',
+      'hub_pipeline_lib/types.rs',
+      'hub_pipeline_lib/errors.rs',
+      'hub_pipeline_lib/effect_plan.rs',
+      'hub_pipeline_lib/diagnostics.rs',
+      'hub_pipeline_lib/stage_catalog.rs',
+    ];
+
+    const missing = requiredFiles.filter((relativePath) => !fs.existsSync(path.join(crateRoot, relativePath)));
+    expect(missing).toEqual([]);
+
+    const libSource = fs.readFileSync(path.join(crateRoot, 'lib.rs'), 'utf8');
+    const engineSource = fs.readFileSync(path.join(crateRoot, 'hub_pipeline_lib/engine.rs'), 'utf8');
+    expect(libSource).toContain('mod hub_pipeline_lib;');
+    expect(libSource).toContain('executeHubPipelineJson');
+    expect(engineSource).toContain('pub struct HubPipelineEngine');
+    expect(engineSource).toContain('pub fn execute_hub_pipeline_json');
+    expect(engineSource).toContain('HubPipelineEffectPlan::empty()');
+  });
+
+  it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
+    const wrapperPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
+    );
+    const requiredExportsPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts',
+    );
+    const wrapperSource = fs.readFileSync(wrapperPath, 'utf8');
+    const requiredExportsSource = fs.readFileSync(requiredExportsPath, 'utf8');
+
+    expect(requiredExportsSource).toContain('"executeHubPipelineJson"');
+    expect(wrapperSource).toContain('export function executeHubPipelineWithNative');
+    expect(wrapperSource).toContain("const capability = 'executeHubPipelineJson'");
+    expect(wrapperSource).toContain('failNativeRequired<HubPipelineLibOutput>');
+    const functionBody = wrapperSource.slice(
+      wrapperSource.indexOf('export function executeHubPipelineWithNative'),
+      wrapperSource.indexOf('export function runHubPipelineOrchestrationWithNative'),
+    );
+    expect(functionBody).not.toContain('runHubPipelineJson');
+  });
+
   it('req_process stage1 must not directly depend on process-level TS semantic residue', () => {
     const filePath = path.join(
       process.cwd(),

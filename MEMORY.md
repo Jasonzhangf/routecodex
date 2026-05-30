@@ -1804,3 +1804,19 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 - **根因 2（decoder 过早 break）**：`responses-sse-to-json-converter` 在 `response.completed` 时 break，丢掉 `response.done`。OpenAI Responses API 中 `completed` ≠ terminal，`done` 才是真 terminal event。修复：decoder 只在 `response.done`/`response.error`/`response.cancelled` 时 break。
 - **根因 3（abort 信号丢失）**：`trackClientConnectionState` 用 Symbol-keyed 存 AbortSignal，Rust bridge JSON 序列化丢失 → decoder 无法感知 client disconnect。修复：轮询 `clientConnectionState.disconnected` 布尔值（200ms interval）。
 - **铁律**：Responses API 的 terminal event 是 `response.done`，不是 `response.completed`。`completed` 只表示回复构建完成，client SDK 仍需 `done` 判定 stream 结束。
+
+
+## 2026-05-30 Windsurf cascade busy polling fix (verified)
+
+- **真源**: cascade-continuation-block.ts executeWindsurfCascadeBusyRetry
+- **修复**: 新增 pollIdle 回调轮询 GetCascadeTrajectory，totalWaitMs=120000
+- **行为**: busy -> poll trajectory every 1s -> status===1 (IDLE) -> retry send
+- **超时**: 2min 后才返回 429 WINDSURF_CASCADE_BUSY
+- **日志**: cascade.busy.wait_idle / cascade.busy.final_timeout
+- **回归测试**: 28/28 passed (5 new RED tests for polling behavior)
+- **构建**: v0.90.2569, build:min passed, install:global passed
+- **待验证**: 真实 Windsurf session 续杯 trajectory 保持（需 Jason 实测确认）
+
+## 2026-05-31 Hub Pipeline Rust 化执行规则
+- Rust 化按阶段推进：每一阶段完成验证后必须本地 `git commit`，但不 push；最终全量验证通过后再 push。
+- 黑盒红测是关键门禁：每阶段先补/运行能证明边界的黑盒或 residue red test，再实现/收口，禁止只靠白盒改动声称完成。

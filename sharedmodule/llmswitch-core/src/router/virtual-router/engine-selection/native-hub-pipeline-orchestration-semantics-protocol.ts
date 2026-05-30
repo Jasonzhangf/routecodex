@@ -27,6 +27,18 @@ type HubPipelineOutput = {
   };
 };
 
+type HubPipelineLibInput = {
+  config?: Record<string, unknown>;
+  request: HubPipelineInput;
+};
+
+type HubPipelineLibOutput = HubPipelineOutput & {
+  effectPlan: {
+    effects: Array<Record<string, unknown>>;
+  };
+  diagnostics: Array<Record<string, unknown>>;
+};
+
 const NON_BLOCKING_PROTOCOL_LOG_THROTTLE_MS = 60_000;
 const nonBlockingProtocolLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-protocol.parse-failed');
@@ -137,6 +149,79 @@ function parseOrchestrationOutput(raw: string): HubPipelineOutput | null {
     }
   }
   return output;
+}
+
+function parseLibOutput(raw: string): HubPipelineLibOutput | null {
+  const parsed = parseJson('parseLibOutput', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  const requestId = typeof row.requestId === 'string' ? row.requestId : '';
+  const success = row.success === true;
+  const effectPlan = row.effectPlan && typeof row.effectPlan === 'object' && !Array.isArray(row.effectPlan)
+    ? row.effectPlan as Record<string, unknown>
+    : null;
+  const effects = Array.isArray(effectPlan?.effects) ? effectPlan.effects : null;
+  const diagnostics = Array.isArray(row.diagnostics) ? row.diagnostics : null;
+  if (!requestId || !effects || !diagnostics) {
+    return null;
+  }
+  const output: HubPipelineLibOutput = {
+    requestId,
+    success,
+    effectPlan: { effects: effects as Array<Record<string, unknown>> },
+    diagnostics: diagnostics as Array<Record<string, unknown>>
+  };
+  if (row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)) {
+    output.payload = row.payload as Record<string, unknown>;
+  }
+  if (row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)) {
+    output.metadata = row.metadata as Record<string, unknown>;
+  }
+  if (row.error && typeof row.error === 'object' && !Array.isArray(row.error)) {
+    const err = row.error as Record<string, unknown>;
+    const code = typeof err.code === 'string' ? err.code.trim() : '';
+    const message = typeof err.message === 'string' ? err.message.trim() : '';
+    if (code && message) {
+      output.error = {
+        code,
+        message,
+        ...(Object.prototype.hasOwnProperty.call(err, 'details') ? { details: err.details } : {})
+      };
+    }
+  }
+  return output;
+}
+
+export function executeHubPipelineWithNative(
+  input: HubPipelineLibInput
+): HubPipelineLibOutput {
+  const capability = 'executeHubPipelineJson';
+  const fail = (reason?: string) => failNativeRequired<HubPipelineLibOutput>(capability, reason);
+
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseLibOutput(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
 }
 
 export function runHubPipelineOrchestrationWithNative(

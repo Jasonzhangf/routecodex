@@ -13199,3 +13199,14 @@ Using skills: coding-principals + rcc-dev-skills
 ### 注意
 - Symbol-keyed abort signal 不可序列化，只能通过 `clientDisconnected` 布尔值轮询（200ms interval）检测 mid-stream disconnect
 - `response.completed` vs `response.done`：`completed` 表示"回复已构建完成"，`done` 是真 terminal event（OpenAI Responses API 规范）
+
+## 2026-05-31 Hub Pipeline Rust 化分析工作台
+- 任务：分析 Hub Pipeline Rust 化推进路径，目标完整 Rust lib，产出落盘 MD + summary。
+- 初步定位：TS Hub Pipeline 位于 `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/`、`process/`、`operation-table/semantic-mappers/`；Rust native 真源集中在 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/`，已有 `native_*hub*` TS wrapper 与多组 coverage 脚本。
+- 约束：Hub Pipeline / Chat Process 语义必须 Rust-only；TS 只能薄壳转发；禁止 fallback/双路径补偿；provider 特例不得进入 Hub Pipeline / VR。
+- 已落盘 `docs/audit/hub-pipeline-rust-lib-analysis-2026-05-31.md`：结论为当前不是缺 Rust 片段，而是缺 Rust 总控 API；推进路径应先在 `router-hotpath-napi` 内形成 `hub_pipeline_lib`，再让 TS 退化为 NAPI/Node runtime glue。
+- 已新增 `docs/goals/hub-pipeline-rust-lib-plan.md`：把 Hub Pipeline Rust lib 化执行计划从 audit 结论收敛成 /goal 可引用计划文档。
+- 进度：新增 Rust `hub_pipeline_lib` typed contract + `HubPipelineEngine` skeleton + NAPI `executeHubPipelineJson`；TS 增加 fail-fast wrapper `executeHubPipelineWithNative` 与 required export gate。当前未切 TS 主链，避免行为跳变。
+- 验证：`cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi hub_pipeline_lib -- --nocapture` 通过（3 passed）；`cd sharedmodule/llmswitch-core && npm run build` 通过。
+- 缺口：`HubPipelineEngine` 当前只包裹 existing `run_hub_pipeline` normalize-level skeleton；TS 主链未切换；req/resp/chat_process/mapper semantic residue 尚未删除。
+- 用户补充硬要求：每阶段都提交但不推送；最后验证以后再推送；黑盒红测非常重要。已记录到 `MEMORY.md`。

@@ -52,6 +52,7 @@
 | `chat-process-generic-marker-strip.ts` | routing marker 保留判断 | 薄决策包装器（18 行），无 payload 语义；Rust 无对应能力时可保留 |
 
 ## Rust 真源路径索引
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/` → Hub Pipeline Rust lib 化总控入口骨架（`HubPipelineEngine`、typed contract、effect plan、diagnostics）；当前已接入 NAPI `executeHubPipelineJson`，但 TS 主链尚未切到该总入口。
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_response_compat.rs` → 消息过滤（空 assistant / 模板 / mirror / tool_call id 归一）
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs` → req_process 工具治理主入口
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs` → resp_process 工具治理主入口

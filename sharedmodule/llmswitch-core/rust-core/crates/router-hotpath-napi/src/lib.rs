@@ -44,6 +44,7 @@ mod hub_chat_envelope_validator;
 mod hub_heartbeat_directives;
 mod hub_pipeline;
 mod hub_pipeline_blocks;
+mod hub_pipeline_lib;
 mod hub_pipeline_session_identifiers;
 mod hub_pipeline_target_utils;
 mod hub_protocol_spec_semantics;
@@ -755,6 +756,12 @@ pub fn should_log_client_remap_debug_json(input_json: String) -> NapiResult<Stri
 #[napi(js_name = "extractClientToolIndexJson")]
 pub fn extract_client_tool_index_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::extract_client_tool_index_json(input_json)
+}
+
+#[napi(js_name = "executeHubPipelineJson")]
+pub fn execute_hub_pipeline_json(input_json: String) -> NapiResult<String> {
+    hub_pipeline_lib::execute_hub_pipeline_json(input_json)
+        .map_err(|error| napi::Error::from_reason(format!("{}: {}", error.code, error.message)))
 }
 
 #[napi(js_name = "resolveClientToolFromIndexJson")]
