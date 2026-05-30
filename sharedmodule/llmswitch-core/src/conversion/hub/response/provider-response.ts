@@ -42,6 +42,7 @@ import {
 import {
   runRespOutboundStage2SseStream
 } from '../pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.js';
+import { executeHubPipelineWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
 import { applyResponseBlacklistWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
 import {
   hasNewGovernedServerToolCallsWithNative,
@@ -230,6 +231,64 @@ function responsesPayloadRequiresSubmitToolOutputs(payload: unknown): boolean {
   return responsesPayloadRequiresSubmitToolOutputsWithNative(payload);
 }
 
+function shouldRunProviderResponseRustHubPipeline(options: ProviderResponseConversionOptions): boolean {
+  if (options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch) {
+    return false;
+  }
+  const rt = (options.context as Record<string, unknown>).__rt;
+  if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
+    const runtime = rt as Record<string, unknown>;
+    if (runtime.serverToolFollowup || runtime.servertool || runtime.clock || runtime.webSearch) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function runProviderResponseRustHubPipeline(options: ProviderResponseConversionOptions): {
+  payload?: JsonObject;
+  effectPlan: { effects: Array<Record<string, unknown>> };
+  diagnostics: Array<Record<string, unknown>>;
+} {
+  const nativeResponsePlan = executeHubPipelineWithNative({
+    config: {},
+    request: {
+      requestId: options.context.requestId || 'unknown',
+      endpoint: options.entryEndpoint,
+      entryEndpoint: options.entryEndpoint,
+      providerProtocol: options.providerProtocol,
+      payload: options.providerResponse,
+      metadata: {
+        ...options.context,
+        clientProtocol: resolveProviderResponseContextSignals(options.context, options.entryEndpoint).clientProtocol,
+        entryEndpoint: options.entryEndpoint,
+        stream: options.wantsStream
+      },
+      stream: options.wantsStream,
+      processMode: 'chat',
+      direction: 'response',
+      stage: 'outbound'
+    }
+  });
+  if (!nativeResponsePlan.success) {
+    const code = nativeResponsePlan.error?.code ?? 'hub_pipeline_response_native_failed';
+    const message = nativeResponsePlan.error?.message ?? 'Rust HubPipeline response path failed';
+    throw new Error(`${code}: ${message}`);
+  }
+  if (!nativeResponsePlan.payload || typeof nativeResponsePlan.payload !== 'object') {
+    throw new Error('Rust HubPipeline response path returned no payload');
+  }
+  const effects = nativeResponsePlan.effectPlan.effects;
+  if (!Array.isArray(effects)) {
+    throw new Error('Rust HubPipeline response path returned invalid effect plan');
+  }
+  return {
+    payload: nativeResponsePlan.payload as JsonObject,
+    effectPlan: { effects },
+    diagnostics: nativeResponsePlan.diagnostics
+  };
+}
+
 export interface ProviderResponseConversionOptions {
   providerProtocol: ProviderProtocol;
   providerResponse: JsonObject;
@@ -276,6 +335,15 @@ export async function convertProviderResponse(
   options: ProviderResponseConversionOptions
 ): Promise<ProviderResponseConversionResult> {
   const requestId = options.context.requestId || 'unknown';
+  const nativeResponsePlan = shouldRunProviderResponseRustHubPipeline(options)
+    ? runProviderResponseRustHubPipeline(options)
+    : null;
+  if (nativeResponsePlan && !Array.isArray(nativeResponsePlan.effectPlan.effects)) {
+    throw new Error('Rust HubPipeline response native effect plan unavailable');
+  }
+  if (nativeResponsePlan) {
+    (options.context as Record<string, unknown>).__nativeResponsePlan = nativeResponsePlan;
+  }
   const contextSignals = resolveProviderResponseContextSignals(options.context, options.entryEndpoint);
   const isFollowup = contextSignals.isFollowup;
   // ServerTool followups are internal hops. They must return canonical OpenAI-chat-like payloads

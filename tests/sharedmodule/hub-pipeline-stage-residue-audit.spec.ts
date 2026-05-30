@@ -112,6 +112,21 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('const shouldStream');
   });
 
+  it('provider response mainline must invoke Rust HubPipeline total entry before TS residue stages', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+
+    expect(source).toContain('executeHubPipelineWithNative');
+    expect(source).toContain('shouldRunProviderResponseRustHubPipeline');
+    expect(source).toContain('runProviderResponseRustHubPipeline');
+    expect(source).toContain('nativeResponsePlan.effectPlan.effects');
+    expect(source).toContain('__nativeResponsePlan');
+    expect(source).toContain('options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch');
+  });
+
   it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
     const wrapperPath = path.join(
       process.cwd(),
