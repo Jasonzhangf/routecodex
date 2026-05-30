@@ -14,6 +14,10 @@ use crate::hub_req_outbound_context_merge::{
 };
 use crate::hub_req_outbound_format_build::{build_format_request, FormatBuildInput};
 use crate::hub_resp_inbound_format_parse::{parse_resp_format_envelope, RespFormatParseInput};
+use crate::hub_resp_outbound_client_semantics::{
+    apply_client_passthrough_patch, build_anthropic_response_from_chat_value,
+    build_responses_payload_from_chat_core, normalize_openai_chat_reasoning_outbound,
+};
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
 };
@@ -423,6 +427,23 @@ impl HubPipelineEngine {
             Some(serde_json::json!({ "payloadObject": finalized_payload.is_object() })),
         ));
         diagnostics.push(diagnostic(
+            HubPipelineStageId::RespOutboundClientRemap,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({
+                "clientProtocol": normalized_metadata.get("clientProtocol").and_then(Value::as_str),
+            })),
+        ));
+        let client_payload = build_client_payload_for_protocol(
+            finalized_payload,
+            &normalized_metadata,
+            output.request_id.as_str(),
+        )?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::RespOutboundClientRemap,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({ "payloadObject": client_payload.is_object() })),
+        ));
+        diagnostics.push(diagnostic(
             HubPipelineStageId::EffectPlan,
             HubPipelineDiagnosticStatus::Completed,
             Some(serde_json::json!({ "effects": 0 })),
@@ -430,7 +451,7 @@ impl HubPipelineEngine {
         Ok(HubPipelineExecutionOutput {
             request_id: output.request_id,
             success: output.success,
-            payload: Some(finalized_payload),
+            payload: Some(client_payload),
             metadata: Some(normalized_metadata),
             effect_plan: HubPipelineEffectPlan::empty(),
             diagnostics,
@@ -548,6 +569,60 @@ fn apply_context_snapshot_to_format_envelope(
         }
     }
     Ok(())
+}
+
+fn build_client_payload_for_protocol(
+    finalized_payload: Value,
+    metadata: &Value,
+    request_id: &str,
+) -> HubPipelineResult<Value> {
+    let client_protocol = metadata
+        .get("clientProtocol")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            HubPipelineError::new(
+                "hub_pipeline_missing_client_protocol",
+                "Rust HubPipeline resp client remap requires metadata.clientProtocol",
+            )
+        })?;
+    let client_payload = match client_protocol {
+        "openai-chat" => {
+            normalize_openai_chat_reasoning_outbound(&finalized_payload).ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_resp_client_remap_failed",
+                    "Rust HubPipeline openai-chat client remap returned no payload",
+                )
+            })?
+        }
+        "anthropic-messages" => {
+            let alias_map = metadata
+                .get("requestSemantics")
+                .and_then(|semantics| semantics.get("aliasMap"));
+            build_anthropic_response_from_chat_value(&finalized_payload, alias_map)
+        }
+        "openai-responses" => {
+            let context = serde_json::json!({ "requestId": request_id });
+            build_responses_payload_from_chat_core(&finalized_payload, Some(request_id), &context)
+                .map_err(|message| {
+                HubPipelineError::new("hub_pipeline_resp_client_remap_failed", message)
+            })?
+        }
+        _ => {
+            return Err(HubPipelineError::new(
+                "hub_pipeline_unsupported_client_protocol",
+                format!(
+                    "Rust HubPipeline resp client remap unsupported client protocol: {}",
+                    client_protocol
+                ),
+            ));
+        }
+    };
+    Ok(apply_client_passthrough_patch(
+        &client_payload,
+        &finalized_payload,
+    ))
 }
 
 fn build_adapter_context(
