@@ -4,7 +4,18 @@ use super::{execute_hub_pipeline_json, HubPipelineConfig, HubPipelineEngine, Hub
 
 #[test]
 fn engine_execute_normalizes_request_and_returns_empty_effect_plan() {
-    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig {
+        virtual_router: json!({
+            "target": {
+                "providerKey": "openai.m",
+                "runtimeKey": "openai",
+                "modelId": "m"
+            },
+            "routeName": "default"
+        }),
+        ..HubPipelineConfig::default()
+    })
+    .unwrap();
     let output = engine
         .execute(HubPipelineRequest {
             request_id: "req-1".to_string(),
@@ -40,7 +51,16 @@ fn execute_hub_pipeline_json_fails_fast_on_empty_input() {
 #[test]
 fn execute_hub_pipeline_json_uses_total_entry_contract() {
     let input = json!({
-        "config": {},
+        "config": {
+            "virtualRouter": {
+                "target": {
+                    "providerKey": "openai.m",
+                    "runtimeKey": "openai",
+                    "modelId": "m"
+                },
+                "routeName": "default"
+            }
+        },
         "request": {
             "requestId": "req-2",
             "endpoint": "/v1/chat/completions",

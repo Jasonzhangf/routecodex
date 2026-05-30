@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 
 use crate::shared_json_utils::read_object_trimmed_string;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteSelectionApplyInput {
     pub request: Value,
@@ -19,7 +19,7 @@ pub struct RouteSelectionApplyInput {
     pub thinking: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteSelectionApplyOutput {
     pub request: Value,

@@ -3,7 +3,11 @@ use serde_json::Value;
 
 use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
 use crate::hub_req_inbound_format_parse::{parse_format_envelope, FormatParseInput};
+use crate::hub_req_inbound_semantic_lift::{
+    apply_req_inbound_semantic_lift, ReqInboundSemanticLiftApplyInput,
+};
 use crate::hub_req_outbound_format_build::{build_format_request, FormatBuildInput};
+use crate::req_process_stage2_route_select::{apply_route_selection, RouteSelectionApplyInput};
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
 use super::effect_plan::HubPipelineEffectPlan;
@@ -102,12 +106,85 @@ impl HubPipelineEngine {
             Some(serde_json::json!({ "format": parsed.envelope.format })),
         ));
         diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqInboundSemanticLift,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({ "protocol": provider_protocol })),
+        ));
+        let lifted_envelope = apply_req_inbound_semantic_lift(ReqInboundSemanticLiftApplyInput {
+            chat_envelope: serde_json::to_value(&parsed.envelope)?,
+            payload: Some(normalized_payload.clone()),
+            protocol: Some(provider_protocol.clone()),
+            entry_endpoint: normalized_metadata
+                .get("entryEndpoint")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            responses_resume: None,
+            session_id: normalized_metadata
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            conversation_id: normalized_metadata
+                .get("conversationId")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        });
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqInboundSemanticLift,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({ "envelopeObject": lifted_envelope.is_object() })),
+        ));
+        let target = self
+            .config
+            .virtual_router
+            .get("target")
+            .cloned()
+            .ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_missing_route_target",
+                    "Rust HubPipeline req route stage requires config.virtualRouter.target",
+                )
+            })?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqProcessRouteSelect,
+            HubPipelineDiagnosticStatus::Started,
+            Some(serde_json::json!({ "targetObject": target.is_object() })),
+        ));
+        let routed = apply_route_selection(RouteSelectionApplyInput {
+            request: normalized_payload,
+            normalized_metadata,
+            target,
+            route_name: self
+                .config
+                .virtual_router
+                .get("routeName")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            original_model: lifted_envelope
+                .get("payload")
+                .and_then(|payload| payload.get("model"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            thinking: None,
+        })
+        .map_err(HubPipelineError::from)?;
+        diagnostics.push(diagnostic(
+            HubPipelineStageId::ReqProcessRouteSelect,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({
+                "metadataObject": routed.normalized_metadata.is_object(),
+            })),
+        ));
+        let mut format_envelope = serde_json::to_value(&parsed.envelope)?;
+        if let Some(envelope) = format_envelope.as_object_mut() {
+            envelope.insert("payload".to_string(), routed.request);
+        }
+        diagnostics.push(diagnostic(
             HubPipelineStageId::ReqOutboundFormatBuild,
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "protocol": provider_protocol })),
         ));
         let outbound = build_format_request(FormatBuildInput {
-            format_envelope: serde_json::to_value(&parsed.envelope)?,
+            format_envelope,
             protocol: provider_protocol,
         })
         .map_err(HubPipelineError::from)?;

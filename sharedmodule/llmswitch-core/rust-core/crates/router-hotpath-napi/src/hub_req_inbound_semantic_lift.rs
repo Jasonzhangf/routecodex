@@ -32,14 +32,14 @@ struct ReqInboundSemanticLiftInput {
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct ReqInboundSemanticLiftApplyInput {
-    chat_envelope: Value,
-    payload: Option<Value>,
-    protocol: Option<String>,
-    entry_endpoint: Option<String>,
-    responses_resume: Option<Value>,
-    session_id: Option<String>,
-    conversation_id: Option<String>,
+pub struct ReqInboundSemanticLiftApplyInput {
+    pub chat_envelope: Value,
+    pub payload: Option<Value>,
+    pub protocol: Option<String>,
+    pub entry_endpoint: Option<String>,
+    pub responses_resume: Option<Value>,
+    pub session_id: Option<String>,
+    pub conversation_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -315,7 +315,7 @@ fn ensure_object(value: &mut Value) -> &mut Map<String, Value> {
     value.as_object_mut().expect("object just initialized")
 }
 
-fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) -> Value {
+pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) -> Value {
     let mut chat_envelope = input.chat_envelope;
     let has_direct_tool_outputs = ensure_object(&mut chat_envelope)
         .get("toolOutputs")
