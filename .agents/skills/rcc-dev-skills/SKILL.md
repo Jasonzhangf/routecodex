@@ -1577,3 +1577,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-30 调试精华（minimonth / provider outbound sanitizer）
 - 看到 `sanitizeProviderOutboundPayloadWithNative not available` 时，先查 `sharedmodule/llmswitch-core` native + wrapper + required-export 三点是否同步；`minimonth provider.traffic.acquire wait` 单独不是失败证据。
+
+### 2026-05-30 VR empty-pool / excludedProviderKeys 精华
+- 看到 `No available providers after applying routing instructions` 且日志有 `excludedProviderKeys`/retry 避让/并发满时，先查 Rust `apply_standard_filters`；`excludedProviderKeys` 只能避让，不能把 routing-state 后的 route pool 删空。
+- 红测必须包含真实 `/v1/responses` HTTP handler + HubPipeline：metadata exclusion 覆盖 default pool 全部目标时仍返回 200 并选回池内 provider。

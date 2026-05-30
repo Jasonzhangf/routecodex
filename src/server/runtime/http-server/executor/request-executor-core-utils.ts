@@ -64,6 +64,7 @@ export function isPoolExhaustedPipelineError(pipelineError: unknown): boolean {
       : String(pipelineError ?? 'Unknown error');
   return (
     pipelineErrorCode === 'PROVIDER_NOT_AVAILABLE' ||
+    pipelineErrorCode === 'HTTP_429' ||
     pipelineErrorCode === 'ERR_NO_PROVIDER_TARGET' ||
     /all providers unavailable/i.test(pipelineErrorMessage) ||
     /virtual router did not produce a provider target/i.test(pipelineErrorMessage)

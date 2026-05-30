@@ -1786,3 +1786,7 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 ## 2026-05-30 minimonth / provider outbound sanitizer 真相
 - `minimonth` 日志里的 `provider.traffic.acquire ... wait` 不是失败；本次失败真源是 route 到 `sdfv/cc` 后 bridge 调 `sanitizeProviderOutboundPayloadWithNative`，但 llmswitch-core native/wrapper 符号缺失。
 - provider outbound sanitizer 必须同时具备：Rust NAPI `sanitizeProviderOutboundPayloadJson`、core TS wrapper `sanitizeProviderOutboundPayloadWithNative`、RouteCodex bridge `sanitizeProviderOutboundPayload`、`native-router-hotpath-required-exports.ts` required export。缺任一处会 fail-fast，不允许 fallback。
+
+## 2026-05-30 VR excludedProviderKeys 空池规则
+- 已验证：`excludedProviderKeys` 是 retry/避让信号，不是硬性删除路由池的真源；若 exclusion 覆盖当前 route pool 全部可用目标，Rust Virtual Router 必须保持 routing-state 后的候选池非空并继续按 priority/weighted 选择，禁止抛 `PROVIDER_NOT_AVAILABLE`。
+- 回归锚点：HTTP 黑盒 `tests/server/handlers/responses-handler.routing-empty-pool.spec.ts` 必须先红后绿；Rust 锚点 `routing_exclusions_do_not_empty_pool_when_all_targets_excluded`。

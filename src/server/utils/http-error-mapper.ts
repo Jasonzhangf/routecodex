@@ -189,7 +189,7 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
 
   if (status === 429) {
     return formatPayload(429, {
-      message: 'Rate limited by upstream provider',
+      message: effectiveUpstreamMessage || baseMessage || 'Rate limited by upstream provider',
       code: upstreamCode || effectiveCode || 'rate_limit',
       request_id: requestId,
       provider_key: providerKey,

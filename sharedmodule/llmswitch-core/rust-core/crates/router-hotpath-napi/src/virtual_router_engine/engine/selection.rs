@@ -127,9 +127,22 @@ impl VirtualRouterEngineCore {
         let filtered =
             filter_candidates_by_state(candidates, routing_state, &self.provider_registry);
         let route_candidates: Vec<String> = filtered
-            .into_iter()
+            .iter()
+            .cloned()
             .filter(|key| !excluded_keys.contains(key))
             .collect();
+        let mut available = self.collect_available_candidates(env, &route_candidates);
+        if available.is_empty()
+            && !excluded_keys.is_empty()
+            && route_candidates.len() < filtered.len()
+        {
+            available = self.collect_available_candidates(env, &filtered);
+        }
+        available
+    }
+
+    fn collect_available_candidates(&mut self, env: Env, candidates: &[String]) -> Vec<String> {
+        let route_candidates: Vec<String> = candidates.iter().cloned().collect();
         let now = now_ms();
         let mut available: Vec<String> = Vec::new();
         for key in &route_candidates {
@@ -804,9 +817,16 @@ pub(crate) fn build_provider_not_available_error(
     }
 
     if let Some(min_wait_ms) = min_recoverable_cooldown_ms {
+        let has_concurrency_busy = hints
+            .iter()
+            .any(|item| item.source == "concurrency.busy");
         let mut sorted_hints = hints;
         sorted_hints.sort_by_key(|item| item.wait_ms);
         let details = json!({
+            "status": 429,
+            "statusCode": 429,
+            "retryable": true,
+            "retryAfterMs": min_wait_ms,
             "minRecoverableCooldownMs": min_wait_ms,
             "candidateProviderCount": candidate_keys.len(),
             "candidateProviderKeys": candidate_keys,
@@ -828,8 +848,18 @@ pub(crate) fn build_provider_not_available_error(
                 .collect::<Vec<Value>>()
         });
         return format_virtual_router_error_with_details(
-            "PROVIDER_NOT_AVAILABLE",
-            message,
+            "HTTP_429",
+            if has_concurrency_busy {
+                format!(
+                    "Route providers are temporarily busy; retry after {}ms",
+                    min_wait_ms
+                )
+            } else {
+                format!(
+                    "Route providers are temporarily unavailable; retry after {}ms",
+                    min_wait_ms
+                )
+            },
             &details,
         );
     }
@@ -957,6 +987,38 @@ mod tests {
             )
             .expect("selection should succeed");
         assert_eq!(selected.provider_key, "mimo.key1.mimo-v2.5-pro");
+    }
+
+    #[test]
+    fn routing_exclusions_do_not_empty_pool_when_all_targets_excluded() {
+        let mut core = build_priority_test_core();
+        let classification = ClassificationResult {
+            route_name: "thinking".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["thinking".to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let routing_state = RoutingInstructionState::default();
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({
+                    "excludedProviderKeys": [
+                        "sdfv.key1.gpt-5.4",
+                        "mimo.key1.mimo-v2.5-pro"
+                    ]
+                }),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("selection must keep a non-empty route pool");
+
+        assert_eq!(selected.provider_key, "sdfv.key1.gpt-5.4");
     }
 
     #[test]

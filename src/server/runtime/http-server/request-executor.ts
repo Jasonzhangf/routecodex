@@ -494,6 +494,7 @@ export class HubRequestExecutor implements RequestExecutor {
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;
         let poolCooldownWaitBudgetMs = 60 * 1000;
+        let recoverableRoutePoolRetries = 0;
         let blockingSingletonRecoverablePoolCooldown = false;
         let forcedRouteHint: string | undefined;
         let contextOverflowRetries = 0;
@@ -590,9 +591,23 @@ export class HubRequestExecutor implements RequestExecutor {
             }
             if (
               cooldownWaitMs &&
-              attempt < maxAttempts &&
-              poolCooldownWaitBudgetMs >= cooldownWaitMs
+              recoverableRoutePoolRetries < 3
             ) {
+              const routePoolBackoffMs = consumeRecoverableErrorBackoffMs(
+                buildRecoverableErrorBackoffKey({
+                  providerKey: `route_pool:${portScope}`,
+                  statusCode: extractStatusCodeFromError(pipelineError),
+                  errorCode: readString(asFlatRecord(pipelineError)?.code),
+                  upstreamCode: readString(asFlatRecord(pipelineError)?.upstreamCode),
+                  reason: pipelineError instanceof Error ? pipelineError.message : String(pipelineError ?? '')
+                }),
+                {
+                  statusCode: extractStatusCodeFromError(pipelineError),
+                  errorCode: readString(asFlatRecord(pipelineError)?.code),
+                  upstreamCode: readString(asFlatRecord(pipelineError)?.upstreamCode),
+                  reason: pipelineError instanceof Error ? pipelineError.message : String(pipelineError ?? '')
+                }
+              );
               logStage(`${pipelineLabel}.completed`, providerRequestId, {
                 route: undefined,
                 target: undefined,
@@ -602,13 +617,17 @@ export class HubRequestExecutor implements RequestExecutor {
               });
               logStage('provider.route_pool_cooldown_wait', providerRequestId, {
                 attempt,
-                waitMs: cooldownWaitMs,
+                retry: recoverableRoutePoolRetries + 1,
+                maxRetries: 3,
+                waitMs: routePoolBackoffMs,
+                recoverableCooldownWaitMs: cooldownWaitMs,
                 waitBudgetMs: poolCooldownWaitBudgetMs,
                 reason: 'provider_pool_cooling_down'
               });
-              poolCooldownWaitBudgetMs -= cooldownWaitMs;
+              recoverableRoutePoolRetries += 1;
+              poolCooldownWaitBudgetMs -= routePoolBackoffMs;
               await waitWithClientAbortSignal(
-                cooldownWaitMs,
+                routePoolBackoffMs,
                 clientAbortSignal,
                 logRequestExecutorNonBlockingError
               );
