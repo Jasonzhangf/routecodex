@@ -57,7 +57,7 @@ type SseFinishReasonTracker = {
 type SseTerminalWatch = {
   sawTerminalChunk: boolean;
   terminalSource?: string;
-  pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.required_action';
+  pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.required_action' | 'response.error' | 'response.cancelled';
 };
 
 
@@ -187,15 +187,16 @@ function buildResponsesTerminalSseFramesFromProbe(probe: Record<string, unknown>
   if (typeof probe.output_text === 'string') responsePayload.output_text = probe.output_text;
   if (probe.reasoning && typeof probe.reasoning === 'object' && !Array.isArray(probe.reasoning)) responsePayload.reasoning = probe.reasoning;
   const frames: string[] = [];
+  const donePayload = { type: 'response.done', response: responsePayload };
   if (requiredAction) {
     frames.push(`event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response: responsePayload, required_action: requiredAction })}\n\n`);
     frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
-    frames.push('data: [DONE]\n\n');
+    frames.push(`event: response.done\ndata: ${JSON.stringify(donePayload)}\n\n`);
     return frames;
   }
-  if (status === 'completed') {
+  if (status === 'completed' || Object.keys(probe).length > 0) {
     frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
-    frames.push('data: [DONE]\n\n');
+    frames.push(`event: response.done\ndata: ${JSON.stringify(donePayload)}\n\n`);
   }
   return frames;
 }
@@ -915,8 +916,11 @@ function updateSseTerminalTrackerFromChunk(
         continue;
       }
       finishTracker.finishReason = derived;
-      finishTracker.seenTerminalEvent = true;
-      terminalWatch.sawTerminalChunk = true;
+      const trueTerminal = parsedType === 'response.done' || parsedType === 'response.error' || parsedType === 'response.cancelled';
+      if (trueTerminal) {
+        finishTracker.seenTerminalEvent = true;
+        terminalWatch.sawTerminalChunk = true;
+      }
       terminalWatch.terminalSource = terminalWatch.terminalSource ?? eventName ?? 'finish_reason';
     } catch {
       // ignore parse failure; handled by explicit response.* scanning below
@@ -932,10 +936,7 @@ function updateSseTerminalTrackerFromChunk(
       .filter((line) => line.startsWith('event:'))
       .map((line) => line.slice('event:'.length).trim())
       .find((name) => name === 'response.completed' || name === 'response.done' || name === 'response.required_action');
-    const effectiveTerminalEvent = eventName
-      ?? (terminalWatch.pendingTerminalEvent && lines.some((line) => line.startsWith('data:'))
-        ? terminalWatch.pendingTerminalEvent
-        : undefined);
+    const effectiveTerminalEvent = (eventName ?? terminalWatch.pendingTerminalEvent ?? undefined) as string | undefined;
     if (!effectiveTerminalEvent) {
       continue;
     }
@@ -955,9 +956,12 @@ function updateSseTerminalTrackerFromChunk(
         // ignore parse failure; terminal event itself is enough to mark stream terminal
       }
     }
-    finishTracker.seenTerminalEvent = true;
+    const trueTerminal2 = effectiveTerminalEvent === 'response.done' || effectiveTerminalEvent === 'response.error' || effectiveTerminalEvent === 'response.cancelled';
+    if (trueTerminal2) {
+      finishTracker.seenTerminalEvent = true;
+      terminalWatch.sawTerminalChunk = true;
+    }
     finishTracker.finishReason = derived ?? (effectiveTerminalEvent === 'response.required_action' ? 'tool_calls' : 'stop');
-    terminalWatch.sawTerminalChunk = true;
     terminalWatch.terminalSource = effectiveTerminalEvent;
     terminalWatch.pendingTerminalEvent = undefined;
   }
