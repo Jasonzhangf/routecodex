@@ -217,6 +217,118 @@ function mockInstantSleep(provider: any): void {
 
 
 
+
+
+  // Context preservation: sequential tool result submission keeps same cascadeId + stepOffset
+  test('sequential tool-results keep cascadeId and stepOffset', async () => {
+    const p = createProvider();
+    jest.spyOn(p, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$test');
+    mockInstantSleep(p);
+    mockInstantGrpcIdle(p);
+    const sendArgs: any[] = [];
+    jest.spyOn(p, 'sendCascadeMessage').mockImplementation(async (...args) => { sendArgs.push(args[0]); });
+
+    const pollArgs: any[] = [];
+    jest.spyOn(p, 'pollCascadeTrajectorySteps').mockImplementation(async (args: any) => {
+      pollArgs.push(args);
+      return { candidate: { role: 'assistant', content: 'ok' }, usage: { inputTokens: 10, outputTokens: 5 }, stepOffset: (args.stepOffset ?? 0) + 1 };
+    });
+
+    // selectUsablePinnedGrpcRuntime: first call returns 0, second call returns 1 (simulates binding update)
+    let selectCallIdx = 0;
+    jest.spyOn(p, 'selectUsablePinnedGrpcRuntime').mockImplementation(async () => {
+      selectCallIdx++;
+      return { sessionId: 's1', cascadeId: 'c1', stepOffset: selectCallIdx >= 2 ? 1 : 0 };
+    });
+
+    // First request
+    await p.sendRequestInternal({ body: { model: 'gpt-5.4-medium', messages: [{ role: 'user', content: 'hello' }] } });
+    const firstCascadeId = sendArgs[0]?.cascadeId;
+
+    // Second request: tool results
+    pollArgs.length = 0;
+    await p.sendRequestInternal({
+      body: {
+        model: 'gpt-5.4-medium',
+        messages: [
+          { role: 'user', content: 'hello' },
+          { role: 'assistant', tool_calls: [{ id: 'tc1', type: 'function', function: { name: 'test_tool', arguments: '{}' } }] },
+          { role: 'tool', tool_call_id: 'tc1', content: '{"result":"ok"}' },
+        ],
+      },
+    });
+    const secondCascadeId = sendArgs[1]?.cascadeId;
+    const secondPollOffset = pollArgs[0]?.stepOffset;
+
+    // Same cascadeId (not new cascade started)
+    expect(secondCascadeId).toBe(firstCascadeId);
+    // Second poll called with stepOffset=1 (from binding), not 0 (reset)
+    expect(secondPollOffset).toBe(1);
+    // sendCascadeMessage called once per request.
+    expect(sendArgs.length).toBe(2);
+  });
+
+  // Context preservation after error recovery: busy retry recovers, context intact
+  test('busy-retry recovers and preserves cascadeId across requests', async () => {
+    const p = createProvider();
+    jest.spyOn(p, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$test');
+    jest.spyOn(p, 'selectUsablePinnedGrpcRuntime').mockResolvedValue({ sessionId: 's1', cascadeId: 'c1', stepOffset: 0 });
+    mockInstantSleep(p);
+    mockInstantGrpcIdle(p);
+
+    let callIdx = 0;
+    jest.spyOn(p, 'sendCascadeMessage').mockImplementation(async () => {
+      callIdx++;
+      if (callIdx === 1) throw busyError(); // First call hits busy
+      return undefined;
+    });
+
+    const sendArgs: any[] = [];
+    jest.spyOn(p, 'pollCascadeTrajectorySteps').mockImplementation(async (args: any) => {
+      return { candidate: { role: 'assistant', content: 'after-retry' }, usage: { inputTokens: 5, outputTokens: 3 }, stepOffset: args.stepOffset + 1 };
+    });
+
+    const result = await p.sendRequestInternal({ body: { model: 'gpt-5.4-medium', messages: [{ role: 'user', content: 'busy-test' }] } });
+
+    // Send was called twice (busy retry recovered)
+    expect(callIdx).toBe(2);
+    // Result returned normally
+    expect(result).not.toBeNull();
+    expect((result as any).choices?.[0]?.message?.content).toBe('after-retry');
+  });
+
+  // Context preservation after provider re-init: same session key re-binds to existing cascade
+  test('provider re-init re-uses existing cascade binding from session', async () => {
+    const p = createProvider();
+    jest.spyOn(p, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$test');
+    mockInstantSleep(p);
+    mockInstantGrpcIdle(p);
+
+    // First request: establishes cascade c1
+    jest.spyOn(p, 'selectUsablePinnedGrpcRuntime').mockResolvedValue({ sessionId: 's1', cascadeId: 'c1', stepOffset: 0 });
+    jest.spyOn(p, 'sendCascadeMessage').mockResolvedValue(undefined);
+    jest.spyOn(p, 'pollCascadeTrajectorySteps').mockResolvedValue({ candidate: { role: 'assistant', content: 'first' }, usage: { inputTokens: 5, outputTokens: 3 }, stepOffset: 1 });
+
+    await p.sendRequestInternal({ body: { model: 'gpt-5.4-medium', messages: [{ role: 'user', content: 'first' }] } });
+
+    // Second request: selectUsablePinnedGrpcRuntime should find existing binding
+    // (rememberWindsurfCascadeSessionBinding was called with stepOffset: 1)
+    const selectSpy = jest.spyOn(p, 'selectUsablePinnedGrpcRuntime').mockResolvedValue({ sessionId: 's1', cascadeId: 'c1', stepOffset: 1 });
+    const sendArgs2: any[] = [];
+    jest.spyOn(p, 'sendCascadeMessage').mockImplementation(async (...args) => { sendArgs2.push(args[0]); });
+    const pollArgs2: any[] = [];
+    jest.spyOn(p, 'pollCascadeTrajectorySteps').mockImplementation(async (args: any) => { pollArgs2.push(args); return { candidate: { role: 'assistant', content: 'second' }, usage: { inputTokens: 5, outputTokens: 3 }, stepOffset: (args.stepOffset ?? 0) + 1 }; });
+
+    await p.sendRequestInternal({ body: { model: 'gpt-5.4-medium', messages: [{ role: 'user', content: 'second' }] } });
+
+    // Second request used existing cascade c1 (not new)
+    expect(selectSpy).toHaveBeenCalled();
+    expect(sendArgs2[0]?.cascadeId).toBe('c1');
+    // Poll was called with stepOffset from binding (1, not 0)
+    expect(pollArgs2[0]?.stepOffset).toBe(1);
+  });
+
+
   test('running-does-not-trigger-rebuild', async () => {
     const p = createProvider();
     jest.spyOn(p, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$test');
