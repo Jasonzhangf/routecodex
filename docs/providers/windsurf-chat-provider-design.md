@@ -52,6 +52,23 @@ request:
   GetCascadeTrajectorySteps / GetCascadeTrajectory poll
 ```
 
+Provider API bridge 状态机：
+
+```text
+send:
+  fresh cascade -> SendUserCascadeMessage
+  sticky cascade with stepOffset > 0 -> first poll GetCascadeTrajectory until IDLE
+  still RUNNING after bounded wait -> fail WINDSURF_CASCADE_BUSY/409, do not send
+
+poll:
+  status RUNNING + new text/thinking/tool progress -> keep polling
+  status RUNNING + stable visible text -> return current assistant text, do not wait for client disconnect
+  status RUNNING + thinking-only/no visible output/no progress -> fail WINDSURF_CASCADE_NO_PROGRESS/409
+  status IDLE -> settle final steps, then return assistant text/tool calls
+```
+
+App 对齐边界：Windsurf.app 发送后 `markCascadeIdActive` / `setCascadeId`，由 active Cascade lifecycle 驱动面板；RouteCodex 作为 HTTP bridge 必须 bounded，不能静默等到客户端断开，也不能在 sticky Cascade 仍 RUNNING 时继续 `SendUserCascadeMessage` 撞 `CASCADE_RUN_STATUS_RUNNING`。
+
 唯一参考真源：
 
 - `/Volumes/extension/code/WindsurfAPI`
