@@ -1564,3 +1564,9 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 2026-05-30 Responses store missing context rule: if logs show `recordResponse: missing request context` for provider-shaped request ids or `:stop_followup`, check whether core response recording passes scope fields into `recordResponsesResponse`. Do not add fallback replay; bind via existing `scopeIndex` by carrying `sessionId`, `conversationId`, `matchedPort`, `routingPolicyGroup`, and `providerKey` from AdapterContext.
 
 - 2026-05-30 chat direct model rule: if `/v1/chat/completions` fails with provider `Model X is not supported` while route target has a provider-specific model id (for example `deepseek-v4-flash-free`), inspect router-direct payload. OpenAI-chat direct sends must override inbound `model` with selected providerPayload/runtime model before provider send; keep Responses direct continuation transparent.
+
+### 2026-05-30 Windsurf Cascade poll / retry 精华
+- Windsurf provider 内的 Cascade 状态机错误必须显式终止：`WINDSURF_CASCADE_BUSY` / `WINDSURF_CASCADE_NO_PROGRESS` 是本地 Cascade executor 状态，不是上游 503；retry policy 必须视为 unrecoverable，禁止 provider-switch 再次 Send 导致 `executor is not idle` 风暴。
+- 审计卡死时同时看 provider poll 状态和请求层 retry 分类：若 provider 已抛 `retryable:false` 但仍出现 `provider-switch retry_same_provider`，根因在 failure-policy 分类，不在 Windsurf payload shape。
+
+- 2026-05-30 chat stream_options 400 精华：若上游报 `stream_options should be set along with stream = true`，必须查最终 `provider-request.json`，不要只看 direct payload mock。OpenAI-chat 通用真源在 `provider-request-shaping-utils`：从 request/data/metadata/runtime metadata 读取 stream intent，并在最终 provider HTTP body 保留 `stream:true`；禁止 DeepSeek/provider 硬编码。
