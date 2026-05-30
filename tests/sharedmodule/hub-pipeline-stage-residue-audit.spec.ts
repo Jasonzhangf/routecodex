@@ -126,10 +126,12 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('__nativeResponsePlan');
     expect(source).toContain('executeProviderResponseNativeOutboundEffects');
     expect(source).toContain('runtimeStateWrite');
+    expect(source).toContain('servertoolRuntimeAction');
+    expect(source).toContain('executeProviderResponseNativeServertoolEffects');
     expect(source).toContain('executeProviderResponseNativeRuntimeStateEffect');
     expect(source).toContain('inspectStopGatewaySignalWithNative');
     expect(source).toContain('if (nativeResponsePlan)');
-    expect(source).toContain('stopGateway.eligible');
+    expect(source).toContain('requireReenterPipeline');
     expect(source).not.toContain('if (options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch) {\n    return false;');
     expect(source).not.toContain('runtime.clock');
     expect(source).not.toContain('runtime.webSearch');

@@ -264,7 +264,7 @@ describe('provider response Rust native plan', () => {
     ]);
   });
 
-  it('keeps servertool stop eligible callback path out of native response plan', async () => {
+  it('uses Rust servertoolRuntimeAction effect for stop eligible callback path', async () => {
     const recorder = new StubStageRecorder();
     const context: Record<string, unknown> = {
       requestId: 'req_provider_response_servertool_stop_guard_1',
@@ -291,6 +291,19 @@ describe('provider response Rust native plan', () => {
       providerInvoker: async () => ({ response: {} as any })
     })).rejects.toThrow('[servertool] followup requires reenter pipeline');
 
-    expect(context.__nativeResponsePlan).toBeUndefined();
+    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
+      effectPlan: expect.objectContaining({
+        effects: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'servertoolRuntimeAction',
+            payload: expect.objectContaining({
+              action: 'requireReenterPipeline',
+              reason: 'stop_eligible_followup',
+              requestId: 'req_provider_response_servertool_stop_guard_1'
+            })
+          })
+        ])
+      })
+    }));
   });
 });

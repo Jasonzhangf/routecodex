@@ -30,6 +30,7 @@ use crate::resp_process_stage1_tool_governance::{
     govern_response, ToolGovernanceInput as RespToolGovernanceInput,
 };
 use crate::resp_process_stage2_finalize::{finalize_chat_response, FinalizeInput};
+use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
 use super::effect_plan::{HubPipelineEffect, HubPipelineEffectKind, HubPipelineEffectPlan};
@@ -481,6 +482,26 @@ impl HubPipelineEngine {
             })),
         ));
         let mut effects = Vec::new();
+        let stop_gateway = inspect_stop_gateway_signal(&stream_decision.payload.to_string())
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .unwrap_or(Value::Null);
+        if should_plan_servertool_runtime_action(&normalized_metadata)
+            && stop_gateway
+            .get("eligible")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            effects.push(HubPipelineEffect {
+                kind: HubPipelineEffectKind::ServertoolRuntimeAction,
+                payload: serde_json::json!({
+                    "action": "requireReenterPipeline",
+                    "reason": "stop_eligible_followup",
+                    "requestId": output.request_id,
+                    "stopGateway": stop_gateway,
+                }),
+            });
+        }
         if stream_decision.should_stream {
             effects.push(HubPipelineEffect {
                 kind: HubPipelineEffectKind::StreamPipe,
@@ -535,6 +556,26 @@ fn response_requires_submit_tool_outputs(payload: &Value) -> bool {
         .and_then(|required_action| required_action.get("type"))
         .and_then(Value::as_str)
         .is_some_and(|kind| kind == "submit_tool_outputs")
+}
+
+fn should_plan_servertool_runtime_action(metadata: &Value) -> bool {
+    metadata
+        .get("runtimeEffects")
+        .and_then(Value::as_object)
+        .is_some_and(|runtime| {
+            runtime
+                .get("providerInvoker")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || runtime
+                    .get("reenterPipeline")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                || runtime
+                    .get("clientInjectDispatch")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+        })
 }
 
 fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {

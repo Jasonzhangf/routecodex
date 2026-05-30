@@ -237,9 +237,6 @@ function responsesPayloadRequiresSubmitToolOutputs(payload: unknown): boolean {
 function shouldRunProviderResponseRustHubPipeline(options: ProviderResponseConversionOptions): boolean {
   if (options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch) {
     const stopGateway = inspectStopGatewaySignalWithNative(options.providerResponse);
-    if (stopGateway.eligible || stopGateway.hasToolCalls === true || stopGateway.reason === 'responses_required_action') {
-      return false;
-    }
     if (!stopGateway.observed) {
       return false;
     }
@@ -271,7 +268,12 @@ function runProviderResponseRustHubPipeline(options: ProviderResponseConversionO
         ...options.context,
         clientProtocol: resolveProviderResponseContextSignals(options.context, options.entryEndpoint).clientProtocol,
         entryEndpoint: options.entryEndpoint,
-        stream: options.wantsStream
+        stream: options.wantsStream,
+        runtimeEffects: {
+          providerInvoker: Boolean(options.providerInvoker),
+          reenterPipeline: Boolean(options.reenterPipeline),
+          clientInjectDispatch: Boolean(options.clientInjectDispatch)
+        }
       },
       stream: options.wantsStream,
       processMode: 'chat',
@@ -338,8 +340,38 @@ function readNativeStreamPipeEffect(effectPlan: { effects: Array<Record<string, 
 
 function assertKnownNativeResponseEffectKinds(effectPlan: { effects: Array<Record<string, unknown>> }): void {
   for (const effect of effectPlan.effects) {
-    if (effect?.kind === 'streamPipe' || effect?.kind === 'runtimeStateWrite') continue;
+    if (effect?.kind === 'streamPipe' || effect?.kind === 'runtimeStateWrite' || effect?.kind === 'servertoolRuntimeAction') continue;
     throw new Error('Rust HubPipeline response effect plan returned unsupported effect kind');
+  }
+}
+
+function readNativeServertoolRuntimeActionEffects(effectPlan: { effects: Array<Record<string, unknown>> }): Array<Record<string, unknown>> {
+  return effectPlan.effects
+    .filter((effect) => effect?.kind === 'servertoolRuntimeAction')
+    .map((effect) => {
+      const payload = effect.payload;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error('Rust HubPipeline servertoolRuntimeAction effect missing payload');
+      }
+      return payload as Record<string, unknown>;
+    });
+}
+
+async function executeProviderResponseNativeServertoolEffects(args: {
+  effectPlan: { effects: Array<Record<string, unknown>> };
+}): Promise<void> {
+  for (const effect of readNativeServertoolRuntimeActionEffects(args.effectPlan)) {
+    if (effect.action === 'requireReenterPipeline') {
+      throw new ProviderProtocolError('[servertool] followup requires reenter pipeline', {
+        code: 'SERVERTOOL_FOLLOWUP_FAILED',
+        category: 'INTERNAL_ERROR',
+        details: {
+          requestId: typeof effect.requestId === 'string' ? effect.requestId : undefined,
+          reason: typeof effect.reason === 'string' ? effect.reason : 'unknown'
+        }
+      });
+    }
+    throw new Error('Rust HubPipeline servertoolRuntimeAction returned unsupported action');
   }
 }
 
@@ -390,6 +422,9 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     throw new Error('Rust HubPipeline native response payload unavailable');
   }
   assertKnownNativeResponseEffectKinds(args.nativeResponsePlan.effectPlan);
+  await executeProviderResponseNativeServertoolEffects({
+    effectPlan: args.nativeResponsePlan.effectPlan
+  });
   const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.effectPlan);
   await executeProviderResponseNativeRuntimeStateEffect({
     effectPlan: args.nativeResponsePlan.effectPlan,
