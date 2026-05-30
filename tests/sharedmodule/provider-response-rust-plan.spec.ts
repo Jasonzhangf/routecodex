@@ -306,4 +306,45 @@ describe('provider response Rust native plan', () => {
       })
     }));
   });
+
+  it('does not bypass Rust native response plan for inert servertool runtime config', async () => {
+    const recorder = new StubStageRecorder();
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_native_servertool_config_plan_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      __rt: { servertool: { enabled: true } }
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_native_servertool_config_plan_1',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native servertool config ok' },
+          finish_reason: 'length'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false,
+      stageRecorder: recorder
+    });
+
+    expect(result.body?.choices?.[0]?.message?.content).toBe('native servertool config ok');
+    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
+      effectPlan: expect.objectContaining({
+        effects: expect.arrayContaining([
+          expect.objectContaining({ kind: 'runtimeStateWrite' })
+        ])
+      })
+    }));
+    expect(recorder.entries.map((entry) => entry.stage)).toEqual([
+      'chat_process.resp.stage9.client_remap',
+      'chat_process.resp.stage10.sse_stream'
+    ]);
+  });
 });
