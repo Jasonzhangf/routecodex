@@ -120,7 +120,6 @@ describe('hub pipeline stage residue audit', () => {
     const source = fs.readFileSync(filePath, 'utf8');
 
     expect(source).toContain('executeHubPipelineWithNative');
-    expect(source).toContain('shouldRunProviderResponseRustHubPipeline');
     expect(source).toContain('runProviderResponseRustHubPipeline');
     expect(source).toContain('nativeResponsePlan.effectPlan.effects');
     expect(source).toContain('__nativeResponsePlan');
@@ -129,10 +128,20 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('servertoolRuntimeAction');
     expect(source).toContain('executeProviderResponseNativeServertoolEffects');
     expect(source).toContain('executeProviderResponseNativeRuntimeStateEffect');
-    expect(source).toContain('inspectStopGatewaySignalWithNative');
-    expect(source).toContain('if (nativeResponsePlan)');
+    expect(source).toContain('const nativeResponsePlan = runProviderResponseRustHubPipeline(options);');
     expect(source).toContain('requireReenterPipeline');
+    expect(source).not.toContain('shouldRunProviderResponseRustHubPipeline');
+    expect(source).not.toContain('if (nativeResponsePlan)');
     expect(source).not.toContain('return false;');
+    expect(source).not.toContain('runRespInboundStage2FormatParse');
+    expect(source).not.toContain('runRespInboundStage3SemanticMap');
+    expect(source).not.toContain('runRespProcessStage1ToolGovernance');
+    expect(source).not.toContain('runRespProcessStage2Finalize');
+    expect(source).not.toContain('runRespProcessStage3ServerToolOrchestration');
+    expect(source).not.toContain('runRespOutboundStage1ClientRemap');
+    expect(source).not.toContain('OpenAIChatResponseMapper');
+    expect(source).not.toContain('PROVIDER_RESPONSE_REGISTRY');
+    expect(source).not.toContain('hasNewGovernedServerToolCalls(');
     expect(source).not.toContain('if (options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch) {\n    return false;');
     expect(source).not.toContain('runtime.clock');
     expect(source).not.toContain('runtime.webSearch');

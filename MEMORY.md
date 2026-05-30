@@ -1824,3 +1824,7 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 ## 2026-05-31 Hub Pipeline response native fail-fast rule
 - 已验证：provider-response callbacks 存在时也不得回 TS path；Rust response path 必须先观测/校验 provider response shape，OpenAI chat response 至少需要 object + 非空 `choices` array，否则返回 `success:false + error` 并由 TS native shell fail-fast。
 - 已删除规则：Rust resp inbound format parse 禁止 unknown protocol generic envelope fallback；未知 response protocol 必须 unsupported fail-fast，避免 raw payload 被误当完成响应透传。
+
+## 2026-05-31 provider-response TS residue deletion
+- 已验证：`sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` 的最终角色是 native call shell + runtime effect glue；不得重新引入 TS resp inbound semantic map、resp_process governance/finalize/servertool orchestration、resp outbound remap 或 response mapper registry。
+- 回归锚点：`tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 禁止 `runRespInboundStage2FormatParse`、`runRespInboundStage3SemanticMap`、`runRespProcessStage1ToolGovernance`、`runRespProcessStage2Finalize`、`runRespProcessStage3ServerToolOrchestration`、`runRespOutboundStage1ClientRemap` 等 provider-response residue。
