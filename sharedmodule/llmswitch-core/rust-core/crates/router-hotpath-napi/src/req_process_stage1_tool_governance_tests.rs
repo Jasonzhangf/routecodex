@@ -257,6 +257,41 @@ fn test_servertool_orchestration_appends_clock_and_keeps_continue_hidden() {
 }
 
 #[test]
+fn test_tool_governance_preserves_top_level_tool_choice_and_stream() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4o-mini",
+          "messages": [{"role": "user", "content": "read files"}],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "parameters": { "type": "object", "properties": { "cmd": { "type": "string" } }, "required": ["cmd"] }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({}),
+        entry_endpoint: "/v1/chat/completions".to_string(),
+        request_id: "req_tool_choice_preserve".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let processed = result.processed_request.as_object().unwrap();
+    assert_eq!(processed["tool_choice"].as_str(), Some("auto"));
+    assert_eq!(processed["stream"].as_bool(), Some(true));
+    assert_eq!(
+        processed["tools"][0]["function"]["name"].as_str(),
+        Some("exec_command")
+    );
+}
+
+#[test]
 fn test_servertool_orchestration_skips_direct_web_search_tool_injection() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({

@@ -90,6 +90,66 @@ fn execute_hub_pipeline_json_uses_total_entry_contract() {
 }
 
 #[test]
+fn execute_request_path_preserves_client_tool_surface() {
+    let input = json!({
+        "config": {
+            "virtualRouter": {
+                "target": {
+                    "providerKey": "openai.m",
+                    "runtimeKey": "openai",
+                    "modelId": "m"
+                },
+                "routeName": "tools"
+            }
+        },
+        "request": {
+            "requestId": "req-tools-preserve",
+            "endpoint": "/v1/chat/completions",
+            "entryEndpoint": "/v1/chat/completions",
+            "providerProtocol": "openai-chat",
+            "payload": {
+                "model": "m",
+                "messages": [{ "role": "user", "content": "read files" }],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "Run shell commands",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "cmd": { "type": "string" } },
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            },
+            "metadata": {},
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+
+    assert_eq!(output.get("success").and_then(|value| value.as_bool()), Some(true));
+    assert_eq!(
+        output
+            .pointer("/payload/tools/0/function/name")
+            .and_then(|value| value.as_str()),
+        Some("exec_command")
+    );
+    assert_eq!(
+        output
+            .pointer("/payload/tool_choice")
+            .and_then(|value| value.as_str()),
+        Some("auto")
+    );
+}
+
+#[test]
 fn execute_hub_pipeline_json_serializes_response_path_errors() {
     let input = json!({
         "config": {},

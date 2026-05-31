@@ -48,12 +48,14 @@ pub(crate) fn build_governed_filter_payload(request: &Value) -> Value {
         .unwrap_or_else(|| Value::Object(Map::new()));
 
     let parameter_obj = parameters.as_object();
-    let tool_choice = parameter_obj
+    let tool_choice = request_obj
         .and_then(|obj| obj.get("tool_choice"))
+        .or_else(|| parameter_obj.and_then(|obj| obj.get("tool_choice")))
         .cloned()
         .unwrap_or(Value::Null);
-    let stream = parameter_obj
+    let stream = request_obj
         .and_then(|obj| obj.get("stream"))
+        .or_else(|| parameter_obj.and_then(|obj| obj.get("stream")))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
