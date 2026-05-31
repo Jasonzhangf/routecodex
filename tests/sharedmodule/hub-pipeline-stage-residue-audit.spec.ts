@@ -376,6 +376,64 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('public conversion barrels must not export legacy mapper or adapter implementations', () => {
+    const conversionIndexPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/index.ts',
+    );
+    const formatAdapterIndexPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.ts',
+    );
+    const conversionIndexSource = fs.readFileSync(conversionIndexPath, 'utf8');
+    const formatAdapterIndexSource = fs.readFileSync(formatAdapterIndexPath, 'utf8');
+
+    const findings = [
+      ...collectMatches(conversionIndexSource, [
+        {
+          label: 'exports legacy ChatSemanticMapper',
+          pattern: /ChatSemanticMapper/,
+        },
+        {
+          label: 'exports legacy AnthropicSemanticMapper',
+          pattern: /AnthropicSemanticMapper/,
+        },
+        {
+          label: 'exports legacy ResponsesSemanticMapper',
+          pattern: /ResponsesSemanticMapper/,
+        },
+        {
+          label: 'exports legacy GeminiSemanticMapper',
+          pattern: /GeminiSemanticMapper/,
+        },
+        {
+          label: 'exports operation-table semantic mapper module',
+          pattern: /operation-table\/semantic-mappers/,
+        },
+      ]),
+      ...collectMatches(formatAdapterIndexSource, [
+        {
+          label: 'exports legacy ChatFormatAdapter',
+          pattern: /ChatFormatAdapter/,
+        },
+        {
+          label: 'exports legacy AnthropicFormatAdapter',
+          pattern: /AnthropicFormatAdapter/,
+        },
+        {
+          label: 'exports legacy ResponsesFormatAdapter',
+          pattern: /ResponsesFormatAdapter/,
+        },
+        {
+          label: 'exports legacy GeminiFormatAdapter',
+          pattern: /GeminiFormatAdapter/,
+        },
+      ]),
+    ];
+
+    expect(findings).toEqual([]);
+  });
+
   it('hub request mainline must enter Rust total API without request-stage mapper hooks', () => {
     const pipelineRoot = path.join(
       process.cwd(),

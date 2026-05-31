@@ -1658,3 +1658,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 Rustification audit cleanup rule
 - If `build:dev` fails on llmswitch rustification audit, first remove/merge new TS files and verify total non-native LOC decreased before refreshing `rustification-audit-baseline.json`; do not use allowlist as fallback for HubPipeline closeout wrappers.
+
+### 2026-05-31 HubPipeline Slice5 barrel cleanup 精华
+- Slice5 residue audit must include public barrels: `conversion/index.ts` and `hub/format-adapters/index.ts` must not export legacy TS `*SemanticMapper` or concrete `*FormatAdapter` implementations; keep type-only interfaces if needed by thin TS glue.

@@ -21,8 +21,3 @@ export interface SemanticMapper {
   toChat(format: FormatEnvelope, ctx: AdapterContext): Promise<ChatEnvelope> | ChatEnvelope;
   fromChat(chat: ChatEnvelope, ctx: AdapterContext): Promise<FormatEnvelope> | FormatEnvelope;
 }
-
-export { ChatFormatAdapter } from './chat-format-adapter.js';
-export { AnthropicFormatAdapter } from './anthropic-format-adapter.js';
-export { ResponsesFormatAdapter } from './responses-format-adapter.js';
-export { GeminiFormatAdapter } from './gemini-format-adapter.js';

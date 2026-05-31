@@ -9,16 +9,13 @@ export * from './hub/pipelines/outbound.js';
 export * from './hub/response/provider-response.js';
 export * from './hub/response/response-runtime.js';
 export * from './hub/pipeline/hub-pipeline.js';
-export * from './hub/format-adapters/index.js';
+export type {
+  FormatAdapter,
+  SemanticMapper,
+  StageRecorder
+} from './hub/format-adapters/index.js';
 export * from './hub/types/index.js';
 export * from './hub/hub-feature.js';
-export {
-  ChatSemanticMapper,
-  maybeAugmentApplyPatchErrorContent
-} from './hub/operation-table/semantic-mappers/chat-mapper.js';
-export { AnthropicSemanticMapper } from './hub/operation-table/semantic-mappers/anthropic-mapper.js';
-export { ResponsesSemanticMapper } from './hub/operation-table/semantic-mappers/responses-mapper.js';
-export { GeminiSemanticMapper } from './hub/operation-table/semantic-mappers/gemini-mapper.js';
 export { mapReqInboundBridgeToolsToChatWithNative } from '../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 export { normalizeProviderProtocolTokenWithNative } from '../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 export { buildAnthropicToolAliasMapWithNative } from '../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
