@@ -366,6 +366,19 @@ class ResponsesConversationStore {
     this.detachEntry(entry);
   }
 
+  clearUnresolvedRequests(): number {
+    let cleared = 0;
+    for (const entry of [...this.requestMap.values()]) {
+      if (typeof entry.lastResponseId === 'string' && entry.lastResponseId.trim()) {
+        continue;
+      }
+      this.detachEntry(entry);
+      cleared += 1;
+    }
+    this.pruneIndexes();
+    return cleared;
+  }
+
   releaseRequestPayload(requestId?: string): void {
     if (!requestId) return;
     const entry = this.requestMap.get(requestId);
@@ -464,6 +477,10 @@ class ResponsesConversationStore {
         this.detachEntry(entry);
       }
     }
+    this.pruneIndexes();
+  }
+
+  private pruneIndexes(): void {
     for (const [respId, entry] of this.responseIndex.entries()) {
       if (!this.requestMap.has(entry.requestId)) {
         this.responseIndex.delete(respId);
@@ -638,6 +655,10 @@ export function materializeLatestResponsesContinuationByScope(args: RestoreBySco
 
 export function clearAllResponsesConversationState(): void {
   store.clearAll();
+}
+
+export function clearUnresolvedResponsesConversationRequests(): number {
+  return store.clearUnresolvedRequests();
 }
 
 export { store as responsesConversationStore };

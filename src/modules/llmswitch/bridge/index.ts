@@ -24,6 +24,7 @@ export {
   resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,
   rebindResponsesConversationRequestId,
+  clearUnresolvedResponsesConversationRequests,
   createResponsesSseToJsonConverter,
   createResponsesJsonToSseConverter,
   reportProviderErrorToRouterPolicy,

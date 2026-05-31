@@ -89,6 +89,10 @@ type ResponsesConversationStoreLike = {
     options?: { keepForSubmitToolOutputs?: boolean },
   ) => void;
   clearAll?: () => void;
+  clearUnresolvedRequests?: () => number;
+  requestMap?: Map<string, { lastResponseId?: unknown }>;
+  detachEntry?: (entry: { lastResponseId?: unknown }) => void;
+  pruneIndexes?: () => void;
   rebindRequestId?: (oldId: string, newId: string) => void;
 };
 
@@ -124,6 +128,7 @@ type ResponsesConversationModule = {
     options?: { keepForSubmitToolOutputs?: boolean },
   ) => void;
   clearAllResponsesConversationState?: () => void;
+  clearUnresolvedResponsesConversationRequests?: () => number;
 };
 
 function readGlobalResponsesConversationStore(): ResponsesConversationStoreLike | null {
@@ -340,6 +345,38 @@ export async function clearAllResponsesConversationState(): Promise<void> {
     );
   }
   fn();
+}
+
+export async function clearUnresolvedResponsesConversationRequests(): Promise<number> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.clearUnresolvedRequests === "function") {
+    return globalStore.clearUnresolvedRequests();
+  }
+  if (
+    globalStore?.requestMap instanceof Map &&
+    typeof globalStore.detachEntry === "function"
+  ) {
+    let cleared = 0;
+    for (const entry of [...globalStore.requestMap.values()]) {
+      if (typeof entry.lastResponseId === "string" && entry.lastResponseId.trim()) {
+        continue;
+      }
+      globalStore.detachEntry(entry);
+      cleared += 1;
+    }
+    if (typeof globalStore.pruneIndexes === "function") {
+      globalStore.pruneIndexes();
+    }
+    return cleared;
+  }
+  const mod = await getResponsesConversationModule();
+  const fn = mod.clearUnresolvedResponsesConversationRequests;
+  if (typeof fn !== "function") {
+    throw new Error(
+      "[llmswitch-bridge] clearUnresolvedResponsesConversationRequests not available",
+    );
+  }
+  return fn();
 }
 
 type ResponsesSseToJsonModule = {

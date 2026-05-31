@@ -3,6 +3,7 @@ import {
   captureResponsesRequestContext,
   clearAllResponsesConversationState,
   clearResponsesConversationByRequestId,
+  clearUnresolvedResponsesConversationRequests,
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
   releaseResponsesConversationRequestPayload,
@@ -991,5 +992,40 @@ describe('responses conversation store plain continuation restore', () => {
     expect(after.responseIndexSize).toBe(0);
     expect(after.scopeIndexSize).toBe(0);
     expect(after.retainedInputItems).toBe(0);
+  });
+
+  it('clears unresolved request entries without deleting resolved response index entries', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-unresolved-sweep-1'),
+      sessionId: 'sess-unresolved-sweep',
+      payload: { model: 'gpt-5.4', store: true },
+      context: {
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'pending' }] }]
+      }
+    });
+
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-unresolved-sweep-2'),
+      sessionId: 'sess-unresolved-sweep-resolved',
+      payload: { model: 'gpt-5.4', store: true },
+      context: {
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'resolved' }] }]
+      }
+    });
+    recordResponsesResponse({
+      requestId: track('req-resp-store-unresolved-sweep-2'),
+      response: {
+        id: 'resp-store-unresolved-sweep-2',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+      }
+    });
+
+    const cleared = clearUnresolvedResponsesConversationRequests();
+    const stats = responsesConversationStore.getDebugStats();
+
+    expect(cleared).toBe(1);
+    expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
+    expect(stats.requestMapSize).toBe(1);
+    expect(stats.responseIndexSize).toBe(1);
   });
 });

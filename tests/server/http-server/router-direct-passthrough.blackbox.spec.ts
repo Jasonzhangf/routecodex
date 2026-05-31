@@ -269,4 +269,79 @@ describe('router-direct passthrough HTTP blackbox', () => {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
+
+  it('HTTP BLACKBOX: router-direct accepts repeated sequential Responses call_id history', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-router-direct-repeated-callid-'));
+    const configPath = path.join(tmp, 'config.json');
+    let upstreamPostCount = 0;
+    let upstreamBody = '';
+    const upstream = http.createServer((req, res) => {
+      if (req.method === 'POST') {
+        upstreamPostCount += 1;
+        req.on('data', (chunk) => { upstreamBody += Buffer.from(chunk).toString('utf8'); });
+        req.on('end', () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({
+            id: 'resp_repeated_callid_ok',
+            object: 'response',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }],
+            output_text: 'ok'
+          }));
+        });
+        return;
+      }
+      req.resume();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [] }));
+    });
+    const upstreamPort = await listen(upstream);
+    await writeProviderToml(tmp, 'direct', upstreamPort);
+    const userConfig = await writeRouterConfig(configPath, upstreamPort);
+    const restores = routerEnv(tmp);
+    let server: RouteCodexHttpServer | undefined;
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(' '));
+      originalWarn(...args);
+    };
+    try {
+      const started = await startRouteCodex(configPath, userConfig);
+      server = started.server;
+      const response = await fetch(`http://127.0.0.1:${started.port}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          stream: false,
+          input: [
+            { role: 'user', content: 'run first command' },
+            { type: 'function_call', call_id: 'call_1', name: 'exec_command', arguments: '{"cmd":"pwd"}' },
+            { type: 'function_call_output', call_id: 'call_1', output: 'first output' },
+            { role: 'user', content: 'run second command' },
+            { type: 'function_call', call_id: 'call_1', name: 'exec_command', arguments: '{"cmd":"ls"}' },
+            { type: 'function_call_output', call_id: 'call_1', output: 'second output' },
+            { role: 'user', content: 'continue' }
+          ],
+          tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } }],
+          metadata: { routeHint: 'thinking', sessionId: 'router-direct-repeated-callid-blackbox' }
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).not.toContain('orphan_tool_result');
+      expect(upstreamPostCount).toBe(1);
+      const forwarded = JSON.parse(upstreamBody) as { input?: unknown[] };
+      expect(Array.isArray(forwarded.input)).toBe(true);
+      expect(warnings.join('\n')).not.toContain('clearUnresolvedResponsesConversationRequests not available');
+    } finally {
+      console.warn = originalWarn;
+      await server?.stop().catch(() => undefined);
+      await closeServer(upstream);
+      for (const restore of restores.reverse()) restore();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 });

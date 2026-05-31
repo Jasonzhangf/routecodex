@@ -366,6 +366,31 @@ async function cleanupResponsesConversationSupersededRequestIds(args: {
   }
 }
 
+async function clearResponsesConversationRequestIds(args: {
+  requestLabel: string;
+  timingRequestIds?: string[];
+  responseId?: string;
+  reason: string;
+}): Promise<void> {
+  const ids: string[] = [];
+  const add = (value: unknown): void => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed || ids.includes(trimmed)) return;
+    ids.push(trimmed);
+  };
+  add(args.requestLabel);
+  add(args.responseId);
+  if (Array.isArray(args.timingRequestIds)) {
+    for (const id of args.timingRequestIds) add(id);
+  }
+  for (const requestId of ids) {
+    await clearResponsesConversationByRequestId(requestId).catch((error) => {
+      logResponseNonBlockingError(`responses-conversation-clear-${args.reason}:${requestId}`, error);
+    });
+  }
+}
+
 function shouldPersistResponsesToolCallContinuationRecord(
   entryEndpoint: string | undefined,
   requestContext?: DispatchOptions['responsesRequestContext']
@@ -551,19 +576,17 @@ function cleanupAbandonedResponsesConversation(
   options: {
     entryEndpoint?: string;
     closeBeforeStreamEnd: boolean;
+    timingRequestIds?: string[];
   }
 ): void {
   if (!options.closeBeforeStreamEnd || options.entryEndpoint !== '/v1/responses') {
     return;
   }
-  try {
-    const store = (globalThis as Record<string, unknown>)['__rccResponsesConversationStore'] as
-      | { clearRequest?: (requestId?: string) => void }
-      | undefined;
-    store?.clearRequest?.(requestLabel);
-  } catch (error) {
-    logResponseNonBlockingError(`response.sse.client_close.clear_responses_conversation:${requestLabel}`, error);
-  }
+  void clearResponsesConversationRequestIds({
+    requestLabel,
+    timingRequestIds: options.timingRequestIds,
+    reason: 'client-close',
+  });
 }
 
 function formatTimestamp(): string {
@@ -1635,7 +1658,8 @@ export async function sendPipelineResponse(
         });
         cleanupAbandonedResponsesConversation(requestLabel, {
           entryEndpoint,
-          closeBeforeStreamEnd
+          closeBeforeStreamEnd,
+          timingRequestIds: result.usageLogInfo?.timingRequestIds
         });
         logPipelineStage('response.sse.client_close', requestLabel, {
           ...details,
@@ -1724,6 +1748,11 @@ export async function sendPipelineResponse(
         closeBeforeStreamEnd: !streamEnded
       });
       logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
+      void clearResponsesConversationRequestIds({
+        requestLabel,
+        timingRequestIds: result.usageLogInfo?.timingRequestIds,
+        reason: 'sse-stream-error',
+      });
       logResponseCompleted({
         status: 500,
         mode: 'sse',
@@ -1802,6 +1831,11 @@ export async function sendPipelineResponse(
               message: 'stream closed before response.completed',
               code: 'upstream_stream_incomplete'
             });
+            void clearResponsesConversationRequestIds({
+              requestLabel,
+              timingRequestIds: result.usageLogInfo?.timingRequestIds,
+              reason: 'sse-incomplete',
+            });
             if (!res.writableEnded && !res.destroyed) {
               try {
                 const payload = {
@@ -1845,6 +1879,13 @@ export async function sendPipelineResponse(
 
   applyHeaders(res, result.headers, false);
   if (body === undefined || body === null) {
+    if (status >= 400) {
+      await clearResponsesConversationRequestIds({
+        requestLabel,
+        timingRequestIds: result.usageLogInfo?.timingRequestIds,
+        reason: 'json-empty-error',
+      });
+    }
     logPipelineStage('response.json.empty', requestLabel, { status });
     if (captureClientResponse) {
       void writeServerSnapshot({
@@ -1879,6 +1920,14 @@ export async function sendPipelineResponse(
   }
   const clientBody = usageNormalized.payload;
   const sanitized = stripInternalKeysDeep(clientBody);
+  if (status >= 400) {
+    await clearResponsesConversationRequestIds({
+      requestLabel,
+      timingRequestIds: result.usageLogInfo?.timingRequestIds,
+      responseId: readResponsesConversationResponseId(sanitized),
+      reason: 'json-error',
+    });
+  }
   const jsonFinishReason = deriveFinishReason(clientBody);
   const conversationProviderKey = deriveResponsesConversationProviderKey(result.usageLogInfo);
   await captureResponsesConversationToolCallRequestContext({

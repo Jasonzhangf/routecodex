@@ -54,6 +54,7 @@ export {
   clearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention,
   clearAllResponsesConversationState,
+  clearUnresolvedResponsesConversationRequests,
   createResponsesSseToJsonConverter,
   createResponsesJsonToSseConverter,
   reportProviderErrorToRouterPolicy,

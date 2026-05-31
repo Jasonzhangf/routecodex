@@ -1353,6 +1353,59 @@ describe("sendPipelineResponse responses store integration", () => {
     }
   });
 
+  it("clears retained responses store entries when JSON response is an error", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const routerRequestId = "openai-responses-router-gpt-5.3-codex-json-error-cleanup";
+    const providerRequestId = "openai-responses-provider-gpt-5.3-codex-json-error-cleanup";
+
+    try {
+      store.captureResponsesRequestContext({
+        requestId: routerRequestId,
+        sessionId: "sess-json-error-cleanup",
+        payload: { model: "gpt-5.3-codex", store: true },
+        context: {
+          input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "will fail" }] }],
+        },
+      });
+      store.captureResponsesRequestContext({
+        requestId: providerRequestId,
+        sessionId: "sess-json-error-cleanup",
+        payload: { model: "gpt-5.3-codex", store: true },
+        context: {
+          input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "will fail provider" }] }],
+        },
+      });
+
+      const res = new MockResponse();
+      await sendPipelineResponse(
+        res as any,
+        {
+          status: 500,
+          body: { error: { message: "bad upstream", code: "HTTP_500" } },
+          usageLogInfo: {
+            timingRequestIds: [providerRequestId],
+          },
+        } as any,
+        routerRequestId,
+        { entryEndpoint: "/v1/responses" },
+      );
+
+      expect(
+        (bridge.clearResponsesConversationByRequestId as jest.Mock).mock.calls.map(([requestId]) => requestId),
+      ).toEqual(expect.arrayContaining([routerRequestId, providerRequestId]));
+      const stats = store.responsesConversationStore.getDebugStats();
+      expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
+      expect(stats.retainedInputItems).toBe(0);
+    } finally {
+      store.clearResponsesConversationByRequestId(routerRequestId);
+      store.clearResponsesConversationByRequestId(providerRequestId);
+    }
+  });
+
   it("records JSON /v1/responses tool_calls under client-visible response id and submit_tool_outputs resumes", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
