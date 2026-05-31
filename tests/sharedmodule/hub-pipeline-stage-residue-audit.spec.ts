@@ -347,33 +347,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('hub registry must not instantiate legacy TS semantic mappers or format adapters', () => {
+  it('legacy TS hub registry must be physically removed', () => {
     const registryPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/registry.ts',
     );
-    const source = fs.readFileSync(registryPath, 'utf8');
 
-    const findings = collectMatches(source, [
-      {
-        label: 'imports legacy format adapter implementation',
-        pattern: /\.\/format-adapters\/(chat|anthropic|responses|gemini)-format-adapter\.js/,
-      },
-      {
-        label: 'imports legacy semantic mapper implementation',
-        pattern: /\.\/operation-table\/semantic-mappers\/(chat|anthropic|responses|gemini)-mapper\.js/,
-      },
-      {
-        label: 'instantiates legacy format adapter',
-        pattern: /new\s+(Chat|Anthropic|Responses|Gemini)FormatAdapter\s*\(/,
-      },
-      {
-        label: 'instantiates legacy semantic mapper',
-        pattern: /new\s+(Chat|Anthropic|Responses|Gemini)SemanticMapper\s*\(/,
-      },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(registryPath)).toBe(false);
   });
 
   it('public conversion barrels must not export legacy mapper or adapter implementations', () => {
@@ -461,6 +441,32 @@ describe('hub pipeline stage residue audit', () => {
     ].filter((entry) => fs.existsSync(path.join(legacyTestRoot, entry)));
 
     expect(legacyFiles).toEqual([]);
+  });
+
+  it('legacy TS hub pipeline entrypoints must be physically removed from public graph', () => {
+    const sourceRoot = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion');
+    const legacyFiles = [
+      'hub/node-support.ts',
+      'hub/pipelines/inbound.ts',
+      'hub/pipelines/outbound.ts',
+    ].filter((relativePath) => fs.existsSync(path.join(sourceRoot, relativePath)));
+    const conversionIndexSource = fs.readFileSync(path.join(sourceRoot, 'index.ts'), 'utf8');
+    const exportFindings = collectMatches(conversionIndexSource, [
+      {
+        label: 'exports legacy node-support',
+        pattern: /hub\/node-support/,
+      },
+      {
+        label: 'exports legacy inbound pipeline',
+        pattern: /hub\/pipelines\/inbound/,
+      },
+      {
+        label: 'exports legacy outbound pipeline',
+        pattern: /hub\/pipelines\/outbound/,
+      },
+    ]);
+
+    expect({ legacyFiles, exportFindings }).toEqual({ legacyFiles: [], exportFindings: [] });
   });
 
   it('hub request mainline must enter Rust total API without request-stage mapper hooks', () => {
