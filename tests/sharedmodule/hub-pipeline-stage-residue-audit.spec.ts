@@ -346,4 +346,64 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(findings).toEqual([]);
   });
+
+  it('hub registry must not instantiate legacy TS semantic mappers or format adapters', () => {
+    const registryPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/registry.ts',
+    );
+    const source = fs.readFileSync(registryPath, 'utf8');
+
+    const findings = collectMatches(source, [
+      {
+        label: 'imports legacy format adapter implementation',
+        pattern: /\.\/format-adapters\/(chat|anthropic|responses|gemini)-format-adapter\.js/,
+      },
+      {
+        label: 'imports legacy semantic mapper implementation',
+        pattern: /\.\/operation-table\/semantic-mappers\/(chat|anthropic|responses|gemini)-mapper\.js/,
+      },
+      {
+        label: 'instantiates legacy format adapter',
+        pattern: /new\s+(Chat|Anthropic|Responses|Gemini)FormatAdapter\s*\(/,
+      },
+      {
+        label: 'instantiates legacy semantic mapper',
+        pattern: /new\s+(Chat|Anthropic|Responses|Gemini)SemanticMapper\s*\(/,
+      },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('hub request mainline must enter Rust total API without request-stage mapper hooks', () => {
+    const pipelineRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+    );
+    const checkedFiles = [
+      'hub-pipeline-execute-request-stage.ts',
+      'hub-pipeline.ts',
+      'hub-pipeline-runtime-execute-blocks.ts',
+    ];
+    const findings: string[] = [];
+    for (const relativePath of checkedFiles) {
+      const source = fs.readFileSync(path.join(pipelineRoot, relativePath), 'utf8');
+      if (relativePath === 'hub-pipeline-execute-request-stage.ts') {
+        expect(source).toContain('runHubPipelineLibWithNative');
+      }
+      const matches = collectMatches(source, [
+        { label: 'requires request stage hooks', pattern: /requireRequestStageHooks/ },
+        { label: 'passes hooks into request stage', pattern: /hooks:/ },
+        { label: 'createSemanticMapper residue', pattern: /createSemanticMapper/ },
+        { label: 'createFormatAdapter residue', pattern: /createFormatAdapter/ },
+        { label: 'SemanticMapper type residue', pattern: /\bSemanticMapper\b/ },
+        { label: 'mapper toChat call residue', pattern: /\.toChat\s*\(/ },
+        { label: 'mapper fromChat call residue', pattern: /\.fromChat\s*\(/ },
+      ]);
+      findings.push(...matches.map((match) => `${relativePath}:${match}`));
+    }
+
+    expect(findings).toEqual([]);
+  });
 });

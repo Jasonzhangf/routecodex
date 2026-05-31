@@ -13348,3 +13348,85 @@ Using skills: coding-principals + rcc-dev-skills
 
 ## 2026-05-31 stopless unique trigger audit
 - Current task: stopless must trigger only once via Rust Hub Pipeline runtimeExecutor effect + stop_message_flow clientInjectOnly; no :stop_followup reenter. Need update old reenter tests and verify blackbox.
+
+
+## 2026-05-31 orphan_tool_result 调查
+- 现象：/v1/responses 多次失败：bridge tool_result item references unknown or already-consumed call_id: call_1。
+- 初始证据：日志显示 search/gateway-priority-5555-weighted-search -> mimo provider；需要追 /v1/responses bridge tool_result 配对真源。
+- 15:29 追加证据：router-direct hub_pipeline_failed，同一错误；mem observer pendingNoResponseId=2 retainedInputItems=1263。怀疑最近 bridge input 转 chat 的 Responses input 全历史里 call_id=call_1 多次复用，pending consume 把第二个 output 判为 already-consumed。
+- 根因确认：route-aware Responses continuation 的 materialize 在 incoming input 不是纯 delta、而是完整历史但前缀不完全相等时，把 store prefix + incoming full input 拼接，导致 call_id=call_1 已完成 pair 被重放；bridge 转 chat 时第二个 tool_result 被判 unknown/already-consumed。
+- 修复点：Rust shared_responses_conversation_utils materialize 增加 completed call replay 检测，命中返回 Null，不再拼接；http-server router-direct hub_pipeline_failed 时清理 responses conversation request store，避免 pendingNoResponseId/retainedInputItems 持续堆积。
+- 验证：3 个 Rust 定向测试通过；`npm run build:min` 通过；`npm run install:global && routecodex restart --port 5555` 完成，5555 `/health` 返回 `ready:true pipelineReady:true version:0.90.2593`。
+- 线上验证：15:43+ 新请求无 `orphan_tool_result`；`15:44:05` 请求完成 `status=200 finish_reason=tool_calls`，可见 `[virtual-router-hit]` 与 `[provider-switch]`。
+
+## 2026-05-31 Responses store retention audit
+- 现象：mem-observer rss=1153.4MB store requestMap=6 responseIndex=3 scopeIndex=7 pendingNoResponseId=3 retainedInputItems=799。目标：错误响应立即销毁 pending item；启动一次性回收。
+2026-05-31 orphan_tool_result/memory leak audit: live /v1/responses still failing with call_1 orphan after prior unit fix; need HTTP blackbox redtest before fix. Remote origin/main lacks Rust inbound normalization changes; compare hub_req_inbound_context_capture and bridge input path.
+2026-05-31 verified: orphan_tool_result live loop after 15:51 stopped after installing/restarting 0.90.2594; post-restart /v1/responses at 16:17-16:19 no orphan/hub_pipeline_failed, only unrelated 503/business errors. Root leak evidence: startup clearUnresolvedResponsesConversationRequests was unavailable from stale/global store path; HTTP blackbox red caught warning, runtime-integrations now sweeps unresolved entries from same global store object when method export is missing.
+2026-05-31 stopless correction: Jason flagged client/tmux injection is wrong for observed /v1/responses case; live failure 241130-591 SERVERTOOL_FOLLOWUP_FAILED client_inject_failed tmux_session_missing. Audit must trace why stopless triggered client injection and produced 503 instead of non-fatal/no-op.
+2026-05-31 stopless correction from Jason: stopless must use servertool reenter, not tmux injection. Skip only in plan mode and /goal active; all other finish_reason=stop should trigger. Refactor to unique skip decision, unique trigger point, unique reenter point.
+2026-05-31 stopless audit start: user requires servertool reenter only, no tmux/client injection; skip only plan mode and /goal active; unique skip/trigger/reenter functions.
+2026-05-31 stopless root cause: Rust servertool skeleton configured stop_message_flow clientInjectOnly and native handler emitted clientInjectOnly/clientInjectText/clientInjectSource, causing tmux/client injection. Fix target: Rust skeleton + Rust handler output; TS only passes plan_mode_active into Rust decision and forces stop_message_flow execution mode reenter.
+2026-05-31 stopless fix verified: stop_message_flow now reenters servertool path, no clientInjectOnly/clientInjectText/clientInjectSource metadata; serverToolFollowup=true without flow id is passed to Rust as __servertool_followup__ to prevent recursive stopless trigger; plan_mode_active added to native decision context; tests cover plan skip, goal active skip, non-active goal statuses trigger, reenter no client inject, followup-hop skip.
+
+## 2026-05-31 server operation correction
+- Jason correction: do not use separate start/stop for RouteCodex server validation; if server lifecycle is needed, use restart only. Current Slice 0 work continues with tests/build only, no server lifecycle action.
+
+## 2026-05-31 HubPipeline Rust Closeout Slice2
+- Slice2 red: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 新增 req_process stage1 audit，初跑失败，证实 TS stage shell 仍直连 `applyReqProcessToolGovernanceWithNative`。
+- Slice2 impl: `req_process_stage1_tool_governance/index.ts` 改走 `runHubPipelineStageWithNative(stage=reqProcessToolGovernance)`；Rust `hub_pipeline_lib/engine.rs` 增加 stage-only req process tool governance 分支，返回 `payload=processedRequest` 与 `metadata.nodeResult`。
+- Slice2 validation: `cargo test -p router-hotpath-napi req_process_stage1 -- --nocapture` 15 passed；`cargo test -p router-hotpath-napi hub_pipeline -- --nocapture` 129 passed；`pnpm run jest:run -- tests/servertool/resp-process-stage3-reentry.spec.ts --no-coverage --runInBand --silent` passed；`npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/servertool/chat-request-marker-strip.spec.ts --runInBand --silent` passed；`pnpm -C sharedmodule/llmswitch-core run build` passed; `node scripts/build-core.mjs` passed.
+- Known unrelated/adjacent: `tests/sharedmodule/apply-patch-chat-process-contract.spec.ts` still has 2 failing server-side-tools assertions expecting final response JSON to omit literal `tool_calls`; schema/governance portions pass after Rust apply_patch schema contract fix.
+
+## 2026-05-31 stopless/tool-context read-only audit
+- User sample: model repeatedly says it will use `exec_command` but performs no tool calls; symptom suggests provider saw text/tool intent but not usable tool-call contract or stopless followup reentered without full tool/context surface.
+- Current code evidence: stop_message_flow is forced to `reenter` in `resolveFollowupExecutionMode`, Rust skeleton tests assert reenter/not client-inject, and stop decision skips only plan mode, active goal, followup hop, non-stop, port disabled, submit-tool-output resume, exhausted/default guards.
+- Risk found: MEMORY still contains stale 2026-05-31 claim that stopless uses clientInjectOnly/tmux; local skill contains newer servertool/reenter fact. Treat MEMORY entry as stale until corrected after verified fix.
+- Coverage gap: existing native decision tests cover plan/goal/non-stop; existing skeleton test covers stop_message_flow reenter; missing blackbox that asserts stop_message_flow reentry preserves original tool declarations and leads to real tool_calls instead of repeated text-only self-talk.
+
+## 2026-05-31 live verification: tool surface cleaning fix
+- Built/installed via `ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 pnpm run install:global`; install script built native release, installed global routecodex 0.90.2595, and performed managed restart for port 5555.
+- Live request marker: `rcc-tool-preserve-1780226782`, HTTP `/v1/chat/completions` to `127.0.0.1:5555`, payload had top-level `tools[exec_command]`, `tool_choice:"required"`, `stream:false`.
+- Live result: HTTP 200, response `finish_reason:"tool_calls"`, tool name `exec_command`, args `{"cmd":"pwd"}`.
+- Provider sample evidence: `~/.rcc/codex-samples/openai-chat/mimo.key2.mimo-v2.5/req_1780226782454_9add697c/provider-request.json` contains marker, `tool_choice:"required"`, and `exec_command`; parsed evidence also showed provider tool choice normalized to `{"type":"any"}` and response tool call intact.
+
+## 2026-05-31 HubPipeline Rust Closeout Slice4 commit + Slice5 redtest
+- Slice4 submitted: `ebfc52ce5 refactor(hub-pipeline): route normalize via Rust stage` with files `hub_pipeline_lib/engine.rs`, `hub-pipeline-normalize-request.ts`, `hub-pipeline-stage-residue-audit.spec.ts`.
+- Slice4 validation before commit: `pnpm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --silent` passed; `cargo test -p router-hotpath-napi hub_pipeline -- --nocapture` passed 130 tests; `pnpm -C sharedmodule/llmswitch-core run build` passed.
+- Slice5 redtest added locally (not committed yet): `hub registry must not instantiate legacy TS semantic mappers or format adapters` in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
+- Redtest failure evidence: `registry.ts` imports legacy `format-adapters/*-format-adapter.js` and `operation-table/semantic-mappers/*-mapper.js`, and instantiates `new Chat/Anthropic/Responses/Gemini FormatAdapter/SemanticMapper` at registry lines 42-94. Next implementation target: replace active registry instantiation with Rust/native mapper registry wrappers or remove old TS registry from active path.
+
+## 2026-05-31 stringified tool_use response cleaning audit
+- 最新 openai-responses→anthropic provider sample 显示 body.messages 内 assistant.content 被清洗成 JSON 字符串形式的 tool_use/tool_result，导致工具调用只读不执行。
+- 修复点：Anthropic OpenAI-chat→Anthropic request builder（TS 与 Rust native codec）识别 stringified structured Anthropic content，并恢复为 content block；预扫描同步登记 tool_use id，避免 tool_result orphan。
+- 验证：Jest servertool followup anthropic schema + anthropic image mapping；Rust anthropic_openai_codec；sample req_1780227126903_d74e7639 局部复放输出 tool_use/tool_result block。
+
+## 2026-05-31 tool-call/space-loss audit
+- 最新错误样本：/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1780228493277_4136f6bd。provider-request 已含 Letme/currentstate 粘连；provider-response_1 为 Anthropic SSE。
+- 根因1：anthropic_openai_codec 多 text block 用 join(\"\")，native 化后跨 block 英文词边界丢空格。
+- 根因2：anthropic_chat_response SSE materialize 对 text_delta/thinking_delta/input_json_delta 使用 trim 读取，丢前导空格；tool_use content_block_start 的空 input 优先覆盖后续 input_json_delta，导致工具参数丢失。
+- 修复：Rust native join_text_segments 保词边界；SSE delta 保留原始非空字符串；tool_use 有 json_delta 时以 delta 解析为唯一真源，解析失败 fail-fast。
+- 验证：cargo tests build_openai_chat_from_anthropic_preserves / anthropic_chat_response 通过；pnpm -C sharedmodule/llmswitch-core run build 通过；旧样本 provider-response_1 native replay 输出 status=requires_action、function_call=1、exec_command=true、joinedBad=false。
+
+## 2026-05-31 tool_choice audit
+- commit 807500ac fixed chat_governed_filter_payload.rs to read tool_choice from both request top-level and parameters
+- uncommitted diff: registry.ts (dead code cleanup), shared_responses_conversation_utils.rs (call_id replay fix), hub_bridge_actions/tests.rs (reuse test)
+- None of the uncommitted changes touch tool_choice
+- HubPipeline Rust engine execute() path: normalize → format_parse → semantic_lift → tool_governance → route_select → context_merge → format_build → compat
+- tool_choice preserved in: normalize (passthrough), tool_governance (build_governed_filter_payload), format_build (strip_private_fields only removes _-prefixed)
+- TS executeRequestStagePipeline calls runHubPipelineLibWithNative which passes normalized.payload directly
+- Need Jason to confirm: is tool_choice still broken after 807500ac? What's the symptom?
+
+## 2026-05-31 Responses→Anthropic outbound messages 修复记录
+- 线上原失败：`/v1/responses` tools 路由到 `mimo.key2.mimo-v2.5`，Anthropic 上游返回 `'messages' must contain at least one entry`。
+- 根因：Rust Hub Pipeline `hub_req_outbound_format_build.rs` 的 `anthropic-messages` outbound 只透传 payload；Responses 入口经过 context merge 后只有 `metadata.context.input`，未转换为 Anthropic `messages`。
+- 修复：Rust 真源中先 Responses→OpenAI chat，再 OpenAI chat→Anthropic messages；保留 tools/tool_choice/参数。
+- 验证：Rust 定向 `execute_hub_pipeline_json_builds_non_empty_anthropic_messages_from_responses_input` 绿；HTTP 黑盒 `responses-handler.routing-empty-pool.spec.ts` 捕获 provider payload，确认 `messagesLen=1` 且 tools 保留。
+- 线上复测：5555 最新 provider-request `/Users/fanzhang/.rcc/codex-samples/openai-responses/mimo.key2.mimo-v2.5/req_1780232075169_0cf6bc79/provider-request.json` 已有非空 Anthropic messages；原 messages-empty 400 消失。当前请求仍可能因 stopless followup 返回 502，是独立后续缺口。
+
+## 2026-05-31 stopless followup semantic_gate 修复记录
+- 线上失败：stopless reenter `:stop_followup` 进入 HubPipeline 前报 `[HubPipeline][semantic_gate] Mappable semantics must not be stored in metadata (chat_process.request.entry): responsesContext`。
+- 根因：`buildServerToolNestedRequestMetadata` 合并 base/extra metadata 时继承 legacy `responsesContext/contextSnapshot/contextMetadataKey`，而 followup 已有 `requestSemantics.responses.context` 真源，legacy metadata 撞语义门。
+- 修复：nested followup metadata 构建入口物理删除 `responsesContext/contextSnapshot/contextMetadataKey`，保留 `requestSemantics.responses.context`。
+- 红测：`servertool-followup-dispatch.spec.ts` 新增 `does not pass legacy responsesContext through nested followup metadata`，先红后绿。
+- 线上复测：5555 同类 `/v1/responses` tools 请求返回 HTTP 200；不再出现 semantic_gate；provider-request messages 非空。

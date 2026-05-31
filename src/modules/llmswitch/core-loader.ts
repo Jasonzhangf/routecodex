@@ -119,6 +119,7 @@ function resolveCorePackageDir(impl: LlmsImpl): string {
     engine: ['rcc-llmswitch-engine']
   };
   const baseUrls = [
+    pathToFileURL(path.join(path.dirname(resolveCoreLoaderModulePath()), 'package.json')).href,
     pathToFileURL(path.join(process.cwd(), 'package.json')).href
   ];
   for (const name of packageNamesByImpl[impl]) {

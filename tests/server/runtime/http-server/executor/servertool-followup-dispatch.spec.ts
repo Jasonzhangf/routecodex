@@ -869,6 +869,52 @@ describe('servertool followup dispatch helper', () => {
     );
   });
 
+  it('does not pass legacy responsesContext through nested followup metadata', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: { body: input.body, metadata: input.metadata }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_no_legacy_responses_context_metadata',
+      body: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
+      },
+      baseMetadata: {
+        responsesContext: { input: [{ role: 'user', content: [{ type: 'input_text', text: 'seed' }] }] },
+        contextSnapshot: { input: [{ role: 'user', content: [{ type: 'input_text', text: 'seed' }] }] },
+        contextMetadataKey: 'responsesContext'
+      },
+      metadata: {
+        __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.stop_message' }
+      },
+      requestSemantics: {
+        responses: {
+          context: { input: [{ role: 'user', content: [{ type: 'input_text', text: 'seed' }] }] }
+        },
+        __routecodex: {
+          serverToolFollowup: true,
+          serverToolFollowupSource: 'servertool.stop_message'
+        }
+      },
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.metadata?.responsesContext).toBeUndefined();
+    expect(nestedInput?.metadata?.contextSnapshot).toBeUndefined();
+    expect(nestedInput?.metadata?.contextMetadataKey).toBeUndefined();
+    expect(nestedInput?.metadata?.requestSemantics?.responses?.context).toBeDefined();
+  });
+
   it('disables servertool followup semantics when stopless goal is active (from request semantics)', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
     const executeNested = jest.fn(async (input: any) => ({

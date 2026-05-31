@@ -1,67 +1,66 @@
 import type { VirtualRouterEngine } from "../../../router/virtual-router/engine.js";
 import type {
   HubPipelineConfig,
+  HubPipelineNodeResult,
   HubPipelineResult,
   NormalizedRequest,
 } from "./hub-pipeline.js";
-import type { RequestStageHooks } from "./hub-pipeline-stage-hooks.js";
-import {
-  executeRequestStageInbound,
-} from "./hub-pipeline-execute-request-stage-inbound.js";
-import {
-  executeRouteAndBuildOutbound,
-} from "./hub-pipeline-route-and-outbound.js";
+import { runHubPipelineLibWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-lib.js';
 import { attachHubStageTopSummary } from "./hub-pipeline-chat-process-request-utils.js";
 
 export async function executeRequestStagePipeline<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;
-  hooks: RequestStageHooks<TContext>;
+  hooks?: TContext;
   routerEngine: VirtualRouterEngine;
   config: HubPipelineConfig;
 }): Promise<HubPipelineResult> {
-  const { normalized, hooks, routerEngine, config } = args;
+  const { normalized, config, routerEngine } = args;
+  const route = routerEngine.route(normalized.payload as never, normalized.metadata as never);
+  const metadata = {
+    ...normalized.metadata,
+    __routecodexPreselectedRoute: route,
+  } as Record<string, unknown>;
 
-  const inbound = await executeRequestStageInbound({
-    normalized,
-    hooks,
-    config,
-  });
-
-  const outbound = await executeRouteAndBuildOutbound({
-    normalized,
-    hooks,
-    routerEngine,
-    config,
-    workingRequest: inbound.workingRequest,
-    nodeResults: inbound.nodeResults,
-    inboundRecorder: inbound.inboundRecorder,
-    serverToolRequired: inbound.serverToolRequired,
-    hasImageAttachment: inbound.hasImageAttachment,
-    rawRequest: inbound.rawRequest,
-    contextSnapshot: inbound.contextSnapshot,
-    semanticMapper: inbound.semanticMapper,
-    effectivePolicy: inbound.effectivePolicy,
-    shadowCompareBaselineMode: inbound.shadowCompareBaselineMode,
-    routeSelectTiming: {
-      enabled: true,
+  const nativePlan = runHubPipelineLibWithNative({
+    config: {
+      virtualRouter: config.virtualRouter as unknown as Record<string, unknown>,
+      ...(config.policy ? { policy: config.policy as unknown as Record<string, unknown> } : {}),
+      ...(config.toolSurface ? { toolSurface: config.toolSurface as unknown as Record<string, unknown> } : {}),
+    },
+    request: {
       requestId: normalized.id,
+      endpoint: normalized.endpoint,
+      entryEndpoint: normalized.entryEndpoint,
+      providerProtocol: normalized.providerProtocol,
+      payload: normalized.payload,
+      metadata,
+      stream: normalized.stream,
+      processMode: normalized.processMode,
+      direction: normalized.direction,
+      stage: normalized.stage,
     },
   });
+  if (nativePlan.success !== true) {
+    throw new Error(nativePlan.error?.message ?? 'Rust HubPipeline request path failed');
+  }
+  const outputMetadata = nativePlan.metadata ?? {};
+  const providerPayload = nativePlan.payload;
+  if (!providerPayload || typeof providerPayload !== 'object' || Array.isArray(providerPayload)) {
+    throw new Error('Rust HubPipeline request path returned invalid provider payload');
+  }
 
   attachHubStageTopSummary({
     requestId: normalized.id,
-    metadata: outbound.metadata,
+    metadata: outputMetadata,
   });
 
   return {
     requestId: normalized.id,
-    providerPayload: outbound.providerPayload,
-    standardizedRequest: inbound.standardizedRequest,
-    processedRequest: inbound.processedRequest,
-    routingDecision: outbound.routingDecision,
-    routingDiagnostics: outbound.routingDiagnostics,
-    target: outbound.target,
-    metadata: outbound.metadata,
-    nodeResults: inbound.nodeResults,
+    providerPayload,
+    target: outputMetadata.target as HubPipelineResult['target'],
+    routingDecision: outputMetadata.routingDecision as HubPipelineResult['routingDecision'],
+    routingDiagnostics: outputMetadata.routingDiagnostics as HubPipelineResult['routingDiagnostics'],
+    metadata: outputMetadata,
+    nodeResults: nativePlan.diagnostics as unknown as HubPipelineNodeResult[],
   };
 }

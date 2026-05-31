@@ -58,7 +58,136 @@ function buildVirtualRouterConfig() {
   };
 }
 
+function buildAnthropicVirtualRouterConfig() {
+  return {
+    providers: {
+      mimo: {
+        id: 'mimo',
+        enabled: true,
+        type: 'anthropic',
+        baseURL: 'mock://mimo',
+        auth: { type: 'apikey', apiKey: 'mimo-key' },
+        models: { 'mimo-v2.5': {} }
+      }
+    },
+    routing: {
+      tools: [
+        {
+          id: 'tools-priority',
+          mode: 'priority',
+          targets: ['mimo.mimo-v2.5']
+        }
+      ],
+      default: [
+        {
+          id: 'default-priority',
+          mode: 'priority',
+          targets: ['mimo.mimo-v2.5']
+        }
+      ]
+    }
+  };
+}
+
 describe('responses handler virtual-router empty-pool guard', () => {
+  it('sends non-empty Anthropic messages when /v1/responses routes to an anthropic provider', async () => {
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const artifacts = (await bootstrapVirtualRouterConfig(buildAnthropicVirtualRouterConfig() as any)) as any;
+    const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
+    const providerPayloads: Array<Record<string, unknown>> = [];
+    const executor = new HubRequestExecutor({
+      runtimeManager: {
+        resolveRuntimeKey: (providerKey?: string) => artifacts.targetRuntime?.[providerKey ?? '']?.runtimeKey,
+        getHandleByRuntimeKey: (runtimeKey?: string) => runtimeKey === 'mimo.key1'
+          ? {
+              runtimeKey: 'mimo.key1',
+              providerId: 'mimo',
+              providerType: 'anthropic',
+              providerFamily: 'anthropic',
+              providerProtocol: 'anthropic-messages',
+              runtime: { runtimeKey: 'mimo.key1' },
+              instance: {
+                initialize: async () => undefined,
+                cleanup: async () => undefined,
+                processIncoming: async (payload: Record<string, unknown>) => {
+                  providerPayloads.push(payload);
+                  return {
+                    status: 200,
+                    data: {
+                      id: 'msg_test_1',
+                      type: 'message',
+                      role: 'assistant',
+                      model: 'mimo-v2.5',
+                      content: [{ type: 'text', text: 'ok' }],
+                      stop_reason: 'end_turn'
+                    }
+                  };
+                }
+              }
+            }
+          : undefined,
+        getHandleByProviderKey: () => undefined,
+        disposeAll: async () => undefined,
+        initialize: async () => undefined
+      },
+      getHubPipeline: () => pipeline as any,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: async () => undefined
+        }
+      }),
+      logStage: () => undefined,
+      stats: new StatsManager()
+    } as any);
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/responses', (req, res) =>
+      handleResponses(req, res, {
+        executePipeline: async (input) => executor.execute(input),
+        errorHandling: null
+      })
+    );
+
+    try {
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/v1/responses`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: 'mimo-v2.5',
+            input: [
+              {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: 'read files' }]
+              }
+            ],
+            tools: [
+              {
+                type: 'function',
+                name: 'exec_command',
+                parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] }
+              }
+            ],
+            tool_choice: 'auto',
+            metadata: { stopMessageEnabled: false }
+          })
+        });
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.error).toBeUndefined();
+        expect(providerPayloads).toHaveLength(1);
+        expect(providerPayloads[0]?.messages).toEqual([
+          { role: 'user', content: [{ type: 'text', text: 'read files' }] }
+        ]);
+        expect((providerPayloads[0]?.tools as Array<Record<string, unknown>> | undefined)?.[0]?.name).toBe('exec_command');
+      });
+    } finally {
+      pipeline.dispose();
+    }
+  });
+
   it('keeps the route pool non-empty when retry exclusions cover every default target', async () => {
     const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;

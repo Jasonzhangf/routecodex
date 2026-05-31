@@ -1,6 +1,6 @@
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024; // 50MB limit
 
@@ -67,18 +67,124 @@ fn build_openai_responses_request(format_envelope: &Value) -> Result<Value, Stri
     Ok(payload)
 }
 
+fn build_openai_chat_request(format_envelope: &Value) -> Result<Value, String> {
+    let payload = format_envelope
+        .get("payload")
+        .ok_or("Missing 'payload' field in format envelope")?
+        .clone();
+    if payload.get("input").is_some() {
+        let converted = crate::responses_openai_codec::run_responses_openai_request_codec_json(
+            payload.to_string(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+        let converted_value: Value = serde_json::from_str(&converted).map_err(|error| error.to_string())?;
+        return converted_value
+            .get("request")
+            .cloned()
+            .ok_or_else(|| "responses-openai request codec returned no request".to_string());
+    }
+    if let Some(context) = format_envelope
+        .get("payload")
+        .and_then(|value| value.get("metadata"))
+        .and_then(|value| value.get("context"))
+        .filter(|value| value.get("input").is_some())
+    {
+        let mut responses_payload = Map::new();
+        if let Some(model) = payload.get("model") {
+            responses_payload.insert("model".to_string(), model.clone());
+        }
+        if let Some(input) = context.get("input") {
+            responses_payload.insert("input".to_string(), input.clone());
+        }
+        let converted = crate::responses_openai_codec::run_responses_openai_request_codec_json(
+            Value::Object(responses_payload).to_string(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+        let converted_value: Value = serde_json::from_str(&converted).map_err(|error| error.to_string())?;
+        return converted_value
+            .get("request")
+            .cloned()
+            .ok_or_else(|| "responses-openai request codec returned no request".to_string());
+    }
+    if payload.get("messages").is_some() {
+        return Ok(strip_private_fields(&payload));
+    }
+    Ok(strip_private_fields(&payload))
+}
+
 fn build_anthropic_messages_request(format_envelope: &Value) -> Result<Value, String> {
-    let mut payload = format_envelope
+    let payload = format_envelope
         .get("payload")
         .ok_or("Missing 'payload' field in format envelope")?
         .clone();
 
-    if let Some(obj) = payload.as_object_mut() {
-        let stripped = strip_private_fields(&Value::Object(obj.clone()));
-        *obj = stripped.as_object().unwrap().clone();
+    if payload.get("input").is_some() {
+        let chat = crate::responses_openai_codec::run_responses_openai_request_codec_json(
+            payload.to_string(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+        let chat_value: Value = serde_json::from_str(&chat).map_err(|error| error.to_string())?;
+        let chat_request = chat_value
+            .get("request")
+            .cloned()
+            .ok_or_else(|| "responses-openai request codec returned no request".to_string())?;
+        let anthropic = crate::anthropic_openai_codec::build_anthropic_from_openai_chat_json(
+            chat_request.to_string(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+        let anthropic_value: Value = serde_json::from_str(&anthropic).map_err(|error| error.to_string())?;
+        return Ok(strip_private_fields(&anthropic_value));
     }
-
-    Ok(payload)
+    if let Some(context) = format_envelope
+        .get("payload")
+        .and_then(|value| value.get("metadata"))
+        .and_then(|value| value.get("context"))
+        .filter(|value| value.get("input").is_some())
+    {
+        let mut responses_payload = Map::new();
+        if let Some(model) = payload.get("model") {
+            responses_payload.insert("model".to_string(), model.clone());
+        }
+        if let Some(input) = context.get("input") {
+            responses_payload.insert("input".to_string(), input.clone());
+        }
+        if let Some(parameters) = context.get("parameters").and_then(|value| value.as_object()) {
+            for (key, value) in parameters {
+                responses_payload.insert(key.clone(), value.clone());
+            }
+        }
+        for key in ["tools", "tool_choice", "temperature", "top_p", "max_output_tokens", "stream"] {
+            if let Some(value) = payload
+                .get(key)
+                .or_else(|| context.get(key))
+                .or_else(|| context.get("toolsRaw").filter(|_| key == "tools"))
+            {
+                responses_payload.insert(key.to_string(), value.clone());
+            }
+        }
+        let chat = crate::responses_openai_codec::run_responses_openai_request_codec_json(
+            Value::Object(responses_payload).to_string(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+        let chat_value: Value = serde_json::from_str(&chat).map_err(|error| error.to_string())?;
+        let chat_request = chat_value
+            .get("request")
+            .cloned()
+            .ok_or_else(|| "responses-openai request codec returned no request".to_string())?;
+        let anthropic = crate::anthropic_openai_codec::build_anthropic_from_openai_chat_json(
+            chat_request.to_string(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+        let anthropic_value: Value = serde_json::from_str(&anthropic).map_err(|error| error.to_string())?;
+        return Ok(strip_private_fields(&anthropic_value));
+    }
+    Ok(strip_private_fields(&payload))
 }
 
 fn build_gemini_chat_request(format_envelope: &Value) -> Result<Value, String> {
@@ -97,6 +203,7 @@ fn build_gemini_chat_request(format_envelope: &Value) -> Result<Value, String> {
 
 pub fn build_format_request(input: FormatBuildInput) -> Result<FormatBuildOutput, String> {
     let payload = match input.protocol.as_str() {
+        "openai-chat" => build_openai_chat_request(&input.format_envelope)?,
         "openai-responses" => build_openai_responses_request(&input.format_envelope)?,
         "anthropic-messages" => build_anthropic_messages_request(&input.format_envelope)?,
         "gemini-chat" => build_gemini_chat_request(&input.format_envelope)?,

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
 use crate::chat_node_result_semantics::build_processed_request_from_chat_response;
+use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
 use crate::hub_req_inbound_context_capture::{
     capture_req_inbound_responses_context_snapshot, ResponsesContextCaptureInput,
 };
@@ -72,6 +72,33 @@ impl HubPipelineEngine {
         Ok(())
     }
 
+    fn select_route(
+        &self,
+        request: &Value,
+        metadata: &Value,
+    ) -> HubPipelineResult<Value> {
+        if let Some(target) = self.config.virtual_router.get("target").cloned() {
+            return Ok(serde_json::json!({
+                "target": target,
+                "decision": {
+                    "routeName": self
+                        .config
+                        .virtual_router
+                        .get("routeName")
+                        .and_then(Value::as_str)
+                        .unwrap_or("default")
+                },
+                "diagnostics": {}
+            }));
+        }
+        read_preselected_route(metadata).ok_or_else(|| {
+            HubPipelineError::new(
+                "hub_pipeline_missing_preselected_route",
+                "Rust HubPipeline req route stage requires metadata.__routecodexPreselectedRoute for bootstrapped virtual router config",
+            )
+        })
+    }
+
     pub fn execute(
         &mut self,
         request: HubPipelineRequest,
@@ -113,7 +140,7 @@ impl HubPipelineEngine {
             )
         })?;
         let normalized_metadata = output.metadata.clone().unwrap_or(Value::Null);
-        let provider_protocol = normalized_metadata
+        let entry_provider_protocol = normalized_metadata
             .get("providerProtocol")
             .and_then(Value::as_str)
             .unwrap_or("openai-chat")
@@ -123,18 +150,18 @@ impl HubPipelineEngine {
                 output,
                 normalized_payload,
                 normalized_metadata,
-                provider_protocol,
+                entry_provider_protocol,
                 diagnostics,
             );
         }
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqInboundFormatParse,
             HubPipelineDiagnosticStatus::Started,
-            Some(serde_json::json!({ "protocol": provider_protocol })),
+            Some(serde_json::json!({ "protocol": entry_provider_protocol })),
         ));
         let parsed = parse_format_envelope(FormatParseInput {
             raw_request: normalized_payload.clone(),
-            protocol: provider_protocol.clone(),
+            protocol: entry_provider_protocol.clone(),
         })
         .map_err(HubPipelineError::from)?;
         diagnostics.push(diagnostic(
@@ -145,12 +172,12 @@ impl HubPipelineEngine {
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqInboundSemanticLift,
             HubPipelineDiagnosticStatus::Started,
-            Some(serde_json::json!({ "protocol": provider_protocol })),
+            Some(serde_json::json!({ "protocol": entry_provider_protocol })),
         ));
         let lifted_envelope = apply_req_inbound_semantic_lift(ReqInboundSemanticLiftApplyInput {
             chat_envelope: serde_json::to_value(&parsed.envelope)?,
             payload: Some(normalized_payload.clone()),
-            protocol: Some(provider_protocol.clone()),
+            protocol: Some(entry_provider_protocol.clone()),
             entry_endpoint: normalized_metadata
                 .get("entryEndpoint")
                 .and_then(Value::as_str)
@@ -173,10 +200,10 @@ impl HubPipelineEngine {
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqInboundContextCapture,
             HubPipelineDiagnosticStatus::Started,
-            Some(serde_json::json!({ "protocol": provider_protocol })),
+            Some(serde_json::json!({ "protocol": entry_provider_protocol })),
         ));
         let context_snapshot = capture_context_snapshot(
-            &provider_protocol,
+            &entry_provider_protocol,
             &normalized_payload,
             &normalized_metadata,
             &request_id,
@@ -214,17 +241,18 @@ impl HubPipelineEngine {
                 "nodeResult": governed.node_result,
             })),
         ));
-        let target = self
-            .config
-            .virtual_router
-            .get("target")
-            .cloned()
-            .ok_or_else(|| {
-                HubPipelineError::new(
-                    "hub_pipeline_missing_route_target",
-                    "Rust HubPipeline req route stage requires config.virtualRouter.target",
-                )
-            })?;
+        let route_output = self.select_route(&governed.processed_request, &normalized_metadata)?;
+        let target = route_output.get("target").cloned().ok_or_else(|| {
+            HubPipelineError::new(
+                "hub_pipeline_missing_route_target",
+                "Rust HubPipeline req route stage returned no target",
+            )
+        })?;
+        let route_name = route_output
+            .get("decision")
+            .and_then(|decision| decision.get("routeName"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqProcessRouteSelect,
             HubPipelineDiagnosticStatus::Started,
@@ -234,12 +262,7 @@ impl HubPipelineEngine {
             request: governed.processed_request,
             normalized_metadata,
             target,
-            route_name: self
-                .config
-                .virtual_router
-                .get("routeName")
-                .and_then(Value::as_str)
-                .map(str::to_string),
+            route_name,
             original_model: lifted_envelope
                 .get("payload")
                 .and_then(|payload| payload.get("model"))
@@ -248,7 +271,17 @@ impl HubPipelineEngine {
             thinking: None,
         })
         .map_err(HubPipelineError::from)?;
+        let provider_protocol = resolve_outbound_provider_protocol(&routed.normalized_metadata)
+            .unwrap_or(entry_provider_protocol);
         attach_context_snapshot_to_metadata(&mut routed.normalized_metadata, context_snapshot)?;
+        if let Some(metadata) = routed.normalized_metadata.as_object_mut() {
+            if let Some(decision) = route_output.get("decision").cloned() {
+                metadata.insert("routingDecision".to_string(), decision);
+            }
+            if let Some(diagnostics_value) = route_output.get("diagnostics").cloned() {
+                metadata.insert("routingDiagnostics".to_string(), diagnostics_value);
+            }
+        }
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqProcessRouteSelect,
             HubPipelineDiagnosticStatus::Completed,
@@ -725,7 +758,7 @@ fn apply_context_snapshot_to_format_envelope(
     })?;
     let patch = apply_req_outbound_context_snapshot(&ReqOutboundContextSnapshotApplyInput {
         chat_envelope: Some(payload.clone()),
-        snapshot: Some(snapshot),
+        snapshot: Some(snapshot.clone()),
     });
     let payload_obj = payload.as_object_mut().ok_or_else(|| {
         HubPipelineError::new(
@@ -733,6 +766,15 @@ fn apply_context_snapshot_to_format_envelope(
             "Rust HubPipeline req outbound context merge requires object payload",
         )
     })?;
+    let metadata_value = payload_obj
+        .entry("metadata".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !metadata_value.is_object() {
+        *metadata_value = Value::Object(serde_json::Map::new());
+    }
+    if let Some(metadata_obj) = metadata_value.as_object_mut() {
+        metadata_obj.insert("context".to_string(), snapshot.clone());
+    }
     if let Some(tool_outputs) = patch.tool_outputs {
         payload_obj.insert(
             "toolOutputs".to_string(),
@@ -917,6 +959,30 @@ fn build_adapter_context(
             conversation_id: None,
         }
     }
+}
+
+fn read_preselected_route(metadata: &Value) -> Option<Value> {
+    let route = metadata.get("__routecodexPreselectedRoute")?;
+    let target = route.get("target")?;
+    let decision = route.get("decision")?;
+    if !target.is_object() || !decision.is_object() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "target": target,
+        "decision": decision,
+        "diagnostics": route.get("diagnostics").cloned().unwrap_or_else(|| serde_json::json!({}))
+    }))
+}
+
+fn resolve_outbound_provider_protocol(metadata: &Value) -> Option<String> {
+    let target = metadata.get("target")?.as_object()?;
+    target
+        .get("outboundProfile")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

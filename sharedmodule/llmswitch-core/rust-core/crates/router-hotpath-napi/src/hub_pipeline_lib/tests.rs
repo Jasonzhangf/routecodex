@@ -90,6 +90,154 @@ fn execute_hub_pipeline_json_uses_total_entry_contract() {
 }
 
 #[test]
+fn execute_hub_pipeline_json_uses_preselected_route_outbound_profile_for_responses_to_chat() {
+    let input = json!({
+        "config": {
+            "virtualRouter": {
+                "providers": {
+                    "primary.key1.gpt-test": {
+                        "providerKey": "primary.key1.gpt-test",
+                        "providerType": "responses",
+                        "runtimeKey": "primary.key1",
+                        "modelId": "gpt-test",
+                        "endpoint": "mock://primary",
+                        "auth": { "type": "apikey", "apiKey": "primary-key" },
+                        "outboundProfile": "openai-chat"
+                    }
+                },
+                "routing": {
+                    "default": [{
+                        "id": "default-priority",
+                        "mode": "priority",
+                        "targets": ["primary.key1.gpt-test"]
+                    }]
+                }
+            }
+        },
+        "request": {
+            "requestId": "req-bootstrap-vr-no-env",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "payload": { "model": "gpt-test", "input": "hi" },
+            "metadata": {
+                "__routecodexPreselectedRoute": {
+                    "target": {
+                        "providerKey": "primary.key1.gpt-test",
+                        "providerType": "responses",
+                        "runtimeKey": "primary.key1",
+                        "modelId": "gpt-test",
+                        "outboundProfile": "openai-chat"
+                    },
+                    "decision": { "routeName": "default" },
+                    "diagnostics": {}
+                }
+            },
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+
+    assert_eq!(output.get("success").and_then(|value| value.as_bool()), Some(true));
+    assert_eq!(
+        output.pointer("/payload/messages/0/role").and_then(|value| value.as_str()),
+        Some("user")
+    );
+    assert_eq!(
+        output.pointer("/payload/messages/0/content").and_then(|value| value.as_str()),
+        Some("hi")
+    );
+}
+
+#[test]
+fn execute_hub_pipeline_json_builds_non_empty_anthropic_messages_from_responses_input() {
+    let input = json!({
+        "config": {
+            "virtualRouter": {
+                "providers": {
+                    "mimo.key2.mimo-v2.5": {
+                        "providerKey": "mimo.key2.mimo-v2.5",
+                        "providerType": "anthropic",
+                        "runtimeKey": "mimo.key2",
+                        "modelId": "mimo-v2.5",
+                        "endpoint": "mock://mimo",
+                        "auth": { "type": "apikey", "apiKey": "mimo-key" },
+                        "outboundProfile": "anthropic-messages"
+                    }
+                },
+                "routing": {
+                    "tools": [{
+                        "id": "tools-priority",
+                        "mode": "priority",
+                        "targets": ["mimo.key2.mimo-v2.5"]
+                    }]
+                }
+            }
+        },
+        "request": {
+            "requestId": "req-responses-to-anthropic-tools",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "payload": {
+                "model": "mimo-v2.5",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "read files" }]
+                }],
+                "tools": [{
+                    "type": "function",
+                    "name": "exec_command",
+                    "description": "execute command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "cmd": { "type": "string" } },
+                        "required": ["cmd"]
+                    }
+                }],
+                "tool_choice": "auto"
+            },
+            "metadata": {
+                "__routecodexPreselectedRoute": {
+                    "target": {
+                        "providerKey": "mimo.key2.mimo-v2.5",
+                        "providerType": "anthropic",
+                        "runtimeKey": "mimo.key2",
+                        "modelId": "mimo-v2.5",
+                        "outboundProfile": "anthropic-messages"
+                    },
+                    "decision": { "routeName": "tools" },
+                    "diagnostics": {}
+                }
+            },
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+
+    assert_eq!(output.get("success").and_then(|value| value.as_bool()), Some(true));
+    assert_eq!(
+        output.pointer("/payload/messages/0/role").and_then(|value| value.as_str()),
+        Some("user")
+    );
+    assert_eq!(
+        output.pointer("/payload/messages/0/content/0/text").and_then(|value| value.as_str()),
+        Some("read files")
+    );
+    assert_eq!(
+        output.pointer("/payload/tools/0/name").and_then(|value| value.as_str()),
+        Some("exec_command")
+    );
+}
+
+#[test]
 fn execute_request_path_preserves_client_tool_surface() {
     let input = json!({
         "config": {

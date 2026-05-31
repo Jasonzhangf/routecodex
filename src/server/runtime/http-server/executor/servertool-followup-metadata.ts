@@ -138,6 +138,9 @@ export function buildServerToolNestedRequestMetadata(args: {
     direction: 'request',
     stage: 'inbound'
   };
+  delete out.responsesContext;
+  delete out.contextSnapshot;
+  delete out.contextMetadataKey;
 
   if (
     args.requestSemantics &&
