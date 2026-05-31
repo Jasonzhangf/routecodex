@@ -13505,3 +13505,9 @@ Using skills: coding-principals + rcc-dev-skills
 - 根因：`scripts/build-core.mjs` 的 dist 有效性只检查旧三项输出，旧 dist 即使缺新增 resp semantics bridge 也可能跳过 core rebuild，导致安装/runtime snapshot 缺模块。
 - 修复：抽出 `scripts/lib/build-core-utils.mjs`，把 `native-hub-pipeline-resp-semantics.js` 加入 required outputs；新增 `tests/scripts/build-core-utils.spec.ts` 锁住旧 dist 缺模块必须 invalid。
 - 验证：Jest 定向通过；`BUILD_MODE=dev node scripts/build-core.mjs` 触发 core rebuild；global install 后 `/opt/homebrew/.../native-hub-pipeline-resp-semantics.js` 存在且可 import；`routecodex restart --port 5555` 后 health ok，新日志未再出现该缺模块错误。真实 `/v1/responses` smoke 到达 provider，失败为上游 503，非模块加载错误。
+
+## 2026-05-31 HubPipeline closeout request stage shell deletion
+- 审计确认 `req_outbound_stage2_format_build/index.ts`、`req_outbound_stage3_compat/index.ts`、`req_process_stage2_route_select/index.ts` 无生产/测试 import，Rust total API engine 已覆盖 `build_format_request`、`run_req_outbound_stage3_compat`、`apply_route_selection`。
+- 红测：`hub-pipeline-stage-residue-audit` 新增 gate 要求三类 request stage shell 物理不存在，先红显示 3 个残留。
+- 修复：物理删除上述 stage shell 及对应 README 空壳。
+- 验证：residue audit 30/30 PASS；`pnpm -C sharedmodule/llmswitch-core run build` PASS；`cargo test -p router-hotpath-napi hub_pipeline -- --nocapture` 132 PASS。

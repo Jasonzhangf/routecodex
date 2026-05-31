@@ -487,6 +487,20 @@ describe('hub pipeline stage residue audit', () => {
     expect({ legacyFiles, exportFindings }).toEqual({ legacyFiles: [], exportFindings: [] });
   });
 
+  it('legacy request stage shells covered by Rust total API must be physically removed', () => {
+    const stageRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages',
+    );
+    const legacyFiles = [
+      'req_outbound/req_outbound_stage2_format_build/index.ts',
+      'req_outbound/req_outbound_stage3_compat/index.ts',
+      'req_process/req_process_stage2_route_select/index.ts',
+    ].filter((relativePath) => fs.existsSync(path.join(stageRoot, relativePath)));
+
+    expect(legacyFiles).toEqual([]);
+  });
+
   it('legacy TS operation-table semantic mapper implementations must be physically removed', () => {
     const semanticMapperRoot = path.join(
       process.cwd(),

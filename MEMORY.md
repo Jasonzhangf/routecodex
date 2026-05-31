@@ -1908,3 +1908,24 @@ Slice 0（总控 API）→ Slice 1-4（P0）→ Slice 5（P1）
 
 ## 2026-05-31 Rustification audit baseline rule
 - Verified: after HubPipeline TS deletion work, refresh `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` only when current total non-native LOC is lower and no new prod TS files remain. Thin wrapper files like `native-hub-pipeline-lib.ts` are not allowed as new prod TS; import existing protocol wrappers directly.
+2026-05-31 verified: MiniMax /v1/responses tools failure root cause was Rust req outbound format build responses-context -> openai-chat path only copied model/input, dropping tools/tool_choice/stream controls. Fixed in hub_req_outbound_format_build.rs, red in hub_pipeline_lib test, live sample rcc-redtools-mini27-1780235661 shows mini27 provider-request toolsLen=1/tool_choice=auto and no “OpenAI chat SSE response did not contain JSON data events”.
+
+## 2026-05-31 empty SSE marker-only and Responses record ordering
+- Provider response conversion 中，OpenAI chat SSE marker-only（无 materialized stream/bodyText）属于 provider SSE decode failure，必须归一为 `SSE_DECODE_ERROR`、`status=502`、`retryable=true`、`requestExecutorProviderErrorStage=provider.sse_decode`，并允许 response-processing phase 进入 provider retry plan；不能作为 HubPipeline fatal conversion 直接终止。
+- Responses conversation 记录顺序：native response runtime effect 不得抢先 `recordResponsesResponse`；handler 在 request context capture 完成后统一 capture+record，避免 `missing_request_context` 与 retained input 泄漏。
+
+## 2026-05-31 HubPipeline Slice5 public barrel cleanup
+- Slice5 不只看 active registry；public barrel 也不能导出 legacy TS mapper/adapter implementations。`conversion/index.ts` 只允许保留 mapper/adapter type exports；`hub/format-adapters/index.ts` 只保留 `FormatAdapter` / `SemanticMapper` / `StageRecorder` interfaces，禁止导出 concrete `*FormatAdapter` classes。
+- Architecture gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 的 `public conversion barrels must not export legacy mapper or adapter implementations`。
+
+## 2026-05-31 HubPipeline Slice5 concrete format-adapter deletion
+- Concrete TS `Chat/Anthropic/Responses/GeminiFormatAdapter` files are physically removed from `sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/`; only type interfaces remain in `index.ts` for thin glue. Residue gate: `legacy concrete TS format adapter implementations must be physically removed` in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
+
+## 2026-05-31 Responses SSE terminal repair id invariant
+- Verified root for Codex reconnect error `failed to parse ResponseCompleted: missing field id`: `handler-response-utils.buildResponsesTerminalSseFramesFromProbe` synthesized `response.completed` / `response.done` from partial SSE probe without `response.id`.
+- Fix invariant: any synthesized Responses terminal frame must include `response.id`; if upstream never provided one, derive deterministic `resp_<requestLabel-sanitized>`. Do not synthesize completed/done from merely `in_progress` probe without completed output or required_action.
+- Regression: `tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts` blackbox uses real Express `/v1/responses` handler + upstream SSE that emits `response.output_item.done` then closes, asserting synthesized `response.completed` and `response.done` both include string id.
+
+## 2026-05-31 HubPipeline request stage shell removal
+- Verified closeout residue: `req_outbound_stage2_format_build`, `req_outbound_stage3_compat`, and `req_process_stage2_route_select` TS stage shells had no production/test import while Rust HubPipeline engine covers `build_format_request`, `run_req_outbound_stage3_compat`, and `apply_route_selection`.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` requires these legacy request stage shells to be physically absent.

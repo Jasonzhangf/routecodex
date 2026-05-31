@@ -1679,3 +1679,11 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 Anthropic response policy fail-fast 精华
 - Response bridge policy wrappers must not broad-catch native policy execution; `response-runtime-anthropic-policy.ts` should propagate native policy errors instead of silently skipping response semantics.
+
+### 2026-05-31 Responses SSE ResponseCompleted id 精华
+- Trigger: Codex UI shows `Stream disconnected before completion: failed to parse ResponseCompleted: missing field id`.
+- Action: inspect synthesized terminal SSE repair in `src/server/handlers/handler-response-utils.ts`; `response.completed` and `response.done` must always carry `response.id`. Add/keep HTTP blackbox with real Express `/v1/responses` handler and partial upstream SSE, not only unit parser tests.
+- Boundary: do not mark an `in_progress` probe as completed merely because stream closed; only synthesize terminal frames from required_action or completed output evidence.
+
+### 2026-05-31 HubPipeline request stage shell deletion 精华
+- Rust total API covers request route/outbound stages; if TS `req_outbound_stage2_format_build`, `req_outbound_stage3_compat`, or `req_process_stage2_route_select` reappears, treat as closeout regression and fail `hub-pipeline-stage-residue-audit`.
