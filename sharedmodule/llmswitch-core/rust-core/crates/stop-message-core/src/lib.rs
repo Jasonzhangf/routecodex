@@ -68,6 +68,7 @@ pub enum SkipReason {
     NotStopFinishReason,
     ReachedMaxRepeats,
     GoalActive,
+    PlanMode,
 }
 
 impl SkipReason {
@@ -88,6 +89,7 @@ impl SkipReason {
             SkipReason::NotStopFinishReason => "skip_not_stop_finish_reason",
             SkipReason::ReachedMaxRepeats => "skip_reached_max_repeats",
             SkipReason::GoalActive => "skip_goal_active",
+            SkipReason::PlanMode => "skip_plan_mode",
         }
     }
 }
@@ -134,6 +136,9 @@ pub struct StopMessageDecisionContext {
     // Goal state
     pub goal_status: GoalStatus,
 
+    // Collaboration mode gate
+    pub plan_mode_active: bool,
+
     // Default config
     pub default_enabled: bool,
     pub default_max_repeats: u32,
@@ -170,50 +175,15 @@ pub enum Action {
 /// Returns a `StopMessageDecision` with the action to take.
 /// This is a pure function — no I/O, no side effects.
 pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
-    // 1. Port disabled?
-    if ctx.port_stop_message_disabled {
-        return skip(SkipReason::PortDisabled);
+    if let Some(reason) = decide_stop_message_skip(ctx) {
+        return skip(reason);
     }
 
-    // 2. Followup flow check
-    if ctx.followup_flow_id.is_some() {
-        if ctx.stop_eligible {
-            // Followup flow + eligible → proceed
-        } else {
-            return skip(SkipReason::ServertoolFollowupHop);
-        }
-    }
-
-    // 3. Submit tool outputs resume?
-    if ctx.has_responses_submit_tool_outputs_resume {
-        return skip(SkipReason::ResponsesSubmitToolOutputsResume);
-    }
-
-    // 4. Explicit mode without snapshot?
-    if let Some(mode) = &ctx.explicit_mode {
-        if matches!(mode, StageMode::On | StageMode::Auto)
-            && ctx.persisted_snapshot.is_none()
-            && ctx.runtime_snapshot.is_none()
-        {
-            return skip(SkipReason::ExplicitModeWithoutSnapshot);
-        }
-    }
-
-    // 5. Resolve snapshot: persisted > runtime > default
     let resolved_snapshot = resolve_snapshot(ctx);
 
     let snapshot = match resolved_snapshot {
         Some(s) => s,
-        None => {
-            // 5a. Default exhausted tombstone?
-            if !ctx.goal_status.is_active()
-                && !ctx.empty_reply_continue_local
-                && ctx.persisted_default_exhausted
-            {
-                return skip(SkipReason::GoalDefaultExhausted);
-            }
-            return skip(SkipReason::NoSnapshot);
-        }
+        None => return skip(SkipReason::NoSnapshot),
     };
 
     // 5. Mode off?
@@ -226,31 +196,12 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
         return skip(SkipReason::EmptyText);
     }
 
-    // 7. Invalid repeats?
-    if snapshot.max_repeats == 0 {
+    let effective_max_repeats = normalize_trigger_max_repeats(&snapshot, ctx.default_max_repeats);
+    if effective_max_repeats == 0 {
         return skip(SkipReason::InvalidRepeats);
     }
-
-    // 7.5 Latest finish_reason gate (current response only)
-    if let Some(latest) = latest_finish_reason(ctx.finish_reasons.as_ref()) {
-        if latest != "stop" {
-            return skip(SkipReason::NotStopFinishReason);
-        }
-    }
-
-    // 8. Not stop eligible?
-    if !ctx.stop_eligible {
-        return skip(SkipReason::NotStopFinishReason);
-    }
-
-    // 9. Reached max repeats?
-    if snapshot.used >= snapshot.max_repeats {
+    if snapshot.used >= effective_max_repeats {
         return skip(SkipReason::ReachedMaxRepeats);
-    }
-
-    // 10. Goal active?
-    if ctx.goal_status.is_active() {
-        return skip(SkipReason::GoalActive);
     }
 
     // ── Trigger ──
@@ -258,10 +209,55 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
         action: Action::Trigger,
         skip_reason: None,
         used: snapshot.used,
-        max_repeats: snapshot.max_repeats,
+        max_repeats: effective_max_repeats,
         followup_text: Some(snapshot.text),
         provider_pin: ctx.provider_pin.clone(),
     }
+}
+
+fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReason> {
+    if ctx.port_stop_message_disabled {
+        return Some(SkipReason::PortDisabled);
+    }
+    if ctx.has_responses_submit_tool_outputs_resume {
+        return Some(SkipReason::ResponsesSubmitToolOutputsResume);
+    }
+    if ctx.plan_mode_active {
+        return Some(SkipReason::PlanMode);
+    }
+    if ctx.goal_status.is_active() {
+        return Some(SkipReason::GoalActive);
+    }
+    if ctx.followup_flow_id.is_some() {
+        return Some(SkipReason::ServertoolFollowupHop);
+    }
+    if ctx.persisted_snapshot.is_none() && ctx.runtime_snapshot.is_none() {
+        if ctx.persisted_default_exhausted {
+            return Some(SkipReason::GoalDefaultExhausted);
+        }
+        if matches!(ctx.explicit_mode, Some(StageMode::On)) {
+            return Some(SkipReason::ExplicitModeWithoutSnapshot);
+        }
+    }
+    if !ctx.stop_eligible {
+        return Some(SkipReason::NotStopFinishReason);
+    }
+    if let Some(latest) = latest_finish_reason(ctx.finish_reasons.as_ref()) {
+        if latest != "stop" {
+            return Some(SkipReason::NotStopFinishReason);
+        }
+    }
+    None
+}
+
+fn normalize_trigger_max_repeats(snapshot: &StopMessageSnapshot, default_max_repeats: u32) -> u32 {
+    if snapshot.max_repeats > 0 {
+        return snapshot.max_repeats;
+    }
+    if default_max_repeats > 0 {
+        return default_max_repeats;
+    }
+    snapshot.used.saturating_add(1).max(1)
 }
 
 // ── Snapshot resolution ────────────────────────────────────────────────────
@@ -277,21 +273,14 @@ fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnaps
         return Some(snapshot.clone());
     }
 
-    // 3. Explicit mode without snapshot → skip
-    if let Some(mode) = &ctx.explicit_mode {
-        if matches!(mode, StageMode::On | StageMode::Auto) {
-            return None; // caller will convert to ExplicitModeWithoutSnapshot
-        }
-    }
-
-    // 4. Try default snapshot
+    // 3. Try default snapshot
     //    Create default when no snapshot exists, goal is not active,
     //    and current request is not an empty-reply-continue scenario.
     let should_use_default = !ctx.goal_status.is_active() && !ctx.empty_reply_continue_local;
 
     if should_use_default {
         if ctx.persisted_default_exhausted {
-            return None; // caller: GoalDefaultExhausted
+            return None;
         }
         if ctx.default_enabled {
             let next_used = 0; // default starts at 0
@@ -342,7 +331,7 @@ mod tests {
     fn base_ctx() -> StopMessageDecisionContext {
         StopMessageDecisionContext {
             port_stop_message_disabled: false,
-            followup_flow_id: Some("stop_message_flow".to_string()),
+            followup_flow_id: None,
             stop_eligible: true,
             finish_reasons: Some(vec!["stop".to_string()]),
             has_responses_submit_tool_outputs_resume: false,
@@ -351,6 +340,7 @@ mod tests {
             persisted_default_exhausted: false,
             explicit_mode: None,
             goal_status: GoalStatus::Idle,
+            plan_mode_active: false,
             default_enabled: true,
             default_max_repeats: 3,
             default_text: "继续执行".to_string(),
@@ -360,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn triggers_on_clean_stop_with_followup_context() {
+    fn triggers_on_clean_stop_without_followup_context() {
         let result = decide(&base_ctx());
         assert_eq!(result.action, Action::Trigger);
         assert!(result.followup_text.is_some());
@@ -440,13 +430,38 @@ mod tests {
     }
 
     #[test]
+    fn skips_when_plan_mode_active() {
+        let mut ctx = base_ctx();
+        ctx.plan_mode_active = true;
+        let result = decide(&ctx);
+        assert_eq!(result.action, Action::Skip);
+        assert_eq!(result.skip_reason.unwrap(), "skip_plan_mode");
+    }
+
+    #[test]
+    fn non_active_managed_goal_statuses_do_not_skip_stopless() {
+        for status in [GoalStatus::Paused, GoalStatus::Stopped, GoalStatus::Completed] {
+            let mut ctx = base_ctx();
+            ctx.goal_status = status;
+            ctx.persisted_snapshot = Some(StopMessageSnapshot {
+                text: "继续执行".to_string(),
+                max_repeats: 3,
+                used: 0,
+                source: SnapshotSource::Persisted,
+                stage_mode: StageMode::On,
+            });
+            let result = decide(&ctx);
+            assert_eq!(result.action, Action::Trigger);
+        }
+    }
+
+    #[test]
     fn skips_when_goal_active_no_persisted_snapshot() {
         let mut ctx = base_ctx();
         ctx.goal_status = GoalStatus::Active;
-        // No persisted snapshot → no default (goal active blocks default) → no snapshot
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
-        assert_eq!(result.skip_reason.unwrap(), "skip_no_stopmessage_snapshot");
+        assert_eq!(result.skip_reason.unwrap(), "skip_goal_active");
     }
 
     #[test]
@@ -520,10 +535,9 @@ mod tests {
     }
 
     #[test]
-    fn skips_when_followup_flow_but_not_eligible() {
+    fn skips_when_followup_flow_to_prevent_recursion() {
         let mut ctx = base_ctx();
         ctx.followup_flow_id = Some("stop_message_flow".to_string());
-        ctx.stop_eligible = false;
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
         assert_eq!(result.skip_reason.unwrap(), "skip_servertool_followup_hop");

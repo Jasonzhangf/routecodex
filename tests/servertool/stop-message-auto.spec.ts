@@ -183,44 +183,58 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
     return { action: 'skip', skip_reason: 'skip_port_stopmessage_disabled' };
   }
 
-  // Followup flow with ineligible stop?
-  if (ctx.followup_flow_id && !ctx.stop_eligible) {
-    return { action: 'skip', skip_reason: 'skip_servertool_followup_hop' };
-  }
-
   // Responses submit tool outputs resume?
   if (ctx.has_responses_submit_tool_outputs_resume) {
     return { action: 'skip', skip_reason: 'skip_responses_submit_tool_outputs_resume' };
   }
 
-  // Resolve snapshot — ignore default-source snapshots outside followup context
-  const hasFollowupCtx = Boolean(ctx.followup_flow_id);
+  if (ctx.plan_mode_active) {
+    return { action: 'skip', skip_reason: 'skip_plan_mode' };
+  }
+
+  const goalStatus = String(ctx.goal_status ?? 'idle').toLowerCase();
+  const goalActive = goalStatus === 'active';
+  if (goalActive) {
+    return { action: 'skip', skip_reason: 'skip_goal_active' };
+  }
+
+  if (ctx.followup_flow_id) {
+    return { action: 'skip', skip_reason: 'skip_servertool_followup_hop' };
+  }
+
+  // Resolve snapshot.
   const rawSnap = (ctx.persisted_snapshot ?? ctx.runtime_snapshot) as Record<string, unknown> | undefined;
-  const snap = rawSnap && (hasFollowupCtx || String(rawSnap.source ?? '').toLowerCase() !== 'default')
-    ? rawSnap
-    : undefined;
+  let snap = rawSnap;
 
   // Explicit mode without snapshot?
-  if (!snap && (ctx.explicit_mode === 'on' || ctx.explicit_mode === 'auto')) {
+  if (!snap && ctx.explicit_mode === 'on') {
     return { action: 'skip', skip_reason: 'skip_explicit_mode_without_snapshot' };
   }
 
-  // No snapshot → try default (only when followup context present)
+  if (!snap && ctx.persisted_default_exhausted) {
+    return { action: 'skip', skip_reason: 'skip_goal_default_exhausted' };
+  }
+
+  const finishReasons = Array.isArray(ctx.finish_reasons) ? ctx.finish_reasons : [];
+  const latestFinishReason = [...finishReasons].reverse().find((value) => typeof value === 'string' && value.trim());
+  const latestFinishReasonNormalized = typeof latestFinishReason === 'string' ? latestFinishReason.trim().toLowerCase() : '';
+  if (latestFinishReasonNormalized && latestFinishReasonNormalized !== 'stop') {
+    return { action: 'skip', skip_reason: 'skip_not_stop_finish_reason' };
+  }
+
+  // No snapshot → try default.
   if (!snap) {
-    const goalStatus = String(ctx.goal_status ?? 'idle').toLowerCase();
-    const goalActive = goalStatus === 'active';
-    if (hasFollowupCtx && !goalActive && ctx.default_enabled) {
-      if (ctx.persisted_default_exhausted) {
-        return { action: 'skip', skip_reason: 'skip_goal_default_exhausted' };
-      }
-      return {
-        action: 'trigger',
-        used: 0,
+    if (!goalActive && ctx.default_enabled) {
+      snap = {
+        text: ctx.default_text || '继续执行',
         max_repeats: typeof ctx.default_max_repeats === 'number' ? ctx.default_max_repeats : 3,
-        followup_text: ctx.default_text || '继续执行',
+        used: 0,
+        source: 'default',
+        stage_mode: 'on'
       };
+    } else {
+      return { action: 'skip', skip_reason: 'skip_no_stopmessage_snapshot' };
     }
-    return { action: 'skip', skip_reason: 'skip_no_stopmessage_snapshot' };
   }
 
   // Snapshot fields
@@ -245,19 +259,13 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
   }
 
   // Not stop eligible?
-  if (!ctx.stop_eligible) {
+  if (!ctx.stop_eligible && latestFinishReasonNormalized !== 'stop') {
     return { action: 'skip', skip_reason: 'skip_not_stop_finish_reason' };
   }
 
   // Reached max repeats?
   if (used >= maxRepeats) {
     return { action: 'skip', skip_reason: 'skip_reached_max_repeats' };
-  }
-
-  // Goal active?
-  const goalStatus = String(ctx.goal_status ?? 'idle').toLowerCase();
-  if (goalStatus === 'active') {
-    return { action: 'skip', skip_reason: 'skip_goal_active' };
   }
 
   // ── Trigger ──
@@ -397,7 +405,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('RED: does NOT trigger stop_message_flow on normal request without followup context even when default enabled', async () => {
+  test('does not trigger default stopMessage without scoped stop state', async () => {
     process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '1';
     resetStopMessageRuntimeConfigCacheForTests();
 
@@ -436,14 +444,13 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    // Must NOT trigger stop_message_flow — normal request has no followup context
     expect(result.execution?.flowId).not.toBe('stop_message_flow');
 
     process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
     resetStopMessageRuntimeConfigCacheForTests();
   });
 
-  test('RED: does NOT trigger when scoped snapshot source=default but request is not followup', async () => {
+  test('triggers when scoped snapshot source=default outside plan and without active goal', async () => {
     const sessionId = 'stopmessage-red-default-scoped-snapshot';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -490,7 +497,7 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.execution?.flowId).not.toBe('stop_message_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
   });
 
   test('schedules followup when stopMessage is active and finish_reason=stop', async () => {
@@ -558,9 +565,12 @@ describe('stop_message_auto servertool', () => {
     expect(followup.metadata).toBeDefined();
     expect(followup.entryEndpoint).toBeUndefined();
     expect(followup.injection).toBeDefined();
+    expect(followup.metadata?.clientInjectOnly).toBeUndefined();
+    expect(followup.metadata?.clientInjectText).toBeUndefined();
+    expect(followup.metadata?.clientInjectSource).toBeUndefined();
     const injectMeta = readClientInjectMeta(followup);
     expect(injectMeta.clientInjectOnly).toBe(false);
-    expect(injectMeta.clientInjectText).toBe('继续执行');
+    expect(injectMeta.clientInjectText).toBe('立即执行待处理任务');
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
       resolveStopStatePath(sessionId),
@@ -659,6 +669,92 @@ describe('stop_message_auto servertool', () => {
     expect(followup?.metadata?.assignedModelId).toBe('MiniMax-M2.7');
     expect(followup?.metadata?.target?.providerKey).toBe('mini27.key1.MiniMax-M2.7');
     expect(followup?.metadata?.target?.modelId).toBe('MiniMax-M2.7');
+  });
+
+  test('servertool orchestration reenters stopless followup and never calls client injection', async () => {
+    const sessionId = 'stopmessage-spec-session-reenter-only';
+    writeRoutingStateForSession(sessionId, {
+      forcedTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    });
+
+    const clientInjectDispatch = jest.fn(async () => ({ ok: true }));
+    const reenterPipeline = jest.fn(async (input: any) => ({
+      body: {
+        id: `${input.requestId}:done`,
+        object: 'chat.completion',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'continued' }, finish_reason: 'stop' }]
+      }
+    }));
+
+    const result = await runServerToolOrchestration({
+      chat: buildStopChatResponse('chatcmpl-stop-reenter-only'),
+      adapterContext: {
+        requestId: 'req-stopmessage-reenter-only',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: 'hi' }]
+        }
+      } as any,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-reenter-only',
+      providerProtocol: 'openai-chat',
+      clientInjectDispatch,
+      reenterPipeline
+    });
+
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe('stop_message_flow');
+    expect(clientInjectDispatch).not.toHaveBeenCalled();
+    expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    const followupBody = reenterPipeline.mock.calls[0]?.[0]?.body as any;
+    expect(JSON.stringify(followupBody)).toContain('继续执行');
+  });
+
+  test('plan mode active skips stopless trigger at the only decision point', async () => {
+    const decisionContexts: StopMessageDecisionContext[] = [];
+    __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {
+      decisionContexts.push(ctx);
+      return testStopMessageDecision(ctx as any) as StopMessageDecision;
+    });
+    try {
+      const result = await runServerSideToolEngine({
+        chatResponse: buildStopChatResponse('chatcmpl-stop-plan-mode-skip'),
+        adapterContext: {
+          requestId: 'req-stopmessage-plan-mode-skip',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          sessionId: 'stopmessage-spec-session-plan-mode-skip',
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [
+              {
+                role: 'system',
+                content: '<collaboration_mode># Collaboration Mode: Plan\n\nYou are now in Plan mode.\n</collaboration_mode>'
+              },
+              { role: 'user', content: 'hi' }
+            ]
+          }
+        } as any,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-plan-mode-skip',
+        providerProtocol: 'openai-chat'
+      });
+
+      expect(result.mode).toBe('passthrough');
+      expect(decisionContexts[0]?.plan_mode_active).toBe(true);
+    } finally {
+      __setDecideOverrideForTests(testStopMessageDecision as any);
+    }
   });
 
   test.skip('codex backend uses session workdir as spawn cwd', async () => {
@@ -967,8 +1063,7 @@ describe('stop_message_auto servertool', () => {
 
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
-      // injection ops removed - metadata-only followup for tmux injection
-    expect(followup?.injection).toBeUndefined();
+      expect(followup?.injection).toBeDefined();
       const injectMeta = readClientInjectMeta(followup);
       expect(injectMeta.clientInjectOnly).toBe(false);
       expect(injectMeta.clientInjectText).toBe('继续执行');
@@ -1018,7 +1113,7 @@ describe('stop_message_auto servertool', () => {
   });
 
 
-  test('stop_message_flow uses clientInjectDispatch only and never reenterPipeline when both are available', async () => {
+  test('stop_message_flow uses reenterPipeline and never clientInjectDispatch when both are available', async () => {
     const sessionId = 'stopmessage-client-inject-only';
     writeRoutingStateForSession(sessionId, {
       forcedTarget: undefined,
@@ -1048,10 +1143,10 @@ describe('stop_message_auto servertool', () => {
     const clientInjectDispatch = jest.fn(async () => ({ ok: true } as any));
     const reenterPipeline = jest.fn(async () => ({
       body: {
-        id: 'chatcmpl-stopmessage-should-not-reenter',
+        id: 'chatcmpl-stopmessage-reentered',
         object: 'chat.completion',
         model: 'gpt-test',
-        choices: [{ index: 0, message: { role: 'assistant', content: 'should not run' }, finish_reason: 'stop' }]
+        choices: [{ index: 0, message: { role: 'assistant', content: 'reentered' }, finish_reason: 'stop' }]
       } as JsonObject
     }));
 
@@ -1067,11 +1162,11 @@ describe('stop_message_auto servertool', () => {
 
     expect(result.executed).toBe(true);
     expect(result.flowId).toBe('stop_message_flow');
-    expect(clientInjectDispatch).toHaveBeenCalledTimes(1);
-    expect(reenterPipeline).toHaveBeenCalledTimes(0);
-    const dispatchMeta = clientInjectDispatch.mock.calls[0]?.[0]?.metadata as Record<string, unknown> | undefined;
-    expect(dispatchMeta?.clientInjectOnly).toBe(true);
-    expect(dispatchMeta?.clientInjectSource).toBe('servertool.stop_message');
+    expect(clientInjectDispatch).not.toHaveBeenCalled();
+    expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    const reenterMeta = reenterPipeline.mock.calls[0]?.[0]?.metadata as Record<string, unknown> | undefined;
+    expect(reenterMeta?.clientInjectOnly).toBeUndefined();
+    expect(reenterMeta?.clientInjectSource).toBeUndefined();
   });
 
   test.skip('main done marker does not terminate until ai-followup reviewer approves', async () => {
@@ -1160,7 +1255,7 @@ describe('stop_message_auto servertool', () => {
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
       const injectMeta = readClientInjectMeta(followup);
-      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectOnly).toBe(false);
       expect(injectMeta.clientInjectText).toBe('继续执行');
       expect(injectMeta.clientInjectText).toBe('继续执行');
 
@@ -1274,7 +1369,7 @@ describe('stop_message_auto servertool', () => {
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
       const injectMeta = readClientInjectMeta(followup);
-      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectOnly).toBe(false);
       expect(injectMeta.clientInjectText).toBe('继续执行');
       expect(injectMeta.clientInjectText).toBe('继续执行');
       const stopStatePath = resolveStopStatePath(sessionId);
@@ -1367,10 +1462,9 @@ describe('stop_message_auto servertool', () => {
 
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
-      // injection ops removed - metadata-only followup for tmux injection
-    expect(followup?.injection).toBeUndefined();
+      expect(followup?.injection).toBeDefined();
       const injectMeta = readClientInjectMeta(followup);
-      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectOnly).toBe(false);
       expect(injectMeta.clientInjectText).toContain('继续执行');
       expect(injectMeta.clientInjectText).toBe('继续执行');
     } finally {
@@ -1467,10 +1561,9 @@ describe('stop_message_auto servertool', () => {
 
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
-      // injection ops removed - metadata-only followup for tmux injection
-    expect(followup?.injection).toBeUndefined();
+      expect(followup?.injection).toBeDefined();
       const injectMeta = readClientInjectMeta(followup);
-      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectOnly).toBe(false);
       expect(injectMeta.clientInjectText).toContain('继续执行');
       expect(injectMeta.clientInjectText).toBe('继续执行');
     } finally {
@@ -1675,8 +1768,8 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.mode).toBe('passthrough');
-    expect(result.execution).toBeUndefined();
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
   });
 
 
@@ -1821,8 +1914,8 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.mode).toBe('passthrough');
-    expect(result.execution).toBeUndefined();
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
   });
 
   test('stopMessage routing state key uses client inject scope', () => {
@@ -2511,7 +2604,7 @@ describe('stop_message_auto servertool', () => {
     expect(compare).toBeDefined();
     expect(typeof compare?.summary).toBe('string');
     expect(String(compare?.summary)).not.toContain('no_context');
-    expect(compare?.compare?.reason).toBe('triggered');
+    expect(compare?.compare?.reason).toBe('native_decision');
   });
 
   test('stops waiting followup when client disconnects during reenter', async () => {
@@ -2592,10 +2685,10 @@ describe('stop_message_auto servertool', () => {
     expect(reenterCalls).toBe(1);
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('stop_message_flow');
-    expect((orchestration.chat as any)?.choices?.[0]?.message?.content).toBe('ok');
+    expect((orchestration.chat as any)?.choices?.[0]?.message?.content).toBe('done');
   });
 
-  test('client-inject stop followup runs once and clears stopMessage on inject failure', async () => {
+  test('stop followup never uses client injection even when client inject is ready', async () => {
     const sessionId = 'stopmessage-spec-session-client-inject-fail';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2638,45 +2731,24 @@ describe('stop_message_auto servertool', () => {
     });
     expect(enginePreview.mode).toBe('tool_flow');
     expect(enginePreview.execution?.flowId).toBe('stop_message_flow');
-    expect(enginePreview.execution?.stopMessageReservation?.stateKey).toBe(`tmux:${sessionId}`);
+    expect(enginePreview.execution?.followup).toBeDefined();
 
     const clientInjectDispatch = jest.fn(async () => ({ ok: false as const, reason: 'inject_failed' }));
-    await expect(
-      runServerToolOrchestration({
-        chat: chatResponse,
-        adapterContext,
-        requestId: 'req-stopmessage-client-inject-fail',
-        entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai-chat',
-        clientInjectDispatch
-      })
-    ).rejects.toMatchObject({
-      code: 'SERVERTOOL_FOLLOWUP_FAILED'
+    const reenterPipeline = jest.fn(async () => ({ body: chatResponse }));
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-stopmessage-client-inject-fail',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      clientInjectDispatch,
+      reenterPipeline
     });
 
-    expect(clientInjectDispatch).toHaveBeenCalledTimes(1);
-    const stopStatePath = resolveStopStatePath(sessionId);
-    if (fs.existsSync(stopStatePath)) {
-      const persisted = await readJsonFileWithRetry<{ state?: Record<string, unknown> }>(
-        stopStatePath,
-        50,
-        10
-      );
-      let current = persisted;
-      for (let i = 0; i < 50; i += 1) {
-        if (
-          current?.state?.stopMessageText === undefined
-          && current?.state?.stopMessageMaxRepeats === undefined
-        ) {
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        current = await readJsonFileWithRetry<{ state?: Record<string, unknown> }>(stopStatePath, 50, 10);
-      }
-      const finalState = current;
-      expect(finalState?.state?.stopMessageText).toBeUndefined();
-      expect(finalState?.state?.stopMessageMaxRepeats).toBeUndefined();
-    }
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('stop_message_flow');
+    expect(clientInjectDispatch).not.toHaveBeenCalled();
+    expect(reenterPipeline).toHaveBeenCalledTimes(1);
   });
 
   test.skip('forces followup stream=false even when captured parameters.stream=true', async () => {
@@ -3301,7 +3373,7 @@ describe('stop_message_auto servertool', () => {
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
       const injectMeta = readClientInjectMeta(followup);
-      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectOnly).toBe(false);
       expect(injectMeta.clientInjectText).toBe('继续执行');
 
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageStage?: unknown } }>(
@@ -3636,7 +3708,7 @@ describe('stop_message_auto servertool', () => {
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
       const injectMeta = readClientInjectMeta(followup);
-      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectOnly).toBe(false);
       expect(injectMeta.clientInjectText).toBe('继续执行');
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageStage?: unknown } }>(
         resolveStopStatePath(sessionId),

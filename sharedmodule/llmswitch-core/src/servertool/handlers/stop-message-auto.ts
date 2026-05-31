@@ -322,6 +322,21 @@ function collectFinishReasonsFromCurrentPayload(base: unknown): string[] | undef
   return reasons.length > 0 ? reasons : undefined;
 }
 
+function isPlanModeActiveFromCapturedRequest(adapterContext: unknown): boolean {
+  const captured = getCapturedRequest(adapterContext as any);
+  if (!captured) {
+    return false;
+  }
+  try {
+    const text = JSON.stringify(captured).toLowerCase();
+    return text.includes('<collaboration_mode>')
+      && text.includes('collaboration mode: plan')
+      && !text.includes('collaboration mode: default');
+  } catch {
+    return false;
+  }
+}
+
 const handler: ServerToolHandler = async (
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerPlan | null> => {
@@ -329,7 +344,8 @@ const handler: ServerToolHandler = async (
   const rt = readRuntimeMetadata(ctx.adapterContext as unknown as Record<string, unknown>) ?? {};
 
   // ── Build native decision context ──
-  const followupFlowId = readServerToolFollowupFlowId(rt);
+  const followupFlowId = readServerToolFollowupFlowId(rt)
+    || (rt.serverToolFollowup === true ? '__servertool_followup__' : '');
   const persistedLookupPlan = planStopMessagePersistedLookup(record, rt, {
     includeSnapshotLookup: true,
     includeTombstoneLookup: true
@@ -371,6 +387,7 @@ const handler: ServerToolHandler = async (
     persisted_default_exhausted: tombstone.exhaustedDefault,
     explicit_mode: explicitMode === 'on' ? 'on' as any : explicitMode === 'auto' ? 'auto' as any : undefined,
     goal_status: !effectiveGoal || effectiveGoal.status === 'idle' ? 'idle' as any : effectiveGoal.status as any,
+    plan_mode_active: isPlanModeActiveFromCapturedRequest(ctx.adapterContext),
     default_enabled: resolveStopMessageDefaultEnabledLive(),
     default_max_repeats: resolveStopMessageDefaultMaxRepeatsLive(),
     default_text: resolveStopMessageDefaultTextLive(),

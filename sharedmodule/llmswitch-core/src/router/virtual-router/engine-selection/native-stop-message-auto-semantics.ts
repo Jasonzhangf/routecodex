@@ -36,6 +36,7 @@ export interface StopMessageDecisionContext {
   persisted_default_exhausted: boolean;
   explicit_mode?: StageMode;
   goal_status: GoalStatus;
+  plan_mode_active: boolean;
   default_enabled: boolean;
   default_max_repeats: number;
   default_text: string;

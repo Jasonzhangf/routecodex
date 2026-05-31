@@ -33,6 +33,7 @@ function buildMinimalDecisionContext(args: {
     persisted_default_exhausted: args.persistedDefaultExhausted ?? false,
     explicit_mode: undefined,
     goal_status: 'idle',
+    plan_mode_active: false,
     default_enabled: args.defaultEnabled ?? true,
     default_max_repeats: args.defaultMaxRepeats ?? 3,
     default_text: args.defaultText ?? '继续执行',
@@ -75,6 +76,29 @@ describe('stop-message native decision (blackbox)', () => {
       goal_status: 'active',
     };
     expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
+  });
+
+  test.each(['idle', 'paused', 'stopped', 'completed'] as const)(
+    'goal status %s does not skip clean stop',
+    (goalStatus) => {
+      const ctx: StopMessageDecisionContext = {
+        ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+        goal_status: goalStatus,
+      };
+      const decision = decideStopMessageActionWithNative(ctx);
+      expect(decision.action).toBe('trigger');
+      expect(decision.followup_text).toBeTruthy();
+    }
+  );
+
+  test('plan mode active → skip', () => {
+    const ctx: StopMessageDecisionContext = {
+      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      plan_mode_active: true,
+    };
+    const decision = decideStopMessageActionWithNative(ctx);
+    expect(decision.action).toBe('skip');
+    expect(decision.skip_reason).toBe('skip_plan_mode');
   });
 
   test('port disabled → skip', () => {

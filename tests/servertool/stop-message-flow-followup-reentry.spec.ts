@@ -104,7 +104,7 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
   };
 }
 
-describe("stop_message_flow client injection", () => {
+describe("stop_message_flow reentry", () => {
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
     process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH = STOPMESSAGE_CONFIG_PATH;
@@ -144,7 +144,7 @@ describe("stop_message_flow client injection", () => {
     );
   });
 
-  test("uses stop_message_flow client injection when the hop is already followup", async () => {
+  test("skips stop_message_flow when the hop is already followup", async () => {
     const sessionId = "stop-message-flow-followup-hop";
     const stateKey = `session:${sessionId}`;
     const state = createEmptyRoutingInstructionState();
@@ -155,15 +155,12 @@ describe("stop_message_flow client injection", () => {
     saveRoutingInstructionStateSync(stateKey, state);
 
     const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
-    const reenterPipeline = jest.fn(async () => {
-      throw new Error("stop_message_flow must not reenter pipeline");
-    });
+    const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
 
     const result = await runServerToolOrchestration({
       chat: buildStopResponse("再次停止"),
       adapterContext: {
         sessionId,
-        clientInjectSource: "servertool.stop_message",
         capturedChatRequest: {
           model: "gpt-test",
           messages: [{ role: "user", content: "start" }],
@@ -177,19 +174,17 @@ describe("stop_message_flow client injection", () => {
       reenterPipeline,
     });
 
-    expect(result.executed).toBe(true);
-    expect(clientInjectDispatch).toHaveBeenCalledTimes(1);
+    expect(result.executed).toBe(false);
+    expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
-    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(0);
   });
 
-  test("non-goal stopless default uses client injection for three consecutive stop turns then stops", async () => {
+  test("non-goal stopless default uses reenter for three consecutive stop turns then stops", async () => {
     const sessionId = "stopless-default-three-turns";
     const stateKey = `session:${sessionId}`;
     const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
-    const reenterPipeline = jest.fn(async () => {
-      throw new Error("stop_message_flow must not reenter pipeline");
-    });
+    const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
 
     for (let index = 0; index < 3; index += 1) {
       const result = await runServerToolOrchestration({
@@ -233,17 +228,15 @@ describe("stop_message_flow client injection", () => {
     });
 
     expect(exhausted.executed).toBe(false);
-    expect(clientInjectDispatch).toHaveBeenCalledTimes(3);
-    expect(reenterPipeline).not.toHaveBeenCalled();
+    expect(clientInjectDispatch).not.toHaveBeenCalled();
+    expect(reenterPipeline).toHaveBeenCalledTimes(3);
   });
 
-  test("servertool followup hop stop still triggers stopless client injection", async () => {
+  test("servertool followup hop stop does not trigger stopless client injection", async () => {
     const sessionId = "stopless-after-apply-patch-followup-stop";
     const stateKey = `session:${sessionId}`;
     const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
-    const reenterPipeline = jest.fn(async () => {
-      throw new Error("stop_message_flow must not reenter pipeline");
-    });
+    const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
 
     const result = await runServerToolOrchestration({
       chat: buildStopResponse("apply_patch followup stopped"),
@@ -265,11 +258,11 @@ describe("stop_message_flow client injection", () => {
       reenterPipeline,
     });
 
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe("stop_message_flow");
-    expect(clientInjectDispatch).toHaveBeenCalledTimes(1);
+    expect(result.executed).toBe(false);
+    expect(result.flowId).toBeUndefined();
+    expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
-    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBeUndefined();
   });
 
   test("servertool loop-state followup stop does not become a second stopless trigger", async () => {
@@ -306,7 +299,7 @@ describe("stop_message_flow client injection", () => {
     expect(reenterPipeline).not.toHaveBeenCalled();
   });
 
-  test("response-stage followup bypass still allows stopless when apply_patch followup returns stop", async () => {
+  test("response-stage followup hop does not trigger stopless when apply_patch followup returns stop", async () => {
     const sessionId = "response-stage-apply-patch-followup-stopless";
     const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
     const reenterPipeline = jest.fn(async () => {
@@ -332,9 +325,9 @@ describe("stop_message_flow client injection", () => {
       reenterPipeline,
     });
 
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe("stop_message_flow");
-    expect(clientInjectDispatch).toHaveBeenCalledTimes(1);
+    expect(result.executed).toBe(false);
+    expect(result.flowId).toBeUndefined();
+    expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
   });
 

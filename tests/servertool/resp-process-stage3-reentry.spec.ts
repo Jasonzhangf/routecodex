@@ -82,7 +82,7 @@ describe('resp_process stage3 servertool followup reentry', () => {
     fs.mkdirSync(SESSION_DIR, { recursive: true });
   });
 
-  test('stop_message followup hop uses client inject and does not reenter orchestration', async () => {
+  test('stop_message followup hop does not use client inject or reenter orchestration', async () => {
     const sessionId = 'stage3-reentry-guard';
     setStoplessMode(sessionId, 'on');
     const clientInjectDispatch = jest.fn(async () => ({ ok: true } as const));
@@ -92,7 +92,6 @@ describe('resp_process stage3 servertool followup reentry', () => {
       payload: buildStopResponse('再次停止') as any,
       adapterContext: {
         sessionId,
-        clientInjectSource: 'servertool.stop_message',
         capturedChatRequest: {
           model: 'gpt-test',
           messages: [{ role: 'user', content: '继续执行' }]
@@ -110,10 +109,10 @@ describe('resp_process stage3 servertool followup reentry', () => {
       }
     });
 
-    expect(result.executed).toBe(true);
-    expect(clientInjectDispatch).toHaveBeenCalledTimes(1);
+    expect(result.executed).toBe(false);
+    expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterCalls).toBe(0);
-    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.stopMessageUsed).toBe(1);
+    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.stopMessageUsed).toBeUndefined();
   });
 
   test('non-reasoning followup still bypasses orchestration', async () => {

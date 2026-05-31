@@ -135,8 +135,8 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                             },
 
                             "stop_message_flow": {
-                                "clientInjectOnly": true,
-                                "clientInjectSource": "servertool.stop_message"
+                                "seedLoopPayload": true,
+                                "retryEmptyFollowupOnce": true
                             },
                             "reasoning_stop_guard_flow": {},
                             "reasoning_stop_continue_flow": {},
@@ -311,6 +311,25 @@ mod tests {
         );
         assert_eq!(
             parsed.get("clientInjectOnly").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn stop_message_followup_runtime_plan_uses_reenter_not_client_inject() {
+        let raw = plan_servertool_followup_runtime_json("stop_message_flow".to_string())
+            .expect("runtime plan json");
+        let parsed: Value = serde_json::from_str(&raw).expect("parse runtime plan");
+        assert_eq!(
+            parsed.get("outcomeMode").and_then(|v| v.as_str()),
+            Some("reenter")
+        );
+        assert_eq!(
+            parsed.get("clientInjectOnly").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            parsed.get("seedLoopPayload").and_then(|v| v.as_bool()),
             Some(true)
         );
     }

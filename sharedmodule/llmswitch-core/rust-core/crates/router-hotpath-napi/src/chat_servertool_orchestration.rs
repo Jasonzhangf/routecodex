@@ -1821,13 +1821,6 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
     if let Some(ref rpm) = routecodex_port_mode {
         metadata_obj.insert("routecodexPortMode".to_string(), Value::String(rpm.clone()));
     }
-    metadata_obj.insert("clientInjectOnly".to_string(), Value::Bool(true));
-    metadata_obj.insert("clientInjectText".to_string(), Value::String(followup_text.clone()));
-    metadata_obj.insert(
-        "clientInjectSource".to_string(),
-        Value::String("servertool.stop_message".to_string()),
-    );
-
     // 7. Build followup plan
     let followup = serde_json::json!({
         "requestIdSuffix": ":stop_followup",
