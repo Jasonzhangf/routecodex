@@ -19,6 +19,74 @@ async function withServer<T>(app: express.Express, run: (baseUrl: string) => Pro
 }
 
 describe('responses-handler stream closed before completed regression', () => {
+  it('repairs terminal Responses SSE frames with a response id when upstream emits output item then closes', async () => {
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/responses', async (req, res) => {
+      const upstream = new PassThrough();
+      setTimeout(() => {
+        upstream.write('event: response.output_item.done\n');
+        upstream.write(
+          `data: ${JSON.stringify({
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: {
+              id: 'msg_terminal_probe_1',
+              type: 'message',
+              role: 'assistant',
+              status: 'completed',
+              content: [{ type: 'output_text', text: 'OK' }]
+            }
+          })}\n\n`
+        );
+        upstream.end();
+      }, 10);
+
+      await handleResponses(req as any, res as any, {
+        executePipeline: async () => ({
+          status: 200,
+          headers: {},
+          body: {
+            __sse_responses: upstream
+          }
+        }),
+        errorHandling: null
+      });
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'text/event-stream'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.3-codex',
+          stream: true,
+          input: 'Reply with OK only.'
+        })
+      });
+      const text = await response.text();
+      const completedLine = text
+        .split('\n')
+        .find((line) => line.startsWith('data: {"type":"response.completed"'));
+      const doneLine = text
+        .split('\n')
+        .find((line) => line.startsWith('data: {"type":"response.done"'));
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('event: response.output_item.done');
+      expect(text).toContain('event: response.completed');
+      expect(text).toContain('event: response.done');
+      expect(text).toContain('data: [DONE]');
+      expect(completedLine).toBeDefined();
+      expect(doneLine).toBeDefined();
+      expect(JSON.parse(completedLine!.slice('data: '.length)).response.id).toEqual(expect.any(String));
+      expect(JSON.parse(doneLine!.slice('data: '.length)).response.id).toEqual(expect.any(String));
+    });
+  });
+
   it('surfaces started-stream failure as explicit SSE error when upstream closes before response.completed', async () => {
     const app = express();
     app.use(express.json());

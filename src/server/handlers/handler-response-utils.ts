@@ -170,7 +170,10 @@ function updateContractProbeFromSseChunk(
   }
 }
 
-function buildResponsesTerminalSseFramesFromProbe(probe: Record<string, unknown> | undefined): string[] {
+function buildResponsesTerminalSseFramesFromProbe(
+  probe: Record<string, unknown> | undefined,
+  requestLabel: string,
+): string[] {
   if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
     return [];
   }
@@ -179,9 +182,17 @@ function buildResponsesTerminalSseFramesFromProbe(probe: Record<string, unknown>
     probe.required_action && typeof probe.required_action === 'object' && !Array.isArray(probe.required_action)
       ? (probe.required_action as Record<string, unknown>)
       : undefined;
+  const hasCompletedOutput = Array.isArray(probe.output) && probe.output.length > 0;
+  if (!requiredAction && status !== 'completed' && !hasCompletedOutput) {
+    return [];
+  }
+  const responseId = typeof probe.id === 'string' && probe.id.trim()
+    ? probe.id.trim()
+    : `resp_${requestLabel.replace(/[^A-Za-z0-9_-]/g, '_')}`;
   const responsePayload: Record<string, unknown> = {
+    id: responseId,
     object: 'response',
-    status: status || (requiredAction ? 'requires_action' : 'completed')
+    status: requiredAction ? 'requires_action' : (status || 'completed')
   };
   if (Array.isArray(probe.output)) responsePayload.output = probe.output;
   if (typeof probe.output_text === 'string') responsePayload.output_text = probe.output_text;
@@ -1672,7 +1683,7 @@ export async function sendPipelineResponse(
             if (ended || streamEnded || res.writableEnded || res.destroyed) {
               return;
             }
-            const repairedFrames = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe);
+            const repairedFrames = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel);
             if (repairedFrames.length > 0) {
               try {
                 for (const frame of repairedFrames) {
@@ -1766,7 +1777,7 @@ export async function sendPipelineResponse(
         logStreamRequestComplete(entryEndpoint, requestLabel, status, resolvedStreamFinishReason, requestLogContext);
       }
       const repairedTerminalFrames = !finishTracker.seenTerminalEvent
-        ? buildResponsesTerminalSseFramesFromProbe(contractProbe.probe)
+        ? buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel)
         : [];
       if (repairedTerminalFrames.length > 0 && !res.writableEnded && !res.destroyed) {
         try {
