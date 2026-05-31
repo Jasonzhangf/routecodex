@@ -5,11 +5,7 @@ export * from './hub/standardized-bridge.js';
 export * from './hub/response/provider-response.js';
 export * from './hub/response/response-runtime.js';
 export * from './hub/pipeline/hub-pipeline.js';
-export type {
-  FormatAdapter,
-  SemanticMapper,
-  StageRecorder
-} from './hub/format-adapters/index.js';
+export type { StageRecorder } from './hub/format-adapters/index.js';
 export * from './hub/types/index.js';
 export * from './hub/hub-feature.js';
 export { mapReqInboundBridgeToolsToChatWithNative } from '../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';

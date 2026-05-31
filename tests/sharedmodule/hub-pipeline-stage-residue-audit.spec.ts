@@ -414,6 +414,24 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('format-adapters public surface must only expose stage recorder glue', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.ts'),
+      'utf8',
+    );
+
+    const findings = collectMatches(source, [
+      { label: 'FormatAdapter interface residue', pattern: /interface\s+FormatAdapter\b/ },
+      { label: 'SemanticMapper interface residue', pattern: /interface\s+SemanticMapper\b/ },
+      { label: 'ChatEnvelope import residue', pattern: /ChatEnvelope/ },
+      { label: 'FormatEnvelope import residue', pattern: /FormatEnvelope/ },
+      { label: 'JsonObject import residue', pattern: /JsonObject/ },
+    ]);
+
+    expect(findings).toEqual([]);
+    expect(source).toContain('export interface StageRecorder');
+  });
+
   it('legacy concrete TS format adapter implementations must be physically removed', () => {
     const adapterRoot = path.join(
       process.cwd(),
