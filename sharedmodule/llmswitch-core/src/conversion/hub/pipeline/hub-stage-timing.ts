@@ -14,6 +14,7 @@ import {
   shouldSkipHubStageTimingLog,
   type HubStageTimingPhase,
 } from "./hub-stage-timing-log-blocks.js";
+import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 
 export { isHubStageTimingDetailEnabled, type HubStageTopSummaryEntry } from "./hub-stage-timing-blocks.js";
 
@@ -29,6 +30,16 @@ export function peekHubStageTopSummary(
   },
 ): HubStageTopSummaryEntry[] {
   return peekHubStageTopSummaryState(requestId, options);
+}
+
+export function attachHubStageTopSummary(args: {
+  requestId: string;
+  metadata: Record<string, unknown>;
+}): void {
+  const hubStageTop = peekHubStageTopSummary(args.requestId);
+  if (!hubStageTop.length) return;
+  const rt = ensureRuntimeMetadata(args.metadata);
+  (rt as Record<string, unknown>).hubStageTop = hubStageTop as unknown;
 }
 
 export function logHubStageTiming(

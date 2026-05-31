@@ -6,7 +6,7 @@ import type {
   NormalizedRequest,
 } from "./hub-pipeline.js";
 import { runHubPipelineLibWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
-import { attachHubStageTopSummary } from "./hub-pipeline-chat-process-request-utils.js";
+import { attachHubStageTopSummary } from "./hub-stage-timing.js";
 
 export async function executeRequestStagePipeline<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;

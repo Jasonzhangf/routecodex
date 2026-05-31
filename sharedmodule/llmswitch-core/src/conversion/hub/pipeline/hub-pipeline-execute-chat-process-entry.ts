@@ -6,7 +6,7 @@ import type {
   HubPipelineResult,
   NormalizedRequest,
 } from "./hub-pipeline.js";
-import { attachHubStageTopSummary } from "./hub-pipeline-chat-process-request-utils.js";
+import { attachHubStageTopSummary } from "./hub-stage-timing.js";
 
 export async function executeChatProcessEntryPipeline(args: {
   normalized: NormalizedRequest;
