@@ -24,7 +24,7 @@ import {
   resolveProviderResponseContextSignals,
   type ProviderProtocol
 } from './provider-response-helpers.js';
-import { runRespProcessStage3ServerToolOrchestration } from '../pipeline/stages/resp_process/resp_process_stage3_servertool_orchestration/index.js';
+import { runServertoolResponseStageOrchestrationShell } from '../../../servertool/response-stage-orchestration-shell.js';
 
 type HubStageTopEntry = {
   stage: string;
@@ -264,7 +264,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
           }
         });
       }
-      const orchestration = await runRespProcessStage3ServerToolOrchestration({
+      const orchestration = await runServertoolResponseStageOrchestrationShell({
         payload,
         adapterContext: args.context,
         requestId: args.requestId,
@@ -290,7 +290,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
           }
         });
       }
-      const orchestration = await runRespProcessStage3ServerToolOrchestration({
+      const orchestration = await runServertoolResponseStageOrchestrationShell({
         payload,
         adapterContext: args.context,
         requestId: args.requestId,

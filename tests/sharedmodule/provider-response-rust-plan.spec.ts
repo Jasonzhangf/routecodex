@@ -297,7 +297,7 @@ describe('provider response Rust native plan', () => {
           expect.objectContaining({
             kind: 'servertoolRuntimeAction',
             payload: expect.objectContaining({
-              action: 'requireReenterPipeline',
+              action: 'requireRuntimeExecutor',
               reason: 'stop_eligible_followup',
               requestId: 'req_provider_response_servertool_stop_guard_1'
             })

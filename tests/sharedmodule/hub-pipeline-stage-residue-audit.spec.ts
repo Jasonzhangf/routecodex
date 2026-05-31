@@ -128,7 +128,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('servertoolRuntimeAction');
     expect(source).toContain('executeProviderResponseNativeServertoolEffects');
     expect(source).toContain('executeProviderResponseNativeRuntimeStateEffect');
-    expect(source).toContain('const nativeResponsePlan = runProviderResponseRustHubPipeline(options);');
+    expect(source).toContain('const nativeResponsePlan = runProviderResponseRustHubPipeline(nativeOptions);');
     expect(source).toContain('requireReenterPipeline');
     expect(source).not.toContain('shouldRunProviderResponseRustHubPipeline');
     expect(source).not.toContain('if (nativeResponsePlan)');
