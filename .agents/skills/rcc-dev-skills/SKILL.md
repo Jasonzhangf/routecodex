@@ -1691,3 +1691,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-05-31 HubPipeline response stage shell deletion 精华
 - Response path closeout means no TS `resp_inbound/*`, `resp_outbound/*`, or `resp_process/*` stage shell directories; keep acceptance coverage by moving tests to Rust total API or side-effect shells such as `servertool/response-stage-orchestration-shell`.
 - Architecture gate: `hub-pipeline-stage-residue-audit` must fail if old `runResp*Stage*` wrappers or directories reappear.
+
+### 2026-05-31 HubPipeline normalize-request cleanup 精华
+- `hub-pipeline-normalize-request.ts` may keep Node/SSE materialization glue, but normalize semantics must be Rust `runHubPipelineStageWithNative({ stage: 'normalizeRequest' })`; old normalize block/helper files must stay physically absent.

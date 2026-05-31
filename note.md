@@ -13516,3 +13516,8 @@ Using skills: coding-principals + rcc-dev-skills
 - Red gate: `hub-pipeline-stage-residue-audit` required response/req_inbound stage shell directories physically absent; first run failed on 9 legacy stage dirs.
 - Action: removed old `req_inbound_stage1_format_parse`, response inbound/outbound/process stage shell directories and direct stage tests; migrated required `resp-process-stage3-reentry` to `servertool/response-stage-orchestration-shell` so explicit acceptance test remains without old stage wrapper.
 - Verification: `hub-pipeline-stage-residue-audit` + `resp-process-stage3-reentry` PASS 32/32; `pnpm -C sharedmodule/llmswitch-core run build` PASS; stage import scan shows no active prod/test imports outside fixtures/native compat names.
+
+## 2026-05-31 HubPipeline normalize request block deletion
+- Red gate: `hub-pipeline-stage-residue-audit` required legacy normalize-request block files physically absent; first run failed on 8 dead files.
+- Action: removed unused normalize-request block/utils/governance files; active `hub-pipeline-normalize-request.ts` remains thin shell calling `runHubPipelineStageWithNative({ stage: 'normalizeRequest' })` plus SSE materialization glue.
+- Verification: residue audit PASS 31/31; `pnpm -C sharedmodule/llmswitch-core run build` PASS.

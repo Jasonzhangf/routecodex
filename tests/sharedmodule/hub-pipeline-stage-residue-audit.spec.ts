@@ -101,6 +101,25 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('buildNormalizedMetadataRecord');
   });
 
+  it('legacy normalize-request TS block files must be physically removed', () => {
+    const pipelineRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+    );
+    const legacyFiles = [
+      'hub-pipeline-normalize-request-blocks.ts',
+      'hub-pipeline-normalize-request-finalize-blocks.ts',
+      'hub-pipeline-normalize-request-metadata-blocks.ts',
+      'hub-pipeline-normalize-request-orchestration-blocks.ts',
+      'hub-pipeline-normalize-request-result-blocks.ts',
+      'hub-pipeline-normalize-request-shape-blocks.ts',
+      'hub-pipeline-request-normalization-utils.ts',
+      'hub-pipeline-governance-blocks.ts',
+    ].filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));
+
+    expect(legacyFiles).toEqual([]);
+  });
+
   it('rust lib response path must call Rust resp stage modules instead of TS stage shells', () => {
     const crateRoot = path.join(
       process.cwd(),

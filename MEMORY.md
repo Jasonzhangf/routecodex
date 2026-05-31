@@ -1933,3 +1933,7 @@ Slice 0（总控 API）→ Slice 1-4（P0）→ Slice 5（P1）
 ## 2026-05-31 HubPipeline response stage shell removal
 - Verified closeout: old TS stage shell directories under `req_inbound/req_inbound_stage1_format_parse`, `resp_inbound/*`, `resp_outbound/*`, and `resp_process/*` are physically removed. Provider response mainline is Rust total API; explicit stage3 reentry regression now targets `servertool/response-stage-orchestration-shell` directly.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` requires these directories absent and provider response mainline not importing/calling old `runResp*Stage*` wrappers.
+
+## 2026-05-31 HubPipeline normalize-request block removal
+- Verified closeout: legacy TS normalize-request block files are physically removed. Active normalize request shell only performs Node/SSE materialization and calls Rust `runHubPipelineStageWithNative({ stage: 'normalizeRequest' })` for semantics.
+- Gate: `hub-pipeline-stage-residue-audit` requires `hub-pipeline-normalize-request-*blocks.ts`, `hub-pipeline-request-normalization-utils.ts`, and `hub-pipeline-governance-blocks.ts` absent.
