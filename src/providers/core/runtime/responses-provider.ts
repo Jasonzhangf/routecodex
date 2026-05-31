@@ -371,7 +371,8 @@ export class ResponsesProvider extends HttpTransportProvider {
         entryEndpoint,
         clientRequestId,
         providerKey: context.providerKey,
-        providerId: context.providerId
+        providerId: context.providerId,
+        metadata: context.metadata
       });
     } catch {
       // non-blocking

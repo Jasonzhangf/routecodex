@@ -13307,3 +13307,7 @@ Using skills: coding-principals + rcc-dev-skills
 - Live logs still show MiniMax provider response entering Rust OpenAI chat validator and failing `OpenAI chat response must contain choices array`.
 - Captured provider sample includes marker-only `{ "clientStream": true, "mode": "sse_passthrough" }`; current TS materializers only classify marker-only `mode:"sse"`.
 - Hypothesis: `sse_passthrough` marker bypasses fail-fast materializer, then Rust treats it as normal OpenAI chat payload and raises missing choices.
+
+## 2026-05-31 provider snapshot port propagation
+- Review found ResponsesProvider.snapshotPhase called writeProviderSnapshot without `context.metadata`, so `matchedPort`/`portContext` never reached sample writer even though HTTP lifecycle injected it.
+- Fix: pass `metadata: context.metadata`; local mirror test now asserts meta/runtime carry entryPort/matchedPort=5555.

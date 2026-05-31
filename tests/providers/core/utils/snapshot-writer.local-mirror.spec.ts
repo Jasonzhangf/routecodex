@@ -92,6 +92,8 @@ describe('provider snapshot writer local mirror', () => {
     expect(writeSnapshotViaHooksMock).toHaveBeenCalledTimes(1);
     expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({ entryPort: 5555 }));
     expect(parsed.meta?.stage).toBe('provider-response');
+    expect(parsed.meta?.entryPort).toBe(5555);
+    expect(parsed.meta?.matchedPort).toBe(5555);
     expect(parsed.body).toMatchObject({
       mode: 'sse',
       captureSse: true,
