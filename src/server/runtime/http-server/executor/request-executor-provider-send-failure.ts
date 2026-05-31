@@ -13,6 +13,7 @@ import {
 } from './request-retry-helpers.js';
 import { isPromptTooLongError } from './retry-engine.js';
 import { shouldApplyProviderTransportBackoff } from './request-executor-provider-failure.js';
+import { isClientDisconnectAbortError } from '../executor-provider.js';
 import type {
   RetryErrorSnapshot,
   BlockingRecoverableRouteHoldState
@@ -76,6 +77,7 @@ type RequestExecutorProviderSendFailureArgs = {
   contextOverflowRetries: number;
   maxContextOverflowRetries: number;
   abortSignal?: AbortSignal;
+  phase: 'provider_send' | 'provider_response_processing';
   logNonBlockingError: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
   extractRetryErrorSnapshot: (error: unknown) => RetryErrorSnapshot;
 };
@@ -120,6 +122,12 @@ async function observeFailedTrafficOutcome(args: {
 export async function processProviderSendFailure(
   args: RequestExecutorProviderSendFailureArgs
 ): Promise<RequestExecutorProviderSendFailureResult> {
+  if (args.abortSignal?.aborted || isClientDisconnectAbortError(args.error)) {
+    throw args.error;
+  }
+  if (args.phase !== 'provider_send') {
+    throw args.error;
+  }
   let cumulativeExternalLatencyMs = args.cumulativeExternalLatencyMs;
   if (args.providerSendStartedAtMs > 0 && args.providerSendElapsedMs <= 0) {
     const failedSendElapsedMs = Math.max(0, Date.now() - args.providerSendStartedAtMs);

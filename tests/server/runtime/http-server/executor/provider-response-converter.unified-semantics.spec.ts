@@ -749,4 +749,44 @@ describe('provider-response-converter unified semantics handoff', () => {
     )).rejects.toMatchObject({ code: 'CLIENT_DISCONNECTED' });
     expect(executeNested).not.toHaveBeenCalled();
   });
+
+  it('fails marker-only provider SSE wrapper before Rust bridge conversion on live executor converter path', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'anthropic-messages',
+        providerType: 'anthropic',
+        providerFamily: 'anthropic',
+        providerKey: 'mimo.key2.mimo-v2.5',
+        requestId: 'req_live_marker_only_wrapper_240540',
+        wantsStream: true,
+        response: {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          body: {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+            body: { captureSse: true, mode: 'sse', transport: 'prepared-request-executor' }
+          }
+        } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined,
+        },
+        executeNested: async () => ({ body: { ok: true } } as any),
+      },
+    )).rejects.toThrow('Provider SSE marker did not include materializable stream or bodyText');
+    expect(mockConvertProviderResponse).not.toHaveBeenCalled();
+  });
 });

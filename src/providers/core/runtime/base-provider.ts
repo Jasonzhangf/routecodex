@@ -170,7 +170,12 @@ export abstract class BaseProvider implements IProviderV2 {
 
     const context = this.createContext(request as UnknownObject);
     const runtimeMetadata = context.runtimeMetadata;
-    const stats = getStatsCenterSafeFromBridge() as StatsCenterLike;
+    let stats: StatsCenterLike | undefined;
+    try {
+      stats = getStatsCenterSafeFromBridge() as StatsCenterLike;
+    } catch (statsError) {
+      this.dependencies.logger?.logModule(this.getLogId(), 'stats-center-unavailable', { error: statsError });
+    }
     let processedRequest: UnknownObject | undefined;
 
     try {
@@ -209,7 +214,7 @@ export abstract class BaseProvider implements IProviderV2 {
           completionTokens: usage.completionTokens,
           totalTokens: usage.totalTokens
         };
-        stats.recordProviderUsage(event);
+        stats?.recordProviderUsage(event);
       } catch {
         // ignore stats errors
       }
@@ -238,7 +243,7 @@ export abstract class BaseProvider implements IProviderV2 {
           success: false,
           latencyMs: endTime - context.startTime
         };
-        stats.recordProviderUsage(event);
+        stats?.recordProviderUsage(event);
       } catch {
         // ignore stats errors
       }

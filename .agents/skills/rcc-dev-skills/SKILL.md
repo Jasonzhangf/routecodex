@@ -1623,3 +1623,11 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - provider snapshot 的 marker-only `{mode:"sse", captureSse, transport}` 不是可转换 payload；遇到它必须 fail-fast 为“缺 materializable stream/bodyText”，禁止继续送 Rust 当 Anthropic message 解析。
 - router-direct 进入 response conversion 时必须传 `providerHandle.providerProtocol`，不能用 `providerType` 推断；`providerType:'openai' + providerProtocol:'openai-responses'` 若按 openai-chat 转换，会把 Responses payload 送进 Chat validator 并报 `missing choices`。红测必须走真实 HTTP `/v1/responses` router-direct。
 - stopMessage followup 再入必须在 nested metadata 和 RequestExecutor response conversion 两处禁用 stopMessage；只在 dispatch 层标记但 normal executor 不消费，会出现断客后 `:stop_followup` 无限递归且日志 `used=0 left=3` 每轮重置。
+
+## 2026-05-31 HTTP 黑盒红测与断连门禁
+- 黑盒红测必须启动真实 `RouteCodexHttpServer` listener，经真实 HubPipeline/provider runtime 到本地 fake upstream；只允许 mock 输入/上游响应/客户端 socket，不得 mock handler、executor、converter 或 provider 行为。
+- 客户端断开类问题必须在真实 HTTP 测试中 destroy client socket，并断言 retry/reroute/followup 没有发出后续 provider POST；白盒 abort 测试只能补充，不能替代。
+
+## 2026-05-31 provider response conversion failover boundary
+- `provider.send.completed` 是 retry/reroute 边界：之前的 transport/upstream failure 可走 provider failure policy；之后的 response normalize/convert/servertool/Rust canonicalize failure 必须 fail-fast，禁止 `provider-switch` 隐藏真实响应错误。
+- 黑盒必须覆盖 HTTP 200 malformed provider response，而不是只测 HTTP 503；验收看 backup provider POST 次数为 0。

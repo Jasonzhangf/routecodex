@@ -55,9 +55,16 @@ export async function materializeProviderResponseSsePayload(
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return payload as Record<string, unknown>;
   }
+  const nestedEnvelopeBody = readProviderResponseEnvelopeBody(payload);
+  if (nestedEnvelopeBody) {
+    return await materializeProviderResponseSsePayload(nestedEnvelopeBody);
+  }
   const stream = extractProviderResponseSseStream(payload);
   if (stream) {
     const bodyText = await readProviderResponseSseStreamText(stream);
+    if (!bodyText.trim()) {
+      throw new Error('Provider SSE marker did not include materializable stream or bodyText');
+    }
     return { ...(payload as Record<string, unknown>), mode: 'sse', bodyText };
   }
   const bodyText = readProviderResponseSseText(payload);
@@ -68,6 +75,28 @@ export async function materializeProviderResponseSsePayload(
     return payload as Record<string, unknown>;
   }
   throw new Error('Provider SSE marker did not include materializable stream or bodyText');
+}
+
+function readProviderResponseEnvelopeBody(payload: unknown): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(record, 'body')) {
+    return undefined;
+  }
+  if (
+    !Object.prototype.hasOwnProperty.call(record, 'status')
+    && !Object.prototype.hasOwnProperty.call(record, 'headers')
+    && !Object.prototype.hasOwnProperty.call(record, 'metadata')
+  ) {
+    return undefined;
+  }
+  const body = record.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return undefined;
+  }
+  return body as Record<string, unknown>;
 }
 
 function extractProviderResponseSseStream(payload: unknown): Readable | undefined {

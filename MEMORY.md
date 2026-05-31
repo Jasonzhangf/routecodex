@@ -1834,3 +1834,11 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 
 ## 2026-05-31 runtime response-mappers dependency rule
 - 已验证：runtime `sharedmodule/llmswitch-core/src/**/*.ts` 除待删除的 `conversion/hub/response/response-mappers.ts` 自身外，不得再 import `response-mappers`; 运行时类型应使用 `JsonObject` 或局部 shell interface，语义真源在 Rust。
+
+## 2026-05-31 HTTP blackbox redtest + client abort guard
+- Verified: response-marker/SSE transport bugs must use real `RouteCodexHttpServer` listener + real HubPipeline/provider runtime; tests may fake only upstream HTTP responses and client socket behavior, not handler/executor/converter behavior.
+- Verified: client abort must short-circuit provider failure handling before retry/reroute/followup; redtest must destroy the HTTP client socket and assert backup provider receives zero real POSTs.
+
+## 2026-05-31 provider response conversion failover boundary
+- Verified: provider transport/send failures may enter retry/reroute; provider response processing failures after `provider.send.completed` must fail fast and must not enter `processProviderSendFailure`, otherwise Rust canonicalization errors such as Anthropic `content array` or OpenAI `choices array` get hidden by provider-switch loops.
+- Required redtest: real HTTP `/v1/responses` -> real HubPipeline/provider runtime -> local upstream HTTP 200 malformed provider response -> assert backup provider receives zero POSTs.

@@ -889,6 +889,7 @@ export class HubRequestExecutor implements RequestExecutor {
           });
         const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt) || providerOwnsWindsurfManagedTraffic;
         let retryAfterProviderFailure = false;
+        let providerFailurePhase: 'provider_send' | 'provider_response_processing' = 'provider_send';
         try {
           throwIfClientAbortSignalAborted(clientAbortSignal);
           if (providerTransportBackoffKey) {
@@ -1010,6 +1011,7 @@ export class HubRequestExecutor implements RequestExecutor {
           const responseStatus = extractResponseStatus(providerResponse);
           providerSendElapsedMs = Date.now() - providerSendStartedAtMs;
           cumulativeExternalLatencyMs += providerSendElapsedMs;
+          providerFailurePhase = 'provider_response_processing';
           logStage('provider.send.completed', input.requestId, {
             providerKey: target.providerKey,
             status: responseStatus,
@@ -1337,6 +1339,7 @@ export class HubRequestExecutor implements RequestExecutor {
             contextOverflowRetries,
             maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES,
             abortSignal: clientAbortSignal,
+            phase: providerFailurePhase,
             logNonBlockingError: logRequestExecutorNonBlockingError,
             extractRetryErrorSnapshot
           });

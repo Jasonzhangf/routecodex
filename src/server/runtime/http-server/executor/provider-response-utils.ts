@@ -20,11 +20,29 @@ export function normalizeProviderResponse(response: unknown): PipelineExecutionR
   const headers = normalizeProviderResponseHeaders(
     response && typeof response === 'object' ? (response as Record<string, unknown>).headers : undefined
   );
-  const body =
-    response && typeof response === 'object' && 'data' in (response as Record<string, unknown>)
-      ? (response as Record<string, unknown>).data
-      : response;
+  const body = normalizeProviderResponseBody(response);
   return { status, headers, body, metadata };
+}
+
+function normalizeProviderResponseBody(response: unknown): unknown {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    return response;
+  }
+  const record = response as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(record, 'data')) {
+    return record.data;
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(record, 'body')
+    && (
+      Object.prototype.hasOwnProperty.call(record, 'status')
+      || Object.prototype.hasOwnProperty.call(record, 'headers')
+      || Object.prototype.hasOwnProperty.call(record, 'metadata')
+    )
+  ) {
+    return record.body;
+  }
+  return response;
 }
 
 function normalizeProviderResponseHeaders(headers: unknown): Record<string, string> | undefined {

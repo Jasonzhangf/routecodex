@@ -34,6 +34,7 @@ import {
   executeServerToolClientInjectDispatch,
   executeServerToolReenterPipeline
 } from './servertool-followup-dispatch.js';
+import { throwIfClientCarrierAborted } from './request-executor-client-abort-block.js';
 import {
   compactFollowupLogReason,
   extractServerToolFollowupErrorLogDetails,
@@ -837,6 +838,8 @@ export async function convertProviderResponseIfNeeded(
       body?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
     }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
+      throwIfClientCarrierAborted(options.pipelineMetadata);
+      throwIfClientCarrierAborted(reenterOpts.metadata);
       const reenterStartMs = Date.now();
       const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
       logPipelineStage('convert.reenter.start', reenterOpts.requestId, {

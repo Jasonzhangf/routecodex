@@ -13322,3 +13322,12 @@ Using skills: coding-principals + rcc-dev-skills
 
 ## 2026-05-31 240538 Anthropic marker-only SSE
 - Live 4568 sample is Anthropic provider response marker `{mode:"sse", captureSse:true, transport:"prepared-request-executor"}` without `bodyText`/`__sse_responses`; expected behavior is fail-fast as non-materializable stream marker, not Anthropic content-array canonicalization.
+
+## 2026-05-31 12xx blackbox redtest follow-up
+- User要求：必须 HTTP 黑盒红测，不得用 handler/direct converter 冒充。
+- 当前线上错误：mimo/minimax provider response marker-only 进入 Rust Anthropic/OpenAI canonicalizer，报 `Anthropic response must contain content array` 或 `OpenAI chat response must contain choices array`。
+- 关键怀疑：真实 RequestExecutor 用 `executor/provider-response-converter.ts`，传给 materializer 的 body 可能是 wrapper 或 marker-only，TS 只可做传输拆包/形状拦截；协议语义仍由 Rust Hub Pipeline 真源处理。
+
+## 2026-05-31 12:43 conversion-failure reroute root cause
+- Red reproduced by HTTP blackbox: upstream returns HTTP 200 malformed Anthropic message, Rust response canonicalizer fails, RequestExecutor catch block classified it as `provider.send` failure and emitted provider-switch/reroute to backup.
+- Fix point: RequestExecutor provider failure phase. Only errors before `provider.send.completed` enter provider retry/reroute; response normalization/conversion/servertool processing errors fail fast to client.
