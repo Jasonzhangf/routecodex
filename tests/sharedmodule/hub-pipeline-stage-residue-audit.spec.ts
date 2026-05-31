@@ -600,6 +600,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
     );
     const legacyFiles = [
+      'stages/req_inbound/req_inbound_stage3_context_capture',
       'hub-pipeline-route-and-outbound.ts',
       'hub-pipeline-execute-request-stage-provider-payload.ts',
       'hub-pipeline-execute-request-stage-inbound.ts',
