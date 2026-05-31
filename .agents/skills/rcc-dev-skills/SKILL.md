@@ -1673,3 +1673,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 HubPipeline Slice5 operation-table runner deletion 精华
 - After mapper deletion, also remove `operation-table-runner.ts` and dead req semantic stage shells/tests; stage catalog and README references must point to Rust total API, not deleted `req_inbound_stage2_semantic_map` / `req_outbound_stage1_semantic_map` IDs.
+
+### 2026-05-31 HubPipeline bridge-actions registry removal 精华
+- `conversion/bridge-actions.ts` must be native-only glue: no `registerBridgeAction`, no TS registry map, no post-native TS action execution, and no swallowed action errors.

@@ -527,6 +527,19 @@ describe('hub pipeline stage residue audit', () => {
     expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
   });
 
+  it('bridge action pipeline wrapper must not retain TS registry fallback execution', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/bridge-actions.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'exports TS bridge action registry registration', pattern: /export function registerBridgeAction/ },
+      { label: 'keeps TS bridge action registry map', pattern: /new Map<string, BridgeAction>/ },
+      { label: 'executes registered TS bridge action', pattern: /registry\.get/ },
+      { label: 'swallows bridge action errors', pattern: /catch\s*\{\s*\/\/ Ignore action failures/s },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('hub request mainline must enter Rust total API without request-stage mapper hooks', () => {
     const pipelineRoot = path.join(
       process.cwd(),

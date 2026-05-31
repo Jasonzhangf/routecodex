@@ -35,14 +35,6 @@ export interface BridgeActionContext {
   state: BridgeActionState;
 }
 
-export type BridgeAction = (context: BridgeActionContext) => void;
-
-const registry = new Map<string, BridgeAction>();
-
-export function registerBridgeAction(name: string, action: BridgeAction): void {
-  registry.set(name, action);
-}
-
 export function createBridgeActionState(seed?: Partial<BridgeActionState>): BridgeActionState {
   const state: BridgeActionState = {
     messages: Array.isArray(seed?.messages) ? (seed.messages as Array<UnknownRecord>) : []
@@ -104,23 +96,5 @@ export function runBridgeActionPipeline(options: {
         : {})
     };
     Object.assign(state, patch);
-  }
-
-  for (const descriptor of actions) {
-    if (!descriptor || typeof descriptor !== 'object') continue;
-    const action = registry.get(descriptor.name);
-    if (!action) continue;
-    try {
-      action({
-        stage,
-        protocol,
-        moduleType,
-        requestId,
-        descriptor,
-        state
-      });
-    } catch {
-      // Ignore action failures to preserve core flow; telemetry hooks can be added later.
-    }
   }
 }
