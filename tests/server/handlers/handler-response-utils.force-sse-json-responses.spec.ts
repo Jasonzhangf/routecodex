@@ -55,6 +55,43 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
     }
   });
 
+  it('rejects Responses JSON-to-SSE payloads without response id before emitting response.completed', async () => {
+    const app = express();
+    app.get('/responses-sse-missing-id', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            object: 'response',
+            status: 'completed',
+            model: 'gpt-5.4-medium',
+            output: []
+          }
+        } as any,
+        'req_force_sse_missing_id',
+        { forceSSE: true, entryEndpoint: '/v1/responses' }
+      );
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/responses-sse-missing-id`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(text).toContain('event: error');
+      expect(text).not.toContain('event: response.completed');
+      expect(text).not.toContain('"type":"response.completed"');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('encodes chat.completion JSON into /v1/responses SSE instead of sse_bridge_error', async () => {
     const app = express();
     app.get('/responses-sse-from-chat-json', (_req, res) => {

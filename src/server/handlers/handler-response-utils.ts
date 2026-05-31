@@ -979,10 +979,12 @@ function sendSseBridgeError(res: Response, requestLabel: string, status = 502): 
       request_id: requestLabel
     }
   };
-  res.status(200);
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
+  if (!res.headersSent) {
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+  }
   try {
     res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
   } catch (error) {

@@ -57,6 +57,46 @@ fn build_openai_responses_request(format_envelope: &Value) -> Result<Value, Stri
         .ok_or("Missing 'payload' field in format envelope")?
         .clone();
 
+    if payload.get("input").is_none() {
+        if let Some(context) = format_envelope
+            .get("payload")
+            .and_then(|value| value.get("metadata"))
+            .and_then(|value| value.get("context"))
+            .filter(|value| value.get("input").is_some())
+        {
+            let mut responses_payload = Map::new();
+            if let Some(model) = payload.get("model") {
+                responses_payload.insert("model".to_string(), model.clone());
+            }
+            if let Some(input) = context.get("input") {
+                responses_payload.insert("input".to_string(), input.clone());
+            }
+            for key in [
+                "tools",
+                "tool_choice",
+                "temperature",
+                "top_p",
+                "max_output_tokens",
+                "max_tokens",
+                "stream",
+                "parallel_tool_calls",
+                "user",
+                "logit_bias",
+                "seed",
+                "response_format",
+            ] {
+                if let Some(value) = payload
+                    .get(key)
+                    .or_else(|| context.get(key))
+                    .or_else(|| context.get("toolsRaw").filter(|_| key == "tools"))
+                {
+                    responses_payload.insert(key.to_string(), value.clone());
+                }
+            }
+            payload = Value::Object(responses_payload);
+        }
+    }
+
     // Ensure required fields for OpenAI Responses format
     if let Some(obj) = payload.as_object_mut() {
         // Remove any private fields
