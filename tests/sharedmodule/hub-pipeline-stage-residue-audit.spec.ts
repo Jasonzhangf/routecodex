@@ -87,6 +87,20 @@ describe('hub pipeline stage residue audit', () => {
     expect(stageSource).not.toContain('native-hub-pipeline-req-process-semantics');
   });
 
+  it('hub pipeline normalize request TS shell must enter Rust total stage API instead of orchestration helper', () => {
+    const normalizePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.ts',
+    );
+    const source = fs.readFileSync(normalizePath, 'utf8');
+
+    expect(source).toContain('runHubPipelineStageWithNative');
+    expect(source).toContain("stage: 'normalizeRequest'");
+    expect(source).not.toContain('runHubPipelineOrchestrationWithNative');
+    expect(source).not.toContain('resolveNormalizedRouteShape');
+    expect(source).not.toContain('buildNormalizedMetadataRecord');
+  });
+
   it('rust lib response path must call Rust resp stage modules instead of TS stage shells', () => {
     const crateRoot = path.join(
       process.cwd(),

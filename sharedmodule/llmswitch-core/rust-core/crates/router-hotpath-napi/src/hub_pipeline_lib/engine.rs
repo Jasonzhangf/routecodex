@@ -966,6 +966,11 @@ pub fn run_hub_pipeline_stage_json(stage_json: String) -> HubPipelineResult<Stri
 
     let raw: Value = serde_json::from_str(&stage_json)?;
     if raw.get("request").is_none()
+        && raw.get("stage").and_then(Value::as_str) == Some("normalizeRequest")
+    {
+        return run_normalize_request_stage(raw);
+    }
+    if raw.get("request").is_none()
         && raw.get("stage").and_then(Value::as_str) == Some("reqProcessToolGovernance")
     {
         return run_req_process_tool_governance_stage(raw);
@@ -981,6 +986,78 @@ pub fn run_hub_pipeline_stage_json(stage_json: String) -> HubPipelineResult<Stri
         serde_json::json!({ "request": raw })
     };
     execute_hub_pipeline_json(serde_json::to_string(&lib_input).map_err(HubPipelineError::from)?)
+}
+
+fn run_normalize_request_stage(raw: Value) -> HubPipelineResult<String> {
+    let request_id = raw
+        .get("requestId")
+        .and_then(Value::as_str)
+        .unwrap_or("hub_pipeline_normalize_request")
+        .to_string();
+    if raw
+        .get("metadata")
+        .and_then(|metadata| metadata.get("processMode"))
+        .and_then(Value::as_str)
+        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("passthrough"))
+    {
+        return Err(HubPipelineError::new(
+            "hub_pipeline_passthrough_process_mode_removed",
+            format!("[HubPipeline] processMode='passthrough' is no longer supported. (requestId={})", request_id),
+        ));
+    }
+    let output = run_hub_pipeline(HubPipelineInput {
+        request_id: request_id.clone(),
+        endpoint: raw
+            .get("endpoint")
+            .and_then(Value::as_str)
+            .unwrap_or("/v1/chat/completions")
+            .to_string(),
+        entry_endpoint: raw
+            .get("entryEndpoint")
+            .and_then(Value::as_str)
+            .unwrap_or("/v1/chat/completions")
+            .to_string(),
+        provider_protocol: raw
+            .get("providerProtocol")
+            .and_then(Value::as_str)
+            .unwrap_or("openai-chat")
+            .to_string(),
+        payload: raw.get("payload").cloned().unwrap_or(Value::Null),
+        metadata: raw.get("metadata").cloned().unwrap_or(Value::Null),
+        stream: raw.get("stream").and_then(Value::as_bool).unwrap_or(false),
+        process_mode: "chat".to_string(),
+        direction: raw
+            .get("direction")
+            .and_then(Value::as_str)
+            .unwrap_or("request")
+            .to_string(),
+        stage: raw
+            .get("metadata")
+            .and_then(|metadata| metadata.get("stage"))
+            .and_then(Value::as_str)
+            .or_else(|| raw.get("stage").and_then(Value::as_str))
+            .unwrap_or("inbound")
+            .to_string(),
+    })
+    .map_err(|message| HubPipelineError::new("hub_pipeline_normalize_request_failed", message))?;
+    let result = HubPipelineExecutionOutput {
+        request_id: output.request_id,
+        success: output.success,
+        payload: output.payload,
+        metadata: output.metadata,
+        effect_plan: HubPipelineEffectPlan::empty(),
+        diagnostics: vec![diagnostic(
+            HubPipelineStageId::NormalizeRequest,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({ "stageOnly": true })),
+        )],
+        error: output.error.map(|error| HubPipelineError {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+        }),
+    };
+    serde_json::to_string(&result).map_err(HubPipelineError::from)
 }
 
 fn run_req_process_tool_governance_stage(raw: Value) -> HubPipelineResult<String> {
