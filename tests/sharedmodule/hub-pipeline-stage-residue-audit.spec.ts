@@ -406,4 +406,56 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(findings).toEqual([]);
   });
+
+  it('legacy TS outbound provider payload orchestration file must be physically removed', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-provider-payload-orchestration-blocks.ts',
+    );
+
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
+  it('legacy TS request route/outbound/inbound orchestrators must be physically removed', () => {
+    const pipelineRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+    );
+    const legacyFiles = [
+      'hub-pipeline-route-and-outbound.ts',
+      'hub-pipeline-execute-request-stage-provider-payload.ts',
+      'hub-pipeline-execute-request-stage-inbound.ts',
+      'hub-pipeline-execute-request-stage-inbound-orchestration-blocks.ts',
+      'hub-pipeline-execute-request-stage-inbound-semantic-blocks.ts',
+      'hub-pipeline-execute-request-stage-inbound-governance-blocks.ts',
+      'hub-pipeline-execute-request-stage-inbound-result-blocks.ts',
+      'hub-pipeline-stage-hooks.ts',
+      'hub-pipeline-shared-guards.ts',
+    ];
+
+    const existing = legacyFiles.filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));
+
+    expect(existing).toEqual([]);
+  });
+
+  it('chat_process request mainline must enter Rust total API without TS route/outbound mapper orchestration', () => {
+    const pipelineRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+    );
+    const mainlineSource = fs.readFileSync(path.join(pipelineRoot, 'hub-pipeline-execute-chat-process-entry.ts'), 'utf8');
+
+    expect(mainlineSource).toContain('runHubPipelineLibWithNative');
+    const findings = [
+      ...collectMatches(mainlineSource, [
+        { label: 'requires request stage hooks', pattern: /requireRequestStageHooks/ },
+        { label: 'executes TS route outbound', pattern: /executeRouteAndBuildOutbound/ },
+        { label: 'runs TS governance phase', pattern: /executeChatProcessGovernancePhase/ },
+        { label: 'creates TS semantic mapper', pattern: /createSemanticMapper/ },
+        { label: 'imports TS route outbound file', pattern: /hub-pipeline-route-and-outbound\.js/ },
+      ]).map((match) => `hub-pipeline-execute-chat-process-entry.ts:${match}`),
+    ];
+
+    expect(findings).toEqual([]);
+  });
 });

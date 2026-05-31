@@ -3,7 +3,6 @@ import type { JsonObject, JsonValue } from "../types/json.js";
 import { isJsonObject } from "../types/json.js";
 import type { AdapterContext } from "../types/chat-envelope.js";
 import type { HubPipelineNodeResult, NormalizedRequest } from "./hub-pipeline.js";
-import type { RequestStageHooks } from "./hub-pipeline-stage-hooks.js";
 import { writeCacheEntryForRequest } from "./stages/req_inbound/req_inbound_stage3_context_capture/cache-write.js";
 import { captureResponsesRequestContext } from '../../shared/responses-conversation-store.js';
 import {
@@ -60,7 +59,7 @@ export async function captureInboundContextSnapshot<TContext = Record<string, un
   inboundStage2ResponsesContext: Record<string, unknown> | undefined;
   rawRequest: JsonObject;
   inboundAdapterContext: AdapterContext;
-  hooks: RequestStageHooks<TContext>;
+  hooks: { captureContext: (args: { rawRequest: JsonObject; adapterContext: AdapterContext; stageRecorder?: StageRecorder }) => Promise<TContext | undefined> | TContext | undefined };
   inboundRecorder?: StageRecorder;
 }): Promise<Record<string, unknown> | undefined> {
   const persistResponsesConversationContext = (context: Record<string, unknown> | undefined): void => {

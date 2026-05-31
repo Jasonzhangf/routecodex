@@ -1856,3 +1856,52 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 ## 2026-05-31 stopless 唯一激发真相
 - 已验证：stopless 默认不是 `:stop_followup` reenter；Rust Hub Pipeline 只产出 `requireRuntimeExecutor`，`stop_message_flow` 策略唯一执行 `clientInjectOnly`，由客户端/tmux 注入 `继续执行`。
 - 禁止旧方式：`stop_message_flow` 不得 `requireReenterPipeline`、不得 `seedLoopPayload/retryEmptyFollowupOnce`、不得在 response-stage/followup hop 上形成二次 stopless 激发；黑盒锚点是真实 HTTP `/v1/responses` + fake upstream SSE + tmux pane 断言 provider 只打一次且 tmux 收到注入文本。
+
+## 2026-05-31 Responses continuation materialize / store retention
+- 已验证根因：route-aware Responses continuation materialize 将非纯 delta 的完整 incoming history 拼到 store prefix，会重放已完成 `call_id`，表现为 `orphan_tool_result ... already-consumed call_id: call_1`，并使 mem-observer `pendingNoResponseId/retainedInputItems` 增长。
+- 修复基线：`shared_responses_conversation_utils.rs::materialize_responses_continuation_payload` 只允许纯 delta materialize；incoming 若重放 prefix 中已完成 tool call id，必须返回 Null 走原 payload；router-direct `hub_pipeline_failed` 后必须清理 responses conversation request store。
+
+## 2026-05-31 Responses store startup cleanup
+- Verified root for retained pending Responses entries: startup cleanup can hit a global responsesConversationStore instance whose module export lacks `clearUnresolvedResponsesConversationRequests`; `src/modules/llmswitch/bridge/runtime-integrations.ts` must clear unresolved entries against the same global store object (`requestMap` + `detachEntry`) before falling back to module export.
+- Regression gate: `tests/server/http-server/router-direct-passthrough.blackbox.spec.ts` has HTTP `/v1/responses` blackbox for repeated sequential `call_1` history and asserts no `clearUnresolvedResponsesConversationRequests not available` startup warning.
+
+
+## HubPipeline Rust 总控 API Closeout（2026-05-31）
+
+### 审计结论
+- 缺口不是缺 Rust 函数，是缺 Rust 总控 API：多个 native helpers 已存在，但调用顺序/错误边界/metadata merge/EffectPlan 仍由 TS 决定。
+- `hub_pipeline.rs` 已收口到 282 行薄壳；`lib.rs` 已声明完整模块树。
+- `rustification-audit-current.json`：非 native LOC 58012→56942，降 1070 行。
+
+### 剩余 P0/P1 Closeout（2026-05-31 closeout plan）
+| Slice | 模块 | 当前残留 TS |
+|---|---|---|
+| Slice 0 | 总控 API 基座 | `hub_pipeline_lib.rs` 缺失；TS `hub-pipeline.ts` 无总控入口 |
+| Slice 1 | resp_process.stage3 servertool | `runServerToolOrchestration` / `runServerSideToolEngine` 在 TS |
+| Slice 2 | req_process.stage1 governance | `maybeInjectNativeTool` 等判断在 TS |
+| Slice 3 | resp_process.stage2 finalize | `buildProcessedRequestFromChatResponse` 在 TS |
+| Slice 4 | hub-pipeline normalize-request | `entryEndpoint` / `providerProtocol` / `routeHint` 决策在 TS |
+| Slice 5 | operation-table/mappers/adapters | 协议语义映射在 TS |
+
+### 计划文档
+- `docs/goals/hubpipeline-rust-closeout-master-plan.md`（详细 plan）
+- `docs/goals/hubpipeline-rust-closeout-goal-prompt.md`（/goal 提示词）
+- `docs/audit/hub-pipeline-rust-lib-analysis-2026-05-31.md`（审计分析）
+
+### 执行顺序
+Slice 0（总控 API）→ Slice 1-4（P0）→ Slice 5（P1）
+
+### 验证
+架构红测 + 黑盒红测 + Rust unit + Jest + build + restart smoke。
+
+## 2026-05-31 stopless / stop_message followup truth
+- stop_message_flow must use servertool reenter, never tmux/client injection. Rust skeleton profile for stop_message_flow must not set clientInjectOnly/clientInjectSource, and native handler output must not emit clientInjectOnly/clientInjectText/clientInjectSource metadata.
+- stopless skip gate belongs in Rust stop-message-core decision. Plan mode and /goal active skip; serverToolFollowup hops skip to prevent recursion; ordinary finish_reason=stop with valid scoped state triggers reenter.
+
+## 2026-05-31 HubPipeline Rust closeout Slice 0
+- Slice 0 total-control API baseline: Rust exports `runHubPipelineLibJson` and `runHubPipelineStageJson`; TS wrapper exports `runHubPipelineLibWithNative` / `runHubPipelineStageWithNative` with `failNativeRequired` and no fallback. Verified with `tests/sharedmodule/hub-pipeline-rust-lib-api-contract.spec.ts`, `cargo test -p router-hotpath-napi hub_pipeline -- --nocapture`, and `node scripts/build-core.mjs`.
+- Server lifecycle validation rule: do not use separate start/stop; if runtime validation needs server lifecycle, use `routecodex restart --port <port>` only.
+
+## 2026-05-31 HubPipeline Rust closeout residue rule
+- Verified: request-stage/chat-process mainline must use Rust total API via `runHubPipelineLibWithNative`; legacy TS route/outbound/inbound orchestrators (`hub-pipeline-route-and-outbound.ts`, `hub-pipeline-execute-request-stage-provider-payload.ts`, `hub-pipeline-execute-request-stage-inbound*.ts`, `hub-pipeline-stage-hooks.ts`, `hub-pipeline-shared-guards.ts`) are deleted truth, not dormant code.
+- Regression gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` must fail if those files or request-stage mapper hook imports return.

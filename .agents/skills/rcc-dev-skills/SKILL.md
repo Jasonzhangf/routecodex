@@ -228,6 +228,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 6. stopless/stop_message 约束（复盘）
 - 默认开启不等于无条件触发；必须有 followup 上下文且 finish_reason 条件正确。
 - 禁止任何“把非 stop 改成 stop”的语义改写（仅允许既定例外：text harvest；stop -> tool_calls）。
+- 2026-05-31 更新：`stop_message_flow` 只能走 servertool reenter，禁止 `clientInjectOnly/clientInjectSource=servertool.stop_message` 与 tmux/client injection；`serverToolFollowup=true` 即使无 flowId 也必须进入 Rust skip，防止 followup hop 递归触发 stopless。
 
 
 ## Windsurf 对齐固定参考（2026-05-21，强制）
@@ -763,6 +764,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - tool:exec_command 参数壳容错（2026-04-20）：`tool:exec_command (...)` + `<parameter name="command">...` 这种显式 tool label，即使 closing tag 残缺/错配，也应按**顶层 label 先锁容器**，再把内部 `<parameter>` 映射回 canonical `cmd`；禁止回退到从 shell 正文猜工具。
 - RCC public TS surface 只做薄壳（2026-04-20）：`text-markup-normalizer` / `tool-harvester` 这类 TS 入口只允许转发 native 真源；不要在 TS 里另写一套 fence / JSON / name 推断逻辑，否则 public surface 会和 Rust 真源再次分叉。
 - Responses submit_tool_outputs 真因（2026-04-20）：若 5520 现场首轮 `/v1/responses` 正常返回 `requires_action`，但 `POST /v1/responses/:id/submit_tool_outputs` 立刻报 `Responses conversation expired or not found`，先查 `executeRequestStageInbound`：**当 stage2 已生成 `responsesContext` 时，不要只写 CACHE 后直接短路返回；仍必须补做 `responses conversation store capture`**，否则 responseId 根本没入 store。
+- Responses scope materialize 膨胀（2026-05-31）：若 `/v1/responses` 报 `orphan_tool_result ... already-consumed call_id: call_1` 且 mem-observer `pendingNoResponseId/retainedInputItems` 增长，先查 `shared_responses_conversation_utils.rs::materialize_responses_continuation_payload` 是否把完整 incoming history 当 delta 拼到 store prefix；纯 delta 才能 materialize，重放已完成 call_id 必须返回 Null 走原 payload。
 - Responses submit_tool_outputs / Mimo thinking 400（2026-05-13）：若 `/v1/responses` 首轮 client payload 已有 `reasoning` item、continuation resume 也已恢复出 `assistant.reasoning_content`，但第二轮 `provider-request` 仍缺 thinking history 并报 `The reasoning_content in the thinking mode must be passed back`，先断在 **`chatEnvelope -> standardizedRequest`**：`router-hotpath-napi/src/hub_standardized_bridge.rs::normalize_chat_message()` 必须保留 `reasoning_content/reasoning`。不要去误改 continuation store、chat bridge 或 provider transport——一旦字段在 standardized owner 被吃掉，下游没有任何正确位置能补回来。
 - DeepSeek-Web resume 续轮边界（2026-04-20）：若第二跳明明拿到了 tool result，却继续 `tool_calls` 循环或报“declared tools present but no valid tool call”，先分两层查：**请求侧** `tools/*` 路由在最新消息角色为 `tool` 时**不得再强塞 `tool-required` 尾提醒**；**响应侧** `strictToolRequired` 只应在 `tool_choice=required/function` 时生效，tool result 之后允许模型直接返回最终文本完成。
 - QwenChat tools 边界（2026-04-12）：**qwenchat 不要改全局 system prompt**。当前 Jason 允许的最小方案是：**仅在声明 tools 时**做 request-side 最小 override（头部 prepend 一条极短 system 提示），再配合 `tools` schema/description；消息正文语义保持原样，响应 harvest 继续走统一 `resp_process_stage1_tool_governance`。
@@ -1642,3 +1644,14 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-05-31 Mimo/Anthropic SSE response inbound 精华
 - mimo 就是 Anthropic：provider SSE 进 `/v1/responses` 后只在 llmswitch-core response inbound 边界 materialize，Rust 负责 Anthropic SSE/message -> Chat/Responses 语义转换；Host executor 禁止再加 SSE materializer/换壳。
 - 红测必须真实 HTTP listener + fake upstream SSE；断言成功文本、无 `Anthropic response must contain content array`、无 `missing choices`，再用真实 5555 smoke 区分转换错误与上游 503。
+
+### 2026-05-31 Responses store cleanup leak
+- Trigger: `[mem-observer] pendingNoResponseId/retainedInputItems` stays high or startup logs `clearUnresolvedResponsesConversationRequests not available`.
+- Action: verify `runtime-integrations.clearUnresolvedResponsesConversationRequests()` against the global responses store object, not only the module export; red gate must be real HTTP `/v1/responses` blackbox plus store stats/cleanup assertion.
+
+### 2026-05-31 HubPipeline Rust Closeout Slice 0
+- Total-control API baseline is `runHubPipelineLibJson` / `runHubPipelineStageJson` in Rust, with TS wrappers `runHubPipelineLibWithNative` / `runHubPipelineStageWithNative`; wrappers must use `failNativeRequired` and must not fallback to `executeHubPipelineJson` or TS orchestration.
+- Runtime validation must use `routecodex restart --port <port>` if lifecycle action is needed; do not do separate start/stop.
+
+### 2026-05-31 HubPipeline Rust closeout residue removal
+- HubPipeline request-stage/chat-process mainline must enter `runHubPipelineLibWithNative`; do not resurrect TS `hub-pipeline-route-and-outbound`, request-stage inbound/provider-payload orchestrators, stage hooks, or shared guards. Architecture gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.

@@ -13436,3 +13436,8 @@ Using skills: coding-principals + rcc-dev-skills
 - Root cause: `buildServerToolNestedRequestMetadata` only stripped a few top-level legacy fields; followup merged `responses_context` / `extraFields` / `responseFormat` and nested `__rt` mappable semantics back into metadata.
 - Fix: centralize stripping of all mappable metadata keys in servertool followup metadata builder, including nested `__rt`; keep responses context only in request semantics/body semantics.
 - Verification: HTTP blackbox `responses-handler.stop-followup-metadata.blackbox.spec.ts`, `servertool-followup-metadata.spec.ts`, `servertool-followup-dispatch.spec.ts`, `servertool-followup-model-pin-regression.spec.ts`, `pnpm -C sharedmodule/llmswitch-core run build`, `npm run build:min`, `npm run install:global`, and `routecodex restart --port 5555` pass; 5555 health returns version `0.90.2599` ready.
+
+## 2026-05-31 HubPipeline Rust closeout request-stage TS residue removal
+- Slice progress: request-stage/chat-process mainline now enters Rust total API (`runHubPipelineLibWithNative`) and legacy TS request route/outbound/inbound orchestrator files were physically removed.
+- Removed old tests that imported deleted TS truth (`hub-pipeline-route-and-outbound`, request-stage inbound/provider payload direct unit tests); retained/extended architecture residue gate.
+- Verification: `hub-pipeline-stage-residue-audit.spec.ts`, `responses-context-capture-fallback.regression.spec.ts`, `servertool-followup-dispatch.spec.ts`, `responses-handler.stop-followup-metadata.blackbox.spec.ts`, `resp-process-stage3-reentry.spec.ts`, `pnpm -C sharedmodule/llmswitch-core run build`, and `cargo test -p router-hotpath-napi hub_pipeline -- --nocapture` passed.
