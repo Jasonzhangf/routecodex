@@ -1622,3 +1622,4 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Anthropic live SSE 修复不能只覆盖 `wantsStream=false`；`/v1/responses` + tool request 下即使用户侧非显式 stream，内部转换可能 `wantsStream=true`。红测必须覆盖 `providerResponse.__sse_responses` + `wantsStream=true`。
 - provider snapshot 的 marker-only `{mode:"sse", captureSse, transport}` 不是可转换 payload；遇到它必须 fail-fast 为“缺 materializable stream/bodyText”，禁止继续送 Rust 当 Anthropic message 解析。
 - router-direct 进入 response conversion 时必须传 `providerHandle.providerProtocol`，不能用 `providerType` 推断；`providerType:'openai' + providerProtocol:'openai-responses'` 若按 openai-chat 转换，会把 Responses payload 送进 Chat validator 并报 `missing choices`。红测必须走真实 HTTP `/v1/responses` router-direct。
+- stopMessage followup 再入必须在 nested metadata 和 RequestExecutor response conversion 两处禁用 stopMessage；只在 dispatch 层标记但 normal executor 不消费，会出现断客后 `:stop_followup` 无限递归且日志 `used=0 left=3` 每轮重置。

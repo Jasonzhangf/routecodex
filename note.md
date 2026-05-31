@@ -13315,3 +13315,10 @@ Using skills: coding-principals + rcc-dev-skills
 ## 2026-05-31 router-direct nonstandard chat payload live failure
 - Live 11:35 failures now hit `router-direct.send completed` for cc.key1.gpt-5.5, then direct response conversion fails in Rust with `hub_pipeline_resp_client_remap_failed: Upstream returned non-standard Chat completion payload (missing choices)`.
 - This is not MiniMax `sse_passthrough`; likely direct path passes an OpenAI Responses-shaped upstream payload into providerProtocol/openai-chat conversion.
+
+## 2026-05-31 stop_followup after client gone
+- Live 4567 showed `:stop_followup` recursion after client gone because nested followup metadata did not hard-disable stopMessage for RequestExecutor response conversion; normal executor used global `isServerToolEnabled()` only, so each nested stop response re-triggered stopMessage with `used=0`.
+- Fix: nested followup metadata now carries stopMessage disabled flags, RequestExecutor honors those flags, and reenter followup checks client disconnect before/after nested reentry result. 0.90.2587 install/restart shows no new 4567 followup sample after restart.
+
+## 2026-05-31 240538 Anthropic marker-only SSE
+- Live 4568 sample is Anthropic provider response marker `{mode:"sse", captureSse:true, transport:"prepared-request-executor"}` without `bodyText`/`__sse_responses`; expected behavior is fail-fast as non-materializable stream marker, not Anthropic content-array canonicalization.

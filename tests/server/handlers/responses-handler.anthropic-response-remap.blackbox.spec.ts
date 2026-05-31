@@ -316,6 +316,52 @@ describe('responses HTTP anthropic provider response remap blackbox', () => {
     }
   });
 
+  it('rejects captured 240538 Anthropic SSE marker over HTTP before content-array canonicalizer', async () => {
+    const samplePath = '/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1780199864374_521f00a5/provider-response.json';
+    const sample = JSON.parse(fs.readFileSync(samplePath, 'utf8')) as Record<string, any>;
+    expect(sample?.body).toMatchObject({ mode: 'sse', captureSse: true, transport: 'prepared-request-executor' });
+    expect(sample?.body?.bodyText).toBeUndefined();
+    expect(sample?.body?.__sse_responses).toBeUndefined();
+
+    const app = express();
+    app.use(express.json({ limit: '512kb' }));
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, {
+        executePipeline: async (input: any) => {
+          const converted = await convertProviderResponse({
+            providerProtocol: 'anthropic-messages',
+            providerResponse: sample.body,
+            context: {
+              requestId: input.requestId,
+              entryEndpoint: '/v1/responses',
+              providerProtocol: 'anthropic-messages'
+            } as any,
+            entryEndpoint: '/v1/responses',
+            wantsStream: true
+          });
+          return { status: 200, headers: {}, body: converted.body };
+        },
+        errorHandling: null
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+    try {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'mimo-v2.5', stream: true, input: 'hello' })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBeGreaterThanOrEqual(500);
+      expect(text).toContain('Provider SSE marker did not include materializable stream or bodyText');
+      expect(text).not.toContain('Anthropic response must contain content array');
+    } finally {
+      await closeServer(server);
+    }
+  });
+
   it('maps captured MiniMax OpenAI chat SSE wrapper from 240109 without missing choices', async () => {
     const samplePath = '/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1780197621568_f7e8b5c2/provider-response_1.json';
     const sample = JSON.parse(fs.readFileSync(samplePath, 'utf8')) as Record<string, any>;

@@ -716,6 +716,17 @@ function buildServerToolNestedInput(args: {
   });
   preserveLiveClientAbortCarriers({ source: args.baseMetadata, target: nestedMetadata });
   preserveLiveClientAbortCarriers({ source: nestedExtra, target: nestedMetadata });
+  nestedMetadata.stopMessageEnabled = false;
+  nestedMetadata.routecodexPortStopMessageEnabled = false;
+  const nestedRuntime =
+    nestedMetadata.__rt && typeof nestedMetadata.__rt === 'object' && !Array.isArray(nestedMetadata.__rt)
+      ? (nestedMetadata.__rt as Record<string, unknown>)
+      : {};
+  nestedMetadata.__rt = {
+    ...nestedRuntime,
+    stopMessageEnabled: false,
+    routecodexPortStopMessageEnabled: false
+  };
   if (args.mode === 'reenter' && isServerToolFollowup(materializedRequestSemantics)) {
     delete nestedMetadata.clientInjectOnly;
     delete nestedMetadata.clientInjectText;
@@ -875,6 +886,7 @@ export async function executeServerToolReenterPipeline(args: {
         timeoutMs: resolveServerToolNestedFollowupTimeoutMs(),
         requestId: args.requestId
       });
+      throwIfNestedFollowupAborted(nestedInputAttempt.metadata);
       throwIfNestedPipelineReturnedError(attemptResult);
       nestedResult = attemptResult;
       break;

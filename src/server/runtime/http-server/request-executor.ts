@@ -1097,7 +1097,19 @@ export class HubRequestExecutor implements RequestExecutor {
             hasSemantics: Boolean(requestSemantics && Object.keys(requestSemantics).length),
             attempt
           });
-          const serverToolsEnabled = isServerToolEnabled();
+          const metadataServerToolsDisabled =
+            mergedMetadata.stopMessageEnabled === false
+            || mergedMetadata.routecodexPortStopMessageEnabled === false
+            || (
+              mergedMetadata.__rt
+              && typeof mergedMetadata.__rt === 'object'
+              && !Array.isArray(mergedMetadata.__rt)
+              && (
+                (mergedMetadata.__rt as Record<string, unknown>).stopMessageEnabled === false
+                || (mergedMetadata.__rt as Record<string, unknown>).routecodexPortStopMessageEnabled === false
+              )
+            );
+          const serverToolsEnabled = isServerToolEnabled() && !metadataServerToolsDisabled;
           logStageLazy('provider.response_convert.start', input.requestId, () => ({
             providerKey: target.providerKey,
             protocol: providerProtocol,

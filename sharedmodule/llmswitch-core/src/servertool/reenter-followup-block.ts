@@ -384,6 +384,17 @@ export async function runReenterFollowup(args: {
       flowId: args.flowId
     });
     try {
+      if (args.isAdapterClientDisconnected(args.adapterContext)) {
+        args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
+        return {
+          kind: 'completed',
+          result: {
+            chat: args.finalChatResponse,
+            executed: true,
+            flowId: args.flowId
+          }
+        };
+      }
       const followupPromise = args.reenterPipeline({
         entryEndpoint: args.followupEntryEndpoint,
         requestId: args.followupRequestId,
@@ -404,6 +415,17 @@ export async function runReenterFollowup(args: {
           })
       );
       disconnectWatcher.cancel();
+      if (args.isAdapterClientDisconnected(args.adapterContext)) {
+        args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
+        return {
+          kind: 'completed',
+          result: {
+            chat: args.finalChatResponse,
+            executed: true,
+            flowId: args.flowId
+          }
+        };
+      }
       const attemptBodyCandidate = resolveFollowupBodyCandidate(followup);
       lifecycle('attempt_result', {
         attempt,
