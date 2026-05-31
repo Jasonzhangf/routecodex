@@ -13345,3 +13345,6 @@ Using skills: coding-principals + rcc-dev-skills
 ## 2026-05-31 SSE inbound truth
 - mimo is Anthropic provider protocol. Provider SSE body enters llmswitch-core response inbound once, then Rust response semantics maps Anthropic message/SSE to target client protocol.
 - Removed Host-level SSE materialization from provider-response-converter; core response materializer is unique inbound boundary.
+
+## 2026-05-31 stopless unique trigger audit
+- Current task: stopless must trigger only once via Rust Hub Pipeline runtimeExecutor effect + stop_message_flow clientInjectOnly; no :stop_followup reenter. Need update old reenter tests and verify blackbox.

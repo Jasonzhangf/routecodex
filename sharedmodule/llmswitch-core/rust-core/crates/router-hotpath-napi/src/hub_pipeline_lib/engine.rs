@@ -503,7 +503,7 @@ impl HubPipelineEngine {
                 effects.push(HubPipelineEffect {
                     kind: HubPipelineEffectKind::ServertoolRuntimeAction,
                     payload: serde_json::json!({
-                        "action": "requireReenterPipeline",
+                        "action": "requireRuntimeExecutor",
                         "reason": "stop_eligible_followup",
                         "requestId": output.request_id,
                         "stopGateway": stop_gateway,

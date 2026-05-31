@@ -1719,6 +1719,15 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .and_then(|v| v.as_u64())
         .or_else(|| input.decision.get("max_repeats").and_then(|v| v.as_u64()))
         .unwrap_or(0) as u32;
+    let followup_text = input
+        .decision
+        .get("followupText")
+        .and_then(|v| v.as_str())
+        .or_else(|| input.decision.get("followup_text").and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or("继续执行")
+        .to_string();
     let provider_pin = input.decision.get("provider_pin").cloned();
 
     // 3. Extract runtime metadata and metadata for field lookups
@@ -1812,6 +1821,12 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
     if let Some(ref rpm) = routecodex_port_mode {
         metadata_obj.insert("routecodexPortMode".to_string(), Value::String(rpm.clone()));
     }
+    metadata_obj.insert("clientInjectOnly".to_string(), Value::Bool(true));
+    metadata_obj.insert("clientInjectText".to_string(), Value::String(followup_text.clone()));
+    metadata_obj.insert(
+        "clientInjectSource".to_string(),
+        Value::String("servertool.stop_message".to_string()),
+    );
 
     // 7. Build followup plan
     let followup = serde_json::json!({
@@ -1819,7 +1834,7 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         "injection": {
             "ops": [
                 { "op": "append_assistant_message", "required": false },
-                { "op": "append_user_text", "text": "继续执行" }
+                { "op": "append_user_text", "text": followup_text }
             ]
         },
         "metadata": Value::Object(metadata_obj)
@@ -1844,7 +1859,7 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
 
     // 9. Build state update
     let state_update = serde_json::json!({
-        "text": "继续执行",
+        "text": followup_text,
         "maxRepeats": max_repeats,
         "used": used + 1,
         "source": "default",

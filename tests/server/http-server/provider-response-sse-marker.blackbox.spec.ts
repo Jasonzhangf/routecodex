@@ -4,6 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
+import { spawnSync } from 'node:child_process';
 
 import { RouteCodexHttpServer } from '../../../src/server/runtime/http-server/index.js';
 import type { ServerConfigV2 } from '../../../src/server/runtime/http-server/types.js';
@@ -51,6 +52,18 @@ function anthropicProvider(id: string, port: number, alias = 'key1'): Record<str
   };
 }
 
+function openaiChatProvider(id: string, port: number, alias = 'key1'): Record<string, unknown> {
+  return {
+    id,
+    enabled: true,
+    type: 'openai',
+    baseURL: `http://127.0.0.1:${port}`,
+    auth: { type: 'apikey', entries: [{ alias, type: 'apikey', value: `test-${id}-${alias}` }] },
+    models: { 'gpt-5.5': { supportsStreaming: true, capabilities: ['text', 'tools'] } },
+    extensions: { transportBackend: 'vercel-ai-sdk' }
+  };
+}
+
 async function writeProviderConfig(root: string, providerId: string, provider: Record<string, unknown>): Promise<void> {
   const dir = path.join(root, '.rcc', 'provider', providerId);
   await fs.mkdir(dir, { recursive: true });
@@ -87,6 +100,25 @@ async function writeRouterConfig(args: {
     await writeProviderConfig(args.tmp, providerId, provider);
   }
   return userConfig;
+}
+
+function startTmuxSession(sessionName: string): void {
+  const result = spawnSync('tmux', ['new-session', '-d', '-s', sessionName, 'sh', '-lc', 'cat'], { encoding: 'utf8' });
+  if (result.status !== 0) {
+    throw new Error(`tmux new-session failed: ${result.stderr || result.stdout || result.status}`);
+  }
+}
+
+function captureTmuxPane(sessionName: string): string {
+  const result = spawnSync('tmux', ['capture-pane', '-pt', sessionName], { encoding: 'utf8' });
+  if (result.status !== 0) {
+    throw new Error(`tmux capture-pane failed: ${result.stderr || result.stdout || result.status}`);
+  }
+  return result.stdout;
+}
+
+function stopTmuxSession(sessionName: string): void {
+  spawnSync('tmux', ['kill-session', '-t', sessionName], { encoding: 'utf8' });
 }
 
 function routerEnv(tmp: string, maxAttempts: string): Array<() => void> {
@@ -168,6 +200,75 @@ function validAnthropicMessage(id: string, text: string): Record<string, unknown
 
 describe('provider response SSE marker HTTP blackbox', () => {
   jest.setTimeout(30000);
+
+  it('HTTP BLACKBOX: OpenAI chat SSE finish_reason stop triggers stopless client injection once', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-stopless-sse-blackbox-'));
+    const configPath = path.join(tmp, 'config.json');
+    const conversationSessionId = 'stopless-sse-blackbox-session';
+    const tmuxSessionId = `rcc-stopless-sse-${Date.now()}`;
+    let providerRequestHits = 0;
+    const upstream = http.createServer((req, res) => {
+      if (req.method === 'POST') {
+        providerRequestHits += 1;
+        req.resume();
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write('data: {"id":"chatcmpl_stopless_sse","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n');
+        res.write('data: {"id":"chatcmpl_stopless_sse","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{"content":"stopless source"},"finish_reason":null}]}\n\n');
+        res.write('data: {"id":"chatcmpl_stopless_sse","object":"chat.completion","model":"gpt-5.5","choices":[{"index":0,"message":{"role":"assistant","content":"stopless source"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n\n');
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+      req.resume();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [] }));
+    });
+    const upstreamPort = await listen(upstream);
+    const userConfig = await writeRouterConfig({
+      tmp,
+      configPath,
+      routingPolicyGroup: 'stoplesssse',
+      providers: { cc: openaiChatProvider('cc', upstreamPort) },
+      targets: ['cc.key1.gpt-5.5']
+    });
+    (userConfig as any).httpserver.ports[0].stopMessage = { enabled: true };
+    const restores = [
+      ...routerEnv(tmp, '1'),
+      setEnv('ROUTECODEX_TMUX_INJECT_DELAY_MS', '0')
+    ];
+    let server: RouteCodexHttpServer | undefined;
+    try {
+      startTmuxSession(tmuxSessionId);
+      const started = await startRouteCodex(configPath, userConfig);
+      server = started.server;
+      const response = await fetch(`http://127.0.0.1:${started.port}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+        body: JSON.stringify({
+          ...responseRequestBody(conversationSessionId),
+          metadata: {
+            routeHint: 'thinking',
+            sessionId: conversationSessionId,
+            clientInjectReady: true,
+            clientTmuxSessionId: tmuxSessionId,
+            stopMessageClientInjectSessionScope: `tmux:${tmuxSessionId}`
+          }
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('stopless source');
+      expect(providerRequestHits).toBe(1);
+      expect(captureTmuxPane(tmuxSessionId)).toContain('继续执行');
+    } finally {
+      await server?.stop().catch(() => undefined);
+      await closeServer(upstream);
+      stopTmuxSession(tmuxSessionId);
+      for (const restore of restores.reverse()) restore();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 
   it('HTTP BLACKBOX: Anthropic provider SSE response enters inbound remap before Responses output', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-anthropic-inbound-blackbox-'));

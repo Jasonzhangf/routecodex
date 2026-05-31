@@ -1852,3 +1852,7 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 ## 2026-05-31 Mimo/Anthropic SSE response inbound 真相
 - mimo 是 Anthropic provider protocol；`/v1/responses` 命中 mimo 后，provider SSE 必须在 llmswitch-core response inbound 唯一边界 materialize 为 `{mode:"sse", bodyText}`，再由 Rust Anthropic response semantics 转 OpenAI Chat/Responses。Host `RequestExecutor` 不得提前二次 materialize/remap。
 - 已验证：真实 5555 smoke 不再出现 `hub_pipeline_resp_anthropic_chat_canonicalize_failed` / `missing choices`；当前剩余 live failure 为上游 `HTTP_503`。
+
+## 2026-05-31 stopless 唯一激发真相
+- 已验证：stopless 默认不是 `:stop_followup` reenter；Rust Hub Pipeline 只产出 `requireRuntimeExecutor`，`stop_message_flow` 策略唯一执行 `clientInjectOnly`，由客户端/tmux 注入 `继续执行`。
+- 禁止旧方式：`stop_message_flow` 不得 `requireReenterPipeline`、不得 `seedLoopPayload/retryEmptyFollowupOnce`、不得在 response-stage/followup hop 上形成二次 stopless 激发；黑盒锚点是真实 HTTP `/v1/responses` + fake upstream SSE + tmux pane 断言 provider 只打一次且 tmux 收到注入文本。

@@ -135,8 +135,8 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                             },
 
                             "stop_message_flow": {
-                                "seedLoopPayload": true,
-                                "retryEmptyFollowupOnce": true
+                                "clientInjectOnly": true,
+                                "clientInjectSource": "servertool.stop_message"
                             },
                             "reasoning_stop_guard_flow": {},
                             "reasoning_stop_continue_flow": {},
