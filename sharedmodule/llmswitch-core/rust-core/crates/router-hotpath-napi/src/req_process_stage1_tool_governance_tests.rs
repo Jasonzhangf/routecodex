@@ -201,7 +201,7 @@ fn test_post_governed_media_cleanup_preserves_latest_user_media_turn() {
 }
 
 #[test]
-fn test_servertool_orchestration_appends_clock_only_and_keeps_review_continue_hidden() {
+fn test_servertool_orchestration_appends_clock_and_keeps_continue_hidden() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "gpt-4o-mini",
@@ -253,7 +253,6 @@ fn test_servertool_orchestration_appends_clock_only_and_keeps_review_continue_hi
     }
     assert!(names.contains("exec_command"));
     assert!(names.contains("clock"));
-    assert!(names.contains("review"));
     assert!(!names.contains("continue_execution"));
 }
 

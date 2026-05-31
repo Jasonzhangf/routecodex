@@ -75,6 +75,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).not.toContain('stages/req_outbound');
   });
 
+  it('req_process stage1 TS shell must enter Rust total stage API instead of direct native helper', () => {
+    const stagePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts',
+    );
+    const stageSource = fs.readFileSync(stagePath, 'utf8');
+
+    expect(stageSource).toContain('runHubPipelineStageWithNative');
+    expect(stageSource).not.toContain('applyReqProcessToolGovernanceWithNative');
+    expect(stageSource).not.toContain('native-hub-pipeline-req-process-semantics');
+  });
+
   it('rust lib response path must call Rust resp stage modules instead of TS stage shells', () => {
     const crateRoot = path.join(
       process.cwd(),

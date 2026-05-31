@@ -26,6 +26,13 @@ pub(crate) fn ensure_apply_patch_chat_process_contract(
             } else {
                 Some(tool_obj)
             }
+        } else if tool_obj
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(|name| name.trim().eq_ignore_ascii_case("apply_patch"))
+            .unwrap_or(false)
+        {
+            Some(tool_obj)
         } else {
             None
         };
@@ -72,13 +79,16 @@ pub(crate) fn ensure_apply_patch_chat_process_contract(
             "patch".to_string(),
             json!({
                 "type": "string",
-                "description": "Required. Patch payload. Supported formats: line-edit operations (`+ line` / `- line`), unified diff (`---` / `+++`), or Markdown fenced code block (for example ```diff ... ```)."
+                "description": "Required. Patch payload. Supported formats: line-edit operations (`+ first line`, `- old line`, `+ new line`), unified diff (`---` / `+++`), or Markdown fenced code block (for example ```diff ... ```)."
             }),
         );
 
         parameters.insert(
             "required".to_string(),
-            Value::Array(vec![Value::String("patch".to_string())]),
+            Value::Array(vec![
+                Value::String("filePath".to_string()),
+                Value::String("patch".to_string()),
+            ]),
         );
         parameters.insert("type".to_string(), Value::String("object".to_string()));
         parameters.insert("additionalProperties".to_string(), Value::Bool(true));
@@ -86,7 +96,7 @@ pub(crate) fn ensure_apply_patch_chat_process_contract(
         function_obj.insert(
             "description".to_string(),
             Value::String(
-                r#"Call apply_patch directly for file edits. `patch` is required; `filePath` is optional. You may provide line-edit patch (`+ line` / `- line`), unified diff (`--- a/...` / `+++ b/...`), or fenced diff block (```diff ... ```). If `filePath` is omitted, path can be inferred from patch headers such as `*** Add File:` or unified diff headers."#.to_string(),
+                r#"Call apply_patch directly for file edits. Provide a workspace-relative `filePath` and `patch`. You may provide line-edit patch (`+ first line`, `- old line`, `+ new line`), unified diff (`--- a/...` / `+++ b/...`), or fenced diff block (```diff ... ```)."#.to_string(),
             ),
         );
     }

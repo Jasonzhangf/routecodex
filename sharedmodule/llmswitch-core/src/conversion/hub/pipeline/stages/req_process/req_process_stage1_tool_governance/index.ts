@@ -2,7 +2,7 @@ import type { StageRecorder } from '../../../../format-adapters/index.js';
 import type { ProcessedRequest, StandardizedRequest } from '../../../../types/standardized.js';
 import type { HubProcessNodeResult } from '../../../../process/chat-process.js';
 import { recordStage } from '../../../stages/utils.js';
-import { applyReqProcessToolGovernanceWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.js';
+import { runHubPipelineStageWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-lib.js';
 import { applyHeartbeatDirectiveRuntimeSideEffectsFromProcessedRequest } from '../../../../process/blocks/chat-process-heartbeat-runtime-side-effects.js';
 import { isRecord } from '../../../../../../shared/common-utils.js';
 
@@ -48,20 +48,26 @@ function parseNodeResult(value: unknown): HubProcessNodeResult {
 export async function runReqProcessStage1ToolGovernance(
   options: ReqProcessStage1ToolGovernanceOptions
 ): Promise<ReqProcessStage1ToolGovernanceResult> {
-  // continue_execution tool injection is disabled globally.
-  // Force stop-message-active semantics so native req_process governance never appends the tool.
-  const hasActiveStopMessageForContinueExecution = true;
-  const nativeResult = applyReqProcessToolGovernanceWithNative({
-    request: options.request as unknown as Record<string, unknown>,
-    rawPayload: options.rawPayload,
-    metadata: options.metadata,
-    entryEndpoint: options.entryEndpoint,
+  const stageResult = runHubPipelineStageWithNative({
     requestId: options.requestId,
-    hasActiveStopMessageForContinueExecution
+    endpoint: options.entryEndpoint,
+    entryEndpoint: options.entryEndpoint,
+    providerProtocol: typeof options.metadata.providerProtocol === 'string' ? options.metadata.providerProtocol : 'openai-chat',
+    payload: options.request as unknown as Record<string, unknown>,
+    metadata: {
+      ...options.metadata,
+      rawPayload: options.rawPayload,
+      hasActiveStopMessageForContinueExecution: true,
+    },
+    stream: options.rawPayload.stream === true,
+    processMode: 'chat',
+    direction: 'request',
+    stage: 'reqProcessToolGovernance',
   });
 
-  const processedRequest = parseProcessedRequest(nativeResult.processedRequest);
-  const nodeResult = parseNodeResult(nativeResult.nodeResult);
+  const stageMetadata = isRecord(stageResult.metadata) ? stageResult.metadata : {};
+  const processedRequest = parseProcessedRequest(stageResult.payload);
+  const nodeResult = parseNodeResult(stageMetadata.nodeResult);
   await applyHeartbeatDirectiveRuntimeSideEffectsFromProcessedRequest(processedRequest);
 
   const nodeResultMetadata =

@@ -963,12 +963,68 @@ pub fn run_hub_pipeline_stage_json(stage_json: String) -> HubPipelineResult<Stri
     }
 
     let raw: Value = serde_json::from_str(&stage_json)?;
+    if raw.get("request").is_none()
+        && raw.get("stage").and_then(Value::as_str) == Some("reqProcessToolGovernance")
+    {
+        return run_req_process_tool_governance_stage(raw);
+    }
     let lib_input = if raw.get("request").is_some() {
         raw
     } else {
         serde_json::json!({ "request": raw })
     };
     execute_hub_pipeline_json(serde_json::to_string(&lib_input).map_err(HubPipelineError::from)?)
+}
+
+fn run_req_process_tool_governance_stage(raw: Value) -> HubPipelineResult<String> {
+    let request_id = raw
+        .get("requestId")
+        .and_then(Value::as_str)
+        .unwrap_or("hub_pipeline_stage_request")
+        .to_string();
+    let metadata = raw.get("metadata").cloned().unwrap_or(Value::Null);
+    let raw_payload = metadata
+        .get("rawPayload")
+        .cloned()
+        .unwrap_or_else(|| raw.get("payload").cloned().unwrap_or(Value::Null));
+    let entry_endpoint = raw
+        .get("entryEndpoint")
+        .and_then(Value::as_str)
+        .or_else(|| raw.get("endpoint").and_then(Value::as_str))
+        .unwrap_or("")
+        .to_string();
+    let has_active_stop_message_for_continue_execution = metadata
+        .get("hasActiveStopMessageForContinueExecution")
+        .and_then(Value::as_bool);
+    let governed = apply_req_process_tool_governance(ToolGovernanceInput {
+        request: raw.get("payload").cloned().unwrap_or(Value::Null),
+        raw_payload,
+        metadata,
+        entry_endpoint,
+        request_id: request_id.clone(),
+        has_active_stop_message_for_continue_execution,
+    })
+    .map_err(|message| {
+        HubPipelineError::new(
+            "hub_pipeline_req_process_tool_governance_failed",
+            message,
+        )
+    })?;
+
+    let output = HubPipelineExecutionOutput {
+        request_id,
+        success: true,
+        payload: Some(governed.processed_request),
+        metadata: Some(serde_json::json!({ "nodeResult": governed.node_result })),
+        effect_plan: HubPipelineEffectPlan::empty(),
+        diagnostics: vec![diagnostic(
+            HubPipelineStageId::ReqProcessToolGovernance,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({ "stageOnly": true })),
+        )],
+        error: None,
+    };
+    serde_json::to_string(&output).map_err(HubPipelineError::from)
 }
 
 fn diagnostic(

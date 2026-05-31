@@ -12,7 +12,7 @@ type HubPipelineInput = {
   stream: boolean;
   processMode: 'chat';
   direction: 'request' | 'response';
-  stage: 'inbound' | 'outbound';
+  stage: string;
 };
 
 type HubPipelineOutput = {
