@@ -607,6 +607,7 @@ describe('hub pipeline stage residue audit', () => {
       'hub-pipeline-execute-request-stage-inbound-semantic-blocks.ts',
       'hub-pipeline-execute-request-stage-inbound-governance-blocks.ts',
       'hub-pipeline-execute-request-stage-inbound-result-blocks.ts',
+      'hub-pipeline-execute-request-stage-inbound-blocks.ts',
       'hub-pipeline-stage-hooks.ts',
       'hub-pipeline-shared-guards.ts',
     ];
