@@ -13311,3 +13311,7 @@ Using skills: coding-principals + rcc-dev-skills
 ## 2026-05-31 provider snapshot port propagation
 - Review found ResponsesProvider.snapshotPhase called writeProviderSnapshot without `context.metadata`, so `matchedPort`/`portContext` never reached sample writer even though HTTP lifecycle injected it.
 - Fix: pass `metadata: context.metadata`; local mirror test now asserts meta/runtime carry entryPort/matchedPort=5555.
+
+## 2026-05-31 router-direct nonstandard chat payload live failure
+- Live 11:35 failures now hit `router-direct.send completed` for cc.key1.gpt-5.5, then direct response conversion fails in Rust with `hub_pipeline_resp_client_remap_failed: Upstream returned non-standard Chat completion payload (missing choices)`.
+- This is not MiniMax `sse_passthrough`; likely direct path passes an OpenAI Responses-shaped upstream payload into providerProtocol/openai-chat conversion.

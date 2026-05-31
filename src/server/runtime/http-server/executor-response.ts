@@ -24,6 +24,7 @@ import {
 export interface ConvertProviderResponseOptions {
   entryEndpoint?: string;
   providerType?: string;
+  providerProtocol?: string;
   requestId: string;
   wantsStream: boolean;
   requestSemantics?: Record<string, unknown> | undefined;
@@ -56,7 +57,7 @@ export async function convertProviderResponseIfNeeded(
   }
 
   try {
-    const providerProtocol = mapProviderProtocol(options.providerType);
+    const providerProtocol = options.providerProtocol || mapProviderProtocol(options.providerType);
     const metadataBag = asRecord(options.pipelineMetadata);
     const aliasMap = extractAnthropicToolAliasMap(metadataBag);
     const adapterContext = buildServerToolAdapterContext({
@@ -65,7 +66,8 @@ export async function convertProviderResponseIfNeeded(
       requestSemantics: options.requestSemantics,
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint || entry,
-      providerProtocol
+      providerProtocol,
+      serverToolsEnabled: options.serverToolsEnabled !== false
     });
     if (aliasMap) {
       (adapterContext as Record<string, unknown>).anthropicToolNameMap = aliasMap;
@@ -135,15 +137,16 @@ export async function convertProviderResponseIfNeeded(
     };
 
     const bridgeProviderResponse = await materializeProviderResponseSsePayload(body as Record<string, unknown>);
+    const serverToolsEnabled = options.serverToolsEnabled !== false;
     const converted = await bridgeConvertProviderResponse({
       providerProtocol,
       providerResponse: bridgeProviderResponse,
       context: adapterContext,
       entryEndpoint: options.entryEndpoint || entry,
       wantsStream: options.wantsStream,
-      providerInvoker,
+      providerInvoker: serverToolsEnabled ? providerInvoker : undefined,
       stageRecorder,
-      reenterPipeline
+      reenterPipeline: serverToolsEnabled ? reenterPipeline : undefined
     });
 
     if (converted.__sse_responses) {
@@ -163,7 +166,7 @@ export async function convertProviderResponseIfNeeded(
   } catch (error) {
     const err = error as Error | unknown;
     const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
-    const providerProtocol = mapProviderProtocol(options.providerType);
+    const providerProtocol = options.providerProtocol || mapProviderProtocol(options.providerType);
 
     const isSseConvertFailure =
       typeof message === 'string' &&

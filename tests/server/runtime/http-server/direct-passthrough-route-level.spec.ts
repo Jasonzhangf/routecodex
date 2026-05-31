@@ -622,7 +622,7 @@ describe('direct passthrough route-level', () => {
         },
         routingDecision: { routeName: 'coding', pool: [providerA, 'mimo.mimo-v2.5-pro'] },
         processMode: 'chat',
-        metadata: {},
+        metadata: { stopMessageEnabled: false, routecodexPortStopMessageEnabled: false },
       })),
       updateVirtualRouterConfig: jest.fn(),
     };
@@ -877,6 +877,9 @@ describe('direct passthrough route-level', () => {
       })),
       updateVirtualRouterConfig: jest.fn(),
     };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline]
+    ]);
     (server as any).providerHandles = new Map([[runtimeKey, {
       runtimeKey,
       providerId: 'direct',
@@ -924,6 +927,112 @@ describe('direct passthrough route-level', () => {
       expect(logs.some((line) => line.includes('reason=thinking:user-input'))).toBe(true);
     } finally {
       console.log = originalLog;
+      await server.stop();
+    }
+  }, 15000);
+
+  it('HTTP BLACKBOX: router-direct converts providerProtocol responses even when providerType is openai', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const providerKey = 'cc.key1.gpt-5.5';
+    const runtimeKey = 'runtime:cc';
+    const directSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_openai_type_responses_protocol',
+        object: 'response',
+        status: 'in_progress',
+        model: 'gpt-5.5',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }],
+        output_text: 'ok'
+      },
+    }));
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 0,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => ({
+        providerPayload: { model: 'gpt-5.5' },
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey,
+          processMode: 'chat',
+        },
+        routingDecision: { routeName: 'coding', pool: [providerKey], reason: 'coding:user-input' },
+        processMode: 'chat',
+        metadata: {},
+      })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline]
+    ]);
+    (server as any).providerHandles = new Map([[runtimeKey, {
+      runtimeKey,
+      providerId: 'cc',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-responses',
+      runtime: { modelId: 'gpt-5.5' },
+      instance: {
+        initialize: async () => {},
+        cleanup: async () => {},
+        processIncoming: jest.fn(),
+        processIncomingDirect: directSend,
+      },
+    }]]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5555',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'router-gpt-5.5',
+          stream: false,
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'read only question' }] }],
+        }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual(expect.objectContaining({ id: 'resp_router_direct_openai_type_responses_protocol' }));
+      expect(JSON.stringify(body)).not.toContain('missing choices');
+      expect(directSend).toHaveBeenCalledTimes(1);
+    } finally {
       await server.stop();
     }
   }, 15000);

@@ -1387,7 +1387,10 @@ export class RouteCodexHttpServer {
         : pipelineResult.standardizedRequest?.semantics && typeof pipelineResult.standardizedRequest.semantics === 'object' && !Array.isArray(pipelineResult.standardizedRequest.semantics)
           ? (pipelineResult.standardizedRequest.semantics as Record<string, unknown>)
           : undefined,
-      pipelineMetadata: pipelineResult.metadata,
+      pipelineMetadata: {
+        ...metadataForHub,
+        ...(pipelineResult.metadata ?? {})
+      },
     };
   }
 
@@ -1467,7 +1470,7 @@ export class RouteCodexHttpServer {
       baseResult.metadata && typeof baseResult.metadata === 'object' && !Array.isArray(baseResult.metadata)
         ? ((baseResult.metadata as Record<string, unknown>).responseSemantics as Record<string, unknown> | undefined)
         : undefined;
-    const pipelineMetadata = {
+    const pipelineMetadata: Record<string, unknown> = {
       ...(input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
         ? (input.metadata as Record<string, unknown>)
         : {}),
@@ -1478,6 +1481,7 @@ export class RouteCodexHttpServer {
     return await convertDirectProviderResponseIfNeeded({
       entryEndpoint: input.entryEndpoint,
       providerType: providerHandle.providerType,
+      providerProtocol: providerHandle.providerProtocol,
       requestId: input.requestId,
       wantsStream: Boolean((input.metadata as Record<string, unknown> | undefined)?.stream),
       originalRequest:
@@ -1486,7 +1490,7 @@ export class RouteCodexHttpServer {
           : undefined,
       requestSemantics: directResult.requestSemantics,
       processMode: directResult.auditContext.processMode,
-      serverToolsEnabled: true,
+      serverToolsEnabled: pipelineMetadata.stopMessageEnabled !== false,
       response: baseResult,
       pipelineMetadata
     }, {
