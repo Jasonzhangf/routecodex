@@ -97,6 +97,28 @@ fn build_openai_chat_request(format_envelope: &Value) -> Result<Value, String> {
         if let Some(input) = context.get("input") {
             responses_payload.insert("input".to_string(), input.clone());
         }
+        for key in [
+            "tools",
+            "tool_choice",
+            "temperature",
+            "top_p",
+            "max_output_tokens",
+            "max_tokens",
+            "stream",
+            "parallel_tool_calls",
+            "user",
+            "logit_bias",
+            "seed",
+            "response_format",
+        ] {
+            if let Some(value) = payload
+                .get(key)
+                .or_else(|| context.get(key))
+                .or_else(|| context.get("toolsRaw").filter(|_| key == "tools"))
+            {
+                responses_payload.insert(key.to_string(), value.clone());
+            }
+        }
         let converted = crate::responses_openai_codec::run_responses_openai_request_codec_json(
             Value::Object(responses_payload).to_string(),
             None,

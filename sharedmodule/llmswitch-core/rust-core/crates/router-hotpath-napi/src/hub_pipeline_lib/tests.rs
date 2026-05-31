@@ -119,7 +119,21 @@ fn execute_hub_pipeline_json_uses_preselected_route_outbound_profile_for_respons
             "endpoint": "/v1/responses",
             "entryEndpoint": "/v1/responses",
             "providerProtocol": "openai-responses",
-            "payload": { "model": "gpt-test", "input": "hi" },
+            "payload": {
+                "model": "gpt-test",
+                "input": "hi",
+                "tools": [{
+                    "type": "function",
+                    "name": "exec_command",
+                    "description": "execute command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "cmd": { "type": "string" } },
+                        "required": ["cmd"]
+                    }
+                }],
+                "tool_choice": "auto"
+            },
             "metadata": {
                 "__routecodexPreselectedRoute": {
                     "target": {
@@ -149,6 +163,14 @@ fn execute_hub_pipeline_json_uses_preselected_route_outbound_profile_for_respons
     assert_eq!(
         output.pointer("/payload/messages/0/content").and_then(|value| value.as_str()),
         Some("hi")
+    );
+    assert_eq!(
+        output.pointer("/payload/tools/0/function/name").and_then(|value| value.as_str()),
+        Some("exec_command")
+    );
+    assert_eq!(
+        output.pointer("/payload/tool_choice").and_then(|value| value.as_str()),
+        Some("auto")
     );
 }
 
