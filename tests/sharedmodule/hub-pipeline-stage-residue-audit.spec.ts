@@ -328,6 +328,21 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('req_process stage1 wrapper must not mutate native nodeResult semantics', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+
+    const findings = collectMatches(source, [
+      { label: 'rewrites native nodeResult dataProcessed', pattern: /dataProcessed\.(messages|tools)\s*=/ },
+      { label: 'mutates native nodeResult metadata', pattern: /nodeResultMetadata/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy resp_process stage1 TS governance shell must be physically removed', () => {
     const filePath = path.join(
       process.cwd(),

@@ -70,19 +70,6 @@ export async function runReqProcessStage1ToolGovernance(
   const nodeResult = parseNodeResult(stageMetadata.nodeResult);
   await applyHeartbeatDirectiveRuntimeSideEffectsFromProcessedRequest(processedRequest);
 
-  const nodeResultMetadata =
-    nodeResult.metadata && typeof nodeResult.metadata === 'object'
-      ? (nodeResult.metadata as Record<string, unknown>)
-      : null;
-  const dataProcessed =
-    nodeResultMetadata?.dataProcessed && typeof nodeResultMetadata.dataProcessed === 'object'
-      ? (nodeResultMetadata.dataProcessed as Record<string, unknown>)
-      : null;
-  if (dataProcessed) {
-    dataProcessed.messages = Array.isArray(processedRequest.messages) ? processedRequest.messages.length : 0;
-    dataProcessed.tools = Array.isArray(processedRequest.tools) ? processedRequest.tools.length : 0;
-  }
-
   recordStage(options.stageRecorder, 'chat_process.req.stage4.tool_governance', processedRequest);
 
   return {
