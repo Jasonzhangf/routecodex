@@ -501,6 +501,12 @@ function isRecoverableSseDecodeBridgeError(error: Record<string, unknown>): bool
   return error.requestExecutorProviderErrorStage === 'provider.sse_decode' && error.retryable === true;
 }
 
+function isEmptyOpenAiChatSseBridgeError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return normalized.includes('openai chat sse response did not contain json data events')
+    || normalized.includes('provider sse marker did not include materializable stream or bodytext');
+}
+
 function shouldEnableHubStageRecorder(): boolean {
   const raw = String(
     process.env.ROUTECODEX_ENABLE_HUB_STAGE_RECORDER
@@ -549,6 +555,13 @@ function remapBridgeSseErrorToHttp(error: Record<string, unknown>, message: stri
     (error as any).statusCode = 502;
     (error as any).retryable = true;
     (error as any).code = 'HTTP_502';
+    return;
+  }
+  if (isEmptyOpenAiChatSseBridgeError(message)) {
+    (error as any).status = 502;
+    (error as any).statusCode = 502;
+    (error as any).retryable = true;
+    (error as any).code = 'SSE_DECODE_ERROR';
   }
 }
 
@@ -1133,6 +1146,7 @@ export async function convertProviderResponseIfNeeded(
       errCode === 'SSE_DECODE_ERROR' ||
       errCode === 'HTTP_502' ||
       errCode === 'HTTP_429' ||
+      isEmptyOpenAiChatSseBridgeError(message) ||
       (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
     const normalizedMessage = message.toLowerCase();
     const isContextLengthExceeded = isContextLengthExceededError(

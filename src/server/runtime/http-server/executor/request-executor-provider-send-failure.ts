@@ -91,6 +91,22 @@ export type RequestExecutorProviderSendFailureResult = {
   cumulativeExternalLatencyMs: number;
 };
 
+function isRetryableProviderResponseProcessingFailure(args: {
+  error: unknown;
+  retryError: RetryErrorSnapshot;
+}): boolean {
+  if (!args.error || typeof args.error !== 'object') {
+    return false;
+  }
+  const record = args.error as {
+    retryable?: unknown;
+    requestExecutorProviderErrorStage?: unknown;
+  };
+  return record.retryable === true
+    && record.requestExecutorProviderErrorStage === 'provider.sse_decode'
+    && args.retryError.errorCode === 'SSE_DECODE_ERROR';
+}
+
 async function observeFailedTrafficOutcome(args: {
   governor: ProviderTrafficGovernorLike;
   runtimeKey: string;
@@ -125,7 +141,14 @@ export async function processProviderSendFailure(
   if (args.abortSignal?.aborted || isClientDisconnectAbortError(args.error)) {
     throw args.error;
   }
-  if (args.phase !== 'provider_send') {
+  const retryError = args.extractRetryErrorSnapshot(args.error);
+  if (
+    args.phase !== 'provider_send'
+    && !isRetryableProviderResponseProcessingFailure({
+      error: args.error,
+      retryError
+    })
+  ) {
     throw args.error;
   }
   let cumulativeExternalLatencyMs = args.cumulativeExternalLatencyMs;
@@ -142,8 +165,6 @@ export async function processProviderSendFailure(
   }
 
   const errorMessage = args.error instanceof Error ? args.error.message : String(args.error ?? 'Unknown error');
-  const retryError = args.extractRetryErrorSnapshot(args.error);
-
   if (args.sessionStormBackoffScopes?.length && args.isSessionStormBackoffCandidate(args.error)) {
     for (const scope of args.sessionStormBackoffScopes) {
       const backoffMs = args.consumeSessionStormBackoffMs(scope, args.error);

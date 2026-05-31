@@ -12,7 +12,6 @@ import {
 } from '../pipeline/hub-stage-timing.js';
 import {
   finalizeResponsesConversationRequestRetention,
-  recordResponsesResponse,
 } from '../../shared/responses-conversation-store.js';
 import type { ProviderInvoker } from '../../../servertool/types.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
@@ -357,10 +356,6 @@ async function executeProviderResponseNativeRuntimeStateEffect(args: {
 }): Promise<void> {
   const runtimeEffect = readNativeRuntimeStateWriteEffect(args.effectPlan);
   if (!runtimeEffect) return;
-  const responseRecord = runtimeEffect.responseRecord;
-  if (responseRecord && typeof responseRecord === 'object' && !Array.isArray(responseRecord)) {
-    recordResponsesResponse(responseRecord as Parameters<typeof recordResponsesResponse>[0]);
-  }
   finalizeResponsesConversationRequestRetention(args.context.requestId, {
     keepForSubmitToolOutputs: runtimeEffect.keepForSubmitToolOutputs === true
   });

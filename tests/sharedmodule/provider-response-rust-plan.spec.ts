@@ -1,6 +1,16 @@
-import { describe, expect, it } from '@jest/globals';
-import { convertProviderResponse } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { StageRecorder } from '../../sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.js';
+
+const recordResponsesResponseMock = jest.fn();
+
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js', () => ({
+  finalizeResponsesConversationRequestRetention: jest.fn(),
+  recordResponsesResponse: recordResponsesResponseMock,
+}));
+
+const { convertProviderResponse } = await import(
+  '../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js'
+);
 
 class StubStageRecorder implements StageRecorder {
   public entries: Array<{ stage: string; payload: object }> = [];
@@ -19,6 +29,10 @@ async function readStreamBody(stream: NodeJS.ReadableStream): Promise<string> {
 }
 
 describe('provider response Rust native plan', () => {
+  beforeEach(() => {
+    recordResponsesResponseMock.mockClear();
+  });
+
   it('uses Rust HubPipeline native response plan for non-side-effect response path', async () => {
     const recorder = new StubStageRecorder();
     const context: Record<string, unknown> = {
@@ -64,6 +78,33 @@ describe('provider response Rust native plan', () => {
     expect(recorder.entries.map((entry) => entry.stage)).toContain('chat_process.resp.stage9.client_remap');
     expect(recorder.entries.map((entry) => entry.stage)).toContain('chat_process.resp.stage10.sse_stream');
   });
+
+  it('does not record Responses conversation before handler captures request context', async () => {
+    const context: Record<string, unknown> = {
+      requestId: 'openai-responses-mimo.key2-mimo-v2.5-20260531T215233443-242655-2116',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'anthropic-messages'
+    };
+
+    await convertProviderResponse({
+      providerProtocol: 'anthropic-messages',
+      providerResponse: {
+        id: 'msg_059b419d6ffe4fd7a726432c',
+        type: 'message',
+        role: 'assistant',
+        model: 'mimo-v2.5',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 }
+      },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: false
+    });
+
+    expect(recordResponsesResponseMock).not.toHaveBeenCalled();
+  });
+
 
   it('uses Rust streamPipe effect plan for streaming response path', async () => {
     const recorder = new StubStageRecorder();
