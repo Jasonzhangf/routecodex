@@ -63,6 +63,33 @@ fn is_likely_url(value: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("ftp://")
 }
 
+fn text_needs_separator(left: &str, right: &str) -> bool {
+    let Some(left_char) = left.chars().next_back() else {
+        return false;
+    };
+    let Some(right_char) = right.chars().next() else {
+        return false;
+    };
+    !left_char.is_whitespace()
+        && !right_char.is_whitespace()
+        && (left_char.is_alphanumeric() || left_char == '.')
+        && (right_char.is_alphanumeric() || right_char == '`')
+}
+
+fn join_text_segments(parts: &[String]) -> String {
+    let mut out = String::new();
+    for part in parts {
+        if part.is_empty() {
+            continue;
+        }
+        if !out.is_empty() && text_needs_separator(&out, part) {
+            out.push(' ');
+        }
+        out.push_str(part);
+    }
+    out
+}
+
 fn parse_structured_anthropic_content_string(value: &str) -> Option<Vec<Value>> {
     let trimmed = value.trim();
     if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
@@ -99,12 +126,14 @@ fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
 fn flatten_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
-        Value::Array(items) => items
-            .iter()
-            .map(flatten_text)
-            .filter(|entry| !entry.is_empty())
-            .collect::<Vec<String>>()
-            .join(""),
+        Value::Array(items) => {
+            let parts = items
+                .iter()
+                .map(flatten_text)
+                .filter(|entry| !entry.is_empty())
+                .collect::<Vec<String>>();
+            join_text_segments(&parts)
+        }
         Value::Object(row) => {
             if let Some(text) = row.get("text").and_then(|v| v.as_str()) {
                 return text.to_string();
@@ -286,12 +315,14 @@ fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value>
 fn collect_openai_chat_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
-        Value::Array(items) => items
-            .iter()
-            .map(collect_openai_chat_text)
-            .filter(|entry| !entry.is_empty())
-            .collect::<Vec<String>>()
-            .join(""),
+        Value::Array(items) => {
+            let parts = items
+                .iter()
+                .map(collect_openai_chat_text)
+                .filter(|entry| !entry.is_empty())
+                .collect::<Vec<String>>();
+            join_text_segments(&parts)
+        }
         Value::Object(row) => {
             if let Some(text) = row.get("text").and_then(|v| v.as_str()) {
                 return text.to_string();
@@ -876,7 +907,7 @@ fn convert_anthropic_messages(
             || !tool_calls.is_empty()
             || !reasoning_parts.is_empty()
         {
-            let combined_text = text_parts.join("");
+            let combined_text = join_text_segments(&text_parts);
             let normalized = normalize_chat_message_content(&Value::String(combined_text.clone()));
             let normalized_reasoning = normalized.reasoning_text.filter(|v| !v.trim().is_empty());
             let text_payload = if normalized_reasoning.is_some() {
@@ -967,6 +998,69 @@ mod tests {
         assert_eq!(
             content[1]["image_url"]["url"].as_str(),
             Some("data:image/png;base64,AAA")
+        );
+    }
+
+    #[test]
+    fn build_openai_chat_from_anthropic_preserves_text_block_word_boundaries() {
+        let payload = json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "text", "text": "Let me understand" },
+                        { "type": "text", "text": "what we need to do." }
+                    ]
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_openai_chat_from_anthropic_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        assert_eq!(
+            output["request"]["messages"][0]["content"].as_str(),
+            Some("Let me understand what we need to do.")
+        );
+    }
+
+    #[test]
+    fn build_openai_chat_from_anthropic_preserves_tool_use_as_tool_calls() {
+        let payload = json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "text", "text": "I will run pwd." },
+                        {
+                            "type": "tool_use",
+                            "id": "call_exec_1",
+                            "name": "exec_command",
+                            "input": { "cmd": "pwd" }
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_openai_chat_from_anthropic_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        let message = &output["request"]["messages"][0];
+        assert_eq!(message["content"].as_str(), Some("I will run pwd."));
+        let tool_calls = message["tool_calls"].as_array().expect("tool calls");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0]["id"].as_str(), Some("call_exec_1"));
+        assert_eq!(tool_calls[0]["function"]["name"].as_str(), Some("exec_command"));
+        assert_eq!(
+            tool_calls[0]["function"]["arguments"].as_str(),
+            Some("{\"cmd\":\"pwd\"}")
         );
     }
 

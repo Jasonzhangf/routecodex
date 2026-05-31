@@ -6,6 +6,15 @@ use crate::hub_reasoning_tool_normalizer::{
 use crate::hub_resp_outbound_client_semantics_blocks::provider_outcome::resolve_anthropic_chat_completion_outcome;
 use crate::shared_json_utils::read_trimmed_string;
 
+fn read_nonempty_string(value: Option<&Value>) -> Option<String> {
+    let raw = value.and_then(Value::as_str)?;
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw.to_string())
+    }
+}
+
 fn flatten_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -22,6 +31,33 @@ fn flatten_text(value: &Value) -> String {
             .unwrap_or_default(),
         _ => String::new(),
     }
+}
+
+fn text_needs_separator(left: &str, right: &str) -> bool {
+    let Some(left_char) = left.chars().next_back() else {
+        return false;
+    };
+    let Some(right_char) = right.chars().next() else {
+        return false;
+    };
+    !left_char.is_whitespace()
+        && !right_char.is_whitespace()
+        && (left_char.is_alphanumeric() || left_char == '.')
+        && (right_char.is_alphanumeric() || right_char == '`')
+}
+
+fn join_text_segments(parts: &[String]) -> String {
+    let mut out = String::new();
+    for part in parts {
+        if part.is_empty() {
+            continue;
+        }
+        if !out.is_empty() && text_needs_separator(&out, part) {
+            out.push(' ');
+        }
+        out.push_str(part);
+    }
+    out
 }
 
 fn normalize_usage(raw: Option<&Value>) -> Option<Value> {
@@ -118,7 +154,7 @@ pub(crate) fn build_openai_chat_response_from_anthropic_message(
         }
     }
 
-    let visible_text = text_parts.join("");
+    let visible_text = join_text_segments(&text_parts);
     let mut message = Map::new();
     message.insert("role".to_string(), Value::String("assistant".to_string()));
     message.insert("content".to_string(), Value::String(visible_text.clone()));
@@ -288,8 +324,8 @@ fn materialize_anthropic_sse_body_text(body_text: &str) -> Result<Value, String>
                     block.id = read_trimmed_string(content_block.get("id"));
                     block.name = read_trimmed_string(content_block.get("name"));
                     block.input = content_block.get("input").cloned();
-                    if let Some(text) = read_trimmed_string(content_block.get("text"))
-                        .or_else(|| read_trimmed_string(content_block.get("thinking")))
+                    if let Some(text) = read_nonempty_string(content_block.get("text"))
+                        .or_else(|| read_nonempty_string(content_block.get("thinking")))
                     {
                         block.text.push_str(text.as_str());
                     }
@@ -305,7 +341,7 @@ fn materialize_anthropic_sse_body_text(body_text: &str) -> Result<Value, String>
                 let delta_type = read_trimmed_string(delta.get("type")).unwrap_or_default();
                 match delta_type.as_str() {
                     "text_delta" => {
-                        if let Some(text) = read_trimmed_string(delta.get("text")) {
+                        if let Some(text) = read_nonempty_string(delta.get("text")) {
                             block.text.push_str(text.as_str());
                         }
                     }
@@ -313,7 +349,7 @@ fn materialize_anthropic_sse_body_text(body_text: &str) -> Result<Value, String>
                         if block.kind.is_empty() {
                             block.kind = "thinking".to_string();
                         }
-                        if let Some(thinking) = read_trimmed_string(delta.get("thinking")) {
+                        if let Some(thinking) = read_nonempty_string(delta.get("thinking")) {
                             block.text.push_str(thinking.as_str());
                         }
                     }
@@ -321,7 +357,7 @@ fn materialize_anthropic_sse_body_text(body_text: &str) -> Result<Value, String>
                         if block.kind.is_empty() {
                             block.kind = "tool_use".to_string();
                         }
-                        if let Some(partial) = read_trimmed_string(delta.get("partial_json")) {
+                        if let Some(partial) = read_nonempty_string(delta.get("partial_json")) {
                             block.json_delta.push_str(partial.as_str());
                         }
                     }
@@ -356,10 +392,13 @@ fn materialize_anthropic_sse_body_text(body_text: &str) -> Result<Value, String>
                 ])));
             }
             "tool_use" => {
-                let input = block
-                    .input
-                    .or_else(|| serde_json::from_str::<Value>(block.json_delta.as_str()).ok())
-                    .unwrap_or_else(|| Value::Object(Map::new()));
+                let input = if block.json_delta.is_empty() {
+                    block.input.unwrap_or_else(|| Value::Object(Map::new()))
+                } else {
+                    serde_json::from_str::<Value>(block.json_delta.as_str()).map_err(|error| {
+                        format!("Anthropic SSE tool_use input_json_delta is invalid JSON: {error}")
+                    })?
+                };
                 content.push(Value::Object(Map::from_iter([
                     ("type".to_string(), Value::String("tool_use".to_string())),
                     (
@@ -419,5 +458,55 @@ mod tests {
         )
         .expect("chat response from anthropic sse");
         assert_eq!(output["choices"][0]["message"]["content"], "anthropic inbound ok");
+    }
+
+    #[test]
+    fn builds_chat_response_from_anthropic_sse_preserves_delta_spaces() {
+        let body_text = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_sse\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"mimo-v2.5\",\"content\":[]}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"Let me\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" understand\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let output = build_openai_chat_response_from_anthropic_message(
+            &json!({ "mode": "sse", "bodyText": body_text }),
+            "req_sse",
+        )
+        .expect("chat response from anthropic sse");
+        assert_eq!(output["choices"][0]["message"]["content"], "Let me understand");
+    }
+
+    #[test]
+    fn builds_chat_response_from_anthropic_sse_tool_use() {
+        let body_text = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_sse\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"mimo-v2.5\",\"content\":[]}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"exec_command\",\"input\":{}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"cmd\\\":\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"pwd\\\"}\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let output = build_openai_chat_response_from_anthropic_message(
+            &json!({ "mode": "sse", "bodyText": body_text }),
+            "req_sse",
+        )
+        .expect("chat response from anthropic sse");
+        assert_eq!(output["choices"][0]["finish_reason"], "tool_calls");
+        let tool_call = &output["choices"][0]["message"]["tool_calls"][0];
+        assert_eq!(tool_call["id"], "call_1");
+        assert_eq!(tool_call["function"]["name"], "exec_command");
+        assert_eq!(tool_call["function"]["arguments"], "{\"cmd\":\"pwd\"}");
     }
 }
