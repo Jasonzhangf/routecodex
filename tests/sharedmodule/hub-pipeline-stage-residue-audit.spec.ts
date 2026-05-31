@@ -106,6 +106,7 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
     );
+    const testRoot = path.join(process.cwd(), 'tests');
     const legacyFiles = [
       'hub-pipeline-normalize-request-blocks.ts',
       'hub-pipeline-normalize-request-finalize-blocks.ts',
@@ -634,6 +635,32 @@ describe('hub pipeline stage residue audit', () => {
     );
 
     expect(fs.existsSync(filePath)).toBe(false);
+  });
+
+  it('legacy TS provider-payload and working-request block residue must be physically removed', () => {
+    const pipelineRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+    );
+    const testRoot = path.join(process.cwd(), 'tests');
+    const legacyFiles = [
+      'hub-pipeline-provider-payload-finalize-blocks.ts',
+      'hub-pipeline-provider-payload-observation-blocks.ts',
+      'hub-pipeline-provider-payload-observation.ts',
+      'hub-pipeline-provider-payload-policy-apply-blocks.ts',
+      'hub-pipeline-provider-payload-policy-blocks.ts',
+      'hub-pipeline-provider-payload-result-blocks.ts',
+      'hub-pipeline-working-request-analysis-blocks.ts',
+      'hub-pipeline-working-request-blocks.ts',
+    ];
+    const legacyTests = [
+      'sharedmodule/hub-pipeline-provider-payload-observation.spec.ts',
+    ];
+
+    const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));
+    const existingTests = legacyTests.filter((relativePath) => fs.existsSync(path.join(testRoot, relativePath)));
+
+    expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
   });
 
   it('legacy TS request route/outbound/inbound orchestrators must be physically removed', () => {
