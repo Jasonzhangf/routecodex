@@ -1299,9 +1299,8 @@ mod tests {
             // 503 always calls trip_provider directly (not recoverable ladder), so state=tripped
             assert_eq!(retripped.state, "tripped");
             assert_eq!(retripped.failure_count, 3);
-            // cooldown_expires_at is still None because the persisted cooldown was cleared in Step-3
-            // but new cooldown is computed fresh (not persisted until handle_provider_failure persists)
-            assert_eq!(retripped.cooldown_expires_at, None);
+            // 503 calls trip_provider directly; cooldown is computed fresh to next midnight.
+            assert!(retripped.cooldown_expires_at.is_some(), "503 should set cooldown to next midnight");
         });
 
         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
