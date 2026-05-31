@@ -56,9 +56,8 @@ export async function materializeProviderResponseSsePayload(
     return payload as Record<string, unknown>;
   }
 
-  const stream = extractProviderResponseSseStream(payload);
-  if (stream) {
-    const bodyText = await readProviderResponseSseStreamText(stream);
+  const bodyText = readProviderResponseSseText(payload);
+  if (typeof bodyText === 'string') {
     return {
       ...(payload as Record<string, unknown>),
       mode: 'sse',
@@ -66,8 +65,9 @@ export async function materializeProviderResponseSsePayload(
     };
   }
 
-  const bodyText = readProviderResponseSseText(payload);
-  if (typeof bodyText === 'string') {
+  const stream = extractProviderResponseSseStream(payload);
+  if (stream) {
+    const bodyText = await readProviderResponseSseStreamText(stream);
     return {
       ...(payload as Record<string, unknown>),
       mode: 'sse',

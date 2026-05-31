@@ -13341,3 +13341,7 @@ Using skills: coding-principals + rcc-dev-skills
 ## 2026-05-31 direct passthrough 收口补充
 - 已物理移除 router-direct 5xx/throw 后 `recoverable_direct_5xx_reenter_executor` 和 `routecodexSameProtocolDirectDisabled` 重入 executor/reroute 旧语义。
 - 已补 HTTP 黑盒 JSON passthrough：真实 server + provider runtime + mock upstream response，断言 direct JSON 原样返回且不出现 missing choices / hub_pipeline_resp_client_remap_failed。
+
+## 2026-05-31 SSE inbound truth
+- mimo is Anthropic provider protocol. Provider SSE body enters llmswitch-core response inbound once, then Rust response semantics maps Anthropic message/SSE to target client protocol.
+- Removed Host-level SSE materialization from provider-response-converter; core response materializer is unique inbound boundary.

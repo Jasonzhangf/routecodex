@@ -1638,3 +1638,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 禁止 direct 5xx/转换错误用 `routecodexSameProtocolDirectDisabled`、`recoverable_direct_5xx_reenter_executor`、二次 `executePipeline` 重入来伪装统一重试；direct 错误必须按 direct/provider transport 结果显式返回或抛出。
 - 禁止把 `outboundProfile` 当 provider 物理协议猜测；配置的 provider type/module 才决定 provider runtime，VR target `outboundProfile` 只属于 HubPipeline 路由/转换语义。
 - 修 direct 回归时先补真实 HTTP 黑盒：真实 `RouteCodexHttpServer` + 真实 provider runtime，只 mock upstream 输入/响应；断言 passthrough 原样返回且无 `missing choices`/`hub_pipeline_resp_client_remap_failed`。
+
+### 2026-05-31 Mimo/Anthropic SSE response inbound 精华
+- mimo 就是 Anthropic：provider SSE 进 `/v1/responses` 后只在 llmswitch-core response inbound 边界 materialize，Rust 负责 Anthropic SSE/message -> Chat/Responses 语义转换；Host executor 禁止再加 SSE materializer/换壳。
+- 红测必须真实 HTTP listener + fake upstream SSE；断言成功文本、无 `Anthropic response must contain content array`、无 `missing choices`，再用真实 5555 smoke 区分转换错误与上游 503。

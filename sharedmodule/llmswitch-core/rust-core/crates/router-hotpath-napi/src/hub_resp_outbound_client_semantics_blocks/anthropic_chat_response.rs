@@ -391,3 +391,33 @@ fn materialize_anthropic_sse_body_text(body_text: &str) -> Result<Value, String>
     }
     Ok(Value::Object(message))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::build_openai_chat_response_from_anthropic_message;
+    use serde_json::json;
+
+    #[test]
+    fn builds_chat_response_from_anthropic_sse_body_text() {
+        let body_text = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_sse\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"mimo-v2.5\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"anthropic inbound ok\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":3}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let output = build_openai_chat_response_from_anthropic_message(
+            &json!({ "mode": "sse", "bodyText": body_text }),
+            "req_sse",
+        )
+        .expect("chat response from anthropic sse");
+        assert_eq!(output["choices"][0]["message"]["content"], "anthropic inbound ok");
+    }
+}

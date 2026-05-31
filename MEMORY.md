@@ -1848,3 +1848,7 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 - HubPipeline request/response 是三段式严格协议链路；每段只有唯一协议真源。SSE 也必须按当前 provider 配置协议在对应唯一链路处理，禁止在 direct path 里二次 materialize、remap、canonicalize 或补兼容。
 - 禁止错误方式：为 direct response 增加 `executor-response` 专用壳、把 direct SSE 读成 bodyText 再送 Hub response conversion、用 `outboundProfile`/请求入口猜 provider 物理协议、添加 fallback/patch/shape 修补来掩盖配置或协议错误、用 `routecodexSameProtocolDirectDisabled`/`recoverable_direct_5xx_reenter_executor` 重入 executor/reroute。
 - 回归测试要求：必须有真实 HTTP 黑盒覆盖 direct passthrough（真实 RouteCodexHttpServer + 真实 provider runtime；只允许 mock upstream 请求/响应），断言 upstream SSE/JSON 原样返回且不出现 `hub_pipeline_resp_client_remap_failed` / `missing choices`。
+
+## 2026-05-31 Mimo/Anthropic SSE response inbound 真相
+- mimo 是 Anthropic provider protocol；`/v1/responses` 命中 mimo 后，provider SSE 必须在 llmswitch-core response inbound 唯一边界 materialize 为 `{mode:"sse", bodyText}`，再由 Rust Anthropic response semantics 转 OpenAI Chat/Responses。Host `RequestExecutor` 不得提前二次 materialize/remap。
+- 已验证：真实 5555 smoke 不再出现 `hub_pipeline_resp_anthropic_chat_canonicalize_failed` / `missing choices`；当前剩余 live failure 为上游 `HTTP_503`。

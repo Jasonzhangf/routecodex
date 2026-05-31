@@ -68,7 +68,7 @@ async function writeRouterConfig(args: {
     version: '2.0.0',
     virtualrouterMode: 'v2',
     httpserver: {
-      ports: [{ port: 0, host: '127.0.0.1', mode: 'router', routingPolicyGroup: args.routingPolicyGroup, sameProtocolBehavior: 'relay' }]
+      ports: [{ port: 0, host: '127.0.0.1', mode: 'router', routingPolicyGroup: args.routingPolicyGroup, sameProtocolBehavior: 'relay', stopMessage: { enabled: false } }]
     },
     virtualrouter: {
       providers: args.providers,
@@ -169,7 +169,68 @@ function validAnthropicMessage(id: string, text: string): Record<string, unknown
 describe('provider response SSE marker HTTP blackbox', () => {
   jest.setTimeout(30000);
 
-  it('HTTP BLACKBOX: marker-only upstream SSE fails before Rust protocol canonicalization', async () => {
+  it('HTTP BLACKBOX: Anthropic provider SSE response enters inbound remap before Responses output', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-anthropic-inbound-blackbox-'));
+    const configPath = path.join(tmp, 'config.json');
+    let providerRequestHits = 0;
+    const upstream = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/v1/messages') {
+        providerRequestHits += 1;
+        req.resume();
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write('event: message_start\n');
+        res.write('data: {"type":"message_start","message":{"id":"msg_anthropic_inbound_sse","type":"message","role":"assistant","model":"mimo-v2.5","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\n');
+        res.write('event: content_block_start\n');
+        res.write('data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n');
+        res.write('event: content_block_delta\n');
+        res.write('data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"anthropic inbound ok"}}\n\n');
+        res.write('event: content_block_stop\n');
+        res.write('data: {"type":"content_block_stop","index":0}\n\n');
+        res.write('event: message_delta\n');
+        res.write('data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}\n\n');
+        res.write('event: message_stop\n');
+        res.write('data: {"type":"message_stop"}\n\n');
+        res.end();
+        return;
+      }
+      req.resume();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [] }));
+    });
+    const upstreamPort = await listen(upstream);
+    const userConfig = await writeRouterConfig({
+      tmp,
+      configPath,
+      routingPolicyGroup: 'anthropicinbound',
+      providers: { mimo: anthropicProvider('mimo', upstreamPort, 'key2') },
+      targets: ['mimo.key2.mimo-v2.5']
+    });
+    const restores = routerEnv(tmp, '1');
+    let server: RouteCodexHttpServer | undefined;
+    try {
+      const started = await startRouteCodex(configPath, userConfig);
+      server = started.server;
+      const response = await fetch(`http://127.0.0.1:${started.port}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+        body: JSON.stringify(responseRequestBody('anthropic-inbound-blackbox'))
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('anthropic inbound ok');
+      expect(text).not.toContain('Anthropic response must contain content array');
+      expect(text).not.toContain('missing choices');
+      expect(providerRequestHits).toBe(1);
+    } finally {
+      await server?.stop().catch(() => undefined);
+      await closeServer(upstream);
+      for (const restore of restores.reverse()) restore();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('HTTP BLACKBOX: empty Anthropic upstream SSE fails in Rust inbound canonicalization', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-sse-marker-blackbox-'));
     const configPath = path.join(tmp, 'config.json');
     let providerRequestHits = 0;
@@ -202,8 +263,8 @@ describe('provider response SSE marker HTTP blackbox', () => {
       const text = await response.text();
 
       expect(response.status).toBeGreaterThanOrEqual(500);
-      expect(text).toContain('Provider SSE marker did not include materializable stream or bodyText');
-      expect(text).not.toContain('Anthropic response must contain content array');
+      expect(text).toContain('hub_pipeline_resp_anthropic_chat_canonicalize_failed');
+      expect(text).toContain('Anthropic response must contain content array');
       expect(providerRequestHits).toBe(1);
       expect(healthCheckHits).toBeGreaterThanOrEqual(0);
     } finally {
@@ -373,7 +434,7 @@ describe('provider response SSE marker HTTP blackbox', () => {
       const text = await response.text();
 
       expect(response.status).toBeGreaterThanOrEqual(500);
-      expect(text).toContain('Anthropic response must contain content array');
+      expect(text).toContain('hub_pipeline_resp_anthropic_chat_canonicalize_failed');
       expect(text).not.toContain('backup must not hide conversion error');
       expect(primaryPosts).toBe(1);
       expect(backupPosts).toBe(0);
