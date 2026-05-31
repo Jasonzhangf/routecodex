@@ -451,6 +451,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(existing).toEqual([]);
   });
 
+  it('legacy llmswitch-core hub pipeline tests must not exercise removed TS mapper pipeline', () => {
+    const legacyTestRoot = path.join(process.cwd(), 'sharedmodule/llmswitch-core/test/hub');
+    const legacyFiles = [
+      'anthropic-pipeline.spec.ts',
+      'chat-pipeline.spec.ts',
+      'gemini-pipeline.spec.ts',
+      'inbound-outbound.spec.ts',
+    ].filter((entry) => fs.existsSync(path.join(legacyTestRoot, entry)));
+
+    expect(legacyFiles).toEqual([]);
+  });
+
   it('hub request mainline must enter Rust total API without request-stage mapper hooks', () => {
     const pipelineRoot = path.join(
       process.cwd(),
