@@ -272,6 +272,50 @@ describe('responses HTTP anthropic provider response remap blackbox', () => {
     expect(converted.body).toMatchObject({ object: 'response', model: 'mimo-v2.5' });
   });
 
+  it('rejects captured MiniMax sse_passthrough marker over HTTP before missing choices', async () => {
+    const samplePath = '/Volumes/extension/.rcc/codex-samples/openai-responses/port-unknown/req_1780197597724_ubtm32b3e/provider-response.json';
+    const sample = JSON.parse(fs.readFileSync(samplePath, 'utf8')) as Record<string, any>;
+    expect(sample?.body).toMatchObject({ mode: 'sse_passthrough', clientStream: true });
+
+    const app = express();
+    app.use(express.json({ limit: '512kb' }));
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, {
+        executePipeline: async (input: any) => {
+          const converted = await convertProviderResponse({
+            providerProtocol: 'openai-chat',
+            providerResponse: sample.body,
+            context: {
+              requestId: input.requestId,
+              entryEndpoint: '/v1/responses',
+              providerProtocol: 'openai-chat'
+            } as any,
+            entryEndpoint: '/v1/responses',
+            wantsStream: true
+          });
+          return { status: 200, headers: {}, body: converted.body };
+        },
+        errorHandling: null
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+    try {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'MiniMax-M2.7', stream: true, input: 'hello' })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBeGreaterThanOrEqual(500);
+      expect(text).toContain('Provider SSE marker did not include materializable stream or bodyText');
+      expect(text).not.toContain('OpenAI chat response must contain choices array');
+    } finally {
+      await closeServer(server);
+    }
+  });
+
   it('maps captured MiniMax OpenAI chat SSE wrapper from 240109 without missing choices', async () => {
     const samplePath = '/Volumes/extension/.rcc/codex-samples/openai-responses/port-unknown/req_1780190256673_3e7bf0ce/provider-response_4.json';
     const sample = JSON.parse(fs.readFileSync(samplePath, 'utf8')) as Record<string, any>;

@@ -15,6 +15,39 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
 }));
 
 describe('executor-response direct SSE materializer', () => {
+  it('fails marker-only sse_passthrough before Rust bridge conversion', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockClear();
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../src/server/runtime/http-server/executor-response.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerType: 'openai',
+          requestId: 'req_direct_sse_passthrough_marker_only',
+          wantsStream: true,
+          response: {
+            body: {
+              clientStream: true,
+              mode: 'sse_passthrough'
+            }
+          } as any,
+          pipelineMetadata: {}
+        },
+        {
+          logStage: () => undefined,
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toThrow('Provider SSE marker did not include materializable stream or bodyText');
+
+    expect(mockConvertProviderResponse).not.toHaveBeenCalled();
+  });
+
   it('materializes direct __sse_responses before Rust bridge conversion', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockClear();

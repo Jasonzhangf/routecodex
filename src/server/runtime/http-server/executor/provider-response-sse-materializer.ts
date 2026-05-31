@@ -29,12 +29,24 @@ export function readProviderResponseSseText(payload: unknown): string | undefine
 }
 
 export function isProviderResponseSseMarker(payload: unknown): boolean {
+  const record = asProviderResponseRecord(payload);
+  if (!record) return false;
+  return hasProviderSseMarkerSignal(record) && readProviderResponseSseText(record) === undefined;
+}
+
+function asProviderResponseRecord(payload: unknown): Record<string, unknown> | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return false;
+    return undefined;
   }
-  const record = payload as Record<string, unknown>;
+  return payload as Record<string, unknown>;
+}
+
+function hasProviderSseMarkerSignal(record: Record<string, unknown>): boolean {
   const mode = typeof record.mode === 'string' ? record.mode.trim().toLowerCase() : '';
-  return mode === 'sse' && readProviderResponseSseText(record) === undefined;
+  if (mode === 'sse' || mode === 'sse_passthrough') {
+    return true;
+  }
+  return record.clientStream === true && (record.__sse_responses === undefined && record.__sse_stream === undefined);
 }
 
 export async function materializeProviderResponseSsePayload(

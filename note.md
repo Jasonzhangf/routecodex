@@ -13302,3 +13302,8 @@ Using skills: coding-principals + rcc-dev-skills
 - 发现：stream wrapper contract probe 会把 `response.created`/空 `completed output:[]` 当终态，误报 `EMPTY_ASSISTANT_RESPONSE`。
 - 修复：stream contract probe 只携带有语义内容/required_action/choices 的 probe；SSE terminal tracker 把 `response.completed` 视为终态并补 `[DONE]`。
 - 验证：`responses-handler.anthropic-response-remap.blackbox.spec.ts`、`executor-response.sse-materializer.spec.ts`、`handler-response-utils.sse-finish-reason.spec.ts` 绿。
+
+## 2026-05-31 sse_passthrough live failure
+- Live logs still show MiniMax provider response entering Rust OpenAI chat validator and failing `OpenAI chat response must contain choices array`.
+- Captured provider sample includes marker-only `{ "clientStream": true, "mode": "sse_passthrough" }`; current TS materializers only classify marker-only `mode:"sse"`.
+- Hypothesis: `sse_passthrough` marker bypasses fail-fast materializer, then Rust treats it as normal OpenAI chat payload and raises missing choices.
