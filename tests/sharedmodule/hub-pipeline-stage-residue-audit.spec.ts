@@ -688,6 +688,29 @@ describe('hub pipeline stage residue audit', () => {
     expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
   });
 
+  it('legacy TS policy/governance utility residue must be physically removed', () => {
+    const pipelineRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+    );
+    const testRoot = path.join(process.cwd(), 'tests');
+    const legacyFiles = [
+      'hub-pipeline-chat-process-governance-utils.ts',
+      'hub-pipeline-heavy-input-fastpath.ts',
+      'hub-pipeline-max-tokens-policy.ts',
+      'hub-pipeline-snapshot-recorder-blocks.ts',
+    ];
+    const legacyTests = [
+      'sharedmodule/hub-pipeline-chat-process-governance-utils.spec.ts',
+      'sharedmodule/hub-pipeline-max-tokens-policy.spec.ts',
+    ];
+
+    const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));
+    const existingTests = legacyTests.filter((relativePath) => fs.existsSync(path.join(testRoot, relativePath)));
+
+    expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
+  });
+
   it('legacy TS request route/outbound/inbound orchestrators must be physically removed', () => {
     const pipelineRoot = path.join(
       process.cwd(),
