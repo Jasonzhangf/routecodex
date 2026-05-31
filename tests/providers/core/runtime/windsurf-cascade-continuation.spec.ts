@@ -408,4 +408,43 @@ test('error-then-recovery-preserves-cascadeId-and-stepOffset', async () => {
   expect(result).not.toBeNull();
   expect((result as any)?.choices?.[0]?.message?.content).toBe('recovered');
 });
+
+test('busy timeout clears stuck cascade binding before next request', async () => {
+  const p = createProvider();
+  jest.spyOn(p, 'resolveCascadeApiKey').mockResolvedValue('devin-session-token$test');
+  mockInstantSleep(p);
+
+  const startCascadeIds = ['fresh-c1', 'fresh-c2'];
+  const startSpy = jest.spyOn(p, 'sendStartCascade').mockImplementation(async () => {
+    const next = startCascadeIds.shift();
+    if (!next) throw new Error('unexpected extra cascade start');
+    return next;
+  });
+  jest.spyOn(p, 'resolveManagedRuntimeOptions').mockResolvedValue({ lsPort: 39399, csrfToken: 'csrf' });
+  jest.spyOn(p, 'resolveCascadeBusyRetryConfig').mockReturnValue({ maxRetries: 0, backoffsMs: [], perAttemptWaitMs: 1, pollIntervalMs: 1 });
+  jest.spyOn(p, 'grpcUnaryLocal').mockResolvedValue(mockTrajectoryStatusProto(2));
+  let allowSuccess = false;
+  jest.spyOn(p, 'sendCascadeMessage').mockImplementation(async () => {
+    if (!allowSuccess) throw busyError();
+  });
+  jest.spyOn(p, 'pollCascadeTrajectorySteps').mockResolvedValue({
+    candidate: { role: 'assistant', content: 'after fresh cascade' },
+    usage: { inputTokens: 5, outputTokens: 3 },
+    stepOffset: 1,
+  });
+
+  await expect(p.sendRequestInternal({
+    body: { model: 'gpt-5.4-medium', messages: [{ role: 'user', content: 'busy timeout' }] },
+  })).rejects.toMatchObject({ code: 'WINDSURF_CASCADE_BUSY' });
+
+  allowSuccess = true;
+  const result = await p.sendRequestInternal({
+    body: { model: 'gpt-5.4-medium', messages: [{ role: 'user', content: 'retry after busy timeout' }] },
+  });
+
+  expect(startSpy).toHaveBeenCalledTimes(2);
+  expect((p.sendCascadeMessage as jest.Mock).mock.calls[0]?.[0]?.cascadeId).toBe('fresh-c1');
+  expect((p.sendCascadeMessage as jest.Mock).mock.calls[1]?.[0]?.cascadeId).toBe('fresh-c2');
+  expect((result as any)?.choices?.[0]?.message?.content).toBe('after fresh cascade');
+});
 });

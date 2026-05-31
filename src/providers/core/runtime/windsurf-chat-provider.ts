@@ -26,6 +26,7 @@ import { WindsurfAccountPool, PoolAllExhaustedError } from './windsurf/windsurf-
 import { WindsurfAccountSessionManager } from './windsurf/windsurf-account-session-manager.js';
 import {
   executeWindsurfCascadeBusyRetry,
+  isWindsurfCascadeBusyError,
 } from './windsurf/cascade-continuation-block.js';
 import type { WindsurfCascadeBusyRetryConfig } from './windsurf/cascade-continuation-block.js';
 import type {
@@ -1009,6 +1010,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         const isExpiredCascade = (error: unknown): boolean => /not_found.*(cascade|trajectory)|(?:cascade|trajectory).*not[ _-]?found|expired.*cascade|unknown.*cascade/i.test(String(error instanceof Error ? error.message : error || ''));
         const isUntrustedWorkspace = (error: unknown): boolean => /untrusted workspace|workspace.*not.*trusted/i.test(String(error instanceof Error ? error.message : error || ''));
 
+        const isWarmStart = retainedSelected !== null;
         let sessionId: string;
         let cascadeId: string;
         let selected: { sessionId: string; cascadeId: string; stepOffset: number };
@@ -1037,9 +1039,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
           deltaSeedParts,
           nativeDeclaredTools,
           body.windsurf_tool_choice,
-          true,
+          isWarmStart,
         );
-        let additionalSteps = this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools, { currentOnly: true, mcpMode });
+        let additionalSteps = this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools, { currentOnly: !isWarmStart, mcpMode });
         if (process.env.RCC_DEBUG_WINDSURF_TOOLS === '1') {
           console.log('[windsurf-tools] outbound-shape', JSON.stringify({
             nativeMode,
@@ -1073,10 +1075,11 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             mcpMode,
           });
         } catch (error) {
-          if (!isPanelMissing(error) && !isExpiredCascade(error) && !isUntrustedWorkspace(error)) {
+          const isCascadeBusy = isWindsurfCascadeBusyError(error);
+          if (!isCascadeBusy && !isPanelMissing(error) && !isExpiredCascade(error) && !isUntrustedWorkspace(error)) {
             throw error;
           }
-          this.resetWindsurfCascadeTransportState('send-rewarm');
+          this.resetWindsurfCascadeTransportState(isCascadeBusy ? 'busy-exhausted' : 'send-rewarm');
           retainedSelected = null;
           selected = await this.selectUsablePinnedGrpcRuntime(apiKey);
           retainedSelected = selected;
@@ -1091,10 +1094,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             deltaSeedParts,
             nativeDeclaredTools,
             body.windsurf_tool_choice,
-            true,
+            false,
           );
-          additionalSteps = this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools, { currentOnly: true, mcpMode });
-          await this.sendCascadeMessageWithBusyRetry({
+          additionalSteps = this.buildCascadeAdditionalStepsFromSemanticConversation(semanticConversation, nativeDeclaredTools, { currentOnly: false, mcpMode });
+          await this.sendCascadeMessage({
             apiKey,
             cascadeId,
             text,
@@ -3050,18 +3053,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
             });
           }
           const hasActiveStep = steps.some((step) => step && typeof step === 'object' && Number((step as Record<string, unknown>).status) === 1);
-          if (pendingToolCandidate && msSinceGrowth > stableToolCallReturnMs && !hasActiveStep) {
-            this.logWindsurfStage('poll.stableToolCallReturn', {
-              cascadeId: args.cascadeId,
-              status,
-              msSinceGrowth,
-              stableToolCallReturnMs,
-              toolCalls: toolCalls.length,
-              pendingToolStepOffset,
-              hasActiveStep,
-            });
-            return { candidate: pendingToolCandidate, usage, stepOffset: pendingToolStepOffset };
-          }
           const warmSignal = sawText || Boolean(lastThinking) || Boolean(pendingToolCandidate);
           const warmCeilingMs = pendingToolCandidate && hasActiveStep
             ? warmStallToolActiveMs
@@ -3644,6 +3635,9 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     this.cleanupReleasedWindsurfSessions();
     const existing = this.windsurfCascadeSessionBindings.get(sessionKey);
     if (existing?.cascadeId && existing.sessionId) {
+      if (existing.active === false) {
+        this.windsurfCascadeSessionBindings.delete(sessionKey);
+      } else {
       this.setPinnedGrpcRuntime(existing.runtime);
       this.windsurfCascadeSessionBindings.set(sessionKey, { ...existing, active: true, lastUsedAtMs: Date.now() });
       return {
@@ -3651,6 +3645,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         cascadeId: existing.cascadeId,
         stepOffset: existing.stepOffset,
       };
+      }
     }
     const managed = await this.resolveManagedRuntimeOptions();
     const candidates = [managed];
@@ -3728,7 +3723,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
         payloadPrefixHex: payload.subarray(0, 48).toString('hex'),
       });
       if (this.shouldLogWindsurfGrpc(pathName)) {
-        console.log(`[windsurf.grpc.start] ${JSON.stringify({ pathName, timeout, payloadBytes: payload.length })}`);
+        console.log(`[windsurf.grpc.start] ${JSON.stringify({ at: new Date().toISOString(), pathName, timeout, payloadBytes: payload.length })}`);
       }
       const req = session.request({
         ':method': 'POST',
@@ -3758,11 +3753,11 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       req.on('end', () => {
         this.logWindsurfStage('grpc.end', { pathName, grpcStatus, grpcMessage, bytes: chunks.reduce((sum, chunk) => sum + chunk.length, 0) });
         if (this.shouldLogWindsurfGrpc(pathName, grpcStatus)) {
-          console.log(`[windsurf.grpc.end] ${JSON.stringify({ pathName, grpcStatus, grpcMessage: grpcMessage ? decodeURIComponent(grpcMessage) : '', bytes: chunks.reduce((sum, chunk) => sum + chunk.length, 0) })}`);
+          console.log(`[windsurf.grpc.end] ${JSON.stringify({ at: new Date().toISOString(), pathName, grpcStatus, grpcMessage: grpcMessage ? decodeURIComponent(grpcMessage) : '', bytes: chunks.reduce((sum, chunk) => sum + chunk.length, 0) })}`);
         }
         if (grpcStatus !== '0') {
           const message = grpcMessage ? decodeURIComponent(grpcMessage) : `gRPC status ${grpcStatus}`;
-          console.warn(`[windsurf.grpc.end] ${JSON.stringify({ pathName, grpcStatus, grpcMessage: message, bytes: chunks.reduce((sum, chunk) => sum + chunk.length, 0) })}`);
+          console.warn(`[windsurf.grpc.end] ${JSON.stringify({ at: new Date().toISOString(), pathName, grpcStatus, grpcMessage: message, bytes: chunks.reduce((sum, chunk) => sum + chunk.length, 0) })}`);
           done(reject, createWindsurfProviderError(message, {
             ...classifyWindsurfUpstreamPayloadError({ code: grpcStatus, message }),
           }));
