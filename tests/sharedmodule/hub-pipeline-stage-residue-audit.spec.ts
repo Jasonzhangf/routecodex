@@ -605,7 +605,6 @@ describe('hub pipeline stage residue audit', () => {
     const checkedFiles = [
       'hub-pipeline-execute-request-stage.ts',
       'hub-pipeline.ts',
-      'hub-pipeline-runtime-execute-blocks.ts',
     ];
     const findings: string[] = [];
     for (const relativePath of checkedFiles) {
@@ -729,6 +728,23 @@ describe('hub pipeline stage residue audit', () => {
     const existingTests = legacyTests.filter((relativePath) => fs.existsSync(path.join(testRoot, relativePath)));
 
     expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
+  });
+
+  it('legacy TS HubPipeline runtime block duplicates must be physically removed', () => {
+    const pipelineRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+    );
+    const legacyFiles = [
+      'hub-pipeline-class-runtime-blocks.ts',
+      'hub-pipeline-runtime-blocks.ts',
+      'hub-pipeline-runtime-execute-blocks.ts',
+      'hub-pipeline-runtime-hooks-blocks.ts',
+    ];
+
+    const existing = legacyFiles.filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));
+
+    expect(existing).toEqual([]);
   });
 
   it('legacy TS request route/outbound/inbound orchestrators must be physically removed', () => {
