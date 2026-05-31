@@ -1667,3 +1667,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 response-processing retry gate 精华
 - `provider.send.completed` 后只允许已归一化的 response-processing `SSE_DECODE_ERROR` 进入 retry；raw Rust empty-SSE 必须先通过共享 normalizer 打 `code/status/retryable/stage`，provider-runtime request contract errors 必须 direct-return，禁止 attempt_backoff 掩盖请求形态错误。
+
+### 2026-05-31 HubPipeline Slice5 semantic mapper deletion 精华
+- Slice5 closeout requires deleting both production `operation-table/semantic-mappers/*.ts` and tests that import those concrete mapper classes; keep architecture gate scanning `tests/` so old direct mapper tests cannot hide TS semantic truth after Rust/native migration.

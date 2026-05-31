@@ -2,7 +2,7 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
 import type { ServerToolFollowupInjectionOp, ServerToolFollowupInjectionPlan } from './types.js';
 import { loadOriginSnapshot } from './origin-request-store.js';
-import { extractCapturedToolOutputs } from '../conversion/hub/operation-table/semantic-mappers/responses-submit-tool-outputs.js';
+import { extractCapturedToolOutputs } from './followup-captured-tool-outputs.js';
 import { dropToolByFunctionName, extractCapturedChatSeed } from './followup-seed.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 

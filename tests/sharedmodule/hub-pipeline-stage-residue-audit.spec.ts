@@ -469,6 +469,42 @@ describe('hub pipeline stage residue audit', () => {
     expect({ legacyFiles, exportFindings }).toEqual({ legacyFiles: [], exportFindings: [] });
   });
 
+  it('legacy TS operation-table semantic mapper implementations must be physically removed', () => {
+    const semanticMapperRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers',
+    );
+    const existing = fs.existsSync(semanticMapperRoot)
+      ? fs.readdirSync(semanticMapperRoot).filter((entry) => entry.endsWith('.ts'))
+      : [];
+
+    expect(existing).toEqual([]);
+  });
+
+  it('tests must not import removed operation-table semantic mapper implementations', () => {
+    const testRoot = path.join(process.cwd(), 'tests');
+    const findings: string[] = [];
+    const visit = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          visit(fullPath);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
+        const relativePath = path.relative(testRoot, fullPath);
+        if (relativePath === path.join('sharedmodule', 'hub-pipeline-stage-residue-audit.spec.ts')) continue;
+        const source = fs.readFileSync(fullPath, 'utf8');
+        if (source.includes('conversion/hub/operation-table/semantic-mappers') || source.includes('operation-table/semantic-mappers')) {
+          findings.push(relativePath);
+        }
+      }
+    };
+
+    visit(testRoot);
+    expect(findings).toEqual([]);
+  });
+
   it('hub request mainline must enter Rust total API without request-stage mapper hooks', () => {
     const pipelineRoot = path.join(
       process.cwd(),
