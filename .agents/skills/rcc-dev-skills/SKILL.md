@@ -1631,3 +1631,10 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ## 2026-05-31 provider response conversion failover boundary
 - `provider.send.completed` 是 retry/reroute 边界：之前的 transport/upstream failure 可走 provider failure policy；之后的 response normalize/convert/servertool/Rust canonicalize failure 必须 fail-fast，禁止 `provider-switch` 隐藏真实响应错误。
 - 黑盒必须覆盖 HTTP 200 malformed provider response，而不是只测 HTTP 503；验收看 backup provider POST 次数为 0。
+
+### 2026-05-31 Direct passthrough 架构禁令
+- router-direct/provider-direct = provider passthrough + hooks only；禁止进入 HubPipeline response conversion、chat-process、servertool response orchestration 或任何 `executor-response` 专用壳。
+- HubPipeline request/response 保持三段式严格协议链路；SSE 按 provider 配置协议在唯一链路处理。direct path 不做 materialize/remap/canonicalize，不做 fallback/patch。
+- 禁止 direct 5xx/转换错误用 `routecodexSameProtocolDirectDisabled`、`recoverable_direct_5xx_reenter_executor`、二次 `executePipeline` 重入来伪装统一重试；direct 错误必须按 direct/provider transport 结果显式返回或抛出。
+- 禁止把 `outboundProfile` 当 provider 物理协议猜测；配置的 provider type/module 才决定 provider runtime，VR target `outboundProfile` 只属于 HubPipeline 路由/转换语义。
+- 修 direct 回归时先补真实 HTTP 黑盒：真实 `RouteCodexHttpServer` + 真实 provider runtime，只 mock upstream 输入/响应；断言 passthrough 原样返回且无 `missing choices`/`hub_pipeline_resp_client_remap_failed`。

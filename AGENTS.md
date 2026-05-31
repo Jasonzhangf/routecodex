@@ -13,6 +13,7 @@
 10. **只写必要代码，且必须最小合规**：新增/修改代码前，先证明它是完成当前需求所必需的；禁止加入用户未要求、问题未证明需要、或不影响验收的代码。实现必须保持最小合规面，能删则删，能不加就不加。
 11. **Windsurf 工具禁止伪装 native**：Windsurf 中只有已证明完全等价的工具才能 native-map；`apply_patch` 不得映射到 `write_to_file/propose_code`，必须走 RCC 文本收割或显式 servertool。
 12. **Hub Pipeline / Virtual Router 禁止 provider 特例**：Hub Pipeline 与 Virtual Router 永远只承载协议、路由、工具治理的通用语义；禁止写入任何 provider-specific 分支、shape 修补、上下文补偿或 Windsurf/Cascade 特例。provider 差异只能在对应 Provider runtime 内解决。
+13. **direct passthrough 禁止换壳转换**：router-direct/provider-direct 的唯一职责是 provider passthrough + hooks；禁止进入 HubPipeline response conversion/chat-process/servertool response orchestration，禁止新增 direct response 专用壳、SSE materialize/remap/canonicalize、fallback/patch/shape 修补；禁止 direct 5xx/转换错误通过 `routecodexSameProtocolDirectDisabled` 重入 executor/reroute。
 
 ## 分类路由（按需跳转）
 1. 入口总览：`docs/agent-routing/00-entry-routing.md`

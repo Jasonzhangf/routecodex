@@ -13331,3 +13331,13 @@ Using skills: coding-principals + rcc-dev-skills
 ## 2026-05-31 12:43 conversion-failure reroute root cause
 - Red reproduced by HTTP blackbox: upstream returns HTTP 200 malformed Anthropic message, Rust response canonicalizer fails, RequestExecutor catch block classified it as `provider.send` failure and emitted provider-switch/reroute to backup.
 - Fix point: RequestExecutor provider failure phase. Only errors before `provider.send.completed` enter provider retry/reroute; response normalization/conversion/servertool processing errors fail fast to client.
+
+## 2026-05-31 router-direct/outboundProfile 复盘
+- 用户明确要求：outboundProfile 不要推断/瞎改，必须完全按配置；所有不看配置的逻辑改回。
+- 当前 direct 错误链：router-direct.send completed 后 `executor-response.ts` 按 providerProtocol 转换，报 Chat `missing choices`。
+- 风险点：`createProviderHandle()` 当前把 runtime.outboundProfile 写进 `ProviderHandle.providerProtocol`；这会把 VR target outbound protocol 与 Provider 实例物理协议混成一个字段，导致 router-direct eligibility 误判 same-protocol。
+- 正确边界待验证：ProviderHandle.providerProtocol 应表达 provider 实例物理协议（provider type/family/module 配置），target.outboundProfile 只属于 VR target/Hub Pipeline 转换语义，不能拿来证明 provider direct 可直通。
+
+## 2026-05-31 direct passthrough 收口补充
+- 已物理移除 router-direct 5xx/throw 后 `recoverable_direct_5xx_reenter_executor` 和 `routecodexSameProtocolDirectDisabled` 重入 executor/reroute 旧语义。
+- 已补 HTTP 黑盒 JSON passthrough：真实 server + provider runtime + mock upstream response，断言 direct JSON 原样返回且不出现 missing choices / hub_pipeline_resp_client_remap_failed。

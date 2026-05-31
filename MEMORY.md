@@ -1696,8 +1696,8 @@ Tags: windsurf, managed-account, health-probe, extra-quota, no-request-account-s
 - Caveat: preserving `previous_response_id` into providerPayload is necessary but not sufficient for Windsurf cascade reuse; live `store:true` previous-response continuation still needs a response-id-to-provider-session alias after final `resp_*` creation. Until that alias exists, explicit `session_id` is the proven continuity path.
 
 ## 2026-05-29 Stopless / Router Direct SSOT
-- stopless 触发后必须由 HTTP server 统一 reenter：router direct 只允许优化同协议 provider send，响应仍必须回到 `executor-response`/llmswitch bridge 运行 response-side servertool；禁止 direct response passthrough 绕过 stop_message_flow。
-- direct 与 relay 的 servertool reenter 语义一致：followup nested request 通过 `executePortAwarePipeline` 进入 HTTP inbound；旧 `direct_mode_no_followup` 是错误死语义，必须删除而不是闲置。
+- 2026-05-31 修正：router-direct/provider-direct 只允许 provider passthrough + hooks，响应禁止回到 `executor-response`/llmswitch bridge 运行 response-side servertool；旧“direct response 仍必须回 response conversion”的说法是错误语义，已废弃。
+- direct 与 relay 的 servertool reenter 语义边界：非 direct 链路的 followup nested request 通过 `executePortAwarePipeline` 进入 HTTP inbound；direct path 不做 response-side orchestration。
 
 - 2026-05-29: Windsurf provider is chat-protocol at Hub boundary. Standard chat `tools` enter provider unchanged, then Windsurf provider alone splits them into native Cascade allowlist/additionalSteps and MCP field-10 payloads; response tool calls must be rejoined to standard chat tool names/args before returning to Hub Pipeline. Regression anchor: `tests/providers/core/runtime/windsurf-mcp-only.spec.ts` native `run_command` -> standard `shell_command` rejoin test.
 
@@ -1842,3 +1842,9 @@ Tags: openai-chat, stream-options, protocol-field-preservation, provider-http-bo
 ## 2026-05-31 provider response conversion failover boundary
 - Verified: provider transport/send failures may enter retry/reroute; provider response processing failures after `provider.send.completed` must fail fast and must not enter `processProviderSendFailure`, otherwise Rust canonicalization errors such as Anthropic `content array` or OpenAI `choices array` get hidden by provider-switch loops.
 - Required redtest: real HTTP `/v1/responses` -> real HubPipeline/provider runtime -> local upstream HTTP 200 malformed provider response -> assert backup provider receives zero POSTs.
+
+## 2026-05-31 router-direct / provider-direct 架构真相修正
+- 已修正旧事实：router-direct/provider-direct 的标准职责是 **provider passthrough + hooks only**；direct path 不进入 HubPipeline response conversion，不跑 chat-process/servertool response orchestration，不包 `executor-response`/换壳。
+- HubPipeline request/response 是三段式严格协议链路；每段只有唯一协议真源。SSE 也必须按当前 provider 配置协议在对应唯一链路处理，禁止在 direct path 里二次 materialize、remap、canonicalize 或补兼容。
+- 禁止错误方式：为 direct response 增加 `executor-response` 专用壳、把 direct SSE 读成 bodyText 再送 Hub response conversion、用 `outboundProfile`/请求入口猜 provider 物理协议、添加 fallback/patch/shape 修补来掩盖配置或协议错误、用 `routecodexSameProtocolDirectDisabled`/`recoverable_direct_5xx_reenter_executor` 重入 executor/reroute。
+- 回归测试要求：必须有真实 HTTP 黑盒覆盖 direct passthrough（真实 RouteCodexHttpServer + 真实 provider runtime；只允许 mock upstream 请求/响应），断言 upstream SSE/JSON 原样返回且不出现 `hub_pipeline_resp_client_remap_failed` / `missing choices`。

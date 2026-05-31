@@ -65,7 +65,6 @@ import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
 import { isPoolExhaustedPipelineError } from './executor/request-executor-core-utils.js';
-import { convertProviderResponseIfNeeded as convertDirectProviderResponseIfNeeded } from './executor-response.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
 import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
@@ -1043,11 +1042,9 @@ export class RouteCodexHttpServer {
       metadata,
     };
     if (!portConfig || portConfig.mode === 'router') {
-      const directDisabledForCurrentRequest = input.metadata?.routecodexSameProtocolDirectDisabled === true;
       if (
         portConfig?.mode === 'router'
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
-        && !directDisabledForCurrentRequest
       ) {
         // apply_patch servertool mode requires Hub response-stage tool dispatch.
         // Router direct bypass skips response conversion/servertool execution,
@@ -1070,17 +1067,6 @@ export class RouteCodexHttpServer {
         const directResult = await this.executeRouterDirectPipelineForPort(portConfig, nextInput);
         if (directResult.used) {
           return this.buildRouterDirectResult(directResult, input);
-        }
-        if (directResult.reason === 'recoverable_direct_5xx_reenter_executor') {
-          return await this.executePipeline({
-            ...nextInput,
-            metadata: {
-              ...(nextInput.metadata ?? {}),
-              routecodexSameProtocolDirectDisabled: true,
-              __routecodexProviderFailureAttemptOffset: 1,
-              ...(directResult.preselectedRoute ? { __routecodexPreselectedRoute: directResult.preselectedRoute } : {}),
-            },
-          });
         }
         if (directResult.preselectedRoute) {
           return await this.executePipeline({
@@ -1158,7 +1144,7 @@ export class RouteCodexHttpServer {
       pipelineResult = await runHubPipeline(hubPipeline, input, metadataForHub);
     } catch (error) {
       if (isPoolExhaustedPipelineError(error)) {
-        this.logStage('router-direct.pool_exhausted_reenter_executor', input.requestId, {
+        this.logStage('router-direct.pool_exhausted', input.requestId, {
           error: error instanceof Error ? error.message : String(error),
           code: error && typeof error === 'object' && typeof (error as Record<string, unknown>).code === 'string'
             ? (error as Record<string, unknown>).code
@@ -1170,19 +1156,11 @@ export class RouteCodexHttpServer {
             ? (input.body as Record<string, unknown>).model
             : undefined,
         });
-        this.logStage('router-direct.skipped', input.requestId, {
-          reason: 'route_pool_error_reenter_executor',
-          code: error && typeof error === 'object' && typeof (error as Record<string, unknown>).code === 'string'
-            ? (error as Record<string, unknown>).code
-            : undefined,
-          statusCode: extractStatusCodeFromError(error),
-        });
-        return { used: false, reason: 'route_pool_error_reenter_executor' };
       }
       this.logStage('router-direct.hub_pipeline_failed', input.requestId, {
         error: error instanceof Error ? error.message : String(error),
       });
-      return { used: false, reason: `hub-pipeline-failed: ${error instanceof Error ? error.message : String(error)}` };
+      throw error;
     }
 
     const { target, providerPayload, routingDecision, processMode } = pipelineResult;
@@ -1203,162 +1181,108 @@ export class RouteCodexHttpServer {
       },
     );
     let capturedUsage: Record<string, unknown> | undefined;
-    // Try the router-direct pipeline
-    let directOutcome: RouterDirectOutcome = { used: false, reason: 'uninitialized' };
-    const maxDirectAttempts = 2;
-    for (let directAttempt = 1; directAttempt <= maxDirectAttempts; directAttempt += 1) {
-      try {
-        directOutcome = await executeRouterDirectPipeline({
-          portConfig,
-          providerPayload,
-          requestPayload,
-          target: {
-            providerKey: target.providerKey,
-            providerType: target.providerType,
-            runtimeKey: target.runtimeKey,
-            processMode: target.processMode,
-          },
-          routingDecision,
-          processMode,
-          requestInfo: {
-            path: input.entryEndpoint,
-            headers: input.headers as Record<string, string | string[] | undefined>,
-          },
-          resolveProviderByRuntimeKey: (runtimeKey?: string) => {
-            if (!runtimeKey) return undefined;
-            return this.providerHandles.get(runtimeKey);
-          },
-          onSnapshotBefore: (payload, ctx) => {
-            this.logStage('router-direct.send.start', input.requestId, {
-              port: portConfig.port,
-              providerKey: ctx.providerKey,
-              inboundProtocol: ctx.inboundProtocol,
-              providerProtocol: ctx.providerProtocol,
-              routeName: ctx.routingDecision?.routeName,
-              observedFields: ctx.observedFields,
-              directAttempt,
-            });
-            const metadataRecord = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
-              ? (input.metadata as Record<string, unknown>)
-              : {};
-            const handle = this.providerHandles.get(ctx.providerKey) ?? this.providerHandles.get(target.runtimeKey ?? target.providerKey);
-            const modelForLog = readTrimmedString(handle?.runtime?.defaultModel)
-              ?? readTrimmedString((payload as Record<string, unknown> | undefined)?.model)
-              ?? readTrimmedString((providerPayload as Record<string, unknown> | undefined)?.model);
-            emitRequestExecutorVirtualRouterConcurrencyLog({
-              sessionId: readTrimmedString(metadataRecord.sessionId) ?? readTrimmedString(metadataRecord.conversationId),
-              projectPath:
-                readTrimmedString(metadataRecord.clientWorkdir)
-                ?? readTrimmedString(metadataRecord.client_workdir)
-                ?? readTrimmedString(metadataRecord.workdir)
-                ?? readTrimmedString(metadataRecord.cwd),
-              routeName: ctx.routingDecision?.routeName,
-              poolId: readTrimmedString((ctx.routingDecision as Record<string, unknown> | undefined)?.poolId),
-              providerKey: ctx.providerKey,
-              model: modelForLog,
-              reason: readTrimmedString((ctx.routingDecision as Record<string, unknown> | undefined)?.reasoning),
-              activeInFlight: 1,
-              maxInFlight: 1,
-            });
-          },
-          onSnapshotAfter: (response, ctx) => {
-            const responseRecord =
-              response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
-            const handle = this.providerHandles.get(ctx.providerKey) ?? this.providerHandles.get(target.runtimeKey ?? target.providerKey);
-            if (handle) {
-              const normalized = normalizeProviderResponse(response);
-              const usage = extractUsageFromResult(normalized, {
-                ...(input.metadata ?? {}),
-                providerProtocol: handle.providerProtocol,
-                providerType: handle.providerType,
-                providerKey: ctx.providerKey,
-              });
-              if (usage) {
-                capturedUsage = usage as Record<string, unknown>;
-              }
-            }
-            const meta = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
-              ? (input.metadata as Record<string, unknown>)
-              : {};
-            emitRequestExecutorVirtualRouterConcurrencyLog({
-              sessionId: readTrimmedString(meta.sessionId as string | undefined) ?? readTrimmedString(meta.conversationId as string | undefined),
-              projectPath:
-                readTrimmedString(meta.clientWorkdir as string | undefined)
-                ?? readTrimmedString(meta.client_workdir as string | undefined)
-                ?? readTrimmedString(meta.workdir as string | undefined)
-                ?? readTrimmedString(meta.cwd as string | undefined),
-              routeName: ctx.routingDecision?.routeName,
-              providerKey: ctx.providerKey,
-              model: readTrimmedString(handle?.runtime?.defaultModel)
-                ?? readTrimmedString((responseRecord?.body as Record<string, unknown> | undefined)?.model as string | undefined)
-                ?? readTrimmedString((providerPayload as Record<string, unknown> | undefined)?.model as string | undefined),
-              reason: readTrimmedString((ctx.routingDecision as Record<string, unknown> | undefined)?.reasoning as string | undefined),
-              activeInFlight: 1,
-              maxInFlight: 1,
-              usage: capturedUsage,
-            });
-            this.logStage('router-direct.send.completed', input.requestId, {
-              port: portConfig.port,
-              providerKey: ctx.providerKey,
-              inboundProtocol: ctx.inboundProtocol,
-              providerProtocol: ctx.providerProtocol,
-              routeName: ctx.routingDecision?.routeName,
-              status: typeof responseRecord?.status === 'number' ? responseRecord.status : undefined,
-              observedFields: ctx.observedFields,
-              directAttempt,
-            });
-          },
-        });
-      } catch (error) {
-        if (this.isRecoverableRouterDirectThrownHttp5xx(error)) {
-          this.logStage('router-direct.reenter_executor', input.requestId, {
-            reason: 'recoverable_direct_5xx_reenter_executor',
-            providerKey: target.providerKey,
-            runtimeKey: target.runtimeKey,
-            status: extractStatusCodeFromError(error),
-            directAttempt,
-            thrown: true,
-          });
-          return {
-            used: false,
-            reason: 'recoverable_direct_5xx_reenter_executor',
-            preselectedRoute: {
-              target,
-              decision: routingDecision,
-              diagnostics: pipelineResult.routingDiagnostics,
-            },
-          };
-        }
-        throw error;
-      }
-      if (!directOutcome.used) {
-        break;
-      }
-      const normalizedDirectResponse = normalizeProviderResponse(directOutcome.response);
-      if (this.isRecoverableRouterDirectHttp5xx(normalizedDirectResponse)) {
-        // Same-protocol direct is a one-shot optimization only. A recoverable
-        // direct 5xx must leave direct mode for this request; otherwise the
-        // next retry re-enters the same direct provider before the unified
-        // executor can exclude/reroute through the single failure-policy path.
-        this.logStage('router-direct.reenter_executor', input.requestId, {
-          reason: 'recoverable_direct_5xx_reenter_executor',
-          providerKey: target.providerKey,
-          runtimeKey: target.runtimeKey,
-          status: normalizedDirectResponse.status,
+    const directAttempt = 1;
+    const directOutcome = await executeRouterDirectPipeline({
+      portConfig,
+      providerPayload,
+      requestPayload,
+      target: {
+        providerKey: target.providerKey,
+        providerType: target.providerType,
+        runtimeKey: target.runtimeKey,
+        processMode: target.processMode,
+      },
+      routingDecision,
+      processMode,
+      requestInfo: {
+        path: input.entryEndpoint,
+        headers: input.headers as Record<string, string | string[] | undefined>,
+      },
+      resolveProviderByRuntimeKey: (runtimeKey?: string) => {
+        if (!runtimeKey) return undefined;
+        return this.providerHandles.get(runtimeKey);
+      },
+      onSnapshotBefore: (payload, ctx) => {
+        this.logStage('router-direct.send.start', input.requestId, {
+          port: portConfig.port,
+          providerKey: ctx.providerKey,
+          inboundProtocol: ctx.inboundProtocol,
+          providerProtocol: ctx.providerProtocol,
+          routeName: ctx.routingDecision?.routeName,
+          observedFields: ctx.observedFields,
           directAttempt,
         });
-        return {
-          used: false,
-          reason: 'recoverable_direct_5xx_reenter_executor',
-          preselectedRoute: {
-            target,
-            decision: routingDecision,
-            diagnostics: pipelineResult.routingDiagnostics,
-          },
-        };
-      }
-      break;
-    }
+        const metadataRecord = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+          ? (input.metadata as Record<string, unknown>)
+          : {};
+        const handle = this.providerHandles.get(ctx.providerKey) ?? this.providerHandles.get(target.runtimeKey ?? target.providerKey);
+        const modelForLog = readTrimmedString(handle?.runtime?.defaultModel)
+          ?? readTrimmedString((payload as Record<string, unknown> | undefined)?.model)
+          ?? readTrimmedString((providerPayload as Record<string, unknown> | undefined)?.model);
+        emitRequestExecutorVirtualRouterConcurrencyLog({
+          sessionId: readTrimmedString(metadataRecord.sessionId) ?? readTrimmedString(metadataRecord.conversationId),
+          projectPath:
+            readTrimmedString(metadataRecord.clientWorkdir)
+            ?? readTrimmedString(metadataRecord.client_workdir)
+            ?? readTrimmedString(metadataRecord.workdir)
+            ?? readTrimmedString(metadataRecord.cwd),
+          routeName: ctx.routingDecision?.routeName,
+          poolId: readTrimmedString((ctx.routingDecision as Record<string, unknown> | undefined)?.poolId),
+          providerKey: ctx.providerKey,
+          model: modelForLog,
+          reason: readTrimmedString((ctx.routingDecision as Record<string, unknown> | undefined)?.reasoning),
+          activeInFlight: 1,
+          maxInFlight: 1,
+        });
+      },
+      onSnapshotAfter: (response, ctx) => {
+        const responseRecord =
+          response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
+        const handle = this.providerHandles.get(ctx.providerKey) ?? this.providerHandles.get(target.runtimeKey ?? target.providerKey);
+        if (handle) {
+          const normalized = normalizeProviderResponse(response);
+          const usage = extractUsageFromResult(normalized, {
+            ...(input.metadata ?? {}),
+            providerProtocol: handle.providerProtocol,
+            providerType: handle.providerType,
+            providerKey: ctx.providerKey,
+          });
+          if (usage) {
+            capturedUsage = usage as Record<string, unknown>;
+          }
+        }
+        const meta = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+          ? (input.metadata as Record<string, unknown>)
+          : {};
+        emitRequestExecutorVirtualRouterConcurrencyLog({
+          sessionId: readTrimmedString(meta.sessionId as string | undefined) ?? readTrimmedString(meta.conversationId as string | undefined),
+          projectPath:
+            readTrimmedString(meta.clientWorkdir as string | undefined)
+            ?? readTrimmedString(meta.client_workdir as string | undefined)
+            ?? readTrimmedString(meta.workdir as string | undefined)
+            ?? readTrimmedString(meta.cwd as string | undefined),
+          routeName: ctx.routingDecision?.routeName,
+          providerKey: ctx.providerKey,
+          model: readTrimmedString(handle?.runtime?.defaultModel)
+            ?? readTrimmedString((responseRecord?.body as Record<string, unknown> | undefined)?.model as string | undefined)
+            ?? readTrimmedString((providerPayload as Record<string, unknown> | undefined)?.model as string | undefined),
+          reason: readTrimmedString((ctx.routingDecision as Record<string, unknown> | undefined)?.reasoning as string | undefined),
+          activeInFlight: 1,
+          maxInFlight: 1,
+          usage: capturedUsage,
+        });
+        this.logStage('router-direct.send.completed', input.requestId, {
+          port: portConfig.port,
+          providerKey: ctx.providerKey,
+          inboundProtocol: ctx.inboundProtocol,
+          providerProtocol: ctx.providerProtocol,
+          routeName: ctx.routingDecision?.routeName,
+          status: typeof responseRecord?.status === 'number' ? responseRecord.status : undefined,
+          observedFields: ctx.observedFields,
+          directAttempt,
+        });
+      },
+    });
 
     if (!directOutcome.used) {
       this.logStage('router-direct.skipped', input.requestId, { reason: directOutcome.reason });
@@ -1394,34 +1318,10 @@ export class RouteCodexHttpServer {
     };
   }
 
-  private isRecoverableRouterDirectHttp5xx(response: PipelineExecutionResult): boolean {
-    if (!response || typeof response !== 'object') {
-      return false;
-    }
-    if (typeof response.status !== 'number' || response.status < 500 || response.status >= 600) {
-      return false;
-    }
-    const body = response.body;
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return false;
-    }
-    const error = (body as Record<string, unknown>).error;
-    if (!error || typeof error !== 'object' || Array.isArray(error)) {
-      return false;
-    }
-    const code = String((error as Record<string, unknown>).code || '').trim().toUpperCase();
-    return code.startsWith('HTTP_5');
-  }
-
-  private isRecoverableRouterDirectThrownHttp5xx(error: unknown): boolean {
-    const status = extractStatusCodeFromError(error);
-    return typeof status === 'number' && status >= 500 && status < 600;
-  }
-
   /**
    * Build a PipelineExecutionResult from a router-direct outcome.
-   * Router direct only owns the same-protocol provider send; response-side
-   * servertool/stopless still runs through the unified HTTP executor bridge.
+   * Contract: router-direct is provider passthrough + hooks only.
+   * It must not re-enter Hub response conversion/chat-process.
    */
   private async buildRouterDirectResult(directResult: RouterDirectResult, input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
     const { response, providerHandle, auditContext } = directResult;
@@ -1441,14 +1341,6 @@ export class RouteCodexHttpServer {
       normalized.body && typeof normalized.body === 'object'
         ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
-    if (requestModel && normalized.body && typeof normalized.body === 'object' && !Array.isArray(normalized.body)) {
-      try {
-        (normalized.body as Record<string, unknown>).model = requestModel;
-      } catch {
-        // ignore model rewrite failures
-      }
-    }
-
     const baseResult: PipelineExecutionResult = {
       ...normalized,
       metadata:
@@ -1466,42 +1358,7 @@ export class RouteCodexHttpServer {
       },
     };
 
-    const responseSemantics =
-      baseResult.metadata && typeof baseResult.metadata === 'object' && !Array.isArray(baseResult.metadata)
-        ? ((baseResult.metadata as Record<string, unknown>).responseSemantics as Record<string, unknown> | undefined)
-        : undefined;
-    const pipelineMetadata: Record<string, unknown> = {
-      ...(input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
-        ? (input.metadata as Record<string, unknown>)
-        : {}),
-      ...(directResult.pipelineMetadata ?? {}),
-      ...(responseSemantics ? { responseSemantics } : {})
-    };
-
-    return await convertDirectProviderResponseIfNeeded({
-      entryEndpoint: input.entryEndpoint,
-      providerType: providerHandle.providerType,
-      providerProtocol: providerHandle.providerProtocol,
-      requestId: input.requestId,
-      wantsStream: Boolean((input.metadata as Record<string, unknown> | undefined)?.stream),
-      originalRequest:
-        input.body && typeof input.body === 'object' && !Array.isArray(input.body)
-          ? (input.body as Record<string, unknown>)
-          : undefined,
-      requestSemantics: directResult.requestSemantics,
-      processMode: directResult.auditContext.processMode,
-      serverToolsEnabled: pipelineMetadata.stopMessageEnabled !== false,
-      response: baseResult,
-      pipelineMetadata
-    }, {
-      logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
-      executeNested: (nestedInput) => this.executePortAwarePipeline(
-        typeof nestedInput.metadata?.routecodexLocalPort === 'number'
-          ? nestedInput.metadata.routecodexLocalPort
-          : undefined,
-        nestedInput
-      )
-    });
+    return baseResult;
   }
 
   /**
