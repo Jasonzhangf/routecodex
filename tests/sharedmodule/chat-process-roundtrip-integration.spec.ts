@@ -5,10 +5,7 @@ import { runRespInboundStage2FormatParse } from '../../sharedmodule/llmswitch-co
 import { runRespInboundStage3SemanticMap } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage3_semantic_map/index.js';
 import { runRespProcessStage2Finalize } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage2_finalize/index.js';
 import { runRespOutboundStage1ClientRemap } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage1_client_remap/index.js';
-import {
-  AnthropicResponseMapper,
-  GeminiResponseMapper
-} from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/response-mappers.js';
+import { createNativeResponseMapper } from './native-response-mapper-test-helper.js';
 
 function createPipeline(providerType: 'anthropic' | 'gemini', model: string): HubPipeline {
   const providerKey = `mock.key1.${model}`;
@@ -54,8 +51,8 @@ async function runResponseRoundtrip(options: {
 
   const mapper =
     options.providerProtocol === 'anthropic-messages'
-      ? new AnthropicResponseMapper()
-      : new GeminiResponseMapper();
+      ? createNativeResponseMapper('anthropic-messages')
+      : createNativeResponseMapper('gemini-chat');
 
   const chatResponse = await runRespInboundStage3SemanticMap({
     adapterContext: {

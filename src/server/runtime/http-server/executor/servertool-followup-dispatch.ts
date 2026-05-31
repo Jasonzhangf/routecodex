@@ -10,6 +10,7 @@ import {
   throwIfNestedFollowupAborted,
   resolveServerToolNestedFollowupTimeoutMs
 } from './servertool-followup-fail-fast.js';
+import { preserveLiveClientAbortCarriers } from './request-executor-client-abort-block.js';
 
 type ServerToolNestedExecute = (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
 
@@ -267,9 +268,7 @@ function clonePipelineInputForRetry(input: PipelineExecutionInput): PipelineExec
     cloned.metadata && typeof cloned.metadata === 'object' && !Array.isArray(cloned.metadata)
       ? (cloned.metadata as Record<string, unknown>)
       : undefined;
-  if (sourceMetadata && targetMetadata && sourceMetadata.clientConnectionState && typeof sourceMetadata.clientConnectionState === 'object') {
-    targetMetadata.clientConnectionState = sourceMetadata.clientConnectionState;
-  }
+  preserveLiveClientAbortCarriers({ source: sourceMetadata, target: targetMetadata });
   return cloned;
 }
 
@@ -715,6 +714,8 @@ function buildServerToolNestedInput(args: {
         }
       : undefined
   });
+  preserveLiveClientAbortCarriers({ source: args.baseMetadata, target: nestedMetadata });
+  preserveLiveClientAbortCarriers({ source: nestedExtra, target: nestedMetadata });
   if (args.mode === 'reenter' && isServerToolFollowup(materializedRequestSemantics)) {
     delete nestedMetadata.clientInjectOnly;
     delete nestedMetadata.clientInjectText;
@@ -842,6 +843,7 @@ export async function executeServerToolReenterPipeline(args: {
   });
 
   if (args.runClientInjectBeforeNested !== false) {
+    throwIfNestedFollowupAborted(nestedMetadata);
     const injectResult = await runClientInjectionFlowBeforeReenter({
       nestedMetadata,
       requestBody: asObjectBody(args.body),
@@ -894,7 +896,12 @@ export async function executeServerToolReenterPipeline(args: {
         + `attempt=${attempt}/${maxAttempts} failed, retry in ${backoffMs}ms: `
         + `${error instanceof Error ? error.message : String(error)}`
       );
-      await sleep(backoffMs);
+      await awaitNestedExecutionWithFailFast({
+        promise: sleep(backoffMs),
+        abortSignal: getNestedFollowupAbortSignal(nestedInput.metadata),
+        timeoutMs: resolveServerToolNestedFollowupTimeoutMs(),
+        requestId: args.requestId
+      });
     }
   }
 

@@ -13259,3 +13259,46 @@ Using skills: coding-principals + rcc-dev-skills
 - 改动：`response-stage-orchestration-shell.ts`、`canonical-chat.ts`、`resp_process_stage1_tool_governance`、`resp_process_stage3_servertool_orchestration`、`resp_inbound_stage3_semantic_map` 改用本地 `JsonObject`/局部接口，不再 import `response-mappers`。
 - Gate：`hub-pipeline-stage-residue-audit` 新增 runtime source 扫描，除 `response-mappers.ts` 自身外禁止 `src/**/*.ts` 引用 `response-mappers`。
 - 验证：`rg response-mappers sharedmodule/llmswitch-core/src` 仅剩 `response-mappers.ts` 自身；`provider-response rust plan + residue + resp outbound monitoring` 40/40 passed；Rust `hub_pipeline_lib` 7/7 passed；`sharedmodule/llmswitch-core npm run build` passed。
+
+- 2026-05-31 08:20 logs: mini27/mimo response conversion failing. Evidence: Rust resp parser got providerProtocol=openai-chat payload without choices; Responses SSE converter got payload missing Responses fields; servertoolRuntimeAction lacked runtime executor on cc. Hypothesis: provider response conversion using wrong protocol/client shape or missing runtime effect executor in Responses path.
+
+- 2026-05-31 fix: provider-response native effect executor now runs existing servertool orchestration shell for requireRuntimeExecutor/requireReenterPipeline when callbacks exist; no fallback path added. Verified tests/sharedmodule/provider-response-rust-plan.spec.ts 10/10 and sharedmodule/llmswitch-core npm run build. Root tsc/build still blocked by pre-existing repo issues: untracked tests/sharedmodule/native-response-mapper-test-helper.ts and Windsurf rcc-llmswitch-core module resolution.
+
+- 2026-05-31 follow-up fix: Rust Responses outbound failed payload now fills model from context metadata when provider response lacks model, preventing Responses SSE validator missing-required-fields on failed/nonstandard payloads. Verified Rust targeted test, hub_pipeline_lib 7/7, node scripts/build-core.mjs, provider-response-rust-plan 10/10.
+
+- 2026-05-31 build/restart: after fail-fast removal, ran Rust tests, build-core, core tsc, install:global, managed routecodex restart --port 5555. Ready endpoint checked after restart.
+
+- 2026-05-31 post-restart health: /health on 5555 returned ready=true pipelineReady=true version 0.90.2573; /v1/models returned 200.
+
+## 2026-05-31 mimo responses missing choices investigation
+- User live log shows provider mimo.key2.mimo-v2.5 returns response path error: hub_pipeline_resp_client_remap_failed missing choices.
+- Evidence from previous errorsample: request payload is Anthropic wire with messages/system/tools, not empty request. Current hypothesis: Anthropic provider response is passed into OpenAI Responses client remap without Rust Anthropic->canonical Chat response mapping. Need HTTP blackbox red test first.
+- 2026-05-31 client disconnect issue: live logs showed stop_followup continued after client closed. Root cause: nested servertool followup metadata clone/merge preserved clientConnectionState inconsistently and lost live clientAbortSignal; backoff sleeps also used nested metadata without a unified abort carrier. Fix direction: extracted request-executor-client-abort-block as sole host-side abort carrier resolver/preserver, rewired attempt metadata, servertool followup fail-fast, nested clone/merge, and global error backoff wait to use it. Verification: servertool-followup-dispatch/fail-fast Jest suites green; /health 5555 ready version 0.90.2574.
+- 2026-05-31 Anthropic SSE wrapper blackbox: added real HTTP /v1/responses blackbox test using captured provider-response_1.json bodyText from /Volumes/extension/.rcc/codex-samples/... It first reproduced 502 hub_pipeline_resp_anthropic_chat_canonicalize_failed content array. Rust canonicalizer now materializes Anthropic SSE bodyText into message content blocks, including thinking_delta and tool_use input_json_delta; blackbox now returns HTTP 200 requires_action for exec_command tool_use. Installed/restarted 5555 version 0.90.2575.
+
+## 2026-05-31 MiniMax/Mimo response remap + snapshot port
+- Red evidence: captured `/Volumes/extension/.rcc/codex-samples/openai-responses/port-unknown/req_1780190256673_3e7bf0ce/provider-response_4.json` is OpenAI Chat SSE wrapper (`body.bodyText`) and failed Rust HubPipeline with `OpenAI chat response must contain choices array`; Mimo Anthropic SSE wrapper in same group must also pass `content array` materialization.
+- Root cause: Rust `hub_resp_inbound_format_parse::parse_openai_chat_response` only accepted materialized Chat completion JSON with top-level `choices`; provider SSE wrapper `{ mode:"sse", bodyText:"data: ..." }` was not materialized before parse.
+- Fix: added generic OpenAI Chat SSE bodyText materializer in Rust inbound format parse; merges streamed `delta.role/content/reasoning_content/tool_calls/finish_reason/usage` into canonical `chat.completion` before normal OpenAI-chat envelope parse.
+- Snapshot port bug: provider snapshot writer dropped `ProviderContext.metadata.matchedPort`, so llmswitch native hook received no `entryPort` and wrote `port-unknown`. Fixed provider snapshot metadata propagation to hook/local marker with `entryPort/matchedPort`.
+- Verification: `cargo test -p router-hotpath-napi test_parse_openai_chat_sse_body_text_wrapper -- --nocapture` green; `npm run jest:run -- tests/server/handlers/responses-handler.anthropic-response-remap.blackbox.spec.ts tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts --runInBand --forceExit` green; `node scripts/build-core.mjs`, `cd sharedmodule/llmswitch-core && npm run build`, `npm run build:min` green; installed/restarted 5555 at `0.90.2576`; `/health` ready true.
+- Known unrelated/legacy test issue: `tests/provider/http-request-executor-sse-snapshot.spec.ts` currently fails because `writeProviderSnapshot` mock is not observed; do not use it as proof for this fix until mock wiring is repaired.
+
+## 2026-05-31 Correction: 240110 Mimo live stream red test
+- Jason corrected prior report: old captured bodyText tests were insufficient. Real 240110 failure path was `providerResponse.__sse_responses` stream entering Rust HubPipeline; JSON serialization lost stream content, so Rust saw a non-Anthropic object and failed `Anthropic response must contain content array`.
+- Correct red test: `tests/server/handlers/responses-handler.anthropic-response-remap.blackbox.spec.ts` replays `/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1780191375196_0cbfc4df/provider-response_1.json` as `{ __sse_responses: Readable.from([bodyText]) }`; it failed 502 before fix and passes after fix.
+- Fix: `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` materializes non-stream provider SSE `Readable` into semantically equivalent `{ mode:"sse", bodyText }` before native response pipeline. This is transport bridging only; parsing/canonicalization remains Rust truth.
+- Verification: 240110 stream-shape blackbox green; `node scripts/build-core.mjs`, `cd sharedmodule/llmswitch-core && npm run build`, `npm run build:min` green; installed/restarted 5555 as `0.90.2577`; health ready.
+
+## 2026-05-31 Correction: 240111 Mimo stream branch
+- Jason showed 240111 still failing after 0.90.2577. New samples: `/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1780192135330_0a1e3eb8/provider-response_1.json` contains real Mimo Anthropic SSE bodyText; provider-specific folder `mimo.../provider-response.json` is marker-only `{mode:"sse", captureSse:true, transport:"prepared-request-executor"}`.
+- Missing red tests: `wantsStream=true` with `providerResponse.__sse_responses` still sent JS stream into native JSON pipeline; marker-only sample still got misclassified as Anthropic payload. Added both tests.
+- Fix: `materializeProviderResponseSseStreamForNative` now materializes provider SSE streams regardless of `wantsStream`; marker-only SSE without stream/bodyText fails fast with `Provider SSE marker did not include materializable stream or bodyText` instead of reaching Rust `content array` error.
+- Verification: `responses-handler.anthropic-response-remap.blackbox.spec.ts` 7 cases green; build-core, llmswitch build, build:min green; installed/restarted 5555 at 0.90.2578; health ready.
+
+## 2026-05-31 direct SSE/materialize review
+- 发现：router-direct response 进入 thin executor-response converter 时，真实 `__sse_responses` 未在 HTTP 层 materialize，Rust 侧只能看到 marker/空形状，触发 `missing choices` / `content array`。
+- 修复：抽 `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-sse-materializer.ts`，direct converter 与主 provider-response converter 共用，marker-only fail-fast。
+- 发现：stream wrapper contract probe 会把 `response.created`/空 `completed output:[]` 当终态，误报 `EMPTY_ASSISTANT_RESPONSE`。
+- 修复：stream contract probe 只携带有语义内容/required_action/choices 的 probe；SSE terminal tracker 把 `response.completed` 视为终态并补 `[DONE]`。
+- 验证：`responses-handler.anthropic-response-remap.blackbox.spec.ts`、`executor-response.sse-materializer.spec.ts`、`handler-response-utils.sse-finish-reason.spec.ts` 绿。

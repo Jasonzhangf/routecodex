@@ -6,6 +6,7 @@ export type ProviderSnapshotPersistInput = {
   groupRequestId: string;
   providerToken: string;
   payload: unknown;
+  entryPort?: number;
 };
 
 type SnapshotBufferGlobal = {

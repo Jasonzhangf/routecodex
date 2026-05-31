@@ -1,7 +1,7 @@
 import {
-  getClientConnectionAbortSignal,
-  type ClientConnectionState
-} from '../../../utils/client-connection-state.js';
+  resolveClientAbortSignalFromCarrier,
+  throwIfClientCarrierAborted
+} from './request-executor-client-abort-block.js';
 
 const DEFAULT_SERVERTOOL_FOLLOWUP_TIMEOUT_MS = 900_000;
 
@@ -106,23 +106,10 @@ export async function awaitNestedExecutionWithFailFast<T>(args: {
   }
 }
 
-function isAbortSignalMetadata(
-  value: unknown
-): value is ClientConnectionState | Record<string, unknown> {
-  return !!value && typeof value === 'object';
-}
-
 export function getNestedFollowupAbortSignal(metadata: unknown): AbortSignal | undefined {
-  return isAbortSignalMetadata(metadata)
-    ? getClientConnectionAbortSignal(metadata)
-    : undefined;
+  return resolveClientAbortSignalFromCarrier(metadata);
 }
 
 export function throwIfNestedFollowupAborted(metadata: unknown): void {
-  const abortSignal = getNestedFollowupAbortSignal(metadata);
-  if (!abortSignal?.aborted) {
-    return;
-  }
-  const reason = (abortSignal as { reason?: unknown }).reason;
-  throw reason instanceof Error ? reason : new Error('CLIENT_DISCONNECTED');
+  throwIfClientCarrierAborted(metadata);
 }

@@ -61,6 +61,7 @@ describe('provider snapshot writer local mirror', () => {
       clientRequestId: requestId,
       entryEndpoint: '/v1/responses',
       providerKey,
+      metadata: { matchedPort: 5555, routingPolicyGroup: 'gateway_priority_5555' },
       data: {
         mode: 'sse',
         captureSse: true,
@@ -89,6 +90,7 @@ describe('provider snapshot writer local mirror', () => {
     const runtimeParsed = JSON.parse(runtimeRaw) as Record<string, unknown>;
 
     expect(writeSnapshotViaHooksMock).toHaveBeenCalledTimes(1);
+    expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({ entryPort: 5555 }));
     expect(parsed.meta?.stage).toBe('provider-response');
     expect(parsed.body).toMatchObject({
       mode: 'sse',
@@ -98,5 +100,7 @@ describe('provider snapshot writer local mirror', () => {
     expect(runtimeParsed.requestId).toBe(requestId);
     expect(runtimeParsed.groupRequestId).toBe(requestId);
     expect(runtimeParsed.providerKey).toBe(providerKey);
+    expect(runtimeParsed.entryPort).toBe(5555);
+    expect(runtimeParsed.matchedPort).toBe(5555);
   });
 });

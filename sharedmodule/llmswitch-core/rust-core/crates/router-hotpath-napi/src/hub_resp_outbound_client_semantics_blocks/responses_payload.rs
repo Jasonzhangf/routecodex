@@ -112,7 +112,7 @@ fn read_failed_status_code(response: &Map<String, Value>) -> Option<String> {
     None
 }
 
-fn read_failed_message(response: &Map<String, Value>) -> String {
+fn read_nonstandard_response_message(response: &Map<String, Value>) -> String {
     read_object_string(response, "msg")
         .or_else(|| read_object_string(response, "message"))
         .unwrap_or_else(|| {
@@ -120,40 +120,12 @@ fn read_failed_message(response: &Map<String, Value>) -> String {
         })
 }
 
-fn build_failed_responses_payload(
-    response: &Map<String, Value>,
-    request_id_hint: Option<&str>,
-) -> Value {
-    let id = allocate_responses_id(response);
-    let message = read_failed_message(response);
-    let mut out = Map::new();
-    out.insert("id".to_string(), Value::String(id));
-    out.insert("object".to_string(), Value::String("response".to_string()));
-    out.insert("created_at".to_string(), read_created_at(response));
-    if let Some(model) = response.get("model") {
-        out.insert("model".to_string(), model.clone());
-    }
-    out.insert("status".to_string(), Value::String("failed".to_string()));
-    out.insert("output".to_string(), Value::Array(Vec::new()));
-    out.insert("output_text".to_string(), Value::String(message.clone()));
-
-    let mut error = Map::new();
-    error.insert(
-        "type".to_string(),
-        Value::String("provider_error".to_string()),
-    );
+fn nonstandard_response_error(response: &Map<String, Value>) -> String {
+    let mut message = read_nonstandard_response_message(response);
     if let Some(code) = read_failed_status_code(response) {
-        error.insert("code".to_string(), Value::String(code));
-    } else {
-        error.insert("code".to_string(), Value::Null);
+        message = format!("{} (provider_status={})", message, code);
     }
-    error.insert("message".to_string(), Value::String(message));
-    out.insert("error".to_string(), Value::Object(error));
-
-    if let Some(request_id) = read_request_id(response, request_id_hint) {
-        out.insert("request_id".to_string(), Value::String(request_id));
-    }
-    Value::Object(out)
+    message
 }
 
 pub(crate) fn normalize_responses_function_name(raw: Option<&str>) -> Option<String> {
@@ -357,6 +329,35 @@ fn read_response_semantics_pointer_field(context: &Value, key: &str) -> Option<S
         .or_else(|| resume_from.and_then(|row| read_object_string(row, key)))
 }
 
+fn read_context_model(context: &Value) -> Option<String> {
+    let row = context.as_object()?;
+    for key in ["model", "displayModel", "clientModelId", "originalModelId"] {
+        if let Some(value) = row
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value.to_string());
+        }
+    }
+    row.get("metadata")
+        .and_then(Value::as_object)
+        .and_then(|metadata| {
+            for key in ["displayModel", "clientModelId", "originalModelId"] {
+                if let Some(value) = metadata
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    return Some(value.to_string());
+                }
+            }
+            None
+        })
+}
+
 fn apply_context_passthrough(out: &mut Map<String, Value>, context: &Value) {
     // Restore original reasoning_effort from metadata if it was overridden during routing
     if let Some(metadata_obj) = context_value(context, "metadata").and_then(|v| v.as_object()) {
@@ -474,11 +475,7 @@ pub(crate) fn build_responses_payload_from_chat_core(
 ) -> Result<Value, String> {
     let response = unwrap_responses_data_node(payload);
     let Some(response_row) = response.as_object() else {
-        return Ok(finalize_client_responses_payload(
-            build_failed_responses_payload(&Map::new(), request_id_hint),
-            &Map::new(),
-            context,
-        ));
+        return Err("Upstream returned non-object response payload".to_string());
     };
 
     if response_row
@@ -500,11 +497,7 @@ pub(crate) fn build_responses_payload_from_chat_core(
         .cloned()
         .unwrap_or_default();
     if choices.is_empty() {
-        return Ok(finalize_client_responses_payload(
-            build_failed_responses_payload(response_row, request_id_hint),
-            response_row,
-            context,
-        ));
+        return Err(nonstandard_response_error(response_row));
     }
 
     let choice = choices
@@ -796,8 +789,12 @@ pub(crate) fn build_responses_payload_from_chat_core(
     out.insert("id".to_string(), Value::String(response_id));
     out.insert("object".to_string(), Value::String("response".to_string()));
     out.insert("created_at".to_string(), read_created_at(response_row));
-    if let Some(model) = response_row.get("model") {
-        out.insert("model".to_string(), model.clone());
+    if let Some(model) = response_row
+        .get("model")
+        .cloned()
+        .or_else(|| read_context_model(context).map(Value::String))
+    {
+        out.insert("model".to_string(), model);
     }
     out.insert(
         "status".to_string(),

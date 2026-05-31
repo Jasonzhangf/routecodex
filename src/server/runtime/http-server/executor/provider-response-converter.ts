@@ -14,6 +14,9 @@ import {
 import {
   normalizeProviderResponse
 } from './provider-response-utils.js';
+import {
+  materializeProviderResponseSsePayload
+} from './provider-response-sse-materializer.js';
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
@@ -611,8 +614,19 @@ export async function convertProviderResponseIfNeeded(
   options: ConvertProviderResponseOptions,
   deps: ConvertProviderResponseDeps
 ): Promise<PipelineExecutionResult> {
-  const body = options.response.body;
+  let body = options.response.body;
   if (body && typeof body === 'object') {
+    const materializedBody = await materializeProviderResponseSsePayload(body);
+    if (materializedBody !== body) {
+      body = materializedBody;
+      options = {
+        ...options,
+        response: {
+          ...options.response,
+          body: materializedBody
+        }
+      };
+    }
     const wrapperError = extractSseWrapperError(body as Record<string, unknown>);
     if (wrapperError) {
       const codeSuffix = wrapperError.errorCode ? ` [${wrapperError.errorCode}]` : '';

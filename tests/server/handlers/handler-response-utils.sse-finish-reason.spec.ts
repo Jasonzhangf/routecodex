@@ -71,6 +71,24 @@ describe('sendPipelineResponse SSE completion logging', () => {
     logSpy.mockRestore();
   });
 
+  it('does not attach stream contract probe for empty response.created placeholder', async () => {
+    const { buildServerToolSseWrapperBody, STREAM_CONTRACT_PROBE_BODY_KEY } = await import(
+      '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js'
+    );
+    const body = buildServerToolSseWrapperBody({
+      sseResponses: Readable.from([]),
+      convertedBody: {
+        id: '066acd209c6b56063dc1679d535ece5c',
+        object: 'response',
+        status: 'completed',
+        output: []
+      }
+    });
+
+    expect(body).toHaveProperty('__sse_responses');
+    expect(body).not.toHaveProperty(STREAM_CONTRACT_PROBE_BODY_KEY);
+  });
+
   it('logs finish_reason after streamed responses complete', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,

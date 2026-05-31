@@ -1597,3 +1597,27 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 日志信号：cascade.busy.wait_idle（轮询中）、cascade.busy.final_timeout（2min 超时后）
 - 回归测试：28/28 passed（含 5 个 RED→GREEN 轮询行为测试）
 - 构建验证：v0.90.2569, build:min + install:global + restart 成功
+
+## 2026-05-31 调试精华（Rust response effect plan 执行）
+- Rust HubPipeline `servertoolRuntimeAction` 不是终点；TS provider-response 壳必须把 effect 接回 `runRespProcessStage3ServerToolOrchestration`，否则有 executor callbacks 也会报 `requires runtime executor`。
+- 排查 response conversion 三连错时先分层：`provider_status_2056` 属 provider business retry；`Invalid ResponsesResponse/missing fields` 查 provider raw shape/SSE wrapper；`SERVERTOOL_HANDLER_FAILED requires runtime executor` 查 native effect plan executor glue。
+
+## 2026-05-31 调试精华（client disconnect / servertool followup）
+- client 断开后 servertool followup 必须 fail-fast；Host 侧唯一取消载体解析/保活走 `src/server/runtime/http-server/executor/request-executor-client-abort-block.ts`，禁止各处手写 `clientConnectionState` / `clientAbortSignal` 读取。
+- nested followup clone/metadata merge 必须保留 live `clientConnectionState` 和 `clientAbortSignal` 对象；retry/backoff sleep 必须挂同一个 abort signal，否则客户端关闭后会继续 `:stop_followup` 递归。
+
+## 2026-05-31 调试精华（Anthropic SSE wrapper -> Responses）
+- mimo/vercel Anthropic runtime 可把 provider response 交给 Hub 时保留为 snapshot wrapper `{bodyText, mode:"sse"}`，不是标准 `{content:[]}`；Rust response canonicalizer 必须先 materialize SSE events (`message_start`, `content_block_delta`, `message_delta`) 再进 Chat->Responses remap。
+- 此类修复必须有 HTTP `/v1/responses` 黑盒红测，测试真实 wrapper bodyText；若 SSE 含 `tool_use`，期望 Responses `requires_action` 而不是 `completed`。
+
+### 2026-05-31 调试精华：provider SSE wrapper 与 snapshot port
+- 若日志出现 `OpenAI chat response must contain choices array` 且样本是 `provider-response*.json` 的 `{ mode:"sse", bodyText:"data: ..." }`，先写 HTTP `/v1/responses` 黑盒复放真实样本；修点在 Rust inbound format parse 的通用 OpenAI-chat SSE materializer，不在 Provider/Hub 写 provider 特例。
+- `port-unknown` 是 snapshot metadata 断链信号；provider snapshot 必须从 `ProviderContext.metadata.matchedPort/entryPort/portContext` 透传 `entryPort` 给 llmswitch native hook，同时写入 `__runtime.json`，禁止接受 unknown 作为正常结果。
+
+### 2026-05-31 纠偏：Mimo 240110 live stream 红测
+- 只复放 `provider-response.body.bodyText` 不足以证明 live 修复；真实主链可能是 `providerResponse.__sse_responses` stream。遇到 `Anthropic response must contain content array` 必须同时红测 `{ __sse_responses: Readable.from([capturedBodyText]) }` 形状。
+- JS `Readable` 不能直接交给 Rust native JSON pipeline；非流式响应转换前必须做传输等价 materialize：`Readable SSE -> { mode:"sse", bodyText }`，语义解析仍由 Rust materializer/canonicalizer 完成。
+
+### 2026-05-31 纠偏：stream=true 也必须 materialize
+- Anthropic live SSE 修复不能只覆盖 `wantsStream=false`；`/v1/responses` + tool request 下即使用户侧非显式 stream，内部转换可能 `wantsStream=true`。红测必须覆盖 `providerResponse.__sse_responses` + `wantsStream=true`。
+- provider snapshot 的 marker-only `{mode:"sse", captureSse, transport}` 不是可转换 payload；遇到它必须 fail-fast 为“缺 materializable stream/bodyText”，禁止继续送 Rust 当 Anthropic message 解析。

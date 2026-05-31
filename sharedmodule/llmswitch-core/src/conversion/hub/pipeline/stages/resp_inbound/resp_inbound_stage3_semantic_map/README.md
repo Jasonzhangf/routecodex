@@ -7,10 +7,10 @@
 - `AdapterContext`。
 
 **输出**
-- ChatCompletion-like payload（`ResponseMapper.toChatCompletion` 结果）。
+- ChatCompletion-like payload（Rust native mapper 输出）。
 
 **依赖**
-- Responses: `ResponsesResponseMapper`；其他协议：`OpenAIChatResponseMapper`、`AnthropicResponseMapper`、`GeminiResponseMapper`。
+- Responses / OpenAI Chat / Anthropic / Gemini 映射语义由 Rust native mapper 承载；TS stage 仅保留测试壳层类型。
 
 **错误落点**
 - 协议不匹配或 mapper 转换失败时抛出 Error。

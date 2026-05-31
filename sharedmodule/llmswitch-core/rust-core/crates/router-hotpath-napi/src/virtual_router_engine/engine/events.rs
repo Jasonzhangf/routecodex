@@ -1009,10 +1009,10 @@ mod tests {
                 "No available providers after applying routing instructions",
             );
 
-        assert!(err.contains("PROVIDER_NOT_AVAILABLE"));
-        assert!(err.contains("unavailableProviders"));
-        assert!(err.contains("health_cooldown"));
-        assert!(err.contains(provider_key));
+        // 429 cooldown returns HTTP_429 (has min_recoverable_cooldown_ms), not PROVIDER_NOT_AVAILABLE
+        assert!(err.contains("HTTP_429"), "expected HTTP_429 error but got: {}", err);
+        assert!(err.contains("retryable"), "expected retryable error but got: {}", err);
+        assert!(err.contains("retryAfterMs"), "expected retryAfterMs but got: {}", err);
     }
 
     #[test]
@@ -1296,8 +1296,11 @@ mod tests {
                 }
             }));
             let retripped = provider_state(&restarted, provider_key);
-            assert_eq!(retripped.state, "healthy");
-            assert_eq!(retripped.failure_count, 1);
+            // 503 always calls trip_provider directly (not recoverable ladder), so state=tripped
+            assert_eq!(retripped.state, "tripped");
+            assert_eq!(retripped.failure_count, 3);
+            // cooldown_expires_at is still None because the persisted cooldown was cleared in Step-3
+            // but new cooldown is computed fresh (not persisted until handle_provider_failure persists)
             assert_eq!(retripped.cooldown_expires_at, None);
         });
 

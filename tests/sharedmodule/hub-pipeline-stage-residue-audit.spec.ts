@@ -194,6 +194,35 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('legacy TS response mapper file and tests must be physically removed from active graph', () => {
+    const mapperPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/response/response-mappers.ts',
+    );
+    expect(fs.existsSync(mapperPath)).toBe(false);
+
+    const testRoot = path.join(process.cwd(), 'tests');
+    const findings: string[] = [];
+    const visit = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          visit(fullPath);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
+        if (fullPath.endsWith(path.join('tests', 'sharedmodule', 'hub-pipeline-stage-residue-audit.spec.ts').split(path.sep).join('/'))) continue;
+        const source = fs.readFileSync(fullPath, 'utf8');
+        if (source.includes('response-mappers')) {
+          findings.push(path.relative(testRoot, fullPath));
+        }
+      }
+    };
+
+    visit(testRoot);
+    expect(findings).toEqual([]);
+  });
+
   it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
     const wrapperPath = path.join(
       process.cwd(),

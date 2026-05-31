@@ -1,13 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { buildProcessedRequestFromChatResponse } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/chat-response-utils.js';
-import {
-  AnthropicResponseMapper,
-  GeminiResponseMapper,
-  OpenAIChatResponseMapper
-} from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/response-mappers.js';
 import { buildChatResponseFromResponses } from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.js';
 import { runRespOutboundStage1ClientRemap } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage1_client_remap/index.js';
+import { createNativeResponseMapper } from './native-response-mapper-test-helper.js';
 
 describe('response continuation semantics', () => {
   it('lifts responses payload continuity and required_action into response-side continuation semantics', () => {
@@ -142,7 +138,7 @@ describe('response continuation semantics', () => {
   });
 
   it('restores session continuation semantics on openai-chat responses from request semantics', () => {
-    const mapper = new OpenAIChatResponseMapper();
+    const mapper = createNativeResponseMapper('openai-chat');
     const chat = mapper.toChatCompletion(
       {
         format: 'openai-chat',
@@ -189,7 +185,7 @@ describe('response continuation semantics', () => {
   });
 
   it('restores conversation continuation semantics on anthropic responses from request semantics', () => {
-    const mapper = new AnthropicResponseMapper();
+    const mapper = createNativeResponseMapper('anthropic-messages');
     const chat = mapper.toChatCompletion(
       {
         format: 'anthropic-messages',
@@ -231,7 +227,7 @@ describe('response continuation semantics', () => {
   });
 
   it('restores session continuation semantics on gemini responses from request semantics', () => {
-    const mapper = new GeminiResponseMapper();
+    const mapper = createNativeResponseMapper('gemini-chat');
     const chat = mapper.toChatCompletion(
       {
         format: 'gemini-chat',
@@ -281,7 +277,7 @@ describe('response continuation semantics', () => {
   it('preserves restored non-responses continuation through processedRequest build', () => {
     const cases = [
       {
-        mapper: new OpenAIChatResponseMapper(),
+        mapper: createNativeResponseMapper('openai-chat'),
         format: {
           format: 'openai-chat',
           direction: 'response',
@@ -309,7 +305,7 @@ describe('response continuation semantics', () => {
         expected: { chainId: 'session_chat_resp_2', stickyScope: 'session' }
       },
       {
-        mapper: new AnthropicResponseMapper(),
+        mapper: createNativeResponseMapper('anthropic-messages'),
         format: {
           format: 'anthropic-messages',
           direction: 'response',
@@ -332,7 +328,7 @@ describe('response continuation semantics', () => {
         expected: { chainId: 'conversation_resp_2', stickyScope: 'conversation' }
       },
       {
-        mapper: new GeminiResponseMapper(),
+        mapper: createNativeResponseMapper('gemini-chat'),
         format: {
           format: 'gemini-chat',
           direction: 'response',

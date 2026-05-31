@@ -1,10 +1,10 @@
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
 import type { HubPipelineResult } from '../executor-pipeline.js';
 import type { RetryPayloadSeed } from './retry-payload-snapshot.js';
-import { getClientConnectionAbortSignal } from '../../../utils/client-connection-state.js';
 import { registerRequestLogContext } from '../../../utils/request-log-color.js';
 import { cloneClientHeaders, decorateMetadataForAttempt } from '../executor-metadata.js';
 import { mergeMetadataPreservingDefined } from './request-executor-core-utils.js';
+import { resolveClientAbortSignalFromCarrier } from './request-executor-client-abort-block.js';
 import { restoreRequestPayloadFromRetrySeed } from './retry-payload-snapshot.js';
 
 export type PreparedRequestExecutorAttemptState = {
@@ -38,7 +38,7 @@ export function prepareRequestExecutorAttemptState(args: {
     args.attempt,
     args.excludedProviderKeys
   );
-  const clientAbortSignal = getClientConnectionAbortSignal(metadataForAttempt);
+  const clientAbortSignal = resolveClientAbortSignalFromCarrier(metadataForAttempt);
   args.throwIfClientAbortSignalAborted(clientAbortSignal);
 
   if (args.forcedRouteHint) {

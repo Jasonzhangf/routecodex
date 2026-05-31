@@ -17,6 +17,9 @@ import {
 import {
   finalizeServerToolBridgeConvertError
 } from './executor/servertool-followup-error.js';
+import {
+  materializeProviderResponseSsePayload
+} from './executor/provider-response-sse-materializer.js';
 
 export interface ConvertProviderResponseOptions {
   entryEndpoint?: string;
@@ -131,9 +134,10 @@ export async function convertProviderResponseIfNeeded(
       });
     };
 
+    const bridgeProviderResponse = await materializeProviderResponseSsePayload(body as Record<string, unknown>);
     const converted = await bridgeConvertProviderResponse({
       providerProtocol,
-      providerResponse: body as Record<string, unknown>,
+      providerResponse: bridgeProviderResponse,
       context: adapterContext,
       entryEndpoint: options.entryEndpoint || entry,
       wantsStream: options.wantsStream,

@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream';
+import type { Readable } from 'node:stream';
 import { defaultSseCodecRegistry, type SseProtocol } from '../../../sse/index.js';
 import type { AdapterContext } from '../types/chat-envelope.js';
 import type { JsonObject } from '../types/json.js';
@@ -14,6 +14,9 @@ import {
   finalizeResponsesConversationRequestRetention,
   recordResponsesResponse,
 } from '../../shared/responses-conversation-store.js';
+import {
+  materializeProviderResponseSsePayload
+} from './provider-response-sse-materializer.js';
 import type { ProviderInvoker } from '../../../servertool/types.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
 import {
@@ -21,6 +24,7 @@ import {
   resolveProviderResponseContextSignals,
   type ProviderProtocol
 } from './provider-response-helpers.js';
+import { runRespProcessStage3ServerToolOrchestration } from '../pipeline/stages/resp_process/resp_process_stage3_servertool_orchestration/index.js';
 
 type HubStageTopEntry = {
   stage: string;
@@ -237,7 +241,83 @@ function readNativeServertoolRuntimeActionEffects(effectPlan: { effects: Array<R
 
 async function executeProviderResponseNativeServertoolEffects(args: {
   effectPlan: { effects: Array<Record<string, unknown>> };
-}): Promise<void> {
+  payload: JsonObject;
+  requestId: string;
+  context: AdapterContext;
+  entryEndpoint: string;
+  providerProtocol: ProviderProtocol;
+  stageRecorder?: StageRecorder;
+  providerInvoker?: ProviderInvoker;
+  reenterPipeline?: ProviderResponseConversionOptions['reenterPipeline'];
+  clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
+}): Promise<JsonObject> {
+  let payload = args.payload;
+  for (const effect of readNativeServertoolRuntimeActionEffects(args.effectPlan)) {
+    if (effect.action === 'requireReenterPipeline') {
+      if (!args.reenterPipeline) {
+        throw new ProviderProtocolError('[servertool] followup requires reenter pipeline', {
+          code: 'SERVERTOOL_FOLLOWUP_FAILED',
+          category: 'INTERNAL_ERROR',
+          details: {
+            requestId: typeof effect.requestId === 'string' ? effect.requestId : undefined,
+            reason: typeof effect.reason === 'string' ? effect.reason : 'unknown'
+          }
+        });
+      }
+      const orchestration = await runRespProcessStage3ServerToolOrchestration({
+        payload,
+        adapterContext: args.context,
+        requestId: args.requestId,
+        entryEndpoint: args.entryEndpoint,
+        providerProtocol: args.providerProtocol,
+        allowFollowup: true,
+        stageRecorder: args.stageRecorder,
+        providerInvoker: args.providerInvoker,
+        reenterPipeline: args.reenterPipeline as any,
+        clientInjectDispatch: args.clientInjectDispatch as any
+      });
+      payload = orchestration.payload;
+      continue;
+    }
+    if (effect.action === 'requireRuntimeExecutor') {
+      if (!args.providerInvoker && !args.reenterPipeline && !args.clientInjectDispatch) {
+        throw new ProviderProtocolError('Rust HubPipeline servertoolRuntimeAction requires runtime executor', {
+          code: 'SERVERTOOL_HANDLER_FAILED',
+          category: 'INTERNAL_ERROR',
+          details: {
+            requestId: typeof effect.requestId === 'string' ? effect.requestId : undefined,
+            reason: typeof effect.reason === 'string' ? effect.reason : 'unknown'
+          }
+        });
+      }
+      const orchestration = await runRespProcessStage3ServerToolOrchestration({
+        payload,
+        adapterContext: args.context,
+        requestId: args.requestId,
+        entryEndpoint: args.entryEndpoint,
+        providerProtocol: args.providerProtocol,
+        stageRecorder: args.stageRecorder,
+        providerInvoker: args.providerInvoker,
+        reenterPipeline: args.reenterPipeline as any,
+        clientInjectDispatch: args.clientInjectDispatch as any
+      });
+      payload = orchestration.payload;
+      continue;
+    }
+    throw new Error('Rust HubPipeline servertoolRuntimeAction returned unsupported action');
+  }
+  return payload;
+}
+
+function assertMissingServertoolRuntimeExecutor(args: {
+  effectPlan: { effects: Array<Record<string, unknown>> };
+  providerInvoker?: ProviderInvoker;
+  reenterPipeline?: ProviderResponseConversionOptions['reenterPipeline'];
+  clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
+}): void {
+  if (args.providerInvoker || args.reenterPipeline || args.clientInjectDispatch) {
+    return;
+  }
   for (const effect of readNativeServertoolRuntimeActionEffects(args.effectPlan)) {
     if (effect.action === 'requireReenterPipeline') {
       throw new ProviderProtocolError('[servertool] followup requires reenter pipeline', {
@@ -303,15 +383,35 @@ async function executeProviderResponseNativeOutboundEffects(args: {
   };
   requestId: string;
   context: AdapterContext;
+  entryEndpoint: string;
+  providerProtocol: ProviderProtocol;
   stageRecorder?: StageRecorder;
+  providerInvoker?: ProviderInvoker;
+  reenterPipeline?: ProviderResponseConversionOptions['reenterPipeline'];
+  clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
 }): Promise<ProviderResponseConversionResult> {
-  const clientPayload = args.nativeResponsePlan.payload;
+  let clientPayload = args.nativeResponsePlan.payload;
   if (!clientPayload || typeof clientPayload !== 'object') {
     throw new Error('Rust HubPipeline native response payload unavailable');
   }
   assertKnownNativeResponseEffectKinds(args.nativeResponsePlan.effectPlan);
-  await executeProviderResponseNativeServertoolEffects({
-    effectPlan: args.nativeResponsePlan.effectPlan
+  assertMissingServertoolRuntimeExecutor({
+    effectPlan: args.nativeResponsePlan.effectPlan,
+    providerInvoker: args.providerInvoker,
+    reenterPipeline: args.reenterPipeline,
+    clientInjectDispatch: args.clientInjectDispatch
+  });
+  clientPayload = await executeProviderResponseNativeServertoolEffects({
+    effectPlan: args.nativeResponsePlan.effectPlan,
+    payload: clientPayload,
+    requestId: args.requestId,
+    context: args.context,
+    entryEndpoint: args.entryEndpoint,
+    providerProtocol: args.providerProtocol,
+    stageRecorder: args.stageRecorder,
+    providerInvoker: args.providerInvoker,
+    reenterPipeline: args.reenterPipeline,
+    clientInjectDispatch: args.clientInjectDispatch
   });
   const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.effectPlan);
   await executeProviderResponseNativeRuntimeStateEffect({
@@ -398,7 +498,11 @@ export async function convertProviderResponse(
   options: ProviderResponseConversionOptions
 ): Promise<ProviderResponseConversionResult> {
   const requestId = options.context.requestId || 'unknown';
-  const nativeResponsePlan = runProviderResponseRustHubPipeline(options);
+  const nativeOptions = {
+    ...options,
+    providerResponse: await materializeProviderResponseSsePayload(options.providerResponse) as JsonObject
+  };
+  const nativeResponsePlan = runProviderResponseRustHubPipeline(nativeOptions);
   if (!Array.isArray(nativeResponsePlan.effectPlan.effects)) {
     throw new Error('Rust HubPipeline response native effect plan unavailable');
   }
@@ -407,6 +511,11 @@ export async function convertProviderResponse(
     nativeResponsePlan,
     requestId,
     context: options.context,
-    stageRecorder: options.stageRecorder
+    entryEndpoint: options.entryEndpoint,
+    providerProtocol: options.providerProtocol,
+    stageRecorder: options.stageRecorder,
+    providerInvoker: options.providerInvoker,
+    reenterPipeline: options.reenterPipeline,
+    clientInjectDispatch: options.clientInjectDispatch
   });
 }

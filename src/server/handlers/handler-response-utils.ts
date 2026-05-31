@@ -192,11 +192,13 @@ function buildResponsesTerminalSseFramesFromProbe(probe: Record<string, unknown>
     frames.push(`event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response: responsePayload, required_action: requiredAction })}\n\n`);
     frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
     frames.push(`event: response.done\ndata: ${JSON.stringify(donePayload)}\n\n`);
+    frames.push('data: [DONE]\n\n');
     return frames;
   }
   if (status === 'completed' || Object.keys(probe).length > 0) {
     frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
     frames.push(`event: response.done\ndata: ${JSON.stringify(donePayload)}\n\n`);
+    frames.push('data: [DONE]\n\n');
   }
   return frames;
 }
@@ -916,7 +918,7 @@ function updateSseTerminalTrackerFromChunk(
         continue;
       }
       finishTracker.finishReason = derived;
-      const trueTerminal = parsedType === 'response.done' || parsedType === 'response.error' || parsedType === 'response.cancelled';
+      const trueTerminal = parsedType === 'response.completed' || parsedType === 'response.done' || parsedType === 'response.required_action' || parsedType === 'response.error' || parsedType === 'response.cancelled';
       if (trueTerminal) {
         finishTracker.seenTerminalEvent = true;
         terminalWatch.sawTerminalChunk = true;
@@ -956,7 +958,7 @@ function updateSseTerminalTrackerFromChunk(
         // ignore parse failure; terminal event itself is enough to mark stream terminal
       }
     }
-    const trueTerminal2 = effectiveTerminalEvent === 'response.done' || effectiveTerminalEvent === 'response.error' || effectiveTerminalEvent === 'response.cancelled';
+    const trueTerminal2 = effectiveTerminalEvent === 'response.completed' || effectiveTerminalEvent === 'response.done' || effectiveTerminalEvent === 'response.required_action' || effectiveTerminalEvent === 'response.error' || effectiveTerminalEvent === 'response.cancelled';
     if (trueTerminal2) {
       finishTracker.seenTerminalEvent = true;
       terminalWatch.sawTerminalChunk = true;

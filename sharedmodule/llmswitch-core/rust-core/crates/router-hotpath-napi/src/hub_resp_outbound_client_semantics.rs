@@ -1,3 +1,4 @@
+pub(crate) use crate::hub_resp_outbound_client_semantics_blocks::anthropic_chat_response::build_openai_chat_response_from_anthropic_message;
 pub(crate) use crate::hub_resp_outbound_client_semantics_blocks::anthropic_response::build_anthropic_response_from_chat_value;
 pub(crate) use crate::hub_resp_outbound_client_semantics_blocks::chat_reasoning::{
     apply_client_passthrough_patch, normalize_openai_chat_reasoning_outbound,

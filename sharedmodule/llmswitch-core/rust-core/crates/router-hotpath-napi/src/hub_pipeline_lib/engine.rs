@@ -16,7 +16,8 @@ use crate::hub_req_outbound_format_build::{build_format_request, FormatBuildInpu
 use crate::hub_resp_inbound_format_parse::{parse_resp_format_envelope, RespFormatParseInput};
 use crate::hub_resp_outbound_client_semantics::{
     apply_client_passthrough_patch, build_anthropic_response_from_chat_value,
-    build_responses_payload_from_chat_core, normalize_openai_chat_reasoning_outbound,
+    build_openai_chat_response_from_anthropic_message, build_responses_payload_from_chat_core,
+    normalize_openai_chat_reasoning_outbound,
 };
 use crate::hub_resp_outbound_sse_stream::{process_sse_stream, SseStreamInput};
 use crate::req_outbound_stage3_compat::{
@@ -368,8 +369,15 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "protocol": parsed.envelope.format })),
         ));
+        let provider_format = parsed.envelope.format.clone();
+        let canonical_payload = canonicalize_provider_response_for_client(
+            parsed.envelope.payload,
+            provider_format.as_str(),
+            &normalized_metadata,
+            output.request_id.as_str(),
+        )?;
         let governed = govern_response(RespToolGovernanceInput {
-            payload: parsed.envelope.payload,
+            payload: canonical_payload,
             client_protocol: normalized_metadata
                 .get("clientProtocol")
                 .and_then(Value::as_str)
@@ -775,7 +783,14 @@ fn build_client_payload_for_protocol(
             build_anthropic_response_from_chat_value(&finalized_payload, alias_map)
         }
         "openai-responses" => {
-            let context = serde_json::json!({ "requestId": request_id });
+            let context = serde_json::json!({
+                "requestId": request_id,
+                "metadata": metadata,
+                "model": metadata
+                    .get("displayModel")
+                    .or_else(|| metadata.get("clientModelId"))
+                    .or_else(|| metadata.get("originalModelId")),
+            });
             build_responses_payload_from_chat_core(&finalized_payload, Some(request_id), &context)
                 .map_err(|message| {
                 HubPipelineError::new("hub_pipeline_resp_client_remap_failed", message)
@@ -795,6 +810,32 @@ fn build_client_payload_for_protocol(
         &client_payload,
         &finalized_payload,
     ))
+}
+
+fn canonicalize_provider_response_for_client(
+    payload: Value,
+    provider_format: &str,
+    metadata: &Value,
+    request_id: &str,
+) -> HubPipelineResult<Value> {
+    let client_protocol = metadata
+        .get("clientProtocol")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if provider_format == "anthropic-messages"
+        && matches!(client_protocol, "openai-chat" | "openai-responses")
+    {
+        return build_openai_chat_response_from_anthropic_message(&payload, request_id).map_err(
+            |message| {
+                HubPipelineError::new(
+                    "hub_pipeline_resp_anthropic_chat_canonicalize_failed",
+                    message,
+                )
+            },
+        );
+    }
+    Ok(payload)
 }
 
 fn build_adapter_context(

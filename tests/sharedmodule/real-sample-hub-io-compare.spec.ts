@@ -5,7 +5,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { AnthropicSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/anthropic-mapper.js';
 import { ResponsesSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/responses-mapper.js';
-import { AnthropicResponseMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/response-mappers.js';
+import { createNativeResponseMapper } from './native-response-mapper-test-helper.js';
 import { runRespInboundStage1SseDecode } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage1_sse_decode/index.js';
 import { runRespInboundStage2FormatParse } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage2_format_parse/index.js';
 import { runRespInboundStage3SemanticMap } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage3_semantic_map/index.js';
@@ -317,7 +317,7 @@ async function replayAnthropicResponseToClient(options: {
   const chatResponse = await runRespInboundStage3SemanticMap({
     adapterContext: adapterContext as any,
     formatEnvelope: stage2,
-    mapper: new AnthropicResponseMapper(),
+    mapper: createNativeResponseMapper('anthropic-messages'),
     requestSemantics: options.requestSemantics as any
   });
 
@@ -522,7 +522,7 @@ describe('real sample responses hub input/output compare', () => {
       const chatResponse = await runRespInboundStage3SemanticMap({
         adapterContext: adapterContext as any,
         formatEnvelope: stage2,
-        mapper: new AnthropicResponseMapper()
+        mapper: createNativeResponseMapper('anthropic-messages')
       });
 
       expect(chatResponse).toBeTruthy();

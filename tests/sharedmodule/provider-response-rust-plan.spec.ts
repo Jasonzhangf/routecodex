@@ -389,7 +389,7 @@ describe('provider response Rust native plan', () => {
     ]);
   });
 
-  it('uses Rust servertoolRuntimeAction effect for tool_call callback path', async () => {
+  it('executes Rust servertoolRuntimeAction effect for tool_call callback path', async () => {
     const recorder = new StubStageRecorder();
     const context: Record<string, unknown> = {
       requestId: 'req_provider_response_servertool_tool_call_guard_1',
@@ -397,7 +397,7 @@ describe('provider response Rust native plan', () => {
       providerProtocol: 'openai-chat'
     };
 
-    await expect(convertProviderResponse({
+    const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
       providerResponse: {
         id: 'chatcmpl_servertool_tool_call_guard_1',
@@ -422,7 +422,9 @@ describe('provider response Rust native plan', () => {
       wantsStream: false,
       stageRecorder: recorder,
       providerInvoker: async () => ({ response: {} as any })
-    })).rejects.toThrow('Rust HubPipeline servertoolRuntimeAction requires runtime executor');
+    });
+
+    expect(result.body?.choices?.[0]?.message?.tool_calls?.[0]?.function?.name).toBe('apply_patch');
 
     expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
       effectPlan: expect.objectContaining({

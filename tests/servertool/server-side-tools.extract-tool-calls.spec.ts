@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 import { extractToolCalls } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
-import { AnthropicResponseMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/response-mappers.js';
+import { mapNativeProviderResponseToChat } from '../sharedmodule/native-response-mapper-test-helper.js';
 
 describe('server-side-tools: extractToolCalls', () => {
   test('skips transcript-like malformed exec_command arguments', () => {
@@ -86,12 +86,9 @@ describe('server-side-tools: extractToolCalls', () => {
   });
 
   test('preserves anthropic tool_use ids for downstream servertool execution', () => {
-    const mapper = new AnthropicResponseMapper();
-    const chat = mapper.toChatCompletion(
+    const chat = mapNativeProviderResponseToChat(
+      'anthropic-messages',
       {
-        format: 'anthropic-messages',
-        direction: 'response',
-        payload: {
           id: 'msg_tool_use_1',
           role: 'assistant',
           model: 'mimo-v2.5-pro',
@@ -104,10 +101,7 @@ describe('server-side-tools: extractToolCalls', () => {
             }
           ],
           stop_reason: 'tool_use'
-        }
-      } as any,
-      { requestId: 'req-anthropic-tool-use-id' } as any,
-      {}
+        } as any
     ) as any;
 
     const calls = extractToolCalls(chat, 'req-anthropic-tool-use-id');

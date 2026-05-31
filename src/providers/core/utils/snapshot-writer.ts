@@ -40,6 +40,7 @@ type ProviderSnapshotWriteOptions = {
   clientRequestId?: string;
   providerKey?: string;
   providerId?: string;
+  metadata?: Record<string, unknown>;
   forceLocalDiskWriteWhenDisabled?: boolean;
 };
 
@@ -490,7 +491,8 @@ async function mirrorSnapshotToLocalDisk(input: ProviderSnapshotPersistInput): P
     endpoint: input.endpoint,
     requestId: input.requestId,
     groupRequestId: input.groupRequestId,
-    providerKey: input.providerToken || undefined
+    providerKey: input.providerToken || undefined,
+    ...(typeof input.entryPort === 'number' ? { entryPort: input.entryPort, matchedPort: input.entryPort } : {})
   });
   const safeStage = input.stage.replace(/[^\w.-]/g, '_') || 'snapshot';
   await writeCanonicalSnapshotFileIfMissing(dir, `${safeStage}.json`, JSON.stringify(input.payload, null, 2));
@@ -505,6 +507,7 @@ async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Pro
       requestId: input.requestId,
       groupRequestId: input.groupRequestId,
       providerKey: input.providerToken || undefined,
+      entryPort: input.entryPort,
       data: input.payload,
       verbosity: 'verbose'
     });
@@ -526,6 +529,7 @@ function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions
   const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
   const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
+  const entryPort = resolveProviderSnapshotEntryPort(options.metadata);
   const payload = coerceSnapshotPayloadForWrite(stage, buildSnapshotPayload({
     stage,
     data: options.data,
@@ -535,11 +539,36 @@ function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions
       ...(options.entryEndpoint ? { entryEndpoint: options.entryEndpoint } : {}),
       ...(options.clientRequestId ? { clientRequestId: options.clientRequestId } : {}),
       ...(options.providerKey ? { providerKey: options.providerKey } : {}),
-      ...(options.providerId ? { providerId: options.providerId } : {})
+      ...(options.providerId ? { providerId: options.providerId } : {}),
+      ...(typeof entryPort === 'number' ? { entryPort, matchedPort: entryPort } : {}),
+      ...(options.metadata ? { requestMetadata: options.metadata } : {})
     }
   }));
 
-  return { endpoint, folder, stage, requestId, groupRequestId, providerToken, payload };
+  return { endpoint, folder, stage, requestId, groupRequestId, providerToken, payload, entryPort };
+}
+
+function resolveProviderSnapshotEntryPort(metadata?: Record<string, unknown>): number | undefined {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+  const portContext = metadata.portContext && typeof metadata.portContext === 'object'
+    ? metadata.portContext as Record<string, unknown>
+    : undefined;
+  const candidates = [
+    metadata.entryPort,
+    metadata.matchedPort,
+    metadata.localPort,
+    portContext?.matchedPort,
+    portContext?.localPort
+  ];
+  for (const value of candidates) {
+    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.floor(numeric);
+    }
+  }
+  return undefined;
 }
 
 export function __resetProviderSnapshotErrorBufferForTests(): void {
@@ -645,6 +674,7 @@ type StreamSnapshotOptions = {
   providerKey?: string;
   providerId?: string;
   extra?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 };
 
 export function shouldCaptureProviderStreamSnapshots(): boolean {
@@ -723,7 +753,8 @@ export function attachProviderSseSnapshotStream(
       entryEndpoint: options.entryEndpoint,
       clientRequestId: options.clientRequestId,
       providerKey: options.providerKey,
-      providerId: options.providerId
+      providerId: options.providerId,
+      metadata: options.metadata
     }).catch((snapshotError) => {
       logSnapshotNonBlockingError(`writeProviderSnapshot(sse):${options.requestId}`, snapshotError);
     });

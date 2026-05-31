@@ -253,6 +253,60 @@ describe('servertool followup dispatch helper', () => {
     expect(result).toEqual({});
   });
 
+  it('does not start servertool followup when client abort signal is already closed', async () => {
+    const controller = new AbortController();
+    controller.abort(Object.assign(new Error('CLIENT_RESPONSE_CLOSED'), {
+      code: 'CLIENT_DISCONNECTED',
+      name: 'AbortError'
+    }));
+    const executeNested = jest.fn(async () => ({ status: 200, body: { unexpected: true } }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await expect(executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_client_aborted_before_start',
+      body: { input: 'continue' },
+      metadata: { __rt: { serverToolFollowup: true } },
+      baseMetadata: { clientAbortSignal: controller.signal },
+      executeNested
+    })).rejects.toMatchObject({ code: 'CLIENT_DISCONNECTED' });
+
+    expect(mockRunClientInjectionFlowBeforeReenter).not.toHaveBeenCalled();
+    expect(executeNested).not.toHaveBeenCalled();
+  });
+
+  it('preserves live client abort signal into nested followup metadata', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const controller = new AbortController();
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: {
+        aborted: input.metadata?.clientAbortSignal?.aborted === true,
+        sameSignal: input.metadata?.clientAbortSignal === controller.signal
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    const result = await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_preserve_abort_signal',
+      body: { input: 'continue' },
+      metadata: { __rt: { serverToolFollowup: true } },
+      baseMetadata: { clientAbortSignal: controller.signal },
+      executeNested
+    });
+
+    expect(result.body).toMatchObject({ aborted: false, sameSignal: true });
+  });
+
   it('client inject dispatch uses the same normalized metadata builder', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: true });
 

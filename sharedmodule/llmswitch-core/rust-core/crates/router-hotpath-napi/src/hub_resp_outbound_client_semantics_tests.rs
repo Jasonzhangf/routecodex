@@ -124,6 +124,23 @@ fn build_responses_payload_from_chat_filters_executed_tool_outputs_from_required
 }
 
 #[test]
+fn build_responses_payload_from_chat_fails_fast_when_choices_missing() {
+    let payload = serde_json::json!({
+        "id": "raw_nonstandard_response",
+        "message": "upstream returned nonstandard payload"
+    });
+
+    let error = build_responses_payload_from_chat_core(
+        &payload,
+        Some("req_failed_model"),
+        &serde_json::json!({ "model": "mimo-v2.5", "toolsRaw": [] }),
+    )
+    .unwrap_err();
+
+    assert!(error.contains("upstream returned nonstandard payload"));
+}
+
+#[test]
 fn build_responses_payload_from_chat_filters_native_tool_output_id_alias_from_required_action() {
     let payload = serde_json::json!({
         "id": "resp_native_completed",
@@ -1041,7 +1058,10 @@ fn build_responses_payload_from_chat_preserves_deepseek_reasoning_before_tool_ca
     .expect("build responses payload");
 
     let output_items = output["output"].as_array().expect("output array");
-    assert_eq!(output_items[0]["type"], Value::String("reasoning".to_string()));
+    assert_eq!(
+        output_items[0]["type"],
+        Value::String("reasoning".to_string())
+    );
     assert_eq!(
         output_items[0]["content"][0]["text"],
         Value::String("Need original upstream reasoning before calling pwd.".to_string())
@@ -1050,7 +1070,10 @@ fn build_responses_payload_from_chat_preserves_deepseek_reasoning_before_tool_ca
         output_items[1]["type"],
         Value::String("function_call".to_string())
     );
-    assert_eq!(output_items[1]["name"], Value::String("exec_command".to_string()));
+    assert_eq!(
+        output_items[1]["name"],
+        Value::String("exec_command".to_string())
+    );
 }
 
 #[test]

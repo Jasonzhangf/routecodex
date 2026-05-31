@@ -42,6 +42,13 @@ const logHttpRequestExecutorNonBlockingError = (
 
 const MAX_SSE_BUSINESS_ERROR_PEEK_BYTES = 64 * 1024;
 
+function readProviderSnapshotMetadata(context: ProviderContext): Record<string, unknown> | undefined {
+  const metadata = (context as { metadata?: unknown }).metadata;
+  return metadata && typeof metadata === 'object'
+    ? metadata as Record<string, unknown>
+    : undefined;
+}
+
 function parseFirstSseDataPayload(frame: string): UnknownObject | undefined {
   const dataLines = frame
     .split('\n')
@@ -247,7 +254,8 @@ export class HttpRequestExecutor {
       routeName: context.routeName,
       clientRequestId,
       providerKey: context.providerKey,
-      providerId: context.providerId
+      providerId: context.providerId,
+      metadata: readProviderSnapshotMetadata(context)
     });
 
 
@@ -275,6 +283,7 @@ export class HttpRequestExecutor {
       clientRequestId?: string;
       providerKey?: string;
       providerId?: string;
+      metadata?: Record<string, unknown>;
     }
   ): Promise<void> {
     const debug = shouldCaptureVisionDebug(processedRequest, {
@@ -295,7 +304,8 @@ export class HttpRequestExecutor {
         entryEndpoint: options.entryEndpoint,
         clientRequestId: options.clientRequestId ?? options.requestId,
         providerKey: options.providerKey,
-        providerId: options.providerId
+        providerId: options.providerId,
+        metadata: options.metadata
       });
     } catch (snapshotError) {
       logHttpRequestExecutorNonBlockingError('captureVisionDebugRequest.provider-body-debug', snapshotError, {
@@ -328,7 +338,8 @@ export class HttpRequestExecutor {
         entryEndpoint: requestInfo.entryEndpoint,
         clientRequestId: requestInfo.clientRequestId,
         providerKey: context.providerKey,
-        providerId: context.providerId
+        providerId: context.providerId,
+        metadata: readProviderSnapshotMetadata(context)
       });
     } catch (snapshotError) {
       logHttpRequestExecutorNonBlockingError('snapshotProviderRequest.provider-request', snapshotError, {
@@ -480,7 +491,8 @@ export class HttpRequestExecutor {
                   entryEndpoint: requestInfo.entryEndpoint,
                   clientRequestId: requestInfo.clientRequestId,
                   providerKey: context.providerKey,
-                  providerId: context.providerId
+                  providerId: context.providerId,
+                  metadata: readProviderSnapshotMetadata(context)
                 })
               : businessCheckedStream;
             const wrapped = await this.deps.wrapUpstreamSseResponse(streamForHost, context);
@@ -498,7 +510,8 @@ export class HttpRequestExecutor {
                 entryEndpoint: requestInfo.entryEndpoint,
                 clientRequestId: requestInfo.clientRequestId,
                 providerKey: context.providerKey,
-                providerId: context.providerId
+                providerId: context.providerId,
+                metadata: readProviderSnapshotMetadata(context)
               });
             } catch (snapshotError) {
               logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response.sse', snapshotError, {
@@ -537,7 +550,8 @@ export class HttpRequestExecutor {
               entryEndpoint: requestInfo.entryEndpoint,
               clientRequestId: requestInfo.clientRequestId,
               providerKey: context.providerKey,
-              providerId: context.providerId
+              providerId: context.providerId,
+              metadata: readProviderSnapshotMetadata(context)
             })
           : businessCheckedStream;
         const wrapped = await this.deps.wrapUpstreamSseResponse(streamForHost, context);
@@ -555,7 +569,8 @@ export class HttpRequestExecutor {
             entryEndpoint: requestInfo.entryEndpoint,
             clientRequestId: requestInfo.clientRequestId,
             providerKey: context.providerKey,
-            providerId: context.providerId
+            providerId: context.providerId,
+            metadata: readProviderSnapshotMetadata(context)
           });
         } catch (snapshotError) {
           logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response.sse.prepared', snapshotError, {
@@ -585,7 +600,8 @@ export class HttpRequestExecutor {
         entryEndpoint: requestInfo.entryEndpoint,
         clientRequestId: requestInfo.clientRequestId,
         providerKey: context.providerKey,
-        providerId: context.providerId
+        providerId: context.providerId,
+        metadata: readProviderSnapshotMetadata(context)
       });
     } catch (snapshotError) {
       logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response', snapshotError, {

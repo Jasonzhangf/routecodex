@@ -111,15 +111,56 @@ fn execute_hub_pipeline_json_serializes_response_path_errors() {
     let output: serde_json::Value =
         serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
 
-    assert_eq!(output.get("success").and_then(|value| value.as_bool()), Some(false));
     assert_eq!(
-        output.pointer("/error/code").and_then(|value| value.as_str()),
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        output
+            .pointer("/error/code")
+            .and_then(|value| value.as_str()),
         Some("hub_pipeline_error")
     );
     assert!(output
         .pointer("/error/message")
         .and_then(|value| value.as_str())
         .is_some_and(|message| message.contains("choices array")));
+}
+
+#[test]
+fn anthropic_response_remaps_to_openai_responses_client_payload() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-anthropic-responses-remap".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "anthropic-messages".to_string(),
+            payload: json!({
+                "id": "msg_anthropic_remap_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "mimo-v2.5",
+                "content": [{ "type": "text", "text": "anthropic response ok" }],
+                "stop_reason": "end_turn",
+                "usage": { "input_tokens": 7, "output_tokens": 3 }
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let payload = output.payload.unwrap();
+    assert_eq!(payload["object"], json!("response"));
+    assert_eq!(payload["status"], json!("completed"));
+    assert_eq!(payload["model"], json!("mimo-v2.5"));
+    assert!(payload.to_string().contains("anthropic response ok"));
 }
 
 #[test]
@@ -175,7 +216,10 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
         .unwrap();
     assert_eq!(runtime_effect.payload["requestId"], json!("req-stream-1"));
     assert_eq!(runtime_effect.payload["payload"], payload);
-    assert_eq!(runtime_effect.payload["keepForSubmitToolOutputs"], json!(false));
+    assert_eq!(
+        runtime_effect.payload["keepForSubmitToolOutputs"],
+        json!(false)
+    );
 }
 
 #[test]
@@ -212,11 +256,16 @@ fn response_stop_with_runtime_callbacks_returns_servertool_effect_plan() {
         .effect_plan
         .effects
         .iter()
-        .find(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction"))
+        .find(|effect| {
+            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+        })
         .unwrap();
     assert_eq!(effect.payload["action"], json!("requireReenterPipeline"));
     assert_eq!(effect.payload["reason"], json!("stop_eligible_followup"));
-    assert_eq!(effect.payload["requestId"], json!("req-servertool-effect-1"));
+    assert_eq!(
+        effect.payload["requestId"],
+        json!("req-servertool-effect-1")
+    );
 }
 
 #[test]

@@ -10,6 +10,7 @@ import { resolveTmuxSessionIdAndSource } from './session-scope-resolution.js';
 import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
 import { isTmuxSessionAlive, resolveTmuxSessionWorkingDirectory } from './tmux-session-probe.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
+import { preserveLiveClientAbortCarriers } from './executor/request-executor-client-abort-block.js';
 
 
 function logExecutorMetadataNonBlocking(
@@ -571,13 +572,7 @@ export function decorateMetadataForAttempt(
   excludedProviderKeys: Set<string>
 ): Record<string, unknown> {
   const clone = cloneMetadata(base);
-  const clientConnectionState =
-    base.clientConnectionState && typeof base.clientConnectionState === 'object'
-      ? base.clientConnectionState
-      : undefined;
-  if (clientConnectionState) {
-    clone.clientConnectionState = clientConnectionState;
-  }
+  preserveLiveClientAbortCarriers({ source: base, target: clone });
   clone.retryAttempt = attempt;
   if (excludedProviderKeys.size > 0) {
     clone.excludedProviderKeys = Array.from(excludedProviderKeys);

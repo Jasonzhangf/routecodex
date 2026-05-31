@@ -1,3 +1,4 @@
+pub(crate) mod anthropic_chat_response;
 pub(crate) mod anthropic_full_response;
 pub(crate) mod anthropic_response;
 pub(crate) mod chat_reasoning;

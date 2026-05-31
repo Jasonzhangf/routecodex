@@ -23,7 +23,27 @@ function buildStreamContractProbeBody(convertedBody: unknown): Record<string, un
       probe[key] = source[key];
     }
   }
-  return Object.keys(probe).length > 0 ? probe : undefined;
+  return isMeaningfulStreamContractProbeBody(probe) ? probe : undefined;
+}
+
+function isMeaningfulStreamContractProbeBody(probe: Record<string, unknown>): boolean {
+  if (Object.keys(probe).length === 0) {
+    return false;
+  }
+  if (Array.isArray(probe.choices) && probe.choices.length > 0) {
+    return true;
+  }
+  if (probe.required_action && typeof probe.required_action === 'object') {
+    return true;
+  }
+  if (typeof probe.output_text === 'string' && probe.output_text.trim()) {
+    return true;
+  }
+  if (Array.isArray(probe.output) && probe.output.length > 0) {
+    return true;
+  }
+  const status = typeof probe.status === 'string' ? probe.status.trim().toLowerCase() : '';
+  return status !== 'completed' && status !== 'stop';
 }
 
 export function buildServerToolSseWrapperBody(args: {

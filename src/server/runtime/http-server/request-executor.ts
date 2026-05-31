@@ -116,6 +116,7 @@ import {
   throwIfClientAbortSignalAborted,
   waitWithClientAbortSignal
 } from './executor/request-executor-abort.js';
+import { resolveClientAbortSignalFromCarrier } from './executor/request-executor-client-abort-block.js';
 import {
   peekScopedErrorBackoffWaitMs,
   recordScopedErrorBackoff,
@@ -1351,7 +1352,7 @@ export class HubRequestExecutor implements RequestExecutor {
                 waitMs: pendingScopedWaitMs,
                 scope: scopedBackoffKey
               });
-              await waitScopedErrorBackoffWithGate(scopedBackoffKey, getClientConnectionAbortSignal(input.metadata));
+              await waitScopedErrorBackoffWithGate(scopedBackoffKey, resolveClientAbortSignalFromCarrier(input.metadata));
               logStage('server.global_error_backoff_wait.completed', providerRequestId, {
                 waitMs: pendingScopedWaitMs,
                 scope: scopedBackoffKey
