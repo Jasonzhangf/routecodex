@@ -3,11 +3,9 @@
 | Flow | Stage ID | Purpose | Protocols |
 |------|----------|---------|-----------|
 | req_inbound | req_inbound_stage1_format_parse | Format adapter parses raw payload into `FormatEnvelope`. | openai-responses, anthropic-messages, gemini-chat |
-| req_inbound | req_inbound_stage2_semantic_map | Semantic mapper converts FormatEnvelope → ChatEnvelope with bridge policies. | openai-responses, anthropic-messages, gemini-chat |
 | req_inbound | req_inbound_stage3_context_capture | Capture Responses context (tools/input/response_format) for outbound reuse. | openai-responses |
 | req_process | req_process_stage1_tool_governance | Run tool filters + ToolGovernanceEngine, emit ProcessedRequest. | all hub protocols |
 | req_process | req_process_stage2_route_select | VirtualRouterEngine routing and metadata attachment. | all hub protocols |
-| req_outbound | req_outbound_stage1_semantic_map | ChatEnvelope → FormatEnvelope using stored context + target metadata. | openai-responses, anthropic-messages, gemini-chat |
 | req_outbound | req_outbound_stage2_format_build | FormatEnvelope → provider wire JSON. | openai-responses, anthropic-messages, gemini-chat |
 | resp_inbound | resp_inbound_stage1_sse_decode | Decode provider SSE stream or annotate passthrough. | all hub protocols |
 | resp_inbound | resp_inbound_stage2_format_parse | Parse provider response JSON into FormatEnvelope. | all hub protocols |

@@ -18,4 +18,4 @@
 - 未找到目标或配置缺失时抛出 Error；需要记录 stage id 以帮助定位配置问题。
 
 **下一步**
-- `req_outbound_stage1_semantic_map`：使用目标 metadata 构建 provider 特定 payload。
+- Rust HubPipeline total API：使用目标 metadata 构建 provider 特定 payload。

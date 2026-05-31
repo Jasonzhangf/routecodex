@@ -17,4 +17,4 @@
 - 非 JSON 或协议字段缺失 → 抛出 `ConversionError` 并终止流水线。
 
 **下一步**
-- `req_inbound_stage2_semantic_map`：使用同一个 `FormatEnvelope` 生成 `ChatEnvelope`。
+- Rust HubPipeline total API：使用同一个请求 envelope 生成 `ChatEnvelope`/标准语义。

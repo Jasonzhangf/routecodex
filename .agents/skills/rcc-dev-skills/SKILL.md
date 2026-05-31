@@ -1670,3 +1670,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 HubPipeline Slice5 semantic mapper deletion 精华
 - Slice5 closeout requires deleting both production `operation-table/semantic-mappers/*.ts` and tests that import those concrete mapper classes; keep architecture gate scanning `tests/` so old direct mapper tests cannot hide TS semantic truth after Rust/native migration.
+
+### 2026-05-31 HubPipeline Slice5 operation-table runner deletion 精华
+- After mapper deletion, also remove `operation-table-runner.ts` and dead req semantic stage shells/tests; stage catalog and README references must point to Rust total API, not deleted `req_inbound_stage2_semantic_map` / `req_outbound_stage1_semantic_map` IDs.

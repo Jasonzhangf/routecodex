@@ -505,6 +505,28 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('legacy TS operation-table runner and request semantic stage shells must be physically removed', () => {
+    const sourceRoot = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src');
+    const testRoot = path.join(process.cwd(), 'tests');
+    const legacyFiles = [
+      'conversion/hub/operation-table/operation-table-runner.ts',
+      'conversion/hub/pipeline/stages/req_inbound/req_inbound_stage2_semantic_map/index.ts',
+      'conversion/hub/pipeline/stages/req_inbound/req_inbound_stage2_semantic_map/semantic-lift.ts',
+      'conversion/hub/pipeline/stages/req_inbound/req_inbound_stage2_semantic_map/README.md',
+      'conversion/hub/pipeline/stages/req_outbound/req_outbound_stage1_semantic_map/index.ts',
+      'conversion/hub/pipeline/stages/req_outbound/req_outbound_stage1_semantic_map/context-merge.ts',
+      'conversion/hub/pipeline/stages/req_outbound/req_outbound_stage1_semantic_map/README.md',
+    ];
+    const legacyTests = [
+      'compat/anthropic-tool-alias-map.spec.ts',
+      'sharedmodule/req-inbound-stage2-tool-shape-normalization.spec.ts',
+    ];
+    const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(sourceRoot, relativePath)));
+    const existingTests = legacyTests.filter((relativePath) => fs.existsSync(path.join(testRoot, relativePath)));
+
+    expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
+  });
+
   it('hub request mainline must enter Rust total API without request-stage mapper hooks', () => {
     const pipelineRoot = path.join(
       process.cwd(),
