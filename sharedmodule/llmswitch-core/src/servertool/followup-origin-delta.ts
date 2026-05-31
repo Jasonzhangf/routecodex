@@ -6,88 +6,49 @@ import { loadOriginSnapshot } from './origin-request-store.js';
 import { dropToolByFunctionName, extractCapturedChatSeed } from './followup-seed.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 
-export type FollowupOriginSeed = {
-  model?: string;
-  messages: JsonObject[];
-  tools?: JsonObject[];
-  parameters?: Record<string, unknown>;
-};
+export type FollowupOriginSeed = { model?: string; messages: JsonObject[]; tools?: JsonObject[]; parameters?: Record<string, unknown> };
 
-interface CapturedResponsesToolOutputEntry extends JsonObject {
-  tool_call_id?: string;
-  call_id?: string;
-  id?: string;
-  output?: JsonValue;
-  name?: string;
-}
+interface CapturedResponsesToolOutputEntry extends JsonObject { tool_call_id?: string; call_id?: string; id?: string; output?: JsonValue; name?: string }
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
-function extractCapturedToolOutputs(
-  responsesContext?: ResponsesRequestContext,
-): CapturedResponsesToolOutputEntry[] {
-  if (!responsesContext || typeof responsesContext !== 'object') {
-    return [];
-  }
-  const snapshot = (responsesContext as Record<string, unknown>).__captured_tool_results;
+function extractCapturedToolOutputs(responsesContext?: ResponsesRequestContext): CapturedResponsesToolOutputEntry[] {
+  const snapshot = responsesContext && typeof responsesContext === 'object'
+    ? (responsesContext as Record<string, unknown>).__captured_tool_results
+    : undefined;
   if (!Array.isArray(snapshot) || !snapshot.length) {
     return [];
   }
-  const entries: CapturedResponsesToolOutputEntry[] = [];
-  for (const entry of snapshot) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-    const row = entry as Record<string, unknown>;
-    const id = typeof row.tool_call_id === 'string' && row.tool_call_id.trim().length
-      ? row.tool_call_id.trim()
-      : typeof row.call_id === 'string' && row.call_id.trim().length
-        ? row.call_id.trim()
-        : undefined;
-    if (!id) {
-      continue;
-    }
-    entries.push({
-      tool_call_id: id,
-      id,
-      output: row.output as JsonValue,
-      ...(typeof row.name === 'string' ? { name: row.name } : {}),
-    });
-  }
-  return entries;
+  return snapshot.flatMap((entry): CapturedResponsesToolOutputEntry[] => {
+    const row = asRecord(entry);
+    const id = readFirstText(row, ['tool_call_id', 'call_id']);
+    return id ? [{ tool_call_id: id, id, output: row?.output as JsonValue, ...(typeof row?.name === 'string' ? { name: row.name } : {}) }] : [];
+  });
+}
+
+function readFirstText(record: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  return keys
+    .map((key) => record?.[key])
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    ?.trim();
 }
 
 function readTextPart(entry: unknown): string {
   const record = asRecord(entry);
-  if (!record) {
-    return '';
-  }
-  if (typeof record.text === 'string') {
-    return record.text;
-  }
-  if (typeof record.output_text === 'string') {
-    return record.output_text;
-  }
-  return '';
+  return typeof record?.text === 'string' ? record.text : typeof record?.output_text === 'string' ? record.output_text : '';
 }
 
 export function extractAssistantFollowupMessage(finalChatResponse: JsonObject): JsonObject | null {
   const record = finalChatResponse as Record<string, unknown>;
   const choices = Array.isArray(record.choices) ? (record.choices as Array<Record<string, unknown>>) : [];
-  const firstChoice =
-    choices[0] && typeof choices[0] === 'object' && !Array.isArray(choices[0]) ? choices[0] : undefined;
-  const choiceMessage =
-    firstChoice?.message && typeof firstChoice.message === 'object' && !Array.isArray(firstChoice.message)
-      ? (firstChoice.message as Record<string, unknown>)
-      : undefined;
+  const firstChoice = choices[0] && typeof choices[0] === 'object' && !Array.isArray(choices[0]) ? choices[0] : undefined;
+  const choiceMessage = firstChoice?.message && typeof firstChoice.message === 'object' && !Array.isArray(firstChoice.message) ? (firstChoice.message as Record<string, unknown>) : undefined;
   if (choiceMessage && typeof choiceMessage.role === 'string') {
     return cloneJson(choiceMessage as unknown as JsonObject);
   }
@@ -149,18 +110,12 @@ export function loadFollowupOriginSeed(adapterContext: AdapterContext): Followup
 
 function appendUserText(messages: JsonObject[], text: string): void {
   const trimmed = text.trim();
-  if (!trimmed) {
-    return;
-  }
-  messages.push({ role: 'user', content: trimmed });
+  if (trimmed) messages.push({ role: 'user', content: trimmed });
 }
 
 function injectSystemText(messages: JsonObject[], text: string): void {
   const trimmed = text.trim();
-  if (!trimmed) {
-    return;
-  }
-  messages.push({ role: 'system', content: trimmed });
+  if (trimmed) messages.push({ role: 'system', content: trimmed });
 }
 
 function appendAssistantMessage(messages: JsonObject[], finalChatResponse: JsonObject, required?: boolean): boolean {
@@ -180,11 +135,9 @@ function extractChatToolOutputs(finalChatResponse: JsonObject): Array<{ tool_cal
   for (const entry of outputs) {
     const record = asRecord(entry);
     if (!record) continue;
-    const toolCallId = typeof record.tool_call_id === 'string' && record.tool_call_id.trim()
-      ? record.tool_call_id.trim()
-      : undefined;
+    const toolCallId = readFirstText(record, ['tool_call_id']);
     const content = Object.prototype.hasOwnProperty.call(record, 'content') ? record.content : record.output;
-    const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : undefined;
+    const name = readFirstText(record, ['name']);
     const argumentsText = typeof record.arguments === 'string' ? record.arguments : undefined;
     out.push({
       ...(toolCallId ? { tool_call_id: toolCallId } : {}),
@@ -209,12 +162,7 @@ function prunePendingToolCallsForOutputs(messages: JsonObject[], toolCallIds: Se
       continue;
     }
     const keptCalls = calls.filter((call) => {
-      const record = asRecord(call);
-      const id = typeof record?.id === 'string' && record.id.trim()
-        ? record.id.trim()
-        : typeof record?.call_id === 'string' && record.call_id.trim()
-          ? record.call_id.trim()
-          : '';
+      const id = readFirstText(asRecord(call), ['id', 'call_id']) ?? '';
       return !id || !toolCallIds.has(id);
     });
     if (keptCalls.length > 0) {
@@ -249,7 +197,7 @@ function appendToolMessagesFromToolOutputs(messages: JsonObject[], adapterContex
   {
     const toolCalls = outputs
       .map((entry) => {
-        const toolCallId = typeof entry.tool_call_id === 'string' && entry.tool_call_id.trim() ? entry.tool_call_id.trim() : '';
+        const toolCallId = typeof entry.tool_call_id === 'string' ? entry.tool_call_id.trim() : '';
         const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'tool';
         if (!toolCallId) return null;
         return {

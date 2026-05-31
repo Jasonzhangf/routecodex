@@ -4,9 +4,13 @@ mod direct_model;
 mod key_utils;
 mod metadata;
 mod selection;
+mod source_normalizer;
+mod target_expander;
 
 #[allow(unused_imports)]
 pub(crate) use bootstrap::{bootstrap_virtual_router_routing_json, NormalizedRoutePoolConfig};
+pub(crate) use source_normalizer::normalize_routing;
+pub(crate) use target_expander::expand_routing_table;
 #[allow(unused_imports)]
 pub(crate) use config::{
     build_route_queue, default_pool_supports_capability, filter_pools_by_capability, parse_routing,

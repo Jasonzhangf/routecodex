@@ -935,4 +935,205 @@ mod tests {
             fourth.cooldown_expires_at.expect("fourth cooldown expiry") - (third_expiry + 4);
         assert!(fourth_ttl > 9 * 60_000 && fourth_ttl <= 11 * 60_000);
     }
+
+    // ========== 黑盒红测：锁定 ProviderHealthManager 公共行为 ==========
+
+    #[test]
+    fn health_new_creates_empty_manager() {
+        let manager = ProviderHealthManager::new();
+        let snapshot = manager.snapshot();
+        assert!(snapshot.is_empty());
+    }
+
+    #[test]
+    fn health_register_providers_appears_in_snapshot() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&[
+            "provider-a".to_string(),
+            "provider-b".to_string(),
+        ]);
+        let snapshot = manager.snapshot();
+        assert_eq!(snapshot.len(), 2);
+        let keys: Vec<&str> = snapshot.iter().map(|s| s.provider_key.as_str()).collect();
+        assert!(keys.contains(&"provider-a"));
+        assert!(keys.contains(&"provider-b"));
+    }
+
+    #[test]
+    fn health_record_failure_increments_count() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+
+        manager.record_failure("test-p", Some("err1".to_string()), 1000);
+        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        assert_eq!(s.failure_count, 1);
+        assert_eq!(s.state, "healthy");
+
+        manager.record_failure("test-p", Some("err2".to_string()), 2000);
+        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        assert_eq!(s.failure_count, 2);
+    }
+
+    #[test]
+    fn health_record_success_resets_failure_count() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+
+        manager.record_failure("test-p", Some("err1".to_string()), 1000);
+        manager.record_failure("test-p", Some("err2".to_string()), 2000);
+        manager.record_success("test-p");
+
+        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        assert_eq!(s.failure_count, 0);
+        assert_eq!(s.state, "healthy");
+    }
+
+    #[test]
+    fn health_cooldown_provider_makes_unavailable() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+
+        manager.cooldown_provider("test-p", Some("manual".to_string()), Some(5000), 1000);
+        assert!(!manager.is_available("test-p", 3000));
+        assert!(manager.is_available("test-p", 6000));
+    }
+
+    #[test]
+    fn health_trip_provider_marks_tripped() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+
+        manager.trip_provider("test-p", Some("manual".to_string()), Some(60_000), 1000);
+        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        assert_eq!(s.state, "tripped");
+        assert!(!manager.is_available("test-p", 1000 + 30_000));
+        assert!(manager.is_available("test-p", 1000 + 60_001));
+    }
+
+    #[test]
+    fn health_snapshot_returns_all_registered_providers() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["a".to_string(), "b".to_string(), "c".to_string()]);
+
+        let snapshot = manager.snapshot();
+        assert_eq!(snapshot.len(), 3);
+    }
+
+    #[test]
+    fn health_snapshot_for_unregistered_is_empty() {
+        let mut manager = ProviderHealthManager::new();
+        let snapshot = manager.snapshot();
+        assert!(snapshot.is_empty());
+    }
+
+    #[test]
+    fn health_config_returns_defaults() {
+        let mut manager = ProviderHealthManager::new();
+        let config = manager.config();
+        assert!(config.cooldown_ms > 0);
+    }
+
+    #[test]
+    fn health_cooldown_remaining_ms_during_cooldown() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+
+        manager.cooldown_provider("test-p", Some("manual".to_string()), Some(5000), 60_000);
+        let remaining = manager.cooldown_remaining_ms("test-p", 30_000);
+        assert!(remaining.is_some());
+        assert!(remaining.unwrap() > 0);
+    }
+
+    #[test]
+    fn health_cooldown_remaining_ms_after_cooldown() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+
+        manager.cooldown_provider("test-p", Some("manual".to_string()), Some(5000), 60_000);
+        let remaining = manager.cooldown_remaining_ms("test-p", 70_000);
+        assert!(remaining.is_none() || remaining == Some(0));
+    }
+
+    #[test]
+    fn health_record_http_502_failure_sets_cooldown() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+
+        // Need 3 failures to reach threshold.max(3)
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), 1000);
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), 2000);
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), 3000);
+        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        assert_eq!(s.state, "tripped");
+        assert!(s.cooldown_expires_at.is_some());
+    }
+
+    #[test]
+    fn health_record_recoverable_failure_sets_cooldown() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+
+        // Need multiple failures to trip
+        manager.record_recoverable_failure("test-p", Some("timeout".to_string()), 1000);
+        manager.record_recoverable_failure("test-p", Some("timeout".to_string()), 2000);
+        manager.record_recoverable_failure("test-p", Some("timeout".to_string()), 3000);
+        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        assert_eq!(s.state, "tripped");
+    }
+
+    #[test]
+    fn health_export_import_roundtrip() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+        // Use persisted 503 daily cooldown (only this type is exported)
+        manager.cooldown_provider_until_midnight_persisted("test-p", 1000, 31_000);
+
+        let exported = manager.export_persistable_state(2000);
+        assert!(exported.is_object(), "exported state should be an object");
+        let cooldowns = exported.get("providerCooldowns").unwrap().as_array().unwrap();
+        assert_eq!(cooldowns.len(), 1, "should export one cooldown entry");
+
+        let mut manager2 = ProviderHealthManager::new();
+        // Use allow_persisted_reprobe=true so import doesn't skip existing healthy entries
+        manager2.import_persistable_state(&exported, 2000, true);
+
+        // After import, cooldown should be restored
+        let s = manager2.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        assert!(s.cooldown_expires_at.is_some(), "cooldown should be restored after import");
+    }
+
+    #[test]
+    fn health_clear_runtime_state_resets_to_healthy() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+
+        manager.record_failure("test-p", Some("err".to_string()), 1000);
+        manager.cooldown_provider("test-p", Some("manual".to_string()), Some(2000), 60_000);
+
+        manager.clear_runtime_state();
+        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        assert_eq!(s.state, "healthy");
+        assert_eq!(s.failure_count, 0);
+    }
+
+    #[test]
+    fn health_describe_state_for_unregistered_is_none() {
+        let manager = ProviderHealthManager::new();
+        assert!(manager.describe_state("nonexistent").is_none());
+    }
+
+    #[test]
+    fn health_cooldown_until_midnight_persisted_sets_cooldown() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+
+        manager.cooldown_provider_until_midnight_persisted("test-p", 1000, 60_000);
+        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        assert_eq!(s.state, "tripped");
+        assert!(s.cooldown_expires_at.is_some());
+        // Should be available after cooldown
+        let expiry = s.cooldown_expires_at.unwrap();
+        assert!(manager.is_available("test-p", expiry + 1));
+    }
+
 }

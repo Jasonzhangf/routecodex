@@ -278,5 +278,4 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
     expect((wrappedBody as Record<string, unknown>).output_text).toBeUndefined();
     expect((wrappedBody as Record<string, unknown>).status).toBeUndefined();
   });
-
 });

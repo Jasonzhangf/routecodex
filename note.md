@@ -13521,3 +13521,22 @@ Using skills: coding-principals + rcc-dev-skills
 - Red gate: `hub-pipeline-stage-residue-audit` required legacy normalize-request block files physically absent; first run failed on 8 dead files.
 - Action: removed unused normalize-request block/utils/governance files; active `hub-pipeline-normalize-request.ts` remains thin shell calling `runHubPipelineStageWithNative({ stage: 'normalizeRequest' })` plus SSE materialization glue.
 - Verification: residue audit PASS 31/31; `pnpm -C sharedmodule/llmswitch-core run build` PASS.
+
+## 2026-05-31 handoff continue
+- 已用临时 index 提交 `50614c0c9 fix(responses): reject replayed completed tool calls` 与 `1a2ce8336 fix(windsurf): clear busy cascade binding`，避免混入脏 index。
+- VR Rust 化草稿当前定向 Jest 红：`virtual-router-servertool-routing` serverToolsDisabled 未跳过、`virtual-router-context-fallback` 冷却/单 provider guard 语义不一致；暂不提交。
+- HubPipeline closeout 继续：补 `hub-pipeline-stage-residue-audit` 覆盖 provider-payload/working-request block 残留，红测命中 8 个旧 block + 1 个旧单测；删除后 gate 32/32 PASS，`pnpm -C sharedmodule/llmswitch-core run build` PASS。
+
+## 2026-06-01 HubPipeline closeout continuation
+- 补 `hub-pipeline-stage-residue-audit` 覆盖 adapter-context / inbound setup / test seam TS 残留，红测命中 7 个旧文件 + 1 个旧单测。
+- 删除 `hub-pipeline-adapter-context*`、`hub-pipeline-chat-process-entry-blocks.ts`、`hub-pipeline-execute-request-stage-inbound-setup.ts`、`hub-pipeline-test-seams.ts` 与 `hub-pipeline-adapter-context.spec.ts` 后，residue gate 33/33 PASS，`pnpm -C sharedmodule/llmswitch-core run build` PASS。
+- 补 `hub-pipeline-stage-residue-audit` 覆盖 policy/governance utility 残留，红测命中 `hub-pipeline-chat-process-governance-utils.ts`、`hub-pipeline-heavy-input-fastpath.ts`、`hub-pipeline-max-tokens-policy.ts`、`hub-pipeline-snapshot-recorder-blocks.ts` 与 2 个旧单测；删除后 residue gate 34/34 PASS，llmswitch-core build PASS。
+- 补 `hub-pipeline-stage-residue-audit` 覆盖 chat-process request utility 残留，红测命中 `hub-pipeline-chat-process-request-utils.ts` 与已坏的 `hub-pipeline-chat-process-shared.spec.ts`；将唯一需要的 `attachHubStageTopSummary` 移入 `hub-stage-timing.ts` 后删除旧 util/单测，residue gate 35/35 PASS，llmswitch-core build PASS。
+- 补 `hub-pipeline-stage-residue-audit` 覆盖 runtime block duplicate，红测命中 `hub-pipeline-class-runtime-blocks.ts`、`hub-pipeline-runtime-blocks.ts`、`hub-pipeline-runtime-execute-blocks.ts`、`hub-pipeline-runtime-hooks-blocks.ts`；删除并收紧主线检查范围后 residue gate 36/36 PASS，llmswitch-core build PASS。
+- Slice2 wrapper 收缩：补 gate 禁止 `req_process_stage1_tool_governance` TS wrapper 改写 native `nodeResult.dataProcessed`；Rust `build_node_result` 已生成 messages/tools 计数。删除 TS 二次改写后，residue/deletion Jest 39/39 PASS，Rust `req_process_stage1` 16/16 PASS，llmswitch-core build PASS。
+- build:dev 在干净 HEAD worktree 被 rustification audit 阻塞：新增 TS 文件 `sharedmodule/llmswitch-core/src/servertool/followup-captured-tool-outputs.ts`。已将 helper 内联回既有 `followup-origin-delta.ts`，删除新增文件并加 residue gate；`followup-origin-delta` + hub residue Jest 41/41 PASS，llmswitch-core build PASS。
+
+## 2026-06-01 VR rustification commit verification
+- Remaining worktree after HubPipeline commits is VR rustification scope plus untracked Rust routing split files.
+- `cargo test -p router-hotpath-napi virtual_router` initially failed only on `shared_read_trimmed_string_deletion_gate_removed_gemini_and_virtual_router_local_clones`: Gemini still had local `read_trimmed_string` / `coerce_thought_signature` clone.
+- Fix: `gemini_openai_codec.rs` now imports shared `read_trimmed_string` and removes local thought-signature wrapper clone before committing VR changes.

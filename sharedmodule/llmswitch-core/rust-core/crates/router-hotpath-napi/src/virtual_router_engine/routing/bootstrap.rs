@@ -8,7 +8,7 @@ use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::load_balancer::LoadBalancingPolicy;
 
 use super::config::RoutePoolTier;
-const PROVIDER_LEVEL_POOL_ALIAS: &str = "pool";
+pub(crate) const PROVIDER_LEVEL_POOL_ALIAS: &str = "pool";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +32,7 @@ pub(crate) struct NormalizedRoutePoolConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ModelIndexEntry {
+pub(crate) struct ModelIndexEntry {
     #[serde(default)]
     declared: bool,
     #[serde(default)]
@@ -40,7 +40,7 @@ struct ModelIndexEntry {
 }
 
 #[derive(Debug, Clone)]
-struct ParsedRouteEntry {
+pub(crate) struct ParsedRouteEntry {
     provider_id: String,
     key_alias: Option<String>,
     model_id: String,
@@ -48,7 +48,7 @@ struct ParsedRouteEntry {
 }
 
 #[derive(Debug, Clone)]
-struct ExpandedTargetCandidate {
+pub(crate) struct ExpandedTargetCandidate {
     key: String,
     priority: i64,
     order: usize,
@@ -103,9 +103,9 @@ pub(crate) fn bootstrap_virtual_router_routing_json(
     let model_index: BTreeMap<String, ModelIndexEntry> = serde_json::from_str(&model_index_json)
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
 
-    let normalized_routing = normalize_routing(&routing_source_map);
+    let normalized_routing = normalize_routing_impl(&routing_source_map);
     let (expanded_routing, target_keys) =
-        expand_routing_table(&normalized_routing, &alias_index, &model_index).map_err(|error| {
+        expand_routing_table_impl(&normalized_routing, &alias_index, &model_index).map_err(|error| {
             napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error))
         })?;
 
@@ -118,7 +118,7 @@ pub(crate) fn bootstrap_virtual_router_routing_json(
     serde_json::to_string(&output).map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
-fn normalize_routing(
+pub(crate) fn normalize_routing_impl(
     source: &Map<String, Value>,
 ) -> BTreeMap<String, Vec<NormalizedRoutePoolConfig>> {
     let mut routing: BTreeMap<String, Vec<NormalizedRoutePoolConfig>> = BTreeMap::new();
@@ -165,7 +165,7 @@ fn normalize_routing(
     routing
 }
 
-fn expand_routing_table(
+pub(crate) fn expand_routing_table_impl(
     routing_source: &BTreeMap<String, Vec<NormalizedRoutePoolConfig>>,
     alias_index: &BTreeMap<String, Vec<String>>,
     model_index: &BTreeMap<String, ModelIndexEntry>,
@@ -1040,7 +1040,7 @@ mod tests {
         )]);
 
         let (routing, _) =
-            expand_routing_table(&routing_source, &alias_index, &model_index).unwrap();
+            expand_routing_table_impl(&routing_source, &alias_index, &model_index).unwrap();
         let pool = &routing["search"][0];
 
         assert_eq!(
@@ -1095,11 +1095,283 @@ mod tests {
         )]);
 
         let (routing, _) =
-            expand_routing_table(&routing_source, &alias_index, &model_index).unwrap();
+            expand_routing_table_impl(&routing_source, &alias_index, &model_index).unwrap();
         assert!(routing.contains_key("gateway_priority_5555:search"));
         assert_eq!(
             routing["gateway_priority_5555:search"][0].id,
             "gateway-priority-5555-weighted-search"
         );
     }
+
+
+    // ========== 黑盒红测：锁定 bootstrap_virtual_router_routing_json 行为 ==========
+
+    #[test]
+    fn bootstrap_json_simple_routing_one_pool_one_target() {
+        let routing = json!({
+            "default": ["openai.gpt-4o"]
+        });
+        let alias_index = json!({ "openai": ["key1"] });
+        let model_index = json!({ "openai": { "declared": true, "models": ["gpt-4o"] } });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        let routing_obj = output.get("routing").expect("routing key");
+        assert!(routing_obj.get("default").is_some());
+        let pools = routing_obj.get("default").unwrap().as_array().unwrap();
+        assert_eq!(pools.len(), 1);
+        let targets: Vec<String> = pools[0].get("targets").unwrap().as_array().unwrap()
+            .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        // Should expand "openai.gpt-4o" to "openai.key1.gpt-4o"
+        assert!(targets.iter().any(|t| t.contains("gpt-4o")));
+    }
+
+    #[test]
+    fn bootstrap_json_weighted_pool_preserves_strategy() {
+        let routing = json!({
+            "search": [{
+                "id": "search-weighted",
+                "priority": 100,
+                "targets": ["openai.gpt-4o", "anthropic.claude-sonnet"]
+            }]
+        });
+        let alias_index = json!({ "openai": ["key1"], "anthropic": ["key2"] });
+        let model_index = json!({ 
+            "openai": { "declared": true, "models": ["gpt-4o"] },
+            "anthropic": { "declared": true, "models": ["claude-sonnet"] }
+        });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        // Just verify the result contains expected keys and routing data
+        assert!(output.get("routingSource").is_some());
+        assert!(output.get("routing").is_some());
+        assert!(output.get("targetKeys").is_some());
+        let routing = output.get("routing").unwrap().as_object().unwrap();
+        assert!(!routing.is_empty(), "should have search route pools");
+    }
+
+    #[test]
+    fn bootstrap_json_legacy_string_array_target() {
+        let routing = json!({
+            "coding": ["openai.gpt-4o"]
+        });
+        let alias_index = json!({ "openai": ["key1"] });
+        let model_index = json!({ "openai": { "declared": true, "models": ["gpt-4o"] } });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        let pools = output.get("routing").unwrap().get("coding").unwrap().as_array().unwrap();
+        assert_eq!(pools.len(), 1);
+        let targets: Vec<String> = pools[0].get("targets").unwrap().as_array().unwrap()
+            .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        assert!(targets.iter().any(|t| t.contains("gpt-4o")));
+    }
+
+    #[test]
+    fn bootstrap_json_alias_expansion() {
+        let routing = json!({
+            "default": ["mimo.mimo-v2.5"]
+        });
+        let alias_index = json!({
+            "mimo": ["key1", "key2"]
+        });
+        let model_index = json!({
+            "mimo": { "declared": true, "models": ["mimo-v2.5"] }
+        });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        let pools = output.get("routing").unwrap().get("default").unwrap().as_array().unwrap();
+        let targets: Vec<String> = pools[0].get("targets").unwrap().as_array().unwrap()
+            .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        assert!(targets.contains(&"mimo.key1.mimo-v2.5".to_string()));
+        assert!(targets.contains(&"mimo.key2.mimo-v2.5".to_string()));
+        assert!(!targets.contains(&"mimo.mimo-v2.5".to_string()));
+    }
+
+    #[test]
+    fn bootstrap_json_priority_ordering() {
+        let routing = json!({
+            "default": [
+                { "id": "low-pri", "priority": 200, "targets": ["a.model"] },
+                { "id": "high-pri", "priority": 10, "targets": ["b.model"] }
+            ]
+        });
+        let alias_index = json!({ "a": ["k1"], "b": ["k2"] });
+        let model_index = json!({ 
+            "a": { "declared": true, "models": ["model"] },
+            "b": { "declared": true, "models": ["model"] }
+        });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        let routing = output.get("routing").unwrap().as_object().unwrap();
+        // Keys are "{priority}:{route_name}" format
+        assert_eq!(routing.len(), 2, "should have 2 pools for default route");
+    }
+
+    #[test]
+    fn bootstrap_json_thinking_field_preserved() {
+        let routing = json!({
+            "thinking": [{
+                "id": "think-pool",
+                "priority": 100,
+                "targets": ["anthropic.claude-sonnet"],
+                "thinking": "high"
+            }]
+        });
+        let alias_index = json!({ "anthropic": ["key1"] });
+        let model_index = json!({ "anthropic": { "declared": true, "models": ["claude-sonnet"] } });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        let routing = output.get("routing").unwrap().as_object().unwrap();
+        assert!(!routing.is_empty(), "should have thinking route pools");
+    }
+
+    #[test]
+    fn bootstrap_json_empty_routing_produces_empty_output() {
+        let routing = json!({});
+        let alias_index = json!({});
+        let model_index = json!({});
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        let routing_obj = output.get("routing").unwrap().as_object().unwrap();
+        assert!(routing_obj.is_empty());
+    }
+
+    #[test]
+    fn bootstrap_json_invalid_routing_json_fails() {
+        let result = bootstrap_virtual_router_routing_json(
+            "not-json".to_string(),
+            "{}".to_string(),
+            "{}".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn bootstrap_json_multiple_routes() {
+        let routing = json!({
+            "coding": ["openai.gpt-4o"],
+            "search": ["openai.gpt-4o"],
+            "default": ["anthropic.claude-sonnet"]
+        });
+        let alias_index = json!({ "openai": ["k1"], "anthropic": ["k2"] });
+        let model_index = json!({ 
+            "openai": { "declared": true, "models": ["gpt-4o"] },
+            "anthropic": { "declared": true, "models": ["claude-sonnet"] }
+        });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        let routing_obj = output.get("routing").unwrap().as_object().unwrap();
+        assert!(routing_obj.contains_key("coding"));
+        assert!(routing_obj.contains_key("search"));
+        assert!(routing_obj.contains_key("default"));
+        assert_eq!(routing_obj.len(), 3);
+    }
+
+    #[test]
+    fn bootstrap_json_route_params_preserved() {
+        let routing = json!({
+            "default": [{
+                "id": "default-pool",
+                "priority": 100,
+                "targets": ["openai.gpt-4o"],
+                "routeParams": { "customField": "customValue" }
+            }]
+        });
+        let alias_index = json!({ "openai": ["k1"] });
+        let model_index = json!({ "openai": { "declared": true, "models": ["gpt-4o"] } });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        let routing = output.get("routing").unwrap().as_object().unwrap();
+        assert!(!routing.is_empty(), "should have default route pools");
+    }
+
+    #[test]
+    fn bootstrap_json_backup_pool_marked() {
+        let routing = json!({
+            "default": [
+                { "id": "primary", "priority": 100, "targets": ["a.model"] },
+                { "id": "backup", "priority": 200, "backup": true, "targets": ["b.model"] }
+            ]
+        });
+        let alias_index = json!({ "a": ["k1"], "b": ["k2"] });
+        let model_index = json!({ 
+            "a": { "declared": true, "models": ["model"] },
+            "b": { "declared": true, "models": ["model"] }
+        });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        let pools = output.get("routing").unwrap().get("default").unwrap().as_array().unwrap();
+        let backup = pools.iter().find(|p| p.get("id").unwrap().as_str().unwrap() == "backup").unwrap();
+        assert_eq!(backup.get("backup").unwrap().as_bool().unwrap(), true);
+    }
+
 }

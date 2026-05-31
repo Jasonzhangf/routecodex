@@ -10,6 +10,7 @@ use crate::hub_reasoning_tool_normalizer::{
 };
 use crate::hub_req_inbound_context_capture::map_bridge_tools_to_chat;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
+use crate::shared_json_utils::read_trimmed_string;
 
 fn parse_value(raw: &str) -> NapiResult<Value> {
     serde_json::from_str(raw).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -17,18 +18,6 @@ fn parse_value(raw: &str) -> NapiResult<Value> {
 
 fn stringify_value(value: &Value) -> NapiResult<String> {
     serde_json::to_string(value).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
 }
 
 fn is_object(value: &Value) -> bool {
@@ -142,13 +131,9 @@ fn map_chat_role_to_gemini(role: Option<&Value>) -> String {
     }
 }
 
-fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {
-    read_trimmed_string(value)
-}
-
 fn extract_thought_signature_from_tool_call(value: &Value) -> Option<String> {
     let row = value.as_object()?;
-    if let Some(sig) = coerce_thought_signature(
+    if let Some(sig) = read_trimmed_string(
         row.get("thought_signature")
             .or_else(|| row.get("thoughtSignature")),
     ) {
@@ -162,7 +147,7 @@ fn extract_thought_signature_from_tool_call(value: &Value) -> Option<String> {
         .get("google")
         .or_else(|| extra.get("Google"))
         .and_then(Value::as_object)?;
-    coerce_thought_signature(
+    read_trimmed_string(
         google
             .get("thought_signature")
             .or_else(|| google.get("thoughtSignature")),
@@ -606,7 +591,7 @@ fn build_openai_chat_from_gemini_response_value(payload: &Value) -> Value {
                     .or_else(|| function_call.get("arguments"))
                     .unwrap_or(&Value::Object(Map::new())),
             );
-            let thought_signature = coerce_thought_signature(part_row.get("thoughtSignature"));
+            let thought_signature = read_trimmed_string(part_row.get("thoughtSignature"));
             if id.is_none() {
                 id = Some(format!("gemini_tool_{}", tool_call_counter));
                 tool_call_counter += 1;
