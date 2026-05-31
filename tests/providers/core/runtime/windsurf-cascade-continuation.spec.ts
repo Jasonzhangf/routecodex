@@ -40,7 +40,7 @@ describe('Windsurf cascade continuation — same session multi-turn alignment', 
     return p;
   }
 
-  
+
 function mockTrajectoryStatusProto(status: number): Buffer {
   // Proto field 2, wire type 0 (varint): tag = (2 << 3) | 0 = 16
   const tag = Buffer.from([16]);
