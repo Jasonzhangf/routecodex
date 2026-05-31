@@ -663,6 +663,31 @@ describe('hub pipeline stage residue audit', () => {
     expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
   });
 
+  it('legacy TS adapter-context and inbound setup residue must be physically removed', () => {
+    const pipelineRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+    );
+    const testRoot = path.join(process.cwd(), 'tests');
+    const legacyFiles = [
+      'hub-pipeline-adapter-context.ts',
+      'hub-pipeline-adapter-context-blocks.ts',
+      'hub-pipeline-adapter-context-metadata-blocks.ts',
+      'hub-pipeline-adapter-context-target-blocks.ts',
+      'hub-pipeline-chat-process-entry-blocks.ts',
+      'hub-pipeline-execute-request-stage-inbound-setup.ts',
+      'hub-pipeline-test-seams.ts',
+    ];
+    const legacyTests = [
+      'sharedmodule/hub-pipeline-adapter-context.spec.ts',
+    ];
+
+    const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));
+    const existingTests = legacyTests.filter((relativePath) => fs.existsSync(path.join(testRoot, relativePath)));
+
+    expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
+  });
+
   it('legacy TS request route/outbound/inbound orchestrators must be physically removed', () => {
     const pipelineRoot = path.join(
       process.cwd(),
