@@ -1676,3 +1676,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 HubPipeline bridge-actions registry removal 精华
 - `conversion/bridge-actions.ts` must be native-only glue: no `registerBridgeAction`, no TS registry map, no post-native TS action execution, and no swallowed action errors.
+
+### 2026-05-31 Anthropic response policy fail-fast 精华
+- Response bridge policy wrappers must not broad-catch native policy execution; `response-runtime-anthropic-policy.ts` should propagate native policy errors instead of silently skipping response semantics.

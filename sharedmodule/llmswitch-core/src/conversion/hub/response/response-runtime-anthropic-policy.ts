@@ -11,27 +11,23 @@ interface AnthropicBridgePolicyOptions {
 }
 
 function applyAnthropicBridgePolicy(options: AnthropicBridgePolicyOptions): void {
-  try {
-    const bridgePolicy = resolveBridgePolicy({ protocol: 'anthropic-messages' });
-    const actions = resolvePolicyActions(bridgePolicy, options.stage);
-    if (!actions?.length) {
-      return;
-    }
-    const actionState = createBridgeActionState({
-      messages: [options.message],
-      rawResponse: options.rawResponse
-    });
-    runBridgeActionPipeline({
-      stage: options.stage,
-      actions,
-      protocol: bridgePolicy?.protocol ?? 'anthropic-messages',
-      moduleType: bridgePolicy?.moduleType ?? 'anthropic-messages',
-      requestId: options.requestId,
-      state: actionState
-    });
-  } catch {
-    // ignore policy failures
+  const bridgePolicy = resolveBridgePolicy({ protocol: 'anthropic-messages' });
+  const actions = resolvePolicyActions(bridgePolicy, options.stage);
+  if (!actions?.length) {
+    return;
   }
+  const actionState = createBridgeActionState({
+    messages: [options.message],
+    rawResponse: options.rawResponse
+  });
+  runBridgeActionPipeline({
+    stage: options.stage,
+    actions,
+    protocol: bridgePolicy?.protocol ?? 'anthropic-messages',
+    moduleType: bridgePolicy?.moduleType ?? 'anthropic-messages',
+    requestId: options.requestId,
+    state: actionState
+  });
 }
 
 export function applyAnthropicResponseInboundBridgePolicy(
