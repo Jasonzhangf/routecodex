@@ -18,6 +18,10 @@ import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
 import { isRateLimitLikeError } from './request-retry-helpers.js';
+import {
+  isEmptyOpenAiChatSseBridgeError,
+  remapBridgeSseErrorToHttp
+} from './provider-response-sse-error-normalizer.js';
 import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason } from '../../../utils/finish-reason.js';
 import { logPipelineStage } from '../../../utils/stage-logger.js';
@@ -501,12 +505,6 @@ function isRecoverableSseDecodeBridgeError(error: Record<string, unknown>): bool
   return error.requestExecutorProviderErrorStage === 'provider.sse_decode' && error.retryable === true;
 }
 
-function isEmptyOpenAiChatSseBridgeError(message: string): boolean {
-  const normalized = message.trim().toLowerCase();
-  return normalized.includes('openai chat sse response did not contain json data events')
-    || normalized.includes('provider sse marker did not include materializable stream or bodytext');
-}
-
 function shouldEnableHubStageRecorder(): boolean {
   const raw = String(
     process.env.ROUTECODEX_ENABLE_HUB_STAGE_RECORDER
@@ -515,56 +513,6 @@ function shouldEnableHubStageRecorder(): boolean {
   ).trim().toLowerCase();
   return TRUTHY_VALUES.has(raw);
 }
-function remapBridgeSseErrorToHttp(error: Record<string, unknown>, message: string): void {
-  const detailRecord = asRecord(error.details);
-  const upstreamCode =
-    typeof error.upstreamCode === 'string'
-      ? error.upstreamCode
-      : typeof detailRecord?.upstreamCode === 'string'
-        ? detailRecord.upstreamCode
-        : undefined;
-  const detailReason = typeof detailRecord?.reason === 'string' ? detailRecord.reason : undefined;
-  const statusCodeRaw =
-    typeof error.statusCode === 'number'
-      ? error.statusCode
-      : typeof error.status === 'number'
-        ? error.status
-        : typeof detailRecord?.statusCode === 'number'
-          ? detailRecord.statusCode
-          : undefined;
-  const isContextLengthExceeded = isContextLengthExceededError(message, upstreamCode, detailReason);
-  if (isContextLengthExceeded) {
-    (error as any).status = 400;
-    (error as any).statusCode = 400;
-    (error as any).retryable = false;
-    (error as any).code = 'CONTEXT_LENGTH_EXCEEDED';
-    if (typeof error.upstreamCode !== 'string' || !String(error.upstreamCode).trim()) {
-      (error as any).upstreamCode = upstreamCode || 'context_length_exceeded';
-    }
-    return;
-  }
-  if (isRateLimitLikeError(message, String(error.code || ''), upstreamCode)) {
-    (error as any).status = 429;
-    (error as any).statusCode = 429;
-    (error as any).retryable = true;
-    (error as any).code = 'HTTP_429';
-    return;
-  }
-  if (isRetryableNetworkSseWrapperError(message, upstreamCode, statusCodeRaw)) {
-    (error as any).status = 502;
-    (error as any).statusCode = 502;
-    (error as any).retryable = true;
-    (error as any).code = 'HTTP_502';
-    return;
-  }
-  if (isEmptyOpenAiChatSseBridgeError(message)) {
-    (error as any).status = 502;
-    (error as any).statusCode = 502;
-    (error as any).retryable = true;
-    (error as any).code = 'SSE_DECODE_ERROR';
-  }
-}
-
 function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
   pipelineMetadata?: Record<string, unknown>;
   adapterContext: Record<string, unknown>;

@@ -191,6 +191,13 @@ function isPromptTooLongLike(args: {
   );
 }
 
+function isProviderRuntimeRequestContractError(reason: string): boolean {
+  return reason.includes('provider-runtime-error: responses payload missing "input" or "instructions"')
+    || reason.includes('provider-runtime-error: responses provider received chat-style "messages"')
+    || reason.includes('provider-runtime-error: responses payload must be an object')
+    || reason.includes('provider-runtime-error: missing model from direct passthrough responses payload');
+}
+
 function readNestedProviderErrorDetails(error: unknown): {
   code?: string;
   type?: string;
@@ -281,6 +288,10 @@ export function resolveProviderFailureClassification(args: {
   const nestedMessage = typeof nested.message === 'string' ? nested.message.toLowerCase() : '';
   const protocolReason = typeof protocolDetails.reason === 'string' ? protocolDetails.reason.trim().toLowerCase() : '';
   const protocolUpstreamCode = normalizeProviderFailureCodeKey(protocolDetails.upstreamCode);
+
+  if (isProviderRuntimeRequestContractError(reason)) {
+    return 'unrecoverable';
+  }
 
   if (
     isProviderBusinessStatus2013(errorCode)

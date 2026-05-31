@@ -3,7 +3,8 @@ import {
   describeProviderFailureDecision,
   isProviderFailureHealthNeutral,
   resolveProviderFailureActionPlan,
-  resolveProviderFailureClassification
+  resolveProviderFailureClassification,
+  resolveProviderFailureRetryEligibility
 } from '../../../../src/providers/core/runtime/provider-failure-policy.js';
 
 describe('provider failure policy ssot', () => {
@@ -170,6 +171,40 @@ describe('provider failure policy ssot', () => {
       backoff: expect.objectContaining({
         scope: 'none'
       })
+    }));
+  });
+
+  it('classifies responses runtime payload contract failures as unrecoverable direct-return', () => {
+    const reason = 'provider-runtime-error: responses payload missing "input" or "instructions"';
+    const error = new Error(reason);
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      reason
+    });
+
+    expect(classification).toBe('unrecoverable');
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      reason,
+      attempt: 2,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'unrecoverable',
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return'
+    }));
+    expect(resolveProviderFailureRetryEligibility({
+      error,
+      stage: 'provider.send',
+      reason,
+      attempt: 2,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'unrecoverable',
+      shouldRetry: false
     }));
   });
 

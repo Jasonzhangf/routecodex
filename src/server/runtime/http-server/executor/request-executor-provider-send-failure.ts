@@ -14,6 +14,7 @@ import {
 import { isPromptTooLongError } from './retry-engine.js';
 import { shouldApplyProviderTransportBackoff } from './request-executor-provider-failure.js';
 import { isClientDisconnectAbortError } from '../executor-provider.js';
+import { remapBridgeSseErrorToHttp } from './provider-response-sse-error-normalizer.js';
 import type {
   RetryErrorSnapshot,
   BlockingRecoverableRouteHoldState
@@ -99,12 +100,20 @@ function isRetryableProviderResponseProcessingFailure(args: {
     return false;
   }
   const record = args.error as {
+    code?: unknown;
     retryable?: unknown;
     requestExecutorProviderErrorStage?: unknown;
   };
+  if (typeof record.requestExecutorProviderErrorStage !== 'string') {
+    const message = args.error instanceof Error ? args.error.message : String(args.error ?? '');
+    remapBridgeSseErrorToHttp(record as Record<string, unknown>, message);
+  }
   return record.retryable === true
     && record.requestExecutorProviderErrorStage === 'provider.sse_decode'
-    && args.retryError.errorCode === 'SSE_DECODE_ERROR';
+    && (
+      args.retryError.errorCode === 'SSE_DECODE_ERROR'
+      || record.code === 'SSE_DECODE_ERROR'
+    );
 }
 
 async function observeFailedTrafficOutcome(args: {

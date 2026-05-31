@@ -1664,3 +1664,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 HubPipeline Slice5 concrete adapter deletion 精华
 - After public barrels stop exporting concrete adapters, physically delete `chat/anthropic/responses/gemini-format-adapter.ts` plus their old tests; production should retain only type interfaces in `format-adapters/index.ts`.
+
+### 2026-05-31 response-processing retry gate 精华
+- `provider.send.completed` 后只允许已归一化的 response-processing `SSE_DECODE_ERROR` 进入 retry；raw Rust empty-SSE 必须先通过共享 normalizer 打 `code/status/retryable/stage`，provider-runtime request contract errors 必须 direct-return，禁止 attempt_backoff 掩盖请求形态错误。

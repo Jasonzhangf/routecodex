@@ -129,4 +129,65 @@ describe('request executor provider send failure abort handling', () => {
       stage: 'provider.send'
     }));
   });
+
+  it('normalizes raw Rust empty OpenAI chat SSE response-processing failures before retry planning', async () => {
+    const error = new Error('Rust HubPipeline response path failed: hub_pipeline_error: OpenAI chat SSE response did not contain JSON data events');
+    const recordAttempt = jest.fn();
+    const logProviderRetrySwitch = jest.fn();
+
+    await expect(processProviderSendFailure({
+      error,
+      requestId: 'req_raw_empty_openai_chat_sse_retryable_response_phase',
+      providerKey: 'mini27.key1.MiniMax-M2.7',
+      providerId: 'mini27',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-chat',
+      providerModel: 'MiniMax-M2.7',
+      routeName: 'tools',
+      runtimeKey: 'mini27.key1.MiniMax-M2.7',
+      target: { providerKey: 'mini27.key1.MiniMax-M2.7', runtimeKey: 'mini27.key1.MiniMax-M2.7' },
+      dependencies: { errorHandlingCenter: {}, debugCenter: {}, logger: {} } as any,
+      runtimeManager: { resolveRuntimeKey: (providerKey?: string) => providerKey },
+      attempt: 1,
+      maxAttempts: 3,
+      logicalRequestChainKey: 'req_raw_empty_openai_chat_sse_retryable_response_phase',
+      routePoolForAttempt: ['mini27.key1.MiniMax-M2.7'],
+      excludedProviderKeys: new Set<string>(),
+      recordAttempt,
+      logStage: jest.fn(),
+      logProviderRetrySwitch,
+      bypassTrafficGovernor: false,
+      trafficGovernor: { observeOutcome: jest.fn() } as any,
+      trafficActiveInFlightAtAcquire: 1,
+      trafficPolicyMaxInFlight: 4,
+      providerTransportBackoffKey: 'mini27.key1.MiniMax-M2.7',
+      consumeProviderTransportBackoffMs: jest.fn(() => 0),
+      sessionStormBackoffScopes: [],
+      isSessionStormBackoffCandidate: jest.fn(() => false),
+      consumeSessionStormBackoffMs: jest.fn(() => 0),
+      getSessionStormBackoffConsecutive: jest.fn(() => 0),
+      providerSendStartedAtMs: Date.now(),
+      providerSendElapsedMs: 0,
+      cumulativeExternalLatencyMs: 0,
+      contextOverflowRetries: 0,
+      maxContextOverflowRetries: 2,
+      phase: 'provider_response_processing',
+      logNonBlockingError: jest.fn(),
+      extractRetryErrorSnapshot: () => ({ reason: error.message })
+    })).resolves.toMatchObject({
+      lastError: expect.objectContaining({
+        code: 'SSE_DECODE_ERROR',
+        statusCode: 502,
+        retryable: true,
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      })
+    });
+
+    expect(recordAttempt).toHaveBeenCalledWith({ error: true });
+    expect(logProviderRetrySwitch).toHaveBeenCalledWith(expect.objectContaining({
+      switchAction: 'retry_same_provider',
+      stage: 'provider.send'
+    }));
+  });
 });
