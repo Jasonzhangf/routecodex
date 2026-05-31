@@ -598,6 +598,15 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('servertool followup must not add standalone TS helper files during Rust closeout', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/servertool/followup-captured-tool-outputs.ts',
+    );
+
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
   it('anthropic response bridge policy must fail fast instead of swallowing policy errors', () => {
     const filePath = path.join(
       process.cwd(),

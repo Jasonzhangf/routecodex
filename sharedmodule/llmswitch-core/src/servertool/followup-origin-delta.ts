@@ -1,8 +1,8 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
+import type { ResponsesRequestContext } from '../conversion/responses/responses-openai-bridge.js';
 import type { ServerToolFollowupInjectionOp, ServerToolFollowupInjectionPlan } from './types.js';
 import { loadOriginSnapshot } from './origin-request-store.js';
-import { extractCapturedToolOutputs } from './followup-captured-tool-outputs.js';
 import { dropToolByFunctionName, extractCapturedChatSeed } from './followup-seed.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 
@@ -13,6 +13,14 @@ export type FollowupOriginSeed = {
   parameters?: Record<string, unknown>;
 };
 
+interface CapturedResponsesToolOutputEntry extends JsonObject {
+  tool_call_id?: string;
+  call_id?: string;
+  id?: string;
+  output?: JsonValue;
+  name?: string;
+}
+
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -21,6 +29,40 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function extractCapturedToolOutputs(
+  responsesContext?: ResponsesRequestContext,
+): CapturedResponsesToolOutputEntry[] {
+  if (!responsesContext || typeof responsesContext !== 'object') {
+    return [];
+  }
+  const snapshot = (responsesContext as Record<string, unknown>).__captured_tool_results;
+  if (!Array.isArray(snapshot) || !snapshot.length) {
+    return [];
+  }
+  const entries: CapturedResponsesToolOutputEntry[] = [];
+  for (const entry of snapshot) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const row = entry as Record<string, unknown>;
+    const id = typeof row.tool_call_id === 'string' && row.tool_call_id.trim().length
+      ? row.tool_call_id.trim()
+      : typeof row.call_id === 'string' && row.call_id.trim().length
+        ? row.call_id.trim()
+        : undefined;
+    if (!id) {
+      continue;
+    }
+    entries.push({
+      tool_call_id: id,
+      id,
+      output: row.output as JsonValue,
+      ...(typeof row.name === 'string' ? { name: row.name } : {}),
+    });
+  }
+  return entries;
 }
 
 function readTextPart(entry: unknown): string {
