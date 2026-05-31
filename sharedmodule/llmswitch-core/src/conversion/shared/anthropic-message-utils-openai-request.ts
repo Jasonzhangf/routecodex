@@ -58,6 +58,32 @@ function normalizeToolResultText(value: string | undefined): string {
   return sanitized;
 }
 
+function parseStructuredAnthropicContentString(value: string): unknown[] | undefined {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) {
+    return undefined;
+  }
+  const hasAnthropicToolBlock = parsed.some((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return false;
+    }
+    const type = typeof (entry as Record<string, unknown>).type === 'string'
+      ? ((entry as Record<string, unknown>).type as string).trim().toLowerCase()
+      : '';
+    return type === 'tool_use' || type === 'tool_result';
+  });
+  return hasAnthropicToolBlock ? parsed : undefined;
+}
+
 function isAnthropicToolDefinitionArray(value: unknown): value is Array<Record<string, unknown>> {
   if (!Array.isArray(value) || value.length === 0) {
     return false;
@@ -118,6 +144,23 @@ export function buildAnthropicRequestFromOpenAIChat(
     if (!m || typeof m !== 'object') continue;
     const role = String((m as any).role || 'user');
     if (role !== 'assistant') continue;
+    const contentNode = (m as any).content;
+    const structuredBlocks = typeof contentNode === 'string'
+      ? parseStructuredAnthropicContentString(contentNode)
+      : Array.isArray(contentNode)
+        ? contentNode
+        : undefined;
+    if (Array.isArray(structuredBlocks)) {
+      for (const block of structuredBlocks) {
+        if (!block || typeof block !== 'object' || Array.isArray(block)) continue;
+        const type = typeof (block as Record<string, unknown>).type === 'string'
+          ? ((block as Record<string, unknown>).type as string).trim().toLowerCase()
+          : '';
+        if (type !== 'tool_use') continue;
+        const id = sanitizeToolUseId(requireTrimmedString((block as any).id, 'tool_use.id'));
+        knownToolCallIds.add(id);
+      }
+    }
     const toolCalls = (m as any).tool_calls;
     if (!Array.isArray(toolCalls)) continue;
     for (const tc of toolCalls) {
@@ -197,7 +240,10 @@ export function buildAnthropicRequestFromOpenAIChat(
       targetShape = mirrorShapes[mirrorIndex];
       mirrorIndex += 1;
     }
-    const contentNode = (m as any).content;
+    const rawContentNode = (m as any).content;
+    const contentNode = typeof rawContentNode === 'string'
+      ? (parseStructuredAnthropicContentString(rawContentNode) ?? rawContentNode)
+      : rawContentNode;
     const text = sanitizeUserVisibleText(collectText(contentNode));
     const hasText = hasVisibleText(text);
 
@@ -253,6 +299,31 @@ export function buildAnthropicRequestFromOpenAIChat(
         if (!entry || typeof entry !== 'object') continue;
         const node = entry as Record<string, unknown>;
         const t = typeof node.type === 'string' ? node.type.toLowerCase() : '';
+        if (t === 'tool_use') {
+          const name = requireTrimmedString(node.name, 'tool_use.name');
+          const id = sanitizeToolUseId(requireTrimmedString(node.id, 'tool_use.id'));
+          blocks.push({
+            type: 'tool_use',
+            id,
+            name,
+            input: normalizeShellLikeToolInput(name, node.input ?? {})
+          });
+          continue;
+        }
+        if (t === 'tool_result') {
+          const toolUseId = sanitizeToolUseId(
+            requireTrimmedString(
+              node.tool_use_id ?? node.tool_call_id ?? node.call_id ?? node.id,
+              'tool_result.tool_use_id'
+            )
+          );
+          blocks.push({
+            type: 'tool_result',
+            content: normalizeToolResultText(collectText(node.content)),
+            tool_use_id: toolUseId
+          });
+          continue;
+        }
         if (t === 'image' && node.source && typeof node.source === 'object') {
           const sourceNode = node.source as Record<string, unknown>;
           const sourceType = typeof sourceNode.type === 'string' ? sourceNode.type.trim().toLowerCase() : '';
