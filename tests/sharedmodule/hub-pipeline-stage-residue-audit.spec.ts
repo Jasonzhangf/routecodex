@@ -434,6 +434,23 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('legacy concrete TS format adapter implementations must be physically removed', () => {
+    const adapterRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/format-adapters',
+    );
+    const legacyFiles = [
+      'chat-format-adapter.ts',
+      'anthropic-format-adapter.ts',
+      'responses-format-adapter.ts',
+      'gemini-format-adapter.ts',
+      '__tests__/format-adapters-native.test.ts',
+    ];
+
+    const existing = legacyFiles.filter((relativePath) => fs.existsSync(path.join(adapterRoot, relativePath)));
+    expect(existing).toEqual([]);
+  });
+
   it('hub request mainline must enter Rust total API without request-stage mapper hooks', () => {
     const pipelineRoot = path.join(
       process.cwd(),
