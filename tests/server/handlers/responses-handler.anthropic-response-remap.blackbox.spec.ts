@@ -119,7 +119,7 @@ describe('responses HTTP anthropic provider response remap blackbox', () => {
   });
 
   it('maps latest captured mimo Anthropic SSE wrapper from 240109 without content-array failure', async () => {
-    const samplePath = '/Volumes/extension/.rcc/codex-samples/openai-responses/port-unknown/req_1780190256673_3e7bf0ce/provider-response.json';
+    const samplePath = '/Volumes/extension/.rcc/codex-samples/openai-responses/mimo.key2.mimo-v2.5/req_1780195058124_b12e1281/provider-response.json';
     const sample = JSON.parse(fs.readFileSync(samplePath, 'utf8')) as Record<string, any>;
     expect(sample?.meta?.providerKey).toBe('mimo.key2.mimo-v2.5');
     expect(sample?.body?.mode).toBe('sse');
@@ -317,9 +317,9 @@ describe('responses HTTP anthropic provider response remap blackbox', () => {
   });
 
   it('maps captured MiniMax OpenAI chat SSE wrapper from 240109 without missing choices', async () => {
-    const samplePath = '/Volumes/extension/.rcc/codex-samples/openai-responses/port-unknown/req_1780190256673_3e7bf0ce/provider-response_4.json';
+    const samplePath = '/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1780197621568_f7e8b5c2/provider-response_1.json';
     const sample = JSON.parse(fs.readFileSync(samplePath, 'utf8')) as Record<string, any>;
-    expect(sample?.meta?.providerKey).toBe('minimonth.key1.MiniMax-M2.7');
+    expect(sample?.meta?.providerKey).toBe('mini27.key1.MiniMax-M2.7');
     expect(sample?.body?.mode).toBe('sse');
     expect(typeof sample?.body?.bodyText).toBe('string');
 
