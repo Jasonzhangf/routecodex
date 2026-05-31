@@ -25,6 +25,27 @@ const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'xworkdir'
 ]);
 
+const MAPPABLE_SEMANTICS_METADATA_KEYS = [
+  'responsesContext',
+  'responses_context',
+  'contextSnapshot',
+  'contextMetadataKey',
+  'responsesResume',
+  'responses_resume',
+  'clientToolsRaw',
+  'client_tools_raw',
+  'anthropicToolNameMap',
+  'anthropic_tool_name_map',
+  'responseFormat',
+  'response_format',
+  'systemInstructions',
+  'system_instructions',
+  'toolsFieldPresent',
+  'tools_field_present',
+  'extraFields',
+  'extra_fields'
+] as const;
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -58,6 +79,12 @@ function readNonEmptyString(value: unknown): string | undefined {
 
 function canonicalizeHeaderName(headerName: string): string {
   return headerName.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function stripMappableSemanticsMetadataFields(metadata: Record<string, unknown>): void {
+  for (const key of MAPPABLE_SEMANTICS_METADATA_KEYS) {
+    delete metadata[key];
+  }
 }
 
 export function extractFollowupSessionHeaders(
@@ -138,9 +165,7 @@ export function buildServerToolNestedRequestMetadata(args: {
     direction: 'request',
     stage: 'inbound'
   };
-  delete out.responsesContext;
-  delete out.contextSnapshot;
-  delete out.contextMetadataKey;
+  stripMappableSemanticsMetadataFields(out);
 
   if (
     args.requestSemantics &&
@@ -163,6 +188,7 @@ export function buildServerToolNestedRequestMetadata(args: {
     const extraRt = asRecord((extraMetadata as Record<string, unknown>).__rt) ?? {};
     if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
       (out as Record<string, unknown>).__rt = { ...baseRt, ...extraRt };
+      stripMappableSemanticsMetadataFields((out as Record<string, unknown>).__rt as Record<string, unknown>);
     }
   } catch (error) {
     args.onMergeRuntimeMetaError?.(error);

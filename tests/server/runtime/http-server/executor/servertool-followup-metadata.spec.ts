@@ -60,4 +60,44 @@ describe('servertool followup nested request metadata', () => {
     expect(metadata.workdir).toBe('/tmp/followup-workdir');
     expect(metadata.cwd).toBe('/tmp/followup-workdir');
   });
+
+  it('strips mappable response semantics from followup metadata before hub reentry', () => {
+    const metadata = buildServerToolNestedRequestMetadata({
+      baseMetadata: {
+        responsesContext: { previous_response_id: 'resp_1' },
+        extraFields: { store: true },
+        contextSnapshot: { store: true },
+        responseFormat: { type: 'json_schema' },
+        __rt: {
+          serverToolFollowup: true,
+          responsesContext: { previous_response_id: 'resp_rt_1' },
+          extraFields: { store: true }
+        }
+      },
+      extraMetadata: {
+        responses_context: { previous_response_id: 'resp_2' },
+        extra_fields: { store: true },
+        systemInstructions: ['legacy'],
+        __rt: {
+          serverToolFollowup: true,
+          responses_context: { previous_response_id: 'resp_rt_2' },
+          extra_fields: { store: true }
+        }
+      },
+      entryEndpoint: '/v1/responses'
+    });
+
+    expect(metadata).not.toHaveProperty('responsesContext');
+    expect(metadata).not.toHaveProperty('responses_context');
+    expect(metadata).not.toHaveProperty('contextSnapshot');
+    expect(metadata).not.toHaveProperty('contextMetadataKey');
+    expect(metadata).not.toHaveProperty('extraFields');
+    expect(metadata).not.toHaveProperty('extra_fields');
+    expect(metadata).not.toHaveProperty('responseFormat');
+    expect(metadata).not.toHaveProperty('systemInstructions');
+    expect(metadata.__rt).not.toHaveProperty('responsesContext');
+    expect(metadata.__rt).not.toHaveProperty('responses_context');
+    expect(metadata.__rt).not.toHaveProperty('extraFields');
+    expect(metadata.__rt).not.toHaveProperty('extra_fields');
+  });
 });

@@ -13430,3 +13430,9 @@ Using skills: coding-principals + rcc-dev-skills
 - 修复：nested followup metadata 构建入口物理删除 `responsesContext/contextSnapshot/contextMetadataKey`，保留 `requestSemantics.responses.context`。
 - 红测：`servertool-followup-dispatch.spec.ts` 新增 `does not pass legacy responsesContext through nested followup metadata`，先红后绿。
 - 线上复测：5555 同类 `/v1/responses` tools 请求返回 HTTP 200；不再出现 semantic_gate；provider-request messages 非空。
+
+## 2026-05-31 stop_followup semantic_gate regression
+- Symptom: stop followup failed in HubPipeline semantic gate: `Mappable semantics must not be stored in metadata (chat_process.request.entry): responsesContext`.
+- Root cause: `buildServerToolNestedRequestMetadata` only stripped a few top-level legacy fields; followup merged `responses_context` / `extraFields` / `responseFormat` and nested `__rt` mappable semantics back into metadata.
+- Fix: centralize stripping of all mappable metadata keys in servertool followup metadata builder, including nested `__rt`; keep responses context only in request semantics/body semantics.
+- Verification: HTTP blackbox `responses-handler.stop-followup-metadata.blackbox.spec.ts`, `servertool-followup-metadata.spec.ts`, `servertool-followup-dispatch.spec.ts`, `servertool-followup-model-pin-regression.spec.ts`, `pnpm -C sharedmodule/llmswitch-core run build`, `npm run build:min`, `npm run install:global`, and `routecodex restart --port 5555` pass; 5555 health returns version `0.90.2599` ready.

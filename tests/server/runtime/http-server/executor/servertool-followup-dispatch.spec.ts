@@ -1195,6 +1195,64 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.metadata?.requestSemantics?.toolOutputs?.length).toBe(1);
   });
 
+  it('strips legacy responses context metadata before stop_followup hub reentry', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: { metadata: input.metadata }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'openai-responses-mimo.key2-mimo-v2.5-20260531T205435169-242642-2103:stop_followup',
+      body: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
+      },
+      baseMetadata: {
+        responsesContext: { previous_response_id: 'resp_base' },
+        extraFields: { store: true },
+        __rt: {
+          serverToolFollowup: true,
+          responsesContext: { previous_response_id: 'resp_rt_base' },
+          extraFields: { store: true }
+        }
+      },
+      metadata: {
+        responses_context: { previous_response_id: 'resp_extra' },
+        extra_fields: { store: true },
+        responseFormat: { type: 'json_object' },
+        __rt: {
+          serverToolFollowup: true,
+          responses_context: { previous_response_id: 'resp_rt_extra' },
+          extra_fields: { store: true }
+        }
+      },
+      requestSemantics: {
+        __routecodex: { serverToolFollowup: true, serverToolFollowupSource: 'servertool.stop_message_flow' },
+        responses: { context: { previous_response_id: 'resp_semantics' } }
+      },
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.metadata).not.toHaveProperty('responsesContext');
+    expect(nestedInput?.metadata).not.toHaveProperty('responses_context');
+    expect(nestedInput?.metadata).not.toHaveProperty('extraFields');
+    expect(nestedInput?.metadata).not.toHaveProperty('extra_fields');
+    expect(nestedInput?.metadata).not.toHaveProperty('responseFormat');
+    expect(nestedInput?.metadata?.__rt).not.toHaveProperty('responsesContext');
+    expect(nestedInput?.metadata?.__rt).not.toHaveProperty('responses_context');
+    expect(nestedInput?.metadata?.__rt).not.toHaveProperty('extraFields');
+    expect(nestedInput?.metadata?.__rt).not.toHaveProperty('extra_fields');
+    expect(nestedInput?.body?.semantics?.responses?.context?.previous_response_id).toBe('resp_semantics');
+  });
+
   it('RED: stop_followup continuation rebinds captured responses context to final response id', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
     const executeNested = jest.fn(async () => ({
