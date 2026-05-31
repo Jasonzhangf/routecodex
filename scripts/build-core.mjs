@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequiredCoreOutputs, distIsValid as isCoreDistValid } from './lib/build-core-utils.mjs';
 
 const root = process.cwd();
 const skip = String(process.env.ROUTECODEX_SKIP_CORE_BUILD || process.env.SKIP_CORE_BUILD || '').trim().toLowerCase();
@@ -12,18 +13,12 @@ const proj = path.join(root, 'sharedmodule', 'llmswitch-core', 'tsconfig.json');
 const coreRoot = path.join(root, 'sharedmodule', 'llmswitch-core');
 const nativeBuildScript = path.join(coreRoot, 'scripts', 'build-native-hotpath.mjs');
 const outDir = path.join(coreRoot, 'dist');
-const requiredOutputs = [
-  path.join(outDir, 'bridge', 'routecodex-adapter.js'),
-  path.join(outDir, 'conversion', 'hub', 'response', 'provider-response.js'),
-  // RouteCodex runtime / hub pipeline / virtual-router tests all require this module.
-  path.join(outDir, 'router', 'virtual-router', 'engine.js')
-];
+const requiredOutputs = createRequiredCoreOutputs(outDir);
 
 function fail(msg){ console.error(`[build-core] ${msg}`); process.exit(2); }
 
 function distIsValid() {
-  if (!fs.existsSync(outDir)) return false;
-  return requiredOutputs.every(file => fs.existsSync(file));
+  return isCoreDistValid(outDir, requiredOutputs);
 }
 
 function getFileMtime(filePath) {

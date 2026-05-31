@@ -13446,3 +13446,62 @@ Using skills: coding-principals + rcc-dev-skills
 - Build:dev was blocked by rustification audit new TS files after earlier closeout work: `native-hub-pipeline-lib.ts`, `native-hub-pipeline-orchestration-semantics-semantic-gate.ts`, and `provider-response-sse-materializer.ts`.
 - Fix: removed thin re-export/new wrapper files, pointed imports at existing `native-hub-pipeline-orchestration-semantics-protocol.ts`, and inlined SSE materializer into existing provider response module; refreshed rustification baseline after total non-native LOC dropped from 52640 to 52096.
 - Verification: `node scripts/ci/llmswitch-rustification-audit.mjs`, `pnpm run build:dev`, `routecodex restart --port 5555`, targeted Jest, and Rust hub_pipeline tests passed.
+2026-05-31 21:42 MiniMax /v1/responses live failure: sample req_1780234967942_15a2a692 provider-response.body is only {mode:sse,captureSse:true,transport:prepared-request-executor}; no captured SSE data, Rust parser reports no JSON data events. Investigating SSE capture/materialization boundary; avoid TS semantic fallback.
+
+## 2026-05-31 mini27 empty SSE + Responses missing context fix
+- 线上样本 `req_1780236078480_8de9a0e9`：mini27 provider-response 只有 `{mode:"sse",captureSse:true,transport:"prepared-request-executor"}` marker，无 materialized bodyText，Rust HubPipeline 抛 `OpenAI chat SSE response did not contain JSON data events`，旧链路在 response-processing phase 直接 failed。
+- 修复：converter 将 empty OpenAI chat SSE / marker-only SSE 归一为 `SSE_DECODE_ERROR status=502 retryable=true stage=provider.sse_decode`；request executor 仅允许这种已标记 retryable 的 response-processing SSE decode 进入 provider retry plan，其余 response-processing 错误仍 fail-fast。
+- 另修 Responses missing_request_context：native response runtime effect 不再提前 `recordResponsesResponse`；handler capture context 后统一记录。
+- 验证：Jest 定向 3 suites/14 tests PASS；llmswitch-core build PASS；build:dev/install/restart 5555 PASS；旧样本本地复放输出 `code=SSE_DECODE_ERROR retryable=true stage=provider.sse_decode`；线上 5555 版本 0.90.2604 tools request HTTP 200 tool_calls。
+
+## 2026-05-31 HubPipeline Closeout Slice5 barrel cleanup
+- 当前 `hub-pipeline-stage-residue-audit` 已覆盖 registry 不实例化旧 TS mapper/adapter，但 public barrel 仍从 `conversion/index.ts` 导出 `Chat/Anthropic/Responses/GeminiSemanticMapper`，`format-adapters/index.ts` 仍导出 `Chat/Anthropic/Responses/GeminiFormatAdapter`。
+- 新增红测 `public conversion barrels must not export legacy mapper or adapter implementations`，先红：12 个 legacy export 命中。
+- 修复：`conversion/index.ts` 只保留 `FormatAdapter/SemanticMapper/StageRecorder` type exports；删除 semantic mapper implementation exports。`format-adapters/index.ts` 删除具体 adapter class exports，只保留 interface/type。
+- 验证：`pnpm run jest:run -- tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --no-coverage --runInBand` 20/20 PASS；`pnpm -C sharedmodule/llmswitch-core run build` PASS。
+
+## 2026-05-31 HubPipeline Closeout Slice5 concrete format-adapter deletion
+- Residue scan showed production code no longer imports concrete `Chat/Anthropic/Responses/GeminiFormatAdapter`; only old llmswitch-core tests and `format-adapters/__tests__` referenced them.
+- Added architecture red gate `legacy concrete TS format adapter implementations must be physically removed`; first run failed with all 5 legacy files present.
+- Deleted `chat-format-adapter.ts`, `anthropic-format-adapter.ts`, `responses-format-adapter.ts`, `gemini-format-adapter.ts`, and `__tests__/format-adapters-native.test.ts` from `src/conversion/hub/format-adapters/`.
+- Verification: `pnpm run jest:run -- tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --no-coverage --runInBand` PASS 21/21; `pnpm -C sharedmodule/llmswitch-core run build` PASS.
+
+## 2026-05-31 empty OpenAI chat SSE response-processing leak
+- Repro red: `tests/server/runtime/http-server/executor/request-executor-provider-send-failure.abort.spec.ts` raw Rust error `OpenAI chat SSE response did not contain JSON data events` rejects before retry planning when phase=`provider_response_processing` because `processProviderSendFailure` gates on pre-normalized `code === SSE_DECODE_ERROR`.
+- Root cause: converter has private remap, but send-failure response-processing gate has no shared normalization; any raw Rust bridge error reaching this layer remains unclassified and fails instead of retrying.
+
+## 2026-05-31 HubPipeline Slice5 semantic mapper deletion
+- Red gate: `hub-pipeline-stage-residue-audit.spec.ts` failed on 28 legacy `operation-table/semantic-mappers/*.ts` files and 15 tests directly importing removed mapper implementations.
+- Action: physically removed all legacy semantic mapper implementation files and direct mapper tests; kept only `operation-table-runner.ts` because req_inbound/req_outbound still use native bridge policy effects there.
+- Verification: `pnpm run jest:run -- tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --no-coverage --runInBand --forceExit` PASS 25/25; `pnpm -C sharedmodule/llmswitch-core run build` PASS.
+
+## 2026-05-31 HubPipeline Slice5 operation-table runner deletion
+- Red gate: `hub-pipeline-stage-residue-audit.spec.ts` failed on `operation-table-runner.ts`, dead req_inbound/req_outbound semantic stage shells, and two old direct stage tests.
+- Action: physically removed operation-table runner, dead request semantic stage shell directories, and direct tests; updated stage catalog/README references to point at Rust total API instead of deleted TS stage IDs.
+- Verification: `pnpm run jest:run -- tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --no-coverage --runInBand --forceExit` PASS 26/26; `pnpm -C sharedmodule/llmswitch-core run build` PASS.
+
+## 2026-05-31 HubPipeline bridge-actions TS registry removal
+- Red gate: `hub-pipeline-stage-residue-audit.spec.ts` failed because `conversion/bridge-actions.ts` still exported `registerBridgeAction`, retained a TS action registry, and could execute registered TS actions after native pipeline.
+- Action: removed TS registry and registered action execution; `runBridgeActionPipeline` now only calls `runBridgeActionPipelineWithNative` and mutates the state from native output.
+- Verification: residue audit PASS 27/27; `pnpm -C sharedmodule/llmswitch-core run build` PASS.
+
+## 2026-05-31 Anthropic response bridge policy fail-fast
+- Red gate: `hub-pipeline-stage-residue-audit.spec.ts` failed when `response-runtime-anthropic-policy.ts` wrapped native bridge policy execution in broad try/catch and swallowed `// ignore policy failures`.
+- Action: removed catch; policy/native bridge failures now propagate instead of silently skipping response policy semantics.
+- Verification: residue audit PASS 28/28; `pnpm -C sharedmodule/llmswitch-core run build` PASS.
+
+## 2026-05-31 responses payload missing input audit
+- 线上新报错：`provider-runtime-error: responses payload missing "input" or "instructions"`，发生在 `/v1/responses` + `tools:tool-request-detected` 后 provider.send。
+- 初步证据：`src/providers/core/runtime/responses-provider.ts` 在 `assertResponsesWireShape` 检测 provider 收到的 body 不是 Responses wire payload。
+- 约束：不能用 retry/backoff 掩盖；应追 HubPipeline/route stage 唯一真源，补 HTTP/请求级红测。
+- Fix verified 2026-05-31: Rust `build_openai_responses_request` now reconstructs `/v1/responses` wire payload from captured context when route/tool governance produced chat-envelope payload without `input`; targeted Jest green and live 5555 smoke returned HTTP 200 without `responses payload missing input` / `field messages is required`.
+- Separate SSE stream issue: missing response id in Responses JSON-to-SSE now emits SSE error without trying to reset headers after they were sent; regression test green.
+- 2026-05-31 HubPipeline closeout: deleted dead TS inbound fallback block `hub-pipeline-execute-request-stage-inbound-blocks.ts`; only caller was a fallback regression test, no production import. Added residue gate to require physical removal.
+- 2026-05-31 HubPipeline closeout: removed dead TS `req_inbound_stage3_context_capture` stage directory and its direct tests; no production callers remained, Rust hub_pipeline tests cover request/context/tool semantics.
+- 2026-05-31 HubPipeline closeout: shrank `hub/format-adapters` public surface to `StageRecorder` only; removed dead `FormatAdapter`/`SemanticMapper` interfaces and conversion barrel exports.
+
+## 2026-05-31 native-hub-pipeline-resp-semantics install miss
+- 线上样本：stop_followup 失败于 `[llmswitch-bridge] Unable to load core module "router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics"`。
+- 根因：`scripts/build-core.mjs` 的 dist 有效性只检查旧三项输出，旧 dist 即使缺新增 resp semantics bridge 也可能跳过 core rebuild，导致安装/runtime snapshot 缺模块。
+- 修复：抽出 `scripts/lib/build-core-utils.mjs`，把 `native-hub-pipeline-resp-semantics.js` 加入 required outputs；新增 `tests/scripts/build-core-utils.spec.ts` 锁住旧 dist 缺模块必须 invalid。
+- 验证：Jest 定向通过；`BUILD_MODE=dev node scripts/build-core.mjs` 触发 core rebuild；global install 后 `/opt/homebrew/.../native-hub-pipeline-resp-semantics.js` 存在且可 import；`routecodex restart --port 5555` 后 health ok，新日志未再出现该缺模块错误。真实 `/v1/responses` smoke 到达 provider，失败为上游 503，非模块加载错误。
