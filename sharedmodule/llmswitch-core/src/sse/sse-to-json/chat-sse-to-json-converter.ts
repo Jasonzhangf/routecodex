@@ -760,7 +760,6 @@ export class ChatSseToJsonConverter {
           );
       }
 
-
     } catch (error) {
       context.eventStats.errorCount++;
       throw ErrorUtils.wrapError(error, `Failed to process SSE event: ${event.event}`);
@@ -811,7 +810,6 @@ export class ChatSseToJsonConverter {
         if (context.options.validateChunks) {
           this.validateChatChunk(chunk);
         }
-
 
         // 初始化响应结构（如果是第一个chunk）
         if (!context.currentResponse.id && chunk.id) {
@@ -1684,7 +1682,6 @@ export class ChatSseToJsonConverter {
       );
     }
   }
-
 
   /**
    * 获取转换统计

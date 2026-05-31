@@ -1,5 +1,5 @@
 import type { VirtualRouterEngine } from "../../../router/virtual-router/engine.js";
-import { runHubPipelineLibWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-lib.js";
+import { runHubPipelineLibWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js";
 import type {
   HubPipelineConfig,
   HubPipelineNodeResult,

@@ -14,9 +14,6 @@ import {
   finalizeResponsesConversationRequestRetention,
   recordResponsesResponse,
 } from '../../shared/responses-conversation-store.js';
-import {
-  materializeProviderResponseSsePayload
-} from './provider-response-sse-materializer.js';
 import type { ProviderInvoker } from '../../../servertool/types.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
 import {
@@ -492,6 +489,118 @@ export interface ProviderResponseConversionResult {
   body?: JsonObject;
   __sse_responses?: Readable;
   format?: string;
+}
+
+export function readProviderResponseSseText(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const bodyText = record.bodyText;
+  if (typeof bodyText === 'string' && bodyText.trim()) {
+    return bodyText;
+  }
+  const raw = record.raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    return raw;
+  }
+  const data = record.data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const nested = data as Record<string, unknown>;
+    const nestedBodyText = nested.bodyText;
+    if (typeof nestedBodyText === 'string' && nestedBodyText.trim()) {
+      return nestedBodyText;
+    }
+    const nestedRaw = nested.raw;
+    if (typeof nestedRaw === 'string' && nestedRaw.trim()) {
+      return nestedRaw;
+    }
+  }
+  return undefined;
+}
+
+export function isProviderResponseSseMarker(payload: unknown): boolean {
+  const record = asProviderResponseRecord(payload);
+  return Boolean(record && hasProviderSseMarkerSignal(record) && readProviderResponseSseText(record) === undefined);
+}
+
+function asProviderResponseRecord(payload: unknown): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  return payload as Record<string, unknown>;
+}
+
+function hasProviderSseMarkerSignal(record: Record<string, unknown>): boolean {
+  const mode = typeof record.mode === 'string' ? record.mode.trim().toLowerCase() : '';
+  return mode === 'sse'
+    || mode === 'sse_passthrough'
+    || (record.clientStream === true && record.__sse_responses === undefined && record.__sse_stream === undefined);
+}
+
+export async function materializeProviderResponseSsePayload(
+  payload: unknown
+): Promise<Record<string, unknown>> {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload as Record<string, unknown>;
+  }
+
+  const bodyText = readProviderResponseSseText(payload);
+  if (typeof bodyText === 'string') {
+    return {
+      ...(payload as Record<string, unknown>),
+      mode: 'sse',
+      bodyText
+    };
+  }
+
+  const stream = extractProviderResponseSseStream(payload);
+  if (stream) {
+    const bodyText = await readProviderResponseSseStreamText(stream);
+    return {
+      ...(payload as Record<string, unknown>),
+      mode: 'sse',
+      bodyText
+    };
+  }
+
+  if (!isProviderResponseSseMarker(payload)) {
+    return payload as Record<string, unknown>;
+  }
+
+  throw new Error('Provider SSE marker did not include materializable stream or bodyText');
+}
+
+function extractProviderResponseSseStream(payload: unknown): Readable | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const direct = record.__sse_responses ?? record.__sse_stream;
+  if (direct && typeof (direct as { pipe?: unknown }).pipe === 'function') {
+    return direct as Readable;
+  }
+  const data = record.data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const nested = data as Record<string, unknown>;
+    const nestedStream = nested.__sse_responses ?? nested.__sse_stream;
+    if (nestedStream && typeof (nestedStream as { pipe?: unknown }).pipe === 'function') {
+      return nestedStream as Readable;
+    }
+  }
+  return undefined;
+}
+
+async function readProviderResponseSseStreamText(stream: Readable): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream as AsyncIterable<Buffer | string | Uint8Array>) {
+    if (typeof chunk === 'string') {
+      chunks.push(Buffer.from(chunk));
+      continue;
+    }
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 export async function convertProviderResponse(

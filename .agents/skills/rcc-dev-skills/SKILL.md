@@ -1655,3 +1655,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 HubPipeline Rust closeout residue removal
 - HubPipeline request-stage/chat-process mainline must enter `runHubPipelineLibWithNative`; do not resurrect TS `hub-pipeline-route-and-outbound`, request-stage inbound/provider-payload orchestrators, stage hooks, or shared guards. Architecture gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
+
+### 2026-05-31 Rustification audit cleanup rule
+- If `build:dev` fails on llmswitch rustification audit, first remove/merge new TS files and verify total non-native LOC decreased before refreshing `rustification-audit-baseline.json`; do not use allowlist as fallback for HubPipeline closeout wrappers.

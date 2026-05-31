@@ -3,7 +3,7 @@ import type { JsonObject } from '../../../../types/json.js';
 import type { ProcessedRequest } from '../../../../types/standardized.js';
 import { recordStage } from '../../../stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
-import { runHubPipelineStageWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-lib.js';
+import { runHubPipelineStageWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
 import { isRecord } from '../../../../../../shared/common-utils.js';
 
 export type ChatReasoningMode = 'keep' | 'drop' | 'append_to_content';

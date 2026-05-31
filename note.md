@@ -13441,3 +13441,8 @@ Using skills: coding-principals + rcc-dev-skills
 - Slice progress: request-stage/chat-process mainline now enters Rust total API (`runHubPipelineLibWithNative`) and legacy TS request route/outbound/inbound orchestrator files were physically removed.
 - Removed old tests that imported deleted TS truth (`hub-pipeline-route-and-outbound`, request-stage inbound/provider payload direct unit tests); retained/extended architecture residue gate.
 - Verification: `hub-pipeline-stage-residue-audit.spec.ts`, `responses-context-capture-fallback.regression.spec.ts`, `servertool-followup-dispatch.spec.ts`, `responses-handler.stop-followup-metadata.blackbox.spec.ts`, `resp-process-stage3-reentry.spec.ts`, `pnpm -C sharedmodule/llmswitch-core run build`, and `cargo test -p router-hotpath-napi hub_pipeline -- --nocapture` passed.
+
+## 2026-05-31 HubPipeline closeout build:dev audit cleanup
+- Build:dev was blocked by rustification audit new TS files after earlier closeout work: `native-hub-pipeline-lib.ts`, `native-hub-pipeline-orchestration-semantics-semantic-gate.ts`, and `provider-response-sse-materializer.ts`.
+- Fix: removed thin re-export/new wrapper files, pointed imports at existing `native-hub-pipeline-orchestration-semantics-protocol.ts`, and inlined SSE materializer into existing provider response module; refreshed rustification baseline after total non-native LOC dropped from 52640 to 52096.
+- Verification: `node scripts/ci/llmswitch-rustification-audit.mjs`, `pnpm run build:dev`, `routecodex restart --port 5555`, targeted Jest, and Rust hub_pipeline tests passed.

@@ -95,9 +95,9 @@ describe('HubPipeline Rust Lib API contract', () => {
     expect(result.success).toBe(true);
   });
 
-  it('hub-pipeline-lib.ts exports the Rust lib entry', async () => {
+  it('orchestration semantics protocol exports the Rust lib entry', async () => {
     const { runHubPipelineLibWithNative: fromLib } = await import(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-lib.js'
+      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js'
     ).catch(() => ({ runHubPipelineLibWithNative: undefined }));
     expect(fromLib).toBeDefined();
   });

@@ -5,7 +5,7 @@ import {
   extractModelHintFromMetadataWithNative,
   resolveSseProtocolWithNative,
 } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js';
-import { runHubPipelineStageWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-lib.js';
+import { runHubPipelineStageWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
 import type { HubPipelineRequest, NormalizedRequest, ProviderProtocol } from './hub-pipeline.js';
 import type { StageRecorder } from '../format-adapters/index.js';
 import { isRecord } from '../../../shared/common-utils.js';

@@ -1905,3 +1905,6 @@ Slice 0（总控 API）→ Slice 1-4（P0）→ Slice 5（P1）
 ## 2026-05-31 HubPipeline Rust closeout residue rule
 - Verified: request-stage/chat-process mainline must use Rust total API via `runHubPipelineLibWithNative`; legacy TS route/outbound/inbound orchestrators (`hub-pipeline-route-and-outbound.ts`, `hub-pipeline-execute-request-stage-provider-payload.ts`, `hub-pipeline-execute-request-stage-inbound*.ts`, `hub-pipeline-stage-hooks.ts`, `hub-pipeline-shared-guards.ts`) are deleted truth, not dormant code.
 - Regression gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` must fail if those files or request-stage mapper hook imports return.
+
+## 2026-05-31 Rustification audit baseline rule
+- Verified: after HubPipeline TS deletion work, refresh `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` only when current total non-native LOC is lower and no new prod TS files remain. Thin wrapper files like `native-hub-pipeline-lib.ts` are not allowed as new prod TS; import existing protocol wrappers directly.

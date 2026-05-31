@@ -279,7 +279,6 @@ export function createDefaultResponsesContext(requestId: string, model: string):
   };
 }
 
-
 /**
  * 生成下一个序列号
  */
