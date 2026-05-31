@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
+use crate::chat_node_result_semantics::build_processed_request_from_chat_response;
 use crate::hub_req_inbound_context_capture::{
     capture_req_inbound_responses_context_snapshot, ResponsesContextCaptureInput,
 };
@@ -31,6 +32,7 @@ use crate::resp_process_stage1_tool_governance::{
     govern_response, ToolGovernanceInput as RespToolGovernanceInput,
 };
 use crate::resp_process_stage2_finalize::{finalize_chat_response, FinalizeInput};
+use crate::servertool_skeleton::finalize_strip::filter_out_executed_servertool_calls;
 use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
@@ -968,6 +970,11 @@ pub fn run_hub_pipeline_stage_json(stage_json: String) -> HubPipelineResult<Stri
     {
         return run_req_process_tool_governance_stage(raw);
     }
+    if raw.get("request").is_none()
+        && raw.get("stage").and_then(Value::as_str) == Some("respProcessFinalize")
+    {
+        return run_resp_process_finalize_stage(raw);
+    }
     let lib_input = if raw.get("request").is_some() {
         raw
     } else {
@@ -1019,6 +1026,56 @@ fn run_req_process_tool_governance_stage(raw: Value) -> HubPipelineResult<String
         effect_plan: HubPipelineEffectPlan::empty(),
         diagnostics: vec![diagnostic(
             HubPipelineStageId::ReqProcessToolGovernance,
+            HubPipelineDiagnosticStatus::Completed,
+            Some(serde_json::json!({ "stageOnly": true })),
+        )],
+        error: None,
+    };
+    serde_json::to_string(&output).map_err(HubPipelineError::from)
+}
+
+fn run_resp_process_finalize_stage(raw: Value) -> HubPipelineResult<String> {
+    let request_id = raw
+        .get("requestId")
+        .and_then(Value::as_str)
+        .unwrap_or("hub_pipeline_stage_response")
+        .to_string();
+    let metadata = raw.get("metadata").cloned().unwrap_or(Value::Null);
+    let wants_stream = raw.get("stream").and_then(Value::as_bool).unwrap_or(false);
+    let reasoning_mode = metadata
+        .get("reasoningMode")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let entry_endpoint = raw
+        .get("entryEndpoint")
+        .and_then(Value::as_str)
+        .or_else(|| raw.get("endpoint").and_then(Value::as_str))
+        .map(str::to_string);
+    let finalized = finalize_chat_response(FinalizeInput {
+        payload: raw.get("payload").cloned().unwrap_or(Value::Null),
+        stream: wants_stream,
+        reasoning_mode,
+        endpoint: entry_endpoint.clone(),
+        request_id: Some(request_id.clone()),
+    });
+    let strip_source = metadata
+        .get("originalPayload")
+        .cloned()
+        .unwrap_or_else(|| raw.get("payload").cloned().unwrap_or(Value::Null));
+    let finalized = if strip_source.is_object() {
+        filter_out_executed_servertool_calls(&finalized, &strip_source)
+    } else {
+        finalized
+    };
+    let processed_request = build_processed_request_from_chat_response(finalized.clone(), wants_stream);
+    let output = HubPipelineExecutionOutput {
+        request_id,
+        success: true,
+        payload: Some(finalized),
+        metadata: Some(serde_json::json!({ "processedRequest": processed_request })),
+        effect_plan: HubPipelineEffectPlan::empty(),
+        diagnostics: vec![diagnostic(
+            HubPipelineStageId::RespProcessFinalize,
             HubPipelineDiagnosticStatus::Completed,
             Some(serde_json::json!({ "stageOnly": true })),
         )],

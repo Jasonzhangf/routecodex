@@ -110,6 +110,19 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).not.toContain('stages/resp_outbound');
   });
 
+  it('resp_process stage2 TS shell must enter Rust total stage API instead of direct finalize helpers', () => {
+    const stagePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage2_finalize/index.ts',
+    );
+    const stageSource = fs.readFileSync(stagePath, 'utf8');
+
+    expect(stageSource).toContain('runHubPipelineStageWithNative');
+    expect(stageSource).not.toContain('finalizeRespProcessChatResponseWithNative');
+    expect(stageSource).not.toContain('filterOutExecutedServerToolCallsWithNative');
+    expect(stageSource).not.toContain('buildProcessedRequestFromChatResponse');
+  });
+
   it('resp outbound SSE TS shell must consume Rust effect plan instead of deciding stream mode', () => {
     const filePath = path.join(
       process.cwd(),

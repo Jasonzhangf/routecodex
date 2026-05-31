@@ -1,10 +1,10 @@
 import type { StageRecorder } from '../../../../format-adapters/index.js';
 import type { JsonObject } from '../../../../types/json.js';
-import { buildProcessedRequestFromChatResponse } from '../../../../response/chat-response-utils.js';
 import type { ProcessedRequest } from '../../../../types/standardized.js';
 import { recordStage } from '../../../stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
-import { finalizeRespProcessChatResponseWithNative, filterOutExecutedServerToolCallsWithNative } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
+import { runHubPipelineStageWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-lib.js';
+import { isRecord } from '../../../../../../shared/common-utils.js';
 
 export type ChatReasoningMode = 'keep' | 'drop' | 'append_to_content';
 
@@ -28,47 +28,39 @@ export async function runRespProcessStage2Finalize(
   options: RespProcessStage2FinalizeOptions
 ): Promise<RespProcessStage2FinalizeResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
-  logHubStageTiming(options.requestId, 'resp_process.stage2_native_finalize', 'start');
-  const nativeFinalizeStart = Date.now();
-  let finalized = (await finalizeRespProcessChatResponseWithNative(
-    {
-      payload: options.payload,
-      stream: options.wantsStream,
+  logHubStageTiming(options.requestId, 'resp_process.stage2_rust_stage_finalize', 'start');
+  const nativeStageStart = Date.now();
+  const stageResult = runHubPipelineStageWithNative({
+    requestId: options.requestId,
+    endpoint: options.entryEndpoint,
+    entryEndpoint: options.entryEndpoint,
+    providerProtocol: 'openai-chat',
+    payload: options.payload,
+    metadata: {
       reasoningMode: options.reasoningMode,
-      endpoint: options.entryEndpoint,
-      requestId: options.requestId
-    }
-  )) as JsonObject;
-
-  // Strip executed servertool calls before returning to client (single source of truth).
-  // This must also run for internal servertool followups: review/clock
-  // handlers append tool_outputs first, and skipping this strip leaks consumed internal
-  // tool_calls into client required_action/output surfaces.
-  const stripSource = options.originalPayload ?? options.payload;
-  if (stripSource && typeof stripSource === 'object') {
-    const stripped: unknown = filterOutExecutedServerToolCallsWithNative(finalized, stripSource as JsonObject);
-    if (stripped && typeof stripped === 'object' && !Array.isArray(stripped)) {
-      finalized = stripped as JsonObject;
-    } else {
-      throw new Error('resp_process.stage2 finalize returned non-object payload after servertool strip');
-    }
+      originalPayload: options.originalPayload,
+    },
+    stream: options.wantsStream,
+    processMode: 'chat',
+    direction: 'response',
+    stage: 'respProcessFinalize',
+  });
+  const finalized = stageResult.payload;
+  const stageMetadata = isRecord(stageResult.metadata) ? stageResult.metadata : {};
+  const processedRequest = stageMetadata.processedRequest;
+  if (!isRecord(finalized)) {
+    throw new Error('resp_process.stage2 finalize returned non-object payload');
   }
-  logHubStageTiming(options.requestId, 'resp_process.stage2_native_finalize', 'completed', {
-    elapsedMs: Date.now() - nativeFinalizeStart,
-    forceLog: forceDetailLog
-  });
-  logHubStageTiming(options.requestId, 'resp_process.stage2_build_processed_request', 'start');
-  const buildProcessedRequestStart = Date.now();
-  const processedRequest = buildProcessedRequestFromChatResponse(finalized, {
-    stream: options.wantsStream
-  });
-  logHubStageTiming(options.requestId, 'resp_process.stage2_build_processed_request', 'completed', {
-    elapsedMs: Date.now() - buildProcessedRequestStart,
+  if (!isRecord(processedRequest)) {
+    throw new Error('resp_process.stage2 finalize returned invalid processedRequest');
+  }
+  logHubStageTiming(options.requestId, 'resp_process.stage2_rust_stage_finalize', 'completed', {
+    elapsedMs: Date.now() - nativeStageStart,
     forceLog: forceDetailLog
   });
   recordStage(options.stageRecorder, 'chat_process.resp.stage8.finalize', {
     model: finalized.model,
     stream: options.wantsStream
   });
-  return { finalizedPayload: finalized, processedRequest };
+  return { finalizedPayload: finalized as JsonObject, processedRequest: processedRequest as unknown as ProcessedRequest };
 }

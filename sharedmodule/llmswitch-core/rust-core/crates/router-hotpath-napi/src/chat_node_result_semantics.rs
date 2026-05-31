@@ -267,7 +267,7 @@ fn restore_response_continuation_semantics(
     Value::Object(response_row)
 }
 
-fn build_processed_request_from_chat_response(chat_response: Value, stream_enabled: bool) -> Value {
+pub(crate) fn build_processed_request_from_chat_response(chat_response: Value, stream_enabled: bool) -> Value {
     let response_row = chat_response.as_object().cloned().unwrap_or_default();
     let choices = response_row
         .get("choices")
