@@ -837,6 +837,61 @@ fn collect_pending_bridge_function_call_ids(input_items: &[Value]) -> Vec<String
     pending
 }
 
+fn collect_completed_bridge_function_call_ids(input_items: &[Value]) -> Vec<String> {
+    let mut pending: Vec<String> = Vec::new();
+    let mut completed: Vec<String> = Vec::new();
+    for item in input_items {
+        let Some(row) = item.as_object() else {
+            continue;
+        };
+        let item_type = read_trimmed_string(row.get("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let Some(call_id) = read_bridge_function_call_id(row) else {
+            continue;
+        };
+        if item_type == "function_call" {
+            pending.push(call_id);
+            continue;
+        }
+        if is_bridge_tool_output_item_type(item_type.as_str()) {
+            if let Some(position) = pending.iter().position(|existing| existing == &call_id) {
+                pending.remove(position);
+                if !completed.iter().any(|existing| existing == &call_id) {
+                    completed.push(call_id);
+                }
+            }
+        }
+    }
+    completed
+}
+
+fn input_replays_completed_bridge_call(
+    input_items: &[Value],
+    completed_call_ids: &[String],
+) -> bool {
+    if completed_call_ids.is_empty() {
+        return false;
+    }
+    input_items.iter().any(|item| {
+        let Some(row) = item.as_object() else {
+            return false;
+        };
+        let item_type = read_trimmed_string(row.get("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if item_type != "function_call" && !is_bridge_tool_output_item_type(item_type.as_str()) {
+            return false;
+        }
+        let Some(call_id) = read_bridge_function_call_id(row) else {
+            return false;
+        };
+        completed_call_ids
+            .iter()
+            .any(|existing| existing == &call_id)
+    })
+}
+
 fn read_released_pending_tool_call_ids(entry_obj: &Map<String, Value>) -> Vec<String> {
     entry_obj
         .get("releasedPendingToolCallIds")
@@ -1026,6 +1081,10 @@ fn materialize_responses_continuation_payload(
 
     let common_prefix_len = count_common_leading_items(&prefix, &input_items);
     if common_prefix_len > 0 {
+        return Value::Null;
+    }
+    let completed_call_ids = collect_completed_bridge_function_call_ids(&prefix);
+    if input_replays_completed_bridge_call(&input_items, &completed_call_ids) {
         return Value::Null;
     }
     if !pending_call_ids.is_empty()
@@ -1462,6 +1521,34 @@ mod tests {
             }),
             Some("req_now"),
             Some("session:sess-1"),
+        );
+
+        assert!(materialized.is_null());
+    }
+
+    #[test]
+    fn does_not_materialize_plain_continuation_when_incoming_replays_completed_call_after_offset() {
+        let materialized = materialize_responses_continuation_payload(
+            &json!({
+                "requestId": "req_prev",
+                "lastResponseId": "resp_prev",
+                "input": [
+                    { "type": "function_call", "id": "fc_call_1", "call_id": "call_1", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
+                    { "type": "function_call_output", "call_id": "call_1", "output": "/tmp" }
+                ],
+                "basePayload": { "model": "gpt-test" }
+            }),
+            &json!({
+                "model": "gpt-test",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "old prompt" }] },
+                    { "type": "function_call", "id": "fc_call_1", "call_id": "call_1", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
+                    { "type": "function_call_output", "call_id": "call_1", "output": "/tmp" },
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "next prompt" }] }
+                ]
+            }),
+            Some("req_next"),
+            Some("session:s1"),
         );
 
         assert!(materialized.is_null());

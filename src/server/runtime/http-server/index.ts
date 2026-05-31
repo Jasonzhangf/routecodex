@@ -64,6 +64,7 @@ import { extractStatusCodeFromError } from './executor/utils.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
+import { clearResponsesConversationByRequestId } from '../../../modules/llmswitch/bridge.js';
 import { isPoolExhaustedPipelineError } from './executor/request-executor-core-utils.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
@@ -1159,6 +1160,9 @@ export class RouteCodexHttpServer {
       }
       this.logStage('router-direct.hub_pipeline_failed', input.requestId, {
         error: error instanceof Error ? error.message : String(error),
+      });
+      await clearResponsesConversationByRequestId(input.requestId).catch(() => {
+        // non-blocking cleanup
       });
       throw error;
     }

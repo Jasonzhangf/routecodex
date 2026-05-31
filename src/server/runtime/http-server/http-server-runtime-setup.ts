@@ -8,7 +8,7 @@ import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-ti
 import { registerClockRuntimeHooks } from './clock-runtime-hooks.js';
 import { registerHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
 import { getSharedProviderTrafficGovernor } from './provider-traffic-governor.js';
-import { preloadCriticalBridgeRuntimeModules } from '../../../modules/llmswitch/bridge.js';
+import { clearUnresolvedResponsesConversationRequests, preloadCriticalBridgeRuntimeModules } from '../../../modules/llmswitch/bridge.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 type RoutingProviderScope = {
@@ -211,6 +211,14 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
     console.warn(`[provider-traffic] failed to reset state on runtime setup (non-blocking): ${reason}`);
   }
   await preloadCriticalBridgeRuntimeModules();
+  try {
+    const cleared = await clearUnresolvedResponsesConversationRequests();
+    if (cleared > 0) {
+      console.warn('[responses-store] cleared unresolved requests on runtime setup', { cleared });
+    }
+  } catch (error) {
+    logRuntimeSetupNonBlockingError('setupRuntime.clearUnresolvedResponsesConversationRequests', error);
+  }
   const hubCtor = await server.ensureHubPipelineCtor();
   const hubConfig: HubPipelineConfig = {
     virtualRouter: bootstrapArtifacts.config

@@ -1596,6 +1596,50 @@ fn convert_bridge_input_rejects_duplicate_function_call_output_after_call_alread
 }
 
 #[test]
+fn convert_bridge_input_allows_reused_call_id_for_distinct_sequential_pairs() {
+    let input = BridgeInputToChatInput {
+        input: vec![
+            json!({
+                "type": "function_call",
+                "id": "call_1",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": { "cmd": "echo first" }
+            }),
+            json!({
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "first"
+            }),
+            json!({
+                "type": "function_call",
+                "id": "call_1",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": { "cmd": "echo second" }
+            }),
+            json!({
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "second"
+            }),
+        ],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
+    };
+
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
+    assert_eq!(output.messages.len(), 4);
+    assert_eq!(output.messages[0]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(output.messages[1]["tool_call_id"], "call_1");
+    assert_eq!(output.messages[2]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(output.messages[3]["tool_call_id"], "call_1");
+}
+
+#[test]
 fn convert_bridge_input_harvests_malformed_assistant_parameter_markup_into_tool_calls() {
     let input = BridgeInputToChatInput {
         input: vec![json!({
