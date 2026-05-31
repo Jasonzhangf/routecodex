@@ -260,7 +260,7 @@ fn response_stop_with_runtime_callbacks_returns_servertool_effect_plan() {
             serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
         })
         .unwrap();
-    assert_eq!(effect.payload["action"], json!("requireReenterPipeline"));
+    assert_eq!(effect.payload["action"], json!("requireRuntimeExecutor"));
     assert_eq!(effect.payload["reason"], json!("stop_eligible_followup"));
     assert_eq!(
         effect.payload["requestId"],

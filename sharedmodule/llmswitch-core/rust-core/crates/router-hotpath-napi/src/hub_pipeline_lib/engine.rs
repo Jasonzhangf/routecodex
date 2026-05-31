@@ -950,6 +950,27 @@ pub fn execute_hub_pipeline_json(input_json: String) -> HubPipelineResult<String
     serde_json::to_string(&output).map_err(HubPipelineError::from)
 }
 
+pub fn run_hub_pipeline_lib_json(input_json: String) -> HubPipelineResult<String> {
+    execute_hub_pipeline_json(input_json)
+}
+
+pub fn run_hub_pipeline_stage_json(stage_json: String) -> HubPipelineResult<String> {
+    if stage_json.trim().is_empty() {
+        return Err(HubPipelineError::new(
+            "hub_pipeline_empty_stage_input",
+            "Stage input JSON is empty",
+        ));
+    }
+
+    let raw: Value = serde_json::from_str(&stage_json)?;
+    let lib_input = if raw.get("request").is_some() {
+        raw
+    } else {
+        serde_json::json!({ "request": raw })
+    };
+    execute_hub_pipeline_json(serde_json::to_string(&lib_input).map_err(HubPipelineError::from)?)
+}
+
 fn diagnostic(
     stage_id: HubPipelineStageId,
     status: HubPipelineDiagnosticStatus,

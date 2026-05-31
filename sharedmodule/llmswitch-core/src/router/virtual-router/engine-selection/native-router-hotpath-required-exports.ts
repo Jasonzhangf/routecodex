@@ -314,6 +314,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "runRespInboundStage3CompatJson",
   "runHubPipelineJson",
   "executeHubPipelineJson",
+  "runHubPipelineLibJson",
+  "runHubPipelineStageJson",
   "buildRespInboundSseErrorDescriptorJson",
   "findMappableSemanticsKeysJson",
   "deriveToolCallKeyJson",

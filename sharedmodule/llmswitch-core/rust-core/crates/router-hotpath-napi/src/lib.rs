@@ -764,6 +764,18 @@ pub fn execute_hub_pipeline_json(input_json: String) -> NapiResult<String> {
         .map_err(|error| napi::Error::from_reason(format!("{}: {}", error.code, error.message)))
 }
 
+#[napi(js_name = "runHubPipelineLibJson")]
+pub fn run_hub_pipeline_lib_json(input_json: String) -> NapiResult<String> {
+    hub_pipeline_lib::run_hub_pipeline_lib_json(input_json)
+        .map_err(|error| napi::Error::from_reason(format!("{}: {}", error.code, error.message)))
+}
+
+#[napi(js_name = "runHubPipelineStageJson")]
+pub fn run_hub_pipeline_stage_json(input_json: String) -> NapiResult<String> {
+    hub_pipeline_lib::run_hub_pipeline_stage_json(input_json)
+        .map_err(|error| napi::Error::from_reason(format!("{}: {}", error.code, error.message)))
+}
+
 #[napi(js_name = "planSseStreamEffectJson")]
 pub fn plan_sse_stream_effect_json(input_json: String) -> NapiResult<String> {
     hub_resp_outbound_sse_stream::plan_sse_stream_effect_json(input_json)

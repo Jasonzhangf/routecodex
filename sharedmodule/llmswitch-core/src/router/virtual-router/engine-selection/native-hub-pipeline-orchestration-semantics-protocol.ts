@@ -224,6 +224,66 @@ export function executeHubPipelineWithNative(
   }
 }
 
+export function runHubPipelineLibWithNative(
+  input: HubPipelineLibInput
+): HubPipelineLibOutput {
+  const capability = 'runHubPipelineLibJson';
+  const fail = (reason?: string) => failNativeRequired<HubPipelineLibOutput>(capability, reason);
+
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseLibOutput(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function runHubPipelineStageWithNative(
+  input: HubPipelineInput
+): HubPipelineLibOutput {
+  const capability = 'runHubPipelineStageJson';
+  const fail = (reason?: string) => failNativeRequired<HubPipelineLibOutput>(capability, reason);
+
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseLibOutput(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function runHubPipelineOrchestrationWithNative(
   input: HubPipelineInput
 ): HubPipelineOutput {

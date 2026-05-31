@@ -209,6 +209,17 @@ fn extract_session_id_from_user_metadata(
     if token.is_empty() {
         return None;
     }
+    if let Some(uuid_match) =
+        Regex::new(r"(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+            .ok()
+            .and_then(|uuid_regex| {
+                uuid_regex
+                    .find(token)
+                    .map(|found| found.as_str().to_string())
+            })
+    {
+        return Some(uuid_match);
+    }
     Some(token.to_string())
 }
 

@@ -2211,8 +2211,8 @@ fn test_lift_responses_resume_into_semantics_injects_when_missing_and_clears_met
         output
             .get("metadata")
             .and_then(|v| v.get("responsesResume"))
-            .is_some(),
-        false
+            .and_then(|v| v.as_null()),
+        Some(())
     );
     assert_eq!(
         output
@@ -2255,8 +2255,8 @@ fn test_lift_responses_resume_into_semantics_preserves_existing_resume() {
         output
             .get("metadata")
             .and_then(|v| v.get("responsesResume"))
-            .is_some(),
-        false
+            .and_then(|v| v.as_null()),
+        Some(())
     );
 }
 
