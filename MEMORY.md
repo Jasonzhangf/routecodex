@@ -1929,3 +1929,7 @@ Slice 0（总控 API）→ Slice 1-4（P0）→ Slice 5（P1）
 ## 2026-05-31 HubPipeline request stage shell removal
 - Verified closeout residue: `req_outbound_stage2_format_build`, `req_outbound_stage3_compat`, and `req_process_stage2_route_select` TS stage shells had no production/test import while Rust HubPipeline engine covers `build_format_request`, `run_req_outbound_stage3_compat`, and `apply_route_selection`.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` requires these legacy request stage shells to be physically absent.
+
+## 2026-05-31 HubPipeline response stage shell removal
+- Verified closeout: old TS stage shell directories under `req_inbound/req_inbound_stage1_format_parse`, `resp_inbound/*`, `resp_outbound/*`, and `resp_process/*` are physically removed. Provider response mainline is Rust total API; explicit stage3 reentry regression now targets `servertool/response-stage-orchestration-shell` directly.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` requires these directories absent and provider response mainline not importing/calling old `runResp*Stage*` wrappers.

@@ -1687,3 +1687,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 HubPipeline request stage shell deletion 精华
 - Rust total API covers request route/outbound stages; if TS `req_outbound_stage2_format_build`, `req_outbound_stage3_compat`, or `req_process_stage2_route_select` reappears, treat as closeout regression and fail `hub-pipeline-stage-residue-audit`.
+
+### 2026-05-31 HubPipeline response stage shell deletion 精华
+- Response path closeout means no TS `resp_inbound/*`, `resp_outbound/*`, or `resp_process/*` stage shell directories; keep acceptance coverage by moving tests to Rust total API or side-effect shells such as `servertool/response-stage-orchestration-shell`.
+- Architecture gate: `hub-pipeline-stage-residue-audit` must fail if old `runResp*Stage*` wrappers or directories reappear.

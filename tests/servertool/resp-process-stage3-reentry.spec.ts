@@ -9,7 +9,7 @@ import {
   saveRoutingInstructionStateSync
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 import type { RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
-import { runRespProcessStage3ServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage3_servertool_orchestration/index.js';
+import { runServertoolResponseStageOrchestrationShell } from '../../sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stage3-reentry-sessions');
 
@@ -88,7 +88,7 @@ describe('resp_process stage3 servertool followup reentry', () => {
     const clientInjectDispatch = jest.fn(async () => ({ ok: true } as const));
     let reenterCalls = 0;
 
-    const result = await runRespProcessStage3ServerToolOrchestration({
+    const result = await runServertoolResponseStageOrchestrationShell({
       payload: buildStopResponse('再次停止') as any,
       adapterContext: {
         sessionId,
@@ -116,7 +116,7 @@ describe('resp_process stage3 servertool followup reentry', () => {
   });
 
   test('non-reasoning followup still bypasses orchestration', async () => {
-    const result = await runRespProcessStage3ServerToolOrchestration({
+    const result = await runServertoolResponseStageOrchestrationShell({
       payload: buildStopResponse('普通 followup') as any,
       adapterContext: {
         sessionId: 'stage3-bypass-normal-followup',

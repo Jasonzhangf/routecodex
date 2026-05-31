@@ -124,31 +124,17 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).not.toContain('stages/resp_outbound');
   });
 
-  it('resp_process stage2 TS shell must enter Rust total stage API instead of direct finalize helpers', () => {
-    const stagePath = path.join(
+  it('legacy resp_process stage2 and resp outbound SSE TS shells must be physically removed', () => {
+    const stageRoot = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage2_finalize/index.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages',
     );
-    const stageSource = fs.readFileSync(stagePath, 'utf8');
+    const legacyFiles = [
+      'resp_process/resp_process_stage2_finalize/index.ts',
+      'resp_outbound/resp_outbound_stage2_sse_stream/index.ts',
+    ].filter((relativePath) => fs.existsSync(path.join(stageRoot, relativePath)));
 
-    expect(stageSource).toContain('runHubPipelineStageWithNative');
-    expect(stageSource).not.toContain('finalizeRespProcessChatResponseWithNative');
-    expect(stageSource).not.toContain('filterOutExecutedServerToolCallsWithNative');
-    expect(stageSource).not.toContain('buildProcessedRequestFromChatResponse');
-  });
-
-  it('resp outbound SSE TS shell must consume Rust effect plan instead of deciding stream mode', () => {
-    const filePath = path.join(
-      process.cwd(),
-      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts',
-    );
-    const source = fs.readFileSync(filePath, 'utf8');
-
-    expect(source).toContain('planSseStreamEffectWithNative');
-    expect(source).toContain('effectPlan.effects');
-    expect(source).not.toContain('processSseStreamWithNative');
-    expect(source).not.toContain('normalizeProviderProtocolTokenWithNative');
-    expect(source).not.toContain('const shouldStream');
+    expect(legacyFiles).toEqual([]);
   });
 
   it('provider response mainline must invoke Rust HubPipeline total entry before TS residue stages', () => {
@@ -322,29 +308,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('resp_process stage1 must remain thin-shell and must not reintroduce TS governance sidecar mutation', () => {
+  it('legacy resp_process stage1 TS governance shell must be physically removed', () => {
     const filePath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage1_tool_governance/index.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
 
-    const findings = collectMatches(source, [
-      {
-        label: 'defines attachRequestedToolNames',
-        pattern: /\bfunction attachRequestedToolNames\b/,
-      },
-      {
-        label: 'defines markTextHarvestApplied',
-        pattern: /\bfunction markTextHarvestApplied\b/,
-      },
-      {
-        label: 'writes __rcc_tool_governance sidecar',
-        pattern: /__rcc_tool_governance/,
-      },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('legacy TS hub registry must be physically removed', () => {
@@ -499,6 +469,27 @@ describe('hub pipeline stage residue audit', () => {
     ].filter((relativePath) => fs.existsSync(path.join(stageRoot, relativePath)));
 
     expect(legacyFiles).toEqual([]);
+  });
+
+  it('legacy response stage shells covered by Rust total API must be physically removed', () => {
+    const stageRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages',
+    );
+    const legacyPaths = [
+      'req_inbound/req_inbound_stage1_format_parse',
+      'resp_inbound/resp_inbound_stage1_sse_decode',
+      'resp_inbound/resp_inbound_stage2_format_parse',
+      'resp_inbound/resp_inbound_stage3_semantic_map',
+      'resp_outbound/resp_outbound_stage1_client_remap',
+      'resp_outbound/resp_outbound_stage2_sse_stream',
+      'resp_process/resp_process_stage1_tool_governance',
+      'resp_process/resp_process_stage2_finalize',
+      'resp_process/resp_process_stage3_servertool_orchestration',
+    ];
+    const existing = legacyPaths.filter((relativePath) => fs.existsSync(path.join(stageRoot, relativePath)));
+
+    expect(existing).toEqual([]);
   });
 
   it('legacy TS operation-table semantic mapper implementations must be physically removed', () => {

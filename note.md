@@ -13511,3 +13511,8 @@ Using skills: coding-principals + rcc-dev-skills
 - 红测：`hub-pipeline-stage-residue-audit` 新增 gate 要求三类 request stage shell 物理不存在，先红显示 3 个残留。
 - 修复：物理删除上述 stage shell 及对应 README 空壳。
 - 验证：residue audit 30/30 PASS；`pnpm -C sharedmodule/llmswitch-core run build` PASS；`cargo test -p router-hotpath-napi hub_pipeline -- --nocapture` 132 PASS。
+
+## 2026-05-31 HubPipeline response stage shell deletion
+- Red gate: `hub-pipeline-stage-residue-audit` required response/req_inbound stage shell directories physically absent; first run failed on 9 legacy stage dirs.
+- Action: removed old `req_inbound_stage1_format_parse`, response inbound/outbound/process stage shell directories and direct stage tests; migrated required `resp-process-stage3-reentry` to `servertool/response-stage-orchestration-shell` so explicit acceptance test remains without old stage wrapper.
+- Verification: `hub-pipeline-stage-residue-audit` + `resp-process-stage3-reentry` PASS 32/32; `pnpm -C sharedmodule/llmswitch-core run build` PASS; stage import scan shows no active prod/test imports outside fixtures/native compat names.
