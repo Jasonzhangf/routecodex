@@ -250,6 +250,11 @@ fn build_anthropic_messages_request(format_envelope: &Value) -> Result<Value, St
         .get("payload")
         .ok_or("Missing 'payload' field in format envelope")?
         .clone();
+    let source_format = format_envelope
+        .get("format")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
 
     if payload.get("input").is_some() {
         let chat = crate::responses_openai_codec::run_responses_openai_request_codec_json(
@@ -264,6 +269,16 @@ fn build_anthropic_messages_request(format_envelope: &Value) -> Result<Value, St
             .ok_or_else(|| "responses-openai request codec returned no request".to_string())?;
         let anthropic = crate::anthropic_openai_codec::build_anthropic_from_openai_chat_json(
             chat_request.to_string(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+        let anthropic_value: Value =
+            serde_json::from_str(&anthropic).map_err(|error| error.to_string())?;
+        return Ok(strip_private_fields(&anthropic_value));
+    }
+    if source_format != "anthropic-messages" && payload.get("messages").is_some() {
+        let anthropic = crate::anthropic_openai_codec::build_anthropic_from_openai_chat_json(
+            payload.to_string(),
             None,
         )
         .map_err(|error| error.to_string())?;
@@ -413,6 +428,30 @@ mod tests {
         let result = build_format_request(input).unwrap();
         assert_eq!(result.payload["model"], "claude-3-opus");
         assert!(result.payload.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn test_build_anthropic_messages_request_converts_chat_payload() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "MiniMax-M3",
+                    "messages": [{"role": "user", "content": "search latest"}],
+                    "metadata": {"providerKey": "must-not-leak"}
+                }
+            }),
+            protocol: "anthropic-messages".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        assert_eq!(result.payload["model"], "MiniMax-M3");
+        assert_eq!(result.payload["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(result.payload["messages"][0]["role"], "user");
+        assert_eq!(result.payload["messages"][0]["content"][0]["type"], "text");
+        assert_eq!(result.payload["messages"][0]["content"][0]["text"], "search latest");
+        assert!(result.payload.get("metadata").is_none());
     }
 
     #[test]

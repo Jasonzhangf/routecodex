@@ -3,6 +3,7 @@ use serde_json::Value;
 
 use crate::chat_node_result_semantics::build_processed_request_from_chat_response;
 use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
+use crate::hub_pipeline_blocks::standardized_request::coerce_standardized_request_from_payload;
 use crate::hub_req_inbound_context_capture::{
     capture_req_inbound_responses_context_snapshot, ResponsesContextCaptureInput,
 };
@@ -32,8 +33,8 @@ use crate::resp_process_stage1_tool_governance::{
     govern_response, ToolGovernanceInput as RespToolGovernanceInput,
 };
 use crate::resp_process_stage2_finalize::{finalize_chat_response, FinalizeInput};
-use crate::servertool_skeleton::finalize_strip::filter_out_executed_servertool_calls;
 use crate::servertool_core_blocks::inspect_stop_gateway_signal;
+use crate::servertool_skeleton::finalize_strip::filter_out_executed_servertool_calls;
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
 use super::effect_plan::{HubPipelineEffect, HubPipelineEffectKind, HubPipelineEffectPlan};
@@ -72,11 +73,7 @@ impl HubPipelineEngine {
         Ok(())
     }
 
-    fn select_route(
-        &self,
-        request: &Value,
-        metadata: &Value,
-    ) -> HubPipelineResult<Value> {
+    fn select_route(&self, request: &Value, metadata: &Value) -> HubPipelineResult<Value> {
         if let Some(target) = self.config.virtual_router.get("target").cloned() {
             return Ok(serde_json::json!({
                 "target": target,
@@ -197,6 +194,35 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Completed,
             Some(serde_json::json!({ "envelopeObject": lifted_envelope.is_object() })),
         ));
+        let standardized = coerce_standardized_request_from_payload(&serde_json::json!({
+            "payload": normalized_payload,
+            "normalized": {
+                "id": output.request_id,
+                "entryEndpoint": entry_endpoint,
+                "stream": normalized_metadata.get("stream").and_then(Value::as_bool).unwrap_or(false),
+                "processMode": normalized_metadata.get("processMode").and_then(Value::as_str).unwrap_or("chat"),
+                "routeHint": normalized_metadata.get("routeHint").cloned().unwrap_or(Value::Null)
+            }
+        }))
+        .map_err(HubPipelineError::from)?;
+        let standardized_payload = standardized
+            .get("standardizedRequest")
+            .cloned()
+            .ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_missing_standardized_request",
+                    "Rust HubPipeline req inbound returned no standardized request",
+                )
+            })?;
+        let standardized_raw_payload = standardized
+            .get("rawPayload")
+            .cloned()
+            .ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_missing_standardized_raw_payload",
+                    "Rust HubPipeline req inbound returned no standardized raw payload",
+                )
+            })?;
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqInboundContextCapture,
             HubPipelineDiagnosticStatus::Started,
@@ -221,13 +247,8 @@ impl HubPipelineEngine {
             Some(serde_json::json!({ "metadataObject": normalized_metadata.is_object() })),
         ));
         let governed = apply_req_process_tool_governance(ToolGovernanceInput {
-            request: normalized_payload,
-            raw_payload: output.payload.clone().ok_or_else(|| {
-                HubPipelineError::new(
-                    "hub_pipeline_missing_raw_payload",
-                    "Rust HubPipeline req governance requires normalized raw payload",
-                )
-            })?,
+            request: standardized_payload,
+            raw_payload: standardized_raw_payload,
             metadata: normalized_metadata.clone(),
             entry_endpoint: entry_endpoint.clone(),
             request_id: output.request_id.clone(),
@@ -659,11 +680,7 @@ fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn build_response_record_effect_payload(
-    metadata: &Value,
-    payload: &Value,
-    request_id: &str,
-) -> Value {
+fn build_response_record_effect_payload(metadata: &Value, payload: &Value, request_id: &str) -> Value {
     if metadata.get("clientProtocol").and_then(Value::as_str) != Some("openai-responses") {
         return Value::Null;
     }
@@ -1068,7 +1085,10 @@ fn run_normalize_request_stage(raw: Value) -> HubPipelineResult<String> {
     {
         return Err(HubPipelineError::new(
             "hub_pipeline_passthrough_process_mode_removed",
-            format!("[HubPipeline] processMode='passthrough' is no longer supported. (requestId={})", request_id),
+            format!(
+                "[HubPipeline] processMode='passthrough' is no longer supported. (requestId={})",
+                request_id
+            ),
         ));
     }
     let output = run_hub_pipeline(HubPipelineInput {
@@ -1155,10 +1175,7 @@ fn run_req_process_tool_governance_stage(raw: Value) -> HubPipelineResult<String
         has_active_stop_message_for_continue_execution,
     })
     .map_err(|message| {
-        HubPipelineError::new(
-            "hub_pipeline_req_process_tool_governance_failed",
-            message,
-        )
+        HubPipelineError::new("hub_pipeline_req_process_tool_governance_failed", message)
     })?;
 
     let output = HubPipelineExecutionOutput {
@@ -1210,7 +1227,8 @@ fn run_resp_process_finalize_stage(raw: Value) -> HubPipelineResult<String> {
     } else {
         finalized
     };
-    let processed_request = build_processed_request_from_chat_response(finalized.clone(), wants_stream);
+    let processed_request =
+        build_processed_request_from_chat_response(finalized.clone(), wants_stream);
     let output = HubPipelineExecutionOutput {
         request_id,
         success: true,
