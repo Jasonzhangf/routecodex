@@ -674,6 +674,20 @@ export function planServertoolAutoHookQueuesWithNative(input: {
   }
 }
 
+export function runServertoolOrchestrationMutationWithNative(input: Record<string, unknown>): unknown {
+  const capability = 'runServertoolOrchestrationMutationJson';
+  const fail = (reason?: string) => failNativeRequired<unknown>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [input]);
+    const parsed = parseJson('runServertoolOrchestrationMutation', raw);
+    if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
+    return parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function resolveServertoolFollowupFlowProfileWithNative(
   flowId: string
 ): NativeServertoolFollowupFlowProfile {

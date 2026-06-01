@@ -638,6 +638,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('servertool orchestration blocks must not retain TS tool call/output mutation semantics', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'builds assistant tool_call message in TS', pattern: /tool_calls:\s*calls|toolCalls\.map\(/ },
+      { label: 'appends tool_outputs in TS', pattern: /tool_outputs\)\.push|tool_outputs\s*=\s*outputs/ },
+      { label: 'builds tool role messages from outputs in TS', pattern: /role:\s*'tool'|tool_call_id:\s*toolCallId/ },
+      { label: 'strips tool_outputs in TS', pattern: /delete\s*\([^)]*\)\.tool_outputs/ },
+      { label: 'patches tool call arguments in TS', pattern: /functionCall|function_call|\.arguments\s*=\s*argumentsText/ },
+      { label: 'filters executed tool_calls in TS', pattern: /toolCalls\.filter\(|executedIds\.has/ },
+      { label: 'swallows orchestration mutation errors', pattern: /catch\s*\{\s*\/\/ ignore\s*\}/s },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('anthropic response bridge policy must fail fast instead of swallowing policy errors', () => {
     const filePath = path.join(
       process.cwd(),

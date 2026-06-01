@@ -1513,6 +1513,213 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+fn build_assistant_tool_call_message_value(tool_calls: &[Value]) -> Value {
+    let calls = tool_calls
+        .iter()
+        .filter_map(|tool_call| {
+            let row = tool_call.as_object()?;
+            let id = row.get("id").and_then(Value::as_str)?.to_string();
+            let name = row.get("name").and_then(Value::as_str)?.to_string();
+            let arguments = row
+                .get("arguments")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            Some(serde_json::json!({
+                "id": id,
+                "type": "function",
+                "function": { "name": name, "arguments": arguments }
+            }))
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({ "role": "assistant", "content": Value::Null, "tool_calls": calls })
+}
+
+fn append_tool_output_value(mut base: Value, tool_call_id: &str, name: &str, content: &str) -> Value {
+    let mut outputs = base
+        .get("tool_outputs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    outputs.push(serde_json::json!({
+        "tool_call_id": tool_call_id,
+        "name": name,
+        "content": content,
+    }));
+    if let Some(row) = base.as_object_mut() {
+        row.insert("tool_outputs".to_string(), Value::Array(outputs));
+    }
+    base
+}
+
+fn build_tool_messages_from_outputs_value(base: &Value, allow_ids: &[String]) -> Value {
+    let allow = allow_ids
+        .iter()
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect::<std::collections::HashSet<_>>();
+    let outputs = base
+        .get("tool_outputs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut out = Vec::new();
+    for entry in outputs {
+        let Some(row) = entry.as_object() else { continue };
+        let Some(tool_call_id) = row
+            .get("tool_call_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        if !allow.contains(tool_call_id) {
+            continue;
+        }
+        let name = row
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("tool");
+        let content = match row.get("content") {
+            Some(Value::String(value)) => value.clone(),
+            Some(value) => serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string()),
+            None => "{}".to_string(),
+        };
+        out.push(serde_json::json!({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "name": name,
+            "content": content,
+        }));
+    }
+    Value::Array(out)
+}
+
+fn strip_tool_outputs_value(mut base: Value) -> Value {
+    if let Some(row) = base.as_object_mut() {
+        row.remove("tool_outputs");
+    }
+    base
+}
+
+fn patch_tool_call_arguments_by_id_value(mut chat_response: Value, tool_call_id: &str, arguments_text: &str) -> Value {
+    if tool_call_id.trim().is_empty() {
+        return chat_response;
+    }
+    let Some(choices) = chat_response.get_mut("choices").and_then(Value::as_array_mut) else {
+        return chat_response;
+    };
+    for choice in choices {
+        let Some(message) = choice
+            .as_object_mut()
+            .and_then(|choice_row| choice_row.get_mut("message"))
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for tool_call in tool_calls {
+            let Some(record) = tool_call.as_object_mut() else { continue };
+            let id = record
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("");
+            if id != tool_call_id {
+                continue;
+            }
+            for key in ["function", "functionCall", "function_call"] {
+                if let Some(fn_row) = record.get_mut(key).and_then(Value::as_object_mut) {
+                    fn_row.insert("arguments".to_string(), Value::String(arguments_text.to_string()));
+                }
+            }
+            if record.contains_key("arguments") {
+                record.insert("arguments".to_string(), Value::String(arguments_text.to_string()));
+            }
+        }
+    }
+    chat_response
+}
+
+fn filter_out_executed_tool_calls_value(mut chat_response: Value, executed_ids: &[String]) -> Value {
+    let executed = executed_ids
+        .iter()
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect::<std::collections::HashSet<_>>();
+    if executed.is_empty() {
+        return chat_response;
+    }
+    let Some(choices) = chat_response.get_mut("choices").and_then(Value::as_array_mut) else {
+        return chat_response;
+    };
+    for choice in choices {
+        let Some(message) = choice
+            .as_object_mut()
+            .and_then(|choice_row| choice_row.get_mut("message"))
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        tool_calls.retain(|tool_call| {
+            let id = tool_call
+                .as_object()
+                .and_then(|row| row.get("id"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("");
+            id.is_empty() || !executed.contains(id)
+        });
+    }
+    chat_response
+}
+
+#[napi]
+pub fn run_servertool_orchestration_mutation_json(input_json: String) -> NapiResult<String> {
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MutationInput {
+        op: String,
+        #[serde(default)]
+        base: Value,
+        #[serde(default)]
+        tool_calls: Vec<Value>,
+        #[serde(default)]
+        allow_ids: Vec<String>,
+        #[serde(default)]
+        executed_ids: Vec<String>,
+        #[serde(default)]
+        tool_call_id: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        content: String,
+        #[serde(default)]
+        arguments_text: String,
+    }
+
+    let input: MutationInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = match input.op.as_str() {
+        "build_assistant_tool_call_message" => build_assistant_tool_call_message_value(&input.tool_calls),
+        "append_tool_output" => append_tool_output_value(input.base, &input.tool_call_id, &input.name, &input.content),
+        "build_tool_messages_from_outputs" => build_tool_messages_from_outputs_value(&input.base, &input.allow_ids),
+        "strip_tool_outputs" => strip_tool_outputs_value(input.base),
+        "patch_tool_call_arguments_by_id" => patch_tool_call_arguments_by_id_value(input.base, &input.tool_call_id, &input.arguments_text),
+        "filter_out_executed_tool_calls" => filter_out_executed_tool_calls_value(input.base, &input.executed_ids),
+        other => return Err(napi::Error::from_reason(format!("unknown servertool orchestration mutation op: {other}"))),
+    };
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 /// Extract a string field from multiple candidate sources in priority order.
 /// Each source is checked in the order given — first non-empty wins.
 fn extract_priority_string(
@@ -2141,7 +2348,7 @@ mod tests {
                             {
                                 "type": "function",
                                 "function": {
-                                    "name": "sample_client_tool",
+                                    "name": "continue_execution",
                                     "arguments": "{\"action\":\"list\"}"
                                 }
                             }
@@ -2153,9 +2360,46 @@ mod tests {
         let tool_calls =
             extract_tool_calls_from_chat_payload_mut(&mut payload, "req_sample_source_id").unwrap();
         assert_eq!(tool_calls.len(), 1);
-        assert_eq!(tool_calls[0].name, "sample_client_tool");
+        assert_eq!(tool_calls[0].name, "continue_execution");
         assert!(tool_calls[0].id.starts_with("call_"));
         assert_eq!(tool_calls[0].id.len(), 29);
+    }
+
+    #[test]
+    fn test_servertool_orchestration_mutation_ops_run_in_rust() {
+        let base = json!({
+            "choices": [{"message": {"role": "assistant", "tool_calls": [
+                {"id":"call_keep", "type":"function", "function":{"name":"client", "arguments":"{}"}},
+                {"id":"call_done", "type":"function", "function":{"name":"apply_patch", "arguments":"old"}}
+            ]}}],
+            "tool_outputs": [{"tool_call_id":"call_done", "name":"apply_patch", "content":{"ok":true}}]
+        });
+
+        let patched = run_servertool_orchestration_mutation_json(json!({
+            "op":"patch_tool_call_arguments_by_id",
+            "base": base,
+            "toolCallId":"call_done",
+            "argumentsText":"new"
+        }).to_string()).expect("patched");
+        let patched_value: Value = serde_json::from_str(&patched).unwrap();
+        assert_eq!(patched_value["choices"][0]["message"]["tool_calls"][1]["function"]["arguments"], "new");
+
+        let filtered = run_servertool_orchestration_mutation_json(json!({
+            "op":"filter_out_executed_tool_calls",
+            "base": patched_value,
+            "executedIds":["call_done"]
+        }).to_string()).expect("filtered");
+        let filtered_value: Value = serde_json::from_str(&filtered).unwrap();
+        assert_eq!(filtered_value["choices"][0]["message"]["tool_calls"].as_array().unwrap().len(), 1);
+
+        let messages = run_servertool_orchestration_mutation_json(json!({
+            "op":"build_tool_messages_from_outputs",
+            "base": filtered_value,
+            "allowIds":["call_done"]
+        }).to_string()).expect("messages");
+        let messages_value: Value = serde_json::from_str(&messages).unwrap();
+        assert_eq!(messages_value[0]["role"], "tool");
+        assert_eq!(messages_value[0]["tool_call_id"], "call_done");
     }
 
     #[test]

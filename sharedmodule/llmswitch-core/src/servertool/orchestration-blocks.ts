@@ -1,7 +1,10 @@
-import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
+import type { JsonObject } from '../conversion/hub/types/json.js';
 import { buildServertoolAutoHookQueueConfig } from './skeleton-config.js';
-import { planServertoolAutoHookQueuesWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
-import type { ServerToolFollowupInjectionOp, ToolCall } from './types.js';
+import {
+  planServertoolAutoHookQueuesWithNative,
+  runServertoolOrchestrationMutationWithNative
+} from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+import type { ToolCall } from './types.js';
 
 function normalizeServerToolCallName(name: string): string {
   const normalized = name.trim().toLowerCase();
@@ -11,12 +14,32 @@ function normalizeServerToolCallName(name: string): string {
   return normalized;
 }
 
-function asObject(value: unknown): JsonObject | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : null;
+function replaceJsonObjectInPlaceInternal(target: JsonObject, next: JsonObject): void {
+  const newKeys = new Set(Object.keys(next));
+  for (const [key, value] of Object.entries(next)) {
+    (target as Record<string, unknown>)[key] = value;
+  }
+  for (const key of Object.keys(target)) {
+    if (!newKeys.has(key)) {
+      delete (target as Record<string, unknown>)[key];
+    }
+  }
 }
 
-function getArray(value: unknown): JsonValue[] {
-  return Array.isArray(value) ? (value as JsonValue[]) : [];
+function nativeRecord(input: Record<string, unknown>): JsonObject {
+  const output = runServertoolOrchestrationMutationWithNative(input);
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[servertool] orchestration mutation returned invalid object');
+  }
+  return output as JsonObject;
+}
+
+function nativeArray(input: Record<string, unknown>): JsonObject[] {
+  const output = runServertoolOrchestrationMutationWithNative(input);
+  if (!Array.isArray(output)) {
+    throw new Error('[servertool] orchestration mutation returned invalid array');
+  }
+  return output.filter((entry): entry is JsonObject => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)));
 }
 
 export function buildAutoHookQueuesFromConfig<THook extends {
@@ -63,61 +86,23 @@ export function buildAutoHookQueuesFromConfig<THook extends {
 }
 
 export function buildAssistantToolCallMessage(toolCalls: ToolCall[]): JsonObject {
-  const calls = toolCalls.map((toolCall) => ({
-    id: toolCall.id,
-    type: 'function',
-    function: {
-      name: toolCall.name,
-      arguments: toolCall.arguments
-    }
-  }));
-  return { role: 'assistant', content: null, tool_calls: calls } as JsonObject;
+  return nativeRecord({ op: 'build_assistant_tool_call_message', toolCalls });
 }
 
 export function appendToolOutput(base: JsonObject, toolCallId: string, name: string, content: string): void {
-  const outputs = Array.isArray((base as any).tool_outputs) ? ((base as any).tool_outputs as any[]) : [];
-  outputs.push({ tool_call_id: toolCallId, name, content });
-  (base as any).tool_outputs = outputs;
+  replaceJsonObjectInPlaceInternal(base, nativeRecord({ op: 'append_tool_output', base, toolCallId, name, content }));
 }
 
 export function buildToolMessagesFromOutputs(base: JsonObject, allowIds: Set<string>): JsonObject[] {
-  const outputs = Array.isArray((base as any).tool_outputs) ? ((base as any).tool_outputs as any[]) : [];
-  const out: JsonObject[] = [];
-  for (const entry of outputs) {
-    if (!entry || typeof entry !== 'object') continue;
-    const toolCallId = typeof (entry as any).tool_call_id === 'string' ? String((entry as any).tool_call_id) : '';
-    if (!toolCallId || !allowIds.has(toolCallId)) continue;
-    const name =
-      typeof (entry as any).name === 'string' && String((entry as any).name).trim()
-        ? String((entry as any).name).trim()
-        : 'tool';
-    const content =
-      typeof (entry as any).content === 'string'
-        ? String((entry as any).content)
-        : JSON.stringify((entry as any).content ?? {});
-    out.push({ role: 'tool', tool_call_id: toolCallId, name, content } as JsonObject);
-  }
-  return out;
+  return nativeArray({ op: 'build_tool_messages_from_outputs', base, allowIds: [...allowIds] });
 }
 
 export function stripToolOutputs(base: JsonObject): void {
-  try {
-    delete (base as any).tool_outputs;
-  } catch {
-    // ignore
-  }
+  replaceJsonObjectInPlaceInternal(base, nativeRecord({ op: 'strip_tool_outputs', base }));
 }
 
 export function replaceJsonObjectInPlace(target: JsonObject, next: JsonObject): void {
-  const newKeys = new Set(Object.keys(next));
-  for (const [key, value] of Object.entries(next)) {
-    (target as any)[key] = value;
-  }
-  for (const key of Object.keys(target)) {
-    if (!newKeys.has(key)) {
-      delete (target as any)[key];
-    }
-  }
+  replaceJsonObjectInPlaceInternal(target, next);
 }
 
 export function patchToolCallArgumentsById(
@@ -125,57 +110,15 @@ export function patchToolCallArgumentsById(
   toolCallId: string,
   argumentsText: string
 ): void {
-  if (!toolCallId || typeof argumentsText !== 'string') {
-    return;
-  }
-  const choices = getArray((chatResponse as any).choices);
-  for (const choice of choices) {
-    const choiceObj = asObject(choice);
-    if (!choiceObj) continue;
-    const message = asObject((choiceObj as any).message);
-    if (!message) continue;
-    const toolCalls = getArray((message as any).tool_calls);
-    for (const toolCall of toolCalls) {
-      const record = asObject(toolCall);
-      if (!record) continue;
-      const id = typeof (record as any).id === 'string' ? String((record as any).id).trim() : '';
-      if (!id || id !== toolCallId) {
-        continue;
-      }
-      const fn = asObject((record as any).function);
-      if (fn) {
-        (fn as any).arguments = argumentsText;
-      }
-      const fnCamel = asObject((record as any).functionCall);
-      if (fnCamel) {
-        (fnCamel as any).arguments = argumentsText;
-      }
-      const fnSnake = asObject((record as any).function_call);
-      if (fnSnake) {
-        (fnSnake as any).arguments = argumentsText;
-      }
-      if (Object.prototype.hasOwnProperty.call(record as any, 'arguments')) {
-        (record as any).arguments = argumentsText;
-      }
-    }
-  }
+  replaceJsonObjectInPlaceInternal(
+    chatResponse,
+    nativeRecord({ op: 'patch_tool_call_arguments_by_id', base: chatResponse, toolCallId, argumentsText })
+  );
 }
 
 export function filterOutExecutedToolCalls(chatResponse: JsonObject, executedIds: Set<string>): void {
-  const choices = getArray((chatResponse as any).choices);
-  for (const choice of choices) {
-    const choiceObj = asObject(choice);
-    if (!choiceObj) continue;
-    const message = asObject((choiceObj as any).message);
-    if (!message) continue;
-    const toolCalls = getArray((message as any).tool_calls);
-    if (!toolCalls.length) continue;
-    const next = toolCalls.filter((toolCall) => {
-      if (!toolCall || typeof toolCall !== 'object' || Array.isArray(toolCall)) return true;
-      const id = typeof (toolCall as any).id === 'string' ? String((toolCall as any).id).trim() : '';
-      if (!id) return true;
-      return !executedIds.has(id);
-    });
-    (message as any).tool_calls = next;
-  }
+  replaceJsonObjectInPlaceInternal(
+    chatResponse,
+    nativeRecord({ op: 'filter_out_executed_tool_calls', base: chatResponse, executedIds: [...executedIds] })
+  );
 }

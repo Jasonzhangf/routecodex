@@ -13890,3 +13890,9 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 修复：补 `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 红测；将 seed/model/parameter 语义迁入 Rust `servertool_followup_delta.rs`，TS `followup-seed.ts` 改为 native 薄壳并移除生成残留 d.ts。
 - 验证：`hub-pipeline-stage-residue-audit` 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit` 绿；`cargo test -p router-hotpath-napi servertool_followup_delta -- --nocapture` 绿；HTTP 黑盒 `responses-handler.stop-followup-metadata.blackbox.spec.ts` 用 `npm run jest:run` 绿；`npm run build:min` 绿并 bump 版本到 0.90.2645。
 - 噪音：`tests/servertool/stop-message-flow-followup-reentry.spec.ts` 仍因测试环境 native binding `getDefaultServertoolSkeletonDocumentJson` 不可用失败，未进入业务断言。
+
+## 2026-06-01 servertool orchestration mutation Rust closeout
+
+- 违规点：`sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts` 在 TS 中构造 assistant `tool_calls`、追加/删除 `tool_outputs`、构造 tool role messages、patch tool call arguments、过滤 executed tool_calls，并有 `catch { // ignore }` 静默吞错。
+- 修复：补 `hub-pipeline-stage-residue-audit` 红测；新增 Rust `run_servertool_orchestration_mutation_json` 承载上述工具响应/请求边界 mutation；TS `orchestration-blocks.ts` 收缩为 native 调用 + in-place replace 薄壳。
+- 验证：`hub-pipeline-stage-residue-audit` 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit` 绿；`cargo test -p router-hotpath-napi chat_servertool_orchestration::tests:: -- --nocapture` 绿；HTTP 黑盒 `responses-handler.stop-followup-metadata.blackbox.spec.ts` 绿；`npm run build:min` 绿并 bump 版本到 0.90.2646。
