@@ -1,10 +1,25 @@
 import {
   buildUsageLogText,
   extractUsageFromResult,
+  computeCacheHitRatio,
   mergeUsageMetrics
 } from '../../../../../src/server/runtime/http-server/executor/usage-aggregator.js';
 
 describe('usage log text', () => {
+  it('caps cache hit ratio at 100 percent', () => {
+    expect(computeCacheHitRatio({
+      prompt_tokens: 110_505,
+      completion_tokens: 19,
+      total_tokens: 110_524,
+      cache_read_input_tokens: 107_122
+    })).toBeCloseTo(107_122 / 110_505, 10);
+
+    expect(computeCacheHitRatio({
+      prompt_tokens: 10,
+      cache_read_input_tokens: 12
+    })).toBe(1);
+  });
+
   it('prints input/output/total tokens with direct completion usage', () => {
     const text = buildUsageLogText({
       prompt_tokens: 120,
@@ -24,7 +39,7 @@ describe('usage log text', () => {
     expect(text).toBe('input_tokens=200 output_tokens=60 total_tokens=260');
   });
 
-  it('extracts usage from body.metadata.usage', () => {
+  it('does not extract usage from response body metadata', () => {
     const usage = extractUsageFromResult({
       body: {
         metadata: {
@@ -37,11 +52,7 @@ describe('usage log text', () => {
       }
     });
 
-    expect(usage).toEqual({
-      prompt_tokens: 11,
-      completion_tokens: 7,
-      total_tokens: 18
-    });
+    expect(usage).toBeUndefined();
   });
 
   it('normalizes camelCase/string usage fields', () => {

@@ -53,22 +53,10 @@ export function extractUsageFromResult(
     if (body.usageMetadata) {
       candidates.push(body.usageMetadata);
     }
-    if (body.metadata && typeof body.metadata === 'object') {
-      const bodyMeta = body.metadata as Record<string, unknown>;
-      if (bodyMeta.usage) {
-        candidates.push(bodyMeta.usage);
-      }
-    }
     if (body.data && typeof body.data === 'object') {
       const bodyData = body.data as Record<string, unknown>;
       if (bodyData.usage) {
         candidates.push(bodyData.usage);
-      }
-      if (bodyData.metadata && typeof bodyData.metadata === 'object') {
-        const bodyDataMeta = bodyData.metadata as Record<string, unknown>;
-        if (bodyDataMeta.usage) {
-          candidates.push(bodyDataMeta.usage);
-        }
       }
     }
     if (body.response && typeof body.response === 'object') {
@@ -81,12 +69,6 @@ export function extractUsageFromResult(
       const payload = body.payload as Record<string, unknown>;
       if (payload.usage) {
         candidates.push(payload.usage);
-      }
-      if (payload.metadata && typeof payload.metadata === 'object') {
-        const payloadMeta = payload.metadata as Record<string, unknown>;
-        if (payloadMeta.usage) {
-          candidates.push(payloadMeta.usage);
-        }
       }
       if (payload.response && typeof payload.response === 'object') {
         const payloadResponse = payload.response as Record<string, unknown>;
@@ -282,6 +264,15 @@ export function mergeUsageMetrics(base?: UsageMetrics, delta?: UsageMetrics): Us
 /**
  * Build usage log text for logging
  */
+export function computeCacheHitRatio(usage?: UsageMetrics): number | undefined {
+  const inputTokens = usage?.prompt_tokens;
+  const cacheRead = usage?.cache_read_input_tokens;
+  if (cacheRead === undefined || cacheRead <= 0 || inputTokens === undefined || inputTokens <= 0) {
+    return undefined;
+  }
+  return Math.min(1, cacheRead / inputTokens);
+}
+
 export function buildUsageLogText(usage?: UsageMetrics): string {
   const inputTokens = usage?.prompt_tokens;
   let outputTokens = usage?.completion_tokens;
@@ -293,9 +284,9 @@ export function buildUsageLogText(usage?: UsageMetrics): string {
   if (outputTokens === undefined && total !== undefined && inputTokens !== undefined) {
     outputTokens = Math.max(0, total - inputTokens);
   }
-  const cacheRead = usage?.cache_read_input_tokens;
-  const cacheRatio = cacheRead !== undefined && cacheRead > 0 && inputTokens !== undefined && inputTokens > 0
-    ? ` cache=${(cacheRead / inputTokens * 100).toFixed(1)}%`
+  const cacheRatio = computeCacheHitRatio(usage);
+  const cacheSuffix = cacheRatio !== undefined
+    ? ` cache=${(cacheRatio * 100).toFixed(1)}%`
     : '';
-  return `input_tokens=${inputTokens ?? 'n/a'} output_tokens=${outputTokens ?? 'n/a'} total_tokens=${total ?? 'n/a'}${cacheRatio}`;
+  return `input_tokens=${inputTokens ?? 'n/a'} output_tokens=${outputTokens ?? 'n/a'} total_tokens=${total ?? 'n/a'}${cacheSuffix}`;
 }
