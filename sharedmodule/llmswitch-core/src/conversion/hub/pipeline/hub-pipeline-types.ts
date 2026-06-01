@@ -14,11 +14,17 @@ import {
   type HubPolicyConfig,
   type HubPolicyMode,
 } from "../policy/policy-engine.js";
-import { type HubToolSurfaceConfig } from "../tool-surface/tool-surface-engine.js";
 
 export type HubShadowCompareRequestConfig = {
   baselineMode: HubPolicyMode;
 };
+
+export type HubToolSurfaceMode = "off" | "observe" | "shadow" | "enforce";
+
+export interface HubToolSurfaceConfig {
+  mode: HubToolSurfaceMode;
+  sampleRate?: number;
+}
 
 export interface HubPipelineConfig {
   virtualRouter: VirtualRouterConfig;

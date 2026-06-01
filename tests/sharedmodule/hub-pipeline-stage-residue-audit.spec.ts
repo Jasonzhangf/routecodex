@@ -771,6 +771,24 @@ describe('hub pipeline stage residue audit', () => {
     expect(existing).toEqual([]);
   });
 
+  it('legacy TS tool-surface semantic engine must be physically removed from HubPipeline graph', () => {
+    const hubRoot = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub');
+    const legacyFiles = [
+      'tool-surface/tool-surface-engine.ts',
+      'tool-surface/tool-surface-convert.ts',
+      'tool-surface/tool-surface-diff.ts',
+    ];
+    const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(hubRoot, relativePath)));
+
+    const pipelineTypesPath = path.join(hubRoot, 'pipeline/hub-pipeline-types.ts');
+    const pipelineTypesSource = fs.readFileSync(pipelineTypesPath, 'utf8');
+    const findings = collectMatches(pipelineTypesSource, [
+      { label: 'imports TS tool-surface engine type', pattern: /tool-surface\/tool-surface-engine/ },
+    ]);
+
+    expect({ existingFiles, findings }).toEqual({ existingFiles: [], findings: [] });
+  });
+
   it('legacy TS request route/outbound/inbound orchestrators must be physically removed', () => {
     const pipelineRoot = path.join(
       process.cwd(),
