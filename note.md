@@ -13545,3 +13545,285 @@ Using skills: coding-principals + rcc-dev-skills
 - Review finding fixed: `routing/utils.rs` was present but not wired; `bootstrap.rs` still owned duplicate utility functions. Added `mod utils`, imported utility functions in `bootstrap.rs`, removed duplicated local implementations, and cleaned `target_expander.rs` unused imports.
 - Added red/green coverage: `utils` unit tests for scalar/bool/number/priority normalization and bootstrap blackbox-style JSON test `split_wrappers_match_bootstrap_json_routing_semantics` proving wrappers match `bootstrap_virtual_router_routing_json` output.
 - Evidence: `cargo test -p router-hotpath-napi virtual_router_engine::routing --lib` => 37 passed. `node scripts/build-core.mjs && npx tsc --noEmit` => exit 0. Wider `cargo test -p router-hotpath-napi --lib` remains non-VR dirty: 1219 passed, 62 failed, 1 ignored.
+
+## 2026-06-01 correction: no fallback in VR/Hub work
+- User correction: never introduce fallback/兜底 naming or semantics while fixing VR/Hub routing. My first patch used `is_tool_route_with_tools_fallback`; removed it immediately.
+- Rule for this task: tool declarations are not routing activity. Only real current-turn tool outputs / assistant tool calls can drive tools/coding/search continuation.
+
+## 2026-06-01 stopless 异常现场线索
+- 5555 日志出现异常标记：`[stopMessage:scope=tmux:rcc-routecodex text="继续执行" mode=on round=36/2 left=0 active=yes]`，时间约 10:08:16-10:08:17；`round` 已超过 `max=2` 仍 active，下一次需保留现场后追 `stopMessage` round/max 状态来源。
+- 同窗口存在 zterm/routecodex 并发请求，先不继续追静默失败；后续以完整现场日志和 request id 串查。
+
+## 2026-06-01 tt provider config startup failure
+- Symptom: RouteCodex 5555 startup fails in Rust VirtualRouter with `Route "coding" references unknown provider "tt"`.
+- Evidence: `~/.rcc/config.toml` routes 10000/5555 already target `tt.key1.gpt-5.5`; `~/.rcc/provider/cc/config.v2.toml` exists, but `~/.rcc/provider/tt/config.v2.toml` is absent. `~/.codex/config.toml` defines Codex tt as cc-like with `base_url=https://api2.codewhisper.cc/v1` and `env_key=CC_OAI_KEY`.
+- Action plan: add `~/.rcc/provider/tt/config.v2.toml` mirroring cc provider shape with providerId/id `tt` and baseURL `https://api2.codewhisper.cc/v1`.
+- 2026-06-01 mimo visual+longcontext incident: investigating why second /v1/responses image request selected mimo-v2.5-pro after previous image request selected mimo-v2.5.
+- 2026-06-01 mimo 404 correction: VR must not route by historical images; historical images must be stripped/placeheld at outbound request sanitation.
+- 2026-06-01 mimo 404 evidence: provider snapshot for mimo.key2.mimo-v2.5-pro sends to https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages with body.model=mimo-v2.5-pro; target.supportsMultimodal=false. Upstream 404 message is capability/model+image rejection, not generic missing URL. Snapshot still had historical Anthropic `type=image`/`source.data` blocks at message idx 676/678, so sanitizer missed that media shape.
+- 2026-06-01 build/install evidence: `npm run build` succeeded, auto-bumped RouteCodex to 0.90.2612; `npm run install:global` succeeded; `routecodex --version` and `rcc --version` exit 0 and print 0.90.2612. Global package: `/opt/homebrew/lib/node_modules/routecodex`; dev-linked core: `/opt/homebrew/lib/node_modules/routecodex/node_modules/rcc-llmswitch-core -> /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core`; native node exists in sharedmodule llmswitch-core dist/target.
+
+## 2026-06-01 multi-port isolation
+- Root cause: v2 virtual router builder/materializer still allowed implicit multi-group merge; server runtime also passed only server-scoped sessionDir, so provider health/error persistence could cross router ports.
+- Fix: require explicit routingPolicyGroup when multiple groups exist; materializer selects only primary router port group; each router group gets its own HubPipeline input; port-aware metadata injects __rt.sessionDir under sessions/<server>/ports/<routingPolicyGroup>.
+- Runtime boundary: provider resolution now receives request metadata and rejects provider handles not in metadata.allowedProviders, so router/direct/executor lookup cannot see providers outside the current port routing group.
+- Evidence: targeted Jest config/http-server suite passed 30 tests; npm run build passed; npm run install:global installed 0.90.2613 and routecodex/rcc --version returned 0.90.2613. Direct npx tsc --noEmit still fails only on existing rcc-llmswitch-core native-router-hotpath declaration imports.
+
+## 2026-06-01: Virtual Router 隔离红测补齐
+
+### 完成项
+8 个新红测 GREEN，177 passed (+8)，3 failed 预存（classifier），零 regression。
+
+| 测试 | 文件 | 验证内容 |
+|---|---|---|
+| T1: session_dir_override_isolation | routing_state_store.rs | 两个不同 sessionDir 回调互相看不到对方文件 |
+| T2a: rcc_user_dir_override_resolves | instructions/path.rs | dir_a ≠ dir_b，resolve_rcc_user_dir 返回正确值 |
+| T2b: rcc_user_dir_path_no_cross | instructions/path.rs | precommand 路径解析不越界到另一 dir |
+| T2c: rcc_user_dir_raii_guard | instructions/path.rs | RAII guard 正确恢复前一个 override |
+| T3: provider_health_session_dir | routing_state_store.rs | provider-health.json 也按 sessionDir 隔离 |
+| T4a: pool_isolation_by_group | engine/selection.rs | coding/default group 的 pool 互不可见 |
+| T4b: pool_isolation_untagged | engine/selection.rs | untagged pool 不泄漏到 port-scoped group |
+| T5: napi_proxy 审计 | napi_proxy.rs（代码审计） | 6 个路由状态方法全部经过 override |
+| T6: 错误边界审计 | RAII 结构审计 | Arc<RwLock> + RAII guard 保证 panic 不扩散 |
+
+### 隔离机制真源确认
+1. `with_session_dir_override` routing_state_store.rs:43
+2. `with_rcc_user_dir_override` instructions/path.rs:37
+3. `pool_matches_route_policy_group` engine/selection.rs:34
+4. `resolve_route_pools_for_selection` engine/selection.rs:59（prefix = `{group}:`）
+5. RAII guards: SessionDirOverrideGuard + RccUserDirOverrideGuard
+
+### 下一步
+Phase 3: Rust I/O struct 补充（RouteInput/RouteOutput 等）
+
+## 2026-06-01: classifier.rs 测试修复
+
+### 根因
+3 个测试断言 `result.reasoning.contains("tools:tool-request-detected")`，但分类器逻辑:
+```rust
+let has_tool_activity = !latest_message_from_user && features.has_tool_call_responses;
+```
+当 `latest_message_from_user = true` 时，`has_tool_activity = false`，tools route 不触发。
+分类器行为正确，测试断言错误。
+
+### 修复
+将 3 个测试的 `assert!(contains("tools:tool-request-detected"))` 改为:
+```rust
+assert!(!result.reasoning.contains("tools:tool-request-detected"),
+    "fresh user turn must not trigger tools:tool-request-detected");
+```
+
+### 最终结果
+**180 passed, 0 failed** — 全量 green，零 regression。
+
+## 2026-06-01 tt/minimax correction
+- User correction: `tt` in `~/.codex/config.toml` is the usable truth: `base_url=https://api2.codewhisper.cc/v1`, `wire_api=responses`. Do not convert RCC `tt` provider to OpenAI chat; keep `type="responses"` and `[provider.responses] process="chat"`.
+- MiniMax official Anthropic-compatible endpoint verified with user token: `https://api.minimaxi.com/anthropic/v1/messages` returns 200 for `MiniMax-M3`; baseURL in RCC provider must be `https://api.minimaxi.com/anthropic` with `type="anthropic"`.
+- 5520 route group now resolves providers `mini27`, `minimax`, `minimonth`; coding/thinking/search/web_search/multimodal/default use `minimax.MiniMax-M3`; tools use `mini27.MiniMax-M2.7` + `minimonth.MiniMax-M2.7`.
+
+## 2026-06-01 server recovery after multi-port isolation patch
+- Installed global CLI is `routecodex 0.90.2614`; installed dist contains `buildAllRouterGroupArtifacts` and initializes provider runtimes with merged router-group artifacts.
+- Safe restart used `routecodex restart --port 5520`; no broad kill. New listener PID `67022` serves `5520` and `5555`.
+- Health verified: `http://127.0.0.1:5520/health` and `http://127.0.0.1:5555/health` both returned `ready:true`, `pipelineReady:true`, `version:0.90.2614`.
+- HTTP blackbox verified after restart: `/v1/responses` on `5520` returned 200 via `minimax.key1.MiniMax-M3`; `/v1/responses` on `5555` returned 200 via `cc.key1.gpt-5.5`.
+- Post-restart log evidence: `tt.key1.gpt-5.5` requests at 12:02 completed status 200; no post-restart `ERR_PROVIDER_NOT_FOUND`, `HTTP_404`, or `HTTP_502` observed in checked tail.
+
+## 2026-06-01: 工具分类规则修复 + 危险命令拦截补全
+
+### 修改文件
+1. `sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts`
+   - 新增 DANGEROUS_PATTERNS 常量（rm -rf, sudo, ssh, scp, rsync, killall, pkill, git clean -f）
+   - 在 detectPolicyViolation 中统一检查所有危险命令
+
+2. `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features/tools.rs`
+   - SHELL_SEARCH_COMMANDS += ["ls", "tree", "pwd"]
+   - 新增 SHELL_TOOLS_COMMANDS（npm/npx/yarn/bun/pnpm/cargo/go/pytest/maven/gradle/tsc/eslint/prettier/make/cmake）
+   - classify_shell_command 扩展：git status/branch/ls-files/rev-parse → search, git diff/show → thinking, git add/commit/stash/checkout/reset → other(tools)
+   - bd list/show → search, bd update/create/close/reopen → coding
+   - test/build/lint 命令 → other(tools route)
+
+### 测试结果
+- 196 passed, 0 failed
+- TS tsc --noEmit: 0 error
+- 新增 16 个分类测试
+
+### 分类规则总结
+| 类别 | 命令 |
+|---|---|
+| search | ls, tree, pwd, rg, grep, find, fd, git status/branch/ls-files/rev-parse/log/grep/blame, bd list/show/search |
+| thinking | cat, head, tail, less, more, nl, sed -n, awk 只读, git diff, git show |
+| coding | edit, write, apply_patch, sed -i, tee, bd update/create/close/reopen |
+| tools | npm test, cargo test, pytest, git add/commit/stash/checkout/reset, rm -rf(拦截), sudo(拦截), ssh(拦截) |
+
+## 2026-06-01 MiniMax 400(2013) root fix
+- Root cause: Responses->Chat native output was paired, but Chat->Anthropic request path still used TS `buildAnthropicRequestFromOpenAIChat`; that TS converter emitted invalid Anthropic tool history under multi-call history, causing MiniMax `tool call result does not follow tool call (2013)`.
+- Fix: `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.ts` is now a thin wrapper over Rust native `buildAnthropicFromOpenAIChatWithNative`; removed orphan/textify patch direction.
+- HTTP blackbox added: `tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts` sends paired Responses `function_call` + `function_call_output` through real `/v1/responses` Express handler and asserts Anthropic provider payload has no dangling `tool_use`.
+- Runtime verified after install/restart `0.90.2616`: live 5520 -> MiniMax paired tool-history request returned HTTP 200; provider snapshot `req_1780288208392_b52e9cd1` contains `call_second_live` tool_use and matching tool_result `second ok`.
+
+- 2026-06-01: 5520 routing correction: search/tools must use mini27/minimonth MiniMax-M2.7; web_search/longcontext/multimodal remain minimax MiniMax-M3 unless user changes.
+
+- 2026-06-01: 5520 web_search changed to priority mini27.MiniMax-M2.7 first, minimax.MiniMax-M3 second; minimonth excluded because live test returned no web_search tool call.
+
+## 2026-06-01 current pipeline pollution fixes
+- Root cause A: Responses outbound converted reasoning-only chat response into both `reasoning` and empty `message` output items; client stored/displayed duplicate assistant text and repeated tool-read cycle. Fixed in Rust `hub_resp_outbound_client_semantics_blocks/responses_payload.rs`: message item now emits only when real content exists; historical reasoning remains preserved as reasoning item.
+- Root cause B: client-side MCP tools such as `mcp__node_repl` entered Hub/provider tools via Responses raw `tools` capture. Fixed in Rust request inbound tool mapping: drop `mcp__*` function tools from `toolsNormalized`; HTTP blackbox proves Anthropic provider payload no longer includes `mcp__node_repl`.
+- Evidence: `node scripts/build-core.mjs` succeeded; Jest HTTP blackboxes `responses-handler.reasoning-only.blackbox.spec.ts` + `responses-handler.anthropic-tool-history.blackbox.spec.ts` passed 3/3 with `--forceExit`; Rust targeted tests for bridge tools, reasoning-only output, Anthropic paired tool history passed.
+
+## 2026-06-01 apply_patch / large heredoc 修复记录
+- 证据：客户端样本显示 Rust exec_command 大 heredoc guard 把真实命令改成 `printf '[routecodex] exec_command blocked...' ; exit 64`，诱导模型改用 base64/python 绕路；MiniMax M3 强制大 heredoc tool-call 实测 60s Abort，无 4xx/5xx 上游拒绝证据，因此不能拦截真实 payload。
+- 根因修复：移除 `resp_process_stage1_tool_governance_blocks/tool_args.rs` 对大 heredoc `cat > ... <<EOF` 的改写/拦截；删除 `exec_command_guard.rs` 中对应死代码，新增/保留 Rust 测试确认大 heredoc 原样保留。
+- apply_patch 引导：把 apply_patch tool output 归一化提示从 `line-edit/filePath/fileContent only` 改成 canonical `*** Begin Patch` / `*** Add File` or `*** Update File` / `*** End Patch`，避免误导模型认为 Add File 不可用。
+- errorsamples：补 `apply_patch_missing_begin_patch_header` 分类，`Invalid patch: The first line...` 会落 `client-tool-error`；已清空 `~/.rcc/errorsamples` 与 `/Volumes/extension/.rcc/errorsamples` 旧文件等待新样本。
+- 验证：Rust focused tests passed；`runtime-error-errorsample-write` 新增用例 passed；`anthropic-tool-schema-stability` passed；build-core/build:min/install:global passed，5520/5555 restarted health ok on 0.90.2618。
+- 已知非本次问题：Windsurf 单用例 `failed RCC text tool result...` 仍显示 provider 专属 RCC wrapper 未生效，属于 Windsurf provider 边界问题，未纳入本次主链修复。
+
+- 2026-06-01: 5555 tools/search/web_search/multimodal/longcontext now include minimax.MiniMax-M3 with weighted 1:1:1:1 across minimax, mini27, minimonth, mimo.
+
+## 2026-06-01: 危险命令拦截 Rust 化
+
+### 完成项
+- Rust `exec_command_guard.rs` 新增 `detect_dangerous_command` + `build_dangerous_command_blocked_object`
+- Rust `tool_args.rs` 两处 `normalize_tool_args` / `normalize_tool_args_preserving_raw_shape` 中插入拦截
+- TS `validator.ts` 删除 `DANGEROUS_PATTERNS` 常量 + 循环引用
+- 15 个 Rust 测试全 GREEN（10 blocked + 4 allowed + 1 blocked_object）
+- 196 total passed, 0 failed
+- TS tsc --noEmit: 0 error
+- Rust 是唯一拦截真源
+
+## 2026-06-01 ProviderForwarder 执行
+
+### 关键架构发现
+- VirtualRouterEngineCore 持 routing/provider_registry/health_manager/quota_manager/load_balancer/classifier
+- route() 在 engine/route.rs 调用 filter_candidates_by_state + load_balancer.select()
+- forwarder.rs 将在 VirtualRouterEngineCore 层级嵌入（不是 load_balancer 内部）
+- NAPI bridge: lib.rs; TS Profile 层在 src/providers/profile/
+- bootstrap_virtual_router_routing_json 入口在 routing/bootstrap.rs
+
+### 实现策略
+- forwarder 解析在 route() 内替换 load_balancer.select() 为 select_with_forwarder_resolution()
+- forwarder 展开 real candidates → availability check → RouteLoadBalancer.select(real)
+- build_target 维持原样（不碰）
+- bootstrap 时 forwarder config 从路由 JSON 的 forwarders 节点解析
+
+### 已知边界
+- availability_check 闭包必须是 Fn(&str) -> bool，接受 provider_key，返回是否可用
+- RouteLoadBalancer::select 的 availability_check 闭包签名已知
+- selection.rs 的 filter_candidates_by_state 已实现 disabled_providers/disabled_keys/disabled_models 过滤
+
+
+## 2026-06-01 tool_invocation 泄露修复
+- 现象：assistant content 中 `<tool_invocation name="exec_command" arguments={...} />` / `<tool_invocation name="update_plan" ... />` 原文泄露给客户端。
+- 根因：Rust text markup harvester 只识别 `<tool_call>`/`<invoke>` 等显式容器，不识别自闭合 `tool_invocation` wrapper；未收割时 content 原样保留。
+- 修复：按 Jason 要求走 mask/canonicalize 思路，把 `tool_invocation` 自闭合 wrapper 转换为现有 `<tool_call>{"name", "arguments"}</tool_call>` 容器，再复用既有 parser；不新增无穷格式分支，不解析 shell 正文。
+- 红测：`tests/sharedmodule/text-markup-normalizer.spec.ts` 新增 self-closing tool_invocation 用例，先红后绿；同文件 9/9 通过。
+- 验证：`node scripts/build-core.mjs` 通过；`cargo test -p router-hotpath-napi hub_reasoning_tool_normalizer::tests::extract_tool_calls_canonicalizes_dsml_variant_wrappers_with_masked_cdata --lib` 通过；`npm run build:min && npm run install:global` 通过；5520/5555 重启后 health ok，版本 0.90.2620。
+
+## 2026-06-01 14:15 convert.bridge terminated 根因
+- 证据：`/Users/fanzhang/.rcc/log/config.toml/ports/5555/server-5555.log:169061-169105` 中 `mini27` 先以 `SSE_DECODE_ERROR` 触发 provider-switch，`minimonth` 在 `convert.bridge` 抛 raw `terminated`。
+- 样本：`~/.rcc/codex-samples/openai-responses/minimonth.key1.MiniMax-M2.7/req_1780294530118_b447f45c/provider-response.json` 为 OpenAI chat SSE，`body.error=terminated`，无 `[DONE]`/`response.completed`，尾部停在普通 content chunk。
+- 根因：Hub response bridge 在读取 provider SSE stream 物化为 `bodyText` 时直接透传 raw stream error；错误未归一为 `provider.sse_decode` + `UPSTREAM_STREAM_TERMINATED`，导致 provider response processing 阶段不能走 recoverable retry/reroute。
+- 修复点：stream materialization 只做错误身份归一，不 salvage、不改写 payload 语义；retry gate 接受 `UPSTREAM_STREAM_TERMINATED` 作为 provider.sse_decode recoverable。
+- 回归：新增 HTTP `/v1/responses` 黑盒，真实 Readable 先发 chat SSE chunk 后 `terminated`，断言 502 不外泄并 reroute 到 secondary 返回 200。
+
+## 2026-06-01 apply_patch servertool 覆盖检查
+- 当前配置：`~/.rcc/config.toml` 为 `[servertool.apply_patch] mode = "servertool"`。
+- 已有覆盖：`tests/servertool/apply-patch-flow.spec.ts` 覆盖 line-edit 创建/修复/followup delta；`tests/sharedmodule/apply-patch-chat-process-contract.spec.ts` 覆盖 schema rewrite、servertool gate、本地执行、followup skeleton、origin restore；`tests/sharedmodule/apply-patch-tool-registry.spec.ts` 覆盖标准 apply_patch registry 兼容。
+- 本次发现：两条断言用字符串 `not.toContain('tool_calls')` 误伤合法 `finish_reason: "tool_calls"`，已改为检查 `message.tool_calls` 真实移除。
+
+## 2026-06-01 exec_command 拦截反馈与 git checkout scope 修复
+- 现象：模型执行被拦截/改写后，前端只看到工具似乎“恢复/无输出”，实际失败原因没有稳定反馈；另 `git checkout` 应只禁止目录/多文件/链式/无 `--`，不禁止单文件 restore。
+- 根因：response-side TS `normalizeExecCommandArguments` 在 `validateToolCall` 返回 `ok=false` 后继续走 parse/normalize 并返回原参数，属于静默失败；Rust response governance 也缺少 `git checkout` 单文件 scope 规则。
+- 修复：response-side 非法 exec_command 统一改写为显式 blocked shell（stderr + exit 2）；Rust 真源新增 git checkout scope 判定；`git checkout -- file` / `git checkout REF -- file` 允许，目录、多文件、链式和无 scope 阻断。
+- 清理：移除 Rust 大 heredoc file generation 拦截逻辑，保留大 heredoc 原样传递，避免误导模型绕到 Python/base64 写文件。
+- 验证：Jest `tool-governor-exec-command-guard.spec.ts` + `tool-registry-tools.spec.ts` 30/30 passed；Rust 精确 `git_checkout` 5/5 passed；Rust 大 heredoc preserve 用例 passed；`npm run build:min` passed；全局安装 0.90.2623 并重启 5520/5555 health ok。
+
+- 2026-06-01: 5555 coding/thinking priority order corrected to tt.key1.gpt-5.5 first, then cc.key1.gpt-5.5, then mimo.mimo-v2.5.
+
+- 2026-06-01: 5555 default priority corrected to sdfv.key1.gpt-5.5 primary, cc.key1.gpt-5.5 backup, tt.key1.gpt-5.5 last.
+
+## 2026-06-01 forwarder 启动失败根因
+- 症状：0.90.2627 启动时报 `[config] v2 config disallows virtualrouter field "forwarders"`，放开校验后又报 `Route "coding" references unknown provider "fwd"`。
+- 根因：v2 loader 校验层误拒 `virtualrouter.forwarders`；Rust routing bootstrap 未把 `fwd.*` 作为 opaque logical target，先按 provider/model 拆成 provider=`fwd`；同时 materialize 未把 forwarders 写回 VR config，forwarder TOML shape 未转成 native shape。
+- 修复：允许 v2 `virtualrouter.forwarders`，materialize 写回 forwarders；builder 规范化 `model->modelId`、`providerId->providerKey`；native routing bootstrap 接收 forwarder ids 并保留 fwd target，TS bootstrap 把 forwarder real targets 加进 provider profile target set。
+- 验证：Rust `bootstrap_json_preserves_declared_forwarder_target` 通过；Jest `materializes virtualrouter.forwarders and keeps their target providers` 通过；`npm run build:min` 通过；全局 0.90.2628 启动后 5520/5555 health OK。
+
+## 2026-06-01 15:56 Minimonth SSE choices missing
+- Symptom: minimonth MiniMax-M2.7 via /v1/responses stream failed in convert.bridge: Rust HubPipeline response path failed: OpenAI chat SSE response did not contain choices array.
+- Need verify upstream SSE frame shape vs Rust chat SSE parser; no config edit before evidence.
+
+- 2026-06-01: Cleared persisted sdfv cooldown only from ~/.rcc/sessions/127.0.0.1_5520/provider-health.json after direct sdfv /v1/responses returned 200; backup saved with .bak-sdfv-cooldown-clean-20260601.
+
+## 2026-06-01 VR duplicate + chat->responses + minimonth SSE
+- Removed TS executor/direct virtual-router-hit rollup emission; Hub/VR remains SSOT for hit log. Regression: request-executor hit-order now asserts no TS duplicate and final provider.send provider/model matches route target.
+- Fixed Rust req outbound format builder: openai-chat messages -> openai-responses input when target outboundProfile=openai-responses. This removes ResponsesProvider missing input/instructions error.
+- New live blackbox /v1/chat/completions model=gpt-5.5 no longer has missing input; now fails with SSE stream missing from pipeline result (separate chat SSE bridge issue).
+- Minimonth upstream simple SSE has normal choices frames plus final choices=[] usage frame; local unit covers this. Live search still reports choices array missing, need capture actual provider SSE body/error frame.
+
+## 2026-06-01 verified virtual-router-hit duplicate removed
+- 0.90.2631 installed and restarted on 5520/5555.
+- Removed TS executor/direct/response-inspect virtual-router-hit rollup emitters. Remaining source ref is only log-rollup definition, with no caller under http-server.
+- Live 5520 /v1/responses smoke returned 200. Dist grep shows no emitRequestExecutorVirtualRouterConcurrencyLog / emitVirtualRouterConcurrencyLog callers. Current logs after 0.90.2631 should only show the Hub/VR [virtual-router-hit], not [virtual-router-hit][rt].
+
+## 2026-06-01 responses-entry MCP namespace tool pollution red test
+- 只做红测，不改实现：`tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts` 新增 namespace MCP aggregator 样本。
+- 失败证据：`npm run jest:run -- --runTestsByPath tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts --runInBand` 中新增用例失败，Anthropic provider payload 的 `tools` 同时包含正常 `exec_command` 和污染的 `mcp__node_repl`。
+- 真实样本对应：`/v1/responses -> minimax.key1.MiniMax-M3` provider-request 中出现 `mcp__node_repl` 聚合工具；entry 是 responses，不按 `/v1/chat/completions` 修。
+
+## 2026-06-01 fix: namespace MCP aggregator tool leak to Anthropic provider
+- 根因：Rust `anthropic_openai_codec::map_chat_tools_to_anthropic_tools` 对 OpenAI/chat tools 无条件转 Anthropic tools，导致 `/v1/responses -> MiniMax/Anthropic` provider payload 泄露 namespace 聚合伪工具（例如 `mcp__node_repl`）。
+- 修复：仅过滤单段 namespace MCP aggregator（`mcp__<namespace>` 且空 schema），保留正常工具 `exec_command` 和真实子工具 `mcp__namespace__tool`。
+- 验证：Rust 单测 `build_anthropic_from_openai_chat_filters_namespace_mcp_aggregator_tools` 通过；黑盒 `responses-handler.anthropic-tool-history.blackbox.spec.ts` 3/3 通过；`npm run build:min` 成功并安装重启 5520/5555 到 `0.90.2633` ready。
+
+- 2026-06-01: 5555 thinking/coding now priority [sdfv.key1.gpt-5.5, tt.key1.gpt-5.5, cc.key1.gpt-5.5, mimo.mimo-v2.5]
+
+## 2026-06-01 tool history / MCP namespace 修复记录
+- 现象：/v1/responses 路由到 MiniMax/OpenAI-chat 时出现 `Responses payload produced no chat messages` 或 MiniMax 2013 `tool call result does not follow tool call`。
+- 根因：入口 TS 曾把 raw `responsesRequestContext` 塞进 pipeline metadata，覆盖/污染 Rust Hub Pipeline 的 context；Responses input 转 OpenAI-chat 时也优先使用 raw input，未使用 Rust 规范化后的 tool history。
+- 修复：在 Rust context capture 生成 `chatMessages`/`toolsNormalized`（保留原 `input` 语义），OpenAI-chat outbound format 优先使用 `metadata.context.chatMessages`；入口 `responses-handler.ts` 不再把 raw `responsesRequestContext` 放入 pipeline input metadata，并且响应后 metadata 不覆盖 Rust result metadata。
+- 验证：Rust 单测 `context_capture_normalizes_tool_history_and_namespace_mcp_tools`、`request_codec_maps_responses_input_into_chat_request_and_context` 通过；HTTP 黑盒 `responses-handler.anthropic-tool-history.blackbox.spec.ts` 4/4 通过；全局安装 `0.90.2640`，5520/5555 status ok；真实 5520/5555 smoke 均 status 200 且无 `Responses payload produced no chat messages`/2013。
+
+## 2026-06-01 工具治理沉入 Rust Phase 3A 文档同步
+- 目标：exec_command hardcoded guard 规则全部沉入 Rust，TS 不再承载重复治理真源。
+- 文档：`docs/goals/exec-command-guard-rustification.md` 已更新为 Phase 3A 执行计划。
+- 审计缺口：TS 仍有 `git reset --hard`、`git checkout scope`、shell write guard、policy-file、shell wrapper shape、tool whitelist 等治理语义；Phase 3A 只迁移 hardcoded deterministic exec_command guard。
+- 用户约束：`sudo` / `ssh` / `scp` / `rsync` 明确允许，不得重新加入阻断。
+
+2026-06-01 配置启动修复：`~/.rcc/config.toml` 启动失败根因是 TOML inline table 写成 `weights = { "target" }`，缺少 `= 1`，parser 报 `invalid TOML inline table entry "mini27.MiniMax-M2.7"`。已备份到 `~/.rcc/config.toml.bak-20260601-invalid-inline-weights`，修复 5520 tools/search、10000 longcontext/vision 四处 weights。验证：`routecodex status` 不再报 TOML parse；5520/5555 `/health` 返回 ready true。10000 有外部 `netdisk_s` 占用 127.0.0.1:10000，curl 命中空响应，需后续处理端口冲突。
+## 2026-06-01 internal latency audit
+- Trigger: 5555 search request total=34496ms, internal=25081ms, external=9415ms; internal unexpectedly dominates.
+- First target: trace how usage logger computes internal/external/wait.inject/wait.traffic and whether internal double-counts client injection or post-response work.
+- Evidence sources: src/server/runtime/http-server/executor/{usage-logger,log-rollup,client-injection-flow}.ts and request executor callsites.
+- Fixed usage/logging accounting drift:
+  1) realtime session-request internal now uses core_internal semantics (subtract traffic wait, client inject wait, decode residual) instead of raw total-external-sse.
+  2) cache hit ratio now uses cacheRead / (promptTokens - cacheRead) when prompt already includes cached input; avoids underreporting on OpenAI/Responses style usage.
+  3) stats-manager totalOutputTokens now tracks completion_tokens only; no longer misuses total_tokens.
+- Evidence: targeted Jest suite passed 40/40 for usage-aggregator, usage-logger, log-rollup, stats-manager table/periods/release.
+- Remaining gap: this fixes accounting/reporting truth; live 25s internal hotspot still needs separate stage-level evidence if wall-clock remains high after restart/log check.
+- Correction: cache.hit must be bounded hit ratio cacheRead / promptTokens, not savings ratio cacheRead / (promptTokens - cacheRead). The latter produced impossible >100% values (e.g. 107122 / 3383 = 3166.5%). Added test to cap ratio at 100% and real sample equals 107122 / 110505 ≈ 96.9%.
+
+## 2026-06-01 metadata 出口审计
+
+- 已核对入口到 provider 出口的 metadata 流转：`chat-schema.ts` / `provider-runtime-metadata.ts` / `http-request-executor.ts` / `responses-provider.ts` / `qwen-profile.ts` / `glm-profile.ts` / `vercel-ai-sdk/*` / Rust outbound build。
+- 关键违规：`src/client/anthropic/anthropic-protocol-client.ts` 在 OpenAI 基础上恢复 top-level `metadata` 回 provider body；`src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.ts` 与 `anthropic-sdk-request-exec.ts` 把 `body.metadata` 映射到 provider options；`sharedmodule/.../hub_req_outbound_format_build.rs` 还会从 `format_envelope.payload.metadata.context` 回填 `input/messages` 参与 outbound 组装。
+- 关键边界点：`ProviderRuntimeMetadata` 通过非枚举 symbol 附着，`http-request-executor` snapshot 只读 context.metadata，不直接写 body；这部分本身不是泄露源。
+- 待修复方向：统一把 metadata 视为 pipeline/runtime 只读 carrier，provider outbound 只允许业务 payload；去除所有把 metadata 重新注入上游 body/options 的路径，并在 Rust outbound 真源收紧 metadata->payload 映射。
+
+## 2026-06-01 工具响应被当文本：git 对比定位
+- 基线：`1a2ce8336803a035b3eb67641c9f3bc519b99dd3`（`git rev-list -n 1 --before='2026-06-01 00:00' HEAD`）。
+- 运行样本：`/Users/fanzhang/.rcc/codex-samples/openai-responses/port-5555/req_1780311160927_3ac27dee/provider-response.json` 中 `<minimax:tool_call>\n\n</minimax:tool_call>` 已进入 `meta.requestMetadata.__raw_request_body.input[*].content[0].text`，不是仅 UI 渲染问题。
+- 污染形态：历史 input 中出现 assistant `message/output_text` 空工具占位，紧跟真实 `function_call`；随后 `contextSnapshot.chatMessages` 中同样变成 assistant content 文本，下一跳会被当普通文本发送。
+- 关键今日改动：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs` 新增 `build_responses_input_from_chat_messages()`，当 payload 没有 `input` 但有 `messages` 时直接把 chat messages 重建为 Responses `input`；该转换只保留 `role/content`，没有处理 `tool_calls` / `tool_call_output`，也没有丢弃工具占位 assistant 文本。
+- 对比结论：`history.rs` 的 `content_blocks_to_bridge()` 昨天和今天都接受 `output_text`；不是这里新增的。`responses_payload.rs` 今天改了消息发射条件，但样本污染已经在请求历史 input，根因更靠前：chat messages -> responses input 的新增重建路径破坏工具语义。
+- 修复方向：不要在该新增路径把含 `tool_calls` 的 assistant 或工具占位 output_text 降级成普通 Responses message；应走唯一 chat process/Rust SSOT 的工具语义转换，或移除该错误重建路径并恢复 context input 真源。
+
+## 2026-06-01 metadata 闭环隔离目标补充
+
+- 用户补充关键边界：metadata 必须是无状态、短生命周期，请求/响应闭环完成后移除；端口隔离、session 隔离，彼此无关，不得污染。
+- 已追加到 `docs/goals/metadata-request-isolation-plan.md`：生命周期边界、端口隔离、session 隔离、污染防线、新增修复清单和测试计划。
+
+## 2026-06-01 Hub Pipeline 工具边界审计进展
+- 已提交 `41d990d73 test: remove TS tool-surface residue`：删除死的 TS tool-surface 语义实现，并补 stage residue audit。
+- `hub_req_outbound_format_build.rs` 红测：`test_build_openai_responses_request_preserves_tool_semantics_from_messages` 先红，证明 chat `tool_calls`/tool result 被错误降级为 Responses `message`。
+- 修复：request outbound Rust 编码将 assistant `tool_calls` 映射为 Responses `function_call`，tool role 映射为 `function_call_output`，避免工具语义变普通文本。
+- 绿测：`cargo test -p router-hotpath-napi test_build_openai_responses_request_preserves_tool_semantics_from_messages -- --nocapture` 与 `cargo test -p router-hotpath-napi hub_req_outbound_format_build::tests -- --nocapture` 通过。

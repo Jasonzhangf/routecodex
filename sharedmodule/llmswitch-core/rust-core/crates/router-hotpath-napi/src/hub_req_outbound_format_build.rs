@@ -68,29 +68,106 @@ fn chat_content_to_responses_content(content: &Value) -> Value {
     }
 }
 
+fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
+    let row = call.as_object()?;
+    let function = row.get("function").and_then(Value::as_object);
+    let call_id = row
+        .get("call_id")
+        .or_else(|| row.get("tool_call_id"))
+        .or_else(|| row.get("id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let name = function
+        .and_then(|entry| entry.get("name"))
+        .or_else(|| row.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let arguments = function
+        .and_then(|entry| entry.get("arguments"))
+        .or_else(|| row.get("arguments"))
+        .cloned()
+        .unwrap_or_else(|| Value::String("{}".to_string()));
+    let arguments_text = arguments
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string()));
+
+    Some(Value::Object(Map::from_iter([
+        ("type".to_string(), Value::String("function_call".to_string())),
+        ("call_id".to_string(), Value::String(call_id.to_string())),
+        ("name".to_string(), Value::String(name.to_string())),
+        ("arguments".to_string(), Value::String(arguments_text)),
+    ])))
+}
+
+fn chat_tool_result_to_responses_input_item(row: &Map<String, Value>) -> Option<Value> {
+    let call_id = row
+        .get("tool_call_id")
+        .or_else(|| row.get("call_id"))
+        .or_else(|| row.get("id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let output = row
+        .get("content")
+        .or_else(|| row.get("output"))
+        .map(|value| match value {
+            Value::String(text) => text.clone(),
+            other => serde_json::to_string(other).unwrap_or_else(|_| String::new()),
+        })
+        .unwrap_or_default();
+
+    Some(Value::Object(Map::from_iter([
+        (
+            "type".to_string(),
+            Value::String("function_call_output".to_string()),
+        ),
+        ("call_id".to_string(), Value::String(call_id.to_string())),
+        ("output".to_string(), Value::String(output)),
+    ])))
+}
+
 fn build_responses_input_from_chat_messages(messages: &[Value]) -> Value {
     Value::Array(
         messages
             .iter()
-            .filter_map(|message| {
-                let row = message.as_object()?;
+            .flat_map(|message| {
+                let Some(row) = message.as_object() else {
+                    return Vec::new();
+                };
                 let role = row
                     .get("role")
                     .and_then(Value::as_str)
                     .unwrap_or("user")
                     .trim();
+                if role.eq_ignore_ascii_case("tool") {
+                    return chat_tool_result_to_responses_input_item(row).into_iter().collect::<Vec<_>>();
+                }
+                if role.eq_ignore_ascii_case("assistant") {
+                    if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
+                        let items = tool_calls
+                            .iter()
+                            .filter_map(chat_tool_call_to_responses_input_item)
+                            .collect::<Vec<Value>>();
+                        if !items.is_empty() {
+                            return items;
+                        }
+                    }
+                }
                 let content = row
                     .get("content")
                     .map(chat_content_to_responses_content)
                     .unwrap_or_else(|| Value::Array(Vec::new()));
-                Some(Value::Object(Map::from_iter([
+                vec![Value::Object(Map::from_iter([
                     ("type".to_string(), Value::String("message".to_string())),
                     (
                         "role".to_string(),
                         Value::String(if role.is_empty() { "user" } else { role }.to_string()),
                     ),
                     ("content".to_string(), content),
-                ])))
+                ]))]
             })
             .collect::<Vec<Value>>(),
     )
@@ -273,6 +350,51 @@ mod tests {
         assert_eq!(result.payload["input"][0]["role"], "user");
         assert_eq!(result.payload["input"][0]["content"][0]["type"], "input_text");
         assert_eq!(result.payload["input"][0]["content"][0]["text"], "hello");
+    }
+
+    #[test]
+    fn test_build_openai_responses_request_preserves_tool_semantics_from_messages() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "gpt-4",
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "exec_command",
+                                        "arguments": "{\"cmd\":\"pwd\"}"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": "call_1",
+                            "content": "ok"
+                        }
+                    ]
+                }
+            }),
+            protocol: "openai-responses".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        let input_items = result.payload["input"].as_array().expect("responses input");
+        assert_eq!(input_items[0]["type"], "function_call");
+        assert_eq!(input_items[0]["call_id"], "call_1");
+        assert_eq!(input_items[0]["name"], "exec_command");
+        assert_eq!(input_items[0]["arguments"], "{\"cmd\":\"pwd\"}");
+        assert_eq!(input_items[1]["type"], "function_call_output");
+        assert_eq!(input_items[1]["call_id"], "call_1");
+        assert_eq!(input_items[1]["output"], "ok");
     }
 
     #[test]
