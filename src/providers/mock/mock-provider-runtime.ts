@@ -60,27 +60,6 @@ function extractRequestBody(payload: unknown): Record<string, unknown> | undefin
   return record;
 }
 
-function resolveMockSampleReqId(payload: unknown, body: Record<string, unknown> | undefined): string | undefined {
-  const fromBody =
-    body && typeof body.metadata === 'object' && body.metadata
-      ? (body.metadata as Record<string, unknown>).mockSampleReqId
-      : undefined;
-  if (typeof fromBody === 'string' && fromBody.trim()) {
-    return fromBody.trim();
-  }
-  if (payload && typeof payload === 'object') {
-    const meta = (payload as Record<string, unknown>).metadata;
-    const candidate =
-      meta && typeof meta === 'object'
-        ? (meta as Record<string, unknown>).mockSampleReqId
-        : undefined;
-    if (typeof candidate === 'string' && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-  return undefined;
-}
-
 function collectInvalidNames(body: Record<string, unknown> | undefined): Array<{ location: string; value: string }> {
   if (!body || typeof body !== 'object') {
     return [];
@@ -370,7 +349,7 @@ export class MockProviderRuntime {
     const mockSampleReqId =
       runtimeMockSampleReqId && runtimeMockSampleReqId.trim()
         ? runtimeMockSampleReqId.trim()
-        : resolveMockSampleReqId(payload, body);
+        : undefined;
     const requestModel = parseModelFromRequestId(reqId, this.samples, entryHint);
     const runtimeModel =
       typeof runtimeMetadata?.target?.modelId === 'string'
