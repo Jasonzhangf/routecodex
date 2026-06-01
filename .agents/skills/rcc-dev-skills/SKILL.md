@@ -1735,3 +1735,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ## 2026-06-02 Hub Pipeline Phase 2 response type skeleton 精华
 - 响应侧第二阶段只允许透明类型骨架：`HubRespInbound02Parsed -> HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic`；不得在该阶段接入 runtime flow 或改变 client response。
 - 拓扑红测真源：`tests/red-tests/hub_pipeline_response_type_topology_contract.test.ts`，必须禁止新 `RespProc` / `resp_process` 类型骨架、provider raw 直达 server client frame、正常 response payload 承载 metadata 或 success-wrapped error。
+
+## 2026-06-02 Hub Pipeline Phase 3/4/5 topology contract 精华
+- VR/provider 边界只允许透明 contract：`HubReqChatProcess03Governed -> VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload`；不得在 contract 阶段接入 selection/encoder runtime 或 patch payload。
+- Meta/Error carrier 必须独立于正常 req/resp payload：`MetaReq02RuntimeCarrier`、`ErrorErr03RuntimeClassified` 只能作 side-car；红测必须禁止 provider wire/client body metadata 与 success-wrapped error。
+- Phase5 当前无安全 live-path 删除；`req_process_*` / `resp_process_*` Rust stage 仍是 live path，删除前必须先完成 typed entrypoint 迁移并让 residue red test 覆盖旧直连 import。

@@ -3,6 +3,7 @@ use serde_json::{Map, Value};
 
 use super::hub_req_chatprocess_03_governed::HubReqChatProcess03Governed;
 use super::hub_req_inbound_02_standardized::{assert_no_inline_metadata, clone_object_payload};
+use super::meta_error_carriers::assert_payload_has_no_meta_or_error_carrier;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +26,7 @@ pub(crate) fn build_hub_req_outbound_05_from_hub_req_chatprocess_03(
 ) -> Result<HubReqOutbound05ProviderSemantic, String> {
     let payload = governed.into_payload();
     assert_no_inline_metadata(&payload, "HubReqOutbound05ProviderSemantic")?;
+    assert_payload_has_no_meta_or_error_carrier(&payload, "HubReqOutbound05ProviderSemantic")?;
     let payload = clone_object_payload(&payload, "HubReqOutbound05ProviderSemantic")?;
     Ok(HubReqOutbound05ProviderSemantic { payload })
 }

@@ -10,6 +10,9 @@ mod hub_req_outbound_05_provider_semantic;
 mod hub_resp_chatprocess_03_governed;
 mod hub_resp_inbound_02_parsed;
 mod hub_resp_outbound_04_client_semantic;
+mod meta_error_carriers;
+mod provider_req_outbound_06_wire_payload;
+mod vr_route_04_selected_target;
 
 pub(crate) use hub_req_chatprocess_03_governed::{
     build_hub_req_chatprocess_03_from_hub_req_inbound_02, HubReqChatProcess03Governed,
@@ -28,4 +31,14 @@ pub(crate) use hub_resp_inbound_02_parsed::{
 };
 pub(crate) use hub_resp_outbound_04_client_semantic::{
     project_hub_resp_outbound_04_from_hub_resp_chatprocess_03, HubRespOutbound04ClientSemantic,
+};
+pub(crate) use meta_error_carriers::{
+    build_error_err_03_runtime_classified, build_meta_req_02_runtime_carrier,
+    ErrorErr03RuntimeClassified, MetaReq02RuntimeCarrier,
+};
+pub(crate) use provider_req_outbound_06_wire_payload::{
+    build_provider_req_outbound_06_from_hub_req_outbound_05, ProviderReqOutbound06WirePayload,
+};
+pub(crate) use vr_route_04_selected_target::{
+    build_vr_route_04_from_hub_req_chatprocess_03, VrRoute04SelectedTarget,
 };

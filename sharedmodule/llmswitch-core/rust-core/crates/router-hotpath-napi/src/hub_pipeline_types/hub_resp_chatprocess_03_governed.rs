@@ -2,9 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::hub_req_inbound_02_standardized::assert_no_inline_metadata;
-use super::hub_resp_inbound_02_parsed::{
-    assert_not_success_error_payload, HubRespInbound02Parsed,
-};
+use super::hub_resp_inbound_02_parsed::{assert_not_success_error_payload, HubRespInbound02Parsed};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -40,7 +38,8 @@ mod tests {
     #[test]
     fn builds_response_chatprocess_from_inbound_only() {
         let payload = json!({"id":"resp_1","output":[{"type":"message"}]});
-        let inbound = parse_hub_resp_inbound_02_from_provider_resp_inbound_01(payload.clone()).unwrap();
+        let inbound =
+            parse_hub_resp_inbound_02_from_provider_resp_inbound_01(payload.clone()).unwrap();
         let governed = build_hub_resp_chatprocess_03_from_hub_resp_inbound_02(inbound).unwrap();
         assert_eq!(governed.payload(), &payload);
         assert_eq!(governed.into_payload(), payload);

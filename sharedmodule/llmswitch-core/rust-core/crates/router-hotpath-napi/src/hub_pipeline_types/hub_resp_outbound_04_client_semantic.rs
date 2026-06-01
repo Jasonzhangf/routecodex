@@ -6,6 +6,7 @@ use super::hub_resp_chatprocess_03_governed::HubRespChatProcess03Governed;
 use super::hub_resp_inbound_02_parsed::{
     assert_not_success_error_payload, clone_response_object_payload,
 };
+use super::meta_error_carriers::assert_payload_has_no_meta_or_error_carrier;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +29,7 @@ pub(crate) fn project_hub_resp_outbound_04_from_hub_resp_chatprocess_03(
 ) -> Result<HubRespOutbound04ClientSemantic, String> {
     let payload = governed.into_payload();
     assert_no_inline_metadata(&payload, "HubRespOutbound04ClientSemantic")?;
+    assert_payload_has_no_meta_or_error_carrier(&payload, "HubRespOutbound04ClientSemantic")?;
     assert_not_success_error_payload(&payload, "HubRespOutbound04ClientSemantic")?;
     let payload = clone_response_object_payload(&payload, "HubRespOutbound04ClientSemantic")?;
     Ok(HubRespOutbound04ClientSemantic { payload })
@@ -45,7 +47,8 @@ mod tests {
     #[test]
     fn projects_client_semantic_from_response_chatprocess_only() {
         let payload = json!({"id":"resp_1","output":[{"type":"message"}]});
-        let inbound = parse_hub_resp_inbound_02_from_provider_resp_inbound_01(payload.clone()).unwrap();
+        let inbound =
+            parse_hub_resp_inbound_02_from_provider_resp_inbound_01(payload.clone()).unwrap();
         let governed = build_hub_resp_chatprocess_03_from_hub_resp_inbound_02(inbound).unwrap();
         let outbound = project_hub_resp_outbound_04_from_hub_resp_chatprocess_03(governed).unwrap();
         assert_eq!(outbound.payload().get("id"), Some(&json!("resp_1")));

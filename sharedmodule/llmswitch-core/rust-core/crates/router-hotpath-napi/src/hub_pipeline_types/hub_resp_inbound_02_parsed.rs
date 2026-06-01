@@ -62,7 +62,8 @@ mod tests {
     #[test]
     fn parses_response_without_changing_payload() {
         let payload = json!({"id":"resp_1","output":[{"type":"message"}]});
-        let node = parse_hub_resp_inbound_02_from_provider_resp_inbound_01(payload.clone()).unwrap();
+        let node =
+            parse_hub_resp_inbound_02_from_provider_resp_inbound_01(payload.clone()).unwrap();
         assert_eq!(node.payload(), &payload);
         assert_eq!(node.into_payload(), payload);
     }

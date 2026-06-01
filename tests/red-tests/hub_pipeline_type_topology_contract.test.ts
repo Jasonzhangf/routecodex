@@ -68,7 +68,6 @@ describe('Hub Pipeline request type topology contract', () => {
         /build_hub_req_outbound_05_from_hub_req_inbound_02/,
         /build_provider_req_outbound_06_from_hub_req_inbound_02/,
         /build_provider_req_outbound_06_from_hub_req_chatprocess_03/,
-        /ProviderReqOutbound06WirePayload/,
       ];
       for (const pattern of forbidden) {
         if (pattern.test(source)) violations.push(`${file}: ${pattern}`);
