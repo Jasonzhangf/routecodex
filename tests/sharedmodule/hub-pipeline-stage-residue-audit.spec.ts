@@ -657,6 +657,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('request executor must not classify tool request semantics in TS', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'src/server/runtime/http-server/executor/request-executor-request-semantics.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'reads tool continuation mode in TS', pattern: /toolContinuation|submit_tool_outputs/ },
+      { label: 'classifies tool result followup in TS', pattern: /toolOutputs|tool_outputs|__captured_tool_results/ },
+      { label: 'scans messages for tool results in TS', pattern: /message\.tool_call_id|role === ['"]tool['"]|function_call_output|tool_result|tool_message/ },
+      { label: 'classifies required tool call in TS', pattern: /tool_choice|toolChoice|toolsNode|clientToolsRaw|baselineTools/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('servertool orchestration blocks must not retain TS tool call/output mutation semantics', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts');
     const source = fs.readFileSync(filePath, 'utf8');

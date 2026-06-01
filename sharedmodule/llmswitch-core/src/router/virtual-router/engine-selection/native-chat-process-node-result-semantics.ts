@@ -224,3 +224,43 @@ export function restoreResponseContinuationSemanticsWithNative(
     return fail(reason);
   }
 }
+
+function invokeBooleanCapability(capability: string, payload: unknown): boolean {
+  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(payload ?? null);
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw === 'boolean') {
+      return raw;
+    }
+    if (typeof raw === 'string') {
+      return JSON.parse(raw) === true;
+    }
+    return fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function hasRequestedToolsInSemanticsWithNative(requestSemantics?: Record<string, unknown>): boolean {
+  return invokeBooleanCapability('hasRequestedToolsInSemanticsJson', requestSemantics ?? null);
+}
+
+export function isRequiredToolCallTurnWithNative(requestSemantics?: Record<string, unknown>): boolean {
+  return invokeBooleanCapability('isRequiredToolCallTurnJson', requestSemantics ?? null);
+}
+
+export function isToolResultFollowupTurnWithNative(requestSemantics?: Record<string, unknown>): boolean {
+  return invokeBooleanCapability('isToolResultFollowupTurnJson', requestSemantics ?? null);
+}

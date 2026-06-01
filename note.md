@@ -13915,3 +13915,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 红测：新增 `hub-pipeline-stage-residue-audit` 用例，先红命中 `followup-shape-guard.ts` 与 `servertool-followup-dispatch.ts` 在 TS 中把 chat `messages/tool_calls/tool` 转成 Responses `input/function_call/function_call_output`，并静默修复工具参数。
 - 修复：新增 Rust SSOT `normalize_servertool_followup_payload_shape_json`，TS 只保留 native JSON 调用薄壳；删除 dispatch 中基于 `body.input` 回写 `requestSemantics.toolOutputs` 的 TS 工具语义扫描。
 - 验证：`cargo test -p router-hotpath-napi hub_submit_tool_outputs::tests -- --nocapture` 2/2 绿；`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 46/46 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 绿；`npm run jest:run -- --runTestsByPath ...server-side-tools.auto-hook-config.spec.ts --runInBand` 绿；`git diff --check` 绿。
+
+## 2026-06-01 request executor tool semantics classification cleanup
+- 红测：新增 `hub-pipeline-stage-residue-audit` 用例，先红命中 `request-executor-request-semantics.ts` 在 HTTP executor 层读取 `toolContinuation`、`toolOutputs`、`tool_call_id`、`function_call_output`、`tool_choice` 并分类工具轮次。
+- 修复：将 `hasRequestedToolsInSemantics` / `isRequiredToolCallTurn` / `isToolResultFollowupTurn` 迁到 Rust `chat_node_result_semantics.rs`，新增 NAPI；TS 文件收缩为 native 调用薄壳。
+- 验证：`cargo test -p router-hotpath-napi chat_node_result_semantics::request_semantics_tests -- --nocapture` 3/3 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 绿；`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 47/47 绿；`git diff --check` 绿。

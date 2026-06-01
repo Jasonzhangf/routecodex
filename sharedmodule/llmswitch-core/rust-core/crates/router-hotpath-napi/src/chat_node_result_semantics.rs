@@ -82,6 +82,165 @@ fn build_node_result_metadata(
     Value::Object(metadata)
 }
 
+fn read_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn has_non_empty_array(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_array).is_some_and(|items| !items.is_empty())
+}
+
+fn read_servertool_followup_source(request_semantics: Option<&Value>) -> String {
+    request_semantics
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("__routecodex"))
+        .and_then(Value::as_object)
+        .and_then(|row| read_string(row.get("serverToolFollowupSource")))
+        .unwrap_or_default()
+}
+
+fn is_reasoning_stop_followup_turn(request_semantics: Option<&Value>) -> bool {
+    read_servertool_followup_source(request_semantics) == "servertool.reasoning_stop_continue"
+}
+
+fn read_continuation_tool_mode(request_semantics: Option<&Value>) -> String {
+    request_semantics
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("continuation"))
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("toolContinuation"))
+        .and_then(Value::as_object)
+        .and_then(|row| read_string(row.get("mode")))
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn has_responses_resume_tool_outputs(request_semantics: Option<&Value>) -> bool {
+    let resume = request_semantics
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("responses"))
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("resume"))
+        .and_then(Value::as_object);
+    has_non_empty_array(resume.and_then(|row| row.get("toolOutputsDetailed")))
+        || has_non_empty_array(resume.and_then(|row| row.get("tool_outputs")))
+}
+
+fn has_requested_tools_in_semantics_value(request_semantics: Option<&Value>) -> bool {
+    let Some(row) = request_semantics.and_then(Value::as_object) else {
+        return false;
+    };
+    let tools_node = row.get("tools").and_then(Value::as_object);
+    has_non_empty_array(row.get("tools"))
+        || has_non_empty_array(tools_node.and_then(|tools| tools.get("clientToolsRaw")))
+        || has_non_empty_array(tools_node.and_then(|tools| tools.get("baselineTools")))
+}
+
+fn read_tool_choice_candidate<'a>(row: Option<&'a Map<String, Value>>) -> Option<&'a Value> {
+    let row = row?;
+    row.get("tool_choice").or_else(|| row.get("toolChoice"))
+}
+
+fn is_required_tool_choice_value(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(raw)) => raw.trim().eq_ignore_ascii_case("required"),
+        Some(Value::Object(row)) => {
+            if read_string(row.get("type"))
+                .map(|value| value.eq_ignore_ascii_case("function"))
+                .unwrap_or(false)
+            {
+                return true;
+            }
+            row.get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| read_string(function.get("name")))
+                .is_some()
+        }
+        _ => false,
+    }
+}
+
+fn is_required_tool_call_turn_value(request_semantics: Option<&Value>) -> bool {
+    if !has_requested_tools_in_semantics_value(request_semantics) {
+        return false;
+    }
+    let row = request_semantics.and_then(Value::as_object);
+    if is_required_tool_choice_value(read_tool_choice_candidate(row)) {
+        return true;
+    }
+    let responses = row
+        .and_then(|row| row.get("responses"))
+        .and_then(Value::as_object);
+    if is_required_tool_choice_value(read_tool_choice_candidate(responses)) {
+        return true;
+    }
+    let request_parameters = responses
+        .and_then(|row| row.get("requestParameters"))
+        .and_then(Value::as_object);
+    if is_required_tool_choice_value(read_tool_choice_candidate(request_parameters)) {
+        return true;
+    }
+    let metadata = row
+        .and_then(|row| row.get("metadata"))
+        .and_then(Value::as_object);
+    if is_required_tool_choice_value(read_tool_choice_candidate(metadata)) {
+        return true;
+    }
+    read_servertool_followup_source(request_semantics) == "servertool.reasoning_stop_continue"
+}
+
+fn is_tool_result_followup_turn_value(request_semantics: Option<&Value>) -> bool {
+    if is_reasoning_stop_followup_turn(request_semantics) {
+        return false;
+    }
+    if read_continuation_tool_mode(request_semantics) == "submit_tool_outputs" {
+        return true;
+    }
+    let row = request_semantics.and_then(Value::as_object);
+    if has_non_empty_array(row.and_then(|row| row.get("toolOutputs")))
+        || has_non_empty_array(row.and_then(|row| row.get("tool_outputs")))
+        || has_non_empty_array(row.and_then(|row| row.get("__captured_tool_results")))
+        || has_responses_resume_tool_outputs(request_semantics)
+    {
+        return true;
+    }
+    let messages = row
+        .and_then(|row| row.get("messages"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for message in messages.iter().rev() {
+        let Some(message_row) = message.as_object() else {
+            continue;
+        };
+        let role = read_string(message_row.get("role"))
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        if role == "tool" || role == "function" {
+            return true;
+        }
+        if read_string(message_row.get("tool_call_id")).is_some() {
+            return true;
+        }
+        let item_type = read_string(message_row.get("type"))
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        if matches!(
+            item_type.as_str(),
+            "function_call_output" | "tool_result" | "tool_message"
+        ) {
+            return true;
+        }
+        if role == "assistant" || role == "user" || !item_type.is_empty() {
+            return false;
+        }
+    }
+    false
+}
+
 fn apply_chat_processed_request(request: Value, timestamp_ms: f64) -> Value {
     let mut request_obj = request.as_object().cloned().unwrap_or_else(Map::new);
 
@@ -267,7 +426,10 @@ fn restore_response_continuation_semantics(
     Value::Object(response_row)
 }
 
-pub(crate) fn build_processed_request_from_chat_response(chat_response: Value, stream_enabled: bool) -> Value {
+pub(crate) fn build_processed_request_from_chat_response(
+    chat_response: Value,
+    stream_enabled: bool,
+) -> Value {
     let response_row = chat_response.as_object().cloned().unwrap_or_default();
     let choices = response_row
         .get("choices")
@@ -426,4 +588,60 @@ pub fn restore_response_continuation_semantics_json(
         provider_protocol.as_deref(),
     );
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+pub fn has_requested_tools_in_semantics_json(request_semantics_json: String) -> NapiResult<bool> {
+    let request_semantics: Value = serde_json::from_str(&request_semantics_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(has_requested_tools_in_semantics_value(Some(&request_semantics)))
+}
+
+pub fn is_required_tool_call_turn_json(request_semantics_json: String) -> NapiResult<bool> {
+    let request_semantics: Value = serde_json::from_str(&request_semantics_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(is_required_tool_call_turn_value(Some(&request_semantics)))
+}
+
+pub fn is_tool_result_followup_turn_json(request_semantics_json: String) -> NapiResult<bool> {
+    let request_semantics: Value = serde_json::from_str(&request_semantics_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(is_tool_result_followup_turn_value(Some(&request_semantics)))
+}
+
+#[cfg(test)]
+mod request_semantics_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn classifies_required_tool_call_turn_in_rust() {
+        let semantics = json!({
+            "tools": { "clientToolsRaw": [{ "type": "function", "function": { "name": "exec_command" } }] },
+            "responses": { "requestParameters": { "tool_choice": "required" } }
+        });
+        assert!(has_requested_tools_in_semantics_value(Some(&semantics)));
+        assert!(is_required_tool_call_turn_value(Some(&semantics)));
+        assert!(!is_tool_result_followup_turn_value(Some(&semantics)));
+    }
+
+    #[test]
+    fn classifies_tool_result_followup_turn_in_rust() {
+        let semantics = json!({
+            "messages": [
+                { "role": "assistant", "content": "call tool" },
+                { "role": "tool", "tool_call_id": "call_1", "content": "ok" }
+            ]
+        });
+        assert!(is_tool_result_followup_turn_value(Some(&semantics)));
+        assert!(!is_required_tool_call_turn_value(Some(&semantics)));
+    }
+
+    #[test]
+    fn reasoning_stop_followup_is_not_tool_result_followup() {
+        let semantics = json!({
+            "__routecodex": { "serverToolFollowupSource": "servertool.reasoning_stop_continue" },
+            "messages": [{ "role": "tool", "tool_call_id": "call_1", "content": "ok" }]
+        });
+        assert!(!is_tool_result_followup_turn_value(Some(&semantics)));
+    }
 }
