@@ -2014,3 +2014,7 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 ## 2026-06-01 Responses previous_response_id continuation persistence
 - Verified: pending Responses tool calls must persist by response id until consumed; process restart/reset must reload the continuation before accepting /v1/responses previous_response_id + function_call_output. Missing response id must fail before provider, not forward orphan tool results.
 - Packaging baseline: routecodex global package must include sharedmodule/llmswitch-core/dist and package.json because runtime importCoreDist loads core modules from installed package.
+
+## 2026-06-01 Pipeline topology naming rule
+- Local topology truth: `docs/design/pipeline-type-topology-and-module-boundaries.md`. Request chain, response chain, error chain, metadata carrier, module naming, and mid-node insertion rules must be updated before changing critical pipeline data structures.
+- Mid-node insertion is architecturally discouraged; prefer current-node internal block, `Meta*`, `Error*`, or `Snapshot*` side-car. If unavoidable, never renumber existing nodes and never use `03b` / `03_1` / `03.5`; open a new chain version or append a new phase with red tests and deletion plan.

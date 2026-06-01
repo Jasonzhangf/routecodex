@@ -13940,3 +13940,6 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 红测：新增 `hub-pipeline-stage-residue-audit` 用例，先红命中 `src/server/utils/finish-reason.ts` 在 TS 中读取 `message.tool_calls`、`required_action.submit_tool_outputs`、Responses `function_call/tool_call` 并映射 `tool_use -> tool_calls`。
 - 修复：将 finish reason 派生迁到 Rust `chat_node_result_semantics.rs`，新增 NAPI `deriveFinishReasonJson`；`src/server/utils/finish-reason.ts` 保持 native bridge 调用薄壳，`src/modules/llmswitch/bridge/native-exports.ts` 用 `.node` 同步桥接，避免 rootDir 跨包 import 与 ESM require 问题。
 - 验证：`cargo test -p router-hotpath-napi chat_node_result_semantics::request_semantics_tests -- --nocapture` 6/6 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 绿；`npx tsc --noEmit --pretty false --skipLibCheck` 绿；`npx jest tests/server/utils/finish-reason.spec.ts --runInBand` 3/3 绿；`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 50/50 绿；`git diff --check` 绿。
+
+## 2026-06-01 Pipeline type topology local rule
+- Added local AGENTS rule and `docs/design/pipeline-type-topology-and-module-boundaries.md` as RouteCodex topology truth for request chain, response chain, error chain, metadata carrier, naming, and mid-node insertion rules.

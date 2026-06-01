@@ -1723,3 +1723,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ## 2026-06-01 Responses previous_response_id 精华
 - pending Responses tool_call 的 response id 必须落盘到 `~/.rcc/state/responses-conversation-store.json`，重启后先本地恢复再进 provider；禁止把 `previous_response_id` 当作孤儿 tool_result 放行。
 - 全局安装包必须携带 `sharedmodule/llmswitch-core/dist`，否则 `importCoreDist` 在 release 包中会启动失败。
+
+## 2026-06-01 Pipeline type topology 精华
+- 全局流水线类型按 `<Module><Direction><NN><Node>` 命名；请求链、响应链、错误链、metadata carrier 都必须只允许相邻节点 builder/parser 转换。
+- 中间插节点默认禁止；优先归入当前节点内部 block 或 `Meta*` / `Error*` / `Snapshot*` carrier，确需改变中段语义时开启新 chain version 或链尾追加，禁止 `03b` / `03_1` / `03.5` 临时编号。

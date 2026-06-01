@@ -16,6 +16,7 @@
 13. **direct passthrough 禁止换壳转换**：router-direct/provider-direct 的唯一职责是 provider passthrough + hooks；禁止进入 HubPipeline response conversion/chat-process/servertool response orchestration，禁止新增 direct response 专用壳、SSE materialize/remap/canonicalize、fallback/patch/shape 修补；禁止 direct 5xx/转换错误通过 `routecodexSameProtocolDirectDisabled` 重入 executor/reroute。
 14. **Hub Pipeline 流水线锁定原则**：靠“类型不可接 + 运行时必拦 + 导出不可见 + 红测必红”锁住 `req_inbound -> req_process -> req_outbound -> resp_inbound -> resp_process -> resp_outbound`，禁止靠约定维护阶段边界；`req_inbound` 是唯一标准化入口，`req_process` 禁止协议转换，`req_outbound` 是唯一 provider wire build。
 15. **metadata 请求/响应闭环隔离**：metadata 只能作为单个 request/response 闭环内的无状态内部控制语义 carrier；provider 出站 body、provider SDK options、client response body、provider/runtime 持久状态均不得携带内部 metadata。闭环结束必须释放，不得跨 requestId / pipelineId / port(serverId) / sessionId / conversationId 复用或污染。禁止 `body.metadata -> provider options`、`rawBody.metadata -> SDK request`、`payload.metadata.context -> provider wire payload`、snapshot metadata 进入正常 live path。
+16. **全局流水线类型拓扑锁**：请求链、响应链、错误链、metadata carrier、Virtual Router、Provider Runtime、Server Runtime 的关键数据结构必须按“模块 + 方向 + 节点序号 + 节点语义”唯一命名并唯一拥有；只允许相邻节点 builder/parser 转换，禁止跨节点 shortcut、同义 DTO、重复 shape、散落 `From` 转换、裸 `unknown`/`Record`/`Value` 承载关键语义。拓扑、命名、插节点规则真源见 `docs/design/pipeline-type-topology-and-module-boundaries.md`。
 
 ## Metadata 生命周期硬边界（醒目）
 1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。
@@ -37,6 +38,14 @@
 9. **servertool_followup**：只能基于 origin snapshot 重建 followup；不得从当前污染 payload 猜测补偿。
 10. **审计真源**：完整执行文档见 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
 
+## 全局流水线类型拓扑（醒目）
+1. **双向链条固定**：请求链必须从 `ServerReqIn01ClientRaw` 单向进入 Hub/VR/Provider；响应链必须从 `ProviderRespIn01Raw` 单向回到 Hub/Server；错误链必须从发生点进入统一错误 pipeline，不得反向补请求 payload。
+2. **命名模板固定**：`<Module><Direction><NN><Node>`，例如 `HubReqIn01RawEnvelope`、`HubReqProc03GovernedRequest`、`VrRoute04SelectedTarget`、`ProviderReqOut05WirePayload`、`ServerRespOut08ClientFrame`、`ErrorErr03RuntimeClassified`。
+3. **节点序号是位置**：序号表达拓扑位置，不表达版本；新增中间节点默认禁止。确需新增时必须先更新 `docs/design/pipeline-type-topology-and-module-boundaries.md`，优先归入既有节点内部 block / carrier；禁止重编号既有节点，禁止 `03b` / `03_1` / `03.5` 临时编号。
+4. **唯一 builder/parser**：每个节点类型只能有一个 owning builder/parser；转换函数必须写明相邻来源和目标，如 `build_hub_req_proc_03_from_hub_req_in_02`。
+5. **禁止跨链污染**：metadata、error、debug/snapshot、provider runtime state 都不能伪装成 req/resp 正常 payload；进入下一链路前必须经对应 carrier 类型或错误类型显式投影。
+6. **红测锁边界**：所有关键链路必须有红测扫描非相邻转换、内部字段泄漏、重复 DTO、旧 TS 语义壳复活；红测路径和禁止模式写入拓扑文档。
+
 ## 分类路由（按需跳转）
 1. 入口总览：`docs/agent-routing/00-entry-routing.md`
 2. 运行时与架构真源：`docs/agent-routing/10-runtime-ssot-routing.md`
@@ -53,6 +62,7 @@
    - `docs/design/servertool-followup-rebuild-from-origin.md`
    - `docs/design/windsurf-cascade-tool-protocol.md`
    - `docs/providers/windsurf-chat-provider-design.md`
+   - `docs/design/pipeline-type-topology-and-module-boundaries.md`
 
 ## 标准执行顺序
 1. 读本文件（项目入口 + 护栏）。
