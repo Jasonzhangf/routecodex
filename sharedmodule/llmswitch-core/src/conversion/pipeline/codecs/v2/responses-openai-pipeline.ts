@@ -19,24 +19,11 @@ import {
 import { buildAdapterContextFromPipeline } from '../../hooks/adapter-context.js';
 import { chatEnvelopeToStandardizedWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 import { standardizedToChatEnvelopeWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
-import { formatUnknownError } from '../../../../shared/common-utils.js';
+import { applyBridgeCaptureToolResultsWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
 
 const DEFAULT_RESPONSES_ENDPOINT = '/v1/responses';
 const RESPONSES_PROTOCOL = 'openai-responses';
 
-
-function logResponsesOpenAiPipelineNonBlocking(
-  stage: string,
-  error: unknown,
-  details: Record<string, unknown> = {}
-): void {
-  try {
-    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(`[responses-openai-pipeline] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
-  } catch {
-    // Never throw from non-blocking logging.
-  }
-}
 
 function assertJsonObject(value: unknown, stage: string): JsonObject {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -106,33 +93,6 @@ function restoreResponsesContext(value?: JsonObject): ResponsesRequestContext | 
   return value as unknown as ResponsesRequestContext;
 }
 
-function captureToolResults(payload: JsonObject): Array<{ tool_call_id?: string; output?: string }> {
-  const results: Array<{ tool_call_id?: string; output?: string }> = [];
-  const inputArr = Array.isArray((payload as any)?.input) ? (((payload as any).input as any[])) : [];
-  for (const it of inputArr) {
-    if (!it || typeof it !== 'object') continue;
-    const t = String((it as any).type || '').toLowerCase();
-    if (t === 'tool_result' || t === 'tool_message' || t === 'function_call_output') {
-      const tool_call_id = (it as any).tool_call_id || (it as any).call_id || (it as any).tool_use_id;
-      let output: string | undefined = undefined;
-      const rawOut = (it as any).output;
-      if (typeof rawOut === 'string') output = rawOut;
-      else if (rawOut && typeof rawOut === 'object') {
-        try {
-          output = JSON.stringify(rawOut);
-        } catch (error) {
-          logResponsesOpenAiPipelineNonBlocking('capture_tool_results.stringify_output', error, {
-            itemType: t,
-            toolCallId: typeof tool_call_id === 'string' ? tool_call_id : undefined
-          });
-        }
-      }
-      results.push({ tool_call_id, output });
-    }
-  }
-  return results;
-}
-
 function buildPipelineContext(profile: ConversionProfile, context: ConversionContext): ProtocolPipelineContext {
   return {
     requestId: context.requestId,
@@ -176,7 +136,10 @@ export class ResponsesOpenAIPipelineCodec implements ConversionCodec {
     if (built.toolsNormalized) {
       responsesContext.toolsNormalized = built.toolsNormalized;
     }
-    const captured = captureToolResults(wire);
+    const captured = applyBridgeCaptureToolResultsWithNative({
+      stage: 'request_inbound',
+      rawRequest: wire,
+    }).capturedToolResults ?? [];
     if (captured.length) {
       (responsesContext as Record<string, unknown>).__captured_tool_results = captured;
     }

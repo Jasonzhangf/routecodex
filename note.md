@@ -13925,3 +13925,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 红测：新增 `hub-pipeline-stage-residue-audit` 用例，先红命中 `request-executor-response-contract.ts` 在 HTTP executor 层读取 `tool_calls`、`function_call`、`required_action.submit_tool_outputs.tool_calls`、`function_call_output/tool_result/tool_message` 并分类响应工具语义。
 - 修复：将 `detectRetryableEmptyAssistantResponse` 的工具/空响应判定迁到 Rust `chat_node_result_semantics.rs`，新增 NAPI `detectRetryableEmptyAssistantResponseJson`；TS response contract 收缩为 native 调用薄壳，并物理删除未使用 probe/readString 壳。
 - 验证：Rust 定向红测先暴露 required-tool turn 被泛化 empty 抢先吞掉，调整 Rust 判定顺序后 `cargo test -p router-hotpath-napi chat_node_result_semantics::request_semantics_tests -- --nocapture` 5/5 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 绿；`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 48/48 绿；`git diff --check` 绿。
+
+## 2026-06-01 responses OpenAI pipeline tool-result capture cleanup
+- 红测：新增 `hub-pipeline-stage-residue-audit` 用例，先红命中 `responses-openai-pipeline.ts` 在 TS 中扫描 `function_call_output/tool_result/tool_message`、提取 tool id/output 并写 `__captured_tool_results`。
+- 修复：删除 TS `captureToolResults` 与非阻塞吞错日志，改为调用 Rust `applyBridgeCaptureToolResultsWithNative({ stage: 'request_inbound', rawRequest })`；TS 仅保留 native 结果 carrier 写入。
+- 验证：`cargo test -p router-hotpath-napi applies_bridge_capture_tool_results -- --nocapture` 2/2 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 绿；`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 49/49 绿；`git diff --check` 绿。

@@ -689,6 +689,20 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('responses openai pipeline must not capture tool results in TS', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/responses-openai-pipeline.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'implements response tool result capture in TS', pattern: /function\s+captureToolResults|const\s+captureToolResults|for\s*\([^)]*inputArr|itemType|toolCallId/ },
+      { label: 'classifies function_call_output in TS', pattern: /\bfunction_call_output\b|\btool_result\b|\btool_message\b|\btool_use_id\b/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('servertool orchestration blocks must not retain TS tool call/output mutation semantics', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts');
     const source = fs.readFileSync(filePath, 'utf8');
