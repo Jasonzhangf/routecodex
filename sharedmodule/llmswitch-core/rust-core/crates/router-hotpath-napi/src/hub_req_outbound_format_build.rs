@@ -39,8 +39,8 @@ fn strip_private_fields(value: &Value) -> Value {
         Value::Object(map) => {
             let mut new_map = serde_json::Map::new();
             for (key, val) in map {
-                // Strip fields starting with underscore (private fields)
-                if !key.starts_with('_') {
+                // Strip private/internal control fields from provider outbound payloads.
+                if key != "metadata" && !key.starts_with('_') {
                     new_map.insert(key.clone(), strip_private_fields(val));
                 }
             }
@@ -51,6 +51,51 @@ fn strip_private_fields(value: &Value) -> Value {
     }
 }
 
+fn chat_content_to_responses_content(content: &Value) -> Value {
+    match content {
+        Value::String(text) => Value::Array(vec![serde_json::json!({
+            "type": "input_text",
+            "text": text
+        })]),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(strip_private_fields)
+                .collect::<Vec<Value>>(),
+        ),
+        Value::Null => Value::Array(Vec::new()),
+        other => Value::Array(vec![strip_private_fields(other)]),
+    }
+}
+
+fn build_responses_input_from_chat_messages(messages: &[Value]) -> Value {
+    Value::Array(
+        messages
+            .iter()
+            .filter_map(|message| {
+                let row = message.as_object()?;
+                let role = row
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .unwrap_or("user")
+                    .trim();
+                let content = row
+                    .get("content")
+                    .map(chat_content_to_responses_content)
+                    .unwrap_or_else(|| Value::Array(Vec::new()));
+                Some(Value::Object(Map::from_iter([
+                    ("type".to_string(), Value::String("message".to_string())),
+                    (
+                        "role".to_string(),
+                        Value::String(if role.is_empty() { "user" } else { role }.to_string()),
+                    ),
+                    ("content".to_string(), content),
+                ])))
+            })
+            .collect::<Vec<Value>>(),
+    )
+}
+
 fn build_openai_responses_request(format_envelope: &Value) -> Result<Value, String> {
     let mut payload = format_envelope
         .get("payload")
@@ -58,19 +103,15 @@ fn build_openai_responses_request(format_envelope: &Value) -> Result<Value, Stri
         .clone();
 
     if payload.get("input").is_none() {
-        if let Some(context) = format_envelope
-            .get("payload")
-            .and_then(|value| value.get("metadata"))
-            .and_then(|value| value.get("context"))
-            .filter(|value| value.get("input").is_some())
-        {
+        if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
             let mut responses_payload = Map::new();
             if let Some(model) = payload.get("model") {
                 responses_payload.insert("model".to_string(), model.clone());
             }
-            if let Some(input) = context.get("input") {
-                responses_payload.insert("input".to_string(), input.clone());
-            }
+            responses_payload.insert(
+                "input".to_string(),
+                build_responses_input_from_chat_messages(messages),
+            );
             for key in [
                 "tools",
                 "tool_choice",
@@ -85,11 +126,7 @@ fn build_openai_responses_request(format_envelope: &Value) -> Result<Value, Stri
                 "seed",
                 "response_format",
             ] {
-                if let Some(value) = payload
-                    .get(key)
-                    .or_else(|| context.get(key))
-                    .or_else(|| context.get("toolsRaw").filter(|_| key == "tools"))
-                {
+                if let Some(value) = payload.get(key) {
                     responses_payload.insert(key.to_string(), value.clone());
                 }
             }
@@ -108,7 +145,7 @@ fn build_openai_responses_request(format_envelope: &Value) -> Result<Value, Stri
 }
 
 fn build_openai_chat_request(format_envelope: &Value) -> Result<Value, String> {
-    let payload = format_envelope
+    let mut payload = format_envelope
         .get("payload")
         .ok_or("Missing 'payload' field in format envelope")?
         .clone();
@@ -118,53 +155,8 @@ fn build_openai_chat_request(format_envelope: &Value) -> Result<Value, String> {
             None,
         )
         .map_err(|error| error.to_string())?;
-        let converted_value: Value = serde_json::from_str(&converted).map_err(|error| error.to_string())?;
-        return converted_value
-            .get("request")
-            .cloned()
-            .ok_or_else(|| "responses-openai request codec returned no request".to_string());
-    }
-    if let Some(context) = format_envelope
-        .get("payload")
-        .and_then(|value| value.get("metadata"))
-        .and_then(|value| value.get("context"))
-        .filter(|value| value.get("input").is_some())
-    {
-        let mut responses_payload = Map::new();
-        if let Some(model) = payload.get("model") {
-            responses_payload.insert("model".to_string(), model.clone());
-        }
-        if let Some(input) = context.get("input") {
-            responses_payload.insert("input".to_string(), input.clone());
-        }
-        for key in [
-            "tools",
-            "tool_choice",
-            "temperature",
-            "top_p",
-            "max_output_tokens",
-            "max_tokens",
-            "stream",
-            "parallel_tool_calls",
-            "user",
-            "logit_bias",
-            "seed",
-            "response_format",
-        ] {
-            if let Some(value) = payload
-                .get(key)
-                .or_else(|| context.get(key))
-                .or_else(|| context.get("toolsRaw").filter(|_| key == "tools"))
-            {
-                responses_payload.insert(key.to_string(), value.clone());
-            }
-        }
-        let converted = crate::responses_openai_codec::run_responses_openai_request_codec_json(
-            Value::Object(responses_payload).to_string(),
-            None,
-        )
-        .map_err(|error| error.to_string())?;
-        let converted_value: Value = serde_json::from_str(&converted).map_err(|error| error.to_string())?;
+        let converted_value: Value =
+            serde_json::from_str(&converted).map_err(|error| error.to_string())?;
         return converted_value
             .get("request")
             .cloned()
@@ -198,52 +190,8 @@ fn build_anthropic_messages_request(format_envelope: &Value) -> Result<Value, St
             None,
         )
         .map_err(|error| error.to_string())?;
-        let anthropic_value: Value = serde_json::from_str(&anthropic).map_err(|error| error.to_string())?;
-        return Ok(strip_private_fields(&anthropic_value));
-    }
-    if let Some(context) = format_envelope
-        .get("payload")
-        .and_then(|value| value.get("metadata"))
-        .and_then(|value| value.get("context"))
-        .filter(|value| value.get("input").is_some())
-    {
-        let mut responses_payload = Map::new();
-        if let Some(model) = payload.get("model") {
-            responses_payload.insert("model".to_string(), model.clone());
-        }
-        if let Some(input) = context.get("input") {
-            responses_payload.insert("input".to_string(), input.clone());
-        }
-        if let Some(parameters) = context.get("parameters").and_then(|value| value.as_object()) {
-            for (key, value) in parameters {
-                responses_payload.insert(key.clone(), value.clone());
-            }
-        }
-        for key in ["tools", "tool_choice", "temperature", "top_p", "max_output_tokens", "stream"] {
-            if let Some(value) = payload
-                .get(key)
-                .or_else(|| context.get(key))
-                .or_else(|| context.get("toolsRaw").filter(|_| key == "tools"))
-            {
-                responses_payload.insert(key.to_string(), value.clone());
-            }
-        }
-        let chat = crate::responses_openai_codec::run_responses_openai_request_codec_json(
-            Value::Object(responses_payload).to_string(),
-            None,
-        )
-        .map_err(|error| error.to_string())?;
-        let chat_value: Value = serde_json::from_str(&chat).map_err(|error| error.to_string())?;
-        let chat_request = chat_value
-            .get("request")
-            .cloned()
-            .ok_or_else(|| "responses-openai request codec returned no request".to_string())?;
-        let anthropic = crate::anthropic_openai_codec::build_anthropic_from_openai_chat_json(
-            chat_request.to_string(),
-            None,
-        )
-        .map_err(|error| error.to_string())?;
-        let anthropic_value: Value = serde_json::from_str(&anthropic).map_err(|error| error.to_string())?;
+        let anthropic_value: Value =
+            serde_json::from_str(&anthropic).map_err(|error| error.to_string())?;
         return Ok(strip_private_fields(&anthropic_value));
     }
     Ok(strip_private_fields(&payload))
@@ -320,6 +268,11 @@ mod tests {
         let result = build_format_request(input).unwrap();
         assert!(result.payload.get("model").is_some());
         assert_eq!(result.payload["model"], "gpt-4");
+        assert!(result.payload.get("messages").is_none());
+        assert_eq!(result.payload["input"][0]["type"], "message");
+        assert_eq!(result.payload["input"][0]["role"], "user");
+        assert_eq!(result.payload["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(result.payload["input"][0]["content"][0]["text"], "hello");
     }
 
     #[test]
@@ -379,12 +332,52 @@ mod tests {
         assert!(result.payload.get("__internal").is_none());
         assert!(result.payload.get("model").is_some());
 
-        // Check nested private fields are also stripped
-        if let Some(messages) = result.payload.get("messages").and_then(|v| v.as_array()) {
-            if let Some(first_msg) = messages.first() {
-                assert!(first_msg.get("_temp").is_none());
-            }
-        }
+        assert!(result.payload.get("messages").is_none());
+        assert!(result.payload["input"][0]["content"][0].get("_temp").is_none());
+    }
+
+    #[test]
+    fn test_provider_outbound_strips_metadata_field() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-chat",
+                "version": "v1",
+                "payload": {
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "metadata": {"user_id": "must-not-leak"}
+                }
+            }),
+            protocol: "openai-chat".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        assert!(result.payload.get("metadata").is_none());
+    }
+
+    #[test]
+    fn test_provider_outbound_does_not_backfill_from_metadata_context() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "gpt-4",
+                    "metadata": {
+                        "context": {
+                            "input": [{"role": "user", "content": [{"type": "input_text", "text": "must not backfill"}]}],
+                            "toolsRaw": [{"type": "function", "name": "leak"}]
+                        }
+                    }
+                }
+            }),
+            protocol: "openai-responses".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        assert!(result.payload.get("metadata").is_none());
+        assert!(result.payload.get("input").is_none());
+        assert!(result.payload.get("tools").is_none());
     }
 
     #[test]
@@ -463,8 +456,8 @@ mod tests {
         };
 
         let result = build_format_request(input).unwrap();
-        if let Some(messages) = result.payload.get("messages").and_then(|v| v.as_array()) {
-            for msg in messages {
+        if let Some(input) = result.payload.get("input").and_then(|v| v.as_array()) {
+            for msg in input {
                 assert!(msg.get("_temp_id").is_none());
                 assert!(msg.get("__internal_cache").is_none());
             }

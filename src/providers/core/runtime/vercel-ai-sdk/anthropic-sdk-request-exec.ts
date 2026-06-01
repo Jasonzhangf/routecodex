@@ -2,7 +2,6 @@ import { Readable } from 'node:stream';
 
 import { AnthropicMessagesLanguageModel } from '@ai-sdk/anthropic/internal';
 
-import { stripInternalKeysDeep } from '../../../../utils/strip-internal-keys.js';
 import type { UnknownObject } from '../../../../types/common-types.js';
 import type { PreparedHttpRequest } from '../http-request-executor.js';
 import { buildAnthropicSdkCallOptions } from './anthropic-sdk-call-options.js';
@@ -10,10 +9,7 @@ import { asRecord, pickString, type UnknownRecord } from './anthropic-sdk-transp
 
 function mergePreservedRequestFields(rawBody: UnknownRecord, builtBody: UnknownRecord): UnknownRecord {
   const next = { ...builtBody };
-  const metadata = rawBody.metadata;
-  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
-    next.metadata = stripInternalKeysDeep(metadata as UnknownRecord);
-  }
+  void rawBody;
   return next;
 }
 

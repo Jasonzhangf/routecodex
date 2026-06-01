@@ -5,6 +5,17 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 
 # RCC Dev Skills
 
+## Metadata 请求/响应闭环隔离硬规则（2026-06-01，强制）
+
+- metadata 是无状态、短生命周期、单个 request/response 闭环内的内部控制语义 carrier；不是 provider request/response 的一部分。
+- 允许读取位置：入口 adapter / Hub Pipeline / Virtual Router / Provider Runtime 的 runtime carrier 或 context side-channel；用途限 routeHint、entryEndpoint、stream intent、servertool/clock/web_search、snapshot 标签、同闭环响应处理。
+- 禁止出口：provider HTTP body、provider SDK request/options、direct passthrough body、client response body、provider health/quota/runtime 持久状态、port/session/global cache。
+- 隔离维度：requestId、pipelineId、port/serverId、sessionId、conversationId 必须互相隔离；闭环完成后 metadata 必须释放，不能跨请求、跨响应、跨端口、跨 session 复用。
+- 明确错误模式：`body.metadata -> provider options`、`rawBody.metadata -> SDK request`、`payload.metadata.context -> provider wire payload`、`snapshot.metadata -> live runtime metadata`、`metadata.user_id/session_id/conversation_id -> upstream body/options` 全部违规。
+- 修复原则：在唯一真源出站构造点移除违规语义并加 fail-fast invariant；禁止 fallback sanitizer、静默 delete、provider-specific 旁路、双路径兼容。
+- 验证要求：红测至少覆盖 protocol client、SDK transport、Rust outbound format build、provider-request snapshot、连续请求/端口/session 隔离。
+
+
 ## 索引概要
 - L1-L20 `purpose`: RouteCodex/llmswitch-core 开发技能索引
 - L21-L55 `closed-loop-refactor`: 标准重构/修复闭环（分步→修改→编译→构建→验证→下一步）

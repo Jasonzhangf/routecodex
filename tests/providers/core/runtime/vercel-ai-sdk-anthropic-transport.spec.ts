@@ -754,6 +754,45 @@ describe('executeAnthropicRequestWithBody exact bad-sample family regression', (
 });
 
 describe('executeAnthropicRequestWithBody', () => {
+  it('does not copy raw request metadata into Anthropic SDK request body', async () => {
+    const originalFetch = global.fetch;
+    const calls: Array<{ init: RequestInit | undefined }> = [];
+    global.fetch = (async (_url: URL | RequestInfo, init?: RequestInit) => {
+      calls.push({ init });
+      return new Response(JSON.stringify({ id: 'msg_1', content: [], usage: { input_tokens: 1, output_tokens: 1 } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }) as typeof fetch;
+
+    try {
+      await executeAnthropicRequestWithBody(
+        {
+          model: 'mimo-v2.5-pro',
+          max_tokens: 64,
+          messages: [{ role: 'user', content: 'hi' }],
+          metadata: { user_id: 'must-not-leak', routeHint: 'internal' }
+        } as any,
+        {
+          endpoint: '/v1/messages',
+          headers: {
+            'content-type': 'application/json',
+            'anthropic-version': '2023-06-01'
+          },
+          targetUrl: 'https://example.com/anthropic/v1/messages',
+          body: {},
+          wantsSse: false
+        } as any
+      );
+
+      expect(calls).toHaveLength(1);
+      const requestBody = JSON.parse(String(calls[0].init?.body));
+      expect(requestBody.metadata).toBeUndefined();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it('reclassifies wrapped upstream 502 html from http 500 envelope to HTTP_502', async () => {
     const originalFetch = global.fetch;
     global.fetch = (async () => new Response(

@@ -14,6 +14,27 @@
 11. **Windsurf 工具禁止伪装 native**：Windsurf 中只有已证明完全等价的工具才能 native-map；`apply_patch` 不得映射到 `write_to_file/propose_code`，必须走 RCC 文本收割或显式 servertool。
 12. **Hub Pipeline / Virtual Router 禁止 provider 特例**：Hub Pipeline 与 Virtual Router 永远只承载协议、路由、工具治理的通用语义；禁止写入任何 provider-specific 分支、shape 修补、上下文补偿或 Windsurf/Cascade 特例。provider 差异只能在对应 Provider runtime 内解决。
 13. **direct passthrough 禁止换壳转换**：router-direct/provider-direct 的唯一职责是 provider passthrough + hooks；禁止进入 HubPipeline response conversion/chat-process/servertool response orchestration，禁止新增 direct response 专用壳、SSE materialize/remap/canonicalize、fallback/patch/shape 修补；禁止 direct 5xx/转换错误通过 `routecodexSameProtocolDirectDisabled` 重入 executor/reroute。
+14. **metadata 请求/响应闭环隔离**：metadata 只能作为单个 request/response 闭环内的无状态内部控制语义 carrier；provider 出站 body、provider SDK options、client response body、provider/runtime 持久状态均不得携带内部 metadata。闭环结束必须释放，不得跨 requestId / pipelineId / port(serverId) / sessionId / conversationId 复用或污染。禁止 `body.metadata -> provider options`、`rawBody.metadata -> SDK request`、`payload.metadata.context -> provider wire payload`、snapshot metadata 进入正常 live path。
+
+## Metadata 生命周期硬边界（醒目）
+1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。
+2. **内部可用**：Hub Pipeline、Virtual Router、Provider Runtime 可通过 runtime carrier / context side-channel 读取 metadata 作为控制语义（routeHint、entryEndpoint、stream intent、servertool/clock/web_search、snapshot 标签等）。
+3. **出站隔离**：provider HTTP body、SDK request/options、direct passthrough body、Responses/Anthropic/OpenAI/Gemini/Qwen/GLM provider body 不得出现内部 metadata；发现必须 fail-fast，禁止静默删除当作修复。
+4. **响应隔离**：resp_inbound/process/outbound 只能读取同一 requestId/pipelineId 的 metadata；不得把 metadata 注入 client response body。
+5. **闭环释放**：请求/响应闭环完成后 metadata 不得进入全局 singleton、provider health/quota、session cache、port-shared cache、snapshot replay normal path。
+6. **错误模式**：禁止从 `metadata.context` 补 provider payload；禁止从 `metadata.user_id/session_id/conversation_id` 生成上游 body/options；禁止跨端口或跨 session 复用 metadata 对象；禁止把 debug/snapshot metadata 当作 live runtime metadata。
+
+## Hub Pipeline 节点职责硬边界（醒目）
+1. **req_inbound**：只做入口协议解析、上下文捕获、原始语义保留；不得伪造工具结果、不得吞非法工具顺序。
+2. **req_process**：请求侧工具治理唯一入口；工具声明注入/裁剪、文本工具 harvest、apply_patch/servertool/MCP/native 工具治理必须 Rust-only。
+3. **virtual_router**：只做路由分类与目标选择；不得修补 payload、不得处理工具结果、不得读取别的端口或别的路由池状态。
+4. **req_outbound**：只把 Hub 规范语义编码成 provider 协议；不得把 `tool_calls` / `function_call_output` / servertool 语义降级为普通文本。
+5. **provider_runtime**：只做 transport/auth/provider 内部协议兼容；不得承担 Hub 工具治理，provider-specific 差异不得写入 Hub Pipeline。
+6. **resp_inbound**：只把 provider 原始响应解析回 Hub 规范响应；SSE/JSON 解析失败必须显式错误。
+7. **resp_process**：响应侧工具治理唯一入口；文本工具收割、servertool followup、apply_patch 逆向转换、internal tool 剥离必须 Rust-only。
+8. **resp_outbound**：只把 Hub 响应投影回客户端入口协议；不得修复请求侧历史污染、不得 provider 特例、不得吞上游错误。
+9. **servertool_followup**：只能基于 origin snapshot 重建 followup；不得从当前污染 payload 猜测补偿。
+10. **审计真源**：完整执行文档见 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
 
 ## 分类路由（按需跳转）
 1. 入口总览：`docs/agent-routing/00-entry-routing.md`

@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { AnthropicProtocolClient } from '../../src/client/anthropic/anthropic-protocol-client.js';
 
 describe('AnthropicProtocolClient', () => {
-  it('preserves top-level metadata (required by Claude-Code-gated proxies)', () => {
+  it('does not leak top-level metadata into Anthropic provider body', () => {
     const client = new AnthropicProtocolClient();
 
     const body = client.buildRequestBody({
@@ -14,7 +14,7 @@ describe('AnthropicProtocolClient', () => {
       }
     } as any);
 
-    expect(body.metadata).toEqual({ user_id: 'test-user' });
+    expect(body.metadata).toBeUndefined();
   });
 
   it('normalizes string tool_choice into Anthropic object form', () => {

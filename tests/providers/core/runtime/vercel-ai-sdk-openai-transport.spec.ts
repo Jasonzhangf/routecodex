@@ -90,6 +90,19 @@ describe('applyOpenCodeZenThinkingDefaults', () => {
 });
 
 describe('buildOpenAiSdkChatCallOptions', () => {
+  it('does not map request metadata into OpenAI SDK provider options', () => {
+    const options = buildOpenAiSdkChatCallOptions(
+      {
+        model: 'gpt-5.4',
+        messages: [{ role: 'user', content: 'hi' }],
+        metadata: { user_id: 'must-not-leak', routeHint: 'internal' }
+      },
+      { authorization: 'Bearer test' }
+    );
+
+    expect((options.providerOptions as any)?.openai?.metadata).toBeUndefined();
+  });
+
   it('maps openai chat payload into AI SDK call options and preserves reasoning/tool config', () => {
     const options = buildOpenAiSdkChatCallOptions(
       {
@@ -271,6 +284,25 @@ describe('mergePreservedOpenAiRequestFields', () => {
       input: [{ role: 'user', content: [{ text: 'hi' }] }]
     });
   });
+
+  it('does not preserve internal metadata as provider request field', () => {
+    expect(
+      mergePreservedOpenAiRequestFields(
+        {
+          model: 'qwen3.5-plus',
+          messages: [],
+          metadata: { user_id: 'must-not-leak' }
+        },
+        {
+          model: 'qwen3.5-plus',
+          messages: []
+        }
+      )
+    ).toEqual({
+      model: 'qwen3.5-plus',
+      messages: []
+    });
+  });
 });
 
 describe('VercelAiSdkOpenAiTransport', () => {
@@ -296,6 +328,7 @@ describe('VercelAiSdkOpenAiTransport', () => {
             model: 'qwen3.5-plus',
             messages: [{ role: 'user', content: 'hello' }],
             reasoning_effort: 'high',
+            metadata: { user_id: 'must-not-leak' },
             parameters: { reasoning: true }
           },
           wantsSse: false
@@ -313,6 +346,7 @@ describe('VercelAiSdkOpenAiTransport', () => {
         reasoning_effort: 'high',
         parameters: { reasoning: true }
       });
+      expect(requestBody.metadata).toBeUndefined();
       expect(response).toMatchObject({
         status: 200,
         data: {

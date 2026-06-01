@@ -446,10 +446,6 @@ export function buildOpenAiSdkChatCallOptions(
   if (store !== undefined) {
     openaiProviderOptions.store = store;
   }
-  const metadata = body.metadata;
-  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
-    openaiProviderOptions.metadata = stripInternalKeysDeep(metadata as UnknownRecord);
-  }
   const prediction = body.prediction;
   if (prediction && typeof prediction === 'object' && !Array.isArray(prediction)) {
     openaiProviderOptions.prediction = stripInternalKeysDeep(prediction as UnknownRecord);
@@ -520,6 +516,9 @@ export function mergePreservedOpenAiRequestFields(rawBody: UnknownRecord, builtB
   const merged = { ...builtBody };
   for (const [key, value] of Object.entries(rawBody)) {
     if (key.startsWith('__')) {
+      continue;
+    }
+    if (key === 'metadata') {
       continue;
     }
     if (Object.prototype.hasOwnProperty.call(merged, key)) {

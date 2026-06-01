@@ -1,12 +1,7 @@
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../http-protocol-client.js';
 import { OpenAIChatProtocolClient } from '../openai/chat-protocol-client.js';
-import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 
 const DEFAULT_VERSION = '2023-06-01';
-
-interface DataEnvelope {
-  data?: Record<string, unknown>;
-}
 
 function buildMalformedAnthropicRequest(message: string, details?: Record<string, unknown>): Error {
   const error = new Error(message);
@@ -16,10 +11,6 @@ function buildMalformedAnthropicRequest(message: string, details?: Record<string
     details
   });
   return error;
-}
-
-function hasDataEnvelope(payload: ProtocolRequestPayload): payload is ProtocolRequestPayload & DataEnvelope {
-  return typeof payload === 'object' && payload !== null && 'data' in payload;
 }
 
 function normalizeAnthropicToolChoice(raw: unknown): Record<string, unknown> | undefined {
@@ -62,7 +53,6 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
   }
 
   buildRequestBody(request: ProtocolRequestPayload): Record<string, unknown> {
-    const rawPayload = this.extractPayload(request);
     const body = this.chatClient.buildRequestBody(request);
     const bodyRecord = body as Record<string, unknown>;
     const normalizedToolChoice = normalizeAnthropicToolChoice(bodyRecord.tool_choice);
@@ -72,19 +62,6 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
 
     // Strip non-Anthropic top-level fields that leak from Claude-Code or OpenAI shapes.
     delete bodyRecord.output_config;
-
-    // Anthropic Messages supports top-level `metadata`. Some Claude-Code-gated proxies require it to exist.
-    // The OpenAI chat client deletes `metadata`, so restore it (after stripping internal "__*" keys
-    // and non-Anthropic sub-fields like `clientHeaders`).
-    const rawMetadata = (rawPayload as Record<string, unknown>).metadata;
-    if (rawMetadata && typeof rawMetadata === 'object' && !Array.isArray(rawMetadata)) {
-      const cleaned = stripInternalKeysDeep(rawMetadata as Record<string, unknown>);
-      delete cleaned.clientHeaders;
-      delete cleaned.client_headers;
-      if (Object.keys(cleaned).length > 0) {
-        bodyRecord.metadata = cleaned;
-      }
-    }
 
     return body;
   }
@@ -123,15 +100,5 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
     }
 
     return normalized;
-  }
-
-  private extractPayload(request: ProtocolRequestPayload): Record<string, unknown> {
-    if (hasDataEnvelope(request)) {
-      const envelope = request as ProtocolRequestPayload & DataEnvelope;
-      if (envelope.data && typeof envelope.data === 'object') {
-        return envelope.data;
-      }
-    }
-    return { ...(request as Record<string, unknown>) };
   }
 }

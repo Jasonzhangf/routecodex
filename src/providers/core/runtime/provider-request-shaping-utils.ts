@@ -48,6 +48,13 @@ function resolveGenericStreamIntent(args: {
     ?? readStreamIntentFromMetadata(args.runtimeMetadata?.metadata);
 }
 
+function assertProviderOutboundBodyHasNoMetadata(body: UnknownObject, source: string): void {
+  if (!isRecord(body) || !Object.prototype.hasOwnProperty.call(body, 'metadata')) {
+    return;
+  }
+  throw new Error(`provider-runtime-error: metadata is not allowed in provider outbound body (${source})`);
+}
+
 export function resolveProviderWantsUpstreamSse(args: {
   request: UnknownObject;
   context: ProviderContext;
@@ -230,24 +237,30 @@ export function buildProviderHttpRequestBody(args: {
     runtimeMetadata: args.runtimeMetadata
   });
   if (profileBody && typeof profileBody === 'object') {
-    return ensureGenericStreamField({
+    const body = ensureGenericStreamField({
       body: profileBody as UnknownObject,
       request: args.request,
       runtimeMetadata: args.runtimeMetadata
     });
+    assertProviderOutboundBodyHasNoMetadata(body, 'familyProfile.buildRequestBody');
+    return body;
   }
   if (args.legacyBody && typeof args.legacyBody === 'object') {
-    return ensureGenericStreamField({
+    const body = ensureGenericStreamField({
       body: args.legacyBody,
       request: args.request,
       runtimeMetadata: args.runtimeMetadata
     });
+    assertProviderOutboundBodyHasNoMetadata(body, 'legacyBody');
+    return body;
   }
-  return ensureGenericStreamField({
+  const body = ensureGenericStreamField({
     body: defaultBody,
     request: args.request,
     runtimeMetadata: args.runtimeMetadata
   });
+  assertProviderOutboundBodyHasNoMetadata(body, 'protocolClient.buildRequestBody');
+  return body;
 }
 
 function ensureGenericStreamField(args: {
