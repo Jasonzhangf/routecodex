@@ -596,6 +596,18 @@ export function readRequestBodyMetadata(payload: unknown): Record<string, unknow
   }
 }
 
+export function stripRequestBodyMetadataForPipeline<T>(payload: T): T {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const record = payload as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(record, 'metadata')) {
+    return payload;
+  }
+  const { metadata: _metadata, ...withoutMetadata } = record;
+  return withoutMetadata as T;
+}
+
 export function mergePipelineMetadata(
   requestBodyMetadata: Record<string, unknown> | undefined,
   internalMetadata: Record<string, unknown>

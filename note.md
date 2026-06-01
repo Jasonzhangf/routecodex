@@ -13854,3 +13854,9 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 已提交 `d3a28ea78 test: forbid provider body metadata control`：新增静态红线测试，禁止 provider runtime / SDK / Rust outbound 从 `body.metadata`、`rawBody.metadata`、`payload.metadata.context` 等路径消费控制语义。
 - 最终本轮验证：metadata Jest 集合 9 suites / 59 tests 全绿；Rust `cargo test -p router-hotpath-napi hub_req_outbound_format_build --lib` 13/13 全绿。
 - 剩余 grep 命中分类：`body.metadata` delete/assert 类；`bridge-actions` 内部 state metadata；`stop-message-auto runtime-utils` 内部 metadata.context；`guardian-daemon` 非 provider 请求链路 metadata；`hub_chat_envelope_validator` schema 校验文本。未发现 provider wire body / SDK options / client response body 的 metadata 注入残留。
+2026-06-01 clock/heartbeat removal: user explicitly requested physical removal; auditing active imports before delete.
+
+## 2026-06-01 metadata入口handler收口
+
+- 扫描发现 chat/messages/responses/images handler 仍把 request body metadata 作为控制语义来源或继续传给 pipeline body；已改为入口读取后只放 internal carrier，handoff body 用 `stripRequestBodyMetadataForPipeline` 剥离 top-level metadata。
+- 验证：`npm run jest:run -- --runTestsByPath tests/red-tests/no_provider_body_metadata_control.test.ts tests/server/handlers/handler-utils.metadata.spec.ts tests/server/handlers/handler-metadata-boundary.spec.ts --runInBand --forceExit` 通过，3 suites / 7 tests passed；扩展 metadata 回归 12 suites / 67 tests passed。

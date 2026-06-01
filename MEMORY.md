@@ -2000,3 +2000,8 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 - 2026-06-01: metadata 隔离实现已分批本地提交（未 push）：`971d7c3e5`、`710acff93`、`62f11f32f`、`2e693ad81`。核心规则：provider/request/response body 不读写内部 metadata；direct/route/entryEndpoint/control flags 必须走 runtime/context carrier；违规 body.metadata 在 provider outbound 边界 fail-fast。
 
 - 2026-06-01: metadata 隔离补充收口：mock provider 也不得读 body metadata；shadow compare 不得忽略 `providerPayload.metadata.*` drift；新增静态红线 `tests/red-tests/no_provider_body_metadata_control.test.ts` 防止 provider runtime/SDK/Rust outbound 再从 body/rawBody/payload.metadata.context 消费控制语义。
+
+## 2026-06-01 Metadata 入口隔离已验证
+
+- Metadata 是 request/response 闭环内的 internal carrier；HTTP handler 可从当前请求读取 metadata，但传给 Hub Pipeline 的 body 必须剥离 top-level `metadata`，控制语义只能进 `input.metadata` carrier。
+- 已验证入口：`/v1/chat/completions`、`/v1/responses`、`/v1/messages`、`/v1/images/generations`；测试命令：`npm run jest:run -- --runTestsByPath tests/red-tests/no_provider_body_metadata_control.test.ts tests/server/handlers/handler-utils.metadata.spec.ts tests/server/handlers/handler-metadata-boundary.spec.ts --runInBand --forceExit`，结果 3 suites / 7 tests passed；扩展 metadata 回归 12 suites / 67 tests passed。

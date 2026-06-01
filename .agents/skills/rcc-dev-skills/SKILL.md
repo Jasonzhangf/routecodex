@@ -5,16 +5,25 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 
 # RCC Dev Skills
 
+## Hub Pipeline 工具边界审计硬规则（最醒目）
+
+- 审计/修复 Hub Pipeline 工具问题前，先读 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
+- `req_inbound` 只解析入口协议和捕获上下文；`req_process` 是请求侧工具治理唯一入口；`req_outbound` 只做 Hub 语义到 provider 协议编码，禁止把工具语义降级成普通文本。
+- `resp_inbound` 只解析 provider 响应；`resp_process` 是响应侧工具治理唯一入口；`resp_outbound` 只做客户端协议投影，禁止修补请求侧历史污染。
+- 工具声明、文本工具 harvest、apply_patch、servertool、MCP/native 工具治理、sanitize、tool list 注入/裁剪必须 Rust-only；TS 只能是 JSON parse/serialize + native 调用薄壳。
+- Virtual Router 只路由，不修 payload；Provider 只 transport/auth/provider 内部兼容，不做 Hub 工具治理；direct/provider passthrough 禁止进入 Hub Pipeline conversion。
+- 发现违规必须先写红测，红测要覆盖真实 Hub Pipeline stage 或 HTTP 黑盒入口；禁止 mock 私有方法冒充黑盒。
+
 ## Metadata 请求/响应闭环隔离硬规则（2026-06-01，强制）
 
 - metadata 是无状态、短生命周期、单个 request/response 闭环内的内部控制语义 carrier；不是 provider request/response 的一部分。
 - 允许读取位置：入口 adapter / Hub Pipeline / Virtual Router / Provider Runtime 的 runtime carrier 或 context side-channel；用途限 routeHint、entryEndpoint、stream intent、servertool/clock/web_search、snapshot 标签、同闭环响应处理。
+- HTTP handler 入口可读取当前 request body metadata 并放入 carrier，但 handoff 给 Hub Pipeline 的 body 必须剥离 top-level `metadata`；禁止 `payload.metadata` / `pipelineBody.metadata` 再作为 mock、session、route、resume 等控制真源。
 - 禁止出口：provider HTTP body、provider SDK request/options、direct passthrough body、client response body、provider health/quota/runtime 持久状态、port/session/global cache。
 - 隔离维度：requestId、pipelineId、port/serverId、sessionId、conversationId 必须互相隔离；闭环完成后 metadata 必须释放，不能跨请求、跨响应、跨端口、跨 session 复用。
 - 明确错误模式：`body.metadata -> provider options`、`rawBody.metadata -> SDK request`、`payload.metadata.context -> provider wire payload`、`snapshot.metadata -> live runtime metadata`、`metadata.user_id/session_id/conversation_id -> upstream body/options` 全部违规。
 - 修复原则：在唯一真源出站构造点移除违规语义并加 fail-fast invariant；禁止 fallback sanitizer、静默 delete、provider-specific 旁路、双路径兼容。
 - 验证要求：红测至少覆盖 protocol client、SDK transport、Rust outbound format build、provider-request snapshot、连续请求/端口/session 隔离。
-
 
 ## 索引概要
 - L1-L20 `purpose`: RouteCodex/llmswitch-core 开发技能索引

@@ -247,3 +247,37 @@ metadata 必须是无状态、短生命周期、闭环内控制语义：
 - Response 隔离：响应 body 不出现请求 metadata；snapshot root metadata 允许存在但不进入 response data。
 - 对象引用隔离：metadata 对象修改不影响后续请求 context。
 - Replay 隔离：debug replay 使用 snapshot metadata 时必须显式 replay scope，不进入正常 live path。
+
+## 2026-06-01 入口 handler 收口补充
+
+### 新发现违规点
+
+12. `src/server/handlers/chat-handler.ts`
+    - 问题：入口读取 `payload.metadata.mockSampleReqId` 作为 mock 控制值，且 pipeline body 沿用原始 `payload`，top-level `metadata` 可继续进入 Hub Pipeline。
+    - 修复：`mockSampleReqId` 不再从 body metadata 派生；`stripRequestBodyMetadataForPipeline` 在 handoff 前剥离 body metadata，只把 request metadata 放入 internal carrier。
+
+13. `src/server/handlers/messages-handler.ts`
+    - 问题：入口读取 `pipelineBody.metadata.mockSampleReqId`，并把含 metadata 的 body 传给 pipeline。
+    - 修复：删除 body metadata 控制读取；handoff 前剥离 top-level metadata。
+
+14. `src/server/handlers/responses-handler.ts`
+    - 问题：submit_tool_outputs 会把 `session_id` 写回 `payload.metadata`，随后同一 payload 进入 pipeline body；同时仍读取 `payload.metadata.mockSampleReqId`。
+    - 修复：session/resume scope 只放 metadata carrier；不再写回 body metadata；pipeline body 剥离 top-level metadata。
+
+15. `src/server/handlers/images-handler.ts`
+    - 问题：images 入口把 client `payload.metadata` 合并进 chat pipeline body 的 `metadata` 字段。
+    - 修复：image generation 控制语义改为显式 `qwenImageGeneration` 字段；client metadata 只进入 carrier，不进入 body。
+
+### 新增验证
+
+- `tests/server/handlers/handler-utils.metadata.spec.ts`：覆盖 `stripRequestBodyMetadataForPipeline`，确保原请求 metadata 仍保留给 carrier，但 pipeline body 不含 metadata。
+- `tests/server/handlers/handler-metadata-boundary.spec.ts`：覆盖 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`、`/v1/images/generations` 四个入口，确认 body metadata 不进入 pipeline body，控制语义只在 metadata carrier。
+- `tests/red-tests/no_provider_body_metadata_control.test.ts`：红线范围扩到 server handlers，禁止入口恢复 body metadata 控制读取。
+
+### 已执行验证
+
+```bash
+npm run jest:run -- --runTestsByPath tests/red-tests/no_provider_body_metadata_control.test.ts tests/server/handlers/handler-utils.metadata.spec.ts tests/server/handlers/handler-metadata-boundary.spec.ts --runInBand --forceExit
+```
+
+结果：3 suites / 7 tests passed；随后 metadata 定向回归扩展到 12 suites / 67 tests passed。

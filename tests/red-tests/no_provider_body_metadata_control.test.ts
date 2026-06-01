@@ -18,6 +18,10 @@ describe('provider metadata isolation redlines', () => {
       'src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-request-exec.ts',
       'src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-remote-image.ts',
       'src/providers/mock/mock-provider-runtime.ts',
+      'src/server/handlers/chat-handler.ts',
+      'src/server/handlers/images-handler.ts',
+      'src/server/handlers/messages-handler.ts',
+      'src/server/handlers/responses-handler.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs'
     ];
     const forbidden = [

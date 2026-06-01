@@ -14,7 +14,8 @@ import {
   captureClientHeaders,
   captureRawRequestBodyForMetadata,
   mergePipelineMetadata,
-  readRequestBodyMetadata
+  readRequestBodyMetadata,
+  stripRequestBodyMetadataForPipeline
 } from './handler-utils.js';
 import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, recordResponsesResponseForRequest, resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
@@ -266,23 +267,6 @@ export async function handleResponses(
     }
     let resumeMeta: Record<string, unknown> | undefined;
     if (isSubmitToolOutputs) {
-      const payloadMetadata =
-        payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
-          ? (payload.metadata as Record<string, unknown>)
-          : undefined;
-      if (
-        sessionIdForResume
-        && (
-          !payloadMetadata
-          || typeof payloadMetadata.session_id !== 'string'
-          || !payloadMetadata.session_id
-        )
-      ) {
-        payload.metadata = {
-          ...(payloadMetadata ?? {}),
-          session_id: sessionIdForResume
-        };
-      }
       const responseId = typeof payload?.response_id === 'string'
         ? payload.response_id
         : options.responseIdFromPath;
@@ -356,21 +340,15 @@ export async function handleResponses(
       return;
     }
 
-    const mockSampleReqId =
-      process.env.ROUTECODEX_USE_MOCK === '1' &&
-      payload &&
-      typeof payload === 'object' &&
-      (payload as { metadata?: Record<string, unknown> }).metadata &&
-      typeof (payload as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId === 'string'
-        ? String((payload as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId).trim()
-        : undefined;
+
+    const pipelineBody = stripRequestBodyMetadataForPipeline(payload);
 	    const pipelineInput = {
 	      entryEndpoint: pipelineEntryEndpoint,
 	      method: req.method,
 	      requestId,
 	      headers: req.headers as Record<string, unknown>,
 	      query: req.query as Record<string, unknown>,
-	      body: payload,
+	      body: pipelineBody,
       metadata: mergePipelineMetadata(requestBodyMetadata, {
         stream: wantsStream,
         clientRequestId,
@@ -395,17 +373,7 @@ export async function handleResponses(
           : originalPayload,
         clientHeaders,
         clientConnectionState,
-	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),
-          responsesRequestContext: {
-            payload: payload as Record<string, unknown>,
-            context: {
-              input: Array.isArray(payload.input) ? payload.input : [],
-              toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
-            },
-            sessionId: readResponsesSessionId(requestBodyMetadata),
-            ...responsesConversationPortScope,
-          },
-	        ...(mockSampleReqId ? { mockSampleReqId } : {})
+	        ...(resumeMeta ? { responsesResume: resumeMeta } : {})
 	      })
 	    };
     if (
@@ -510,14 +478,16 @@ export async function handleResponses(
     ) {
       result.metadata = {
         ...(result.metadata || {}),
-        responsesRequestContext: {
-          payload: payload as Record<string, unknown>,
-          context: {
-            input: Array.isArray(payload.input) ? payload.input : [],
-            toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
+        responsesRequestContext:
+          (result.metadata?.responsesRequestContext as Record<string, unknown> | undefined)
+          ?? {
+            payload: payload as Record<string, unknown>,
+            context: {
+              input: Array.isArray(payload.input) ? payload.input : [],
+              toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
+            },
+            sessionId: readResponsesSessionId(requestBodyMetadata),
           },
-          sessionId: readResponsesSessionId(requestBodyMetadata),
-        },
       };
     }
     if (!hasSsePayload(result.body)) {

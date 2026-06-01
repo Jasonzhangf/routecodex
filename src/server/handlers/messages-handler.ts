@@ -12,7 +12,8 @@ import {
   captureClientHeaders,
   captureRawRequestBodyForMetadata,
   mergePipelineMetadata,
-  readRequestBodyMetadata
+  readRequestBodyMetadata,
+  stripRequestBodyMetadataForPipeline
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { parseSseJsonRequest } from '../utils/sse-request-parser.js';
@@ -112,21 +113,14 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       outboundStream,
       model: inferredModel ?? jsonPayload?.model
     });
-    const mockSampleReqId =
-      process.env.ROUTECODEX_USE_MOCK === '1' &&
-      pipelineBody &&
-      typeof pipelineBody === 'object' &&
-      (pipelineBody as { metadata?: Record<string, unknown> }).metadata &&
-      typeof (pipelineBody as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId === 'string'
-        ? String((pipelineBody as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId).trim()
-        : undefined;
+    const strippedPipelineBody = stripRequestBodyMetadataForPipeline(pipelineBody);
     const result = await ctx.executePipeline({
       entryEndpoint,
       method: req.method,
       requestId,
       headers: req.headers as Record<string, unknown>,
       query: req.query as Record<string, unknown>,
-      body: pipelineBody,
+      body: strippedPipelineBody,
       metadata: mergePipelineMetadata(requestBodyMetadata, {
         stream: wantsStream,
         clientRequestId,
@@ -135,8 +129,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         providerProtocol: 'anthropic-messages',
         __raw_request_body: rawRequestMetadata,
         clientHeaders,
-        clientConnectionState,
-        ...(mockSampleReqId ? { mockSampleReqId } : {})
+        clientConnectionState
       })
     });
     if (!hasSsePayload(result.body)) {

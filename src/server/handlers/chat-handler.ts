@@ -12,7 +12,8 @@ import {
   captureClientHeaders,
   captureRawRequestBodyForMetadata,
   mergePipelineMetadata,
-  readRequestBodyMetadata
+  readRequestBodyMetadata,
+  stripRequestBodyMetadataForPipeline
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { trackClientConnectionState } from '../utils/client-connection-state.js';
@@ -60,21 +61,14 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       model: payload?.model,
       videoRequest: isVideoRequest || undefined
     });
-    const mockSampleReqId =
-      process.env.ROUTECODEX_USE_MOCK === '1' &&
-      payload &&
-      typeof payload === 'object' &&
-      (payload as { metadata?: Record<string, unknown> }).metadata &&
-      typeof (payload as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId === 'string'
-        ? String((payload as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId).trim()
-        : undefined;
+    const pipelineBody = stripRequestBodyMetadataForPipeline(payload);
     const result = await ctx.executePipeline({
       entryEndpoint,
       method: req.method,
       requestId,
       headers: req.headers as Record<string, unknown>,
       query: req.query as Record<string, unknown>,
-      body: payload,
+      body: pipelineBody,
       metadata: mergePipelineMetadata(requestBodyMetadata, {
         stream: wantsSSE,
         clientRequestId,
@@ -84,8 +78,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
         providerProtocol: 'openai-chat',
         __raw_request_body: originalPayload,
         clientHeaders,
-        clientConnectionState,
-        ...(mockSampleReqId ? { mockSampleReqId } : {})
+        clientConnectionState
       })
     });
     if (!hasSsePayload(result.body)) {

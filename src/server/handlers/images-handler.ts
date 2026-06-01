@@ -5,7 +5,8 @@ import {
   respondWithPipelineError,
   logRequestStart,
   logRequestComplete,
-  logRequestError
+  logRequestError,
+  readRequestBodyMetadata
 } from './handler-utils.js';
 
 type ImageGenerationPayload = {
@@ -201,10 +202,7 @@ async function handleImageRequest(
     const count = clampCount(payload.n);
     const responseFormat = normalizeResponseFormat(payload.response_format);
     const model = normalizeInputString(payload.model) || 'qwen.qwen3-vl-plus';
-    const reqMetadata =
-      payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
-        ? (payload.metadata as Record<string, unknown>)
-        : {};
+    const requestBodyMetadata = readRequestBodyMetadata(payload);
 
     logRequestStart(entryEndpoint, requestId, {
       clientRequestId,
@@ -223,15 +221,12 @@ async function handleImageRequest(
           content: buildUserMessageContent(prompt, inputImages)
         }
       ],
-      metadata: {
-        ...reqMetadata,
-        qwenImageGeneration: {
-          enabled: true,
-          n: count,
-          size: payload.size,
-          responseFormat,
-          mode: options.requireInputImage ? 'edit' : 'generate'
-        }
+      qwenImageGeneration: {
+        enabled: true,
+        n: count,
+        size: payload.size,
+        responseFormat,
+        mode: options.requireInputImage ? 'edit' : 'generate'
       }
     };
     const qwenImageGenerationMeta = {
@@ -250,6 +245,7 @@ async function handleImageRequest(
       query: req.query as Record<string, unknown>,
       body: pipelineBody,
       metadata: {
+        ...(requestBodyMetadata ?? {}),
         stream: false,
         clientRequestId,
         providerProtocol: 'openai-chat',
