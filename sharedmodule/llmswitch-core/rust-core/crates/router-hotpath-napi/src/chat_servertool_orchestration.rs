@@ -2141,7 +2141,7 @@ mod tests {
                             {
                                 "type": "function",
                                 "function": {
-                                    "name": "clock",
+                                    "name": "sample_client_tool",
                                     "arguments": "{\"action\":\"list\"}"
                                 }
                             }
@@ -2151,9 +2151,9 @@ mod tests {
             ]
         });
         let tool_calls =
-            extract_tool_calls_from_chat_payload_mut(&mut payload, "req_clock_source_id").unwrap();
+            extract_tool_calls_from_chat_payload_mut(&mut payload, "req_sample_source_id").unwrap();
         assert_eq!(tool_calls.len(), 1);
-        assert_eq!(tool_calls[0].name, "clock");
+        assert_eq!(tool_calls[0].name, "sample_client_tool");
         assert!(tool_calls[0].id.starts_with("call_"));
         assert_eq!(tool_calls[0].id.len(), 29);
     }
@@ -2197,16 +2197,16 @@ mod tests {
     fn test_plan_servertool_tool_call_dispatch_filters_and_selects_registered_handlers() {
         let raw = serde_json::json!({
             "toolCalls": [
-                { "id": "call_1", "name": "clock", "arguments": "{}" },
+                { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" },
                 { "id": "call_2", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
                 { "id": "call_3", "name": "unknown_tool", "arguments": "{}" }
             ],
             "disableToolCallHandlers": false,
-            "includeToolCallHandlerNames": ["clock", "exec_command", "unknown_tool"],
+            "includeToolCallHandlerNames": ["sample_client_tool", "exec_command", "unknown_tool"],
             "excludeToolCallHandlerNames": ["exec_command"],
             "registeredToolCallHandlers": [
                 {
-                    "name": "clock",
+                    "name": "sample_client_tool",
                     "trigger": "tool_call",
                     "executionMode": "client_inject_only",
                     "stripAfterExecute": true
@@ -2234,7 +2234,7 @@ mod tests {
         assert_eq!(executable.len(), 1);
         assert_eq!(
             executable[0].get("name").and_then(|v| v.as_str()),
-            Some("clock")
+            Some("sample_client_tool")
         );
         assert_eq!(
             executable[0].get("executionMode").and_then(|v| v.as_str()),
@@ -2317,20 +2317,20 @@ mod tests {
     fn test_plan_servertool_outcome_prefers_mixed_branch_with_pending_session_target() {
         let raw = serde_json::json!({
             "toolCalls": [
-                { "id": "call_1", "name": "clock", "arguments": "{}" },
+                { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" },
                 { "id": "call_2", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
             ],
             "executedToolCalls": [
                 {
                     "id": "call_1",
-                    "name": "clock",
+                    "name": "sample_client_tool",
                     "arguments": "{}",
                     "executionMode": "client_inject_only",
                     "stripAfterExecute": true
                 }
             ],
-            "executedFlowIds": ["clock_done"],
-            "lastExecutionFlowId": "clock_done",
+            "executedFlowIds": ["sample_done"],
+            "lastExecutionFlowId": "sample_done",
             "hasLastExecutionFollowup": true,
             "sessionId": "sess_1",
             "conversationId": "conv_1"
@@ -2382,19 +2382,19 @@ mod tests {
     fn test_plan_servertool_outcome_resolves_single_followup_path() {
         let raw = serde_json::json!({
             "toolCalls": [
-                { "id": "call_1", "name": "clock", "arguments": "{}" }
+                { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" }
             ],
             "executedToolCalls": [
                 {
                     "id": "call_1",
-                    "name": "clock",
+                    "name": "sample_client_tool",
                     "arguments": "{}",
                     "executionMode": "client_inject_only",
                     "stripAfterExecute": true
                 }
             ],
-            "executedFlowIds": ["clock_done"],
-            "lastExecutionFlowId": "clock_done",
+            "executedFlowIds": ["sample_done"],
+            "lastExecutionFlowId": "sample_done",
             "hasLastExecutionFollowup": true
         });
         let output = plan_servertool_outcome_json(raw.to_string()).unwrap();
@@ -2405,7 +2405,7 @@ mod tests {
         );
         assert_eq!(
             parsed.get("flowId").and_then(|v| v.as_str()),
-            Some("clock_done")
+            Some("sample_done")
         );
         assert_eq!(
             parsed
@@ -2444,19 +2444,19 @@ mod tests {
     fn test_plan_servertool_outcome_resolves_generic_followup_ops_when_last_followup_missing() {
         let raw = serde_json::json!({
             "toolCalls": [
-                { "id": "call_1", "name": "clock", "arguments": "{}" }
+                { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" }
             ],
             "executedToolCalls": [
                 {
                     "id": "call_1",
-                    "name": "clock",
+                    "name": "sample_client_tool",
                     "arguments": "{}",
                     "executionMode": "client_inject_only",
                     "stripAfterExecute": true
                 }
             ],
-            "executedFlowIds": ["clock_done"],
-            "lastExecutionFlowId": "clock_done",
+            "executedFlowIds": ["sample_done"],
+            "lastExecutionFlowId": "sample_done",
             "hasLastExecutionFollowup": false
         });
         let output = plan_servertool_outcome_json(raw.to_string()).unwrap();
@@ -2476,11 +2476,11 @@ mod tests {
         let raw = serde_json::json!({
             "hooks": [
                 { "id": "stop_message_auto", "phase": "default", "priority": 40, "order": 3 },
-                { "id": "clock_auto", "phase": "post", "priority": 50, "order": 4 },
+                { "id": "sample_auto", "phase": "post", "priority": 50, "order": 4 },
                 { "id": "recursive_detection_guard", "phase": "pre", "priority": 5, "order": 0 },
                 { "id": "reasoning_only_continue", "phase": "post", "priority": 200, "order": 5 }
             ],
-            "optionalPrimaryHookOrder": ["clock_auto", "stop_message_auto"],
+            "optionalPrimaryHookOrder": ["sample_auto", "stop_message_auto"],
             "mandatoryHookOrder": []
         });
         let output = plan_servertool_auto_hook_queues_json(raw.to_string()).unwrap();
@@ -2503,7 +2503,7 @@ mod tests {
             ids,
             vec![
                 "recursive_detection_guard",
-                "clock_auto",
+                "sample_auto",
                 "stop_message_auto",
                 "reasoning_only_continue"
             ]
@@ -2515,12 +2515,12 @@ mod tests {
         let raw = serde_json::json!({
             "hooks": [
                 { "id": "stop_message_auto", "phase": "default", "priority": 40, "order": 3 },
-                { "id": "clock_auto", "phase": "post", "priority": 50, "order": 4 },
+                { "id": "sample_auto", "phase": "post", "priority": 50, "order": 4 },
                 { "id": "recursive_detection_guard", "phase": "pre", "priority": 5, "order": 0 }
             ],
-            "includeAutoHookIds": ["clock_auto", "stop_message_auto"],
+            "includeAutoHookIds": ["sample_auto", "stop_message_auto"],
             "excludeAutoHookIds": ["stop_message_auto"],
-            "optionalPrimaryHookOrder": ["clock_auto", "stop_message_auto"],
+            "optionalPrimaryHookOrder": ["sample_auto", "stop_message_auto"],
             "mandatoryHookOrder": []
         });
         let output = plan_servertool_auto_hook_queues_json(raw.to_string()).unwrap();
@@ -2533,7 +2533,7 @@ mod tests {
         assert_eq!(optional.len(), 1);
         assert_eq!(
             optional[0].get("id").and_then(|v| v.as_str()),
-            Some("clock_auto")
+            Some("sample_auto")
         );
         assert_eq!(
             optional[0].get("queueIndex").and_then(|v| v.as_i64()),

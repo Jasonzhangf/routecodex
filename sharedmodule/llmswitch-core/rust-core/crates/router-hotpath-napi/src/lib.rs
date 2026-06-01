@@ -69,6 +69,7 @@ mod resp_process_stage2_finalize;
 mod responses_openai_codec;
 mod responses_reasoning_registry;
 mod servertool_core_blocks;
+mod servertool_followup_delta;
 mod servertool_skeleton;
 mod servertool_skeleton_config;
 mod shared_args_mapping;

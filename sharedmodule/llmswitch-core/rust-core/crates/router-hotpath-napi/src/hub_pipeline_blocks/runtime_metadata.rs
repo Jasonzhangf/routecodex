@@ -30,7 +30,6 @@ pub(crate) fn prepare_runtime_metadata_for_servertools(input: &Value) -> Result<
 
     attach_if_object(rt_base, "webSearchConfig", "webSearch", row);
     attach_if_object(rt_base, "execCommandGuard", "execCommandGuard", row);
-    attach_if_object(rt_base, "clockConfig", "clock", row);
     attach_if_object(rt_base, "applyPatchConfig", "applyPatch", row);
 
     Ok(Value::Object(meta_base))

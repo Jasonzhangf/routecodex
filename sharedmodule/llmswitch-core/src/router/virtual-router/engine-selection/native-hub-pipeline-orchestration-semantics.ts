@@ -165,7 +165,6 @@ export interface NativeServertoolRuntimeMetadataBuildInput {
   metadata?: Record<string, unknown>;
   webSearchConfig?: Record<string, unknown>;
   execCommandGuard?: Record<string, unknown>;
-  clockConfig?: Record<string, unknown>;
   applyPatchConfig?: Record<string, unknown>;
 }
 

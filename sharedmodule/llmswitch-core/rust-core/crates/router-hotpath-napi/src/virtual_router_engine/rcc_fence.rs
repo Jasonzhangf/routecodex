@@ -159,36 +159,6 @@ fn resolve_directive(block: &RccFenceBlock) -> Result<RccDirective, String> {
             }
             _ => Err("RCC_FENCE_UNKNOWN_ACTION".to_string()),
         },
-        "clock" => match block.action.as_str() {
-            "at" => {
-                if block.args.is_empty() {
-                    return Err("RCC_FENCE_INVALID_COMMAND_LINE".to_string());
-                }
-                Ok(RccDirective {
-                    directive_type,
-                    domain: block.domain.clone(),
-                    action: block.action.clone(),
-                    args: block.args.clone(),
-                    body: block.body.clone(),
-                    passthrough: "private-only".to_string(),
-                })
-            }
-            "clear" => {
-                if !block.args.is_empty() {
-                    return Err("RCC_FENCE_INVALID_COMMAND_LINE".to_string());
-                }
-                require_empty_body(block)?;
-                Ok(RccDirective {
-                    directive_type,
-                    domain: block.domain.clone(),
-                    action: block.action.clone(),
-                    args: Vec::new(),
-                    body: String::new(),
-                    passthrough: "state-only".to_string(),
-                })
-            }
-            _ => Err("RCC_FENCE_UNKNOWN_ACTION".to_string()),
-        },
         "stop_message" => match block.action.as_str() {
             "set" => {
                 require_non_empty_body(block)?;
@@ -544,7 +514,8 @@ mod tests {
         let pause =
             parse_rcc_fence_document("<**rcc**>\nstopless pause\nwaiting for Jason\n</rcc**>")
                 .expect("pause");
-        let clear = parse_rcc_fence_document("<**rcc**>\nclock clear\n</rcc**>").expect("clear");
+        let clear = parse_rcc_fence_document("<**rcc**>\nstop_message clear\n</rcc**>")
+            .expect("clear");
 
         assert_eq!(start.directives[0].passthrough, "body-forward");
         assert_eq!(pause.directives[0].passthrough, "private-only");
@@ -561,7 +532,7 @@ mod tests {
     #[test]
     fn rejects_nested_block() {
         let error = parse_rcc_fence_document(
-            "<**rcc**>\nstopless start\n<**rcc**>\nclock clear\n</rcc**>\n</rcc**>",
+            "<**rcc**>\nstopless start\n<**rcc**>\nstop_message clear\n</rcc**>\n</rcc**>",
         )
         .expect_err("should fail");
         assert_eq!(error, "RCC_FENCE_NESTED_UNSUPPORTED");

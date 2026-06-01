@@ -61,7 +61,6 @@ export function bootstrapVirtualRouterConfig(
     contextRouting: configMeta.contextRouting,
     ...(configMeta.webSearch ? { webSearch: configMeta.webSearch } : {}),
     ...(configMeta.execCommandGuard ? { execCommandGuard: configMeta.execCommandGuard } : {}),
-    ...(configMeta.clock ? { clock: configMeta.clock } : {}),
     ...(configMeta.applyPatch ? { applyPatch: configMeta.applyPatch } : {})
   };
 
@@ -85,7 +84,6 @@ function extractVirtualRouterSection(
   contextRouting?: unknown;
   webSearch?: unknown;
   execCommandGuard?: unknown;
-  clock?: unknown;
   applyPatch?: unknown;
 } {
   const root = asRecord(input);
@@ -99,7 +97,6 @@ function extractVirtualRouterSection(
   const webSearch = section.webSearch ?? (root as Record<string, unknown>).webSearch;
   const execCommandGuard =
     (section as Record<string, unknown>).execCommandGuard ?? (root as Record<string, unknown>).execCommandGuard;
-  const clock = (section as Record<string, unknown>).clock ?? (root as Record<string, unknown>).clock;
   const servertool = (section as Record<string, unknown>).servertool ?? (root as Record<string, unknown>).servertool;
   const servertoolRecord = servertool && typeof servertool === 'object' && !Array.isArray(servertool)
     ? (servertool as Record<string, unknown>)
@@ -111,10 +108,10 @@ function extractVirtualRouterSection(
     ?? (root as Record<string, unknown>).applyPatch
     ?? (root as Record<string, unknown>).apply_patch;
 
-  return { providers, routing, classifier, loadBalancing, health, contextRouting, webSearch, execCommandGuard, clock, applyPatch };
+  return { providers, routing, classifier, loadBalancing, health, contextRouting, webSearch, execCommandGuard, applyPatch };
 }
 
-type NativeBootstrapConfigMeta = Pick<VirtualRouterConfig, 'classifier' | 'health' | 'contextRouting' | 'webSearch' | 'execCommandGuard' | 'clock' | 'applyPatch' | 'loadBalancing'>;
+type NativeBootstrapConfigMeta = Pick<VirtualRouterConfig, 'classifier' | 'health' | 'contextRouting' | 'webSearch' | 'execCommandGuard' | 'applyPatch' | 'loadBalancing'>;
 
 function requireNativeBootstrapConfigFunction(exportName: string): (...args: string[]) => unknown {
   if (isNativeDisabledByEnv()) {

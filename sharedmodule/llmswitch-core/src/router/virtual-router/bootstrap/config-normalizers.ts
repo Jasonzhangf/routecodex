@@ -1,5 +1,5 @@
 import { DEFAULT_CONTEXT_ROUTING } from './config-defaults.js';
-import type { VirtualRouterClockConfig, VirtualRouterConfig, VirtualRouterContextRoutingConfig } from '../types.js';
+import type { VirtualRouterConfig, VirtualRouterContextRoutingConfig } from '../types.js';
 
 export function normalizeExecCommandGuard(input: unknown): VirtualRouterConfig['execCommandGuard'] | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -23,48 +23,6 @@ export function normalizeExecCommandGuard(input: unknown): VirtualRouterConfig['
     enabled: true,
     ...(policyFile ? { policyFile } : {})
   };
-}
-
-export function normalizeClock(raw: unknown): VirtualRouterClockConfig | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return undefined;
-  }
-  const record = raw as Record<string, unknown>;
-  const enabled =
-    record.enabled === true ||
-    (typeof record.enabled === 'string' && record.enabled.trim().toLowerCase() === 'true') ||
-    (typeof record.enabled === 'number' && record.enabled === 1);
-  if (!enabled) {
-    return undefined;
-  }
-  const out: VirtualRouterClockConfig = { enabled: true };
-  if (typeof record.retentionMs === 'number' && Number.isFinite(record.retentionMs) && record.retentionMs >= 0) {
-    out.retentionMs = Math.floor(record.retentionMs);
-  }
-  if (typeof record.dueWindowMs === 'number' && Number.isFinite(record.dueWindowMs) && record.dueWindowMs >= 0) {
-    out.dueWindowMs = Math.floor(record.dueWindowMs);
-  }
-  if (typeof record.tickMs === 'number' && Number.isFinite(record.tickMs) && record.tickMs >= 0) {
-    out.tickMs = Math.floor(record.tickMs);
-  }
-  if (
-    record.holdNonStreaming === true ||
-    (typeof record.holdNonStreaming === 'string' && record.holdNonStreaming.trim().toLowerCase() === 'true') ||
-    (typeof record.holdNonStreaming === 'number' && record.holdNonStreaming === 1)
-  ) {
-    out.holdNonStreaming = true;
-  }
-  if (typeof record.holdMaxMs === 'number' && Number.isFinite(record.holdMaxMs) && record.holdMaxMs >= 0) {
-    out.holdMaxMs = Math.floor(record.holdMaxMs);
-  }
-  if (
-    record.includeTimeTag === true ||
-    (typeof record.includeTimeTag === 'string' && record.includeTimeTag.trim().toLowerCase() === 'true') ||
-    (typeof record.includeTimeTag === 'number' && record.includeTimeTag === 1)
-  ) {
-    out.includeTimeTag = true;
-  }
-  return out;
 }
 
 export function normalizeContextRouting(input: unknown): VirtualRouterContextRoutingConfig {

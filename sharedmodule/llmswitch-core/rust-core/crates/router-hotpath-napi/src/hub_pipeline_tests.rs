@@ -1430,7 +1430,6 @@ fn test_prepare_runtime_metadata_for_servertools_injects_runtime_configs() {
         },
         "webSearchConfig": { "enabled": true },
         "execCommandGuard": { "mode": "strict" },
-        "clockConfig": { "tickMs": 60000 },
         "applyPatchConfig": { "mode": "servertool" }
     });
     let output = prepare_runtime_metadata_for_servertools(&input)
@@ -1456,13 +1455,7 @@ fn test_prepare_runtime_metadata_for_servertools_injects_runtime_configs() {
             .and_then(|v| v.as_str()),
         Some("strict")
     );
-    assert_eq!(
-        rt.get("clock")
-            .and_then(|v| v.as_object())
-            .and_then(|v| v.get("tickMs"))
-            .and_then(|v| v.as_i64()),
-        Some(60000)
-    );
+    assert!(!rt.contains_key("clock"));
     assert_eq!(
         rt.get("applyPatch")
             .and_then(|v| v.as_object())
@@ -1479,8 +1472,7 @@ fn test_prepare_runtime_metadata_for_servertools_normalizes_missing_or_invalid_r
             "foo": "bar",
             "__rt": "invalid"
         },
-        "webSearchConfig": null,
-        "clockConfig": 1
+        "webSearchConfig": null
     });
     let output = prepare_runtime_metadata_for_servertools(&input)
         .expect("prepare runtime metadata for servertools");
@@ -1683,13 +1675,11 @@ fn test_build_passthrough_governance_skipped_node_shape() {
 #[test]
 fn test_extract_adapter_context_metadata_fields_trims_strings_and_keeps_booleans() {
     let metadata = json!({
-        "clockDaemonId": "  daemon-1 ",
         "clientInjectReady": true,
         "workdir": "   ",
         "ignored": 123
     });
     let keys = json!([
-        "clockDaemonId",
         "clientInjectReady",
         "workdir",
         "missing",
@@ -1697,10 +1687,6 @@ fn test_extract_adapter_context_metadata_fields_trims_strings_and_keeps_booleans
     ]);
     let output = extract_adapter_context_metadata_fields(&metadata, &keys);
     let row = output.as_object().expect("object output");
-    assert_eq!(
-        row.get("clockDaemonId").and_then(|v| v.as_str()),
-        Some("daemon-1")
-    );
     assert_eq!(
         row.get("clientInjectReady").and_then(|v| v.as_bool()),
         Some(true)
@@ -1780,7 +1766,7 @@ fn test_resolve_adapter_context_metadata_signals_omits_invalid_entries() {
 fn test_resolve_adapter_context_object_carriers_keeps_object_values() {
     let metadata = json!({
         "runtime": {
-            "clock": { "enabled": true }
+            "trace": { "enabled": true }
         },
         "capturedChatRequest": {
             "model": "gpt-5",

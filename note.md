@@ -13877,3 +13877,9 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 发现：上一批 clock/heartbeat 删除门漏检 active source，仍有 VirtualRouter config `clock`、clock reservation metadata、`servertool.clock/servertool.heartbeat` followup/source、Anthropic stable tool schema `clock`、tmux injection runtime config 等残留。
 - 修复：补强 `tests/sharedmodule/clock-heartbeat-feature-removal-gate.spec.ts`，物理删除/移除上述残留；保留通用 session-client daemon heartbeat（注册存活检测）与 SSE heartbeat，不属于 RCC clock/heartbeat feature。
 - 验证：clock-heartbeat Jest 删除门通过；llmswitch-core TS typecheck 通过；router-hotpath-napi clock/heartbeat 三个 Rust 删除门单独通过。root `npx tsc --noEmit` 仍被既有 Windsurf shim module declaration 缺失阻塞。
+
+## 2026-06-01 clock/heartbeat removal + followup delta Rust closeout
+
+- 违规残留：clock/heartbeat 功能删除后，VirtualRouter bootstrap/types、servertool skeleton、runtime metadata、RCC fence 与部分 Rust 单测仍保留 clock/clock_auto/clockConfig/clockDaemonId 语义入口；`followup-origin-delta.ts` 仍在 TS 中重建 tool_outputs/tool messages/tool list。
+- 修复：物理删除 active clock config/runtime/fence/skeleton 残留；将 followup delta 工具消息与工具列表变更迁入 Rust `servertool_followup_delta.rs`，TS `followup-origin-delta.ts` 收缩为 native 薄壳。
+- 验证：`npx jest tests/sharedmodule/clock-heartbeat-feature-removal-gate.spec.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand`、`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit`、定向 `cargo test -p router-hotpath-napi ...` 全部通过；`cargo test -p router-hotpath-napi rcc_fence` 宽匹配会命中既有 unrelated shared_tooling deletion gate，已用精确测试名验证 rcc_fence。

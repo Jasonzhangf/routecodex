@@ -9,13 +9,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
             "enabled": true,
             "internalTools": {
 
-                "clock": {
-                    "name": "clock",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "tool_call", "canonicalName": "clock" },
-                    "execution": { "mode": "client_inject_only", "stripAfterExecute": true }
-                },
                 "continue_execution": {
                     "name": "continue_execution",
                     "enabled": true,
@@ -51,13 +44,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "trigger": { "type": "auto", "canonicalName": "recursive_detection_guard", "phase": "pre", "priority": 5 },
                     "execution": { "mode": "auto_hook", "stripAfterExecute": true }
                 },
-                "clock_auto": {
-                    "name": "clock_auto",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "auto", "canonicalName": "clock_auto", "phase": "post", "priority": 50 },
-                    "execution": { "mode": "auto_hook", "stripAfterExecute": true }
-                },
                 "vision_auto": {
                     "name": "vision_auto",
                     "enabled": true,
@@ -87,7 +73,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
             "skeleton": {
                 "finalizeStrip": { "enabled": true, "requireFinalizedMarker": true },
                 "autoHooks": {
-                    "optionalPrimaryOrder": ["clock_auto", "stop_message_auto"],
+                    "optionalPrimaryOrder": ["stop_message_auto"],
                     "mandatoryOrder": []
                 },
                 "pendingInjection": {

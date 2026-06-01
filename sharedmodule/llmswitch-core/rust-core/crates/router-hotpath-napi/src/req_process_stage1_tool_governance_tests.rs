@@ -84,6 +84,73 @@ fn test_processed_request_shape_and_node_metadata() {
 }
 
 #[test]
+fn test_chat_process_filters_namespace_mcp_aggregator_tools() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4o",
+          "messages": [
+            {"role": "assistant", "content": null, "tool_calls": [
+              {"id": "call_drop", "type": "function", "function": {"name": "mcp__node_repl", "arguments": "{}"}},
+              {"id": "call_keep", "type": "function", "function": {"name": "mcp__node_repl__js", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "tool_call_id": "call_keep", "content": "ok"}
+          ],
+          "tools": [
+            {"type": "function", "function": {"name": "mcp__node_repl", "parameters": {}}},
+            {"type": "function", "function": {"name": "mcp__node_repl__js", "parameters": {"type": "object"}}}
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({"entryEndpoint": "/v1/responses"}),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_filter_namespace_mcp".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+    };
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let messages = result.processed_request["messages"].as_array().unwrap();
+    let tool_calls = messages[0]["tool_calls"].as_array().unwrap();
+    assert_eq!(tool_calls.len(), 1);
+    assert_eq!(tool_calls[0]["id"].as_str(), Some("call_keep"));
+    let tools = result.processed_request["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(
+        tools[0]["function"]["name"].as_str(),
+        Some("mcp__node_repl__js")
+    );
+}
+
+#[test]
+fn test_chat_process_merges_consecutive_assistant_tool_call_messages() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4o",
+          "messages": [
+            {"role": "assistant", "content": null, "tool_calls": [
+              {"id": "call_a", "type": "function", "function": {"name": "first", "arguments": "{}"}}
+            ]},
+            {"role": "assistant", "content": null, "tool_calls": [
+              {"id": "call_b", "type": "function", "function": {"name": "second", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "tool_call_id": "call_a", "content": "a"},
+            {"role": "tool", "tool_call_id": "call_b", "content": "b"}
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({"entryEndpoint": "/v1/responses"}),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_merge_tool_calls".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+    };
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let messages = result.processed_request["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0]["role"].as_str(), Some("assistant"));
+    assert_eq!(messages[0]["tool_calls"].as_array().unwrap().len(), 2);
+    assert_eq!(messages[1]["role"].as_str(), Some("tool"));
+    assert_eq!(messages[2]["role"].as_str(), Some("tool"));
+}
+
+#[test]
 fn test_post_governed_media_cleanup_preserves_followup_messages_and_context() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
@@ -201,7 +268,7 @@ fn test_post_governed_media_cleanup_preserves_latest_user_media_turn() {
 }
 
 #[test]
-fn test_servertool_orchestration_appends_clock_and_keeps_continue_hidden() {
+fn test_servertool_orchestration_keeps_removed_clock_absent_and_continue_hidden() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "gpt-4o-mini",
@@ -223,7 +290,6 @@ fn test_servertool_orchestration_appends_clock_and_keeps_continue_hidden() {
         metadata: serde_json::json!({
           "tmuxSessionId": "s-1",
           "__rt": {
-            "clock": { "enabled": true },
             "webSearch": {
               "engines": [
                 { "id": "google" }
@@ -252,7 +318,7 @@ fn test_servertool_orchestration_appends_clock_and_keeps_continue_hidden() {
         }
     }
     assert!(names.contains("exec_command"));
-    assert!(names.contains("clock"));
+    assert!(!names.contains("clock"));
     assert!(!names.contains("continue_execution"));
 }
 
@@ -305,7 +371,6 @@ fn test_servertool_orchestration_skips_direct_web_search_tool_injection() {
         metadata: serde_json::json!({
           "tmuxSessionId": "s-1",
           "__rt": {
-            "clock": { "enabled": true },
             "webSearch": {
               "engines": [
                 {
@@ -338,7 +403,7 @@ fn test_servertool_orchestration_skips_direct_web_search_tool_injection() {
         }
     }
     assert!(!names.contains("websearch"));
-    assert!(names.contains("clock"));
+    assert!(!names.contains("clock"));
     assert!(!names.contains("continue_execution"));
 }
 

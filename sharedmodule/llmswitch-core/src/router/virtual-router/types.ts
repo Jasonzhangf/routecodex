@@ -343,37 +343,6 @@ export interface VirtualRouterExecCommandGuardConfig {
   policyFile?: string;
 }
 
-export interface VirtualRouterClockConfig {
-  enabled: boolean;
-  /**
-   * Task retention after dueAt (ms). Tasks older than (dueAt + retentionMs)
-   * are eligible for cleanup.
-   */
-  retentionMs?: number;
-  /**
-   * "Due window" in ms. A task is considered due when now >= dueAt - dueWindowMs.
-   */
-  dueWindowMs?: number;
-  /**
-   * Daemon tick interval (ms). 0 disables background cleanup tick (still cleans on load).
-   */
-  tickMs?: number;
-  /**
-   * Allow clock hold flow for non-streaming (JSON) requests.
-   * Default: true.
-   */
-  holdNonStreaming?: boolean;
-  /**
-   * Maximum time (ms) a request is allowed to hold waiting for due window.
-   * Default: 60s.
-   */
-  holdMaxMs?: number;
-  /**
-   * Whether to inject per-request `[Time/Date]` tags into user messages.
-   * Default: false (disabled) to preserve upstream/cache prompt stability.
-   */
-  includeTimeTag?: boolean;
-}
 
 export interface VirtualRouterApplyPatchConfig {
   mode: "client" | "servertool";
@@ -389,7 +358,6 @@ export interface VirtualRouterConfig {
   contextRouting?: VirtualRouterContextRoutingConfig;
   webSearch?: VirtualRouterWebSearchConfig;
   execCommandGuard?: VirtualRouterExecCommandGuardConfig;
-  clock?: VirtualRouterClockConfig;
   applyPatch?: VirtualRouterApplyPatchConfig;
 }
 
@@ -412,7 +380,6 @@ export interface VirtualRouterBootstrapInput extends Record<string, unknown> {
   execCommandGuard?:
     | VirtualRouterExecCommandGuardConfig
     | Record<string, unknown>;
-  clock?: VirtualRouterClockConfig | Record<string, unknown>;
   applyPatch?: VirtualRouterApplyPatchConfig | Record<string, unknown>;
 }
 

@@ -704,6 +704,59 @@ export function planServertoolFollowupRuntimeWithNative(
   }
 }
 
+export function extractCapturedChatSeedWithNative(captured: unknown): Record<string, unknown> | null {
+  const capability = 'extractCapturedChatSeedJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [captured ?? null]);
+    const parsed = parseJson('extractCapturedChatSeed', raw);
+    if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
+    if (parsed === null) return null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('invalid payload');
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function extractAssistantFollowupMessageWithNative(finalChatResponse: unknown): Record<string, unknown> | null {
+  const capability = 'extractAssistantFollowupMessageJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [finalChatResponse ?? null]);
+    const parsed = parseJson('extractAssistantFollowupMessage', raw);
+    if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
+    if (parsed === null) return null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('invalid payload');
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function applyFollowupDeltaPlanWithNative(input: {
+  adapterContext: Record<string, unknown>;
+  finalChatResponse: Record<string, unknown>;
+  seed: Record<string, unknown>;
+  injection: Record<string, unknown>;
+}): Record<string, unknown> | null {
+  const capability = 'applyFollowupDeltaPlanJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [input]);
+    const parsed = parseJson('applyFollowupDeltaPlan', raw);
+    if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
+    if (parsed === null) return null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('invalid payload');
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export type NativeApplyPatchResult = {
   ok: boolean;
   payload: Record<string, unknown>;

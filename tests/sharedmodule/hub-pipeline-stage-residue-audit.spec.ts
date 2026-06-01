@@ -600,12 +600,24 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('servertool followup must not add standalone TS helper files during Rust closeout', () => {
-    const filePath = path.join(
-      process.cwd(),
+    const legacyFiles = [
       'sharedmodule/llmswitch-core/src/servertool/followup-captured-tool-outputs.ts',
+    ];
+    const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(process.cwd(), relativePath)));
+    const followupOriginDelta = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/followup-origin-delta.ts'),
+      'utf8'
     );
+    const findings = collectMatches(followupOriginDelta, [
+      { label: 'extracts captured tool outputs in TS', pattern: /extractCapturedToolOutputs/ },
+      { label: 'extracts chat tool outputs in TS', pattern: /extractChatToolOutputs/ },
+      { label: 'applies single followup delta op in TS', pattern: /applySingleDeltaOp/ },
+      { label: 'rebuilds tool messages in TS', pattern: /appendToolMessagesFromToolOutputs/ },
+      { label: 'mutates tool list in TS', pattern: /dropToolByFunctionName|appendToolIfMissing/ },
+      { label: 'prunes pending tool calls in TS', pattern: /prunePendingToolCallsForOutputs/ },
+    ]);
 
-    expect(fs.existsSync(filePath)).toBe(false);
+    expect({ existingFiles, findings }).toEqual({ existingFiles: [], findings: [] });
   });
 
   it('anthropic response bridge policy must fail fast instead of swallowing policy errors', () => {

@@ -28,15 +28,6 @@ export const ADAPTER_CONTEXT_CWD = 'cwd' as const;
 export const ADAPTER_CONTEXT_TMUX_SESSION_ID = 'tmuxSessionId' as const;
 
 /**
- * Clock daemon 字段
- * 
- * 唯一真源：`clockDaemonId`
- * 
- * 废弃：`clock_daemon_id`, `clockClientDaemonId`, `clock_client_daemon_id`
- */
-export const ADAPTER_CONTEXT_CLOCK_DAEMON_ID = 'clockDaemonId' as const;
-
-/**
  * Client inject 就绪状态字段
  * 
  * 唯一真源：`clientInjectReady`
@@ -53,6 +44,5 @@ export const ADAPTER_CONTEXT_CLIENT_INJECT_READY = 'clientInjectReady' as const;
 export const STANDARD_ADAPTER_CONTEXT_FIELDS = [
   ADAPTER_CONTEXT_CWD,
   ADAPTER_CONTEXT_TMUX_SESSION_ID,
-  ADAPTER_CONTEXT_CLOCK_DAEMON_ID,
   ADAPTER_CONTEXT_CLIENT_INJECT_READY,
 ] as const;
