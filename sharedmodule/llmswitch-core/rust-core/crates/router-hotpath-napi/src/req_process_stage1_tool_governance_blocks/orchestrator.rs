@@ -3,9 +3,7 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::hub_heartbeat_directives::apply_heartbeat_directive_semantics;
 use crate::req_process_stage1_tool_governance_blocks::apply_patch_schema::ensure_apply_patch_chat_process_contract;
-use crate::req_process_stage1_tool_governance_blocks::clock_runtime::apply_clock_runtime_semantics;
 use crate::req_process_stage1_tool_governance_blocks::request_result::{
     apply_chat_process_request_sanitizer, build_governed_filter_payload, build_node_result,
     build_processed_request, now_millis,
@@ -72,23 +70,8 @@ pub fn apply_req_process_tool_governance(
     let metadata = normalize_record(input.metadata);
     let request_metadata = Value::Object(metadata.clone());
     let mut request = normalize_record(input.request);
-    let request_messages = request
-        .get("messages")
-        .cloned()
-        .unwrap_or(Value::Array(Vec::new()));
-    let heartbeat_applied =
-        apply_heartbeat_directive_semantics(request_messages, &request_metadata);
-    let heartbeat_directive = heartbeat_applied.runtime_summary.clone();
-    request.insert("messages".to_string(), heartbeat_applied.messages);
     let runtime_metadata = read_runtime_metadata(&metadata);
     let client_inject_ready = resolve_client_inject_ready(&metadata);
-    let clock_runtime_output =
-        apply_clock_runtime_semantics(&request, &metadata, &runtime_metadata, client_inject_ready);
-    request = clock_runtime_output.request;
-    let clock_runtime_summary = clock_runtime_output
-        .runtime_summary
-        .clone()
-        .and_then(|summary| serde_json::to_value(summary).ok());
     apply_chat_process_request_sanitizer(&mut request);
 
     apply_anthropic_tool_alias_semantics(&mut request, &ctx.entry_endpoint);
@@ -111,8 +94,6 @@ pub fn apply_req_process_tool_governance(
     let processed = build_processed_request(
         Value::Object(governed_request),
         &metadata,
-        heartbeat_directive,
-        clock_runtime_summary,
     );
     let processed_request_map = normalize_record_ref(&processed);
     let end_time_ms = now_millis();

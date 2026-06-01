@@ -8,20 +8,8 @@ use chat_process_media_semantics::{
     analyze_chat_process_media, strip_chat_process_historical_images,
 };
 use chat_web_search_intent::{analyze_chat_web_search_intent, extract_web_search_semantics_hint};
-mod chat_clock_clear_directive;
-use chat_clock_clear_directive::strip_clock_clear_directive_text;
-mod chat_clock_schedule_directive_candidate;
-use chat_clock_schedule_directive_candidate::parse_clock_schedule_directive_candidate;
-mod chat_clock_schedule_directive_text_parts;
-use chat_clock_schedule_directive_text_parts::extract_clock_schedule_directive_text_parts;
 mod anthropic_openai_codec;
 mod chat_anthropic_tool_alias;
-mod chat_clock_reminder_directives;
-mod chat_clock_reminder_orchestration_semantics;
-mod chat_clock_reminder_semantics;
-mod chat_clock_reminder_time_tag_semantics;
-mod chat_clock_reminders_semantics;
-mod chat_clock_tool_schema_ops;
 mod chat_continue_execution_directive_injection;
 mod chat_governance_context;
 mod chat_governance_finalize;
@@ -41,7 +29,6 @@ mod hashline;
 mod hub_bridge_actions;
 mod hub_bridge_policies;
 mod hub_chat_envelope_validator;
-mod hub_heartbeat_directives;
 mod hub_pipeline;
 mod hub_pipeline_blocks;
 mod hub_pipeline_lib;
@@ -843,24 +830,6 @@ pub fn extract_web_search_semantics_hint_json(semantics_json: String) -> NapiRes
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-#[napi]
-pub fn strip_clock_clear_directive_text_json(text: String) -> NapiResult<String> {
-    let output = strip_clock_clear_directive_text(text);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn parse_clock_schedule_directive_candidate_json(payload: String) -> NapiResult<String> {
-    let output = parse_clock_schedule_directive_candidate(payload);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn extract_clock_schedule_directive_text_parts_json(text: String) -> NapiResult<String> {
-    let output = extract_clock_schedule_directive_text_parts(text);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
 fn serialize_instruction_target_for_napi(
     target: &crate::virtual_router_engine::instructions::InstructionTarget,
     out: &mut Map<String, Value>,
@@ -1368,11 +1337,13 @@ pub fn bootstrap_virtual_router_routing_json_bridge(
     routing_json: String,
     alias_index_json: String,
     model_index_json: String,
+    forwarder_ids_json: Option<String>,
 ) -> NapiResult<String> {
     virtual_router_engine::routing::bootstrap_virtual_router_routing_json(
         routing_json,
         alias_index_json,
         model_index_json,
+        forwarder_ids_json,
     )
 }
 

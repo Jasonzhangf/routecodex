@@ -362,51 +362,27 @@ fn shared_tooling_deletion_gate_removed_shared_tool_result_text_normalizer_modul
 #[test]
 fn shared_tooling_deletion_gate_removed_hub_heartbeat_directives_local_wrapper() {
     let path = crate_src_path("hub_heartbeat_directives.rs");
-    let source = fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
     assert!(
-        !source.contains("fn find_last_user_message_index(messages: &Value) -> Option<usize> {"),
-        "local find_last_user_message_index wrapper still present in {}",
-        path.display()
-    );
-    assert!(
-        source.contains("find_last_user_index_shared(rows.as_slice())")
-            || source.contains("find_last_user_index_shared(messages_arr)"),
-        "hub_heartbeat_directives.rs must call shared find_last_user_message_index truth directly"
+        !path.exists(),
+        "hub_heartbeat_directives.rs must be physically removed with heartbeat feature"
     );
 }
 
 #[test]
 fn shared_tooling_deletion_gate_removed_chat_clock_reminder_directives_local_wrapper() {
     let path = crate_src_path("chat_clock_reminder_directives.rs");
-    let source = fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
     assert!(
-        !source.contains("fn find_last_user_message_index(messages: &[Value]) -> Option<usize> {"),
-        "local find_last_user_message_index wrapper still present in {}",
-        path.display()
-    );
-    assert!(
-        source.contains("find_last_user_index_shared(rows.as_slice())"),
-        "chat_clock_reminder_directives.rs must call shared find_last_user_message_index truth directly"
+        !path.exists(),
+        "chat_clock_reminder_directives.rs must be physically removed with clock feature"
     );
 }
 
 #[test]
 fn shared_tooling_deletion_gate_removed_chat_clock_reminder_semantics_local_wrapper() {
     let path = crate_src_path("chat_clock_reminder_semantics.rs");
-    let source = fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
     assert!(
-        !source.contains("pub(crate) fn find_last_user_message_index(messages: &[Value]) -> i64 {"),
-        "local find_last_user_message_index wrapper still present in {}",
-        path.display()
-    );
-    assert!(
-        source.contains("find_last_user_index_shared(rows.as_slice())")
-            && source.contains(".map(|idx| idx as i64)")
-            && source.contains(".unwrap_or(-1)"),
-        "chat_clock_reminder_semantics.rs must inline shared find_last_user_message_index truth directly"
+        !path.exists(),
+        "chat_clock_reminder_semantics.rs must be physically removed with clock feature"
     );
 }
 

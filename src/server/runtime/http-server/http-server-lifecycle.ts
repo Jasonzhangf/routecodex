@@ -18,8 +18,6 @@ import { asRecord } from './provider-utils.js';
 import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.js';
 import type { ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
 import type { ServerStatusV2 } from './types.js';
-import { clearClockRuntimeHooks } from './clock-runtime-hooks.js';
-import { clearHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
 import { cleanupSessionStorageOnShutdown } from './session-storage-cleanup.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import { installPortLogConsoleRouter } from './port-log-context.js';
@@ -202,8 +200,6 @@ export async function stopHttpServer(server: any): Promise<void> {
   };
 
   server.stopSessionDaemonInjectLoop();
-  await clearClockRuntimeHooks();
-  await clearHeartbeatRuntimeHooks();
   try {
     await shutdownCamoufoxLaunchers();
   } catch (error) {

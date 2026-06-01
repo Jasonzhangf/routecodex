@@ -13,8 +13,7 @@ import {
 import {
   containsSyntheticRouteCodexControlText,
   resolveServerToolFollowupTimeoutMs,
-  resolveServerToolTimeoutMs,
-  shouldDisableServerToolTimeoutForClockHold
+  resolveServerToolTimeoutMs
 } from './orchestration-policy-block.js';
 import {
   runPrimaryServerToolEngineSelection
@@ -156,13 +155,7 @@ export async function runServerToolOrchestration(
   }
 
   const serverToolTimeoutMs = resolveServerToolTimeoutMs();
-  const shouldDisableTimeout = await shouldDisableServerToolTimeoutForClockHold({
-    chat: options.chat,
-    adapterContext: options.adapterContext,
-    serverToolTimeoutMs,
-    requestId: options.requestId
-  });
-  const effectiveServerToolTimeoutMs = shouldDisableTimeout ? 0 : serverToolTimeoutMs;
+  const effectiveServerToolTimeoutMs = serverToolTimeoutMs;
   const followupTimeoutMs = resolveServerToolFollowupTimeoutMs();
   const engineOptions: ServerSideToolEngineOptions = {
     chatResponse: options.chat,

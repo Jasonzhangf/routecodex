@@ -1,10 +1,7 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
-import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { isSyntheticRouteCodexControlText } from '../conversion/shared/openai-message-normalize.js';
-import { findNextUndeliveredDueAtMs, listClockTasks, resolveClockConfig } from './clock/task-store.js';
-import { resolveClockSessionScope } from './clock/session-scope.js';
 import { sanitizeFollowupText } from './handlers/followup-sanitize.js';
 import { inspectStopGatewaySignal } from './stop-gateway-context.js';
 
@@ -140,56 +137,4 @@ export function containsSyntheticRouteCodexControlText(value: unknown): boolean 
   }
   return Object.values(value as Record<string, unknown>)
     .some((entry) => containsSyntheticRouteCodexControlText(entry));
-}
-
-export async function shouldDisableServerToolTimeoutForClockHold(args: {
-  chat: JsonObject;
-  adapterContext: AdapterContext;
-  serverToolTimeoutMs: number;
-  requestId?: string;
-}): Promise<boolean> {
-  if (!isStopFinishReasonWithoutToolCalls(args.chat)) {
-    return false;
-  }
-  const record = args.adapterContext as Record<string, unknown>;
-  const rt = readRuntimeMetadata(record);
-  const sessionId = resolveClockSessionScope(record, rt as Record<string, unknown>);
-  if (!sessionId) {
-    return false;
-  }
-  const clockConfig = resolveClockConfig((rt as { clock?: unknown }).clock);
-  if (!clockConfig) {
-    return false;
-  }
-  try {
-    const tasks = await listClockTasks(sessionId, clockConfig);
-    const at = Date.now();
-    const nextDueAtMs = findNextUndeliveredDueAtMs(tasks, at);
-    if (!nextDueAtMs) {
-      return false;
-    }
-    const thresholdMs = nextDueAtMs - clockConfig.dueWindowMs;
-    if (thresholdMs <= at) {
-      return false;
-    }
-    if (args.serverToolTimeoutMs > 0 && thresholdMs - at <= args.serverToolTimeoutMs) {
-      return false;
-    }
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-    const wrapped = new ProviderProtocolError('[servertool] clock hold timeout probe failed', {
-      code: 'SERVERTOOL_CLOCK_HOLD_TIMEOUT_PROBE_FAILED',
-      category: 'INTERNAL_ERROR',
-      details: {
-        requestId: args.requestId,
-        sessionId,
-        serverToolTimeoutMs: args.serverToolTimeoutMs,
-        reason: message
-      }
-    }) as ProviderProtocolError & { status?: number; cause?: unknown };
-    wrapped.status = 500;
-    wrapped.cause = error;
-    throw wrapped;
-  }
 }

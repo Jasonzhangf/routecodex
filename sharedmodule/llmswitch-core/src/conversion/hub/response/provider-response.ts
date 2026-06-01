@@ -16,7 +16,6 @@ import {
 import type { ProviderInvoker } from '../../../servertool/types.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
 import {
-  maybeCommitClockReservationFromContext,
   resolveProviderResponseContextSignals,
   type ProviderProtocol
 } from './provider-response-helpers.js';
@@ -359,7 +358,6 @@ async function executeProviderResponseNativeRuntimeStateEffect(args: {
   finalizeResponsesConversationRequestRetention(args.context.requestId, {
     keepForSubmitToolOutputs: runtimeEffect.keepForSubmitToolOutputs === true
   });
-  await maybeCommitClockReservationFromContext(args.context);
   saveChatProcessSessionActualUsage({
     context: args.context,
     usage: runtimeEffect.usage && typeof runtimeEffect.usage === 'object' && !Array.isArray(runtimeEffect.usage)
@@ -588,14 +586,45 @@ function extractProviderResponseSseStream(payload: unknown): Readable | undefine
 
 async function readProviderResponseSseStreamText(stream: Readable): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of stream as AsyncIterable<Buffer | string | Uint8Array>) {
-    if (typeof chunk === 'string') {
+  try {
+    for await (const chunk of stream as AsyncIterable<Buffer | string | Uint8Array>) {
+      if (typeof chunk === 'string') {
+        chunks.push(Buffer.from(chunk));
+        continue;
+      }
       chunks.push(Buffer.from(chunk));
-      continue;
     }
-    chunks.push(Buffer.from(chunk));
+  } catch (error) {
+    throw buildProviderSseStreamReadError(error);
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+function buildProviderSseStreamReadError(error: unknown): Error {
+  const source = error as Record<string, unknown> | undefined;
+  const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+  const normalizedMessage = message.toLowerCase();
+  const normalizedCode = typeof source?.code === 'string' ? source.code.toLowerCase() : '';
+  const upstreamCode = normalizedMessage.includes('terminated') || normalizedCode.includes('terminated')
+    ? 'UPSTREAM_STREAM_TERMINATED'
+    : typeof source?.upstreamCode === 'string'
+      ? source.upstreamCode
+      : typeof source?.code === 'string'
+        ? source.code
+        : 'SSE_TO_JSON_ERROR';
+  const wrapped = new Error(message) as Error & {
+    code?: string;
+    upstreamCode?: string;
+    statusCode?: number;
+    retryable?: boolean;
+    requestExecutorProviderErrorStage?: string;
+  };
+  wrapped.code = 'SSE_DECODE_ERROR';
+  wrapped.upstreamCode = upstreamCode;
+  wrapped.statusCode = 502;
+  wrapped.retryable = true;
+  wrapped.requestExecutorProviderErrorStage = 'provider.sse_decode';
+  return wrapped;
 }
 
 export async function convertProviderResponse(

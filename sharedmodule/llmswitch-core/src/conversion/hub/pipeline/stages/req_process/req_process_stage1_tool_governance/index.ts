@@ -3,7 +3,6 @@ import type { ProcessedRequest, StandardizedRequest } from '../../../../types/st
 import type { HubProcessNodeResult } from '../../../../process/chat-process.js';
 import { recordStage } from '../../../stages/utils.js';
 import { runHubPipelineStageWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
-import { applyHeartbeatDirectiveRuntimeSideEffectsFromProcessedRequest } from '../../../../process/blocks/chat-process-heartbeat-runtime-side-effects.js';
 import { isRecord } from '../../../../../../shared/common-utils.js';
 
 export interface ReqProcessStage1ToolGovernanceOptions {
@@ -68,7 +67,6 @@ export async function runReqProcessStage1ToolGovernance(
   const stageMetadata = isRecord(stageResult.metadata) ? stageResult.metadata : {};
   const processedRequest = parseProcessedRequest(stageResult.payload);
   const nodeResult = parseNodeResult(stageMetadata.nodeResult);
-  await applyHeartbeatDirectiveRuntimeSideEffectsFromProcessedRequest(processedRequest);
 
   recordStage(options.stageRecorder, 'chat_process.req.stage4.tool_governance', processedRequest);
 

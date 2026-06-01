@@ -2,7 +2,6 @@ use napi::bindgen_prelude::Result as NapiResult;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use crate::chat_clock_tool_schema_ops::build_clock_tool_append_operations_json;
 use crate::chat_servertool_orchestration::{
     build_continue_execution_operations_json, plan_chat_servertool_orchestration_bundle_json,
 };
@@ -32,8 +31,6 @@ struct SimpleInjectPlan {
 struct ServerToolBundlePlan {
     #[serde(default)]
     web_search: WebSearchPlan,
-    #[serde(default)]
-    clock: SimpleInjectPlan,
     #[serde(default)]
     continue_execution: SimpleInjectPlan,
 }
@@ -89,23 +86,12 @@ pub(crate) fn resolve_client_inject_ready(metadata: &Map<String, Value>) -> bool
     parse_bool_or_default(resolve_client_inject_ready_json(metadata_json), true)
 }
 
-fn read_clock_enabled(runtime_metadata: &Map<String, Value>) -> bool {
-    let raw_clock = runtime_metadata.get("clock");
-    match raw_clock {
-        None => false,
-        Some(Value::Object(row)) => pick_bool(row.get("enabled")).unwrap_or(false),
-        _ => false,
-    }
-}
-
 fn resolve_default_bundle_plan(
     runtime_metadata: &Map<String, Value>,
     has_active_stop_message: bool,
 ) -> ServerToolBundlePlan {
     let server_tool_followup =
         pick_bool(runtime_metadata.get("serverToolFollowup")).unwrap_or(false);
-    let clock_followup_inject_tool =
-        pick_bool(runtime_metadata.get("clockFollowupInjectTool")).unwrap_or(false);
     let (web_search_indexes, has_direct_web_search_engine) = runtime_metadata
         .get("webSearch")
         .and_then(|v| v.as_object())
@@ -130,20 +116,12 @@ fn resolve_default_bundle_plan(
     // within the same request. Once direct mode is present, do not inject servertool websearch.
     let web_search_should =
         !has_direct_web_search_engine && !web_search_indexes.is_empty() && !server_tool_followup;
-    let clock_should = if server_tool_followup && !clock_followup_inject_tool {
-        false
-    } else {
-        read_clock_enabled(runtime_metadata)
-    };
     let continue_should = !(server_tool_followup || has_active_stop_message);
 
     ServerToolBundlePlan {
         web_search: WebSearchPlan {
             should_inject: web_search_should,
             selected_engine_indexes: web_search_indexes,
-        },
-        clock: SimpleInjectPlan {
-            should_inject: clock_should,
         },
         continue_execution: SimpleInjectPlan {
             should_inject: continue_should,
@@ -179,60 +157,6 @@ fn read_selected_web_search_engines(
         selected.push(engines[idx].clone());
     }
     Value::Array(selected)
-}
-
-fn build_clock_tool_definition() -> Value {
-    json!({
-      "type": "function",
-      "function": {
-        "name": "clock",
-        "description": "Time + Alarm for this session. Mandatory workflow: before every new clock.schedule, call clock.list first; without a fresh list, new reminder creation is invalid. After listing, prefer clock.update over clock.schedule whenever an existing reminder can be edited. If two reminders would be within 5 minutes, merge or retime them instead of keeping near-duplicate alarms. Use clock.schedule for any blocking wait so work can continue non-blockingly and you will get an interrupt reminder later. If waiting 3 minutes or longer is required, MUST call clock.schedule now (never promise to wait without scheduling). You may set multiple reminders when they are meaningfully different. For complex reminders, write clock.md before waiting and read it first when reminded. Required clock.md template: ## 背景 / ## 当前阻塞点 / ## 下次提醒要做的第一步 / ## 不能忘的检查项. Format example: {\"action\":\"list\",\"items\":[],\"taskId\":\"\"} before {\"action\":\"schedule\",\"items\":[{\"dueAt\":\"<ISO8601>\",\"task\":\"<exact follow-up action>\",\"tool\":\"<tool-name-or-empty>\",\"arguments\":\"<json-string-or-{}>\"}],\"taskId\":\"\"}. Use get/schedule/update/list/cancel/clear. Scheduled reminders are injected into future requests.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "action": {
-              "type": "string",
-              "enum": ["get", "schedule", "update", "list", "cancel", "clear"],
-              "description": "Get current time, or schedule/update/list/cancel/clear session-scoped reminders. Mandatory rule: before every new clock.schedule, call clock.list first; without a fresh list, new reminder creation is invalid. After listing, prefer clock.update over clock.schedule whenever an existing reminder can be edited. If reminders end up within 5 minutes of each other, reconsider and merge or retime them. Use clock.schedule for blocking waits that should not stall execution. If waiting 3 minutes or longer is required, use action=\"schedule\" immediately."
-            },
-            "items": {
-              "type": "array",
-              "description": "For schedule/update: list of reminder payloads. update uses items[0] as patch source.",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "dueAt": {
-                    "type": "string",
-                    "description": "ISO8601 datetime with timezone (e.g. 2026-01-21T20:30:00-08:00)."
-                  },
-                  "task": {
-                    "type": "string",
-                    "description": "Reminder text that states the exact action to execute on wake-up (no vague placeholders)."
-                  },
-                  "tool": {
-                    "type": "string",
-                    "description": "Optional suggested tool name (hint only)."
-                  },
-                  "arguments": {
-                    "type": "string",
-                    "description": "Optional suggested tool arguments as a JSON string (hint only). Use \"{}\" when unsure."
-                  }
-                },
-                "required": ["dueAt", "task", "tool", "arguments"],
-                "additionalProperties": false
-              }
-            },
-            "taskId": {
-              "type": "string",
-              "description": "For cancel/update: target taskId."
-            }
-          },
-          "required": ["action", "items", "taskId"],
-          "additionalProperties": false
-        },
-        "strict": true
-      }
-    })
 }
 
 pub(crate) fn resolve_tool_name(tool: &Value) -> Option<String> {
@@ -458,30 +382,6 @@ pub(crate) fn maybe_apply_servertool_orchestration(
             operations.extend(parse_ops_or_empty(
                 build_web_search_tool_append_operations_json(engines_json),
             ));
-        }
-    }
-
-    if bundle_plan.clock.should_inject {
-        let has_tmux_session = [
-            "clientTmuxSessionId",
-            "client_tmux_session_id",
-            "tmuxSessionId",
-            "tmux_session_id",
-        ]
-        .iter()
-        .any(|key| {
-            metadata
-                .get(*key)
-                .and_then(|v| v.as_str())
-                .map(|v| !v.trim().is_empty())
-                .unwrap_or(false)
-        });
-        let clock_tool = build_clock_tool_definition();
-        if let Ok(clock_tool_json) = serde_json::to_string(&clock_tool) {
-            operations.extend(parse_ops_or_empty(build_clock_tool_append_operations_json(
-                has_tmux_session,
-                clock_tool_json,
-            )));
         }
     }
 

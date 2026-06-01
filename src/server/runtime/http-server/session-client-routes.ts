@@ -1,39 +1,14 @@
 import type { Application, Request, Response } from 'express';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 
-import {
-  appendHeartbeatHistoryEventSnapshot,
-  buildHeartbeatInjectTextSnapshot,
-  cancelClockTaskSnapshot,
-  clearClockTasksSnapshot,
-  listHeartbeatHistorySnapshot,
-  listHeartbeatStatesSnapshot,
-  listClockSessionIdsSnapshot,
-  listClockTasksSnapshot,
-  loadHeartbeatStateSnapshot,
-  resolveClockConfigSnapshot,
-  scheduleClockTasksSnapshot,
-  setHeartbeatEnabledSnapshot,
-  updateClockTaskSnapshot
-} from '../../../modules/llmswitch/bridge.js';
 import { getSessionClientRegistry } from './session-client-registry.js';
 import { normalizeWorkdir } from './session-client-registry-utils.js';
 import { isLocalRequest, isLoopbackBindHost } from './daemon-admin-routes.js';
-import { triggerHeartbeatNow } from './heartbeat-runtime-hooks.js';
-import {
-  isTmuxSessionAlive,
-  resolveTmuxSessionWorkingDirectory
-} from './tmux-session-probe.js';
+import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import {
   extractApiKeyFromRequest,
   resolveEnvSecretReference
 } from './middleware.js';
 import {
-  isSessionManagedTerminationEnabled,
-  normalizeClockSessionIdInput,
-  normalizeTaskCreateItems,
-  normalizeTaskPatch,
   parseBoolean,
   parsePositiveInt,
   parseString,
@@ -52,43 +27,6 @@ function logSessionClientRoutesNonBlockingError(stage: string, error: unknown, d
   } catch {
     // Never throw from non-blocking logging.
   }
-}
-
-function stripHeartbeatStopMarkerFromText(raw: string): { updated: string; changed: boolean } {
-  const lines = String(raw || '').split(/\r?\n/);
-  let changed = false;
-  const kept: string[] = [];
-  for (const line of lines) {
-    if (/^\s*Heartbeat-Stop-When:\s*.+$/i.test(line)) {
-      changed = true;
-      continue;
-    }
-    kept.push(line);
-  }
-  return { updated: kept.join('\n'), changed };
-}
-
-async function clearHeartbeatStopMarkerForWorkdir(workdir: string | undefined): Promise<void> {
-  const normalized = typeof workdir === 'string' ? workdir.trim() : '';
-  if (!normalized) {
-    return;
-  }
-  const heartbeatPath = path.join(normalized, 'HEARTBEAT.md');
-  let raw = '';
-  try {
-    raw = await fs.readFile(heartbeatPath, 'utf8');
-  } catch (error) {
-    const code = (error as { code?: unknown })?.code;
-    if (code === 'ENOENT') {
-      return;
-    }
-    throw error;
-  }
-  const stripped = stripHeartbeatStopMarkerFromText(raw);
-  if (!stripped.changed) {
-    return;
-  }
-  await fs.writeFile(heartbeatPath, stripped.updated, 'utf8');
 }
 
 export interface SessionClientRouteOptions {
@@ -282,305 +220,6 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     res.status(200).json({ ok: true, records: registry.list() });
   });
 
-  app.get('/daemon/heartbeat/list', async (req: Request, res: Response) => {
-    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
-      return;
-    }
-    const states = await listHeartbeatStatesSnapshot();
-    res.status(200).json({ ok: true, states });
-  });
-
-  app.get('/daemon/heartbeat', async (req: Request, res: Response) => {
-    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
-      return;
-    }
-    const tmuxSessionId =
-      parseString(req.query.tmuxSessionId) ||
-      parseString(req.query.sessionId) ||
-      parseString(req.query.daemonId && registry.findByDaemonId(String(req.query.daemonId))?.tmuxSessionId);
-    if (!tmuxSessionId) {
-      res.status(400).json({ error: { message: 'tmuxSessionId is required', code: 'bad_request' } });
-      return;
-    }
-    const state = await loadHeartbeatStateSnapshot(tmuxSessionId);
-    res.status(200).json({ ok: true, tmuxSessionId, state });
-  });
-
-  app.get('/daemon/heartbeat/history', async (req: Request, res: Response) => {
-    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
-      return;
-    }
-    const tmuxSessionId =
-      parseString(req.query.tmuxSessionId) ||
-      parseString(req.query.sessionId) ||
-      parseString(req.query.daemonId && registry.findByDaemonId(String(req.query.daemonId))?.tmuxSessionId);
-    if (!tmuxSessionId) {
-      res.status(400).json({ error: { message: 'tmuxSessionId is required', code: 'bad_request' } });
-      return;
-    }
-    const limit = parsePositiveInt(req.query.limit) || 100;
-    const events = await listHeartbeatHistorySnapshot({ tmuxSessionId, limit });
-    res.status(200).json({ ok: true, tmuxSessionId, events });
-  });
-
-  app.post('/daemon/session-client/inject', async (req: Request, res: Response) => {
-    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
-      return;
-    }
-    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
-    const text = parseString(body.text);
-    if (!text) {
-      res.status(400).json({ error: { message: 'text is required', code: 'bad_request' } });
-      return;
-    }
-
-    const tmuxSessionId = parseString(body.tmuxSessionId);
-    const sessionAlias = parseString(body.sessionId);
-    const workdir = normalizeWorkdir(parseString(body.workdir) || parseString(body.cwd) || parseString(body.workingDirectory));
-    if (!tmuxSessionId && !sessionAlias) {
-      res.status(400).json({ error: { message: 'tmuxSessionId is required', code: 'bad_request' } });
-      return;
-    }
-
-    if (sessionAlias && tmuxSessionId && sessionAlias !== tmuxSessionId) {
-      registry.bindConversationSession({
-        conversationSessionId: sessionAlias,
-        tmuxSessionId,
-        clientType: parseString(body.clientType),
-        ...(workdir ? { workdir } : {})
-      });
-    }
-
-    const result = await registry.inject({
-      text,
-      ...(tmuxSessionId ? { tmuxSessionId } : {}),
-      ...(sessionAlias ? { sessionId: sessionAlias } : {}),
-      ...(workdir ? { workdir } : {}),
-      requestId: parseString(body.requestId),
-      source: parseString(body.source)
-    });
-    if (!result.ok) {
-      res.status(503).json({ error: { message: result.reason || 'inject_failed', code: 'service_unavailable' } });
-      return;
-    }
-    res.status(200).json({ ok: true, daemonId: result.daemonId });
-  });
-
-  app.post('/daemon/heartbeat', async (req: Request, res: Response) => {
-    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
-      return;
-    }
-    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
-    const action = parseString(body.action)?.toLowerCase();
-    const daemonId = parseString(body.daemonId);
-    const tmuxSessionId =
-      parseString(body.tmuxSessionId) ||
-      parseString(body.sessionId) ||
-      (daemonId ? parseString(registry.findByDaemonId(daemonId)?.tmuxSessionId) : undefined);
-    if (!tmuxSessionId) {
-      res.status(400).json({ error: { message: 'tmuxSessionId is required', code: 'bad_request' } });
-      return;
-    }
-
-    if (action === 'on' || action === 'off') {
-      const state = await setHeartbeatEnabledSnapshot({
-        tmuxSessionId,
-        enabled: action === 'on',
-        source: 'api',
-        ...(action === 'off' ? { reason: 'disabled_by_api' } : {})
-      });
-      if (action === 'on') {
-        const bodyWorkdir = normalizeWorkdir(
-          parseString(body.workdir) || parseString(body.cwd) || parseString(body.workingDirectory)
-        );
-        const daemonWorkdir = daemonId ? normalizeWorkdir(parseString(registry.findByDaemonId(daemonId)?.workdir)) : undefined;
-        const tmuxWorkdir = resolveTmuxSessionWorkingDirectory(tmuxSessionId);
-        const workdir = bodyWorkdir || daemonWorkdir || tmuxWorkdir;
-        await clearHeartbeatStopMarkerForWorkdir(workdir).catch((error) => {
-          logSessionClientRoutesNonBlockingError('heartbeat.clear_stop_marker', error, {
-            tmuxSessionId,
-            workdir
-          });
-        });
-        const injectText =
-          (await buildHeartbeatInjectTextSnapshot()) ||
-          '[Heartbeat]\n请先判断你当前是否仍在执行上一次已开始的任务。\n如果当前任务仍在执行中，请忽略本次提醒，不要打断当前工作。\n如果当前任务已经空闲或已中断，请读取 HEARTBEAT.md，更新 DELIVERY.md（最多只保留最近十次交付记录，不要无限追加成巨型文件），并调用 drudge.review。';
-        const result = await triggerHeartbeatNow({
-          tmuxSessionId,
-          injectText,
-          requestActivityTracker: {
-            countActiveRequestsForTmuxSession: (sessionId: string) =>
-              Number((req.app?.locals?.routecodexServer as any)?.requestActivityTracker?.countActiveRequestsForTmuxSession?.(sessionId) || 0)
-          }
-        });
-        await appendHeartbeatHistoryEventSnapshot({
-          tmuxSessionId,
-          source: 'api',
-          action: 'trigger',
-          outcome: result?.ok ? 'triggered' : result?.disable ? 'disabled' : result?.skipped ? 'skipped' : 'failed',
-          ...(parseString((result as Record<string, unknown> | null)?.reason) ? { reason: parseString((result as Record<string, unknown> | null)?.reason) } : {}),
-          details: { dryRun: false, action: 'on' }
-        });
-        res.status(200).json({ ok: true, tmuxSessionId, state, trigger: result });
-        return;
-      }
-      res.status(200).json({ ok: true, tmuxSessionId, state });
-      return;
-    }
-
-    if (action === 'trigger') {
-      const dryRun = parseBoolean(body.dryRun) === true;
-      const injectText =
-        (await buildHeartbeatInjectTextSnapshot()) ||
-        '[Heartbeat]\n请先判断你当前是否仍在执行上一次已开始的任务。\n如果当前任务仍在执行中，请忽略本次提醒，不要打断当前工作。\n如果当前任务已经空闲或已中断，请读取 HEARTBEAT.md，更新 DELIVERY.md（最多只保留最近十次交付记录，不要无限追加成巨型文件），并调用 drudge.review。';
-      const result = await triggerHeartbeatNow({
-        tmuxSessionId,
-        injectText,
-        requestActivityTracker: {
-          countActiveRequestsForTmuxSession: (sessionId: string) =>
-            Number((req.app?.locals?.routecodexServer as any)?.requestActivityTracker?.countActiveRequestsForTmuxSession?.(sessionId) || 0)
-        },
-        ...(dryRun ? { dryRun } : {})
-      });
-      await appendHeartbeatHistoryEventSnapshot({
-        tmuxSessionId,
-        source: 'api',
-        action: 'trigger',
-        outcome: result?.ok ? 'triggered' : result?.disable ? 'disabled' : result?.skipped ? 'skipped' : 'failed',
-        ...(parseString((result as Record<string, unknown> | null)?.reason) ? { reason: parseString((result as Record<string, unknown> | null)?.reason) } : {}),
-        details: { dryRun }
-      });
-      res.status(200).json({ ok: true, tmuxSessionId, result });
-      return;
-    }
-
-    res.status(400).json({ error: { message: 'action must be on|off|trigger', code: 'bad_request' } });
-  });
-
-  app.get('/daemon/session/tasks', async (req: Request, res: Response) => {
-    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
-      return;
-    }
-    const sessionConfig = await resolveClockConfigSnapshot(undefined);
-    if (!sessionConfig) {
-      res.status(500).json({ error: { message: 'session_config_unavailable', code: 'internal_error' } });
-      return;
-    }
-
-    const querySessionId = normalizeClockSessionIdInput(req.query.sessionId);
-    const sessionIds = querySessionId ? [querySessionId] : await listClockSessionIdsSnapshot();
-
-    const sessions = [] as Array<{ sessionId: string; taskCount: number; tasks: unknown[] }>;
-    for (const sessionId of sessionIds) {
-      const tasks = await listClockTasksSnapshot({ sessionId, config: sessionConfig });
-      sessions.push({ sessionId, taskCount: tasks.length, tasks });
-    }
-
-    res.status(200).json({
-      ok: true,
-      sessions,
-      records: registry.list()
-    });
-  });
-
-  app.post('/daemon/session/tasks', async (req: Request, res: Response) => {
-    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
-      return;
-    }
-    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
-    const sessionId = normalizeClockSessionIdInput(body.sessionId);
-    if (!sessionId) {
-      res.status(400).json({ error: { message: 'sessionId is required and must resolve to tmux scope', code: 'bad_request' } });
-      return;
-    }
-    const normalized = normalizeTaskCreateItems(body);
-    if (normalized.error) {
-      res.status(400).json({ error: { message: normalized.error, code: 'bad_request' } });
-      return;
-    }
-
-    const sessionConfig = await resolveClockConfigSnapshot(undefined);
-    if (!sessionConfig) {
-      res.status(500).json({ error: { message: 'session_config_unavailable', code: 'internal_error' } });
-      return;
-    }
-
-    const scheduled = await scheduleClockTasksSnapshot({
-      sessionId,
-      items: normalized.items,
-      config: sessionConfig
-    });
-
-    res.status(200).json({ ok: true, sessionId, scheduledCount: scheduled.length, scheduled });
-  });
-
-  app.patch('/daemon/session/tasks', async (req: Request, res: Response) => {
-    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
-      return;
-    }
-    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
-    const sessionId = normalizeClockSessionIdInput(body.sessionId);
-    const taskId = parseString(body.taskId);
-    if (!sessionId || !taskId) {
-      res.status(400).json({ error: { message: 'sessionId and taskId are required; sessionId must resolve to tmux scope', code: 'bad_request' } });
-      return;
-    }
-
-    const normalizedPatch = normalizeTaskPatch(body);
-    if (normalizedPatch.error) {
-      res.status(400).json({ error: { message: normalizedPatch.error, code: 'bad_request' } });
-      return;
-    }
-
-    const sessionConfig = await resolveClockConfigSnapshot(undefined);
-    if (!sessionConfig) {
-      res.status(500).json({ error: { message: 'session_config_unavailable', code: 'internal_error' } });
-      return;
-    }
-
-    const updated = await updateClockTaskSnapshot({
-      sessionId,
-      taskId,
-      patch: normalizedPatch.patch,
-      config: sessionConfig
-    });
-
-    if (!updated) {
-      res.status(404).json({ error: { message: 'task_not_found_or_invalid_patch', code: 'not_found' } });
-      return;
-    }
-
-    res.status(200).json({ ok: true, sessionId, taskId, updated });
-  });
-
-  app.delete('/daemon/session/tasks', async (req: Request, res: Response) => {
-    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
-      return;
-    }
-    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
-    const sessionId = normalizeClockSessionIdInput(body.sessionId);
-    if (!sessionId) {
-      res.status(400).json({ error: { message: 'sessionId is required and must resolve to tmux scope', code: 'bad_request' } });
-      return;
-    }
-
-    const sessionConfig = await resolveClockConfigSnapshot(undefined);
-    if (!sessionConfig) {
-      res.status(500).json({ error: { message: 'session_config_unavailable', code: 'internal_error' } });
-      return;
-    }
-
-    const taskId = parseString(body.taskId);
-    if (taskId) {
-      const removed = await cancelClockTaskSnapshot({ sessionId, taskId, config: sessionConfig });
-      res.status(200).json({ ok: true, sessionId, taskId, removed });
-      return;
-    }
-
-    const removedCount = await clearClockTasksSnapshot({ sessionId, config: sessionConfig });
-    res.status(200).json({ ok: true, sessionId, removedCount });
-  });
-
   app.post('/daemon/session/cleanup', async (req: Request, res: Response) => {
     if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
@@ -589,11 +228,6 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
     const mode = parseString(body.mode) || 'dead_tmux';
 
-    const sessionConfig = await resolveClockConfigSnapshot(undefined);
-    if (!sessionConfig) {
-      res.status(500).json({ error: { message: 'session_config_unavailable', code: 'internal_error' } });
-      return;
-    }
 
     if (mode === 'unbind') {
       const sessionScope = parseString(body.sessionScope) || parseString(body.conversationSessionId);
@@ -603,31 +237,23 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       }
       const normalizedSessionScope = sessionScope.startsWith('sessiond.') || sessionScope.startsWith('tmux:')
         ? sessionScope
-        : normalizeClockSessionIdInput(sessionScope) ?? sessionScope;
+        : sessionScope;
       const unbound = normalizedSessionScope.startsWith('sessiond.') || normalizedSessionScope.startsWith('tmux:')
         ? registry.unbindSessionScope(normalizedSessionScope)
         : registry.unbindConversationSession(normalizedSessionScope);
-      const clearTasks = parseBoolean(body.clearTasks) === true;
-      let cleared = 0;
-      if (clearTasks) {
-        cleared = await clearClockTasksSnapshot({
-          sessionId: normalizeClockSessionIdInput(normalizedSessionScope) ?? normalizedSessionScope,
-          config: sessionConfig
-        });
-      }
       const clearedStopMessage = normalizedSessionScope.startsWith('tmux:')
         ? clearStopMessageTmuxScope({
           tmuxSessionId: normalizedSessionScope.slice('tmux:'.length),
           reason: 'session_unbind'
         })
         : undefined;
-      res.status(200).json({ ok: true, mode, sessionScope: normalizedSessionScope, unbound, cleared, clearedStopMessage });
+      res.status(200).json({ ok: true, mode, sessionScope: normalizedSessionScope, unbound, clearedStopMessage });
       return;
     }
 
     const modeSafe = mode.toLowerCase();
     const requestedTerminateManaged =
-      parseBoolean(body.terminateManaged) ?? isSessionManagedTerminationEnabled();
+      parseBoolean(body.terminateManaged) ?? false;
     const allowManagedTermination = false;
     const cleanup = modeSafe === 'stale_heartbeat'
       ? registry.cleanupStaleHeartbeats({
@@ -642,12 +268,6 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       ...cleanup.removedTmuxSessionIds
     ]));
 
-    let clearedTaskSessions = 0;
-    for (const cleanupSessionId of cleanupSessionIds) {
-      const normalizedCleanupSessionId = normalizeClockSessionIdInput(cleanupSessionId) ?? cleanupSessionId;
-      await clearClockTasksSnapshot({ sessionId: normalizedCleanupSessionId, config: sessionConfig });
-      clearedTaskSessions += 1;
-    }
     let clearedStopMessageScopes = 0;
     const removedTmuxIds = Array.from(new Set(cleanup.removedTmuxSessionIds));
     for (const tmuxSessionId of removedTmuxIds) {
@@ -666,7 +286,6 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       terminateManaged: allowManagedTermination,
       terminateManagedRequested: requestedTerminateManaged,
       cleanup,
-      clearedTaskSessions,
       clearedStopMessageScopes
     });
   });

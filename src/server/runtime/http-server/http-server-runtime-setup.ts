@@ -3,13 +3,12 @@ import { asRecord } from './provider-utils.js';
 import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
-import type { HubPipeline, HubPipelineConfig, HubPipelineCtor } from './types.js';
+import type { HubPipeline, HubPipelineConfig, HubPipelineCtor, VirtualRouterArtifacts } from './types.js';
 import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-timing-defaults.js';
-import { registerClockRuntimeHooks } from './clock-runtime-hooks.js';
-import { registerHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
 import { getSharedProviderTrafficGovernor } from './provider-traffic-governor.js';
 import { clearUnresolvedResponsesConversationRequests, preloadCriticalBridgeRuntimeModules } from '../../../modules/llmswitch/bridge.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
+import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-builder.js';
 
 type RoutingProviderScope = {
   providerKeys: string[];
@@ -82,6 +81,31 @@ async function rebuildRoutingPolicyGroupHubPipelines(args: {
     }
   }
   args.server.hubPipelinesByRoutingPolicyGroup = next;
+}
+
+async function buildAllRouterGroupArtifacts(args: {
+  server: any;
+  primaryArtifacts: VirtualRouterArtifacts;
+}): Promise<VirtualRouterArtifacts> {
+  const groups = collectRouterRoutingPolicyGroups(args.server);
+  if (groups.length < 1) {
+    return args.primaryArtifacts;
+  }
+  const runtime = { ...(args.primaryArtifacts.runtime ?? {}) } as Record<string, ProviderRuntimeProfile>;
+  const targetRuntime = { ...(args.primaryArtifacts.targetRuntime ?? {}) } as Record<string, ProviderRuntimeProfile>;
+  for (const group of groups) {
+    const routerInput = await buildVirtualRouterInputV2(args.server.userConfig as Record<string, unknown>, undefined, {
+      routingPolicyGroup: group,
+    });
+    const artifacts = await args.server.bootstrapVirtualRouter(routerInput as UnknownObject);
+    Object.assign(runtime, artifacts.runtime ?? {});
+    Object.assign(targetRuntime, artifacts.targetRuntime ?? {});
+  }
+  return {
+    ...args.primaryArtifacts,
+    runtime,
+    targetRuntime,
+  };
 }
 
 function readTruthyEnv(names: string[]): boolean {
@@ -184,16 +208,20 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   server.ensureProviderProfilesFromUserConfig();
   const routerInput = await server.resolveVirtualRouterInput(server.userConfig);
   const bootstrapArtifacts = await server.bootstrapVirtualRouter(routerInput);
+  const providerRuntimeArtifacts = await buildAllRouterGroupArtifacts({
+    server,
+    primaryArtifacts: bootstrapArtifacts,
+  });
   enforceNoMockRuntimeInServer({
-    runtimeMap: bootstrapArtifacts?.targetRuntime,
+    runtimeMap: providerRuntimeArtifacts?.targetRuntime,
     configPath: server?.config?.configPath
   });
   server.currentRouterArtifacts = bootstrapArtifacts;
   const runtimeForScope = {
-    ...(bootstrapArtifacts?.runtime ?? {}),
-    ...(bootstrapArtifacts?.targetRuntime ?? {})
+    ...(providerRuntimeArtifacts?.runtime ?? {}),
+    ...(providerRuntimeArtifacts?.targetRuntime ?? {})
   } as Record<string, ProviderRuntimeProfile>;
-  const routingScope = deriveRoutingProviderScope(runtimeForScope, routerInput, server.userConfig);
+  const routingScope = deriveRoutingProviderScope(runtimeForScope, { routing: {} } as UnknownObject, server.userConfig);
   // Runtime-level scope cache: provider init/warmup must honor the same routing scope
   // as token/quota managers to avoid non-routed providers doing background tasks.
   server.routingProviderScope = routingScope;
@@ -307,10 +335,7 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   server.hubPipelineConfigForShadow = hubConfig as Record<string, unknown>;
   server.hubPipelineEngineShadow = null;
 
-  await server.initializeProviderRuntimes(bootstrapArtifacts);
-  await registerClockRuntimeHooks();
-  await registerHeartbeatRuntimeHooks(server);
-  server.startSessionDaemonInjectLoop();
+  await server.initializeProviderRuntimes(providerRuntimeArtifacts);
 }
 
 function deriveRoutingProviderScope(

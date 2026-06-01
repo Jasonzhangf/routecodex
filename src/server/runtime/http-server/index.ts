@@ -36,7 +36,7 @@ import type {
 import { createServerColoredLogger } from './colored-logger.js';
 import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
 import { ManagerDaemon } from '../../../manager/index.js';
-import { ensureServerScopedSessionDir } from './session-dir.js';
+import { ensureServerScopedSessionDir, resolvePortScopedSessionDir } from './session-dir.js';
 import { cleanupSessionStorageOnStartup } from './session-storage-cleanup.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import { shouldLogStageEvent, extractProviderKeysForRoutingGroup } from './http-server-bootstrap.js';
@@ -97,11 +97,7 @@ import {
   initializeRouteErrorHub,
 } from './http-server-bootstrap.js';
 import {
-  shouldEnableSessionDaemonInjectLoop,
-  resolveRawSessionConfig,
-  stopSessionDaemonInjectLoop,
-  startSessionDaemonInjectLoop,
-  tickSessionDaemonInjectLoop
+  stopSessionDaemonInjectLoop
 } from './http-server-session-daemon.js';
 import { setupRuntime } from './http-server-runtime-setup.js';
 import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-builder.js';
@@ -181,7 +177,6 @@ import { convertProviderResponseIfNeeded } from './executor/provider-response-co
 import { extractUsageFromResult } from './executor/usage-aggregator.js';
 import { deriveFinishReason } from '../../utils/finish-reason.js';
 import { mapProviderProtocol } from './provider-utils.js';
-import { emitRequestExecutorVirtualRouterConcurrencyLog } from './executor/request-executor-runtime-blocks.js';
 
 export class RouteCodexHttpServer {
   private app: Application;
@@ -233,6 +228,7 @@ export class RouteCodexHttpServer {
   private readonly requestActivityTracker = new RequestActivityTracker();
   private readonly portRegistry = new PortRegistry();
   private readonly requestExecutor: RequestExecutor;
+  private readonly serverId: string;
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -241,7 +237,8 @@ export class RouteCodexHttpServer {
     this.errorHandling = new QuietErrorHandlingCenter();
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
-    ensureServerScopedSessionDir(canonicalizeServerId(this.config.server.host, this.config.server.port));
+    this.serverId = canonicalizeServerId(this.config.server.host, this.config.server.port);
+    ensureServerScopedSessionDir(this.serverId);
     const sessionCleanup = cleanupSessionStorageOnStartup({ isTmuxSessionAlive });
     if (
       sessionCleanup.removedLegacyScopeFiles > 0 ||
@@ -269,7 +266,7 @@ export class RouteCodexHttpServer {
 
     this.requestExecutor = createRequestExecutor({
       runtimeManager: {
-        resolveRuntimeKey: (providerKey?: string, fallback?: string): string | undefined => {
+        resolveRuntimeKey: (providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined => {
           const tryVariants = (candidate: string | undefined): string | undefined => {
             if (!candidate) {
               return undefined;
@@ -280,8 +277,11 @@ export class RouteCodexHttpServer {
               candidate.replace(/\.(\d+)(?=\.|$)/g, '.key$1')
             ].filter((value, index, arr) => typeof value === 'string' && value.trim() && arr.indexOf(value) === index) as string[];
             for (const variant of variants) {
+              if (!this.isProviderVisibleInMetadataScope(variant, metadata)) {
+                continue;
+              }
               const mapped = this.providerKeyToRuntimeKey.get(variant);
-              if (mapped && this.providerHandles.has(mapped)) {
+              if (mapped && this.providerHandles.has(mapped) && this.isProviderVisibleInMetadataScope(mapped, metadata)) {
                 return mapped;
               }
               if (mapped) {
@@ -291,12 +291,12 @@ export class RouteCodexHttpServer {
                   mapped.replace(/\.(\d+)(?=\.|$)/g, '.key$1')
                 ].filter((value, index, arr) => typeof value === 'string' && value.trim() && arr.indexOf(value) === index) as string[];
                 for (const mappedVariant of mappedVariants) {
-                  if (this.providerHandles.has(mappedVariant)) {
+                  if (this.providerHandles.has(mappedVariant) && this.isProviderVisibleInMetadataScope(mappedVariant, metadata)) {
                     return mappedVariant;
                   }
                 }
               }
-              if (this.providerHandles.has(variant)) {
+              if (this.providerHandles.has(variant) && this.isProviderVisibleInMetadataScope(variant, metadata)) {
                 return variant;
               }
             }
@@ -321,8 +321,11 @@ export class RouteCodexHttpServer {
 
           return tryVariants(fallback) ?? fallback;
         },
-        getHandleByRuntimeKey: (runtimeKey?: string): ProviderHandle | undefined => {
+        getHandleByRuntimeKey: (runtimeKey?: string, metadata?: Record<string, unknown>): ProviderHandle | undefined => {
           if (!runtimeKey) {
+            return undefined;
+          }
+          if (!this.isProviderVisibleInMetadataScope(runtimeKey, metadata)) {
             return undefined;
           }
           const direct = this.providerHandles.get(runtimeKey);
@@ -331,14 +334,18 @@ export class RouteCodexHttpServer {
           }
           const normalizedRuntimeKey = runtimeKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
           if (normalizedRuntimeKey !== runtimeKey) {
-            const normalizedDirect = this.providerHandles.get(normalizedRuntimeKey);
+            const normalizedDirect = this.isProviderVisibleInMetadataScope(normalizedRuntimeKey, metadata)
+              ? this.providerHandles.get(normalizedRuntimeKey)
+              : undefined;
             if (normalizedDirect) {
               return normalizedDirect;
             }
           }
           const denormalizedRuntimeKey = runtimeKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
           if (denormalizedRuntimeKey !== runtimeKey) {
-            const denormalizedDirect = this.providerHandles.get(denormalizedRuntimeKey);
+            const denormalizedDirect = this.isProviderVisibleInMetadataScope(denormalizedRuntimeKey, metadata)
+              ? this.providerHandles.get(denormalizedRuntimeKey)
+              : undefined;
             if (denormalizedDirect) {
               return denormalizedDirect;
             }
@@ -347,14 +354,14 @@ export class RouteCodexHttpServer {
           if (runtimeKeyParts.length === 2) {
             const aliasScopedPrefix = `${runtimeKeyParts[0]}.${runtimeKeyParts[1]}.`;
             for (const [candidateKey, handle] of this.providerHandles.entries()) {
-              if (candidateKey.startsWith(aliasScopedPrefix)) {
+              if (candidateKey.startsWith(aliasScopedPrefix) && this.isProviderVisibleInMetadataScope(candidateKey, metadata)) {
                 return handle;
               }
             }
             const normalizedAliasScopedPrefix = aliasScopedPrefix.replace(/\.key(\d+)\./i, '.$1.');
             if (normalizedAliasScopedPrefix !== aliasScopedPrefix) {
               for (const [candidateKey, handle] of this.providerHandles.entries()) {
-                if (candidateKey.startsWith(normalizedAliasScopedPrefix)) {
+                if (candidateKey.startsWith(normalizedAliasScopedPrefix) && this.isProviderVisibleInMetadataScope(candidateKey, metadata)) {
                   return handle;
                 }
               }
@@ -382,7 +389,6 @@ export class RouteCodexHttpServer {
       },
       onRequestEnd: async ({ requestId }) => {
         this.requestActivityTracker.end(requestId);
-        await this.tickSessionDaemonInjectLoop();
       }
     });
 
@@ -474,6 +480,32 @@ export class RouteCodexHttpServer {
     return this.hubPipeline;
   }
 
+  private resolvePortSessionDir(portConfig?: PortConfig | null, localPort?: number): string | undefined {
+    const resolved = resolvePortScopedSessionDir({
+      serverId: this.serverId,
+      port: typeof portConfig?.port === 'number' ? portConfig.port : localPort,
+      routingPolicyGroup: portConfig?.routingPolicyGroup,
+    });
+    return resolved ?? undefined;
+  }
+
+  private isProviderVisibleInMetadataScope(providerKey: string | undefined, metadata?: Record<string, unknown>): boolean {
+    const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+    if (!key) {
+      return false;
+    }
+    const allowed = Array.isArray(metadata?.allowedProviders)
+      ? (metadata.allowedProviders as unknown[])
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          .map((value) => value.trim().toLowerCase())
+      : [];
+    if (allowed.length === 0) {
+      return true;
+    }
+    const normalizedKey = key.toLowerCase();
+    return allowed.some((providerId) => normalizedKey === providerId || normalizedKey.startsWith(`${providerId}.`));
+  }
+
   private async buildHubPipelineConfigForRoutingPolicyGroup(
     routingPolicyGroup: string,
     baseConfig: HubPipelineConfig,
@@ -512,24 +544,8 @@ export class RouteCodexHttpServer {
     return shouldStartManagerDaemon(this);
   }
 
-  private shouldEnableSessionDaemonInjectLoop(): boolean {
-    return shouldEnableSessionDaemonInjectLoop();
-  }
-
-  private resolveRawSessionConfig(): unknown {
-    return resolveRawSessionConfig(this);
-  }
-
   private stopSessionDaemonInjectLoop(): void {
     stopSessionDaemonInjectLoop(this);
-  }
-
-  private startSessionDaemonInjectLoop(): void {
-    startSessionDaemonInjectLoop(this);
-  }
-
-  private async tickSessionDaemonInjectLoop(): Promise<void> {
-    await tickSessionDaemonInjectLoop(this);
   }
 
   public async initialize(): Promise<void> {
@@ -854,7 +870,7 @@ export class RouteCodexHttpServer {
     return await this.requestExecutor.execute(input);
   }
 
-  private resolveRuntimeKeyForProviderBinding(bindingKey?: string): string | undefined {
+  private resolveRuntimeKeyForProviderBinding(bindingKey?: string, metadata?: Record<string, unknown>): string | undefined {
     if (!bindingKey) {
       return undefined;
     }
@@ -863,14 +879,15 @@ export class RouteCodexHttpServer {
       return undefined;
     }
     if (this.providerKeyToRuntimeKey.has(normalizedBinding)) {
-      return this.providerKeyToRuntimeKey.get(normalizedBinding);
+      const runtimeKey = this.providerKeyToRuntimeKey.get(normalizedBinding);
+      return this.isProviderVisibleInMetadataScope(runtimeKey, metadata) ? runtimeKey : undefined;
     }
-    if (this.providerHandles.has(normalizedBinding)) {
+    if (this.providerHandles.has(normalizedBinding) && this.isProviderVisibleInMetadataScope(normalizedBinding, metadata)) {
       return normalizedBinding;
     }
     const scopedPrefix = `${normalizedBinding}.`;
     for (const runtimeKey of this.providerHandles.keys()) {
-      if (runtimeKey === normalizedBinding || runtimeKey.startsWith(scopedPrefix)) {
+      if ((runtimeKey === normalizedBinding || runtimeKey.startsWith(scopedPrefix)) && this.isProviderVisibleInMetadataScope(runtimeKey, metadata)) {
         return runtimeKey;
       }
     }
@@ -878,13 +895,13 @@ export class RouteCodexHttpServer {
       const lastDot = normalizedBinding.lastIndexOf('.');
       const modelSuffix = `.${normalizedBinding.slice(lastDot + 1)}`;
       for (const runtimeKey of this.providerHandles.keys()) {
-        if (runtimeKey.endsWith(modelSuffix) && runtimeKey.startsWith(normalizedBinding.slice(0, lastDot))) {
+        if (runtimeKey.endsWith(modelSuffix) && runtimeKey.startsWith(normalizedBinding.slice(0, lastDot)) && this.isProviderVisibleInMetadataScope(runtimeKey, metadata)) {
           return runtimeKey;
         }
       }
       const parentBinding = normalizedBinding.slice(0, lastDot);
       if (parentBinding && parentBinding !== normalizedBinding) {
-        const parentResolved = this.resolveRuntimeKeyForProviderBinding(parentBinding);
+        const parentResolved = this.resolveRuntimeKeyForProviderBinding(parentBinding, metadata);
         if (parentResolved) {
           return parentResolved;
         }
@@ -904,13 +921,13 @@ export class RouteCodexHttpServer {
           continue;
         }
         const runtimeTail = runtimeSegments[runtimeSegments.length - 1].replace(/[-_]/g, '').toLowerCase();
-        if (runtimeTail === normalizedModel) {
+        if (runtimeTail === normalizedModel && this.isProviderVisibleInMetadataScope(runtimeKey, metadata)) {
           return runtimeKey;
         }
       }
       for (const runtimeKey of this.providerHandles.keys()) {
         const runtimeSegments = runtimeKey.split('.').map((part) => part.trim()).filter(Boolean);
-        if (runtimeSegments[0] === providerId && runtimeSegments.includes(alias)) {
+        if (runtimeSegments[0] === providerId && runtimeSegments.includes(alias) && this.isProviderVisibleInMetadataScope(runtimeKey, metadata)) {
           return runtimeKey;
         }
       }
@@ -918,8 +935,8 @@ export class RouteCodexHttpServer {
     return undefined;
   }
 
-  private resolveProviderHandleForBinding(bindingKey?: string): ProviderHandle | undefined {
-    const runtimeKey = this.resolveRuntimeKeyForProviderBinding(bindingKey);
+  private resolveProviderHandleForBinding(bindingKey?: string, metadata?: Record<string, unknown>): ProviderHandle | undefined {
+    const runtimeKey = this.resolveRuntimeKeyForProviderBinding(bindingKey, metadata);
     return runtimeKey ? this.providerHandles.get(runtimeKey) : undefined;
   }
 
@@ -1029,6 +1046,16 @@ export class RouteCodexHttpServer {
       ...(routeHint ? { routeHint } : {}),
       ...(allowedProviders ? { allowedProviders } : {}),
     };
+    const portSessionDir = this.resolvePortSessionDir(portConfig, localPort);
+    if (portSessionDir) {
+      const existingRt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : {};
+      metadata.__rt = {
+        ...existingRt,
+        sessionDir: portSessionDir,
+      };
+    }
     const resumeProviderKey = (() => {
       const resume = metadata.responsesResume;
       if (!resume || typeof resume !== 'object' || Array.isArray(resume)) return undefined;
@@ -1083,7 +1110,7 @@ export class RouteCodexHttpServer {
       return await this.executePipeline(nextInput);
     }
 
-    const handle = this.resolveProviderHandleForBinding(portConfig.providerBinding);
+    const handle = this.resolveProviderHandleForBinding(portConfig.providerBinding, metadata);
     if (!handle) {
       throw new Error(`Provider not found for binding: ${portConfig.providerBinding ?? ''}`);
     }
@@ -1130,7 +1157,7 @@ export class RouteCodexHttpServer {
         ? extractProviderKeysForRoutingGroup(this.userConfig, portConfig.routingPolicyGroup)
         : undefined;
 
-    const metadataForHub = {
+    const metadataForHub: Record<string, unknown> = {
       ...(input.metadata ?? {}),
       routecodexLocalPort: portConfig.port,
       routecodexPortMode: portConfig.mode,
@@ -1138,6 +1165,16 @@ export class RouteCodexHttpServer {
       routecodexRoutingPolicyGroup: portConfig.routingPolicyGroup,
       ...(allowedProviders && allowedProviders.length > 0 ? { allowedProviders } : {}),
     };
+    const portSessionDir = this.resolvePortSessionDir(portConfig, portConfig.port);
+    if (portSessionDir) {
+      const existingRt = metadataForHub.__rt && typeof metadataForHub.__rt === 'object' && !Array.isArray(metadataForHub.__rt)
+        ? (metadataForHub.__rt as Record<string, unknown>)
+        : {};
+      metadataForHub.__rt = {
+        ...existingRt,
+        sessionDir: portSessionDir,
+      };
+    }
 
     // Run Hub Pipeline to get routing decision (preserves routing truth source)
     let pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>;
@@ -1204,7 +1241,9 @@ export class RouteCodexHttpServer {
       },
       resolveProviderByRuntimeKey: (runtimeKey?: string) => {
         if (!runtimeKey) return undefined;
-        return this.providerHandles.get(runtimeKey);
+        return this.isProviderVisibleInMetadataScope(runtimeKey, metadataForHub)
+          ? this.providerHandles.get(runtimeKey)
+          : undefined;
       },
       onSnapshotBefore: (payload, ctx) => {
         this.logStage('router-direct.send.start', input.requestId, {
@@ -1216,33 +1255,12 @@ export class RouteCodexHttpServer {
           observedFields: ctx.observedFields,
           directAttempt,
         });
-        const metadataRecord = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
-          ? (input.metadata as Record<string, unknown>)
-          : {};
-        const handle = this.providerHandles.get(ctx.providerKey) ?? this.providerHandles.get(target.runtimeKey ?? target.providerKey);
-        const modelForLog = readTrimmedString(handle?.runtime?.defaultModel)
-          ?? readTrimmedString((payload as Record<string, unknown> | undefined)?.model)
-          ?? readTrimmedString((providerPayload as Record<string, unknown> | undefined)?.model);
-        emitRequestExecutorVirtualRouterConcurrencyLog({
-          sessionId: readTrimmedString(metadataRecord.sessionId) ?? readTrimmedString(metadataRecord.conversationId),
-          projectPath:
-            readTrimmedString(metadataRecord.clientWorkdir)
-            ?? readTrimmedString(metadataRecord.client_workdir)
-            ?? readTrimmedString(metadataRecord.workdir)
-            ?? readTrimmedString(metadataRecord.cwd),
-          routeName: ctx.routingDecision?.routeName,
-          poolId: readTrimmedString((ctx.routingDecision as Record<string, unknown> | undefined)?.poolId),
-          providerKey: ctx.providerKey,
-          model: modelForLog,
-          reason: readTrimmedString((ctx.routingDecision as Record<string, unknown> | undefined)?.reasoning),
-          activeInFlight: 1,
-          maxInFlight: 1,
-        });
       },
       onSnapshotAfter: (response, ctx) => {
         const responseRecord =
           response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
-        const handle = this.providerHandles.get(ctx.providerKey) ?? this.providerHandles.get(target.runtimeKey ?? target.providerKey);
+        const handle = this.resolveProviderHandleForBinding(ctx.providerKey, metadataForHub)
+          ?? this.resolveProviderHandleForBinding(target.runtimeKey ?? target.providerKey, metadataForHub);
         if (handle) {
           const normalized = normalizeProviderResponse(response);
           const usage = extractUsageFromResult(normalized, {
@@ -1255,26 +1273,6 @@ export class RouteCodexHttpServer {
             capturedUsage = usage as Record<string, unknown>;
           }
         }
-        const meta = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
-          ? (input.metadata as Record<string, unknown>)
-          : {};
-        emitRequestExecutorVirtualRouterConcurrencyLog({
-          sessionId: readTrimmedString(meta.sessionId as string | undefined) ?? readTrimmedString(meta.conversationId as string | undefined),
-          projectPath:
-            readTrimmedString(meta.clientWorkdir as string | undefined)
-            ?? readTrimmedString(meta.client_workdir as string | undefined)
-            ?? readTrimmedString(meta.workdir as string | undefined)
-            ?? readTrimmedString(meta.cwd as string | undefined),
-          routeName: ctx.routingDecision?.routeName,
-          providerKey: ctx.providerKey,
-          model: readTrimmedString(handle?.runtime?.defaultModel)
-            ?? readTrimmedString((responseRecord?.body as Record<string, unknown> | undefined)?.model as string | undefined)
-            ?? readTrimmedString((providerPayload as Record<string, unknown> | undefined)?.model as string | undefined),
-          reason: readTrimmedString((ctx.routingDecision as Record<string, unknown> | undefined)?.reasoning as string | undefined),
-          activeInFlight: 1,
-          maxInFlight: 1,
-          usage: capturedUsage,
-        });
         this.logStage('router-direct.send.completed', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
@@ -1432,7 +1430,10 @@ export class RouteCodexHttpServer {
       },
     );
     const providerBinding = portConfig.providerBinding;
-    const runtimeKey = this.resolveRuntimeKeyForProviderBinding(providerBinding);
+    const metadata = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+      ? (input.metadata as Record<string, unknown>)
+      : undefined;
+    const runtimeKey = this.resolveRuntimeKeyForProviderBinding(providerBinding, metadata);
     this.logStage('port_pipeline.dispatch', input.requestId, {
       port: portConfig.port,
       mode: portConfig.mode,
@@ -1451,10 +1452,10 @@ export class RouteCodexHttpServer {
       },
       {
         portConfig,
-        resolveProvider: (bindingKey: string) => this.resolveProviderHandleForBinding(bindingKey),
+        resolveProvider: (bindingKey: string) => this.resolveProviderHandleForBinding(bindingKey, metadata),
         detectInboundProtocol: detectInboundProtocolFromRequest,
         preparePayload: (providerPayload, context) => {
-          const handle = this.resolveProviderHandleForBinding(context.providerKey);
+          const handle = this.resolveProviderHandleForBinding(context.providerKey, metadata);
           if (!handle) {
             throw new Error(`Provider not found for binding: ${context.providerKey}`);
           }
@@ -1466,7 +1467,7 @@ export class RouteCodexHttpServer {
             providerFamily: handle.providerFamily,
             providerProtocol: handle.providerProtocol,
             pipelineId: context.providerKey,
-            runtimeKey: this.resolveRuntimeKeyForProviderBinding(context.providerKey),
+            runtimeKey: this.resolveRuntimeKeyForProviderBinding(context.providerKey, metadata),
             metadata: input.metadata,
             compatibilityProfile: handle.runtime?.compatibilityProfile,
           });
@@ -1491,7 +1492,7 @@ export class RouteCodexHttpServer {
                 : undefined,
           });
           // Extract usage/cache from response inline in the output hook
-          const handle = this.resolveProviderHandleForBinding(context.providerKey);
+          const handle = this.resolveProviderHandleForBinding(context.providerKey, metadata);
           if (handle) {
             const normalized = normalizeProviderResponse(response);
             const usage = extractUsageFromResult(normalized, {

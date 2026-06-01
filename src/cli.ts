@@ -34,7 +34,6 @@ import { registerCodeCommand } from './cli/register/code-command.js';
 import { registerClaudeCommand } from './cli/register/claude-command.js';
 import { registerCodexCommand } from './cli/register/codex-command.js';
 import { registerCamoufoxCommand } from './cli/register/camoufox-command.js';
-import { registerHeartbeatCommand } from './cli/register/heartbeat-command.js';
 import { registerSessionInjectCommand } from './cli/register/session-inject-command.js';
 import { registerSessionAdminCommand } from './cli/register/session-admin-command.js';
 import { registerGuardianDaemonCommand } from './cli/register/guardian-daemon-command.js';
@@ -356,18 +355,6 @@ const launcherContext = {
 
 registerClaudeCommand(program, launcherContext);
 registerCodexCommand(program, launcherContext);
-
-// External tmux injection command
-registerHeartbeatCommand(program, {
-  isDevPackage: IS_DEV_PACKAGE,
-  defaultDevPort: DEFAULT_DEV_PORT,
-  logger,
-  log: (line) => console.log(line),
-  loadConfig: (explicitPath?: string) => loadRouteCodexConfig(explicitPath),
-  fetch,
-  env: process.env,
-  exit: (code) => process.exit(code)
-});
 
 registerSessionInjectCommand(program, {
   isDevPackage: IS_DEV_PACKAGE,

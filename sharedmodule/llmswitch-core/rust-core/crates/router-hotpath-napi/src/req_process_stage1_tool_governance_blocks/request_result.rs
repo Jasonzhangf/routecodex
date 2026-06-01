@@ -1,6 +1,8 @@
 use serde_json::{json, Map, Value};
 
-use crate::hub_heartbeat_directives::HeartbeatDirectiveRuntimeSummary;
+use crate::hub_tool_session_compat::{
+    filter_namespace_mcp_aggregator_tool_definitions, normalize_tool_session_messages,
+};
 use crate::shared_json_utils::{as_object, normalize_record};
 use crate::shared_response_compat::{sanitize_chat_process_messages_value, SanitizeMessagesOutput};
 
@@ -9,10 +11,14 @@ use super::request_sanitizer::strip_generic_markers_from_request;
 pub(crate) fn apply_chat_process_request_sanitizer(request: &mut Map<String, Value>) {
     strip_generic_markers_from_request(request);
     let sanitized = sanitize_chat_process_messages_value(&Value::Object(request.clone()));
+    let normalized_messages = normalize_tool_session_messages(sanitized.messages.clone());
     request.insert(
         "messages".to_string(),
-        Value::Array(sanitized.messages.clone()),
+        Value::Array(normalized_messages),
     );
+    if let Some(tools) = request.get_mut("tools") {
+        filter_namespace_mcp_aggregator_tool_definitions(tools);
+    }
     attach_chat_process_sanitizer_metadata(request, &sanitized);
 }
 
@@ -133,8 +139,6 @@ pub(crate) fn build_node_result(
 pub(crate) fn build_processed_request(
     governed: Value,
     metadata: &Map<String, Value>,
-    heartbeat_directive: Option<HeartbeatDirectiveRuntimeSummary>,
-    clock_runtime: Option<Value>,
 ) -> Value {
     let mut processed = normalize_record(governed);
     let stream_enabled = processed
@@ -172,14 +176,6 @@ pub(crate) fn build_processed_request(
           "chunkCount": 0
         }),
     );
-    if let Some(summary) = heartbeat_directive {
-        if let Ok(value) = serde_json::to_value(summary) {
-            processing_metadata.insert("heartbeatDirective".to_string(), value);
-        }
-    }
-    if let Some(summary) = clock_runtime {
-        processing_metadata.insert("clockRuntime".to_string(), summary);
-    }
     processed.insert(
         "processingMetadata".to_string(),
         Value::Object(processing_metadata),

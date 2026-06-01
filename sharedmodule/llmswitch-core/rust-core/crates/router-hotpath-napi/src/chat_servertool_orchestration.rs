@@ -27,12 +27,6 @@ struct ChatWebSearchPlanOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ChatClockPlanOutput {
-    should_inject: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct ChatContinueExecutionPlanOutput {
     should_inject: bool,
 }
@@ -41,7 +35,6 @@ struct ChatContinueExecutionPlanOutput {
 #[serde(rename_all = "camelCase")]
 struct ChatServerToolBundlePlanOutput {
     web_search: ChatWebSearchPlanOutput,
-    clock: ChatClockPlanOutput,
     continue_execution: ChatContinueExecutionPlanOutput,
 }
 
@@ -1170,44 +1163,6 @@ fn resolve_chat_web_search_plan(
     }
 }
 
-fn read_clock_enabled(raw_clock: Option<&Value>) -> bool {
-    match raw_clock {
-        None => false,
-        Some(Value::Object(row)) => {
-            let enabled = row.get("enabled");
-            if enabled == Some(&Value::Bool(true)) {
-                return true;
-            }
-            if let Some(text) = enabled.and_then(|v| v.as_str()) {
-                return text.trim().eq_ignore_ascii_case("true");
-            }
-            if let Some(number) = enabled.and_then(|v| v.as_i64()) {
-                return number == 1;
-            }
-            false
-        }
-        _ => false,
-    }
-}
-
-fn resolve_chat_clock_plan(runtime_metadata: &Value) -> ChatClockPlanOutput {
-    let server_tool_followup = read_runtime_metadata_bool(runtime_metadata, "serverToolFollowup");
-    let clock_followup_inject_tool =
-        read_runtime_metadata_bool(runtime_metadata, "clockFollowupInjectTool");
-    if server_tool_followup && !clock_followup_inject_tool {
-        return ChatClockPlanOutput {
-            should_inject: false,
-        };
-    }
-
-    let should_inject = read_clock_enabled(
-        runtime_metadata
-            .as_object()
-            .and_then(|obj| obj.get("clock")),
-    );
-    ChatClockPlanOutput { should_inject }
-}
-
 fn resolve_continue_execution_plan(
     runtime_metadata: &Value,
     has_active_stop_message: bool,
@@ -1237,14 +1192,6 @@ pub fn plan_chat_web_search_operations_json(
 }
 
 #[napi]
-pub fn plan_chat_clock_operations_json(runtime_metadata_json: String) -> NapiResult<String> {
-    let runtime_metadata: Value = serde_json::from_str(&runtime_metadata_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_chat_clock_plan(&runtime_metadata);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
 pub fn plan_continue_execution_operations_json(
     runtime_metadata_json: String,
     has_active_stop_message: bool,
@@ -1268,7 +1215,6 @@ pub fn plan_chat_servertool_orchestration_bundle_json(
 
     let output = ChatServerToolBundlePlanOutput {
         web_search: resolve_chat_web_search_plan(&request, &runtime_metadata),
-        clock: resolve_chat_clock_plan(&runtime_metadata),
         continue_execution: resolve_continue_execution_plan(
             &runtime_metadata,
             has_active_stop_message,

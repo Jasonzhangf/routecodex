@@ -203,7 +203,8 @@ describe('hub pipeline stage residue audit', () => {
     const source = fs.readFileSync(filePath, 'utf8');
 
     expect(source).toContain('resolveProviderResponseContextSignals');
-    expect(source).toContain('maybeCommitClockReservationFromContext');
+    expect(source).not.toContain('maybeCommitClockReservationFromContext');
+    expect(source).not.toContain('ClockReservation');
     expect(source).not.toContain('response-mappers');
     expect(source).not.toContain('ResponseMapper');
     expect(source).not.toContain('ProviderResponsePlan');

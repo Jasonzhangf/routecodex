@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { readJsonFile, writeJsonFileAtomic } from './clock/io.js';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
 import { inspectOpenAiChatToolHistory } from '../conversion/shared/openai-message-normalize.js';
 import { isSyntheticRouteCodexToolCallId } from '../conversion/shared/openai-message-normalize.js';
@@ -24,6 +23,17 @@ export interface PendingServerToolInjection {
 }
 
 const DEFAULT_PENDING_MAX_AGE_MS = 30 * 60 * 1000;
+
+async function readJsonFile(file: string): Promise<unknown> {
+  return JSON.parse(await fs.readFile(file, 'utf8'));
+}
+
+async function writeJsonFileAtomic(file: string, payload: unknown): Promise<void> {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  await fs.rename(tmp, file);
+}
 
 function readSessionDirEnv(): string {
   const envValue = String(

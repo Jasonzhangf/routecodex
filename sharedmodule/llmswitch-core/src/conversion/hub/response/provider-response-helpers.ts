@@ -1,9 +1,7 @@
 import type { AdapterContext } from '../types/chat-envelope.js';
 import { readRuntimeMetadata } from '../../runtime-metadata.js';
-import { commitClockReservation, resolveClockConfig } from '../../../servertool/clock/task-store.js';
 import {
-  resolveProviderResponseContextHelpersWithNative,
-  resolveClockReservationFromContextWithNative
+  resolveProviderResponseContextHelpersWithNative
 } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 
 export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
@@ -46,25 +44,4 @@ export function resolveProviderResponseContextSignals(
         : undefined,
     clientFacingRequestId
   };
-}
-
-export async function maybeCommitClockReservationFromContext(
-  context: AdapterContext
-): Promise<void> {
-  try {
-    const runtimeMeta = readRuntimeMetadata(context as unknown as Record<string, unknown>);
-    const clockConfig = resolveClockConfig((runtimeMeta as any)?.clock);
-    if (!clockConfig) {
-      return;
-    }
-    const reservation = resolveClockReservationFromContextWithNative(
-      context as unknown as Record<string, unknown>
-    );
-    if (!reservation) {
-      return;
-    }
-    await commitClockReservation(reservation as any, clockConfig);
-  } catch {
-    // best-effort: never break response conversion due to clock persistence errors
-  }
 }

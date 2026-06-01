@@ -7,11 +7,6 @@ const mockStartHeartbeatDaemonIfNeededSnapshot = jest.fn();
 const mockRunHeartbeatDaemonTickSnapshot = jest.fn();
 
 const mockBridgeModule = () => ({
-  resolveClockConfigSnapshot: mockResolveClockConfigSnapshot,
-  startClockDaemonIfNeededSnapshot: mockStartClockDaemonIfNeededSnapshot,
-  resolveHeartbeatConfigSnapshot: mockResolveHeartbeatConfigSnapshot,
-  startHeartbeatDaemonIfNeededSnapshot: mockStartHeartbeatDaemonIfNeededSnapshot,
-  runHeartbeatDaemonTickSnapshot: mockRunHeartbeatDaemonTickSnapshot
 });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
