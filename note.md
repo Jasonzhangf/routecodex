@@ -13976,3 +13976,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - HTTP blackbox: `tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts` passed 7/7, including unknown previous_response_id, mismatched resumed tool id, persisted valid resume, Anthropic pairing, MCP filter, and OpenAI chat ordering.
 - Stage/Rust/build: `cargo test ... build_compat_result_strips_top_level_internal_fields` passed; `cargo test ... request_codec_rejects_orphan_tool_output_with_previous_response_id` passed; `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` passed 50/50; `npx tsc --noEmit --pretty false --skipLibCheck` passed; `npm run build:min` passed.
 - Caveat: broad `cargo test -p router-hotpath-napi req_outbound_stage3_compat -- --nocapture` still has existing/non-target failures in resp/profile tests; not fixed in this slice.
+
+## 2026-06-02 Hub Pipeline Phase 6A-1 request typed wrappers
+- Added request-side typed entrypoint wrappers only: `run_hub_req_inbound_02_standardized_entrypoint`, `run_hub_req_chatprocess_03_governed_entrypoint`, `run_hub_req_outbound_05_provider_semantic_entrypoint` in `hub_pipeline_types/request_typed_entrypoints.rs`.
+- Wrappers only delegate to existing transparent type builders and are not wired into `hub_pipeline.rs`, `hub_pipeline_lib/engine.rs`, or NAPI `lib.rs` live runtime paths.
+- Validation: `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml request_typed_entrypoints --lib` passed 2/2; request typed entrypoint + request topology Jest passed 10/10; `npm run -s build --prefix sharedmodule/llmswitch-core` passed; `git diff --check` passed.

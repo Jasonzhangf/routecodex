@@ -12,6 +12,7 @@ mod hub_resp_inbound_02_parsed;
 mod hub_resp_outbound_04_client_semantic;
 mod meta_error_carriers;
 mod provider_req_outbound_06_wire_payload;
+mod request_typed_entrypoints;
 mod vr_route_04_selected_target;
 
 pub(crate) use hub_req_chatprocess_03_governed::{
@@ -38,6 +39,10 @@ pub(crate) use meta_error_carriers::{
 };
 pub(crate) use provider_req_outbound_06_wire_payload::{
     build_provider_req_outbound_06_from_hub_req_outbound_05, ProviderReqOutbound06WirePayload,
+};
+pub(crate) use request_typed_entrypoints::{
+    run_hub_req_chatprocess_03_governed_entrypoint, run_hub_req_inbound_02_standardized_entrypoint,
+    run_hub_req_outbound_05_provider_semantic_entrypoint,
 };
 pub(crate) use vr_route_04_selected_target::{
     build_vr_route_04_from_hub_req_chatprocess_03, VrRoute04SelectedTarget,

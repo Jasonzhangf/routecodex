@@ -2035,3 +2035,7 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 - Verified transparent contract wrappers exist for `VrRoute04SelectedTarget`, `ProviderReqOutbound06WirePayload`, `MetaReq02RuntimeCarrier`, and `ErrorErr03RuntimeClassified` in Rust `hub_pipeline_types/`; they are not wired into runtime flow and preserve route selection/provider wire/client response behavior.
 - Red-test truth: `hub_pipeline_vr_provider_boundary_contract`, `hub_pipeline_meta_error_carrier_contract`, and `hub_pipeline_type_residue_contract` lock VR no-payload-patch, provider no-Hub-tool-governance/no-metadata-wire, Meta/Error carrier isolation, and no unsafe deletion pretending.
 - Phase5 deletion result: no safe live-path deletion yet; current `req_process_*` / `resp_process_*` Rust stage files remain live until a later migration proves typed `ReqChatProcess` / `RespChatProcess` entrypoints own the path.
+
+## 2026-06-02 Hub Pipeline Phase 6A-1 request typed wrappers
+- Verified request typed wrappers exist in `hub_pipeline_types/request_typed_entrypoints.rs` and only delegate to existing transparent type builders. They are deliberately not wired into `hub_pipeline.rs`, `hub_pipeline_lib/engine.rs`, or NAPI `lib.rs`, so live request flow/provider wire behavior is unchanged.
+- Red-test truth: `tests/red-tests/hub_pipeline_request_typed_entrypoint_contract.test.ts` locks wrapper names, forbids runtime-stage logic inside wrappers, and forbids live runtime path wiring in Phase 6A-1.

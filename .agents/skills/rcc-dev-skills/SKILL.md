@@ -1740,3 +1740,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - VR/provider 边界只允许透明 contract：`HubReqChatProcess03Governed -> VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload`；不得在 contract 阶段接入 selection/encoder runtime 或 patch payload。
 - Meta/Error carrier 必须独立于正常 req/resp payload：`MetaReq02RuntimeCarrier`、`ErrorErr03RuntimeClassified` 只能作 side-car；红测必须禁止 provider wire/client body metadata 与 success-wrapped error。
 - Phase5 当前无安全 live-path 删除；`req_process_*` / `resp_process_*` Rust stage 仍是 live path，删除前必须先完成 typed entrypoint 迁移并让 residue red test 覆盖旧直连 import。
+
+## 2026-06-02 Hub Pipeline Phase 6A-1 request typed wrapper 精华
+- request typed wrappers 只允许做 type-boundary delegation：`run_hub_req_inbound_02_standardized_entrypoint`、`run_hub_req_chatprocess_03_governed_entrypoint`、`run_hub_req_outbound_05_provider_semantic_entrypoint`；不得调用 runtime stage、route selection、provider encoder。
+- Phase 6A-1 必须保持未接 live path；红测 `hub_pipeline_request_typed_entrypoint_contract` 要禁止 `hub_pipeline.rs` / `hub_pipeline_lib/engine.rs` / `lib.rs` 引用这些 wrapper。
