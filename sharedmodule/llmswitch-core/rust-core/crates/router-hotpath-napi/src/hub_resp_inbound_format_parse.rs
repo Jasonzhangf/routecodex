@@ -201,7 +201,9 @@ fn materialize_openai_chat_sse_body_text(body_text: &str) -> Result<Value, Strin
         if created.is_none() {
             created = event_row.get("created").cloned();
         }
-        if event_row.get("usage").is_some() && !event_row.get("usage").unwrap_or(&Value::Null).is_null() {
+        if event_row.get("usage").is_some()
+            && !event_row.get("usage").unwrap_or(&Value::Null).is_null()
+        {
             usage = event_row.get("usage").cloned();
         }
         let Some(event_choices) = event_row.get("choices").and_then(Value::as_array) else {
@@ -213,7 +215,12 @@ fn materialize_openai_chat_sse_body_text(body_text: &str) -> Result<Value, Strin
             };
             let index = choice_row.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
             let choice = choices.entry(index).or_default();
-            if choice_row.get("finish_reason").is_some() && !choice_row.get("finish_reason").unwrap_or(&Value::Null).is_null() {
+            if choice_row.get("finish_reason").is_some()
+                && !choice_row
+                    .get("finish_reason")
+                    .unwrap_or(&Value::Null)
+                    .is_null()
+            {
                 choice.finish_reason = choice_row.get("finish_reason").cloned();
             }
             let Some(delta) = choice_row.get("delta").and_then(Value::as_object) else {
@@ -235,12 +242,19 @@ fn materialize_openai_chat_sse_body_text(body_text: &str) -> Result<Value, Strin
                     let Some(tool_call_row) = tool_call_value.as_object() else {
                         continue;
                     };
-                    let tool_index = tool_call_row.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let tool_index = tool_call_row
+                        .get("index")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize;
                     let tool_call = choice.tool_calls.entry(tool_index).or_default();
-                    tool_call.id = read_trimmed_string(tool_call_row.get("id")).or(tool_call.id.take());
-                    tool_call.kind = read_trimmed_string(tool_call_row.get("type")).or(tool_call.kind.take());
-                    if let Some(function) = tool_call_row.get("function").and_then(Value::as_object) {
-                        tool_call.function_name = read_trimmed_string(function.get("name")).or(tool_call.function_name.take());
+                    tool_call.id =
+                        read_trimmed_string(tool_call_row.get("id")).or(tool_call.id.take());
+                    tool_call.kind =
+                        read_trimmed_string(tool_call_row.get("type")).or(tool_call.kind.take());
+                    if let Some(function) = tool_call_row.get("function").and_then(Value::as_object)
+                    {
+                        tool_call.function_name = read_trimmed_string(function.get("name"))
+                            .or(tool_call.function_name.take());
                         if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
                             tool_call.function_arguments.push_str(arguments);
                         }
@@ -276,7 +290,9 @@ fn materialize_openai_chat_sse_body_text(body_text: &str) -> Result<Value, Strin
                     Value::Object(Map::from_iter([
                         (
                             "id".to_string(),
-                            Value::String(tool_call.id.unwrap_or_else(|| format!("call_{tool_index}"))),
+                            Value::String(
+                                tool_call.id.unwrap_or_else(|| format!("call_{tool_index}")),
+                            ),
                         ),
                         (
                             "type".to_string(),
@@ -287,7 +303,11 @@ fn materialize_openai_chat_sse_body_text(body_text: &str) -> Result<Value, Strin
                             Value::Object(Map::from_iter([
                                 (
                                     "name".to_string(),
-                                    Value::String(tool_call.function_name.unwrap_or_else(|| "tool".to_string())),
+                                    Value::String(
+                                        tool_call
+                                            .function_name
+                                            .unwrap_or_else(|| "tool".to_string()),
+                                    ),
                                 ),
                                 (
                                     "arguments".to_string(),
@@ -305,7 +325,9 @@ fn materialize_openai_chat_sse_body_text(body_text: &str) -> Result<Value, Strin
             ("message".to_string(), Value::Object(message)),
             (
                 "finish_reason".to_string(),
-                choice.finish_reason.unwrap_or(Value::String("stop".to_string())),
+                choice
+                    .finish_reason
+                    .unwrap_or(Value::String("stop".to_string())),
             ),
         ])));
     }
@@ -315,8 +337,14 @@ fn materialize_openai_chat_sse_body_text(body_text: &str) -> Result<Value, Strin
         "id".to_string(),
         Value::String(response_id.unwrap_or_else(|| "chatcmpl_sse".to_string())),
     );
-    response.insert("object".to_string(), Value::String("chat.completion".to_string()));
-    response.insert("model".to_string(), Value::String(model.unwrap_or_default()));
+    response.insert(
+        "object".to_string(),
+        Value::String("chat.completion".to_string()),
+    );
+    response.insert(
+        "model".to_string(),
+        Value::String(model.unwrap_or_default()),
+    );
     response.insert("choices".to_string(), Value::Array(materialized_choices));
     if let Some(created) = created {
         response.insert("created".to_string(), created);
@@ -481,11 +509,53 @@ mod tests {
 
         let result = parse_resp_format_envelope(input).unwrap();
         assert_eq!(result.envelope.format, "openai-chat");
-        assert_eq!(result.envelope.metadata.as_ref().unwrap()["model"], "MiniMax-M2.7");
-        assert_eq!(result.envelope.payload["choices"][0]["message"]["role"], "assistant");
-        assert_eq!(result.envelope.payload["choices"][0]["message"]["content"], "ok");
-        assert_eq!(result.envelope.payload["choices"][0]["message"]["reasoning_content"], "think");
-        assert_eq!(result.envelope.payload["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(
+            result.envelope.metadata.as_ref().unwrap()["model"],
+            "MiniMax-M2.7"
+        );
+        assert_eq!(
+            result.envelope.payload["choices"][0]["message"]["role"],
+            "assistant"
+        );
+        assert_eq!(
+            result.envelope.payload["choices"][0]["message"]["content"],
+            "ok"
+        );
+        assert_eq!(
+            result.envelope.payload["choices"][0]["message"]["reasoning_content"],
+            "think"
+        );
+        assert_eq!(
+            result.envelope.payload["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+    }
+
+    #[test]
+    fn test_parse_openai_chat_sse_minimax_usage_empty_choices_tail() {
+        let body_text = concat!(
+            "data: {\"id\":\"066c6f5b6c8765d17c5e3449736a8c00\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>\\nThe user\",\"role\":\"assistant\",\"name\":\"MiniMax AI\",\"audio_content\":\"\"}}],\"created\":1780300891,\"model\":\"MiniMax-M2.7\",\"object\":\"chat.completion.chunk\",\"usage\":null}\n\n",
+            "data: {\"id\":\"066c6f5b6c8765d17c5e3449736a8c00\",\"choices\":[{\"finish_reason\":\"length\",\"index\":0,\"delta\":{\"content\":\" says ping\\n</think>\\n\",\"role\":\"assistant\",\"name\":\"MiniMax AI\",\"audio_content\":\"\"}}],\"created\":1780300891,\"model\":\"MiniMax-M2.7\",\"object\":\"chat.completion.chunk\",\"usage\":null}\n\n",
+            "data: {\"id\":\"066c6f5b6c8765d17c5e3449736a8c00\",\"choices\":[],\"created\":1780300891,\"model\":\"MiniMax-M2.7\",\"object\":\"chat.completion.chunk\",\"usage\":{\"total_tokens\":58,\"prompt_tokens\":42,\"completion_tokens\":16,\"completion_tokens_details\":{\"reasoning_tokens\":16}},\"base_resp\":{\"status_code\":0,\"status_msg\":\"\"}}\n\n"
+        );
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "mode": "sse",
+                "bodyText": body_text
+            }),
+            protocol: "openai-chat".to_string(),
+        };
+
+        let result = parse_resp_format_envelope(input).unwrap();
+        assert_eq!(
+            result.envelope.payload["choices"][0]["finish_reason"],
+            "length"
+        );
+        assert_eq!(result.envelope.payload["usage"]["total_tokens"], 58);
+        assert_eq!(
+            result.envelope.payload["choices"][0]["message"]["role"],
+            "assistant"
+        );
     }
 
     #[test]
@@ -555,7 +625,9 @@ mod tests {
 
         let result = parse_resp_format_envelope(input);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Unsupported response protocol"));
+        assert!(result
+            .unwrap_err()
+            .contains("Unsupported response protocol"));
     }
 
     #[test]

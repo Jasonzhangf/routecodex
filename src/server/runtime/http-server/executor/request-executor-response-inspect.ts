@@ -3,13 +3,10 @@
  *
  * Extracted from request-executor.ts.
  * Pure inspection functions: check text presence, detect markers,
- * validate payload structure, emit concurrency logs, etc.
+ * validate payload structure, etc.
  */
 
 import { readString } from './request-executor-error-shared.js';
-import { recordVirtualRouterHitRollup } from './log-rollup.js';
-
-type StoplessLogMode = 'on' | 'off' | 'endless';
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -89,34 +86,6 @@ export function extractTextFromResponsesOutputItem(item: unknown): string {
     return chunks.join('');
   }
   return '';
-}
-
-export function emitVirtualRouterConcurrencyLog(args: {
-  sessionId?: string;
-  projectPath?: string;
-  routeName?: string;
-  poolId?: string;
-  providerKey?: string;
-  model?: string;
-  reason?: string;
-  stoplessMode?: StoplessLogMode;
-  stoplessArmed?: boolean;
-  activeInFlight: number;
-  maxInFlight: number;
-}): void {
-  recordVirtualRouterHitRollup({
-    routeName: args.routeName,
-    poolId: args.poolId,
-    providerKey: args.providerKey,
-    model: args.model,
-    sessionId: args.sessionId,
-    projectPath: args.projectPath,
-    reason: args.reason,
-    stoplessMode: args.stoplessMode,
-    stoplessArmed: args.stoplessArmed,
-    activeInFlight: args.activeInFlight,
-    maxInFlight: args.maxInFlight
-  });
 }
 
 export function hasNonEmptyToolCalls(value: unknown): boolean {

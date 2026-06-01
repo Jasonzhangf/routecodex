@@ -1010,9 +1010,21 @@ mod tests {
             );
 
         // 429 cooldown returns HTTP_429 (has min_recoverable_cooldown_ms), not PROVIDER_NOT_AVAILABLE
-        assert!(err.contains("HTTP_429"), "expected HTTP_429 error but got: {}", err);
-        assert!(err.contains("retryable"), "expected retryable error but got: {}", err);
-        assert!(err.contains("retryAfterMs"), "expected retryAfterMs but got: {}", err);
+        assert!(
+            err.contains("HTTP_429"),
+            "expected HTTP_429 error but got: {}",
+            err
+        );
+        assert!(
+            err.contains("retryable"),
+            "expected retryable error but got: {}",
+            err
+        );
+        assert!(
+            err.contains("retryAfterMs"),
+            "expected retryAfterMs but got: {}",
+            err
+        );
     }
 
     #[test]
@@ -1300,7 +1312,10 @@ mod tests {
             assert_eq!(retripped.state, "tripped");
             assert_eq!(retripped.failure_count, 3);
             // 503 calls trip_provider directly; cooldown is computed fresh to next midnight.
-            assert!(retripped.cooldown_expires_at.is_some(), "503 should set cooldown to next midnight");
+            assert!(
+                retripped.cooldown_expires_at.is_some(),
+                "503 should set cooldown to next midnight"
+            );
         });
 
         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
@@ -1371,5 +1386,88 @@ mod tests {
         });
 
         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
+    }
+
+    #[test]
+    fn first_request_success_clears_persisted_503_cooldown() {
+        // RED: After first request success, persisted 503 cooldown should be cleared.
+        let provider_key = "sdfv.key1.gpt-5.5";
+        let mut core = build_test_core_with_providers(&[
+            (provider_key, "gpt-5.5"),
+            ("cc.key1.gpt-5.5", "gpt-5.5"),
+        ]);
+
+        // Trip with persisted 503 cooldown
+        core.health_manager.trip_provider(
+            provider_key,
+            Some("__http_503_daily_cooldown__".to_string()),
+            Some(86_400_000),
+            now_ms(),
+        );
+        let tripped = provider_state(&core, provider_key);
+        assert_eq!(tripped.state, "tripped");
+
+        // Simulate first request success
+        core.handle_provider_success(&json!({
+            "runtime": {
+                "requestId": "first-live-request",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            },
+            "timestamp": now_ms()
+        }));
+
+        let healed = provider_state(&core, provider_key);
+        assert_eq!(
+            healed.state, "healthy",
+            "first request success should clear cooldown"
+        );
+        assert_eq!(
+            healed.cooldown_expires_at, None,
+            "cooldown should be cleared"
+        );
+    }
+
+    #[test]
+    fn first_request_503_failure_reapplies_cooldown() {
+        // RED: After first request fails 503, cooldown should be reapplied.
+        let provider_key = "sdfv.key1.gpt-5.5";
+        let mut core = build_test_core_with_providers(&[
+            (provider_key, "gpt-5.5"),
+            ("cc.key1.gpt-5.5", "gpt-5.5"),
+        ]);
+
+        // Trip with persisted 503 cooldown
+        core.health_manager.trip_provider(
+            provider_key,
+            Some("__http_503_daily_cooldown__".to_string()),
+            Some(86_400_000),
+            now_ms(),
+        );
+
+        // Simulate first request failure
+        core.handle_provider_failure(&json!({
+            "code": "HTTP_503",
+            "message": "upstream unavailable",
+            "stage": "provider.send",
+            "status": 503,
+            "runtime": {
+                "requestId": "first-live-request-fail",
+                "providerKey": provider_key
+            },
+            "details": {
+                "routePoolSize": 2
+            }
+        }));
+
+        let retripped = provider_state(&core, provider_key);
+        assert_eq!(
+            retripped.state, "tripped",
+            "first request failure should reapply cooldown"
+        );
+        assert!(
+            retripped.cooldown_expires_at.is_some(),
+            "cooldown should be set"
+        );
     }
 }

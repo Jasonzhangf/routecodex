@@ -355,6 +355,132 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     }
   });
 
+  it('returns visible blocked exec_command feedback from HTTP /v1/responses for directory git checkout', async () => {
+    const pipelineExecute = jest.fn(async () => ({
+      providerPayload: { model: 'claude-sonnet-4-5', messages: [{ role: 'user', content: 'restore src dir' }] },
+      standardizedRequest: { model: 'claude-sonnet-4-5', messages: [{ role: 'user', content: 'restore src dir' }] },
+      processedRequest: {
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: 'restore src dir' }],
+        semantics: {
+          tools: {
+            clientToolsRaw: [
+              {
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  parameters: {
+                    type: 'object',
+                    properties: { cmd: { type: 'string' }, workdir: { type: 'string' } },
+                    required: ['cmd'],
+                    additionalProperties: false
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      target: {
+        providerKey: 'mock.anthropic.responses',
+        providerType: 'anthropic',
+        outboundProfile: 'anthropic-messages',
+        runtimeKey: 'runtime:anthropic:responses',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    }));
+
+    const processIncoming = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'msg_http_blocked_checkout_1',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-4-5',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'call_blocked_checkout_1',
+            name: 'exec_command',
+            input: {
+              cmd: 'git checkout -- sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/',
+              workdir: '/workspace'
+            }
+          }
+        ],
+        stop_reason: 'tool_use'
+      }
+    }));
+
+    const handle = createProviderHandle({
+      runtimeKey: 'runtime:anthropic:responses',
+      providerKey: 'mock.anthropic.responses',
+      providerType: 'anthropic',
+      providerProtocol: 'anthropic-messages',
+      processIncoming
+    });
+
+    const executor = createRequestExecutor({
+      runtimeManager: {
+        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
+        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
+      },
+      getHubPipeline: () => ({
+        execute: pipelineExecute,
+        updateVirtualRouterConfig: jest.fn(),
+        dispose: jest.fn()
+      } as any),
+      getModuleDependencies: () => ({
+        errorHandlingCenter: { handleError: jest.fn(async () => ({ success: true })) }
+      } as any),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    });
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses', (req, res) => {
+      void handleResponses(req as any, res as any, {
+        executePipeline: (input) => executor.execute(input as any),
+        errorHandling: null
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const result = await fetchJson(baseUrl, '/v1/responses', {
+        model: 'claude-sonnet-4-5',
+        input: 'restore src dir',
+        tools: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: {
+              type: 'object',
+              properties: { cmd: { type: 'string' }, workdir: { type: 'string' } },
+              required: ['cmd'],
+              additionalProperties: false
+            }
+          }
+        ]
+      });
+
+      expect(result.status).toBe(200);
+      const functionCall = result.payload?.output?.find((item: any) => item?.type === 'function_call');
+      const args = JSON.parse(String(functionCall?.arguments || '{}'));
+      expect(functionCall?.name).toBe('exec_command');
+      expect(String(args.cmd || '')).toContain('blocked by exec_command guard');
+      expect(String(args.cmd || '')).toContain('git checkout');
+      expect(String(args.cmd || '')).not.toContain('RESTORED');
+      expect(args.workdir).toBe('/workspace');
+    } finally {
+      await closeServer(server);
+    }
+  });
+
 
 
 

@@ -383,7 +383,55 @@ impl VirtualRouterEngineCore {
                         Some("round-robin"),
                     ),
                 };
-                if let Some(provider_key) = selected {
+                // ===== ProviderForwarder resolution =====
+                // If selected is a forwarder id, expand to a real provider_key.
+                // We pre-collect available real keys (so the closure doesn't borrow self
+                // while forwarder_registry.select() needs &mut self).
+                let resolved_key: Option<String> = if let Some(key) = selected.clone() {
+                    if crate::virtual_router_engine::forwarder::ForwarderRegistry::is_forwarder_id(
+                        &key,
+                    ) {
+                        // Pre-collect (clone out targets, then drop borrow) so we can call mutating self
+                        let cloned_targets: Vec<
+                            crate::virtual_router_engine::forwarder::ForwarderTarget,
+                        > = self
+                            .forwarder_registry
+                            .get(&key)
+                            .map(|e| e.targets.clone())
+                            .unwrap_or_default();
+                        let mut available_real_keys: std::collections::HashSet<String> =
+                            std::collections::HashSet::new();
+                        for target in &cloned_targets {
+                            if !target.disabled
+                                && !excluded_keys.contains(&target.provider_key)
+                                && self.is_provider_available(env, &target.provider_key)
+                            {
+                                available_real_keys.insert(target.provider_key.clone());
+                            }
+                        }
+                        match self.forwarder_registry.select(
+                            &key,
+                            &mut self.load_balancer,
+                            |k: &str| available_real_keys.contains(k),
+                            None,
+                        ) {
+                            Ok(real) => Some(real),
+                            Err(e) if e == crate::virtual_router_engine::forwarder::ERR_FORWARDER_NO_AVAILABLE_TARGET => {
+                                return Err(format!(
+                                    "forwarder '{}' has no available target: {}",
+                                    key, e
+                                ));
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    } else {
+                        Some(key)
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(provider_key) = resolved_key {
                     return Ok(SelectionResult::new(
                         provider_key,
                         route_name.to_string(),
@@ -883,7 +931,7 @@ mod tests {
     use super::*;
     use crate::virtual_router_engine::engine::VirtualRouterEngineCore;
     use crate::virtual_router_engine::features::RoutingFeatures;
-    use crate::virtual_router_engine::routing::parse_routing;
+    use crate::virtual_router_engine::routing::{parse_routing, RoutePoolTier};
     use serde_json::{json, Map, Value};
 
     fn build_priority_test_core() -> VirtualRouterEngineCore {
@@ -1248,5 +1296,278 @@ mod tests {
         );
         // Should fail because no providers are available
         assert!(result.is_err());
+    }
+
+    // ============================================================
+    // T4: Pool isolation by routePolicyGroup — based on real config.toml
+    // ============================================================
+
+    /// Simulate the real config.toml routing structure:
+    /// - coding group: thinking→deepseek, coding→deepseek, tools→mini27+deepseek
+    /// - default group: default→priority(mini27→dbittai→mimo), tools→priority(mini27→dbittai→mimo)
+    /// Both groups define a "default" route with completely different targets.
+    /// Pool isolation means group="coding" can NOT see default group's pools.
+    #[test]
+    fn pool_isolation_by_route_policy_group() {
+        // Build pools that mimic real config.toml structure
+        let coding_pools = vec![
+            RoutePoolTier {
+                id: "coding-thinking-deepseek".to_string(),
+                targets: vec!["deepseek.key1.v4-flash".to_string()],
+                priority: 200,
+                mode: Some("weighted".to_string()),
+                backup: None,
+                force: None,
+                load_balancing: None,
+                route_params: Some(
+                    serde_json::from_value(json!({
+                        "routePolicyGroup": "coding"
+                    }))
+                    .unwrap(),
+                ),
+                thinking: None,
+            },
+            RoutePoolTier {
+                id: "coding-default-deepseek".to_string(),
+                targets: vec!["deepseek.key1.v4-flash".to_string()],
+                priority: 200,
+                mode: None,
+                backup: None,
+                force: None,
+                load_balancing: None,
+                route_params: Some(
+                    serde_json::from_value(json!({
+                        "routePolicyGroup": "coding"
+                    }))
+                    .unwrap(),
+                ),
+                thinking: None,
+            },
+        ];
+
+        let default_pools = vec![RoutePoolTier {
+            id: "default-priority-mini27".to_string(),
+            targets: vec![
+                "mini27.key1.MiniMax-M2.7".to_string(),
+                "mimo.key1.mimo-v2.5-pro".to_string(),
+            ],
+            priority: 200,
+            mode: Some("priority".to_string()),
+            backup: None,
+            force: None,
+            load_balancing: None,
+            route_params: Some(
+                serde_json::from_value(json!({
+                    "routePolicyGroup": "default"
+                }))
+                .unwrap(),
+            ),
+            thinking: None,
+        }];
+
+        // T4a: pool_matches_route_policy_group correctly filters
+        for pool in &coding_pools {
+            assert!(
+                pool_matches_route_policy_group(pool, Some("coding")),
+                "coding pool must match group=coding"
+            );
+            assert!(
+                !pool_matches_route_policy_group(pool, Some("default")),
+                "coding pool must NOT match group=default"
+            );
+        }
+        for pool in &default_pools {
+            assert!(
+                pool_matches_route_policy_group(pool, Some("default")),
+                "default pool must match group=default"
+            );
+            assert!(
+                !pool_matches_route_policy_group(pool, Some("coding")),
+                "default pool must NOT match group=coding"
+            );
+        }
+
+        // T4b: resolve_route_pools_for_selection with group prefix
+        let mut all_pools = std::collections::HashMap::new();
+        all_pools.insert(
+            "coding:thinking".to_string(),
+            vec![RoutePoolTier {
+                id: "coding-thinking-deepseek".to_string(),
+                targets: vec!["deepseek.key1.v4-flash".to_string()],
+                priority: 200,
+                mode: None,
+                backup: None,
+                force: None,
+                load_balancing: None,
+                route_params: Some(
+                    serde_json::from_value(json!({"routePolicyGroup": "coding"})).unwrap(),
+                ),
+                thinking: None,
+            }],
+        );
+        all_pools.insert("coding:default".to_string(), coding_pools.clone());
+        all_pools.insert("default:default".to_string(), default_pools.clone());
+
+        let routing = crate::virtual_router_engine::routing::RoutingPools { pools: all_pools };
+
+        // Request group=coding: should see coding:default pools
+        let result =
+            resolve_route_pools_for_selection(&routing, "default", Some(&"coding:".to_string()));
+        assert_eq!(
+            result.len(),
+            2,
+            "coding group should see 2 pools for route 'default'"
+        );
+
+        // Request group=default: should see default:default pools
+        let result =
+            resolve_route_pools_for_selection(&routing, "default", Some(&"default:".to_string()));
+        assert_eq!(
+            result.len(),
+            1,
+            "default group should see 1 pool for route 'default'"
+        );
+        assert_eq!(result[0].id, "default-priority-mini27");
+
+        // Request group=coding with route=thinking: should see coding:thinking
+        let result =
+            resolve_route_pools_for_selection(&routing, "thinking", Some(&"coding:".to_string()));
+        assert_eq!(
+            result.len(),
+            1,
+            "coding group should see 1 pool for route 'thinking'"
+        );
+        assert_eq!(result[0].id, "coding-thinking-deepseek");
+    }
+
+    /// T4c: Un tagged pools must NOT leak into a port-scoped group.
+    /// When a port requests group="coding", untagged/global pools must be invisible.
+    #[test]
+    fn pool_isolation_untagged_pools_not_leaked() {
+        let untagged_pool = RoutePoolTier {
+            id: "global-fallback".to_string(),
+            targets: vec!["openai.key1.gpt-4o".to_string()],
+            priority: 999,
+            mode: None,
+            backup: None,
+            force: None,
+            load_balancing: None,
+            route_params: None, // No routePolicyGroup = untagged
+            thinking: None,
+        };
+
+        // When no group is requested, untagged pool IS visible
+        assert!(
+            pool_matches_route_policy_group(&untagged_pool, None),
+            "untagged pool should be visible when no group requested"
+        );
+
+        // When group=coding is requested, untagged pool is NOT visible
+        assert!(
+            !pool_matches_route_policy_group(&untagged_pool, Some("coding")),
+            "untagged pool must NOT leak into port-scoped group"
+        );
+
+        // When group=default is requested, untagged pool is NOT visible
+        assert!(
+            !pool_matches_route_policy_group(&untagged_pool, Some("default")),
+            "untagged pool must NOT leak into port-scoped group"
+        );
+    }
+
+    #[test]
+    fn startup_import_allows_persisted_cooldown_provider_through_selection() {
+        // RED: After startup import with allow_persisted_reprobe=true,
+        // a persisted 503 cooldown provider should be selectable via select_provider
+        // even when there are multiple candidates in a priority pool.
+        use crate::virtual_router_engine::routing_state_store::with_session_dir_override;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("rcc-startup-health-red-{unique}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        with_session_dir_override(temp_dir.to_str(), || {
+            let provider_key = "sdfv.key1.gpt-5.5";
+            let backup_key = "cc.key1.gpt-5.5";
+            let mut core = VirtualRouterEngineCore::new();
+            let mut providers = Map::new();
+            for (key, model) in &[(provider_key, "gpt-5.5"), (backup_key, "gpt-5.5")] {
+                providers.insert(
+                    key.to_string(),
+                    json!({
+                        "providerKey": key,
+                        "providerType": "responses",
+                        "modelId": model,
+                        "enabled": true
+                    }),
+                );
+            }
+            core.provider_registry.load(&providers);
+            let keys = core.provider_registry.list_keys();
+            core.health_manager.register_providers(&keys);
+            core.quota_manager.register_providers(&keys);
+
+            // Simulate persisted 503 cooldown in file
+            let health_state = json!({
+                "version": 1,
+                "providerCooldowns": [{
+                    "providerKey": "sdfv.1.gpt-5.5",
+                    "reason": "__http_503_daily_cooldown__",
+                    "cooldownExpiresAt": now_ms() + 86_400_000
+                }]
+            });
+            let health_path = temp_dir.join("provider-health.json");
+            fs::write(&health_path, serde_json::to_string(&health_state).unwrap()).unwrap();
+
+            // Startup import
+            core.refresh_provider_health_from_store(true);
+
+            // Setup routing: priority [primary, backup]
+            let routing = Map::from_iter([(
+                "thinking".to_string(),
+                Value::Array(vec![json!({
+                    "id": "test-thinking",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": [provider_key, backup_key]
+                })]),
+            )]);
+            core.routing = parse_routing(&routing);
+
+            let classification = ClassificationResult {
+                route_name: "thinking".to_string(),
+                confidence: 1.0,
+                reasoning: "test".to_string(),
+                candidates: vec!["thinking".to_string()],
+            };
+            let features = RoutingFeatures::default();
+            let routing_state = RoutingInstructionState::default();
+
+            // RED: select_provider should pick the persisted cooldown provider
+            // because persisted_503_reprobe_available = true after startup import
+            let selected = core
+                .select_provider(
+                    "thinking",
+                    &json!({}),
+                    &classification,
+                    &features,
+                    &routing_state,
+                    None,
+                    unsafe { Env::from_raw(std::ptr::null_mut()) },
+                )
+                .expect("selection should succeed");
+            assert_eq!(
+                selected.provider_key, provider_key,
+                "persisted cooldown provider should be allowed on startup first request"
+            );
+        });
+
+        let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
     }
 }

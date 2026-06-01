@@ -514,8 +514,8 @@ mod tests {
         let pause =
             parse_rcc_fence_document("<**rcc**>\nstopless pause\nwaiting for Jason\n</rcc**>")
                 .expect("pause");
-        let clear = parse_rcc_fence_document("<**rcc**>\nstop_message clear\n</rcc**>")
-            .expect("clear");
+        let clear =
+            parse_rcc_fence_document("<**rcc**>\nstop_message clear\n</rcc**>").expect("clear");
 
         assert_eq!(start.directives[0].passthrough, "body-forward");
         assert_eq!(pause.directives[0].passthrough, "private-only");

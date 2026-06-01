@@ -29,11 +29,15 @@ export async function materializeRouteCodexConfig(
   validateV2ConfigSources(userConfig);
   materializeActiveRoutingPolicyGroup(userConfig);
   const vrBase = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
-  const v2Input = await buildVirtualRouterInputV2(userConfig, providerRootDir);
+  const routingPolicyGroup = resolvePrimaryRouterRoutingPolicyGroup(userConfig);
+  const v2Input = await buildVirtualRouterInputV2(userConfig, providerRootDir, {
+    ...(routingPolicyGroup ? { routingPolicyGroup } : {})
+  });
   userConfig.virtualrouter = {
     ...vrBase,
     providers: v2Input.providers,
     routing: v2Input.routing,
+    ...(v2Input.forwarders ? { forwarders: v2Input.forwarders } : {}),
     ...(v2Input.applyPatch ? { applyPatch: v2Input.applyPatch } : {})
   };
   const providerProfiles = buildProviderProfiles(userConfig);
@@ -71,7 +75,7 @@ export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[]
   if (!vr) {
     errors.push('v2 config requires virtualrouter.routingPolicyGroups');
   } else {
-    const allowedVr = new Set(['routingPolicyGroups']);
+    const allowedVr = new Set(['routingPolicyGroups', 'forwarders']);
     for (const key of Object.keys(vr)) {
       if (!allowedVr.has(key)) {
         errors.push(`v2 config disallows virtualrouter field "${key}" (routingPolicyGroups only); activeRoutingPolicyGroup is no longer supported`);
@@ -123,4 +127,31 @@ export function validateV2ConfigSources(userConfig: UnknownRecord): void {
  */
 export function materializeActiveRoutingPolicyGroup(_userConfig: UnknownRecord): void {
   // No-op: per-port routingPolicyGroup in httpserver.ports[] replaces global active.
+}
+
+function resolvePrimaryRouterRoutingPolicyGroup(userConfig: UnknownRecord): string | undefined {
+  const httpserver = isRecord(userConfig.httpserver) ? (userConfig.httpserver as UnknownRecord) : undefined;
+  const ports = Array.isArray(httpserver?.ports) ? (httpserver.ports as unknown[]) : [];
+  for (const port of ports) {
+    if (!isRecord(port)) {
+      continue;
+    }
+    const mode = typeof port.mode === 'string' ? port.mode.trim().toLowerCase() : '';
+    if (mode && mode !== 'router') {
+      continue;
+    }
+    const group = typeof port.routingPolicyGroup === 'string' ? port.routingPolicyGroup.trim() : '';
+    if (group) {
+      return group;
+    }
+  }
+  const virtualrouter = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : undefined;
+  const groups = isRecord(virtualrouter?.routingPolicyGroups)
+    ? (virtualrouter!.routingPolicyGroups as UnknownRecord)
+    : undefined;
+  if (!groups) {
+    return undefined;
+  }
+  const groupIds = Object.keys(groups).filter((groupId) => groupId.trim());
+  return groupIds.length === 1 ? groupIds[0] : undefined;
 }

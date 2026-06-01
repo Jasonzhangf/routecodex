@@ -132,4 +132,5 @@ export type ReportRequestExecutorProviderErrorArgs = {
   logStage: ProviderErrorStageLogger;
   stageHint?: RequestExecutorProviderErrorStage;
   extraDetails?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 };

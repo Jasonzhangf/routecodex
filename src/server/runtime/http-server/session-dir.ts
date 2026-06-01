@@ -93,3 +93,24 @@ export function ensureServerScopedSessionDir(serverId: string): string | null {
   process.env.ROUTECODEX_SESSION_DIR = resolved;
   return resolved;
 }
+
+export function resolvePortScopedSessionDir(args: {
+  serverId: string;
+  port?: number;
+  routingPolicyGroup?: string;
+}): string | null {
+  const serverDir = resolveServerScopedSessionDir(args.serverId);
+  if (!serverDir) {
+    return null;
+  }
+  const rawScope = typeof args.routingPolicyGroup === 'string' && args.routingPolicyGroup.trim()
+    ? args.routingPolicyGroup.trim()
+    : typeof args.port === 'number' && Number.isFinite(args.port)
+      ? String(args.port)
+      : '';
+  const safeScope = sanitizeSegment(rawScope);
+  if (!safeScope) {
+    return serverDir;
+  }
+  return path.join(serverDir, 'ports', safeScope);
+}

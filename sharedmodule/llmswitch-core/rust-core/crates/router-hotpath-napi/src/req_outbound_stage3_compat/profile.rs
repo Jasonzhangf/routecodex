@@ -118,6 +118,9 @@ mod tests {
         assert!(!root.contains_key("processed"));
         assert!(!root.contains_key("processingMetadata"));
         assert_eq!(root.get("model"), Some(&json!("MiniMax-M3")));
-        assert_eq!(root["messages"][0]["content"], json!("semantics word stays"));
+        assert_eq!(
+            root["messages"][0]["content"],
+            json!("semantics word stays")
+        );
     }
 }

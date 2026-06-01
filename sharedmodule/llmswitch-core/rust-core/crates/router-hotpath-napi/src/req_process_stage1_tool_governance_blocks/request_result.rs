@@ -12,10 +12,7 @@ pub(crate) fn apply_chat_process_request_sanitizer(request: &mut Map<String, Val
     strip_generic_markers_from_request(request);
     let sanitized = sanitize_chat_process_messages_value(&Value::Object(request.clone()));
     let normalized_messages = normalize_tool_session_messages(sanitized.messages.clone());
-    request.insert(
-        "messages".to_string(),
-        Value::Array(normalized_messages),
-    );
+    request.insert("messages".to_string(), Value::Array(normalized_messages));
     if let Some(tools) = request.get_mut("tools") {
         filter_namespace_mcp_aggregator_tool_definitions(tools);
     }
@@ -136,10 +133,7 @@ pub(crate) fn build_node_result(
     Value::Object(result)
 }
 
-pub(crate) fn build_processed_request(
-    governed: Value,
-    metadata: &Map<String, Value>,
-) -> Value {
+pub(crate) fn build_processed_request(governed: Value, metadata: &Map<String, Value>) -> Value {
     let mut processed = normalize_record(governed);
     let stream_enabled = processed
         .get("parameters")

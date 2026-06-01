@@ -118,13 +118,7 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   const statusFromErr = extractStatus(error);
   const upstream = extractUpstreamError(error);
   const status = normalizeStatus(statusFromErr, upstream.status);
-  const requestId = extractRequestId(error);
-  const providerKey =
-    extractString(error.providerKey) ||
-    extractString(error.details?.providerKey) ||
-    extractString(upstream.providerKey);
-  const providerType = extractString(error.providerType) || extractString(error.details?.providerType);
-  const routeName = extractString(error.routeName) || extractString(error.details?.routeName);
+  const requestId = sanitizePublicRequestId(extractRequestId(error));
   const upstreamCode = upstream.code;
   const upstreamMessage = upstream.message;
   const nestedJson = tryExtractNestedJsonErrorMessage(upstreamMessage || baseMessage);
@@ -144,22 +138,17 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   };
 
   const publicDetails = sanitizePublicErrorDetails(error.details);
-  const detailField = publicDetails ? { details: publicDetails } : {};
+  const shouldExposeDetails = String(effectiveCode || '').trim().toUpperCase() === 'PROVIDER_NOT_AVAILABLE';
+  const detailField = shouldExposeDetails && publicDetails ? { details: publicDetails } : {};
 
   // Protocol/shape errors produced by our bridge/pipeline should be treated as client errors.
   // (e.g. /v1/responses with invalid payload shape)
   const normalizedCode = String(effectiveCode || '').trim().toUpperCase();
   if (normalizedCode === 'MALFORMED_REQUEST') {
     return formatPayload(400, {
-      message: effectiveUpstreamMessage || baseMessage || 'Malformed request',
+      message: baseMessage || 'Malformed request',
       code: 'MALFORMED_REQUEST',
       request_id: requestId,
-      provider_key: providerKey,
-      route_name: routeName,
-      provider_type: providerType,
-      upstream_status: upstream.status,
-      upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage,
       ...validationFields,
       ...detailField
     });
@@ -173,15 +162,9 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     timeoutHint.includes('upstream_headers_timeout')
   ) {
     return formatPayload(504, {
-      message: effectiveUpstreamMessage || baseMessage || 'Upstream request timed out',
+      message: 'Upstream request timed out',
       code: upstreamCode || effectiveCode || 'gateway_timeout',
       request_id: requestId,
-      provider_key: providerKey,
-      route_name: routeName,
-      provider_type: providerType,
-      upstream_status: upstream.status,
-      upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage,
       ...validationFields,
       ...detailField
     });
@@ -189,15 +172,9 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
 
   if (status === 429) {
     return formatPayload(429, {
-      message: effectiveUpstreamMessage || baseMessage || 'Rate limited by upstream provider',
+      message: 'Rate limited by upstream provider',
       code: upstreamCode || effectiveCode || 'rate_limit',
       request_id: requestId,
-      provider_key: providerKey,
-      route_name: routeName,
-      provider_type: providerType,
-      upstream_status: upstream.status,
-      upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage,
       ...validationFields,
       ...detailField
     });
@@ -205,15 +182,9 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
 
   if (status === 401 || status === 403) {
     return formatPayload(status, {
-      message: effectiveUpstreamMessage || 'Upstream authentication failed',
+      message: 'Upstream authentication failed',
       code: upstreamCode || effectiveCode || 'authentication_error',
       request_id: requestId,
-      provider_key: providerKey,
-      route_name: routeName,
-      provider_type: providerType,
-      upstream_status: upstream.status,
-      upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage,
       ...validationFields,
       ...detailField
     });
@@ -221,15 +192,9 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
 
   if (status === 501) {
     return formatPayload(501, {
-      message: effectiveUpstreamMessage || baseMessage || 'Requested provider capability is not implemented',
+      message: 'Requested provider capability is not implemented',
       code: upstreamCode || effectiveCode || 'not_implemented',
       request_id: requestId,
-      provider_key: providerKey,
-      route_name: routeName,
-      provider_type: providerType,
-      upstream_status: upstream.status,
-      upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage,
       ...validationFields,
       ...detailField
     });
@@ -237,30 +202,18 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
 
   if (status >= 400 && status < 500) {
     return formatPayload(status, {
-      message: effectiveUpstreamMessage || baseMessage || 'Upstream rejected the request',
+      message: 'Upstream rejected the request',
       code: upstreamCode || effectiveCode || 'upstream_client_error',
       request_id: requestId,
-      provider_key: providerKey,
-      route_name: routeName,
-      provider_type: providerType,
-      upstream_status: upstream.status,
-      upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage,
       ...validationFields,
       ...detailField
     });
   }
 
   return formatPayload(502, {
-    message: effectiveUpstreamMessage || baseMessage || 'Upstream provider error',
+    message: 'Upstream provider error',
     code: upstreamCode || effectiveCode || 'upstream_error',
     request_id: requestId,
-    provider_key: providerKey,
-    route_name: routeName,
-    provider_type: providerType,
-    upstream_status: upstream.status,
-    upstream_code: upstreamCode,
-    upstream_message: effectiveUpstreamMessage,
     ...validationFields,
     ...detailField
   });
@@ -525,6 +478,18 @@ function normalizeStatus(primary?: number, secondary?: number): number {
 
 function formatPayload(status: number, body: HttpErrorPayload['body']['error']): HttpErrorPayload {
   return { status, body: { error: body } };
+}
+
+function sanitizePublicRequestId(value?: string): string | undefined {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) {
+    return undefined;
+  }
+  const routed = raw.match(/^(openai-(?:responses|chat|messages)-)(.+?)(-\d{8}T\d{9}-\d+-\d+)$/);
+  if (routed) {
+    return `${routed[1]}provider${routed[3]}`;
+  }
+  return raw;
 }
 
 function normalizeErrorPayload(err: unknown): RawErrorPayload {

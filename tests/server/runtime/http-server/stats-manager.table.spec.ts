@@ -110,7 +110,7 @@ describe('StatsManager provider summary table output', () => {
     const output = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
     expect(output).toContain('[Stats][final][session]');
     expect(output).toContain('[Stats][final][historical]');
-    expect(output).toContain('glm.2-173 / kimi-k2.5 calls=1 tokens=10/4/14');
-    expect(output).toContain('qwen.1 / qwen3.5-plus calls=1 tokens=8/2/10');
+    expect(output).toContain('glm.2-173 / kimi-k2.5 1 10 4 4');
+    expect(output).toContain('qwen.1 / qwen3.5-plus 1 8 2 2');
   });
 });

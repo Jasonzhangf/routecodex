@@ -1,4 +1,13 @@
 import type {
+  ProviderForwarderCollection,
+  ProviderForwarderProfile,
+  ProviderForwarderStrategy,
+  ProviderForwarderResolutionMode,
+  ProviderForwarderStickyKey,
+  ProviderForwarderTarget,
+} from './forwarder-types.js';
+import { FORWARDER_ID_PREFIX, validateForwarderId } from './forwarder-types.js';
+import type {
   ProviderProfile,
   ProviderProfileCollection,
   ProviderTransportConfig,
@@ -541,3 +550,143 @@ function pickStringArray(value: unknown): string[] | undefined {
   }
   return undefined;
 }
+
+
+// ==================== ProviderForwarder loader ====================
+
+export function buildForwarderProfiles(
+  config: UnknownRecord,
+  knownProviderIds: Set<string>
+): ProviderForwarderCollection {
+  const forwardersNode = collectForwarderNodes(config);
+  const profiles: ProviderForwarderProfile[] = [];
+  for (const [id, raw] of Object.entries(forwardersNode)) {
+    if (!isRecord(raw)) {
+      throw new Error(`[forwarder-profiles] forwarder '${id}' is not an object`);
+    }
+    // P0-2: id opaque, only namespace check
+    const validation = validateForwarderId(id);
+    if (!validation.ok) {
+      throw new Error(`[forwarder-profiles] ${validation.reason}`);
+    }
+    // 显式 model/protocol 字段；禁止从 id 推断
+    const protocol = pickString(raw.protocol) as ProviderForwarderProfile['protocol'] | undefined;
+    if (!protocol) {
+      throw new Error(`[forwarder-profiles] forwarder '${id}' missing protocol`);
+    }
+    if (!['openai', 'responses', 'anthropic', 'gemini'].includes(protocol)) {
+      throw new Error(`[forwarder-profiles] forwarder '${id}' has unsupported protocol '${protocol}'`);
+    }
+    const model = pickString(raw.model) ?? pickString(raw.modelId);
+    if (!model) {
+      throw new Error(`[forwarder-profiles] forwarder '${id}' missing model`);
+    }
+    // 不接受旧字段名 transportOverride（hard guardrail）
+    if ('transportOverride' in raw) {
+      throw new Error(`[forwarder-profiles] forwarder '${id}' transportOverride is not supported (forwarder is a pure index, no field merge)`);
+    }
+    const resolutionMode = (pickString(raw.resolutionMode) as ProviderForwarderResolutionMode | undefined) ?? 'model-first';
+    if (!['model-first', 'provider-first'].includes(resolutionMode)) {
+      throw new Error(`[forwarder-profiles] forwarder '${id}' has invalid resolutionMode`);
+    }
+    const strategy = (pickString(raw.strategy) as ProviderForwarderStrategy | undefined) ?? 'round-robin';
+    if (!['round-robin', 'priority', 'weighted'].includes(strategy)) {
+      throw new Error(`[forwarder-profiles] forwarder '${id}' has invalid strategy`);
+    }
+    const stickyKey = (pickString(raw.stickyKey) as ProviderForwarderStickyKey | undefined) ?? 'none';
+    if (!['session', 'request', 'none'].includes(stickyKey)) {
+      throw new Error(`[forwarder-profiles] forwarder '${id}' has invalid stickyKey`);
+    }
+    const targets = parseForwarderTargets(raw.targets, id, knownProviderIds);
+    if (targets.length === 0) {
+      throw new Error(`[forwarder-profiles] forwarder '${id}' has no enabled targets`);
+    }
+    const weights = parseForwarderWeights(raw.weights);
+    profiles.push({
+      id,
+      protocol,
+      model,
+      resolutionMode,
+      strategy,
+      stickyKey,
+      targets,
+      ...(weights ? { weights } : {}),
+    });
+  }
+  // 同一 (protocol, model) 不允许多 forwarder
+  const seenModel = new Map<string, string>();
+  for (const p of profiles) {
+    const key = `${p.protocol}::${p.model}`;
+    const existing = seenModel.get(key);
+    if (existing) {
+      throw new Error(`[forwarder-profiles] duplicate forwarder for (protocol='${p.protocol}', model='${p.model}'): existing='${existing}', new='${p.id}'`);
+    }
+    seenModel.set(key, p.id);
+  }
+  return {
+    profiles,
+    byId: profiles.reduce<Record<string, ProviderForwarderProfile>>((acc, profile) => {
+      acc[profile.id] = profile;
+      return acc;
+    }, {}),
+  };
+}
+
+function collectForwarderNodes(config: UnknownRecord): Record<string, UnknownRecord> {
+  const out: Record<string, UnknownRecord> = {};
+  if (isRecord(config.forwarders)) {
+    for (const [id, raw] of Object.entries(config.forwarders)) {
+      if (isRecord(raw)) {
+        out[id] = raw;
+      }
+    }
+  }
+  return out;
+}
+
+function parseForwarderTargets(
+  raw: unknown,
+  forwarderId: string,
+  knownProviderIds: Set<string>
+): ProviderForwarderTarget[] {
+  if (!Array.isArray(raw)) {
+    throw new Error(`[forwarder-profiles] forwarder '${forwarderId}' targets must be an array`);
+  }
+  const result: ProviderForwarderTarget[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry)) {
+      throw new Error(`[forwarder-profiles] forwarder '${forwarderId}' has invalid target entry`);
+    }
+    const providerId = pickString(entry.providerId) ?? pickString(entry.providerKey);
+    if (!providerId) {
+      throw new Error(`[forwarder-profiles] forwarder '${forwarderId}' target missing providerId`);
+    }
+    if (!knownProviderIds.has(providerId)) {
+      throw new Error(`[forwarder-profiles] forwarder '${forwarderId}' references unknown providerId '${providerId}'`);
+    }
+    result.push({
+      providerId,
+      ...(pickPositiveInt(entry.weight) !== undefined ? { weight: pickPositiveInt(entry.weight) } : {}),
+      ...(pickNumber(entry.priority) !== undefined ? { priority: pickNumber(entry.priority) } : {}),
+      ...(entry.disabled === true ? { disabled: true } : {}),
+    });
+  }
+  return result;
+}
+
+function parseForwarderWeights(raw: unknown): Record<string, number> | undefined {
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const n = pickNumber(v);
+    if (n !== undefined && n > 0) {
+      out[k] = n;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+// Re-export the prefix for callers
+export { FORWARDER_ID_PREFIX, validateForwarderId };

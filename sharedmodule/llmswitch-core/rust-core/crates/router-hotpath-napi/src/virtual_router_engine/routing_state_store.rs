@@ -1,4 +1,4 @@
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use std::cell::RefCell;
 use std::env;
 use std::fs;
@@ -805,4 +805,121 @@ fn deserialize_pre_command_state(obj: &Map<String, Value>, state: &mut RoutingIn
         .map(|v| v.to_string());
     state.pre_command.pre_command_updated_at =
         obj.get("preCommandUpdatedAt").and_then(|v| v.as_i64());
+}
+
+// ============================================================
+// Port isolation red tests — lock down isolation properties
+// ============================================================
+
+#[cfg(test)]
+mod isolation_tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp() -> PathBuf {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("rcc-iso-{n}"))
+    }
+
+    // T1: two different session_dir overrides must not see each other's state
+    #[test]
+    fn session_dir_override_isolation_keyed_by_dir() {
+        let dir_a = unique_temp();
+        let dir_b = unique_temp();
+        fs::create_dir_all(&dir_a).unwrap();
+        fs::create_dir_all(&dir_b).unwrap();
+
+        with_session_dir_override(dir_a.to_str(), || {
+            let key = "session:iso-test";
+            let state = RoutingInstructionState::default();
+            persist_routing_instruction_state(key, Some(&state));
+
+            let path_a = resolve_session_filepath(key);
+            assert!(path_a.is_some(), "should resolve path under dir_a");
+            let path_a = path_a.unwrap();
+            assert!(path_a.starts_with(&dir_a), "path must be under dir_a");
+
+            with_session_dir_override(dir_b.to_str(), || {
+                let path_b = resolve_session_filepath(key);
+                assert!(path_b.is_some());
+                assert!(path_b.as_ref().unwrap().starts_with(&dir_b));
+                assert_ne!(
+                    path_a,
+                    *path_b.as_ref().unwrap(),
+                    "different dir = different path"
+                );
+
+                let loaded = load_routing_instruction_state(key);
+                assert!(loaded.is_none(), "dir_b must not see dir_a's state");
+            });
+        });
+
+        let _ = fs::remove_dir_all(dir_a);
+        let _ = fs::remove_dir_all(dir_b);
+    }
+
+    // T2: without override, state must NOT go to any test-specific dir
+    #[test]
+    fn no_override_uses_default_rcc_user_dir() {
+        let dir_a = unique_temp();
+        fs::create_dir_all(&dir_a).unwrap();
+
+        with_session_dir_override(dir_a.to_str(), || {
+            let key = "session:default-dir-test";
+            let state = RoutingInstructionState::default();
+            persist_routing_instruction_state(key, Some(&state));
+            let path = resolve_session_filepath(key).unwrap();
+            assert!(path.starts_with(&dir_a));
+        });
+
+        let key = "session:default-dir-test2";
+        let state = RoutingInstructionState::default();
+        persist_routing_instruction_state(key, Some(&state));
+        let path = resolve_session_filepath(key).unwrap();
+        assert!(
+            !path.starts_with(&dir_a),
+            "without override must NOT use dir_a"
+        );
+
+        let _ = fs::remove_dir_all(dir_a);
+        if let Some(p) = resolve_session_filepath(key) {
+            let _ = fs::remove_file(p);
+        }
+    }
+
+    // T3: provider health state also respects session_dir override
+    #[test]
+    fn provider_health_respects_session_dir_override() {
+        let dir_a = unique_temp();
+        let dir_b = unique_temp();
+        fs::create_dir_all(&dir_a).unwrap();
+        fs::create_dir_all(&dir_b).unwrap();
+
+        with_session_dir_override(dir_a.to_str(), || {
+            let health_state = json!({
+                "providerCooldowns": [
+                    {"provider": "test-p", "expires": 9999999999i64}
+                ]
+            });
+            persist_provider_health_state(&health_state);
+            let path_a = resolve_provider_health_filepath().unwrap();
+            assert!(path_a.starts_with(&dir_a));
+
+            with_session_dir_override(dir_b.to_str(), || {
+                let loaded = load_provider_health_state();
+                assert!(
+                    loaded.is_none(),
+                    "dir_b must not see dir_a's provider health"
+                );
+            });
+        });
+
+        let _ = fs::remove_dir_all(dir_a);
+        let _ = fs::remove_dir_all(dir_b);
+    }
 }

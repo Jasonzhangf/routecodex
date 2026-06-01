@@ -536,6 +536,38 @@ describe('runtime parse/exec errorsamples', () => {
     expect(String(json.matchedText || '')).toContain("'--- a/src/server/index.ts'");
   });
 
+  it('writes client-tool-error sample for apply_patch missing begin patch header', async () => {
+    const recorder = await createSnapshotRecorder(
+      {
+        requestId: 'req_client_tool_apply_patch_missing_begin_1',
+        providerId: 'mock',
+        providerProtocol: 'openai-responses'
+      },
+      '/v1/responses'
+    );
+
+    (recorder as any).record('chat_process.req.stage2.semantic_map', {
+      messages: [
+        {
+          role: 'tool',
+          name: 'apply_patch',
+          tool_call_id: 'call_apply_patch_missing_begin_1',
+          call_id: 'call_apply_patch_missing_begin_1',
+          content: "Invalid patch: The first line of the patch must be '*** Begin Patch'"
+        }
+      ]
+    });
+
+    const clientToolDir = path.join(errorsDir, 'client-tool-error');
+    const file = await waitForFile(
+      clientToolDir,
+      (name) => name.startsWith('chat_process.req.stage2.semantic_map.apply_patch-')
+    );
+    const json = JSON.parse(await fs.readFile(file, 'utf8')) as any;
+    expect(json.errorType).toBe('apply_patch_missing_begin_patch_header');
+    expect(json.requestId).toBe('req_client_tool_apply_patch_missing_begin_1');
+  });
+
   it('classifies runtime exec-error apply_patch conflict-marker failures into a stable subtype', async () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {

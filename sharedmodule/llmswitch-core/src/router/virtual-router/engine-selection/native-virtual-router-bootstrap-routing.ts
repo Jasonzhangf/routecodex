@@ -60,6 +60,7 @@ export function bootstrapRoutingWithNative(input: {
   routingSource: Record<string, unknown>;
   aliasIndex: Map<string, string[]>;
   modelIndex: Map<string, ModelIndexEntry>;
+  forwarderIds?: string[];
 }): {
   routingSource: Record<string, NormalizedRoutePoolConfig[]>;
   routing: Record<string, RoutePoolTier[]>;
@@ -75,7 +76,8 @@ export function bootstrapRoutingWithNative(input: {
     raw = fn(
       JSON.stringify(input.routingSource ?? {}),
       JSON.stringify(aliasIndex),
-      JSON.stringify(modelIndex)
+      JSON.stringify(modelIndex),
+      JSON.stringify(input.forwarderIds ?? [])
     );
   } catch (error) {
     const virtualRouterError = parseVirtualRouterNativeError(error);

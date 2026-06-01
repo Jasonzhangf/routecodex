@@ -343,7 +343,6 @@ export interface VirtualRouterExecCommandGuardConfig {
   policyFile?: string;
 }
 
-
 export interface VirtualRouterApplyPatchConfig {
   mode: "client" | "servertool";
 }
@@ -359,6 +358,11 @@ export interface VirtualRouterConfig {
   webSearch?: VirtualRouterWebSearchConfig;
   execCommandGuard?: VirtualRouterExecCommandGuardConfig;
   applyPatch?: VirtualRouterApplyPatchConfig;
+  /**
+   * ProviderForwarder 节点（顶层 key = forwarder id，如 `fwd.openai.gpt-4o`）。
+   * Rust engine 内部解析；host 不感知 forwarder 存在。
+   */
+  forwarders?: Record<string, Record<string, unknown>>;
 }
 
 export interface VirtualRouterContextRoutingConfig {
@@ -372,6 +376,7 @@ export interface VirtualRouterBootstrapInput extends Record<string, unknown> {
   virtualrouter?: Record<string, unknown>;
   providers?: Record<string, VirtualRouterProviderDefinition>;
   routing?: Record<string, unknown>;
+  forwarders?: Record<string, Record<string, unknown>>;
   classifier?: VirtualRouterClassifierConfig;
   loadBalancing?: LoadBalancingPolicy;
   health?: ProviderHealthConfig;

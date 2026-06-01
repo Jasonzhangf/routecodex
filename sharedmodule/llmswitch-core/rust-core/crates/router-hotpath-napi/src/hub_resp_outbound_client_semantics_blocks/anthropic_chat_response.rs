@@ -457,7 +457,10 @@ mod tests {
             "req_sse",
         )
         .expect("chat response from anthropic sse");
-        assert_eq!(output["choices"][0]["message"]["content"], "anthropic inbound ok");
+        assert_eq!(
+            output["choices"][0]["message"]["content"],
+            "anthropic inbound ok"
+        );
     }
 
     #[test]
@@ -479,7 +482,10 @@ mod tests {
             "req_sse",
         )
         .expect("chat response from anthropic sse");
-        assert_eq!(output["choices"][0]["message"]["content"], "Let me understand");
+        assert_eq!(
+            output["choices"][0]["message"]["content"],
+            "Let me understand"
+        );
     }
 
     #[test]

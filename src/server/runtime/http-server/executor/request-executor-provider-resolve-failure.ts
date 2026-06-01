@@ -47,6 +47,7 @@ type RequestExecutorProviderResolveFailureArgs = {
   }) => void;
   forcedRouteHint?: string;
   abortSignal?: AbortSignal;
+  metadata?: Record<string, unknown>;
   logNonBlockingError: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
   extractRetryErrorSnapshot: (error: unknown) => RetryErrorSnapshot;
 };
@@ -94,6 +95,7 @@ export async function processProviderResolveFailure(
     routeHint: args.forcedRouteHint,
     forceExcludeCurrentProviderOnRetry: true,
     abortSignal: args.abortSignal,
+    metadata: args.metadata,
     logNonBlockingError: args.logNonBlockingError
   });
   const retryExecutionPlan = providerFailurePlan.retryExecutionPlan;

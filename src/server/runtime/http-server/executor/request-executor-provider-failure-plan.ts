@@ -25,7 +25,7 @@ import {
 } from './request-executor-provider-failure.js';
 
 type RuntimeManager = {
-  resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
+  resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
 };
 
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
@@ -60,6 +60,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
   abortSignal?: AbortSignal;
+  metadata?: Record<string, unknown>;
   logNonBlockingError: LogNonBlockingError;
 }): Promise<RequestExecutorProviderFailurePlan> {
   const reportPlan = resolveRequestExecutorProviderErrorReportPlan({
@@ -119,6 +120,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     attempt: args.attempt,
     logStage: args.logStage,
     stageHint: reportPlan.stageHint,
+    metadata: args.metadata,
     extraDetails: {
       routePoolSize: Array.isArray(args.routePool) ? args.routePool.length : 0
     }

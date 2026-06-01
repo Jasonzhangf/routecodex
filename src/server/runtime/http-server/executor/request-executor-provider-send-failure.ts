@@ -35,7 +35,7 @@ type RequestExecutorProviderSendFailureArgs = {
   target: Record<string, unknown>;
   dependencies: ModuleDependencies;
   runtimeManager: {
-    resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
+    resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
   };
   attempt: number;
   maxAttempts: number;
@@ -78,6 +78,7 @@ type RequestExecutorProviderSendFailureArgs = {
   contextOverflowRetries: number;
   maxContextOverflowRetries: number;
   abortSignal?: AbortSignal;
+  metadata?: Record<string, unknown>;
   phase: 'provider_send' | 'provider_response_processing';
   logNonBlockingError: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
   extractRetryErrorSnapshot: (error: unknown) => RetryErrorSnapshot;
@@ -101,6 +102,7 @@ function isRetryableProviderResponseProcessingFailure(args: {
   }
   const record = args.error as {
     code?: unknown;
+    upstreamCode?: unknown;
     retryable?: unknown;
     requestExecutorProviderErrorStage?: unknown;
   };
@@ -113,6 +115,8 @@ function isRetryableProviderResponseProcessingFailure(args: {
     && (
       args.retryError.errorCode === 'SSE_DECODE_ERROR'
       || record.code === 'SSE_DECODE_ERROR'
+      || args.retryError.upstreamCode === 'UPSTREAM_STREAM_TERMINATED'
+      || record.upstreamCode === 'UPSTREAM_STREAM_TERMINATED'
     );
 }
 
@@ -295,6 +299,7 @@ export async function processProviderSendFailure(
     maxContextOverflowRetries: args.maxContextOverflowRetries,
     status,
     abortSignal: args.abortSignal,
+    metadata: args.metadata,
     logNonBlockingError: args.logNonBlockingError
   });
   const retryExecutionPlan = providerFailurePlan.retryExecutionPlan;

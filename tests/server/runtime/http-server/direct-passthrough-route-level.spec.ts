@@ -465,6 +465,62 @@ describe('direct passthrough route-level', () => {
     expect(directSpy.mock.calls[0]?.[1]?.metadata).toEqual(expect.objectContaining({
       routeHint: 'search',
       routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      __rt: expect.objectContaining({
+        sessionDir: expect.stringContaining('ports/gateway_priority_5555'),
+      }),
+    }));
+  });
+
+  it('router port metadata exposes only its routing policy group providers', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5555,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'relay',
+        }],
+      },
+      virtualrouter: {
+        routingPolicyGroups: {
+          gateway_priority_5555: { routing: { default: [{ id: 'route-5555', targets: ['mimo.key1.model-a'] }] } },
+          gateway_coding_10000: { routing: { default: [{ id: 'route-10000', targets: ['llmgate.key2.model-b'] }] } },
+        },
+      },
+    };
+    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline]
+    ]);
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({ status: 200, body: { ok: true } } as any);
+
+    await (server as any).executePortAwarePipeline(5555, {
+      requestId: 'req_router_port_scope_metadata',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: { model: 'gpt-5.5', input: 'hello' },
+      metadata: {},
+    });
+
+    expect(executePipelineSpy.mock.calls[0]?.[0]?.metadata).toEqual(expect.objectContaining({
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      allowedProviders: ['mimo'],
+      __rt: expect.objectContaining({
+        sessionDir: expect.stringContaining('ports/gateway_priority_5555'),
+      }),
     }));
   });
 

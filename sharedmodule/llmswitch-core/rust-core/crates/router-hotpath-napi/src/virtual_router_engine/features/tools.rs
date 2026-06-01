@@ -80,6 +80,10 @@ const WEB_TOOL_KEYWORDS: &[&str] = &[
 ];
 const SHELL_TOOL_NAMES: &[&str] = &["shell_command", "shell", "bash", "exec_command"];
 const SHELL_THINKING_COMMANDS: &[&str] = &["cat", "head", "tail", "strings", "less", "more", "nl"];
+const SHELL_TOOLS_COMMANDS: &[&str] = &[
+    "npm", "npx", "yarn", "bun", "pnpm", "cargo", "go", "pytest", "maven", "gradle", "tsc",
+    "eslint", "prettier", "make", "cmake",
+];
 const SHELL_SEARCH_COMMANDS: &[&str] = &[
     "rg",
     "ripgrep",
@@ -92,6 +96,9 @@ const SHELL_SEARCH_COMMANDS: &[&str] = &[
     "fd",
     "locate",
     "codesearch",
+    "ls",
+    "tree",
+    "pwd",
 ];
 const SHELL_WRITE_COMMANDS: &[&str] = &["apply_patch", "tee", "touch", "truncate", "patch"];
 const SHELL_REDIRECT_WRITE_BINARIES: &[&str] = &[
@@ -636,15 +643,41 @@ fn classify_shell_command(command: &str) -> String {
     {
         return "search".to_string();
     }
-    if contains_command(&normalized, "git")
-        && [" grep", " log", " shortlog", " reflog", " blame"]
-            .iter()
-            .any(|sub| normalized.contains(sub))
-    {
-        return "search".to_string();
+    if contains_command(&normalized, "git") {
+        // git search/discovery → search
+        if [
+            "status",
+            "branch",
+            "ls-files",
+            "rev-parse",
+            "log",
+            "grep",
+            "blame",
+            "shortlog",
+            "reflog",
+            "diff --stat",
+        ]
+        .iter()
+        .any(|sub| normalized.contains(sub))
+        {
+            return "search".to_string();
+        }
+        // git diff / git show → thinking (analyze content)
+        if normalized.contains("diff") || normalized.contains("show") {
+            return "thinking".to_string();
+        }
+        // git add/commit/stash/checkout/reset/clean/rebase/merge/restore → tools
+        return "other".to_string();
     }
-    if contains_command(&normalized, "bd") && normalized.contains(" search") {
-        return "search".to_string();
+    if contains_command(&normalized, "bd") {
+        if normalized.contains(" search")
+            || normalized.contains(" list")
+            || normalized.contains(" show")
+        {
+            return "search".to_string();
+        }
+        // bd update/create/close/reopen → coding (modify task state)
+        return "coding".to_string();
     }
     if contains_command(&normalized, "sed") || contains_command(&normalized, "awk") {
         return "thinking".to_string();
@@ -660,6 +693,23 @@ fn classify_shell_command(command: &str) -> String {
     }
     if contains_command(&normalized, "update_plan") {
         return "thinking".to_string();
+    }
+    // Test runners → tools
+    if SHELL_TOOLS_COMMANDS
+        .iter()
+        .any(|cmd| contains_command(&normalized, cmd))
+    {
+        // Check if it's a test/build/lint command
+        if normalized.contains("test")
+            || normalized.contains("lint")
+            || normalized.contains("check")
+            || normalized.contains("build")
+            || normalized.contains("compile")
+            || normalized.contains("install")
+            || normalized.contains("run")
+        {
+            return "other".to_string(); // → tools route
+        }
     }
     "other".to_string()
 }
@@ -1095,5 +1145,249 @@ mod tests {
         });
 
         assert!(classify_tool_call_for_report(&call).is_none());
+    }
+
+    // ============================================================
+    // New classification rules tests
+    // ============================================================
+
+    #[test]
+    fn ls_is_classified_as_search() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"ls -la\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "search"
+        );
+    }
+
+    #[test]
+    fn tree_is_classified_as_search() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"tree -L 2\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "search"
+        );
+    }
+
+    #[test]
+    fn pwd_is_classified_as_search() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"pwd\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "search"
+        );
+    }
+
+    #[test]
+    fn git_status_is_classified_as_search() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git status\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "search"
+        );
+    }
+
+    #[test]
+    fn git_branch_is_classified_as_search() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git branch\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "search"
+        );
+    }
+
+    #[test]
+    fn git_diff_is_classified_as_thinking() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git diff\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "thinking"
+        );
+    }
+
+    #[test]
+    fn git_show_is_classified_as_thinking() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git show HEAD\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "thinking"
+        );
+    }
+
+    #[test]
+    fn cargo_test_is_classified_as_other_tools_route() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"cargo test -p router-hotpath-napi\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "other"
+        );
+    }
+
+    #[test]
+    fn npm_test_is_classified_as_other_tools_route() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"npm test\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "other"
+        );
+    }
+
+    #[test]
+    fn bd_list_is_classified_as_search() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"bd list\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "search"
+        );
+    }
+
+    #[test]
+    fn bd_update_is_classified_as_coding() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"bd update routecodex-123 --status in_progress\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "coding"
+        );
+    }
+
+    #[test]
+    fn git_add_is_classified_as_other_tools_route() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git add .\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "other"
+        );
+    }
+
+    #[test]
+    fn git_commit_is_classified_as_other_tools_route() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git commit -m fix\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "other"
+        );
+    }
+
+    #[test]
+    fn git_stash_is_classified_as_other_tools_route() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git stash\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "other"
+        );
+    }
+
+    #[test]
+    fn git_checkout_is_classified_as_other_tools_route() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git checkout -- file.txt\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "other"
+        );
+    }
+
+    #[test]
+    fn git_reset_mixed_is_classified_as_other_tools_route() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git reset --mixed HEAD~1\",\"workdir\":\"/repo\"}"
+            }
+        });
+        assert_eq!(
+            classify_tool_call_for_report(&call).unwrap().category,
+            "other"
+        );
     }
 }

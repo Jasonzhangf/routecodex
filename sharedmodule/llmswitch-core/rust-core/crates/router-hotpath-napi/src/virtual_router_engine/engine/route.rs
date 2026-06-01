@@ -765,4 +765,143 @@ mod tests {
 
         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
     }
+
+    fn build_route_test_core() -> VirtualRouterEngineCore {
+        let mut core = VirtualRouterEngineCore::new();
+        let config = json!({
+            "routing": {
+                "default": [{
+                    "id": "default-pool",
+                    "priority": 100,
+                    "targets": ["openai.key1.gpt-4o"]
+                }],
+                "thinking": [{
+                    "id": "thinking-pool",
+                    "priority": 100,
+                    "targets": ["anthropic.key1.claude-sonnet"]
+                }]
+            },
+            "providers": {
+                "openai.key1.gpt-4o": {
+                    "providerKey": "openai.key1.gpt-4o",
+                    "providerType": "openai",
+                    "modelId": "gpt-4o",
+                    "enabled": true
+                },
+                "anthropic.key1.claude-sonnet": {
+                    "providerKey": "anthropic.key1.claude-sonnet",
+                    "providerType": "anthropic",
+                    "modelId": "claude-sonnet",
+                    "enabled": true
+                }
+            }
+        });
+        core.initialize(&config).expect("init should succeed");
+        core
+    }
+
+    #[test]
+    fn route_selects_provider_for_default_route() {
+        let mut core = build_route_test_core();
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "hello" }
+            ]
+        });
+        let metadata = json!({
+            "endpoint": "/v1/chat/completions",
+            "requestId": "test-123"
+        });
+
+        let result = core.route(
+            unsafe { Env::from_raw(std::ptr::null_mut()) },
+            &request,
+            &metadata,
+        );
+        assert!(result.is_ok(), "route should succeed: {:?}", result.err());
+        let output = result.unwrap();
+        assert!(output.is_object(), "output should be an object");
+        let decision = output.get("decision");
+        assert!(decision.is_some(), "output should have decision");
+        let provider_key = decision
+            .unwrap()
+            .get("providerKey")
+            .and_then(|v| v.as_str());
+        assert!(provider_key.is_some(), "decision should have providerKey");
+        assert!(
+            provider_key.unwrap() == "openai.key1.gpt-4o"
+                || provider_key.unwrap() == "anthropic.key1.claude-sonnet",
+            "providerKey should be a configured provider, got: {}",
+            provider_key.unwrap()
+        );
+    }
+
+    #[test]
+    fn route_returns_error_when_no_providers_configured() {
+        let mut core = VirtualRouterEngineCore::new();
+        let config = json!({
+            "routing": {
+                "default": [{
+                    "id": "default-pool",
+                    "priority": 100,
+                    "targets": ["nonexistent.key1.model"]
+                }]
+            },
+            "providers": {}
+        });
+        core.initialize(&config).expect("init should succeed");
+
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "hello" }
+            ]
+        });
+        let metadata = json!({
+            "endpoint": "/v1/chat/completions",
+            "requestId": "test-456"
+        });
+
+        let result = core.route(
+            unsafe { Env::from_raw(std::ptr::null_mut()) },
+            &request,
+            &metadata,
+        );
+        assert!(
+            result.is_err(),
+            "route should fail when no providers available"
+        );
+    }
+
+    #[test]
+    fn route_output_contains_required_fields() {
+        let mut core = build_route_test_core();
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "hello" }
+            ]
+        });
+        let metadata = json!({
+            "endpoint": "/v1/chat/completions",
+            "requestId": "test-789"
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .unwrap();
+
+        // Output should have decision with required fields
+        let decision = result.get("decision").expect("should have decision");
+        assert!(
+            decision.get("providerKey").is_some(),
+            "decision should have providerKey"
+        );
+        assert!(
+            decision.get("routeName").is_some(),
+            "decision should have routeName"
+        );
+    }
 }

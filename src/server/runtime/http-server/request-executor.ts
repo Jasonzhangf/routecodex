@@ -217,7 +217,6 @@ import {
   type ProviderTrafficPermit
 } from './provider-traffic-governor.js';
 import {
-  emitRequestExecutorVirtualRouterConcurrencyLog,
   createRequestExecutorPayloadContractErrorsampleWriter,
   resolveRequestExecutorTrafficRuntimeProfile,
   shouldBypassProviderResponseConversion
@@ -231,8 +230,8 @@ import {
 } from './executor/request-executor-response-inspect.js';
 export type RequestExecutorDeps = {
   runtimeManager: {
-    resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
-    getHandleByRuntimeKey(runtimeKey?: string): ProviderHandle | undefined;
+    resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
+    getHandleByRuntimeKey(runtimeKey?: string, metadata?: Record<string, unknown>): ProviderHandle | undefined;
   };
   getHubPipeline(routingPolicyGroup?: string): HubPipeline | null;
   getModuleDependencies(): ModuleDependencies;
@@ -700,7 +699,8 @@ export class HubRequestExecutor implements RequestExecutor {
             routeName: pipelineResult.routingDecision?.routeName,
             runtimeKeyHint: target.runtimeKey,
             runtimeManager: this.deps.runtimeManager,
-            dependencies: this.deps.getModuleDependencies()
+            dependencies: this.deps.getModuleDependencies(),
+            metadata: metadataForAttempt
           });
           runtimeKey = resolved.runtimeKey;
           handle = resolved.handle;
@@ -752,6 +752,7 @@ export class HubRequestExecutor implements RequestExecutor {
             logProviderRetrySwitch: (switchArgs) => this.logProviderRetrySwitch(switchArgs),
             forcedRouteHint,
             abortSignal: clientAbortSignal,
+            metadata: metadataForAttempt,
             logNonBlockingError: logRequestExecutorNonBlockingError,
             extractRetryErrorSnapshot
           });
@@ -968,25 +969,6 @@ export class HubRequestExecutor implements RequestExecutor {
             pipelineResult.routingDecision && typeof pipelineResult.routingDecision === 'object'
               ? (pipelineResult.routingDecision as Record<string, unknown>)
               : undefined;
-
-          emitRequestExecutorVirtualRouterConcurrencyLog({
-            sessionId: readString(mergedMetadata.sessionId) ?? readString(mergedMetadata.conversationId),
-            projectPath:
-              readString(mergedMetadata.clientWorkdir)
-              ?? readString(mergedMetadata.client_workdir)
-              ?? readString(mergedMetadata.workdir)
-              ?? readString(mergedMetadata.cwd),
-            routeName: pipelineResult.routingDecision?.routeName,
-            poolId: readString(routingDecisionRecord?.poolId),
-            providerKey: target.providerKey,
-            model: providerModel,
-            reason: readString(routingDecisionRecord?.reasoning),
-            stoplessMode: stoplessLogState.mode,
-            stoplessArmed: stoplessLogState.armed,
-            activeInFlight: trafficActiveInFlightAtAcquire,
-            maxInFlight: trafficPolicyMaxInFlight
-          });
-
           providerSendStartedAtMs = Date.now();
           logStageLazy('provider.send.start', input.requestId, () => ({
             providerKey: target.providerKey,
@@ -1049,22 +1031,6 @@ export class HubRequestExecutor implements RequestExecutor {
             source: 'provider_response',
             hasUsage: Boolean(usageFromProvider),
             attempt
-          });
-          emitRequestExecutorVirtualRouterConcurrencyLog({
-            sessionId: readString(mergedMetadata.sessionId) ?? readString(mergedMetadata.conversationId),
-            projectPath:
-              readString(mergedMetadata.clientWorkdir)
-              ?? readString(mergedMetadata.client_workdir)
-              ?? readString(mergedMetadata.workdir)
-              ?? readString(mergedMetadata.cwd),
-            routeName: pipelineResult.routingDecision?.routeName,
-            poolId: readString(routingDecisionRecord?.poolId),
-            providerKey: target.providerKey,
-            model: providerModel,
-            reason: readString(routingDecisionRecord?.reasoning),
-            activeInFlight: trafficActiveInFlightAtAcquire,
-            maxInFlight: trafficPolicyMaxInFlight,
-            usage: usageFromProvider as Record<string, unknown> | undefined
           });
           logStageLazy('provider.request_semantics.start', input.requestId, () => ({
             providerKey: target.providerKey,
@@ -1339,6 +1305,7 @@ export class HubRequestExecutor implements RequestExecutor {
             contextOverflowRetries,
             maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES,
             abortSignal: clientAbortSignal,
+            metadata: metadataForAttempt,
             phase: providerFailurePhase,
             logNonBlockingError: logRequestExecutorNonBlockingError,
             extractRetryErrorSnapshot

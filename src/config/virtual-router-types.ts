@@ -19,6 +19,12 @@ export type VirtualRouterProvidersConfig = Record<string, UnknownRecord>;
 export interface VirtualRouterInput extends UnknownRecord {
   providers: VirtualRouterProvidersConfig;
   routing: VirtualRouterRoutingConfig;
+  /**
+   * ProviderForwarder 节点（顶层 key = forwarder id，如 `fwd.openai.gpt-4o`）。
+   * 每个 entry 形如 { protocol, model, resolutionMode, strategy, targets, stickyKey, ... }
+   * Rust 端 `forwarder.rs` 负责解析 + sticky 状态。
+   */
+  forwarders?: Record<string, UnknownRecord>;
   applyPatch?: UnknownRecord;
 }
 
@@ -57,9 +63,18 @@ export function buildVirtualRouterInputFromUserConfig(userConfig: UnknownRecord)
     routingSource = userConfig.routing as VirtualRouterRoutingConfig;
   }
 
+  const forwardersSource = isRecord(vrNode.forwarders)
+    ? (vrNode.forwarders as Record<string, UnknownRecord>)
+    : isRecord(userConfig.forwarders)
+      ? (userConfig.forwarders as Record<string, UnknownRecord>)
+      : undefined;
+
   return {
     ...vrNode,
     providers: { ...providersSource },
-    routing: Array.isArray(routingSource) ? {} : { ...routingSource }
+    routing: Array.isArray(routingSource) ? {} : { ...routingSource },
+    ...(forwardersSource && Object.keys(forwardersSource).length
+      ? { forwarders: { ...forwardersSource } }
+      : {})
   };
 }

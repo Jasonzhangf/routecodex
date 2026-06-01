@@ -1,0 +1,49 @@
+{
+  "providers": {
+    "openai-prod-1": {
+      "type": "openai-http-provider",
+      "providerType": "openai",
+      "baseURL": "https://api.openai.com/v1",
+      "auth": { "type": "apikey", "env": "OPENAI_API_KEY" }
+    },
+    "openai-prod-2": {
+      "type": "openai-http-provider",
+      "providerType": "openai",
+      "baseURL": "https://api.openai.com/v1",
+      "auth": { "type": "apikey", "env": "OPENAI_API_KEY_2" }
+    },
+    "azure-gpt-4o": {
+      "type": "openai-http-provider",
+      "providerType": "openai",
+      "baseURL": "https://myres.openai.azure.com/openai/deployments/gpt-4o",
+      "auth": { "type": "apikey", "env": "AZURE_OPENAI_KEY" }
+    },
+    "openrouter-gpt4": {
+      "type": "openai-http-provider",
+      "providerType": "openai",
+      "baseURL": "https://openrouter.ai/api/v1",
+      "auth": { "type": "apikey", "env": "OPENROUTER_KEY" }
+    }
+  },
+  "forwarders": {
+    "fwd.openai.gpt-4o": {
+      "protocol": "openai",
+      "model": "gpt-4o",
+      "resolutionMode": "model-first",
+      "strategy": "weighted",
+      "weights": {
+        "openai-prod-1": 5,
+        "openai-prod-2": 3,
+        "azure-gpt-4o": 2,
+        "openrouter-gpt4": 1
+      },
+      "targets": [
+        { "providerId": "openai-prod-1",   "weight": 5 },
+        { "providerId": "openai-prod-2",   "weight": 3 },
+        { "providerId": "azure-gpt-4o",    "weight": 2 },
+        { "providerId": "openrouter-gpt4", "weight": 1 }
+      ],
+      "stickyKey": "session"
+    }
+  }
+}

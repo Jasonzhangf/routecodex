@@ -1139,7 +1139,9 @@ pub fn normalizeChatResponseReasoningToolsJson(
 }
 
 #[napi(js_name = "hasRequestedToolsInSemanticsJson")]
-pub fn has_requested_tools_in_semantics_json_bridge(request_semantics_json: String) -> NapiResult<bool> {
+pub fn has_requested_tools_in_semantics_json_bridge(
+    request_semantics_json: String,
+) -> NapiResult<bool> {
     chat_node_result_semantics::has_requested_tools_in_semantics_json(request_semantics_json)
 }
 
@@ -1149,7 +1151,9 @@ pub fn is_required_tool_call_turn_json_bridge(request_semantics_json: String) ->
 }
 
 #[napi(js_name = "isToolResultFollowupTurnJson")]
-pub fn is_tool_result_followup_turn_json_bridge(request_semantics_json: String) -> NapiResult<bool> {
+pub fn is_tool_result_followup_turn_json_bridge(
+    request_semantics_json: String,
+) -> NapiResult<bool> {
     chat_node_result_semantics::is_tool_result_followup_turn_json(request_semantics_json)
 }
 

@@ -462,6 +462,25 @@ fn resolves_responses_bridge_tools_preserves_resume_original_tools_without_chat_
 }
 
 #[test]
+fn resolves_responses_bridge_tools_does_not_passthrough_client_mcp_tools_without_chat_tools() {
+    let output = resolve_responses_bridge_tools(ResolveResponsesBridgeToolsInput {
+        original_tools: Some(vec![json!({
+            "type": "function",
+            "name": "mcp__node_repl",
+            "description": "client side MCP tool",
+            "tools": [{ "name": "js" }]
+        })]),
+        chat_tools: Some(vec![]),
+        allow_builtin_web_search: Some(false),
+        has_server_side_web_search: Some(false),
+        passthrough_keys: None,
+        request: None,
+    });
+
+    assert!(output.merged_tools.is_none());
+}
+
+#[test]
 fn resolves_responses_bridge_tools_dedupes_builtin_web_search_by_type() {
     let output = resolve_responses_bridge_tools(ResolveResponsesBridgeToolsInput {
         original_tools: Some(vec![

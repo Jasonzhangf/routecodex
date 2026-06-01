@@ -217,6 +217,67 @@ describe('buildVirtualRouterInputV2', () => {
     expect(input.routing.default?.[0]?.target).toBe('mini27.MiniMax-M2.7');
   });
 
+  it('materializes virtualrouter.forwarders and keeps their target providers', async () => {
+    const root = await createTempDir('provider-v2-');
+    for (const providerId of ['minimax', 'mini27']) {
+      const providerDir = path.join(root, providerId);
+      await fs.mkdir(providerDir, { recursive: true });
+      await fs.writeFile(
+        path.join(providerDir, 'config.v2.json'),
+        `${JSON.stringify({
+          version: '2.0.0',
+          providerId,
+          provider: { type: 'anthropic', baseURL: `https://${providerId}.example.test` }
+        }, null, 2)}\n`,
+        'utf8'
+      );
+    }
+
+    const userConfig: UnknownRecord = {
+      version: '2.0.0',
+      virtualrouterMode: 'v2',
+      virtualrouter: {
+        forwarders: {
+          'fwd.minimax.MiniMax-M3': {
+            protocol: 'anthropic',
+            model: 'MiniMax-M3',
+            strategy: 'priority',
+            targets: [
+              { providerId: 'minimax', priority: 1 },
+              { providerId: 'mini27', priority: 2 }
+            ]
+          }
+        },
+        routingPolicyGroups: {
+          gateway_priority_5520: {
+            routing: {
+              default: [{ id: 'default', target: 'fwd.minimax.MiniMax-M3' }]
+            }
+          }
+        }
+      }
+    };
+
+    const materialized = await materializeRouteCodexConfig(userConfig, root);
+
+    expect(Object.keys(materialized.userConfig.virtualrouter?.providers as Record<string, unknown>).sort()).toEqual([
+      'mini27',
+      'minimax'
+    ]);
+    expect(materialized.userConfig.virtualrouter?.forwarders).toEqual(
+      expect.objectContaining({
+        'fwd.minimax.MiniMax-M3': expect.objectContaining({
+          forwarderId: 'fwd.minimax.MiniMax-M3',
+          modelId: 'MiniMax-M3',
+          targets: expect.arrayContaining([
+            expect.objectContaining({ providerKey: 'minimax' }),
+            expect.objectContaining({ providerKey: 'mini27' })
+          ])
+        })
+      })
+    );
+  });
+
 
   it('carries top-level servertool.apply_patch mode into virtual router input', async () => {
     const root = await createTempDir('provider-v2-');
@@ -275,6 +336,46 @@ describe('buildVirtualRouterInputV2', () => {
     }, root);
 
     expect((materialized.userConfig.virtualrouter as any).applyPatch).toEqual({ mode: 'servertool' });
+  });
+
+  it('materializes only the primary router port routing policy group', async () => {
+    const root = await createTempDir('provider-v2-');
+    for (const providerId of ['alpha', 'beta']) {
+      const providerDir = path.join(root, providerId);
+      await fs.mkdir(providerDir, { recursive: true });
+      await fs.writeFile(
+        path.join(providerDir, 'config.v2.json'),
+        `${JSON.stringify({
+          version: '2.0.0',
+          providerId,
+          provider: { type: 'mock-provider', baseURL: `https://${providerId}.example.com` }
+        }, null, 2)}\n`,
+        'utf8'
+      );
+    }
+
+    const materialized = await materializeRouteCodexConfig({
+      version: '2.0.0',
+      virtualrouterMode: 'v2',
+      httpserver: {
+        ports: [
+          { port: 5520, mode: 'router', routingPolicyGroup: 'group_a' },
+          { port: 5555, mode: 'router', routingPolicyGroup: 'group_b' }
+        ]
+      },
+      virtualrouter: {
+        routingPolicyGroups: {
+          group_a: { routing: { default: [{ id: 'route-a', targets: ['alpha.model-a'] }] } },
+          group_b: { routing: { default: [{ id: 'route-b', targets: ['beta.model-b'] }] } }
+        }
+      }
+    }, root);
+
+    expect((materialized.userConfig.virtualrouter as any).routing.default).toEqual([
+      expect.objectContaining({ id: 'route-a' })
+    ]);
+    expect((materialized.userConfig.virtualrouter as any).providers).toHaveProperty('alpha');
+    expect((materialized.userConfig.virtualrouter as any).providers).not.toHaveProperty('beta');
   });
 
   it('does not auto-synthesize capability routes when route pools are absent', async () => {

@@ -5,7 +5,7 @@ import type {
   VirtualRouterRoutingConfig
 } from './virtual-router-types.js';
 import { loadProviderConfigsV2 } from './provider-v2-loader.js';
-import { formatUnknownError, isRecord } from '../utils/common-utils.js';
+import { isRecord } from '../utils/common-utils.js';
 
 
 function resolveReferencedProviderIdsFromRouting(routing: VirtualRouterRoutingConfig): Set<string> {
@@ -55,6 +55,32 @@ function resolveReferencedProviderIdsFromRouting(routing: VirtualRouterRoutingCo
     }
   }
   return providerIds;
+}
+
+/**
+ * 收集 routing target 中引用的 forwarder id（`fwd.*`）。
+ * 这些 id 必须在 `virtualrouter.forwarders` 中存在，否则 bootstrap 失败。
+ */
+function resolveReferencedForwarderIdsFromRouting(routing: VirtualRouterRoutingConfig): Set<string> {
+  const ids = new Set<string>();
+  for (const entries of Object.values(routing)) {
+    for (const entry of entries) {
+      const collect = (target: unknown) => {
+        if (typeof target !== 'string') return;
+        const trimmed = target.trim();
+        if (trimmed.startsWith('fwd.') && trimmed.length > 4) {
+          ids.add(trimmed);
+        }
+      };
+      if (Array.isArray(entry.targets)) {
+        for (const t of entry.targets) collect(t);
+      }
+      if (typeof entry.target === 'string') {
+        collect(entry.target);
+      }
+    }
+  }
+  return ids;
 }
 
 function resolveProviderIdsFromProviderPorts(userConfig: UnknownRecord): Set<string> {
@@ -116,11 +142,11 @@ function withRoutePolicyGroupTag(routeEntry: unknown, groupId: string): unknown 
 }
 
 /**
- * Per-port routing: collect ALL groups into global routing config.
- * Per-port allowedProviders filter restricts routing at request time.
+ * Per-port routing: build one VirtualRouterInput for one routingPolicyGroup.
  */
 export type BuildVirtualRouterInputV2Options = {
   routingPolicyGroup?: string;
+  includeAllRoutingPolicyGroups?: boolean;
 };
 
 function extractRoutingFromUserConfig(
@@ -141,12 +167,14 @@ function extractRoutingFromUserConfig(
     if (groupEntries.length === 0) {
       throw new Error(`[config] v2 config missing virtualrouter.routingPolicyGroups["${requestedGroup}"]`);
     }
+  } else if (options?.includeAllRoutingPolicyGroups !== true && groupEntries.length > 1) {
+    throw new Error('[config] v2 config with multiple routingPolicyGroups requires an explicit routingPolicyGroup');
   }
   if (groupEntries.length === 0) {
     throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups with at least one group');
   }
-  // Collect routing from ALL groups into a flat RoutingPools config.
-  // Per-port allowedProviders filter will restrict routing at request time.
+  // Collect routing into a flat RoutingPools config for exactly one selected group.
+  // Multi-port servers build one isolated VirtualRouterInput per port/group.
   const routing: VirtualRouterRoutingConfig = {};
   for (const [groupId, groupNode] of groupEntries) {
     const groupRouting = isRecord(groupNode.routing) ? (groupNode.routing as VirtualRouterRoutingConfig) : undefined;
@@ -168,7 +196,7 @@ function extractRoutingFromUserConfig(
 /**
  * Build a VirtualRouterInput in "v2" mode by combining:
  * - Provider v2 configs loaded from ~/.rcc/provider (or a custom root)
- * - RoutingPools merged from ALL routingPolicyGroups; per-port allowedProviders filter restricts at runtime
+ * - RoutingPools selected from one routingPolicyGroup; multi-port runtime builds one router per group
  *
  * V2 config is the single source of truth: no legacy routing fallback and no
  * auto-synthesized capability routes are injected here.
@@ -182,6 +210,34 @@ export async function buildVirtualRouterInputV2(
   const referencedProviderIds = resolveReferencedProviderIdsFromRouting(routing);
   for (const providerId of resolveProviderIdsFromProviderPorts(userConfig)) {
     referencedProviderIds.add(providerId);
+  }
+
+  // 收集 forwarder 引用 + forwarder 定义，并补全 forwarder targets 引用的 real provider id
+  const referencedForwarderIds = resolveReferencedForwarderIdsFromRouting(routing);
+  const forwardersSource = extractForwardersFromUserConfig(userConfig);
+  if (forwardersSource) {
+    for (const fwdId of Object.keys(forwardersSource)) {
+      if (!fwdId.startsWith('fwd.')) {
+        throw new Error(`[forwarder-config] forwarder id '${fwdId}' must start with 'fwd.'`);
+      }
+    }
+    for (const refId of referencedForwarderIds) {
+      if (!forwardersSource[refId]) {
+        throw new Error(`[forwarder-config] routing references unknown forwarder '${refId}'`);
+      }
+    }
+    // 收集 forwarder targets 引用的 real provider id
+    for (const fwdNode of Object.values(forwardersSource)) {
+      const targets = Array.isArray((fwdNode as UnknownRecord).targets)
+        ? ((fwdNode as UnknownRecord).targets as Array<UnknownRecord>)
+        : [];
+      for (const t of targets) {
+        const providerId = pickString(t.providerId) ?? pickString(t.providerKey);
+        if (providerId) {
+            referencedProviderIds.add(providerId);
+        }
+      }
+    }
   }
 
   const providerConfigs = await loadProviderConfigsV2(providerRootDir);
@@ -198,7 +254,77 @@ export async function buildVirtualRouterInputV2(
   const input: VirtualRouterInput = {
     providers,
     routing,
+    ...(forwardersSource && Object.keys(forwardersSource).length
+      ? { forwarders: normalizeForwardersForNative(forwardersSource) }
+      : {}),
     ...(applyPatch ? { applyPatch } : {})
   };
   return input;
+}
+
+function normalizeForwardersForNative(source: Record<string, UnknownRecord>): Record<string, UnknownRecord> {
+  const out: Record<string, UnknownRecord> = {};
+  for (const [id, raw] of Object.entries(source)) {
+    const entry: UnknownRecord = { ...raw };
+    entry.forwarderId = pickString(entry.forwarderId) ?? id;
+    const modelId = pickString(entry.modelId) ?? pickString(entry.model);
+    if (modelId) {
+      entry.modelId = modelId;
+      delete entry.model;
+    }
+    const resolutionMode = pickString(entry.resolutionMode);
+    if (!resolutionMode) {
+      entry.resolutionMode = 'model-first';
+    }
+    const strategy = pickString(entry.strategy);
+    if (!strategy) {
+      entry.strategy = 'round-robin';
+    }
+    const stickyKey = pickString(entry.stickyKey);
+    if (!stickyKey) {
+      entry.stickyKey = 'none';
+    }
+    if (Array.isArray(entry.targets)) {
+      entry.targets = entry.targets
+        .filter((target): target is UnknownRecord => isRecord(target))
+        .map((target) => {
+          const providerKey = pickString(target.providerKey) ?? pickString(target.providerId);
+          return {
+            ...target,
+            ...(providerKey ? { providerKey } : {})
+          };
+        });
+    }
+    out[id] = entry;
+  }
+  return out;
+}
+
+function pickString(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  return undefined;
+}
+
+function extractForwardersFromUserConfig(userConfig: UnknownRecord): Record<string, UnknownRecord> | undefined {
+  const vrNode = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : undefined;
+  const candidates: Array<unknown> = [
+    vrNode?.forwarders,
+    userConfig.forwarders,
+  ];
+  for (const c of candidates) {
+    if (isRecord(c)) {
+      // 仅保留 fwd. 前缀的
+      const filtered: Record<string, UnknownRecord> = {};
+      for (const [k, v] of Object.entries(c)) {
+        if (k.startsWith('fwd.') && isRecord(v)) {
+          filtered[k] = v as UnknownRecord;
+        }
+      }
+      if (Object.keys(filtered).length) return filtered;
+    }
+  }
+  return undefined;
 }

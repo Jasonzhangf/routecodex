@@ -52,6 +52,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "syncSessionIdentifiersToMetadataJson",
   "buildToolGovernanceNodeResultJson",
   "buildProviderProtocolErrorJson",
+  "deriveFinishReasonJson",
   "buildFormatRequestJson",
   "buildResponsesPayloadFromChatJson",
   "buildBridgeHistoryJson",

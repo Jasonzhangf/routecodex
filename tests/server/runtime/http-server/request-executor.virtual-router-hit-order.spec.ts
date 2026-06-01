@@ -112,7 +112,7 @@ describe('request-executor virtual-router-hit timing', () => {
     logSpy.mockClear();
   });
 
-  it('prints unified virtual-router-hit before provider.send.start and before provider processIncoming', async () => {
+  it('keeps router target and final provider send consistent without TS duplicate hit', async () => {
     mockConvertProviderResponseIfNeeded.mockResolvedValue({
       status: 200,
       body: {
@@ -148,24 +148,20 @@ describe('request-executor virtual-router-hit timing', () => {
       }
     } as any);
 
-    expect(mockRecordVirtualRouterHitRollup).toHaveBeenCalledTimes(1);
-    expect(mockRecordVirtualRouterHitRollup).toHaveBeenCalledWith(expect.objectContaining({
-      routeName: 'coding',
-      poolId: 'primary',
-      providerKey: 'mock.key1.claude-sonnet-4-5',
-      model: 'claude-sonnet-4-5',
-      sessionId: 'sess_virtual_router_hit_order'
-    }));
+    expect(mockRecordVirtualRouterHitRollup).not.toHaveBeenCalled();
 
     const providerSendStartIndex = logStage.mock.calls.findIndex(([stage]: [string]) => stage === 'provider.send.start');
     expect(providerSendStartIndex).toBeGreaterThanOrEqual(0);
 
-    const virtualRouterHitOrder = mockRecordVirtualRouterHitRollup.mock.invocationCallOrder[0];
+    expect(logStage.mock.calls[providerSendStartIndex][2]).toEqual(expect.objectContaining({
+      providerKey: 'mock.key1.claude-sonnet-4-5',
+      model: 'claude-sonnet-4-5'
+    }));
+
     const providerSendStartOrder = logStage.mock.invocationCallOrder[providerSendStartIndex];
     const providerProcessIncomingOrder = handle.instance.processIncoming.mock.invocationCallOrder[0];
 
-    expect(virtualRouterHitOrder).toBeLessThan(providerSendStartOrder);
-    expect(virtualRouterHitOrder).toBeLessThan(providerProcessIncomingOrder);
+    expect(providerSendStartOrder).toBeLessThan(providerProcessIncomingOrder);
   });
 
   afterAll(() => {

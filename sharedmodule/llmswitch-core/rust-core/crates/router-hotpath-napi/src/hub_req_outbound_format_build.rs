@@ -95,7 +95,10 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
         .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string()));
 
     Some(Value::Object(Map::from_iter([
-        ("type".to_string(), Value::String("function_call".to_string())),
+        (
+            "type".to_string(),
+            Value::String("function_call".to_string()),
+        ),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("name".to_string(), Value::String(name.to_string())),
         ("arguments".to_string(), Value::String(arguments_text)),
@@ -143,7 +146,9 @@ fn build_responses_input_from_chat_messages(messages: &[Value]) -> Value {
                     .unwrap_or("user")
                     .trim();
                 if role.eq_ignore_ascii_case("tool") {
-                    return chat_tool_result_to_responses_input_item(row).into_iter().collect::<Vec<_>>();
+                    return chat_tool_result_to_responses_input_item(row)
+                        .into_iter()
+                        .collect::<Vec<_>>();
                 }
                 if role.eq_ignore_ascii_case("assistant") {
                     if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
@@ -363,7 +368,10 @@ mod tests {
         assert!(result.payload.get("messages").is_none());
         assert_eq!(result.payload["input"][0]["type"], "message");
         assert_eq!(result.payload["input"][0]["role"], "user");
-        assert_eq!(result.payload["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(
+            result.payload["input"][0]["content"][0]["type"],
+            "input_text"
+        );
         assert_eq!(result.payload["input"][0]["content"][0]["text"], "hello");
     }
 
@@ -450,7 +458,10 @@ mod tests {
         assert_eq!(result.payload["messages"].as_array().unwrap().len(), 1);
         assert_eq!(result.payload["messages"][0]["role"], "user");
         assert_eq!(result.payload["messages"][0]["content"][0]["type"], "text");
-        assert_eq!(result.payload["messages"][0]["content"][0]["text"], "search latest");
+        assert_eq!(
+            result.payload["messages"][0]["content"][0]["text"],
+            "search latest"
+        );
         assert!(result.payload.get("metadata").is_none());
     }
 
@@ -494,7 +505,9 @@ mod tests {
         assert!(result.payload.get("model").is_some());
 
         assert!(result.payload.get("messages").is_none());
-        assert!(result.payload["input"][0]["content"][0].get("_temp").is_none());
+        assert!(result.payload["input"][0]["content"][0]
+            .get("_temp")
+            .is_none());
     }
 
     #[test]

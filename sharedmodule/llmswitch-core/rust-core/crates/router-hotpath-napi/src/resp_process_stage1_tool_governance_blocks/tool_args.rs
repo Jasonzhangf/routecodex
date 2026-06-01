@@ -5,9 +5,8 @@ use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::{
     args_contain_direct_or_nested_key, normalize_exec_command_text, read_command_from_args,
 };
 use crate::resp_process_stage1_tool_governance_blocks::exec_command_guard::{
-    build_exec_command_large_write_guard_command, build_exec_command_object_with_shape,
-    exec_command_heredoc_preview_chars, is_large_heredoc_file_generation_command,
-    maybe_guard_large_exec_command_from_raw_string, truncate_preview,
+    build_dangerous_command_blocked_object, build_exec_command_object_with_shape,
+    detect_dangerous_command,
 };
 use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
@@ -61,26 +60,15 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
     let name = normalize_routecodex_tool_name(Some(tool_name))?;
     let args = parse_json_record(raw_args).unwrap_or_default();
     if name == "exec_command" {
-        if let Some(guarded) = maybe_guard_large_exec_command_from_raw_string(
-            raw_args,
-            source_is_shell_alias,
-            |guard, force_cmd, force_command| {
-                build_exec_command_object_with_shape(
-                    guard,
-                    None,
-                    source_is_shell_alias,
-                    force_cmd,
-                    force_command,
-                    args_contain_direct_or_nested_key,
-                )
-            },
-        ) {
-            return Some(guarded);
-        }
-        let mut cmd = normalize_exec_command_text(read_command_from_args(&args)?.as_str());
-        if is_large_heredoc_file_generation_command(cmd.as_str()) {
-            let preview = truncate_preview(cmd.as_str(), exec_command_heredoc_preview_chars());
-            cmd = build_exec_command_large_write_guard_command(preview.as_str());
+        let cmd = normalize_exec_command_text(read_command_from_args(&args)?.as_str());
+        if let Some((reason, message)) = detect_dangerous_command(cmd.as_str()) {
+            return build_dangerous_command_blocked_object(
+                reason,
+                message,
+                Some(&args),
+                source_is_shell_alias,
+                args_contain_direct_or_nested_key,
+            );
         }
         let read_nested_value = |keys: &[&str]| -> Option<Value> {
             for key in keys {
@@ -302,33 +290,14 @@ pub(crate) fn normalize_tool_args_preserving_raw_shape(
         source_tool_name.as_str(),
         "shell_command" | "shell" | "bash" | "terminal" | "execute_command" | "execute-command"
     );
-    if let Some(guarded) = maybe_guard_large_exec_command_from_raw_string(
-        raw_args,
-        source_is_shell_alias,
-        |guard, force_cmd, force_command| {
-            build_exec_command_object_with_shape(
-                guard,
-                None,
-                source_is_shell_alias,
-                force_cmd,
-                force_command,
-                args_contain_direct_or_nested_key,
-            )
-        },
-    ) {
-        return Some(guarded);
-    }
     let args = parse_json_record(raw_args).unwrap_or_default();
     let cmd = read_command_from_args(&args)?;
-    if is_large_heredoc_file_generation_command(cmd.as_str()) {
-        let preview = truncate_preview(cmd.as_str(), exec_command_heredoc_preview_chars());
-        let guard = build_exec_command_large_write_guard_command(preview.as_str());
-        return build_exec_command_object_with_shape(
-            guard,
+    if let Some((reason, message)) = detect_dangerous_command(cmd.as_str()) {
+        return build_dangerous_command_blocked_object(
+            reason,
+            message,
             Some(&args),
             source_is_shell_alias,
-            None,
-            None,
             args_contain_direct_or_nested_key,
         );
     }

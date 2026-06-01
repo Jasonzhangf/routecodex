@@ -36,13 +36,18 @@ export function bootstrapVirtualRouterConfig(
   const routingBootstrap = bootstrapRoutingWithNative({
     routingSource: section.routing,
     aliasIndex,
-    modelIndex
+    modelIndex,
+    forwarderIds: section.forwarders ? Object.keys(section.forwarders) : []
   });
   const routingSource = routingBootstrap.routingSource;
   const routing = routingBootstrap.routing;
 
+  const routedTargetKeys = new Set<string>([
+    ...routingBootstrap.targetKeys,
+    ...collectForwarderTargetKeys(section.forwarders, aliasIndex)
+  ]);
   const providerProfilesBootstrap = bootstrapProviderProfilesWithNative({
-    routedTargetKeys: routingBootstrap.targetKeys,
+    routedTargetKeys,
     aliasIndex,
     modelIndex,
     runtimeEntries
@@ -61,7 +66,10 @@ export function bootstrapVirtualRouterConfig(
     contextRouting: configMeta.contextRouting,
     ...(configMeta.webSearch ? { webSearch: configMeta.webSearch } : {}),
     ...(configMeta.execCommandGuard ? { execCommandGuard: configMeta.execCommandGuard } : {}),
-    ...(configMeta.applyPatch ? { applyPatch: configMeta.applyPatch } : {})
+    ...(configMeta.applyPatch ? { applyPatch: configMeta.applyPatch } : {}),
+    ...(section.forwarders && Object.keys(section.forwarders).length
+      ? { forwarders: section.forwarders }
+      : {})
   };
 
   return {
@@ -73,11 +81,55 @@ export function bootstrapVirtualRouterConfig(
   };
 }
 
+function collectForwarderTargetKeys(
+  forwarders: Record<string, Record<string, unknown>> | undefined,
+  aliasIndex: Map<string, string[]>
+): string[] {
+  if (!forwarders || typeof forwarders !== 'object') {
+    return [];
+  }
+  const out: string[] = [];
+  for (const raw of Object.values(forwarders)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      continue;
+    }
+    const model = readNonEmptyString((raw as Record<string, unknown>).modelId)
+      ?? readNonEmptyString((raw as Record<string, unknown>).model);
+    const targets = Array.isArray((raw as Record<string, unknown>).targets)
+      ? ((raw as Record<string, unknown>).targets as unknown[])
+      : [];
+    if (!model || !targets.length) {
+      continue;
+    }
+    for (const target of targets) {
+      if (!target || typeof target !== 'object' || Array.isArray(target)) {
+        continue;
+      }
+      const targetRecord = target as Record<string, unknown>;
+      const providerId = readNonEmptyString(targetRecord.providerId)
+        ?? readNonEmptyString(targetRecord.providerKey);
+      if (!providerId) {
+        continue;
+      }
+      const aliases = aliasIndex.get(providerId) ?? [];
+      for (const alias of aliases) {
+        out.push(`${providerId}.${alias}.${model}`);
+      }
+    }
+  }
+  return out;
+}
+
+function readNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 function extractVirtualRouterSection(
   input: VirtualRouterBootstrapInput
 ): {
   providers: Record<string, unknown>;
   routing: Record<string, unknown>;
+  forwarders?: Record<string, Record<string, unknown>>;
   classifier?: unknown;
   loadBalancing?: unknown;
   health?: unknown;
@@ -90,6 +142,11 @@ function extractVirtualRouterSection(
   const section = root.virtualrouter && typeof root.virtualrouter === 'object' ? asRecord(root.virtualrouter) : root;
   const providers = asRecord(section.providers ?? root.providers);
   const routing = asRecord(section.routing ?? root.routing);
+  const forwardersRaw = (section as Record<string, unknown>).forwarders
+    ?? (root as Record<string, unknown>).forwarders;
+  const forwarders = forwardersRaw && typeof forwardersRaw === 'object' && !Array.isArray(forwardersRaw)
+    ? (forwardersRaw as Record<string, Record<string, unknown>>)
+    : undefined;
   const classifier = section.classifier ?? root.classifier;
   const loadBalancing = section.loadBalancing ?? root.loadBalancing;
   const health = section.health ?? root.health;
@@ -108,7 +165,7 @@ function extractVirtualRouterSection(
     ?? (root as Record<string, unknown>).applyPatch
     ?? (root as Record<string, unknown>).apply_patch;
 
-  return { providers, routing, classifier, loadBalancing, health, contextRouting, webSearch, execCommandGuard, applyPatch };
+  return { providers, routing, forwarders, classifier, loadBalancing, health, contextRouting, webSearch, execCommandGuard, applyPatch };
 }
 
 type NativeBootstrapConfigMeta = Pick<VirtualRouterConfig, 'classifier' | 'health' | 'contextRouting' | 'webSearch' | 'execCommandGuard' | 'applyPatch' | 'loadBalancing'>;

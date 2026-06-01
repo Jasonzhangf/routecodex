@@ -214,10 +214,8 @@ impl HubPipelineEngine {
                     "Rust HubPipeline req inbound returned no standardized request",
                 )
             })?;
-        let standardized_raw_payload = standardized
-            .get("rawPayload")
-            .cloned()
-            .ok_or_else(|| {
+        let standardized_raw_payload =
+            standardized.get("rawPayload").cloned().ok_or_else(|| {
                 HubPipelineError::new(
                     "hub_pipeline_missing_standardized_raw_payload",
                     "Rust HubPipeline req inbound returned no standardized raw payload",
@@ -680,7 +678,11 @@ fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn build_response_record_effect_payload(metadata: &Value, payload: &Value, request_id: &str) -> Value {
+fn build_response_record_effect_payload(
+    metadata: &Value,
+    payload: &Value,
+    request_id: &str,
+) -> Value {
     if metadata.get("clientProtocol").and_then(Value::as_str) != Some("openai-responses") {
         return Value::Null;
     }

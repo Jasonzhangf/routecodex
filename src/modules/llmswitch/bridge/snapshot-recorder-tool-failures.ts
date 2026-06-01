@@ -233,6 +233,12 @@ function resolveApplyPatchFailure(content: string): { errorType: string; matched
   if (lower.includes('apply_patch verification failed')) {
     return classifyApplyPatchVerificationFailure(raw);
   }
+  if (lower.includes("invalid patch: the first line of the patch must be '*** begin patch'")) {
+    return {
+      errorType: 'apply_patch_missing_begin_patch_header',
+      matchedText: clipText(raw)
+    };
+  }
   if (lower.includes('apply_patch failed') || lower.includes('invalid patch')) {
     return {
       errorType: 'apply_patch_failed',

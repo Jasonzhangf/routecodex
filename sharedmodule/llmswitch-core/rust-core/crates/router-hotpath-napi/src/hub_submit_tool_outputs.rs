@@ -66,7 +66,9 @@ fn tool_arguments_to_string(value: Option<&Value>) -> String {
     }
 }
 
-fn coerce_assistant_tool_calls_to_responses_input(message: &serde_json::Map<String, Value>) -> Vec<Value> {
+fn coerce_assistant_tool_calls_to_responses_input(
+    message: &serde_json::Map<String, Value>,
+) -> Vec<Value> {
     let mut out = Vec::new();
     let Some(tool_calls) = message.get("tool_calls").and_then(|value| value.as_array()) else {
         return out;
@@ -133,10 +135,15 @@ fn coerce_chat_message_to_responses_input(message: &serde_json::Map<String, Valu
 }
 
 fn endpoint_is_responses(entry_endpoint: &str) -> bool {
-    entry_endpoint.to_ascii_lowercase().contains("/v1/responses")
+    entry_endpoint
+        .to_ascii_lowercase()
+        .contains("/v1/responses")
 }
 
-fn normalize_servertool_followup_payload_shape_value(entry_endpoint: &str, payload: Value) -> Value {
+fn normalize_servertool_followup_payload_shape_value(
+    entry_endpoint: &str,
+    payload: Value,
+) -> Value {
     if !endpoint_is_responses(entry_endpoint) {
         return payload;
     }
@@ -144,8 +151,14 @@ fn normalize_servertool_followup_payload_shape_value(entry_endpoint: &str, paylo
         Value::Object(object) => object,
         other => return other,
     };
-    if object.get("input").and_then(|value| value.as_array()).is_some()
-        || object.get("messages").and_then(|value| value.as_array()).is_none()
+    if object
+        .get("input")
+        .and_then(|value| value.as_array())
+        .is_some()
+        || object
+            .get("messages")
+            .and_then(|value| value.as_array())
+            .is_none()
     {
         return Value::Object(object);
     }
@@ -157,7 +170,10 @@ fn normalize_servertool_followup_payload_shape_value(entry_endpoint: &str, paylo
                 continue;
             };
             for item in coerce_chat_message_to_responses_input(message_object) {
-                let item_type = item.get("type").and_then(|value| value.as_str()).unwrap_or("");
+                let item_type = item
+                    .get("type")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
                 if item_type == "function_call_output" {
                     let call_id = item
                         .get("call_id")
@@ -339,9 +355,13 @@ mod tests {
             ]
         });
 
-        let normalized = normalize_servertool_followup_payload_shape_value("/v1/responses", payload);
+        let normalized =
+            normalize_servertool_followup_payload_shape_value("/v1/responses", payload);
         assert!(normalized.get("messages").is_none());
-        let input = normalized.get("input").and_then(|value| value.as_array()).unwrap();
+        let input = normalized
+            .get("input")
+            .and_then(|value| value.as_array())
+            .unwrap();
         assert_eq!(input.len(), 3);
         assert_eq!(input[0]["type"], "function_call");
         assert_eq!(input[0]["call_id"], "call_1");
@@ -356,7 +376,10 @@ mod tests {
     #[test]
     fn leaves_non_responses_followup_payload_unchanged() {
         let payload = json!({ "messages": [{ "role": "user", "content": "hello" }] });
-        let normalized = normalize_servertool_followup_payload_shape_value("/v1/chat/completions", payload.clone());
+        let normalized = normalize_servertool_followup_payload_shape_value(
+            "/v1/chat/completions",
+            payload.clone(),
+        );
         assert_eq!(normalized, payload);
     }
 }

@@ -474,6 +474,12 @@ fn is_server_side_web_search_function(tool: &Value) -> bool {
         .unwrap_or(false)
 }
 
+fn is_client_runtime_mcp_tool(tool: &Value) -> bool {
+    resolve_routecodex_tool_identity(tool)
+        .map(|name| name.trim().to_ascii_lowercase().starts_with("mcp__"))
+        .unwrap_or(false)
+}
+
 pub(crate) fn resolve_responses_bridge_tools(
     input: ResolveResponsesBridgeToolsInput,
 ) -> ResolveResponsesBridgeToolsOutput {
@@ -539,7 +545,7 @@ pub(crate) fn resolve_responses_bridge_tools(
     if !has_chat_tools {
         if let Some(original_tools) = input.original_tools.as_ref() {
             for tool in original_tools {
-                if is_builtin_web_search_tool(tool) {
+                if is_builtin_web_search_tool(tool) || is_client_runtime_mcp_tool(tool) {
                     continue;
                 }
                 register(tool);

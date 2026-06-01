@@ -5759,7 +5759,7 @@ print(__import__('json').dumps(checks))
               { id: 'call_patch_failed', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: '/tmp/rcc.txt', patch: 'bad patch' }) } },
             ],
           },
-          { role: 'tool', tool_call_id: 'call_patch_failed', content: 'APPLY_PATCH_ERROR: apply_patch did not apply. Retry with workspace-relative filePath and a line-edit patch only.' },
+          { role: 'tool', tool_call_id: 'call_patch_failed', content: 'APPLY_PATCH_ERROR: apply_patch did not apply. Retry with workspace-relative filePath and a line-edit patch.' },
         ],
         tools: [
           { type: 'function', name: 'apply_patch', description: 'patch files', parameters: { type: 'object', properties: { filePath: { type: 'string' }, patch: { type: 'string' } }, required: ['filePath', 'patch'] } },

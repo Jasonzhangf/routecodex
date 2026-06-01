@@ -1,5 +1,6 @@
 import express from 'express';
 import type { AddressInfo } from 'node:net';
+import { Readable } from 'node:stream';
 
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
 import { HubRequestExecutor } from '../../../src/server/runtime/http-server/request-executor.js';
@@ -90,6 +91,116 @@ function buildAnthropicVirtualRouterConfig() {
 }
 
 describe('responses handler virtual-router empty-pool guard', () => {
+  it('retries HTTP /v1/responses when provider SSE stream terminates during bridge materialization', async () => {
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
+    const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
+    const providerCalls: string[] = [];
+    const createTerminatingStream = () => new Readable({
+      read() {
+        this.push('data: {"id":"chatcmpl_red","object":"chat.completion.chunk","model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n');
+        this.destroy(new Error('terminated'));
+      }
+    });
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey?: string) => artifacts.targetRuntime?.[providerKey ?? '']?.runtimeKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => {
+        if (runtimeKey === 'primary.key1') {
+          return {
+            runtimeKey: 'primary.key1',
+            providerId: 'primary',
+            providerType: 'openai',
+            providerFamily: 'openai',
+            providerProtocol: 'openai-chat',
+            runtime: { runtimeKey: 'primary.key1' },
+            instance: {
+              initialize: async () => undefined,
+              cleanup: async () => undefined,
+              processIncoming: async () => {
+                providerCalls.push('primary');
+                return { status: 200, data: { mode: 'sse', __sse_responses: createTerminatingStream() } };
+              }
+            }
+          };
+        }
+        if (runtimeKey === 'secondary.key1') {
+          return {
+            runtimeKey: 'secondary.key1',
+            providerId: 'secondary',
+            providerType: 'openai',
+            providerFamily: 'openai',
+            providerProtocol: 'openai-chat',
+            runtime: { runtimeKey: 'secondary.key1' },
+            instance: {
+              initialize: async () => undefined,
+              cleanup: async () => undefined,
+              processIncoming: async () => {
+                providerCalls.push('secondary');
+                return {
+                  status: 200,
+                  data: {
+                    id: 'chatcmpl_ok',
+                    object: 'chat.completion',
+                    model: 'gpt-test',
+                    choices: [{ index: 0, message: { role: 'assistant', content: 'ok_from_secondary' }, finish_reason: 'stop' }]
+                  }
+                };
+              }
+            }
+          };
+        }
+        return undefined;
+      },
+      getHandleByProviderKey: () => undefined,
+      disposeAll: async () => undefined,
+      initialize: async () => undefined
+    };
+    const executor = new HubRequestExecutor({
+      runtimeManager,
+      getHubPipeline: () => pipeline as any,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: async () => undefined
+        }
+      }),
+      logStage: () => undefined,
+      stats: new StatsManager()
+    } as any);
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/responses', (req, res) =>
+      handleResponses(req, res, {
+        executePipeline: async (input) => executor.execute(input),
+        errorHandling: null
+      })
+    );
+
+    const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    const previousBase = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '4';
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = '1';
+    try {
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/v1/responses`, {
+          method: 'POST',
+          headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
+          body: JSON.stringify({ model: 'gpt-test', stream: true, input: 'hi' })
+        });
+        const text = await response.text();
+        expect(response.status).toBe(200);
+        expect(text).toContain('ok_from_secondary');
+        expect(providerCalls).toEqual(['primary', 'secondary']);
+      });
+    } finally {
+      pipeline.dispose();
+      if (previousAttempts === undefined) delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      else process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
+      if (previousBase === undefined) delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+      else process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = previousBase;
+    }
+  });
+
   it('sends non-empty Anthropic messages when /v1/responses routes to an anthropic provider', async () => {
     const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildAnthropicVirtualRouterConfig() as any)) as any;

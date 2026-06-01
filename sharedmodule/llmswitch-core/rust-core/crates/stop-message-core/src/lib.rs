@@ -440,7 +440,11 @@ mod tests {
 
     #[test]
     fn non_active_managed_goal_statuses_do_not_skip_stopless() {
-        for status in [GoalStatus::Paused, GoalStatus::Stopped, GoalStatus::Completed] {
+        for status in [
+            GoalStatus::Paused,
+            GoalStatus::Stopped,
+            GoalStatus::Completed,
+        ] {
             let mut ctx = base_ctx();
             ctx.goal_status = status;
             ctx.persisted_snapshot = Some(StopMessageSnapshot {

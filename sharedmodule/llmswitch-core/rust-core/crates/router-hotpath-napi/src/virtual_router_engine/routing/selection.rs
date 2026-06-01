@@ -228,6 +228,47 @@ pub(crate) fn resolve_instruction_process_mode_for_selection(
     None
 }
 
+// ==================== ProviderForwarder selection wrapper ====================
+//
+// §3.6 字面契约：forwarder 解析 100% 在 select 阶段完成。
+// 实际 hook 在 `engine::selection::select_provider` 末尾；本函数暴露独立 API
+// 供候选列表做 fwd.* → real provider_key 折叠。
+
+use super::super::forwarder::{ForwarderRegistry, ERR_FORWARDER_NO_AVAILABLE_TARGET};
+use super::super::load_balancer::RouteLoadBalancer;
+
+/// 解析 candidate 列表中的 fwd.* 项为 real provider_key。
+/// 返回 (real_candidates, errors)。errors 包含全 disabled 等错误。
+pub(crate) fn select_with_forwarder_resolution(
+    candidates: &[String],
+    forwarder_registry: &mut ForwarderRegistry,
+    load_balancer: &mut RouteLoadBalancer,
+    availability_check: impl Fn(&str) -> bool,
+    session_id: Option<&str>,
+) -> (Vec<String>, Vec<String>) {
+    let mut real = Vec::new();
+    let mut errors = Vec::new();
+    for candidate in candidates {
+        if ForwarderRegistry::is_forwarder_id(candidate) {
+            match forwarder_registry.select(
+                candidate,
+                load_balancer,
+                &availability_check,
+                session_id,
+            ) {
+                Ok(provider_key) => real.push(provider_key),
+                Err(e) if e == ERR_FORWARDER_NO_AVAILABLE_TARGET => {
+                    errors.push(format!("{}: {}", candidate, e));
+                }
+                Err(e) => errors.push(format!("{}: {}", candidate, e)),
+            }
+        } else {
+            real.push(candidate.clone());
+        }
+    }
+    (real, errors)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,5 +441,84 @@ mod tests {
         };
         let result = resolve_instruction_target(&target, &registry);
         assert!(result.is_none());
+    }
+
+    // ==================== select_with_forwarder_resolution tests ====================
+
+    fn make_forwarder_providers() -> std::collections::HashSet<String> {
+        let mut s = std::collections::HashSet::new();
+        s.insert("real-a.key1".to_string());
+        s.insert("real-b.key1".to_string());
+        s
+    }
+
+    fn load_simple_forwarder(reg: &mut crate::virtual_router_engine::forwarder::ForwarderRegistry) {
+        let mut fwd = serde_json::Map::new();
+        fwd.insert(
+            "fwd.openai.gpt-4o".to_string(),
+            serde_json::json!({
+                "forwarderId": "fwd.openai.gpt-4o",
+                "protocol": "openai",
+                "modelId": "gpt-4o",
+                "resolutionMode": "model-first",
+                "strategy": "round-robin",
+                "targets": [
+                    {"providerKey": "real-a.key1", "weight": null, "priority": null, "disabled": false},
+                    {"providerKey": "real-b.key1", "weight": null, "priority": null, "disabled": false},
+                ],
+                "stickyKey": "none",
+            }),
+        );
+        reg.load(&fwd, &make_forwarder_providers()).expect("load");
+    }
+
+    #[test]
+    fn select_with_forwarder_resolution_expands_fwd_to_real() {
+        use super::select_with_forwarder_resolution;
+        use crate::virtual_router_engine::forwarder::ForwarderRegistry;
+        use crate::virtual_router_engine::load_balancer::RouteLoadBalancer;
+
+        let mut reg = ForwarderRegistry::new();
+        load_simple_forwarder(&mut reg);
+        let mut lb = RouteLoadBalancer::new(None);
+        let candidates = vec!["fwd.openai.gpt-4o".to_string(), "real-a.key1".to_string()];
+        let (real, errors) =
+            select_with_forwarder_resolution(&candidates, &mut reg, &mut lb, |_| true, None);
+        assert!(errors.is_empty());
+        assert!(real[0].starts_with("real-"));
+        assert_eq!(real[1], "real-a.key1");
+    }
+
+    #[test]
+    fn select_with_forwarder_resolution_records_error_on_no_target() {
+        use super::select_with_forwarder_resolution;
+        use crate::virtual_router_engine::forwarder::ForwarderRegistry;
+        use crate::virtual_router_engine::load_balancer::RouteLoadBalancer;
+
+        let mut reg = ForwarderRegistry::new();
+        let mut fwd = serde_json::Map::new();
+        fwd.insert(
+            "fwd.openai.gpt-4o".to_string(),
+            serde_json::json!({
+                "forwarderId": "fwd.openai.gpt-4o",
+                "protocol": "openai",
+                "modelId": "gpt-4o",
+                "resolutionMode": "model-first",
+                "strategy": "round-robin",
+                "targets": [
+                    {"providerKey": "real-a.key1", "weight": null, "priority": null, "disabled": true},
+                    {"providerKey": "real-b.key1", "weight": null, "priority": null, "disabled": true},
+                ],
+                "stickyKey": "none",
+            }),
+        );
+        reg.load(&fwd, &make_forwarder_providers()).expect("load");
+        let mut lb = RouteLoadBalancer::new(None);
+        let candidates = vec!["fwd.openai.gpt-4o".to_string()];
+        let (real, errors) =
+            select_with_forwarder_resolution(&candidates, &mut reg, &mut lb, |_| true, None);
+        assert!(real.is_empty());
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("ERR_FORWARDER_NO_AVAILABLE_TARGET"));
     }
 }

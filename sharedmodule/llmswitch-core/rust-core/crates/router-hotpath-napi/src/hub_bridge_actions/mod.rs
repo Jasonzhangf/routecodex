@@ -12,6 +12,7 @@ pub(crate) mod utils;
 pub(crate) use bridge_input::convert_bridge_input_to_chat_messages;
 pub(crate) use history::build_bridge_history;
 pub(crate) use reasoning::normalize_reasoning_in_chat_payload;
+pub(crate) use types::BridgeInputToChatInput;
 
 pub use bindings::{
     append_local_image_block_on_latest_user_input_json, apply_bridge_capture_tool_results_json,

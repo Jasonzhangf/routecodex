@@ -201,7 +201,7 @@ describe('apply_patch chat-process contract', () => {
 
     expect(result.mode).toBe('tool_flow');
     expect(fs.readFileSync(target, 'utf8')).toBe('new\nkeep\n');
-    expect(JSON.stringify(result.finalChatResponse)).not.toContain('tool_calls');
+    expect((result.finalChatResponse as any).choices[0].message.tool_calls).toBeUndefined();
     expect(JSON.stringify(result.finalChatResponse)).toContain('APPLY_PATCH_APPLIED');
     expect(result.execution?.followup).toBeTruthy();
   });
@@ -390,7 +390,7 @@ describe('apply_patch chat-process contract', () => {
     expect(fs.readFileSync(target, 'utf8')).toBe('new\nkeep\n');
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(result.execution?.followup).toBeTruthy();
-    expect(JSON.stringify(result.finalChatResponse)).not.toContain('tool_calls');
+    expect((result.finalChatResponse as any).choices[0].message.tool_calls).toBeUndefined();
     expect(JSON.stringify(result.finalChatResponse)).toContain('APPLY_PATCH_APPLIED');
 
   });

@@ -108,7 +108,11 @@ fn parse_structured_anthropic_content_string(value: &str) -> Option<Vec<Value>> 
             })
             .unwrap_or(false)
     });
-    if has_tool_block { Some(items) } else { None }
+    if has_tool_block {
+        Some(items)
+    } else {
+        None
+    }
 }
 
 fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
@@ -357,6 +361,88 @@ fn is_request_like_openai_chat_payload(value: &Value) -> bool {
             .unwrap_or(false)
 }
 
+fn content_blocks_are_all_type(content: &Value, expected_type: &str) -> bool {
+    let Some(blocks) = content.as_array() else {
+        return false;
+    };
+    if blocks.is_empty() {
+        return false;
+    }
+    blocks.iter().all(|block| {
+        block
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("type")))
+            .map(|block_type| block_type.eq_ignore_ascii_case(expected_type))
+            .unwrap_or(false)
+    })
+}
+
+fn content_blocks_contain_type(content: &Value, expected_type: &str) -> bool {
+    content
+        .as_array()
+        .map(|blocks| {
+            blocks.iter().any(|block| {
+                block
+                    .as_object()
+                    .and_then(|row| read_trimmed_string(row.get("type")))
+                    .map(|block_type| block_type.eq_ignore_ascii_case(expected_type))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn should_merge_adjacent_anthropic_messages(role: &str, previous: &Value, next: &Value) -> bool {
+    if role.eq_ignore_ascii_case("assistant") {
+        return content_blocks_are_all_type(previous, "tool_use")
+            && content_blocks_are_all_type(next, "tool_use");
+    }
+    if role.eq_ignore_ascii_case("user") {
+        return content_blocks_contain_type(previous, "tool_result")
+            && (content_blocks_are_all_type(next, "tool_result")
+                || content_blocks_are_all_type(next, "text"));
+    }
+    false
+}
+
+fn merge_adjacent_anthropic_messages(messages: Vec<Value>) -> Vec<Value> {
+    let mut merged: Vec<Value> = Vec::new();
+    for message in messages {
+        let Some(row) = message.as_object() else {
+            continue;
+        };
+        let role = read_trimmed_string(row.get("role")).unwrap_or_else(|| "user".to_string());
+        let content = row.get("content").cloned().unwrap_or(Value::Null);
+        if let Some(previous) = merged.last_mut().and_then(Value::as_object_mut) {
+            let previous_role =
+                read_trimmed_string(previous.get("role")).unwrap_or_else(|| "user".to_string());
+            if previous_role == role {
+                let previous_content_value =
+                    previous.get("content").cloned().unwrap_or(Value::Null);
+                if let (Some(previous_content), Some(next_content)) = (
+                    previous.get_mut("content").and_then(Value::as_array_mut),
+                    content.as_array(),
+                ) {
+                    if should_merge_adjacent_anthropic_messages(
+                        role.as_str(),
+                        &previous_content_value,
+                        &content,
+                    ) {
+                        previous_content.extend(next_content.iter().cloned());
+                        continue;
+                    }
+                }
+            }
+        }
+        merged.push(message);
+    }
+    merged
+}
+
+fn normalize_anthropic_tool_history(messages: Vec<Value>) -> Vec<Value> {
+    merge_adjacent_anthropic_messages(messages)
+}
+
 fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value {
     let Some(request_row) = chat_request.as_object() else {
         return Value::Object(Map::new());
@@ -552,9 +638,8 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
                     else {
                         continue;
                     };
-                    let content = collect_openai_chat_text(
-                        part_obj.get("content").unwrap_or(&Value::Null),
-                    );
+                    let content =
+                        collect_openai_chat_text(part_obj.get("content").unwrap_or(&Value::Null));
                     blocks.push(Value::Object(Map::from_iter([
                         ("type".to_string(), Value::String("tool_result".to_string())),
                         ("tool_use_id".to_string(), Value::String(tool_use_id)),
@@ -701,6 +786,8 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
             ])));
         }
     }
+
+    let messages = normalize_anthropic_tool_history(messages);
 
     let mut out = Map::<String, Value>::new();
     out.insert("model".to_string(), Value::String(model));
@@ -1057,7 +1144,10 @@ mod tests {
         let tool_calls = message["tool_calls"].as_array().expect("tool calls");
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0]["id"].as_str(), Some("call_exec_1"));
-        assert_eq!(tool_calls[0]["function"]["name"].as_str(), Some("exec_command"));
+        assert_eq!(
+            tool_calls[0]["function"]["name"].as_str(),
+            Some("exec_command")
+        );
         assert_eq!(
             tool_calls[0]["function"]["arguments"].as_str(),
             Some("{\"cmd\":\"pwd\"}")

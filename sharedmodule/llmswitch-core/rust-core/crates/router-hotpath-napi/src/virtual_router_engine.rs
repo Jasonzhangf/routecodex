@@ -4,6 +4,7 @@ mod context_weighted;
 mod engine;
 mod error;
 mod features;
+mod forwarder;
 mod health;
 mod health_weighted;
 pub(crate) mod instructions;

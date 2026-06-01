@@ -159,7 +159,9 @@ pub(crate) fn should_apply_deepseek_thinking_history_compat(
     if provider_protocol != "openai-chat" && provider_protocol != "anthropic-messages" {
         return false;
     }
-    model_matches_deepseek_family(adapter_context, payload) && is_thinking_enabled(payload)
+    provider_matches_deepseek(adapter_context)
+        && model_matches_deepseek_family(adapter_context, payload)
+        && is_thinking_enabled(payload)
 }
 
 fn parse_disabled_type(raw: Option<&Value>) -> bool {
@@ -338,18 +340,23 @@ pub(crate) fn ensure_deepseek_anthropic_thinking_block_for_tool_use_history(
         if role != "assistant" || !has_non_empty_tool_calls(row) {
             continue;
         }
-        if content_has_thinking_block(row.get("content")) {
+        let existing_content = row.get("content").cloned();
+        if content_has_thinking_block(existing_content.as_ref()) {
             continue;
         }
         let Some(reasoning) = read_trimmed_string(row.get("reasoning_content")) else {
             continue;
         };
+        let mut blocks = vec![serde_json::json!({
+            "type": "thinking",
+            "thinking": reasoning,
+        })];
+        if let Some(Value::Array(items)) = existing_content {
+            blocks.extend(items);
+        }
         row.insert(
             "content".to_string(),
-            Value::Array(vec![serde_json::json!({
-                "type": "thinking",
-                "thinking": reasoning,
-            })]),
+            Value::Array(blocks),
         );
     }
 }

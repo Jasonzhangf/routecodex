@@ -36,12 +36,42 @@ export async function resolveVirtualRouterInput(server: any, userConfig: Unknown
     if (vrNode && isRecord(vrNode.providers) && Object.keys(vrNode.providers as Record<string, unknown>).length > 0) {
       return buildVirtualRouterInputFromUserConfig(root) as UnknownObject;
     }
-    return (await buildVirtualRouterInputV2(root)) as UnknownObject;
+    const primaryRoutingPolicyGroup = resolvePrimaryRouterRoutingPolicyGroup(root);
+    return (await buildVirtualRouterInputV2(root, undefined, {
+      ...(primaryRoutingPolicyGroup ? { routingPolicyGroup: primaryRoutingPolicyGroup } : {})
+    })) as UnknownObject;
   }
   if (vrNode) {
     return vrNode as UnknownObject;
   }
   return userConfig;
+}
+
+function resolvePrimaryRouterRoutingPolicyGroup(root: Record<string, unknown>): string | undefined {
+  const httpserver = isRecord(root.httpserver) ? (root.httpserver as Record<string, unknown>) : null;
+  const ports = Array.isArray(httpserver?.ports) ? (httpserver.ports as unknown[]) : [];
+  for (const port of ports) {
+    if (!isRecord(port)) {
+      continue;
+    }
+    const mode = typeof port.mode === 'string' ? port.mode.trim().toLowerCase() : '';
+    if (mode && mode !== 'router') {
+      continue;
+    }
+    const group = typeof port.routingPolicyGroup === 'string' ? port.routingPolicyGroup.trim() : '';
+    if (group) {
+      return group;
+    }
+  }
+  const groups = isRecord(root.virtualrouter)
+    && isRecord((root.virtualrouter as Record<string, unknown>).routingPolicyGroups)
+    ? ((root.virtualrouter as Record<string, unknown>).routingPolicyGroups as Record<string, unknown>)
+    : null;
+  if (!groups) {
+    return undefined;
+  }
+  const groupIds = Object.keys(groups).filter((groupId) => groupId.trim());
+  return groupIds.length === 1 ? groupIds[0] : undefined;
 }
 
 export function getModuleDependencies(server: any): ModuleDependencies {

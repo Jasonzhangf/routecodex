@@ -31,6 +31,7 @@ import {
   ANSI_BAR,
   ANSI_WHITE
 } from './log-rollup-format-blocks.js';
+import { computeCacheHitRatio } from './usage-aggregator.js';
 
 type VirtualRouterHitRecord = {
   routeName?: string;
@@ -337,9 +338,16 @@ function emitRealtimeSessionRequestLog(args: {
   const calls = sessionAgg?.usageCalls ?? 0;
   const retries = sessionAgg?.totalRetryCount ?? 0;
   console.log(colorize(`[session-request][rt] session=${sessionLabel} project=${project}`, sessionColor));
+  const coreInternalMs = computeCoreInternalMs(
+    args.event.internalLatencyMs,
+    args.event.trafficWaitMs,
+    args.event.clientInjectWaitMs,
+    args.event.sseDecodeMs,
+    args.event.codecDecodeMs
+  );
   console.log(
     `${colorize(
-      `  req=${requestLabel} ${routePool} -> ${provider} total=${formatMs(args.event.latencyMs)} internal=${formatMs(args.event.internalLatencyMs)} external=${formatMs(args.event.externalLatencyMs)} retries=${args.event.retryCount} attempts=${args.event.providerAttemptCount} wait.traffic=${formatMs(args.event.trafficWaitMs)} wait.inject=${formatMs(args.event.clientInjectWaitMs)} decode.sse=${formatMs(args.event.sseDecodeMs)} decode.codec=${formatMs(args.event.codecDecodeMs)}${args.event.providerDecodeTag ? ` ${args.event.providerDecodeTag}` : ''}`,
+      `  req=${requestLabel} ${routePool} -> ${provider} total=${formatMs(args.event.latencyMs)} internal=${formatMs(coreInternalMs)} external=${formatMs(args.event.externalLatencyMs)} retries=${args.event.retryCount} attempts=${args.event.providerAttemptCount} wait.traffic=${formatMs(args.event.trafficWaitMs)} wait.inject=${formatMs(args.event.clientInjectWaitMs)} decode.sse=${formatMs(args.event.sseDecodeMs)} decode.codec=${formatMs(args.event.codecDecodeMs)}${args.event.providerDecodeTag ? ` ${args.event.providerDecodeTag}` : ''}`,
       sessionColor
     )} ${ANSI_WHITE}finish_reason=${finishReason}${ANSI_RESET}`
   );
@@ -389,8 +397,12 @@ function emitRealtimeSessionRequestLog(args: {
     }
     if (reqUsage.cacheReadTokens !== undefined) {
       tokParts.push(`cache.read=${formatWholeNumber(reqUsage.cacheReadTokens)}`);
-      if (reqUsage.promptTokens !== undefined && reqUsage.promptTokens > 0) {
-        tokParts.push(`cache.hit=${formatRatio(reqUsage.cacheReadTokens, reqUsage.promptTokens)}`);
+      const cacheHitRatio = computeCacheHitRatio({
+        prompt_tokens: reqUsage.promptTokens,
+        cache_read_input_tokens: reqUsage.cacheReadTokens
+      });
+      if (cacheHitRatio !== undefined) {
+        tokParts.push(`cache.hit=${(cacheHitRatio * 100).toFixed(1)}%`);
       }
     }
     if (reqUsage.cacheCreationTokens !== undefined) {

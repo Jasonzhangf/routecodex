@@ -91,10 +91,7 @@ pub fn apply_req_process_tool_governance(
     );
     apply_post_governed_media_cleanup(&mut governed_request);
 
-    let processed = build_processed_request(
-        Value::Object(governed_request),
-        &metadata,
-    );
+    let processed = build_processed_request(Value::Object(governed_request), &metadata);
     let processed_request_map = normalize_record_ref(&processed);
     let end_time_ms = now_millis();
 

@@ -131,18 +131,18 @@ describe('anthropic tool schema stability (root regression)', () => {
     expect(Object.keys(questions.items.properties.options.items.properties).sort()).toEqual(['description', 'label']);
   });
 
-  test('preserves apply_patch internal line-edit fields from chat process contract for anthropic outbound', () => {
+  test('preserves apply_patch servertool line-edit fields from chat process contract for anthropic outbound', () => {
     const tools: any[] = [
       {
         type: 'function',
         function: {
           name: 'apply_patch',
           description:
-            'Edit files through apply_patch. The upstream authoring contract is internal line-edit format: provide `filePath`, provide `fileContent`, and write `patch` in internal line-edit syntax.',
+            'Edit files through servertool apply_patch. Provide `filePath` and write `patch` in line-edit syntax.',
           parameters: {
             type: 'object',
             properties: {
-              patch: { type: 'string', description: 'internal line-edit patch text' },
+              patch: { type: 'string', description: 'servertool line-edit patch text' },
               filePath: { type: 'string', description: 'target file path' },
               fileContent: { type: 'string', description: 'current file content' }
             },

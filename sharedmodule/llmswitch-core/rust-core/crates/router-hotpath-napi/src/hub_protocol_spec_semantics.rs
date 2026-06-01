@@ -283,7 +283,12 @@ fn resolve_hub_protocol_spec(input: ResolveHubProtocolSpecInput) -> ProtocolSpec
 }
 
 fn normalize_provider_protocol(protocol: Option<&str>) -> String {
-    match protocol.unwrap_or("openai-chat").trim().to_ascii_lowercase().as_str() {
+    match protocol
+        .unwrap_or("openai-chat")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "responses" | "openai-responses" => "openai-responses".to_string(),
         "anthropic" | "anthropic-messages" => "anthropic-messages".to_string(),
         "gemini" | "gemini-chat" => "gemini-chat".to_string(),
@@ -331,9 +336,11 @@ fn default_allowlists_for_input() -> HubProtocolAllowlists {
     let allowlists = build_default_allowlists();
     HubProtocolAllowlists {
         openai_chat_allowed_fields: allowlists.openai_chat_allowed_fields,
-        openai_chat_parameters_wrapper_allow_keys: allowlists.openai_chat_parameters_wrapper_allow_keys,
+        openai_chat_parameters_wrapper_allow_keys: allowlists
+            .openai_chat_parameters_wrapper_allow_keys,
         openai_responses_allowed_fields: allowlists.openai_responses_allowed_fields,
-        openai_responses_parameters_wrapper_allow_keys: allowlists.openai_responses_parameters_wrapper_allow_keys,
+        openai_responses_parameters_wrapper_allow_keys: allowlists
+            .openai_responses_parameters_wrapper_allow_keys,
         anthropic_allowed_fields: allowlists.anthropic_allowed_fields,
         anthropic_parameters_wrapper_allow_keys: allowlists.anthropic_parameters_wrapper_allow_keys,
         gemini_allowed_fields: allowlists.gemini_allowed_fields,
@@ -364,7 +371,11 @@ fn apply_provider_outbound_policy(
     }
 
     let reserved_prefixes = spec.provider_outbound.reserved_key_prefixes;
-    payload.retain(|key, _| !reserved_prefixes.iter().any(|prefix| key.starts_with(prefix)));
+    payload.retain(|key, _| {
+        !reserved_prefixes
+            .iter()
+            .any(|prefix| key.starts_with(prefix))
+    });
 
     let is_gemini_envelope = protocol == "gemini-chat" && is_gemini_agent_payload(&payload);
     for rule in spec.provider_outbound.flatten_wrappers {
@@ -388,7 +399,10 @@ fn apply_provider_outbound_policy(
             .map(|keys| keys.into_iter().collect::<BTreeSet<String>>());
         let only_if_missing = rule.only_if_target_missing.unwrap_or(true);
         for (key, value) in inner {
-            if allow_keys.as_ref().is_some_and(|allowed| !allowed.contains(&key)) {
+            if allow_keys
+                .as_ref()
+                .is_some_and(|allowed| !allowed.contains(&key))
+            {
                 continue;
             }
             if !only_if_missing || !payload.contains_key(&key) {
@@ -398,7 +412,11 @@ fn apply_provider_outbound_policy(
         payload.remove(&rule.wrapper_key);
     }
 
-    if spec.provider_outbound.enforce_allowed_top_level_keys.unwrap_or(false) {
+    if spec
+        .provider_outbound
+        .enforce_allowed_top_level_keys
+        .unwrap_or(false)
+    {
         if let Some(keys) = spec.provider_outbound.allowed_top_level_keys {
             let mut allowed = keys.into_iter().collect::<BTreeSet<String>>();
             if is_gemini_envelope {
@@ -619,12 +637,10 @@ pub fn sanitize_provider_outbound_payload_json(input_json: String) -> NapiResult
         return serde_json::to_string(&Value::Object(payload))
             .map_err(|e| napi::Error::from_reason(e.to_string()));
     }
-    let output = apply_provider_outbound_policy(
-        &protocol,
-        input.compatibility_profile.as_deref(),
-        payload,
-    );
-    serde_json::to_string(&Value::Object(output)).map_err(|e| napi::Error::from_reason(e.to_string()))
+    let output =
+        apply_provider_outbound_policy(&protocol, input.compatibility_profile.as_deref(), payload);
+    serde_json::to_string(&Value::Object(output))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[cfg(test)]
@@ -692,7 +708,10 @@ mod tests {
         let output = apply_provider_outbound_policy("openai-responses", None, payload);
         assert!(!output.contains_key("__private"));
         assert!(!output.contains_key("unknown"));
-        assert_eq!(output.get("max_output_tokens"), Some(&serde_json::json!(128)));
+        assert_eq!(
+            output.get("max_output_tokens"),
+            Some(&serde_json::json!(128))
+        );
         let input_items = output.get("input").and_then(Value::as_array).unwrap();
         let reasoning = input_items[0].as_object().unwrap();
         assert!(!reasoning.contains_key("content"));
@@ -712,7 +731,8 @@ mod tests {
         let Value::Object(payload) = payload else {
             panic!("object payload expected");
         };
-        let output = apply_provider_outbound_policy("openai-responses", Some("chat:deepseek"), payload);
+        let output =
+            apply_provider_outbound_policy("openai-responses", Some("chat:deepseek"), payload);
         let input_items = output.get("input").and_then(Value::as_array).unwrap();
         let reasoning = input_items[0].as_object().unwrap();
         assert!(reasoning.contains_key("content"));

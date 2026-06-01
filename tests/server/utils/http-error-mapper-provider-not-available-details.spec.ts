@@ -105,19 +105,9 @@ describe('mapErrorToHttp PROVIDER_NOT_AVAILABLE details passthrough', () => {
 
     expect(mapped.status).toBe(400);
     expect(mapped.body.error.code).toBe('HTTP_400');
-    expect((mapped.body.error as Record<string, unknown>).details).toMatchObject({
-      status: 400,
-      providerKey: 'mimo.key1.mimo-v2.5',
-      routeName: 'multimodal',
-      endpoint: '/v1/responses'
-    });
-    expect((mapped.body.error as Record<string, unknown>).details).not.toHaveProperty('metadata');
-    expect((mapped.body.error as Record<string, unknown>).details).not.toHaveProperty('requestContext');
-    expect((mapped.body.error as Record<string, unknown>).details).not.toHaveProperty('target');
-    expect((mapped.body.error as Record<string, unknown>).details).not.toHaveProperty('response');
-    expect((mapped.body.error as Record<string, unknown>).details).not.toHaveProperty('rawError');
-    expect((mapped.body.error as Record<string, unknown>).details).not.toHaveProperty('rawErrorSnippet');
-    expect((mapped.body.error as Record<string, unknown>).details).not.toHaveProperty('__rt');
-    expect(JSON.stringify((mapped.body.error as Record<string, unknown>).details)).not.toContain('super-secret-token');
+    expect((mapped.body.error as Record<string, unknown>).details).toBeUndefined();
+    expect(JSON.stringify(mapped.body.error)).not.toContain('mimo.key1.mimo-v2.5');
+    expect(JSON.stringify(mapped.body.error)).not.toContain('multimodal');
+    expect(JSON.stringify(mapped.body.error)).not.toContain('super-secret-token');
   });
 });

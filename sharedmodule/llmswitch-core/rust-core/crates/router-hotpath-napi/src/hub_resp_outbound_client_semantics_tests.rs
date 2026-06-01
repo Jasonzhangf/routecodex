@@ -914,7 +914,9 @@ fn build_responses_payload_from_chat_merges_source_retention_and_context_fields(
     assert_eq!(output["metadata"]["keep"], Value::Bool(true));
     assert_eq!(output["metadata"]["source"], Value::Bool(true));
     assert!(output["metadata"].get("toolCallIdStyle").is_none());
-    assert!(output["metadata"].get("__routecodexPreselectedRoute").is_none());
+    assert!(output["metadata"]
+        .get("__routecodexPreselectedRoute")
+        .is_none());
     assert!(output["metadata"].get("__raw_request_body").is_none());
     assert_eq!(output["temperature"], Value::from(0.4));
     assert_eq!(output["top_p"], Value::from(0.8));
@@ -1198,8 +1200,13 @@ fn build_responses_payload_from_chat_reasoning_only_does_not_emit_duplicate_mess
 
     let output_items = output["output"].as_array().expect("output array");
     assert_eq!(output_items.len(), 1);
-    assert_eq!(output_items[0]["type"], Value::String("reasoning".to_string()));
-    assert!(output_items.iter().all(|item| item["type"] != Value::String("message".to_string())));
+    assert_eq!(
+        output_items[0]["type"],
+        Value::String("reasoning".to_string())
+    );
+    assert!(output_items
+        .iter()
+        .all(|item| item["type"] != Value::String("message".to_string())));
 }
 
 #[test]

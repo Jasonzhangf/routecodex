@@ -112,6 +112,9 @@ fn read_part_media_candidate(part: &Value) -> String {
     if let Some(value) = read_media_candidate(obj, "video_url") {
         return value;
     }
+    if let Some(value) = read_media_candidate(obj, "source") {
+        return value;
+    }
     for key in ["url", "uri", "data", "base64"] {
         if let Some(value) = obj.get(key).and_then(|v| v.as_str()) {
             let trimmed = value.trim();
@@ -724,5 +727,57 @@ pub fn strip_latest_responses_input_media(
     ChatProcessMediaStripOutput {
         changed: true,
         messages: next_entries,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn strips_historical_anthropic_source_image_parts() {
+        let output = strip_chat_process_historical_images(
+            vec![
+                json!({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "historical"},
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAA"}}
+                    ]
+                }),
+                json!({"role": "assistant", "content": [{"type": "text", "text": "ok"}]}),
+            ],
+            "[Image omitted]".to_string(),
+        );
+
+        assert!(output.changed);
+        assert_eq!(
+            output.messages[0]["content"][1],
+            json!({"type": "text", "text": "[Image omitted]"})
+        );
+    }
+
+    #[test]
+    fn strips_historical_responses_anthropic_source_image_parts() {
+        let output = strip_responses_context_input_historical_media(
+            vec![
+                json!({
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "historical"},
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAA"}}
+                    ]
+                }),
+                json!({"role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}),
+            ],
+            "[Image omitted]".to_string(),
+        );
+
+        assert!(output.changed);
+        assert_eq!(
+            output.messages[0]["content"][1],
+            json!({"type": "input_text", "text": "[Image omitted]"})
+        );
     }
 }

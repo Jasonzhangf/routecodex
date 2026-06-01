@@ -1493,33 +1493,48 @@ fn test_normalize_tool_args_variants() {
 }
 
 #[test]
-fn test_normalize_tool_args_exec_command_blocks_large_heredoc_file_generation() {
+fn test_normalize_tool_args_exec_command_preserves_large_heredoc_file_generation() {
     let large_body = "x".repeat(5000);
+    let command = format!(
+        "cat > /tmp/FileSheet.tsx << 'ENDOFFILE'\n{}\nENDOFFILE",
+        large_body
+    );
     let raw_args = json!({
-        "cmd": format!("cat > /tmp/FileSheet.tsx << 'ENDOFFILE'\n{}\nENDOFFILE", large_body),
+        "cmd": command,
         "workdir": "/workspace"
     });
     let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
-    let cmd = parsed["cmd"].as_str().unwrap_or("");
-    assert!(cmd.contains("Use apply_patch"));
-    assert!(cmd.contains("large heredoc file generation was truncated"));
+    assert_eq!(parsed["cmd"], raw_args["cmd"]);
     assert_eq!(parsed["workdir"], "/workspace");
 }
 
 #[test]
-fn test_normalize_tool_args_exec_command_salvages_malformed_large_heredoc_args_into_guard() {
-    let large_body = "y".repeat(5000);
-    let raw_args = Value::String(format!(
-        "{{\"cmd\": \"cat > /tmp/FileSheet.tsx << 'ENDOFFILE'\\n{}",
-        large_body
-    ));
+fn test_normalize_tool_args_exec_command_blocks_git_checkout_scope_with_feedback() {
+    let raw_args = json!({
+        "cmd": "git checkout -- src/",
+        "workdir": "/workspace"
+    });
     let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
-    let cmd = parsed["cmd"].as_str().unwrap_or("");
-    assert!(cmd.contains("Use apply_patch"));
-    assert!(cmd.contains("Command preview"));
-    assert!(cmd.contains("FileSheet.tsx"));
+    let cmd = parsed["cmd"].as_str().unwrap();
+    assert!(cmd.contains("blocked by exec_command guard"));
+    assert!(cmd.contains("forbidden_git_checkout_scope"));
+    assert!(cmd.contains("exit 2"));
+    assert!(cmd.contains("bash -lc 'printf"));
+    assert_eq!(parsed["workdir"], "/workspace");
+}
+
+#[test]
+fn test_normalize_tool_args_exec_command_allows_git_checkout_single_file() {
+    let raw_args = json!({
+        "cmd": "git checkout -- src/index.ts",
+        "workdir": "/workspace"
+    });
+    let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["cmd"], "git checkout -- src/index.ts");
+    assert_eq!(parsed["workdir"], "/workspace");
 }
 
 #[test]

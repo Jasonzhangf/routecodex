@@ -73,6 +73,15 @@ fn stringify_tool_output(value: Option<&Value>) -> String {
     }
 }
 
+fn normalize_tool_output_text(value: Option<&Value>) -> String {
+    let text = stringify_tool_output(value);
+    if text.trim().is_empty() {
+        "[RouteCodex] Tool output was empty; execution status unknown.".to_string()
+    } else {
+        text
+    }
+}
+
 fn coerce_tool_call_to_xml_block(tool_call: &Value) -> Option<String> {
     let row = tool_call.as_object()?;
     let type_name = row
@@ -172,7 +181,7 @@ fn rewrite_message_tool_surface_in_place(message: &mut Map<String, Value>) {
             .and_then(|v| v.as_str())
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
-        let content = stringify_tool_output(message.get("content"));
+        let content = normalize_tool_output_text(message.get("content"));
         let mut lines = vec!["Tool result:".to_string()];
         if let Some(name) = tool_name {
             lines.push(format!("name: {}", name));

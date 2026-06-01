@@ -90,7 +90,9 @@ fn read_string(value: Option<&Value>) -> Option<String> {
 }
 
 fn has_non_empty_array(value: Option<&Value>) -> bool {
-    value.and_then(Value::as_array).is_some_and(|items| !items.is_empty())
+    value
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty())
 }
 
 fn read_servertool_followup_source(request_semantics: Option<&Value>) -> String {
@@ -254,12 +256,17 @@ fn stream_contract_probe_body(body: &Value) -> Option<&Value> {
 fn value_has_visible_assistant_text(value: Option<&Value>) -> bool {
     match value {
         Some(Value::String(text)) => !text.trim().is_empty(),
-        Some(Value::Array(items)) => items.iter().any(|entry| value_has_visible_assistant_text(Some(entry))),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|entry| value_has_visible_assistant_text(Some(entry))),
         Some(Value::Object(row)) => {
             let item_type = read_string(row.get("type"))
                 .map(|value| value.to_ascii_lowercase())
                 .unwrap_or_default();
-            if matches!(item_type.as_str(), "refusal" | "tool_result" | "function_call_output" | "reasoning") {
+            if matches!(
+                item_type.as_str(),
+                "refusal" | "tool_result" | "function_call_output" | "reasoning"
+            ) {
                 return false;
             }
             value_has_visible_assistant_text(row.get("text"))
@@ -277,7 +284,9 @@ fn is_meaningless_dot_only_text(text: &str) -> bool {
 fn value_has_meaningful_visible_assistant_text(value: Option<&Value>) -> bool {
     match value {
         Some(Value::String(text)) => !text.trim().is_empty() && !is_meaningless_dot_only_text(text),
-        Some(Value::Array(items)) => items.iter().any(|entry| value_has_meaningful_visible_assistant_text(Some(entry))),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|entry| value_has_meaningful_visible_assistant_text(Some(entry))),
         Some(Value::Object(row)) => {
             let item_type = read_string(row.get("type"))
                 .map(|value| value.to_ascii_lowercase())
@@ -296,7 +305,9 @@ fn value_has_meaningful_visible_assistant_text(value: Option<&Value>) -> bool {
 fn value_has_reasoning_only_content(value: Option<&Value>) -> bool {
     match value {
         Some(Value::String(_)) => false,
-        Some(Value::Array(items)) => items.iter().any(|entry| value_has_reasoning_only_content(Some(entry))),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|entry| value_has_reasoning_only_content(Some(entry))),
         Some(Value::Object(row)) => {
             if read_string(row.get("type"))
                 .map(|value| value.eq_ignore_ascii_case("reasoning"))
@@ -339,8 +350,12 @@ fn contains_tool_registry_missing_text(value: Option<&Value>) -> bool {
                 || normalized.contains("unknown tool")
                 || normalized.contains("missing tool")
         }
-        Some(Value::Array(items)) => items.iter().any(|entry| contains_tool_registry_missing_text(Some(entry))),
-        Some(Value::Object(row)) => row.values().any(|entry| contains_tool_registry_missing_text(Some(entry))),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|entry| contains_tool_registry_missing_text(Some(entry))),
+        Some(Value::Object(row)) => row
+            .values()
+            .any(|entry| contains_tool_registry_missing_text(Some(entry))),
         _ => false,
     }
 }
@@ -348,8 +363,12 @@ fn contains_tool_registry_missing_text(value: Option<&Value>) -> bool {
 fn contains_reasoning_stop_finalized_marker(value: Option<&Value>) -> bool {
     match value {
         Some(Value::String(text)) => text.contains("[app.finished:reasoning.stop]"),
-        Some(Value::Array(items)) => items.iter().any(|entry| contains_reasoning_stop_finalized_marker(Some(entry))),
-        Some(Value::Object(row)) => row.values().any(|entry| contains_reasoning_stop_finalized_marker(Some(entry))),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|entry| contains_reasoning_stop_finalized_marker(Some(entry))),
+        Some(Value::Object(row)) => row
+            .values()
+            .any(|entry| contains_reasoning_stop_finalized_marker(Some(entry))),
         _ => false,
     }
 }
@@ -460,7 +479,9 @@ fn has_responses_tool_call(record: &Map<String, Value>) -> bool {
 fn derive_finish_reason_value(body: &Value) -> Option<String> {
     let record = resolve_finish_reason_record(body)?;
     let first_choice = first_choice_record(record);
-    if let Some(choice_finish_reason) = first_choice.and_then(|row| read_string(row.get("finish_reason"))) {
+    if let Some(choice_finish_reason) =
+        first_choice.and_then(|row| read_string(row.get("finish_reason")))
+    {
         return Some(choice_finish_reason);
     }
     if let Some(stop_reason) = read_string(record.get("stop_reason")) {
@@ -477,7 +498,9 @@ fn derive_finish_reason_value(body: &Value) -> Option<String> {
         .and_then(Value::as_object)
         .and_then(|row| read_string(row.get("reason")))
     {
-        return Some(map_incomplete_reason_to_finish_reason(incomplete_reason.as_str()));
+        return Some(map_incomplete_reason_to_finish_reason(
+            incomplete_reason.as_str(),
+        ));
     }
     let response_status = read_string(record.get("status"))
         .map(|value| value.to_ascii_lowercase())
@@ -513,30 +536,54 @@ fn detect_retryable_empty_assistant_response_value(
             .map(|value| value.to_ascii_lowercase())
             .unwrap_or_default();
         let message = first_choice.get("message").and_then(Value::as_object);
-        let has_tool_calls = has_non_empty_tool_calls(message.and_then(|row| row.get("tool_calls")));
-        let has_text = value_has_meaningful_visible_assistant_text(message.and_then(|row| row.get("content")))
-            || value_has_meaningful_visible_assistant_text(first_choice.get("content"));
-        let combined_text_has_registry_missing = contains_tool_registry_missing_text(message.and_then(|row| row.get("content")))
-            || contains_tool_registry_missing_text(first_choice.get("content"));
+        let has_tool_calls =
+            has_non_empty_tool_calls(message.and_then(|row| row.get("tool_calls")));
+        let has_text =
+            value_has_meaningful_visible_assistant_text(message.and_then(|row| row.get("content")))
+                || value_has_meaningful_visible_assistant_text(first_choice.get("content"));
+        let combined_text_has_registry_missing =
+            contains_tool_registry_missing_text(message.and_then(|row| row.get("content")))
+                || contains_tool_registry_missing_text(first_choice.get("content"));
         if (finish_reason == "stop" || finish_reason.is_empty())
             && !has_tool_calls
             && is_required_tool_call_turn_value(request_semantics)
             && !is_tool_result_followup_turn_value(request_semantics)
         {
             return Some(payload_contract_signal(
-                format!("finish_reason={} with declared request tools but no structured tool_calls", if finish_reason.is_empty() { "unknown" } else { finish_reason.as_str() }),
+                format!(
+                    "finish_reason={} with declared request tools but no structured tool_calls",
+                    if finish_reason.is_empty() {
+                        "unknown"
+                    } else {
+                        finish_reason.as_str()
+                    }
+                ),
                 "chat_missing_required_tool_call",
             ));
         }
-        if matches!(finish_reason.as_str(), "stop" | "tool_calls" | "") && !has_tool_calls && !has_text {
+        if matches!(finish_reason.as_str(), "stop" | "tool_calls" | "")
+            && !has_tool_calls
+            && !has_text
+        {
             return Some(payload_contract_signal(
-                format!("finish_reason={} but assistant text/tool_calls are empty", if finish_reason.is_empty() { "unknown" } else { finish_reason.as_str() }),
+                format!(
+                    "finish_reason={} but assistant text/tool_calls are empty",
+                    if finish_reason.is_empty() {
+                        "unknown"
+                    } else {
+                        finish_reason.as_str()
+                    }
+                ),
                 "chat_empty_assistant",
             ));
         }
-        if matches!(finish_reason.as_str(), "stop" | "tool_calls" | "") && !has_tool_calls && combined_text_has_registry_missing {
+        if matches!(finish_reason.as_str(), "stop" | "tool_calls" | "")
+            && !has_tool_calls
+            && combined_text_has_registry_missing
+        {
             return Some(payload_contract_signal(
-                "assistant emitted textual tool-not-found complaint without structured tool_calls".to_string(),
+                "assistant emitted textual tool-not-found complaint without structured tool_calls"
+                    .to_string(),
                 "chat_textual_tool_registry_missing",
             ));
         }
@@ -551,10 +598,12 @@ fn detect_retryable_empty_assistant_response_value(
             .and_then(Value::as_object)
             .and_then(|row| row.get("submit_tool_outputs"))
             .and_then(Value::as_object);
-        let has_required_action_tool_calls = has_non_empty_tool_calls(submit_tool_outputs.and_then(|row| row.get("tool_calls")));
+        let has_required_action_tool_calls =
+            has_non_empty_tool_calls(submit_tool_outputs.and_then(|row| row.get("tool_calls")));
         let has_function_calls = has_output_function_calls(effective_row.get("output"));
-        let has_text = value_has_meaningful_visible_assistant_text(effective_row.get("output_text"))
-            || value_has_meaningful_visible_assistant_text(effective_row.get("output"));
+        let has_text =
+            value_has_meaningful_visible_assistant_text(effective_row.get("output_text"))
+                || value_has_meaningful_visible_assistant_text(effective_row.get("output"));
         let has_reasoning_only = value_has_reasoning_only_content(effective_row.get("output"))
             || value_has_reasoning_only_content(effective_row.get("reasoning"));
         if !has_required_action_tool_calls
@@ -565,7 +614,10 @@ fn detect_retryable_empty_assistant_response_value(
             && !contains_reasoning_stop_finalized_marker(effective_row.get("output_text"))
         {
             return Some(payload_contract_signal(
-                format!("responses status={} with declared request tools but no function_call output", status),
+                format!(
+                    "responses status={} with declared request tools but no function_call output",
+                    status
+                ),
                 "responses_missing_required_tool_call",
             ));
         }
@@ -576,7 +628,15 @@ fn detect_retryable_empty_assistant_response_value(
             && !is_tool_result_followup_turn_value(request_semantics)
         {
             return Some(payload_contract_signal(
-                format!("responses status={} but output text/tool_calls are empty{}", status, if has_reasoning_only { " (reasoning-only payload)" } else { "" }),
+                format!(
+                    "responses status={} but output text/tool_calls are empty{}",
+                    status,
+                    if has_reasoning_only {
+                        " (reasoning-only payload)"
+                    } else {
+                        ""
+                    }
+                ),
                 "responses_empty_output",
             ));
         }
@@ -945,7 +1005,9 @@ pub fn restore_response_continuation_semantics_json(
 pub fn has_requested_tools_in_semantics_json(request_semantics_json: String) -> NapiResult<bool> {
     let request_semantics: Value = serde_json::from_str(&request_semantics_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    Ok(has_requested_tools_in_semantics_value(Some(&request_semantics)))
+    Ok(has_requested_tools_in_semantics_value(Some(
+        &request_semantics,
+    )))
 }
 
 pub fn is_required_tool_call_turn_json(request_semantics_json: String) -> NapiResult<bool> {
@@ -964,8 +1026,8 @@ pub fn detect_retryable_empty_assistant_response_json(
     body_json: String,
     request_semantics_json: String,
 ) -> NapiResult<String> {
-    let body: Value = serde_json::from_str(&body_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let body: Value =
+        serde_json::from_str(&body_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let request_semantics: Value = serde_json::from_str(&request_semantics_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = detect_retryable_empty_assistant_response_value(&body, Some(&request_semantics))
@@ -974,8 +1036,8 @@ pub fn detect_retryable_empty_assistant_response_json(
 }
 
 pub fn derive_finish_reason_json(body_json: String) -> NapiResult<String> {
-    let body: Value = serde_json::from_str(&body_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let body: Value =
+        serde_json::from_str(&body_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = derive_finish_reason_value(&body)
         .map(Value::String)
         .unwrap_or(Value::Null);
@@ -1026,29 +1088,41 @@ mod request_semantics_tests {
             "tools": { "clientToolsRaw": [{ "type": "function", "function": { "name": "exec_command" } }] },
             "tool_choice": "required"
         });
-        let signal = detect_retryable_empty_assistant_response_value(&body, Some(&semantics)).unwrap();
+        let signal =
+            detect_retryable_empty_assistant_response_value(&body, Some(&semantics)).unwrap();
         assert_eq!(signal["marker"], "responses_missing_required_tool_call");
     }
 
     #[test]
     fn detects_chat_empty_assistant_in_rust() {
-        let body = json!({ "choices": [{ "finish_reason": "tool_calls", "message": { "content": "" } }] });
-        let signal = detect_retryable_empty_assistant_response_value(&body, Some(&Value::Null)).unwrap();
+        let body =
+            json!({ "choices": [{ "finish_reason": "tool_calls", "message": { "content": "" } }] });
+        let signal =
+            detect_retryable_empty_assistant_response_value(&body, Some(&Value::Null)).unwrap();
         assert_eq!(signal["marker"], "chat_empty_assistant");
     }
 
     #[test]
     fn derives_finish_reason_tool_calls_in_rust() {
         let chat = json!({ "choices": [{ "message": { "tool_calls": [{ "id": "call_1" }] } }] });
-        assert_eq!(derive_finish_reason_value(&chat).as_deref(), Some("tool_calls"));
+        assert_eq!(
+            derive_finish_reason_value(&chat).as_deref(),
+            Some("tool_calls")
+        );
 
         let responses = json!({
             "status": "completed",
             "output": [{ "type": "function_call", "call_id": "call_1" }]
         });
-        assert_eq!(derive_finish_reason_value(&responses).as_deref(), Some("tool_calls"));
+        assert_eq!(
+            derive_finish_reason_value(&responses).as_deref(),
+            Some("tool_calls")
+        );
 
         let anthropic = json!({ "stop_reason": "tool_use" });
-        assert_eq!(derive_finish_reason_value(&anthropic).as_deref(), Some("tool_calls"));
+        assert_eq!(
+            derive_finish_reason_value(&anthropic).as_deref(),
+            Some("tool_calls")
+        );
     }
 }

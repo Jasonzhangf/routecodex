@@ -235,6 +235,15 @@ export async function reportRequestExecutorProviderError(
     });
   }
   try {
+    const rtHints = args.metadata?.__rt && typeof args.metadata.__rt === 'object' && !Array.isArray(args.metadata.__rt)
+      ? (args.metadata.__rt as Record<string, unknown>)
+      : undefined;
+    const sessionDir = typeof rtHints?.sessionDir === 'string' && rtHints.sessionDir.trim()
+      ? rtHints.sessionDir.trim()
+      : undefined;
+    const rccUserDir = typeof rtHints?.rccUserDir === 'string' && rtHints.rccUserDir.trim()
+      ? rtHints.rccUserDir.trim()
+      : undefined;
     await emitProviderErrorAndWait({
       error: args.error,
       stage,
@@ -248,7 +257,9 @@ export async function reportRequestExecutorProviderError(
         routeName: args.routeName,
         pipelineId: args.providerKey,
         target: args.target,
-        runtimeKey: args.runtimeKey
+        runtimeKey: args.runtimeKey,
+        ...(sessionDir ? { sessionDir } : {}),
+        ...(rccUserDir ? { rccUserDir } : {})
       },
       dependencies: args.dependencies as ModuleDependencies,
       statusCode,

@@ -122,6 +122,24 @@ tool:exec_command (tool:exec_command)
 `);
   });
 
+  it('harvests self-closing tool_invocation markup and strips visible text', () => {
+    const message = {
+      role: 'assistant',
+      content: [
+        '<tool_invocation name="exec_command" arguments={"cmd":"ssh root@example echo ok"} />',
+        '<tool_invocation name="update_plan" arguments={"plan":[{"step":"更新 Max Body Size 配置","status":"in_progress"}]} />'
+      ].join('\n')
+    };
+
+    const normalized = normalizeAssistantTextToToolCalls(message);
+    const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
+    expect(toolCalls).toHaveLength(2);
+    expect(toolCalls[0]?.function?.name).toBe('exec_command');
+    expect(JSON.parse(String(toolCalls[0]?.function?.arguments || '{}')).cmd).toContain('ssh root@example');
+    expect(toolCalls[1]?.function?.name).toBe('update_plan');
+    expect((normalized as any).content).toBe('');
+  });
+
   it('does not harvest noisy marker + trailing text wrapper around JSON tool_calls without explicit container', () => {
     const message = {
       role: 'assistant',

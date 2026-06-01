@@ -2,7 +2,6 @@ import type { PipelineExecutionResult } from '../../../handlers/types.js';
 import type { ProviderHandle } from '../types.js';
 import type { ProviderRuntimeProfile } from '../../../../providers/core/api/provider-types.js';
 import type { ProviderTrafficGovernorLike, ProviderTrafficPermit } from '../provider-traffic-governor.js';
-import { recordVirtualRouterHitRollup } from './log-rollup.js';
 import { writeErrorsampleJson } from '../../../../utils/errorsamples.js';
 import { truncateReason } from './request-executor-error-shared.js';
 
@@ -123,46 +122,6 @@ export function resolveRequestExecutorTrafficRuntimeProfile(
       value: ''
     }
   };
-}
-
-export function emitRequestExecutorVirtualRouterConcurrencyLog(args: {
-  sessionId?: string;
-  projectPath?: string;
-  routeName?: string;
-  poolId?: string;
-  providerKey?: string;
-  model?: string;
-  reason?: string;
-  stoplessMode?: 'on' | 'off' | 'endless';
-  stoplessArmed?: boolean;
-  activeInFlight: number;
-  maxInFlight: number;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    cache_read_input_tokens?: number;
-    cache_creation_input_tokens?: number;
-    total_tokens?: number;
-  };
-}): void {
-  recordVirtualRouterHitRollup({
-    routeName: args.routeName,
-    poolId: args.poolId,
-    providerKey: args.providerKey,
-    model: args.model,
-    sessionId: args.sessionId,
-    projectPath: args.projectPath,
-    reason: args.reason,
-    stoplessMode: args.stoplessMode,
-    stoplessArmed: args.stoplessArmed,
-    activeInFlight: args.activeInFlight,
-    maxInFlight: args.maxInFlight,
-    promptTokens: args.usage?.prompt_tokens,
-    completionTokens: args.usage?.completion_tokens,
-    cacheReadTokens: args.usage?.cache_read_input_tokens,
-    cacheCreationTokens: args.usage?.cache_creation_input_tokens,
-    totalTokens: args.usage?.total_tokens
-  });
 }
 
 function isAlreadyClientFinalResponseBody(body: unknown): boolean {

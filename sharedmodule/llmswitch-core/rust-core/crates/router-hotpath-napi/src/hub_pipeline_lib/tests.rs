@@ -75,7 +75,6 @@ fn execute_hub_pipeline_json_uses_total_entry_contract() {
     });
     let output: serde_json::Value =
         serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
-
     assert_eq!(
         output.get("requestId").and_then(|value| value.as_str()),
         Some("req-2")
@@ -155,21 +154,32 @@ fn execute_hub_pipeline_json_uses_preselected_route_outbound_profile_for_respons
     let output: serde_json::Value =
         serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
 
-    assert_eq!(output.get("success").and_then(|value| value.as_bool()), Some(true));
     assert_eq!(
-        output.pointer("/payload/messages/0/role").and_then(|value| value.as_str()),
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        output
+            .pointer("/payload/messages/0/role")
+            .and_then(|value| value.as_str()),
         Some("user")
     );
     assert_eq!(
-        output.pointer("/payload/messages/0/content").and_then(|value| value.as_str()),
+        output
+            .pointer("/payload/messages/0/content")
+            .and_then(|value| value.as_str()),
         Some("hi")
     );
     assert_eq!(
-        output.pointer("/payload/tools/0/function/name").and_then(|value| value.as_str()),
+        output
+            .pointer("/payload/tools/0/function/name")
+            .and_then(|value| value.as_str()),
         Some("exec_command")
     );
     assert_eq!(
-        output.pointer("/payload/tool_choice").and_then(|value| value.as_str()),
+        output
+            .pointer("/payload/tool_choice")
+            .and_then(|value| value.as_str()),
         Some("auto")
     );
 }
@@ -244,17 +254,26 @@ fn execute_hub_pipeline_json_builds_non_empty_anthropic_messages_from_responses_
     let output: serde_json::Value =
         serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
 
-    assert_eq!(output.get("success").and_then(|value| value.as_bool()), Some(true));
     assert_eq!(
-        output.pointer("/payload/messages/0/role").and_then(|value| value.as_str()),
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        output
+            .pointer("/payload/messages/0/role")
+            .and_then(|value| value.as_str()),
         Some("user")
     );
     assert_eq!(
-        output.pointer("/payload/messages/0/content/0/text").and_then(|value| value.as_str()),
+        output
+            .pointer("/payload/messages/0/content/0/text")
+            .and_then(|value| value.as_str()),
         Some("read files")
     );
     assert_eq!(
-        output.pointer("/payload/tools/0/name").and_then(|value| value.as_str()),
+        output
+            .pointer("/payload/tools/0/name")
+            .and_then(|value| value.as_str()),
         Some("exec_command")
     );
 }
@@ -304,7 +323,10 @@ fn execute_request_path_preserves_client_tool_surface() {
     let output: serde_json::Value =
         serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
 
-    assert_eq!(output.get("success").and_then(|value| value.as_bool()), Some(true));
+    assert_eq!(
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(true)
+    );
     assert_eq!(
         output
             .pointer("/payload/tools/0/function/name")

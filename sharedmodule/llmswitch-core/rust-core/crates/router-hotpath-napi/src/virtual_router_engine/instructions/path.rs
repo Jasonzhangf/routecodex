@@ -254,3 +254,122 @@ pub(super) fn resolve_stop_message_text(raw: &str) -> Result<String, String> {
     })?;
     Ok(content)
 }
+
+// ============================================================
+// rcc_user_dir isolation red tests
+// ============================================================
+
+#[cfg(test)]
+mod isolation_tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp() -> PathBuf {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("rcc-user-dir-iso-{n}"))
+    }
+
+    // T2a: two different rcc_user_dir overrides must resolve to different base paths
+    #[test]
+    fn rcc_user_dir_override_resolves_different_paths() {
+        let dir_a = unique_temp();
+        let dir_b = unique_temp();
+        fs::create_dir_all(&dir_a).unwrap();
+        fs::create_dir_all(&dir_b).unwrap();
+
+        // With override A active
+        with_rcc_user_dir_override(dir_a.to_str(), || {
+            let resolved = resolve_rcc_user_dir();
+            assert!(resolved.is_ok());
+            assert_eq!(resolved.unwrap(), dir_a, "must resolve to dir_a");
+        });
+
+        // With override B active
+        with_rcc_user_dir_override(dir_b.to_str(), || {
+            let resolved = resolve_rcc_user_dir();
+            assert!(resolved.is_ok());
+            assert_eq!(resolved.unwrap(), dir_b, "must resolve to dir_b");
+        });
+
+        let _ = fs::remove_dir_all(dir_a);
+        let _ = fs::remove_dir_all(dir_b);
+    }
+
+    // T2b: path resolution under rcc_user_dir must not cross into another dir
+    #[test]
+    fn rcc_user_dir_override_path_resolution_no_cross() {
+        let dir_a = unique_temp();
+        let dir_b = unique_temp();
+        fs::create_dir_all(&dir_a.join("precommand")).unwrap();
+        fs::create_dir_all(&dir_b.join("precommand")).unwrap();
+
+        // Write a script into dir_a
+        let script_a = dir_a.join("precommand").join("test.sh");
+        fs::write(&script_a, "#!/bin/sh\necho hello").unwrap();
+
+        // Write a different script into dir_b
+        let script_b = dir_b.join("precommand").join("test.sh");
+        fs::write(&script_b, "#!/bin/sh\necho world").unwrap();
+
+        // dir_a should resolve to dir_a's script
+        with_rcc_user_dir_override(dir_a.to_str(), || {
+            let result = resolve_precommand_script_path("test.sh");
+            assert!(result.is_ok(), "should resolve test.sh in dir_a");
+            let resolved = result.unwrap();
+            assert!(
+                resolved.contains(dir_a.to_str().unwrap()),
+                "must be under dir_a"
+            );
+        });
+
+        // dir_b should resolve to dir_b's script, not dir_a's
+        with_rcc_user_dir_override(dir_b.to_str(), || {
+            let result = resolve_precommand_script_path("test.sh");
+            assert!(result.is_ok(), "should resolve test.sh in dir_b");
+            let resolved = result.unwrap();
+            assert!(
+                resolved.contains(dir_b.to_str().unwrap()),
+                "must be under dir_b"
+            );
+            assert!(
+                !resolved.contains(dir_a.to_str().unwrap()),
+                "must NOT cross into dir_a"
+            );
+        });
+
+        let _ = fs::remove_dir_all(dir_a);
+        let _ = fs::remove_dir_all(dir_b);
+    }
+
+    // T2c: nested override clears correctly (RAII guard restores previous)
+    #[test]
+    fn rcc_user_dir_override_raii_guard_restores() {
+        let dir_a = unique_temp();
+        let dir_b = unique_temp();
+        fs::create_dir_all(&dir_a).unwrap();
+        fs::create_dir_all(&dir_b).unwrap();
+
+        with_rcc_user_dir_override(dir_a.to_str(), || {
+            let r1 = resolve_rcc_user_dir().unwrap();
+            assert_eq!(r1, dir_a);
+
+            // Inner override sets dir_b
+            with_rcc_user_dir_override(dir_b.to_str(), || {
+                let r2 = resolve_rcc_user_dir().unwrap();
+                assert_eq!(r2, dir_b);
+            });
+
+            // After inner override drops, must restore to dir_a
+            let r3 = resolve_rcc_user_dir().unwrap();
+            assert_eq!(r3, dir_a, "RAII guard must restore previous override");
+        });
+
+        let _ = fs::remove_dir_all(dir_a);
+        let _ = fs::remove_dir_all(dir_b);
+    }
+}

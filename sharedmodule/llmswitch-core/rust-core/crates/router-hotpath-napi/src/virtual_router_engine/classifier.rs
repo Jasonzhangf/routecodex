@@ -443,7 +443,12 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
-        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        // tools:tool-request-detected is NOT triggered on fresh user turns
+        // because has_tool_activity = !latest_message_from_user && has_tool_call_responses = false
+        assert!(
+            !result.reasoning.contains("tools:tool-request-detected"),
+            "fresh user turn must not trigger tools:tool-request-detected"
+        );
         assert!(!result.reasoning.contains("search:last-tool-search"));
     }
 
@@ -477,7 +482,11 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
-        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        // tools:tool-request-detected is NOT triggered on fresh user turns
+        assert!(
+            !result.reasoning.contains("tools:tool-request-detected"),
+            "fresh user turn must not trigger tools:tool-request-detected"
+        );
         assert!(!result.reasoning.contains("web_search:servertool-required"));
     }
 
@@ -494,7 +503,11 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
-        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        // tools:tool-request-detected is NOT triggered on fresh user turns
+        assert!(
+            !result.reasoning.contains("tools:tool-request-detected"),
+            "fresh user turn must not trigger tools:tool-request-detected"
+        );
     }
 
     #[test]

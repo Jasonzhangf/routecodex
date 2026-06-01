@@ -544,7 +544,7 @@ export class StatsManager {
       const usage = options.usage;
       bucket.totalPromptTokens += usage.prompt_tokens ?? 0;
       bucket.totalCompletionTokens += usage.completion_tokens ?? 0;
-      bucket.totalOutputTokens += usage.total_tokens ?? 0;
+      bucket.totalOutputTokens += usage.completion_tokens ?? 0;
     }
   }
 

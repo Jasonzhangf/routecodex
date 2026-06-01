@@ -948,10 +948,7 @@ mod tests {
     #[test]
     fn health_register_providers_appears_in_snapshot() {
         let mut manager = ProviderHealthManager::new();
-        manager.register_providers(&[
-            "provider-a".to_string(),
-            "provider-b".to_string(),
-        ]);
+        manager.register_providers(&["provider-a".to_string(), "provider-b".to_string()]);
         let snapshot = manager.snapshot();
         assert_eq!(snapshot.len(), 2);
         let keys: Vec<&str> = snapshot.iter().map(|s| s.provider_key.as_str()).collect();
@@ -965,12 +962,20 @@ mod tests {
         manager.register_providers(&["test-p".to_string()]);
 
         manager.record_failure("test-p", Some("err1".to_string()), 1000);
-        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        let s = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .unwrap();
         assert_eq!(s.failure_count, 1);
         assert_eq!(s.state, "healthy");
 
         manager.record_failure("test-p", Some("err2".to_string()), 2000);
-        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        let s = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .unwrap();
         assert_eq!(s.failure_count, 2);
     }
 
@@ -983,7 +988,11 @@ mod tests {
         manager.record_failure("test-p", Some("err2".to_string()), 2000);
         manager.record_success("test-p");
 
-        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        let s = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .unwrap();
         assert_eq!(s.failure_count, 0);
         assert_eq!(s.state, "healthy");
     }
@@ -1004,7 +1013,11 @@ mod tests {
         manager.register_providers(&["test-p".to_string()]);
 
         manager.trip_provider("test-p", Some("manual".to_string()), Some(60_000), 1000);
-        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        let s = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .unwrap();
         assert_eq!(s.state, "tripped");
         assert!(!manager.is_available("test-p", 1000 + 30_000));
         assert!(manager.is_available("test-p", 1000 + 60_001));
@@ -1063,7 +1076,11 @@ mod tests {
         manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), 1000);
         manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), 2000);
         manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), 3000);
-        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        let s = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .unwrap();
         assert_eq!(s.state, "tripped");
         assert!(s.cooldown_expires_at.is_some());
     }
@@ -1077,7 +1094,11 @@ mod tests {
         manager.record_recoverable_failure("test-p", Some("timeout".to_string()), 1000);
         manager.record_recoverable_failure("test-p", Some("timeout".to_string()), 2000);
         manager.record_recoverable_failure("test-p", Some("timeout".to_string()), 3000);
-        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        let s = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .unwrap();
         assert_eq!(s.state, "tripped");
     }
 
@@ -1090,7 +1111,11 @@ mod tests {
 
         let exported = manager.export_persistable_state(2000);
         assert!(exported.is_object(), "exported state should be an object");
-        let cooldowns = exported.get("providerCooldowns").unwrap().as_array().unwrap();
+        let cooldowns = exported
+            .get("providerCooldowns")
+            .unwrap()
+            .as_array()
+            .unwrap();
         assert_eq!(cooldowns.len(), 1, "should export one cooldown entry");
 
         let mut manager2 = ProviderHealthManager::new();
@@ -1098,8 +1123,15 @@ mod tests {
         manager2.import_persistable_state(&exported, 2000, true);
 
         // After import, cooldown should be restored
-        let s = manager2.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
-        assert!(s.cooldown_expires_at.is_some(), "cooldown should be restored after import");
+        let s = manager2
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .unwrap();
+        assert!(
+            s.cooldown_expires_at.is_some(),
+            "cooldown should be restored after import"
+        );
     }
 
     #[test]
@@ -1111,7 +1143,11 @@ mod tests {
         manager.cooldown_provider("test-p", Some("manual".to_string()), Some(2000), 60_000);
 
         manager.clear_runtime_state();
-        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        let s = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .unwrap();
         assert_eq!(s.state, "healthy");
         assert_eq!(s.failure_count, 0);
     }
@@ -1128,12 +1164,15 @@ mod tests {
         manager.register_providers(&["test-p".to_string()]);
 
         manager.cooldown_provider_until_midnight_persisted("test-p", 1000, 60_000);
-        let s = manager.snapshot().into_iter().find(|s| s.provider_key == "test-p").unwrap();
+        let s = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .unwrap();
         assert_eq!(s.state, "tripped");
         assert!(s.cooldown_expires_at.is_some());
         // Should be available after cooldown
         let expiry = s.cooldown_expires_at.unwrap();
         assert!(manager.is_available("test-p", expiry + 1));
     }
-
 }

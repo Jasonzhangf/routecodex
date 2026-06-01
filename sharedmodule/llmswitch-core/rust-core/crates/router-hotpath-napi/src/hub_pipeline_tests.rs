@@ -1679,12 +1679,7 @@ fn test_extract_adapter_context_metadata_fields_trims_strings_and_keeps_booleans
         "workdir": "   ",
         "ignored": 123
     });
-    let keys = json!([
-        "clientInjectReady",
-        "workdir",
-        "missing",
-        1
-    ]);
+    let keys = json!(["clientInjectReady", "workdir", "missing", 1]);
     let output = extract_adapter_context_metadata_fields(&metadata, &keys);
     let row = output.as_object().expect("object output");
     assert_eq!(

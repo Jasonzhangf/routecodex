@@ -24,13 +24,12 @@ fn read_trimmed_string(record: Option<&Map<String, Value>>, keys: &[&str]) -> Op
 }
 
 fn clone_array(value: Option<&Value>) -> Vec<Value> {
-    value
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
+    value.and_then(Value::as_array).cloned().unwrap_or_default()
 }
 
-fn extract_responses_top_level_parameters(record: &Map<String, Value>) -> Option<Map<String, Value>> {
+fn extract_responses_top_level_parameters(
+    record: &Map<String, Value>,
+) -> Option<Map<String, Value>> {
     const ALLOWED: &[&str] = &[
         "temperature",
         "top_p",
@@ -54,14 +53,22 @@ fn extract_responses_top_level_parameters(record: &Map<String, Value>) -> Option
             out.insert((*key).to_string(), value.clone());
         }
     }
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }
 
 pub(crate) fn normalize_followup_parameters(value: &Value) -> Option<Value> {
     let mut row = value.as_object()?.clone();
     row.remove("stream");
     row.remove("tool_choice");
-    if row.is_empty() { None } else { Some(Value::Object(row)) }
+    if row.is_empty() {
+        None
+    } else {
+        Some(Value::Object(row))
+    }
 }
 
 fn first_normalized_parameters(candidates: Vec<Option<Value>>) -> Option<Value> {
@@ -77,7 +84,12 @@ pub(crate) fn resolve_followup_model(seed_model: &Value, adapter_context: &Value
         return seed.unwrap_or("").to_string();
     };
     for key in ["assignedModelId", "modelId"] {
-        if let Some(value) = record.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(value) = record
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             return value.to_string();
         }
     }
@@ -85,7 +97,12 @@ pub(crate) fn resolve_followup_model(seed_model: &Value, adapter_context: &Value
         return value.to_string();
     }
     for key in ["model", "originalModelId"] {
-        if let Some(value) = record.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(value) = record
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             return value.to_string();
         }
     }
@@ -115,7 +132,9 @@ fn extract_responses_message_text(content: &Value) -> String {
 fn extract_chat_messages_from_responses_input(input: &[Value]) -> Vec<Value> {
     let mut messages = Vec::new();
     for item in input {
-        let Some(row) = item.as_object() else { continue };
+        let Some(row) = item.as_object() else {
+            continue;
+        };
         let item_type = row.get("type").and_then(Value::as_str).unwrap_or("");
         if item_type == "message" || row.contains_key("role") {
             let role = row.get("role").and_then(Value::as_str).unwrap_or("user");
@@ -193,7 +212,9 @@ fn extract_captured_tool_outputs(responses_context: Option<&Map<String, Value>>)
     };
     let mut out = Vec::new();
     for entry in rows {
-        let Some(row) = entry.as_object() else { continue };
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
         let Some(id) = read_trimmed_string(Some(row), &["tool_call_id", "call_id"]) else {
             continue;
         };
@@ -275,7 +296,9 @@ fn extract_chat_tool_outputs(final_chat_response: &Value) -> Vec<Value> {
         .unwrap_or_default();
     let mut out = Vec::new();
     for entry in outputs {
-        let Some(record) = entry.as_object() else { continue };
+        let Some(record) = entry.as_object() else {
+            continue;
+        };
         let mut next = Map::new();
         if let Some(tool_call_id) = read_trimmed_string(Some(record), &["tool_call_id"]) {
             next.insert("tool_call_id".to_string(), Value::String(tool_call_id));
@@ -284,7 +307,10 @@ fn extract_chat_tool_outputs(final_chat_response: &Value) -> Vec<Value> {
             next.insert("name".to_string(), Value::String(name));
         }
         if let Some(arguments) = record.get("arguments").and_then(Value::as_str) {
-            next.insert("arguments".to_string(), Value::String(arguments.to_string()));
+            next.insert(
+                "arguments".to_string(),
+                Value::String(arguments.to_string()),
+            );
         }
         let content = record
             .get("content")
@@ -323,7 +349,8 @@ fn prune_pending_tool_calls_for_outputs(messages: &mut Vec<Value>, tool_call_ids
         let kept_calls: Vec<Value> = calls
             .into_iter()
             .filter(|call| {
-                let id = read_trimmed_string(call.as_object(), &["id", "call_id"]).unwrap_or_default();
+                let id =
+                    read_trimmed_string(call.as_object(), &["id", "call_id"]).unwrap_or_default();
                 id.is_empty() || !tool_call_ids.iter().any(|candidate| candidate == &id)
             })
             .collect();
@@ -385,7 +412,8 @@ fn append_tool_messages_from_tool_outputs(
         .filter_map(|entry| {
             let row = entry.as_object()?;
             let tool_call_id = read_trimmed_string(Some(row), &["tool_call_id"])?;
-            let name = read_trimmed_string(Some(row), &["name"]).unwrap_or_else(|| "tool".to_string());
+            let name =
+                read_trimmed_string(Some(row), &["name"]).unwrap_or_else(|| "tool".to_string());
             let arguments = row
                 .get("arguments")
                 .and_then(Value::as_str)
@@ -405,20 +433,23 @@ fn append_tool_messages_from_tool_outputs(
         })
         .collect();
     if !tool_calls.is_empty() {
-        let append_to_last = messages.last_mut().and_then(Value::as_object_mut).map(|last| {
-            let role = last
-                .get("role")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim()
-                .to_ascii_lowercase();
-            if role == "assistant" && !last.get("tool_calls").is_some_and(Value::is_array) {
-                last.insert("tool_calls".to_string(), Value::Array(tool_calls.clone()));
-                true
-            } else {
-                false
-            }
-        });
+        let append_to_last = messages
+            .last_mut()
+            .and_then(Value::as_object_mut)
+            .map(|last| {
+                let role = last
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_ascii_lowercase();
+                if role == "assistant" && !last.get("tool_calls").is_some_and(Value::is_array) {
+                    last.insert("tool_calls".to_string(), Value::Array(tool_calls.clone()));
+                    true
+                } else {
+                    false
+                }
+            });
         if append_to_last != Some(true) {
             messages.push(Value::Object(Map::from_iter([
                 ("role".to_string(), Value::String("assistant".to_string())),
@@ -461,7 +492,9 @@ fn append_text_message(messages: &mut Vec<Value>, role: &str, text: Option<&str>
 fn compact_tool_content(messages: &mut [Value], max_chars: i64) {
     let safe_max = std::cmp::max(1, max_chars) as usize;
     for message in messages {
-        let Some(row) = message.as_object_mut() else { continue };
+        let Some(row) = message.as_object_mut() else {
+            continue;
+        };
         let role = row
             .get("role")
             .and_then(Value::as_str)
@@ -476,7 +509,10 @@ fn compact_tool_content(messages: &mut [Value], max_chars: i64) {
         };
         if content.chars().count() > safe_max {
             let truncated = content.chars().take(safe_max).collect::<String>();
-            row.insert("content".to_string(), Value::String(format!("{}…", truncated)));
+            row.insert(
+                "content".to_string(),
+                Value::String(format!("{}…", truncated)),
+            );
         }
     }
 }
@@ -531,7 +567,11 @@ fn drop_tool_by_function_name(tools: &[Value], name: &str) -> Vec<Value> {
         .collect()
 }
 
-fn append_tool_if_missing(tools: Option<&Vec<Value>>, tool_name_value: &str, tool_definition: &Value) -> Vec<Value> {
+fn append_tool_if_missing(
+    tools: Option<&Vec<Value>>,
+    tool_name_value: &str,
+    tool_definition: &Value,
+) -> Vec<Value> {
     let name = tool_name_value.trim();
     let mut next = tools.cloned().unwrap_or_default();
     if !next.iter().any(|tool| tool_name(tool) == name) {
@@ -540,7 +580,11 @@ fn append_tool_if_missing(tools: Option<&Vec<Value>>, tool_name_value: &str, too
     next
 }
 
-fn rebuild_vision_followup(messages: &[Value], summary: Option<&str>, original_prompt: Option<&str>) -> Vec<Value> {
+fn rebuild_vision_followup(
+    messages: &[Value],
+    summary: Option<&str>,
+    original_prompt: Option<&str>,
+) -> Vec<Value> {
     let mut next: Vec<Value> = messages
         .iter()
         .filter(|message| {
@@ -589,18 +633,29 @@ fn apply_single_delta_op(
                 &mut messages,
                 adapter_context,
                 final_chat_response,
-                op_row.get("required").and_then(Value::as_bool).unwrap_or(false),
+                op_row
+                    .get("required")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             );
             payload.insert("messages".to_string(), Value::Array(messages));
             ok
         }
         "append_user_text" => {
-            append_text_message(&mut messages, "user", op_row.get("text").and_then(Value::as_str));
+            append_text_message(
+                &mut messages,
+                "user",
+                op_row.get("text").and_then(Value::as_str),
+            );
             payload.insert("messages".to_string(), Value::Array(messages));
             true
         }
         "inject_system_text" => {
-            append_text_message(&mut messages, "system", op_row.get("text").and_then(Value::as_str));
+            append_text_message(
+                &mut messages,
+                "system",
+                op_row.get("text").and_then(Value::as_str),
+            );
             payload.insert("messages".to_string(), Value::Array(messages));
             true
         }
@@ -628,7 +683,11 @@ fn apply_single_delta_op(
             true
         }
         "inject_vision_summary" => {
-            append_text_message(&mut messages, "user", op_row.get("summary").and_then(Value::as_str));
+            append_text_message(
+                &mut messages,
+                "user",
+                op_row.get("summary").and_then(Value::as_str),
+            );
             payload.insert("messages".to_string(), Value::Array(messages));
             true
         }
@@ -648,7 +707,10 @@ fn apply_single_delta_op(
                 .get("maxNonSystemMessages")
                 .and_then(Value::as_i64)
                 .unwrap_or(1);
-            payload.insert("messages".to_string(), Value::Array(trim_openai_messages(messages, max)));
+            payload.insert(
+                "messages".to_string(),
+                Value::Array(trim_openai_messages(messages, max)),
+            );
             true
         }
         "append_tool_if_missing" => {
@@ -657,7 +719,11 @@ fn apply_single_delta_op(
             let tools = payload.get("tools").and_then(Value::as_array);
             payload.insert(
                 "tools".to_string(),
-                Value::Array(append_tool_if_missing(tools, tool_name_value, tool_definition)),
+                Value::Array(append_tool_if_missing(
+                    tools,
+                    tool_name_value,
+                    tool_definition,
+                )),
             );
             true
         }
@@ -718,7 +784,10 @@ pub fn extract_captured_chat_seed_json(captured_json: String) -> NapiResult<Stri
 }
 
 #[napi]
-pub fn resolve_followup_model_json(seed_model_json: String, adapter_context_json: String) -> NapiResult<String> {
+pub fn resolve_followup_model_json(
+    seed_model_json: String,
+    adapter_context_json: String,
+) -> NapiResult<String> {
     let seed_model: Value = serde_json::from_str(&seed_model_json)
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
     let adapter_context: Value = serde_json::from_str(&adapter_context_json)
@@ -736,11 +805,15 @@ pub fn normalize_followup_parameters_json(parameters_json: String) -> NapiResult
 }
 
 #[napi]
-pub fn extract_assistant_followup_message_json(final_chat_response_json: String) -> NapiResult<String> {
+pub fn extract_assistant_followup_message_json(
+    final_chat_response_json: String,
+) -> NapiResult<String> {
     let final_chat_response: Value = serde_json::from_str(&final_chat_response_json)
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
-    serde_json::to_string(&extract_assistant_followup_message(&final_chat_response).unwrap_or(Value::Null))
-        .map_err(|error| napi::Error::from_reason(error.to_string()))
+    serde_json::to_string(
+        &extract_assistant_followup_message(&final_chat_response).unwrap_or(Value::Null),
+    )
+    .map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
 #[napi]
@@ -785,7 +858,10 @@ mod tests {
             }
         });
         let payload = apply_followup_delta_plan(&input).expect("payload");
-        assert_eq!(payload["messages"][1]["tool_calls"][0]["id"], "call_apply_patch_test");
+        assert_eq!(
+            payload["messages"][1]["tool_calls"][0]["id"],
+            "call_apply_patch_test"
+        );
         assert_eq!(payload["messages"][2]["role"], "tool");
         assert_eq!(payload["tools"].as_array().unwrap().len(), 1);
         assert_eq!(payload["tools"][0]["function"]["name"], "exec_command");
@@ -831,7 +907,10 @@ mod tests {
             "assigned"
         );
         assert_eq!(
-            resolve_followup_model(&Value::String("seed-model".to_string()), &json!({"model":"ctx"})),
+            resolve_followup_model(
+                &Value::String("seed-model".to_string()),
+                &json!({"model":"ctx"})
+            ),
             "seed-model"
         );
     }

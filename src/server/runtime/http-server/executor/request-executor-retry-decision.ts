@@ -25,7 +25,7 @@ import type {
 const MAX_CONTEXT_OVERFLOW_RETRIES = 3;
 
 type RuntimeManager = {
-  resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
+  resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
 };
 
 function isNetworkTransportLikeError(error: unknown): boolean {

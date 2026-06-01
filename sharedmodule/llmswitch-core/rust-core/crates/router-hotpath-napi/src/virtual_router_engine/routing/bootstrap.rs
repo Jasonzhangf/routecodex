@@ -98,6 +98,7 @@ pub(crate) fn bootstrap_virtual_router_routing_json(
     routing_json: String,
     alias_index_json: String,
     model_index_json: String,
+    forwarder_ids_json: Option<String>,
 ) -> NapiResult<String> {
     let routing_source_map: Map<String, Value> = serde_json::from_str(&routing_json)
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
@@ -105,12 +106,25 @@ pub(crate) fn bootstrap_virtual_router_routing_json(
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
     let model_index: BTreeMap<String, ModelIndexEntry> = serde_json::from_str(&model_index_json)
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let forwarder_ids: HashSet<String> = forwarder_ids_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
 
     let normalized_routing = normalize_routing_impl(&routing_source_map);
-    let (expanded_routing, target_keys) =
-        expand_routing_table_impl(&normalized_routing, &alias_index, &model_index).map_err(
-            |error| napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error)),
-        )?;
+    let (expanded_routing, target_keys) = expand_routing_table_impl(
+        &normalized_routing,
+        &alias_index,
+        &model_index,
+        &forwarder_ids,
+    )
+    .map_err(|error| {
+        napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error))
+    })?;
 
     let output = RoutingBootstrapOutput {
         routing_source: normalized_routing,
@@ -172,6 +186,7 @@ pub(crate) fn expand_routing_table_impl(
     routing_source: &BTreeMap<String, Vec<NormalizedRoutePoolConfig>>,
     alias_index: &BTreeMap<String, Vec<String>>,
     model_index: &BTreeMap<String, ModelIndexEntry>,
+    forwarder_ids: &HashSet<String>,
 ) -> Result<(BTreeMap<String, Vec<RoutePoolTier>>, Vec<String>), String> {
     let mut routing: BTreeMap<String, Vec<RoutePoolTier>> = BTreeMap::new();
     let mut target_keys: Vec<String> = Vec::new();
@@ -183,6 +198,15 @@ pub(crate) fn expand_routing_table_impl(
             let mut expanded_targets: Vec<ExpandedTargetCandidate> = Vec::new();
             let mut order_counter: usize = 0;
             for entry in &pool.targets {
+                if forwarder_ids.contains(entry) {
+                    expanded_targets.push(ExpandedTargetCandidate {
+                        key: entry.clone(),
+                        priority: 100,
+                        order: order_counter,
+                    });
+                    order_counter += 1;
+                    continue;
+                }
                 let Some(parsed) = parse_route_entry(entry, alias_index) else {
                     continue;
                 };
@@ -971,7 +995,8 @@ mod tests {
         )]);
 
         let (routing, _) =
-            expand_routing_table_impl(&routing_source, &alias_index, &model_index).unwrap();
+            expand_routing_table_impl(&routing_source, &alias_index, &model_index, &HashSet::new())
+                .unwrap();
         let pool = &routing["search"][0];
 
         assert_eq!(
@@ -1026,7 +1051,8 @@ mod tests {
         )]);
 
         let (routing, _) =
-            expand_routing_table_impl(&routing_source, &alias_index, &model_index).unwrap();
+            expand_routing_table_impl(&routing_source, &alias_index, &model_index, &HashSet::new())
+                .unwrap();
         assert!(routing.contains_key("gateway_priority_5555:search"));
         assert_eq!(
             routing["gateway_priority_5555:search"][0].id,
@@ -1048,6 +1074,7 @@ mod tests {
             routing.to_string(),
             alias_index.to_string(),
             model_index.to_string(),
+            None,
         )
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -1097,6 +1124,7 @@ mod tests {
             &normalized,
             &alias_index,
             &model_index,
+            &HashSet::new(),
         )
         .unwrap();
         assert_eq!(expanded["default"][0].targets, vec!["openai.k1.gpt-4o"]);
@@ -1106,6 +1134,7 @@ mod tests {
             routing.to_string(),
             json!({ "openai": ["k1"] }).to_string(),
             json!({ "openai": { "declared": true, "models": ["gpt-4o"] } }).to_string(),
+            None,
         )
         .unwrap();
         let bootstrap_output: serde_json::Value = serde_json::from_str(&bootstrap).unwrap();
@@ -1135,6 +1164,7 @@ mod tests {
             routing.to_string(),
             alias_index.to_string(),
             model_index.to_string(),
+            None,
         )
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -1159,6 +1189,7 @@ mod tests {
             routing.to_string(),
             alias_index.to_string(),
             model_index.to_string(),
+            None,
         )
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -1198,6 +1229,7 @@ mod tests {
             routing.to_string(),
             alias_index.to_string(),
             model_index.to_string(),
+            None,
         )
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -1223,6 +1255,40 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_json_preserves_declared_forwarder_target() {
+        let routing = json!({
+            "default": [{
+                "id": "default",
+                "mode": "priority",
+                "targets": ["fwd.minimax.MiniMax-M3"]
+            }]
+        });
+        let alias_index = json!({
+            "minimax": ["key1"],
+            "mini27": ["key1"]
+        });
+        let model_index = json!({
+            "minimax": { "declared": true, "models": ["MiniMax-M3"] },
+            "mini27": { "declared": true, "models": ["MiniMax-M3"] }
+        });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+            Some(json!(["fwd.minimax.MiniMax-M3"]).to_string()),
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        assert_eq!(
+            output["routing"]["default"][0]["targets"],
+            json!(["fwd.minimax.MiniMax-M3"])
+        );
+        assert_eq!(output["targetKeys"], json!([]));
+    }
+
+    #[test]
     fn bootstrap_json_priority_ordering() {
         let routing = json!({
             "default": [
@@ -1240,6 +1306,7 @@ mod tests {
             routing.to_string(),
             alias_index.to_string(),
             model_index.to_string(),
+            None,
         )
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -1266,6 +1333,7 @@ mod tests {
             routing.to_string(),
             alias_index.to_string(),
             model_index.to_string(),
+            None,
         )
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -1284,6 +1352,7 @@ mod tests {
             routing.to_string(),
             alias_index.to_string(),
             model_index.to_string(),
+            None,
         )
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -1298,6 +1367,7 @@ mod tests {
             "not-json".to_string(),
             "{}".to_string(),
             "{}".to_string(),
+            None,
         );
         assert!(result.is_err());
     }
@@ -1319,6 +1389,7 @@ mod tests {
             routing.to_string(),
             alias_index.to_string(),
             model_index.to_string(),
+            None,
         )
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -1347,6 +1418,7 @@ mod tests {
             routing.to_string(),
             alias_index.to_string(),
             model_index.to_string(),
+            None,
         )
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -1373,6 +1445,7 @@ mod tests {
             routing.to_string(),
             alias_index.to_string(),
             model_index.to_string(),
+            None,
         )
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();

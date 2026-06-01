@@ -29,6 +29,7 @@ pub(crate) struct VirtualRouterEngineCore {
     pub web_search_force: bool,
     pub context_warn_ratio: f64,
     pub context_hard_limit: bool,
+    pub forwarder_registry: crate::virtual_router_engine::forwarder::ForwarderRegistry,
     pub(crate) concurrency_busy_keys: HashMap<String, i64>, // key -> expires_at_ms
 }
 
@@ -40,6 +41,7 @@ impl VirtualRouterEngineCore {
             health_manager: ProviderHealthManager::new(),
             quota_manager: ProviderQuotaManager::new(),
             load_balancer: RouteLoadBalancer::new(None),
+            forwarder_registry: crate::virtual_router_engine::forwarder::ForwarderRegistry::new(),
             classifier: RoutingClassifier::new(&Value::Object(Map::new())),
             routing_instruction_state: HashMap::new(),
             web_search_force: false,
@@ -61,6 +63,23 @@ impl VirtualRouterEngineCore {
         let routing = parse_routing(routing_value);
         self.provider_registry.load(providers_value);
         self.routing = routing;
+        // Load forwarder config (must come after provider_registry)
+        if let (Some(forwarders_value), Some(routing_val)) = (
+            config.get("forwarders").and_then(|v| v.as_object()),
+            config.get("routing").and_then(|v| v.as_object()),
+        ) {
+            let provider_keys = self
+                .provider_registry
+                .list_keys()
+                .into_iter()
+                .collect::<std::collections::HashSet<String>>();
+            if let Err(e) = self
+                .forwarder_registry
+                .load(forwarders_value, &provider_keys)
+            {
+                return Err(format!("forwarder config invalid: {}", e));
+            }
+        }
         let health_config = config
             .get("health")
             .cloned()

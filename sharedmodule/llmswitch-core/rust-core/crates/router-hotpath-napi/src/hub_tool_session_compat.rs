@@ -318,6 +318,138 @@ fn normalize_tool_call_ordering(
     }
 }
 
+fn is_assistant_tool_calls_only(message: &Value) -> bool {
+    let Some(row) = message.as_object() else {
+        return false;
+    };
+    let role = row
+        .get("role")
+        .and_then(|entry| entry.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if role != "assistant" {
+        return false;
+    }
+    let has_tool_calls = row
+        .get("tool_calls")
+        .and_then(|entry| entry.as_array())
+        .map(|calls| !calls.is_empty())
+        .unwrap_or(false);
+    if !has_tool_calls {
+        return false;
+    }
+    read_trimmed_string(row.get("content")).is_none()
+}
+
+fn merge_consecutive_assistant_tool_call_messages(messages: &mut Vec<Value>) {
+    let mut index = 0usize;
+    while index + 1 < messages.len() {
+        if !is_assistant_tool_calls_only(&messages[index])
+            || !is_assistant_tool_calls_only(&messages[index + 1])
+        {
+            index += 1;
+            continue;
+        }
+        let next = messages.remove(index + 1);
+        let next_calls = next
+            .as_object()
+            .and_then(|row| row.get("tool_calls"))
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if let Some(current_calls) = messages[index]
+            .as_object_mut()
+            .and_then(|row| row.get_mut("tool_calls"))
+            .and_then(|value| value.as_array_mut())
+        {
+            current_calls.extend(next_calls);
+        }
+    }
+}
+
+fn is_namespace_mcp_aggregator_tool_name(name: &str, schema: Option<&Value>) -> bool {
+    let normalized = name.trim();
+    if !normalized.starts_with("mcp__") || normalized[5..].contains("__") {
+        return false;
+    }
+    schema
+        .and_then(Value::as_object)
+        .map(|schema| schema.is_empty())
+        .unwrap_or(true)
+}
+
+pub(crate) fn filter_namespace_mcp_aggregator_tool_definitions(tools: &mut Value) {
+    let Some(tool_list) = tools.as_array_mut() else {
+        return;
+    };
+    tool_list.retain(|tool| {
+        let Some(tool_obj) = tool.as_object() else {
+            return false;
+        };
+        let function_obj = tool_obj.get("function").and_then(Value::as_object);
+        let name = function_obj
+            .and_then(|function| function.get("name"))
+            .or_else(|| tool_obj.get("name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(name) = name else {
+            return false;
+        };
+        let schema = function_obj
+            .and_then(|function| function.get("parameters"))
+            .or_else(|| function_obj.and_then(|function| function.get("input_schema")))
+            .or_else(|| tool_obj.get("parameters"))
+            .or_else(|| tool_obj.get("input_schema"));
+        !is_namespace_mcp_aggregator_tool_name(name, schema)
+    });
+}
+
+pub(crate) fn normalize_tool_session_messages(messages: Vec<Value>) -> Vec<Value> {
+    let mut messages = messages;
+    let tool_output_lookup = HashMap::new();
+    filter_namespace_mcp_aggregator_tools(&mut messages);
+    merge_consecutive_assistant_tool_call_messages(&mut messages);
+    normalize_tool_call_ordering(&mut messages, &tool_output_lookup);
+    messages
+}
+
+fn filter_namespace_mcp_aggregator_tools(messages: &mut [Value]) {
+    for message in messages {
+        let Some(row) = message.as_object_mut() else {
+            continue;
+        };
+        let Some(tool_calls) = row.get_mut("tool_calls").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        tool_calls.retain(|call| {
+            let Some(call_obj) = call.as_object() else {
+                return false;
+            };
+            let function_obj = call_obj.get("function").and_then(Value::as_object);
+            let name = function_obj
+                .and_then(|function| function.get("name"))
+                .or_else(|| call_obj.get("name"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let Some(name) = name else {
+                return false;
+            };
+            let schema = function_obj
+                .and_then(|function| function.get("parameters"))
+                .or_else(|| function_obj.and_then(|function| function.get("input_schema")))
+                .or_else(|| call_obj.get("parameters"))
+                .or_else(|| call_obj.get("input_schema"));
+            !is_namespace_mcp_aggregator_tool_name(name, schema)
+        });
+        if tool_calls.is_empty() {
+            row.remove("tool_calls");
+        }
+    }
+}
+
 fn collect_valid_call_ids(messages: &[Value]) -> HashSet<String> {
     let mut valid = HashSet::new();
     for message in messages {
@@ -389,6 +521,8 @@ pub(crate) fn normalize_tool_session_payload(
 ) -> ToolSessionCompatOutput {
     let mut messages = input.messages;
     let tool_output_lookup = build_tool_output_lookup(input.tool_outputs.as_ref());
+    filter_namespace_mcp_aggregator_tools(&mut messages);
+    merge_consecutive_assistant_tool_call_messages(&mut messages);
     normalize_tool_call_ordering(&mut messages, &tool_output_lookup);
     let valid_call_ids = collect_valid_call_ids(&messages);
     let tool_outputs = filter_tool_outputs(input.tool_outputs, &valid_call_ids);
@@ -678,6 +812,90 @@ mod tests {
             tool_message.get("content").and_then(|v| v.as_str()),
             Some("done")
         );
+    }
+
+    #[test]
+    fn merges_consecutive_assistant_tool_calls_before_tool_results() {
+        let input = ToolSessionCompatInput {
+            messages: vec![
+                json!({
+                  "role": "assistant",
+                  "tool_calls": [
+                    {"id": "call_a", "type": "function", "function": {"name": "toolA"}}
+                  ]
+                }),
+                json!({
+                  "role": "assistant",
+                  "tool_calls": [
+                    {"id": "call_b", "type": "function", "function": {"name": "toolB"}}
+                  ]
+                }),
+                json!({"role": "tool", "tool_call_id": "call_a", "content": "a ok"}),
+                json!({"role": "tool", "tool_call_id": "call_b", "content": "b ok"}),
+            ],
+            tool_outputs: None,
+        };
+
+        let output = normalize_tool_session_payload(input);
+        assert_eq!(output.messages.len(), 3);
+        let assistant = output.messages[0].as_object().unwrap();
+        assert_eq!(
+            assistant.get("role").and_then(|v| v.as_str()),
+            Some("assistant")
+        );
+        assert_eq!(
+            assistant
+                .get("tool_calls")
+                .and_then(|v| v.as_array())
+                .map(|items| items.len()),
+            Some(2)
+        );
+        assert_eq!(
+            output.messages[1]
+                .as_object()
+                .and_then(|row| row.get("tool_call_id"))
+                .and_then(|v| v.as_str()),
+            Some("call_a")
+        );
+        assert_eq!(
+            output.messages[2]
+                .as_object()
+                .and_then(|row| row.get("tool_call_id"))
+                .and_then(|v| v.as_str()),
+            Some("call_b")
+        );
+    }
+
+    #[test]
+    fn filters_namespace_mcp_aggregator_tool_calls_in_tool_session_governance() {
+        let input = ToolSessionCompatInput {
+            messages: vec![json!({
+              "role": "assistant",
+              "tool_calls": [
+                {"id": "call_keep", "type": "function", "function": {"name": "exec_command", "parameters": {"type": "object"}}},
+                {"id": "call_drop", "type": "function", "function": {"name": "mcp__node_repl", "parameters": {}}},
+                {"id": "call_child", "type": "function", "function": {"name": "mcp__node_repl__js", "parameters": {"type": "object"}}}
+              ]
+            })],
+            tool_outputs: None,
+        };
+
+        let output = normalize_tool_session_payload(input);
+        let calls = output.messages[0]
+            .as_object()
+            .and_then(|row| row.get("tool_calls"))
+            .and_then(Value::as_array)
+            .expect("tool calls");
+        let names = calls
+            .iter()
+            .filter_map(|call| {
+                call.get("function")
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["exec_command", "mcp__node_repl__js"]);
     }
 
     #[test]

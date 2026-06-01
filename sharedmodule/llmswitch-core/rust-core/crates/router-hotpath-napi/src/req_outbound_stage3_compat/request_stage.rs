@@ -17,8 +17,8 @@ use super::thinking_history::{
     ensure_deepseek_anthropic_thinking_block_for_tool_use_history,
     ensure_deepseek_thinking_content_for_assistant_history,
     ensure_reasoning_content_for_anthropic_assistant_history,
-    ensure_reasoning_content_for_assistant_history,
-    should_apply_anthropic_thinking_history_compat, should_apply_deepseek_thinking_history_compat,
+    ensure_reasoning_content_for_assistant_history, should_apply_anthropic_thinking_history_compat,
+    should_apply_deepseek_thinking_history_compat,
     should_apply_local_deepseek_thinking_history_compat,
 };
 use super::{CompatResult, ReqOutboundCompatInput};
@@ -136,8 +136,7 @@ pub fn run_req_outbound_stage3_compat(
         ..
     } = input;
 
-    let payload = strip_historical_media(input_payload);
-    let mut payload = strip_media_for_non_multimodal_target(payload, &adapter_context);
+    let mut payload = strip_media_for_non_multimodal_target(input_payload, &adapter_context);
     if should_apply_local_deepseek_thinking_history_compat(&payload, &adapter_context) {
         if let Some(root) = payload.as_object_mut() {
             ensure_reasoning_content_for_assistant_history(root);
