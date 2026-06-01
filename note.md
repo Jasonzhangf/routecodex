@@ -13860,3 +13860,9 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 
 - 扫描发现 chat/messages/responses/images handler 仍把 request body metadata 作为控制语义来源或继续传给 pipeline body；已改为入口读取后只放 internal carrier，handoff body 用 `stripRequestBodyMetadataForPipeline` 剥离 top-level metadata。
 - 验证：`npm run jest:run -- --runTestsByPath tests/red-tests/no_provider_body_metadata_control.test.ts tests/server/handlers/handler-utils.metadata.spec.ts tests/server/handlers/handler-metadata-boundary.spec.ts --runInBand --forceExit` 通过，3 suites / 7 tests passed；扩展 metadata 回归 12 suites / 67 tests passed。
+
+## 2026-06-01 metadata响应/replay/snapshot收口
+
+- 发现并修复 Responses JSON->SSE `response.metadata`、SSE->JSON provider event metadata、direct `metadata.__raw_request_body.metadata` replay、Responses persisted context payload 四类泄露/持久化风险。
+- 验证：metadata Jest 回归 15 suites / 76 tests passed；Rust `cargo test -p router-hotpath-napi hub_req_outbound_format_build --lib` 13 tests passed（仅既有 warnings）。
+2026-06-01 continue Hub Pipeline boundary audit after clock/heartbeat removal: scanning TS semantic residues before edits.

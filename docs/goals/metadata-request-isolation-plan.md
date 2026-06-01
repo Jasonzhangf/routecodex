@@ -281,3 +281,45 @@ npm run jest:run -- --runTestsByPath tests/red-tests/no_provider_body_metadata_c
 ```
 
 结果：3 suites / 7 tests passed；随后 metadata 定向回归扩展到 12 suites / 67 tests passed。
+
+## 2026-06-01 响应 / replay / snapshot 收口补充
+
+### 新发现违规点
+
+16. `sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts`
+    - 问题：Responses JSON -> SSE 的 `createResponsePayload` 会把 `response.metadata` 投射到 `response.created` / `response.in_progress` / `response.completed` client SSE payload。
+    - 修复：client SSE response payload 不再输出 `metadata`；内部 metadata 只能留在 carrier / snapshot root。
+
+17. `sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts`
+    - 问题：Responses SSE -> JSON builder 会从 provider SSE `data.metadata` / `responsePayload.metadata` 重建 client JSON `response.metadata`。
+    - 修复：builder 不再聚合或恢复 response metadata；provider event metadata 不进入 client JSON body。
+
+18. `src/server/runtime/http-server/direct-passthrough-payload.ts`
+    - 问题：direct passthrough replay 优先使用 `metadata.__raw_request_body` 时，会把 raw body 的 top-level `metadata` 恢复进 provider wire payload。
+    - 修复：direct raw/body clone 使用 wire payload clone，统一剥离 top-level `metadata`，避免 replay/snapshot 观测数据回流 live path。
+
+19. `src/server/handlers/responses-handler.ts`
+    - 问题：Responses request context 可能持久化原始 `payload`，其中包含 client body metadata。
+    - 修复：`responsesRequestContext.payload` 和 capture context payload 改为剥离后的 `pipelineBody`；session scope 保留在 carrier 字段，不进入持久 payload。
+
+### 新增验证
+
+- `tests/sharedmodule/responses-sse-metadata-boundary.spec.ts`：覆盖 Responses JSON->SSE 与 SSE->JSON 两个响应方向，确认 client response payload 不含 internal/provider metadata。
+- `tests/server/runtime/http-server/direct-passthrough-payload.spec.ts`：覆盖 replay/raw payload direct 路径，确认 `metadata.__raw_request_body.metadata` 不会回到 provider wire body。
+- `tests/debug/snapshot-store-port-isolation.red.spec.ts`：补 provider-request snapshot 验证，确认 snapshot root metadata 允许存在但 `payload.data.metadata` 不存在，端口命名空间隔离仍成立。
+- `tests/server/handlers/handler-metadata-boundary.spec.ts`：补 Responses persisted request context 验证，确认持久 context payload 不含 request body metadata。
+- `tests/red-tests/no_provider_body_metadata_control.test.ts`：红线扩展到 Responses SSE/JSON response 生成器，禁止 `response.metadata` / `data.metadata` / `responsePayload.metadata` 投射到 client response body。
+
+### 已执行验证
+
+```bash
+npm run jest:run -- --runTestsByPath tests/red-tests/no_provider_body_metadata_control.test.ts tests/server/handlers/handler-utils.metadata.spec.ts tests/server/handlers/handler-metadata-boundary.spec.ts tests/sharedmodule/responses-sse-metadata-boundary.spec.ts tests/server/runtime/http-server/direct-passthrough-payload.spec.ts tests/debug/snapshot-store-port-isolation.red.spec.ts tests/providers/core/runtime/provider-runtime-metadata.isolation.spec.ts tests/client/anthropic-protocol-client.spec.ts tests/providers/core/runtime/provider-request-shaping-utils.metadata-boundary.spec.ts tests/providers/core/runtime/vercel-ai-sdk-openai-transport.spec.ts tests/providers/core/runtime/vercel-ai-sdk-anthropic-transport.spec.ts tests/providers/runtime/responses-provider.direct-passthrough.spec.ts tests/server/runtime/http-server/executor/usage-aggregator.spec.ts tests/unified-hub/shadow-runtime-compare.errorsamples.spec.ts tests/providers/mock-provider-runtime.spec.ts --runInBand --forceExit
+```
+
+结果：15 suites / 76 tests passed。
+
+```bash
+cargo test -p router-hotpath-napi hub_req_outbound_format_build --lib
+```
+
+结果：13 tests passed；存在既有 Rust warnings。

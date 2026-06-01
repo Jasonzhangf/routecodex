@@ -23,6 +23,35 @@ describe('snapshot store port isolation red tests', () => {
     expect(fs.existsSync(path.join(dir, 'rcc-fin.jsonl'))).toBe(false);
   });
 
+  it('keeps provider-request snapshot metadata at root and out of wire payload', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-snapshot-metadata-boundary-'));
+    const store = new FileSnapshotStore(dir);
+
+    await store.save({
+      sessionId: 'rcc-metadata-boundary',
+      nodeId: 'provider-request',
+      direction: 'request',
+      payload: {
+        data: {
+          model: 'gpt-5.5',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }]
+        }
+      },
+      timestamp: 1,
+      metadata: {
+        session_id: 'snapshot-root-only',
+        matchedPort: 5555,
+        routingPolicyGroup: 'gateway_priority_5555'
+      }
+    });
+
+    const file = path.join(dir, 'ports', '5555', 'rcc-metadata-boundary.jsonl');
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8').trim()) as Record<string, any>;
+    expect(parsed.metadata.session_id).toBe('snapshot-root-only');
+    expect(parsed.payload.data.metadata).toBeUndefined();
+    expect(JSON.stringify(parsed.payload)).not.toContain('snapshot-root-only');
+  });
+
   it('writes pipeline stage snapshots by entry protocol and port instead of provider', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-snapshot-entry-'));
     const store = new FileSnapshotStore(dir);

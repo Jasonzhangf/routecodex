@@ -170,7 +170,6 @@ function createResponsePayload(
     temperature: response.temperature,
     top_p: response.top_p,
     max_output_tokens: response.max_output_tokens,
-    metadata: response.metadata,
     user: response.user,
     store: response.store,
     truncation: response.truncation,

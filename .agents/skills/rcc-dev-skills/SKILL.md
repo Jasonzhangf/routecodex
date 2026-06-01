@@ -20,6 +20,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 允许读取位置：入口 adapter / Hub Pipeline / Virtual Router / Provider Runtime 的 runtime carrier 或 context side-channel；用途限 routeHint、entryEndpoint、stream intent、servertool/clock/web_search、snapshot 标签、同闭环响应处理。
 - HTTP handler 入口可读取当前 request body metadata 并放入 carrier，但 handoff 给 Hub Pipeline 的 body 必须剥离 top-level `metadata`；禁止 `payload.metadata` / `pipelineBody.metadata` 再作为 mock、session、route、resume 等控制真源。
 - 禁止出口：provider HTTP body、provider SDK request/options、direct passthrough body、client response body、provider health/quota/runtime 持久状态、port/session/global cache。
+- Responses JSON/SSE 转换和 direct replay 是高风险边界：禁止 `response.metadata` / provider SSE `data.metadata` / `metadata.__raw_request_body.metadata` 进入 client response payload 或 provider wire body；snapshot metadata 只能留在 snapshot root，不能被 normal live path 恢复。
 - 隔离维度：requestId、pipelineId、port/serverId、sessionId、conversationId 必须互相隔离；闭环完成后 metadata 必须释放，不能跨请求、跨响应、跨端口、跨 session 复用。
 - 明确错误模式：`body.metadata -> provider options`、`rawBody.metadata -> SDK request`、`payload.metadata.context -> provider wire payload`、`snapshot.metadata -> live runtime metadata`、`metadata.user_id/session_id/conversation_id -> upstream body/options` 全部违规。
 - 修复原则：在唯一真源出站构造点移除违规语义并加 fail-fast invariant；禁止 fallback sanitizer、静默 delete、provider-specific 旁路、双路径兼容。

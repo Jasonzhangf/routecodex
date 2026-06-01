@@ -22,6 +22,8 @@ describe('provider metadata isolation redlines', () => {
       'src/server/handlers/images-handler.ts',
       'src/server/handlers/messages-handler.ts',
       'src/server/handlers/responses-handler.ts',
+      'sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts',
+      'sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs'
     ];
     const forbidden = [
@@ -31,6 +33,9 @@ describe('provider metadata isolation redlines', () => {
       /openaiProviderOptions\.metadata/,
       /providerOptions\.metadata/,
       /next\.metadata\s*=/,
+      /metadata:\s*response\.metadata/,
+      /metadata:\s*data\.metadata/,
+      /responsePayload\.metadata/,
       /payload\.metadata\.context/,
       /value\.get\("metadata"\)[\s\S]{0,120}value\.get\("context"\)/
     ];

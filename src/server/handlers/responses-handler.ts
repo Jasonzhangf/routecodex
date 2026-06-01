@@ -373,7 +373,16 @@ export async function handleResponses(
           : originalPayload,
         clientHeaders,
         clientConnectionState,
-	        ...(resumeMeta ? { responsesResume: resumeMeta } : {})
+	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),
+          responsesRequestContext: {
+            payload: pipelineBody as Record<string, unknown>,
+            context: {
+              input: Array.isArray(payload.input) ? payload.input : [],
+              toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
+            },
+            sessionId: readResponsesSessionId(requestBodyMetadata),
+            ...responsesConversationPortScope,
+          }
 	      })
 	    };
     if (
@@ -385,7 +394,7 @@ export async function handleResponses(
     ) {
       await captureResponsesRequestContextForRequest({
         requestId,
-        payload: payload as Record<string, unknown>,
+        payload: pipelineBody as Record<string, unknown>,
         context: {
           input: Array.isArray(payload.input) ? payload.input : [],
           toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
@@ -481,7 +490,7 @@ export async function handleResponses(
         responsesRequestContext:
           (result.metadata?.responsesRequestContext as Record<string, unknown> | undefined)
           ?? {
-            payload: payload as Record<string, unknown>,
+            payload: pipelineBody as Record<string, unknown>,
             context: {
               input: Array.isArray(payload.input) ? payload.input : [],
               toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,

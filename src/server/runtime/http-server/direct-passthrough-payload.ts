@@ -8,20 +8,26 @@ function cloneRecord<T extends Record<string, unknown>>(value: T): T {
   return structuredClone(value);
 }
 
+function cloneWirePayload(value: Record<string, unknown>): Record<string, unknown> {
+  const next = cloneRecord(value);
+  delete next.metadata;
+  return next;
+}
+
 export function resolveRawPayloadForDirect(
   body: unknown,
   metadata?: Record<string, unknown>,
 ): Record<string, unknown> {
   const raw = metadata?.__raw_request_body;
   if (isRecord(raw)) {
-    const next = cloneRecord(raw);
+    const next = cloneWirePayload(raw);
     if ((isRecord(body) && body.stream === true || metadata?.stream === true || metadata?.outboundStream === true) && next.stream !== true) {
       next.stream = true;
     }
     return next;
   }
   if (isRecord(body)) {
-    return cloneRecord(body);
+    return cloneWirePayload(body);
   }
   return {};
 }

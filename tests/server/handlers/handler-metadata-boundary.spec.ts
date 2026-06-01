@@ -73,6 +73,36 @@ describe('handler metadata boundary', () => {
     }
   });
 
+  it('keeps request body metadata out of persisted responses request context', async () => {
+    const executePipeline = jest.fn(async () => ({
+      status: 200,
+      body: {
+        id: 'resp_metadata_context',
+        object: 'response',
+        status: 'completed',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+      }
+    }));
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/responses', (req, res) => void handleResponses(req as any, res as any, { executePipeline, errorHandling: null }));
+    const { server, baseUrl } = await listenApp(app);
+    try {
+      await fetchJson(baseUrl, '/v1/responses', {
+        model: 'gpt-test',
+        store: true,
+        metadata: { session_id: 'persisted-context-must-not-leak' },
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]
+      });
+      const input = executePipeline.mock.calls[0]?.[0] as any;
+      expect(input.body.metadata).toBeUndefined();
+      expect(input.metadata.responsesRequestContext?.payload?.metadata).toBeUndefined();
+      expect(JSON.stringify(input.metadata.responsesRequestContext?.payload)).not.toContain('persisted-context-must-not-leak');
+    } finally {
+      await closeServer(server);
+    }
+  });
+
   it('keeps request body metadata out of messages pipeline body', async () => {
     const executePipeline = jest.fn(async () => ({ status: 200, body: { type: 'message', content: [{ type: 'text', text: 'ok' }] } }));
     const app = express();

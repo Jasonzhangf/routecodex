@@ -243,7 +243,6 @@ export class ResponsesResponseBuilder {
       temperature: data.temperature ?? this.response.temperature,
       top_p: data.top_p ?? this.response.top_p,
       max_output_tokens: data.max_output_tokens ?? this.response.max_output_tokens,
-      metadata: data.metadata ?? this.response.metadata,
       output: this.response.output ?? []
     };
   }
@@ -913,9 +912,6 @@ export class ResponsesResponseBuilder {
       required_action: requiredAction ?? (this.response as ResponsesResponse).required_action,
       usage
     };
-    if (responsePayload.metadata) {
-      (nextResponse as any).metadata = responsePayload.metadata;
-    }
     this.applyDerivedTopLevelOutputText(nextResponse);
     this.response = nextResponse;
     this.state = 'completed';
