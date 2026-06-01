@@ -703,6 +703,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('finish reason utility must not classify tool semantics in TS', () => {
+    const filePath = path.join(process.cwd(), 'src/server/utils/finish-reason.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'checks chat tool_calls in TS', pattern: /hasChatChoiceToolCalls|message\.tool_calls|toolCalls\.length/ },
+      { label: 'checks responses tool calls in TS', pattern: /hasResponsesToolCall|required_action|submit_tool_outputs|function_call|tool_call/ },
+      { label: 'maps provider tool stop reason in TS', pattern: /case\s+['"]tool_use['"]|return\s+['"]tool_calls['"]/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('servertool orchestration blocks must not retain TS tool call/output mutation semantics', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts');
     const source = fs.readFileSync(filePath, 'utf8');

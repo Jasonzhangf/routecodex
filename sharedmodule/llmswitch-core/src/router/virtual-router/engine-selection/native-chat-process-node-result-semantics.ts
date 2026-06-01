@@ -301,3 +301,33 @@ export function detectRetryableEmptyAssistantResponseWithNative(
     return fail(reason);
   }
 }
+
+export function deriveFinishReasonWithNative(body: unknown): string | undefined {
+  const capability = 'deriveFinishReasonJson';
+  const fail = (reason?: string) => failNativeRequired<string | undefined>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const bodyJson = safeStringify(body ?? null);
+  if (!bodyJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(bodyJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseJson(raw);
+    if (parsed === null) {
+      return undefined;
+    }
+    return typeof parsed === 'string' ? parsed : fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}

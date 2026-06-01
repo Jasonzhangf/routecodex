@@ -361,6 +361,142 @@ fn payload_contract_signal(reason: String, marker: &str) -> Value {
     Value::Object(row)
 }
 
+const STREAM_LOG_FINISH_REASON_KEY: &str = "__routecodex_finish_reason";
+
+fn resolve_finish_reason_record(body: &Value) -> Option<&Map<String, Value>> {
+    let root = body.as_object()?;
+    for key in ["data", "response", "payload"] {
+        let Some(nested) = root.get(key).and_then(Value::as_object) else {
+            continue;
+        };
+        if nested.get("choices").and_then(Value::as_array).is_some()
+            || nested.get("output").and_then(Value::as_array).is_some()
+            || nested.get("stop_reason").and_then(Value::as_str).is_some()
+            || nested.get("status").and_then(Value::as_str).is_some()
+            || nested
+                .get(STREAM_LOG_FINISH_REASON_KEY)
+                .and_then(Value::as_str)
+                .is_some()
+        {
+            return Some(nested);
+        }
+    }
+    Some(root)
+}
+
+fn map_stop_reason_to_finish_reason(stop_reason: &str) -> String {
+    match stop_reason.trim().to_ascii_lowercase().as_str() {
+        "end_turn" => "stop".to_string(),
+        "tool_use" => "tool_calls".to_string(),
+        "max_tokens" => "length".to_string(),
+        normalized => normalized.to_string(),
+    }
+}
+
+fn map_incomplete_reason_to_finish_reason(reason: &str) -> String {
+    match reason.trim().to_ascii_lowercase().as_str() {
+        "max_output_tokens" | "max_tokens" => "length".to_string(),
+        "content_filter" => "content_filter".to_string(),
+        normalized => normalized.to_string(),
+    }
+}
+
+fn first_choice_record(record: &Map<String, Value>) -> Option<&Map<String, Value>> {
+    record
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(Value::as_object)
+}
+
+fn has_chat_choice_tool_calls(choice: Option<&Map<String, Value>>) -> bool {
+    choice
+        .and_then(|row| row.get("message"))
+        .and_then(Value::as_object)
+        .and_then(|message| message.get("tool_calls"))
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty())
+}
+
+fn has_chat_choice_assistant_content(choice: Option<&Map<String, Value>>) -> bool {
+    let Some(message) = choice
+        .and_then(|row| row.get("message"))
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    match message.get("content") {
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        Some(Value::Array(items)) => !items.is_empty(),
+        _ => false,
+    }
+}
+
+fn has_responses_tool_call(record: &Map<String, Value>) -> bool {
+    if record
+        .get("required_action")
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("submit_tool_outputs"))
+        .and_then(Value::as_object)
+        .is_some()
+    {
+        return true;
+    }
+    record
+        .get("output")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                let item_type = item
+                    .as_object()
+                    .and_then(|row| read_string(row.get("type")))
+                    .map(|value| value.to_ascii_lowercase())
+                    .unwrap_or_default();
+                matches!(item_type.as_str(), "function_call" | "tool_call")
+            })
+        })
+}
+
+fn derive_finish_reason_value(body: &Value) -> Option<String> {
+    let record = resolve_finish_reason_record(body)?;
+    let first_choice = first_choice_record(record);
+    if let Some(choice_finish_reason) = first_choice.and_then(|row| read_string(row.get("finish_reason"))) {
+        return Some(choice_finish_reason);
+    }
+    if let Some(stop_reason) = read_string(record.get("stop_reason")) {
+        return Some(map_stop_reason_to_finish_reason(stop_reason.as_str()));
+    }
+    if has_chat_choice_tool_calls(first_choice) {
+        return Some("tool_calls".to_string());
+    }
+    if has_responses_tool_call(record) {
+        return Some("tool_calls".to_string());
+    }
+    if let Some(incomplete_reason) = record
+        .get("incomplete_details")
+        .and_then(Value::as_object)
+        .and_then(|row| read_string(row.get("reason")))
+    {
+        return Some(map_incomplete_reason_to_finish_reason(incomplete_reason.as_str()));
+    }
+    let response_status = read_string(record.get("status"))
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if response_status == "completed" {
+        return Some("stop".to_string());
+    }
+    if response_status == "requires_action" {
+        return Some("tool_calls".to_string());
+    }
+    if let Some(wrapped_finish_reason) = read_string(record.get(STREAM_LOG_FINISH_REASON_KEY)) {
+        return Some(wrapped_finish_reason);
+    }
+    if has_chat_choice_assistant_content(first_choice) {
+        return Some("stop".to_string());
+    }
+    None
+}
+
 fn detect_retryable_empty_assistant_response_value(
     body: &Value,
     request_semantics: Option<&Value>,
@@ -837,6 +973,15 @@ pub fn detect_retryable_empty_assistant_response_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+pub fn derive_finish_reason_json(body_json: String) -> NapiResult<String> {
+    let body: Value = serde_json::from_str(&body_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = derive_finish_reason_value(&body)
+        .map(Value::String)
+        .unwrap_or(Value::Null);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[cfg(test)]
 mod request_semantics_tests {
     use super::*;
@@ -890,5 +1035,20 @@ mod request_semantics_tests {
         let body = json!({ "choices": [{ "finish_reason": "tool_calls", "message": { "content": "" } }] });
         let signal = detect_retryable_empty_assistant_response_value(&body, Some(&Value::Null)).unwrap();
         assert_eq!(signal["marker"], "chat_empty_assistant");
+    }
+
+    #[test]
+    fn derives_finish_reason_tool_calls_in_rust() {
+        let chat = json!({ "choices": [{ "message": { "tool_calls": [{ "id": "call_1" }] } }] });
+        assert_eq!(derive_finish_reason_value(&chat).as_deref(), Some("tool_calls"));
+
+        let responses = json!({
+            "status": "completed",
+            "output": [{ "type": "function_call", "call_id": "call_1" }]
+        });
+        assert_eq!(derive_finish_reason_value(&responses).as_deref(), Some("tool_calls"));
+
+        let anthropic = json!({ "stop_reason": "tool_use" });
+        assert_eq!(derive_finish_reason_value(&anthropic).as_deref(), Some("tool_calls"));
     }
 }

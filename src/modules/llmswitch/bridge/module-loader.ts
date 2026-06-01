@@ -138,6 +138,7 @@ export {
   isEngineEnabled,
   getEnginePrefixes,
   resolveImplForSubpath,
+  resolveCoreModulePath,
   importCoreDist,
   requireCoreDist
 };

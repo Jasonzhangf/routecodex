@@ -10,6 +10,7 @@ export {
   isEngineEnabled,
   getEnginePrefixes,
   resolveImplForSubpath,
+  resolveCoreModulePath,
   importCoreDist,
   requireCoreDist,
   type AnyRecord,
@@ -56,5 +57,6 @@ export {
 
 export {
   classifyProviderFailure,
+  deriveFinishReasonNative,
   getNetworkErrorCodes
 } from './native-exports.js';

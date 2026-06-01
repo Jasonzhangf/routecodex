@@ -4,7 +4,9 @@
  * Thin wrappers around llmswitch-core native bindings.
  */
 
-import { importCoreDist, requireCoreDist, type AnyRecord } from './module-loader.js';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { importCoreDist, requireCoreDist, resolveCoreModulePath, type AnyRecord } from './module-loader.js';
 
 type NativeFailureClassification = unknown;
 type NativeFailurePolicyModule = {
@@ -42,6 +44,10 @@ type NativeSharedConversionSemantics = {
   ) => Record<string, unknown>;
 };
 
+type NativeChatProcessNodeResultSemantics = {
+  deriveFinishReasonJson?: (bodyJson: string) => string;
+};
+
 type NativeHubPipelineRespSemantics = {
   buildAnthropicResponseFromChatWithNative?: (
     chatResponse: unknown,
@@ -66,6 +72,7 @@ let cachedRespSemantics: NativeHubPipelineRespSemantics | null | undefined;
 let cachedFollowupSanitize: FollowupSanitizeModule | null | undefined;
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
 let cachedHubBridgePolicySemantics: NativeHubBridgePolicySemantics | null | undefined;
+let cachedChatProcessNodeResultSemantics: NativeChatProcessNodeResultSemantics | null | undefined;
 let sharedBindingsChecked: boolean | undefined;
 let respBindingsChecked: boolean | undefined;
 
@@ -206,6 +213,30 @@ async function getHubBridgePolicySemantics(): Promise<NativeHubBridgePolicySeman
   return cachedHubBridgePolicySemantics;
 }
 
+function getChatProcessNodeResultSemantics(): NativeChatProcessNodeResultSemantics {
+  if (cachedChatProcessNodeResultSemantics !== undefined) {
+    if (!cachedChatProcessNodeResultSemantics) {
+      throw new Error('[llmswitch-bridge] native-chat-process-node-result-semantics not available');
+    }
+    return cachedChatProcessNodeResultSemantics;
+  }
+  try {
+    const wrapperPath = resolveCoreModulePath(
+      'router/virtual-router/engine-selection/native-chat-process-node-result-semantics'
+    );
+    const nativePath = path.resolve(wrapperPath, '..', '..', '..', '..', 'native', 'router_hotpath_napi.node');
+    cachedChatProcessNodeResultSemantics = createRequire(wrapperPath)(
+      nativePath
+    );
+  } catch {
+    cachedChatProcessNodeResultSemantics = null;
+  }
+  if (!cachedChatProcessNodeResultSemantics) {
+    throw new Error('[llmswitch-bridge] native-chat-process-node-result-semantics not available');
+  }
+  return cachedChatProcessNodeResultSemantics;
+}
+
 export async function mapChatToolsToBridgeJson(rawTools: unknown): Promise<AnyRecord[]> {
   await assertSharedBindings();
   const mod = await getSharedConversionSemantics();
@@ -301,6 +332,16 @@ export function classifyProviderFailure(
     throw new Error('[llmswitch-bridge] classifyProviderFailure not available');
   }
   return fn(statusCode, errorCode, upstreamCode, isNetworkError);
+}
+
+export function deriveFinishReasonNative(body: unknown): string | undefined {
+  const fn = getChatProcessNodeResultSemantics().deriveFinishReasonJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] deriveFinishReasonJson not available');
+  }
+  const raw = fn(JSON.stringify(body ?? null));
+  const parsed = JSON.parse(raw) as unknown;
+  return typeof parsed === 'string' ? parsed : undefined;
 }
 
 export function isBlockingRecoverableNative(

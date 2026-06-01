@@ -1163,6 +1163,11 @@ pub fn detect_retryable_empty_assistant_response_json_bridge(
     )
 }
 
+#[napi(js_name = "deriveFinishReasonJson")]
+pub fn derive_finish_reason_json_bridge(body_json: String) -> NapiResult<String> {
+    chat_node_result_semantics::derive_finish_reason_json(body_json)
+}
+
 #[napi(js_name = "normalizeToolCallIdsJson")]
 pub fn normalize_tool_call_ids_json(payload_json: String) -> NapiResult<String> {
     shared_response_compat::normalize_tool_call_ids_json(payload_json)

@@ -30,6 +30,7 @@ export {
   importCoreDist,
   requireCoreDist,
   resolveImplForSubpath,
+  resolveCoreModulePath,
   type AnyRecord,
   type LlmsImpl
 } from './bridge/module-loader.js';

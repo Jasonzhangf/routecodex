@@ -13935,3 +13935,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - Red: HTTP blackbox reproduced restart/reset losing pending Responses tool_call context; second /v1/responses previous_response_id + function_call_output returned malformed/orphan before persistence reload.
 - Fix: ResponsesConversationStore now persists pending continuation entries to ~/.rcc/state/responses-conversation-store.json; /v1/responses function_call_output resume normalizes to tool_outputs and restores local context before provider.
 - Runtime: package now includes sharedmodule/llmswitch-core/dist so global install can load core modules.
+
+## 2026-06-01 finish reason tool semantics cleanup
+- 红测：新增 `hub-pipeline-stage-residue-audit` 用例，先红命中 `src/server/utils/finish-reason.ts` 在 TS 中读取 `message.tool_calls`、`required_action.submit_tool_outputs`、Responses `function_call/tool_call` 并映射 `tool_use -> tool_calls`。
+- 修复：将 finish reason 派生迁到 Rust `chat_node_result_semantics.rs`，新增 NAPI `deriveFinishReasonJson`；`src/server/utils/finish-reason.ts` 保持 native bridge 调用薄壳，`src/modules/llmswitch/bridge/native-exports.ts` 用 `.node` 同步桥接，避免 rootDir 跨包 import 与 ESM require 问题。
+- 验证：`cargo test -p router-hotpath-napi chat_node_result_semantics::request_semantics_tests -- --nocapture` 6/6 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 绿；`npx tsc --noEmit --pretty false --skipLibCheck` 绿；`npx jest tests/server/utils/finish-reason.spec.ts --runInBand` 3/3 绿；`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 50/50 绿；`git diff --check` 绿。
