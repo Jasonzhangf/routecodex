@@ -18,16 +18,6 @@ describe('servertool followup runtime block', () => {
     ).toBe('skip');
   });
 
-  test('uses native client inject outcome mode directly', () => {
-    expect(
-      resolveFollowupExecutionMode({
-        flowId: 'clock_hold_flow',
-        metadata: {},
-        readClientInjectOnly: () => false
-      })
-    ).toBe('client_inject_only');
-  });
-
   test('keeps explicit metadata client inject override authoritative at dispatch time', () => {
     expect(
       resolveFollowupExecutionMode({

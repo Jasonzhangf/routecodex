@@ -35,12 +35,6 @@ describe('servertool followup flow policy', () => {
     expect(resolveFollowupFlowDecision('reasoning_stop_finalize_flow').outcomeMode).toBe('skip');
   });
 
-  test('reads client-inject-only policy from skeleton profiles', () => {
-    expect(isClientInjectOnlyFollowupFlowId('clock_hold_flow')).toBe(true);
-    expect(resolveClientInjectSourceForFlowId('clock_hold_flow')).toBe('servertool.clock');
-    expect(resolveFollowupFlowDecision('clock_hold_flow').outcomeMode).toBe('client_inject_only');
-  });
-
   test('reads retry-empty-followup policy from skeleton profiles', () => {
     expect(shouldRetryEmptyFollowupOnce('stop_message_flow')).toBe(true);
   });
@@ -48,10 +42,6 @@ describe('servertool followup flow policy', () => {
   test('reads context decoration mode from skeleton config', () => {
     expect(resolveContextDecorationModeForFlowId('continue_execution_flow')).toBe('continue_execution_summary');
     expect(resolveContextDecorationModeForFlowId('web_search_flow')).toBe('web_search_summary');
-  });
-
-  test('reads progress tool name mapping from skeleton config', () => {
-    expect(resolveProgressToolName('clock_hold_flow')).toBe('clock_auto');
   });
 
   test('reads gold highlight flow ids from skeleton config', () => {

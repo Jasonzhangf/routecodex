@@ -277,7 +277,6 @@ export async function stopHttpServer(server: any): Promise<void> {
       cleanup.removedLegacyScopeFiles > 0 ||
       cleanup.removedDeadTmuxStateFiles > 0 ||
       cleanup.removedHeartbeatStateFiles > 0 ||
-      cleanup.removedClockStateFiles > 0 ||
       cleanup.prunedRegistryDirs > 0 ||
       cleanup.removedRegistryDirs > 0
     ) {

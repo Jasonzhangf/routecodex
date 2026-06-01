@@ -244,7 +244,6 @@ export class RouteCodexHttpServer {
       sessionCleanup.removedLegacyScopeFiles > 0 ||
       sessionCleanup.removedDeadTmuxStateFiles > 0 ||
       sessionCleanup.removedHeartbeatStateFiles > 0 ||
-      sessionCleanup.removedClockStateFiles > 0 ||
       sessionCleanup.prunedRegistryDirs > 0 ||
       sessionCleanup.removedRegistryDirs > 0
     ) {

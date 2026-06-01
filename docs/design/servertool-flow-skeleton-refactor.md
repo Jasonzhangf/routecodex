@@ -24,8 +24,6 @@ functions -> blocks -> orchestration
 
 - `stop_message_flow`
 - `continue_execution_flow`
-- `clock_flow`
-- `clock_hold_flow`
 - `web_search_flow`
 - `vision_flow`
 - `apply_patch_read_before_retry_guard`
@@ -72,9 +70,6 @@ Rust `plan_servertool_followup_runtime_json(flow_id)` 已能输出：
 |---|---|---|---|---|
 | `stop_message_flow` | auto hook | Rust skeleton profile | plain stopless -> `client_inject_only`；goal continue 例外 | **是** |
 | `continue_execution_flow` | tool call | Rust skeleton profile | `reenter` | 否 |
-| `clock_flow` | tool call | Rust skeleton profile | followup / normal tool flow | 轻微 |
-| `clock_hold_flow` | auto/tool | Rust skeleton profile | `client_inject_only` | 否 |
-| `heartbeat_flow` | persisted/runtime | Rust skeleton profile | `client_inject_only` | 否 |
 | `web_search_flow` | tool call / auto inject | Rust skeleton profile | `reenter` + summary decorate | 否 |
 | `vision_flow` | tool/backend | Rust skeleton profile 缺显式 outcome，仅 context mode | 依实现而定 | 轻微 |
 | `apply_patch_guard` | guard | Rust skeleton profile | `reenter` + autoLimit | 否 |

@@ -47,7 +47,6 @@ async function main() {
   await withTempNativeModule(
     `
 exports.planChatWebSearchOperationsJson = () => JSON.stringify({ shouldInject: true, selectedEngineIndexes: [1, 3] });
-exports.planChatClockOperationsJson = () => JSON.stringify({ shouldInject: true });
 exports.planContinueExecutionOperationsJson = () => JSON.stringify({ shouldInject: false });
 exports.detectProviderResponseShapeJson = () => JSON.stringify('openai-responses');
 exports.buildContinueExecutionOperationsJson = (shouldInject) => JSON.stringify(
@@ -81,12 +80,6 @@ exports.injectContinueExecutionDirectiveJson = (messagesJson, marker, targetText
       );
       assert.equal(webPlan.shouldInject, true);
       assert.deepEqual(webPlan.selectedEngineIndexes, [1, 3]);
-
-      const clockPlan = mod.planChatClockOperationsWithNative(
-        { serverToolFollowup: false, clock: { enabled: true } },
-        { shouldInject: false }
-      );
-      assert.equal(clockPlan.shouldInject, true);
 
       const continuePlan = mod.planContinueExecutionOperationsWithNative(
         { serverToolFollowup: false },

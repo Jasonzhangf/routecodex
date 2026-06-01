@@ -4,6 +4,10 @@ import path from 'node:path';
 import { describe, expect, it } from '@jest/globals';
 
 const REMOVED_PATHS = [
+  'HEARTBEAT.md',
+  'docs/CLOCK.md',
+  'docs/SERVERTOOL_CLOCK_DESIGN.md',
+  'docs/session-client-daemon-design.md',
   'docs/agent-routing/30-heartbeat-delivery-clock.md',
   'docs/design/heartbeat-session-execution-state.md',
   'src/cli/commands/heartbeat.ts',
@@ -19,6 +23,10 @@ const REMOVED_PATHS = [
   'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-heartbeat-directives.ts',
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_heartbeat_directives.rs',
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/clock_runtime.rs',
+  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-clock-reminder-semantics.ts',
+  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-clock-reminder-semantics.js',
+  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-clock-reminder-semantics.d.ts',
+  'tests/servertool/servertool-clock.spec.ts',
 ];
 
 const FORBIDDEN_SOURCE_PATTERNS = [
@@ -29,9 +37,19 @@ const FORBIDDEN_SOURCE_PATTERNS = [
   /heartbeat-runtime-hooks\.js/,
   /chat_clock_[a-z_]+/,
   /hub_heartbeat_directives/,
+  /resolveHeartbeatDirectiveWithNative/,
+  /resolveHeartbeatDirectiveJson/,
   /plan_chat_clock_operations_json/,
+  /normalizeTaskInput/,
+  /normalizeTaskPatch/,
+  /normalizeClockSessionIdInput/,
+  /removedClockStateFiles/,
+  /sanitizeClockStateDir/,
   /buildHeartbeatInjectTextSnapshot/,
   /resolveClockConfigSnapshot/,
+  /resolveClockReservationFromContext/,
+  /ClockReservationFromContextOutput/,
+  /native-chat-process-clock-reminder-semantics/,
   /startClockDaemonIfNeededSnapshot/,
   /setHeartbeatRuntimeHooksSnapshot/,
 ];

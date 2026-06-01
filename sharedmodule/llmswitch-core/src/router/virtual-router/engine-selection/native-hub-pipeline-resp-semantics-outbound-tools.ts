@@ -1,7 +1,6 @@
 import {
   parseAnthropicChatCompletionOutcome,
   parseAnthropicStopReasonResolution,
-  parseClockReservationFromContext,
   parseJsonObjectCandidate,
   parseProviderResponseContextHelpers,
   parseProviderResponseToolCallSummary,
@@ -19,7 +18,6 @@ import {
 import type {
   AnthropicChatCompletionOutcome,
   AnthropicStopReasonResolution,
-  ClockReservationFromContextOutput,
   ProviderResponseContextHelpersOutput,
   ProviderResponseToolCallSummary,
   ResponsesHostPolicyResult
@@ -187,36 +185,6 @@ export function resolveProviderResponseContextHelpersWithNative(input: {
     }
     const parsed = parseProviderResponseContextHelpers(raw);
     return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function resolveClockReservationFromContextWithNative(
-  context: unknown
-): ClockReservationFromContextOutput | undefined {
-  const capability = 'resolveClockReservationFromContextJson';
-  const fail = (reason?: string): ClockReservationFromContextOutput | undefined =>
-    failNative<ClockReservationFromContextOutput | undefined>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const contextJson = safeStringify(context ?? {});
-  if (!contextJson) {
-    return fail('context json stringify failed');
-  }
-  try {
-    const raw = fn(contextJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseClockReservationFromContext(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

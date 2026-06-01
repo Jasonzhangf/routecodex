@@ -29,7 +29,6 @@ describe('webui integration flows (feature coverage)', () => {
     'quota.snapshot_refresh',
     'advanced.control_restart_all',
     'advanced.control_quota_refresh',
-    'advanced.clock_refresh',
     'auth.logout',
     'auth.login',
     'auth.change_password'
@@ -560,37 +559,6 @@ describe('webui integration flows (feature coverage)', () => {
         return json({ ok: true, action: body.action || 'unknown' });
       }
 
-      if (path === '/daemon/clock/tasks' && method === 'GET') {
-        if (fault.clockFetchFail) {
-          return json({ error: { message: 'clock fetch failed' } }, 500);
-        }
-        return json({
-          sessions: [
-            {
-              sessionId: 'session-1',
-              taskCount: 1,
-              tasks: [
-                {
-                  id: 'clock-1',
-                  status: 'scheduled',
-                  dueAtMs: Date.now() + 60_000,
-                  tool: 'mockTool'
-                }
-              ]
-            }
-          ],
-          records: [
-            {
-              daemonId: 'd1',
-              tmuxSessionId: 'tmux-1',
-              heartbeatAt: Date.now(),
-              status: 'online',
-              lastError: ''
-            }
-          ]
-        });
-      }
-
       return json({ error: { message: `unhandled ${method} ${path}` } }, 500);
     }) as unknown as typeof fetch;
   });
@@ -772,13 +740,6 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/quota\.refresh done\./)).toBeTruthy());
     hit('advanced.control_quota_refresh');
 
-    // Ops / Clock
-    fireEvent.click(screen.getByText('Clock'));
-    await waitFor(() => expect(screen.getByText('Clock Tasks')).toBeTruthy());
-    fireEvent.click(within(panelByTitle('Clock Tasks')).getByText('Refresh'));
-    await waitFor(() => expect(screen.getByText(/Clock snapshot refreshed\./)).toBeTruthy());
-    await waitFor(() => expect(screen.getByText('clock-1')).toBeTruthy());
-    hit('advanced.clock_refresh');
 
     // Auth flows: logout + login + change password
     fireEvent.click(screen.getByText('Logout'));
@@ -906,9 +867,5 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(within(panelByTitle('Control Plane')).getByText('Restart All Servers'));
     await waitFor(() => expect(screen.getAllByText(/control mutate failed/i).length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByText('Clock'));
-    await waitFor(() => expect(screen.getByText('Clock Tasks')).toBeTruthy());
-    fireEvent.click(within(panelByTitle('Clock Tasks')).getByText('Refresh'));
-    await waitFor(() => expect(screen.getAllByText(/clock fetch failed/i).length).toBeGreaterThan(0));
   });
 });

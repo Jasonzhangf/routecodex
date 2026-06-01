@@ -3,7 +3,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import {
-  ClockPage,
   ControlPage,
   OAuthPage,
   ProviderPage,
@@ -297,19 +296,6 @@ function installPageFetchMock() {
       });
     }
 
-    if (path === '/daemon/clock/tasks' && method === 'GET') {
-      return json({
-        sessions: [
-          {
-            sessionId: 'session-1',
-            taskCount: 1,
-            tasks: [{ id: 'clock-1', status: 'scheduled', dueAtMs: Date.now() + 60_000, tool: 'mockTool' }]
-          }
-        ],
-        records: [{ daemonId: 'd1', tmuxSessionId: 'tmux-1', heartbeatAt: Date.now(), status: 'online', lastError: '' }]
-      });
-    }
-
     return json({});
   }) as unknown as typeof fetch;
 }
@@ -404,12 +390,4 @@ describe('webui page-level coverage', () => {
     await waitFor(() => expect(hasToast('servers.restart done.')).toBe(true));
     controlView.unmount();
 
-    const clockView = render(<ClockPage authenticated authEpoch={1} onToast={onToast} />);
-    await waitFor(() => expect(screen.getByText('Clock Tasks')).toBeTruthy());
-    await waitFor(() => expect(screen.getByText('clock-1')).toBeTruthy());
-    fireEvent.change(screen.getByPlaceholderText('conversation session id'), { target: { value: 'session-1' } });
-    fireEvent.click(screen.getByText('Refresh'));
-    await waitFor(() => expect(screen.getByText(/Clock snapshot refreshed\./)).toBeTruthy());
-    clockView.unmount();
-  });
 });

@@ -26,13 +26,6 @@ export interface ProviderResponseContextHelpersOutput {
   clientFacingRequestId?: string;
 }
 
-export interface ClockReservationFromContextOutput {
-  reservationId: string;
-  sessionId: string;
-  taskIds: string[];
-  reservedAtMs: number;
-}
-
 export interface ContextLengthDiagnosticsOutput {
   estimatedPromptTokens?: number;
   maxContextTokens?: number;

@@ -132,25 +132,6 @@ describe('native semantics parser observability', () => {
     warnSpy.mockRestore();
   });
 
-  it('logs clock reminder parser JSON failures before fail-fasting native capability', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const mod = await importWithNativeParseFailureMock<{
-      resolveClockConfigWithNative: (
-        raw: unknown,
-        rawIsUndefined: boolean
-      ) => Record<string, unknown> | null;
-    }>(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-clock-reminder-semantics.js',
-      'resolveClockConfigJson'
-    );
-
-    expect(() => mod.resolveClockConfigWithNative({}, false)).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseClockConfigOrNull failed (non-blocking)');
-
-    warnSpy.mockRestore();
-  });
-
   it('logs metadata policy parser JSON failures before fail-fasting native capability', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 

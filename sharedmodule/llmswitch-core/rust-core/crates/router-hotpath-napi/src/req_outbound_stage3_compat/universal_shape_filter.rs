@@ -1,5 +1,5 @@
 use crate::shared_json_utils::read_trimmed_string;
-use crate::shared_tooling::normalize_tool_result_value;
+use crate::shared_tooling::{normalize_standard_chunked_tool_text, normalize_tool_result_value};
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{json, Map, Value};
 
@@ -202,7 +202,11 @@ fn normalize_request_message(
             "content".to_string(),
             Value::String(
                 row.get("content")
-                    .map(normalize_tool_result_value)
+                    .map(|content| {
+                        normalize_standard_chunked_tool_text(
+                            normalize_tool_result_value(content).as_str(),
+                        )
+                    })
                     .unwrap_or_default(),
             ),
         );

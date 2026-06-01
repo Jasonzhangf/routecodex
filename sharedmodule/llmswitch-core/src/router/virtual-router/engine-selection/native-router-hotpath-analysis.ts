@@ -257,20 +257,6 @@ export function parseChatWebSearchIntentPayload(raw: string): ChatWebSearchInten
   };
 }
 
-export function parseClockClearDirectivePayload(raw: string): ClockClearDirectivePayload | null {
-  const parsed = parseJson('parseClockClearDirectivePayload', raw) as {
-    hadClear?: unknown;
-    next?: unknown;
-  } | typeof JSON_PARSE_FAILED;
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed.hadClear !== 'boolean' || typeof parsed.next !== 'string') {
-    return null;
-  }
-  return {
-    hadClear: parsed.hadClear,
-    next: parsed.next
-  };
-}
-
 export function parseStopMessagePersistedLookupPlanPayload(raw: string): StopMessagePersistedLookupPlanPayload | null {
   const parsed = parseJson('parseStopMessagePersistedLookupPlanPayload', raw) as {
     strictSessionScope?: unknown;

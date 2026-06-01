@@ -7,7 +7,7 @@ use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_metadata_semantics::ensure_protocol_state_mut;
 use crate::shared_openai_message_normalize::normalize_openai_chat_messages;
 use crate::shared_tool_mapping::flatten_chat_tools_for_function_calling;
-use crate::shared_tooling::normalize_tool_result_value;
+use crate::shared_tooling::{normalize_standard_chunked_tool_text, normalize_tool_result_value};
 
 const CHAT_PARAMETER_KEYS: [&str; 19] = [
     "model",
@@ -297,7 +297,9 @@ fn normalize_chat_messages(raw: Option<&Value>) -> NormalizedMessages {
                     .or_else(|| entry_obj.get("output"))
                     .cloned()
                     .unwrap_or(Value::Null);
-                let normalized_content = normalize_tool_result_value(&raw_content);
+                let normalized_content = normalize_standard_chunked_tool_text(
+                    normalize_tool_result_value(&raw_content).as_str(),
+                );
                 let mut output_entry = Map::new();
                 output_entry.insert(
                     "tool_call_id".to_string(),
@@ -365,7 +367,9 @@ fn normalize_standalone_tool_outputs(raw: Option<&Value>, missing: &mut Vec<Valu
             .or_else(|| entry_obj.get("output"))
             .cloned()
             .unwrap_or(Value::Null);
-        let normalized = normalize_tool_result_value(&raw_content);
+        let normalized = normalize_standard_chunked_tool_text(
+            normalize_tool_result_value(&raw_content).as_str(),
+        );
         let mut output_entry = Map::new();
         output_entry.insert(
             "tool_call_id".to_string(),

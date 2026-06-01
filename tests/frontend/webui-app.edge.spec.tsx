@@ -4,7 +4,6 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import {
   App,
-  ClockPage,
   ControlPage,
   OAuthPage,
   ProviderPage,
@@ -528,26 +527,6 @@ describe('webui edge coverage', () => {
         return responseJson({ ok: true, action: body.action || 'unknown' });
       }
 
-      if (path === '/daemon/clock/tasks' && method === 'GET') {
-        clockCalls += 1;
-        if (clockCalls === 1) {
-          return responseJson({
-            tasks: [{ taskId: 'clock-fallback-id', status: 'scheduled', dueAt: Date.now() + 5000, tool: 'tool-a', sessionId: 'sid-a' }],
-            daemonRecords: [{ daemonId: 'd-fallback', tmuxSession: 'tmux-fallback', heartbeatAtMs: Date.now(), status: 'online', lastError: '' }]
-          });
-        }
-        return responseJson({
-          sessions: [
-            {
-              sessionId: 'sid-a',
-              taskCount: 1,
-              tasks: [{ id: 'clock-session-task', status: 'scheduled', dueAtMs: Date.now() + 5000, tool: 'tool-b' }]
-            }
-          ],
-          records: [{ daemonId: 'd-session', tmuxSessionId: 'tmux-session', heartbeatAt: Date.now(), status: 'online', lastError: '' }]
-        });
-      }
-
       return responseJson({});
     }) as unknown as typeof fetch;
 
@@ -613,13 +592,4 @@ describe('webui edge coverage', () => {
     await waitFor(() => expect(hasToast('servers.restart done.')).toBe(true));
     controlView.unmount();
 
-    const clockView = render(<ClockPage authenticated authEpoch={1} onToast={onToast} />);
-    await waitFor(() => expect(screen.getByText('Clock Tasks')).toBeTruthy());
-    await waitFor(() => expect(screen.getByText('daemon records: 1')).toBeTruthy());
-
-    fireEvent.change(screen.getByPlaceholderText('conversation session id'), { target: { value: 'sid-a' } });
-    fireEvent.click(screen.getByText('Refresh'));
-    await waitFor(() => expect(screen.getByText('clock-session-task')).toBeTruthy());
-    clockView.unmount();
-  });
 });

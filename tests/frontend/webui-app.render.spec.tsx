@@ -45,7 +45,5 @@ describe('webui render smoke', () => {
     const advancedControl = renderToString(<AdvancedPage {...common} tab="control" />);
     expect(advancedControl).toContain('Control Plane');
 
-    const advancedClock = renderToString(<AdvancedPage {...common} tab="clock" />);
-    expect(advancedClock).toContain('Clock Tasks');
   });
 });

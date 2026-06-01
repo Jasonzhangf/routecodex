@@ -17,6 +17,7 @@ use crate::resp_process_stage1_tool_governance_blocks::xml_text_utils::{
     resolve_xml_wrapper_tool_name_from_attrs, should_attempt_xml_wrapper_harvest,
     strip_xml_tags_preserve_text, unwrap_xml_cdata_sections,
 };
+use crate::shared_tooling::extract_rcc_tool_call_fence_segments;
 
 fn looks_like_pathish_suffix(raw: &str) -> bool {
     let trimmed = raw.trim();
@@ -612,31 +613,6 @@ pub(crate) fn collect_harvest_text_variants(raw: &str) -> Vec<String> {
         for caps in captures.into_iter().rev() {
             if let Some(inner) = caps.get(1) {
                 push_variant(inner.as_str());
-            }
-        }
-    }
-
-    out
-}
-
-pub(crate) fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut seen = HashSet::<String>::new();
-    let patterns = [
-        Regex::new(r"(?ims)^[^\S\r\n]*(?:[•*-]\s+)?<<\s*RCC_TOOL_CALLS_JSON\s*$([\s\S]*?)^[^\S\r\n]*RCC_TOOL_CALLS_JSON\s*$")
-            .expect("valid strict rcc tool calls json heredoc pattern"),
-        Regex::new(r"(?ims)^[^\S\r\n]*(?:[•*-]\s+)?<<\s*RCC_TOOL_CALLS\s*$([\s\S]*?)^[^\S\r\n]*RCC_TOOL_CALLS\s*$")
-            .expect("valid strict rcc tool calls heredoc pattern"),
-    ];
-
-    for pattern in patterns {
-        for caps in pattern.captures_iter(raw) {
-            let Some(inner) = caps.get(1) else {
-                continue;
-            };
-            let candidate = inner.as_str().trim();
-            if !candidate.is_empty() && seen.insert(candidate.to_string()) {
-                out.push(candidate.to_string());
             }
         }
     }

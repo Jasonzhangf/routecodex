@@ -6,13 +6,15 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::shared_tooling::value_to_string;
+
 fn normalize_shell_like_output_text(raw: &str) -> String {
     raw.to_string()
 }
 
 fn normalize_apply_patch_output_text(raw: &str) -> String {
-    const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with workspace-relative filePath and a line-edit patch only. Create/append lines start with `+ `. Updates use exact current target lines as `- ` entries followed by replacement `+ ` entries.";
-    const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future apply_patch calls with workspace-relative filePath and line-edit patch entries.";
+    const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with workspace-relative filePath and a line-edit patch. Create/append lines start with `+ `. Updates use exact current target lines as `- ` entries followed by replacement `+ ` entries.";
+    const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future servertool apply_patch calls with workspace-relative filePath and line-edit patch entries.";
 
     let text = raw.replace("\r\n", "\n").replace('\r', "\n");
     let trimmed = text.trim();
@@ -340,19 +342,6 @@ fn read_write_stdin_session_id(args: &Map<String, Value>) -> Option<i64> {
             Value::String(text) => text.trim().parse::<i64>().ok(),
             _ => None,
         })
-}
-
-fn value_to_string(value: &Value) -> String {
-    match value {
-        Value::Null => String::new(),
-        Value::String(text) => text.clone(),
-        Value::Array(entries) => entries
-            .iter()
-            .map(value_to_string)
-            .collect::<Vec<_>>()
-            .join(""),
-        other => other.to_string(),
-    }
 }
 
 fn read_write_stdin_chars(args: &Map<String, Value>) -> Option<String> {
@@ -1013,7 +1002,7 @@ mod tests {
               "role": "tool",
               "name": "apply_patch",
               "tool_call_id": "call_bad_patch_guard",
-              "content": "APPLY_PATCH_ERROR: patch was rejected by Codex apply_patch executor. Retry with filePath, exact current fileContent, and minimal `- old` / `+ new` patch lines."
+              "content": "APPLY_PATCH_ERROR: patch was rejected by Codex apply_patch executor. Retry with filePath and minimal `- old` / `+ new` patch lines."
             },
             { "role": "user", "content": "try again" }
           ]
@@ -1557,8 +1546,8 @@ mod tests {
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let output = payload["input"][1]["output"].as_str().expect("tool output");
         assert!(output.contains("APPLY_PATCH_ERROR"));
-        assert!(output.contains("filePath"));
         assert!(output.contains("line-edit"));
+        assert!(output.contains("filePath"));
         assert!(!output.contains("Original executor output"));
         assert!(!output.contains("Codex apply_patch executor"));
         assert!(!output.contains("fileContent"));
@@ -1632,7 +1621,7 @@ mod tests {
             {
               "type": "function_call_output",
               "call_id": "fc_patch_error_once",
-              "output": "APPLY_PATCH_ERROR: patch was rejected by Codex apply_patch executor. Keep the same filePath and exact current fileContent, then retry using only the internal line-edit patch format (`- old` / `+ new`)."
+              "output": "APPLY_PATCH_ERROR: patch was rejected by Codex apply_patch executor. Retry with filePath and minimal `- old` / `+ new` patch lines."
             }
           ]
         });
@@ -1666,7 +1655,7 @@ mod tests {
               "role": "tool",
               "name": "apply_patch",
               "tool_call_id": "call_legacy_patch_error",
-              "content": "APPLY_PATCH_ERROR: patch was rejected by Codex apply_patch executor. Retry with filePath, exact current fileContent, and minimal `- old` / `+ new` patch lines."
+              "content": "APPLY_PATCH_ERROR: patch was rejected by Codex apply_patch executor. Retry with filePath and minimal `- old` / `+ new` patch lines."
             }
           ]
         });
@@ -1676,8 +1665,8 @@ mod tests {
             .as_str()
             .expect("tool output");
         assert!(content.contains("APPLY_PATCH_ERROR"));
-        assert!(content.contains("filePath"));
         assert!(content.contains("line-edit"));
+        assert!(content.contains("filePath"));
         assert!(!content.contains("Codex apply_patch executor"));
         assert!(!content.contains("fileContent"));
     }

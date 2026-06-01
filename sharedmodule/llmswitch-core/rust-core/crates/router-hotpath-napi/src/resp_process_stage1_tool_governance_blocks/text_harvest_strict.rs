@@ -11,9 +11,9 @@ use crate::resp_process_stage1_tool_governance_blocks::requested_tools::{
     collect_requested_tool_name_keys, retain_allowed_tool_calls,
 };
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_extract::{
-    collect_harvest_text_variants, extract_rcc_tool_call_fence_segments,
-    extract_reasoning_inline_exec_command_arg_key, extract_tool_prefixed_exec_command_block,
-    extract_xml_named_tool_call_blocks, extract_xml_tool_call_blocks,
+    collect_harvest_text_variants, extract_reasoning_inline_exec_command_arg_key,
+    extract_tool_prefixed_exec_command_block, extract_xml_named_tool_call_blocks,
+    extract_xml_tool_call_blocks,
 };
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_shape::collect_stage1_harvest_input_texts;
 use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::{
@@ -23,6 +23,7 @@ use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::{
 };
 use crate::resp_process_stage1_tool_governance_blocks::xml_text_utils::normalize_dsml_tool_markup;
 use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_tooling::extract_rcc_tool_call_fence_segments;
 
 pub(crate) fn harvest_text_tool_calls_from_payload(payload: &mut Value) -> i64 {
     harvest_explicit_wrapper_only_tool_calls_from_payload(payload)
@@ -95,7 +96,7 @@ pub(crate) fn extract_strict_wrapper_tool_calls_from_rcc(
 ) -> Vec<Value> {
     let mut recovered: Vec<Value> = Vec::new();
     for inner in extract_rcc_tool_call_fence_segments(text) {
-        let parsed = try_parse_json_value_lenient(inner.as_str());
+        let parsed = try_parse_json_value_lenient(&inner);
         let Some(value) = parsed else {
             continue;
         };

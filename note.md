@@ -13900,3 +13900,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 ## 2026-06-01 native required export bootstrap 修复
 - 启动报 `[virtual-router-native-hotpath] native bootstrapVirtualRouterProvidersJson is required but unavailable` 时，先跑 required-export vs `.node` probe；本次真实根因不是 bootstrap 函数缺失，而是 required 清单仍包含已移除的 `resolveClockReservationFromContextJson` / `mergeClockReservationIntoMetadataJson`，前置校验整体失败。
 - 修复：从 `native-router-hotpath-required-exports.ts` 移除两个 stale clock 导出，`build-core` 后 local/global missing=0，`bootstrapVirtualRouterProvidersJson` 为 function；全局安装 0.90.2647 后 5520/5555 health 200。
+
+## 2026-06-01 clock/heartbeat removal + shared tooling deletion gate
+- 按需求物理移除 clock/heartbeat 功能面：HTTP daemon heartbeat/task API、session-admin task CRUD、WebUI/Ops Clock、clock/heartbeat 文档与相关测试残留均收敛到删除门。
+- Rust deletion gate 暴露 shared_tooling 重复实现残留：`value_to_string`、RCC fence extractor、structured apply_patch detector、XML scalar normalizer、repair args、chunked tool text wrapper。已改为直接消费 `shared_tooling.rs` 唯一真源，移除本地 clone。
+- 验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/clock-heartbeat-feature-removal-gate.spec.ts tests/servertool/server-side-tools.auto-hook-config.spec.ts tests/sharedmodule/native-semantics-parsers-observability.spec.ts --runInBand` 通过；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 通过；`npm run build:webui` 通过；`npm run build:min` 通过；`cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed -- --nocapture` 13/13 通过；`git diff --check` 通过。

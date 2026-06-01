@@ -1,4 +1,7 @@
 use crate::resp_process_stage1_tool_governance_blocks::json_args::try_parse_json_value_lenient;
+use crate::shared_tooling::{
+    extract_structured_apply_patch_payloads_with, normalize_xml_scalar_text, value_to_string,
+};
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use regex::Regex;
@@ -272,16 +275,6 @@ fn coerce_command_value_to_string(value: &Value) -> String {
             serde_json::to_string(value).unwrap_or_else(|_| value_to_string(value))
         }
         _ => normalize_shell_escaped_quotes(value_to_string(value).as_str()),
-    }
-}
-
-fn value_to_string(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => String::new(),
-        _ => serde_json::to_string(value).unwrap_or_default(),
     }
 }
 
@@ -1593,37 +1586,6 @@ fn extract_json_tool_calls_from_text_impl(
     }
 }
 
-fn is_structured_apply_patch_payload(value: &Value) -> bool {
-    if let Value::Object(map) = value {
-        if let Some(Value::Array(_)) = map.get("changes") {
-            return true;
-        }
-    }
-    false
-}
-
-fn extract_structured_apply_patch_payloads(text: &str) -> Vec<Value> {
-    let mut payloads = Vec::new();
-    let fence_re = Regex::new(r"```(?:json|apply_patch|toon)?\s*([\s\S]*?)\s*```").unwrap();
-    for caps in fence_re.captures_iter(text) {
-        if let Some(body) = caps.get(1) {
-            if let Some(parsed) = try_parse_json_value_lenient(body.as_str()) {
-                if is_structured_apply_patch_payload(&parsed) {
-                    payloads.push(parsed);
-                }
-            }
-        }
-    }
-    if payloads.is_empty() && text.contains("\"changes\"") {
-        if let Some(parsed) = try_parse_json_value_lenient(text) {
-            if is_structured_apply_patch_payload(&parsed) {
-                payloads.push(parsed);
-            }
-        }
-    }
-    payloads
-}
-
 fn normalize_raw_apply_patch_block(raw: &str) -> String {
     let mut lines: Vec<String> = raw.split("\n").map(|line| line.replace('\r', "")).collect();
     while !lines.is_empty() && lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {
@@ -1688,7 +1650,7 @@ fn extract_apply_patch_calls_from_text_impl(text: &str) -> Option<Vec<ToolCallLi
     if text.is_empty() {
         return None;
     }
-    let payloads = extract_structured_apply_patch_payloads(text);
+    let payloads = extract_structured_apply_patch_payloads_with(text, try_parse_json_value_lenient);
     let patch_blocks = extract_raw_apply_patch_blocks(text);
     if payloads.is_empty() && patch_blocks.is_empty() {
         return None;
@@ -1766,7 +1728,7 @@ fn apply_tool_inner_field(
     if key.is_empty() || key == "requires_approval" {
         return;
     }
-    let raw_val = decode_basic_xml_entities(unwrap_xml_cdata_sections(raw_val_input).trim());
+    let raw_val = normalize_xml_scalar_text(raw_val_input);
     let value = try_parse_primitive_value(raw_val.as_str());
 
     if lname == "exec_command" && (key == "cmd" || key == "command") {
@@ -1812,38 +1774,6 @@ fn apply_tool_inner_field(
         return;
     }
     args_obj.insert(key, value);
-}
-
-fn decode_basic_xml_entities(raw: &str) -> String {
-    raw.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
-}
-
-fn unwrap_xml_cdata_sections(raw: &str) -> String {
-    if !raw.contains("<![CDATA[") {
-        return raw.to_string();
-    }
-
-    let mut out = String::with_capacity(raw.len());
-    let mut remaining = raw;
-    loop {
-        let Some(start) = remaining.find("<![CDATA[") else {
-            out.push_str(remaining);
-            break;
-        };
-        out.push_str(&remaining[..start]);
-        let after_start = &remaining[start + "<![CDATA[".len()..];
-        let Some(end) = after_start.find("]]>") else {
-            out.push_str(after_start);
-            break;
-        };
-        out.push_str(&after_start[..end]);
-        remaining = &after_start[end + "]]>".len()..];
-    }
-    out
 }
 
 fn is_image_path(input: &str) -> bool {

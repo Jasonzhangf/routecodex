@@ -1,7 +1,6 @@
 import type {
   AnthropicChatCompletionOutcome,
   AnthropicStopReasonResolution,
-  ClockReservationFromContextOutput,
   ContextLengthDiagnosticsOutput,
   ProviderResponseContextHelpersOutput,
   ProviderResponseToolCallSummary,
@@ -284,45 +283,4 @@ export function parseProviderResponseContextHelpers(raw: string): ProviderRespon
     output.clientFacingRequestId = row.clientFacingRequestId.trim();
   }
   return output;
-}
-
-export function parseClockReservationFromContext(
-  raw: string
-): ClockReservationFromContextOutput | undefined | null {
-  const parsed = parseJson('parseClockReservationFromContext', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed === null) {
-    return undefined;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  const row = parsed as Record<string, unknown>;
-  if (typeof row.reservationId !== 'string' || !row.reservationId.trim()) {
-    return null;
-  }
-  if (typeof row.sessionId !== 'string' || !row.sessionId.trim()) {
-    return null;
-  }
-  if (!Array.isArray(row.taskIds)) {
-    return null;
-  }
-  const taskIds = row.taskIds
-    .filter((taskId) => typeof taskId === 'string')
-    .map((taskId) => String(taskId).trim())
-    .filter((taskId) => taskId.length > 0);
-  if (taskIds.length === 0) {
-    return null;
-  }
-  if (typeof row.reservedAtMs !== 'number' || !Number.isFinite(row.reservedAtMs)) {
-    return null;
-  }
-  return {
-    reservationId: row.reservationId.trim(),
-    sessionId: row.sessionId.trim(),
-    taskIds,
-    reservedAtMs: Math.floor(row.reservedAtMs)
-  };
 }

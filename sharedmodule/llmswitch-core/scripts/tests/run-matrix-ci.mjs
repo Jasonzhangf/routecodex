@@ -279,12 +279,6 @@ async function main() {
   );
   results.push(
     await run(
-      'matrix:native-chat-process-clock-reminder-semantics',
-      'scripts/tests/coverage-native-chat-process-clock-reminder-semantics.mjs'
-    )
-  );
-  results.push(
-    await run(
       'matrix:coverage-hub-req-process-route-select',
       'scripts/tests/coverage-hub-req-process-route-select.mjs'
     )

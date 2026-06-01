@@ -94,11 +94,6 @@ type SessionIdentifiersMetadataSyncInput = {
   conversationId?: string;
 };
 
-type MergeClockReservationMetadataInput = {
-  processedRequest?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-};
-
 type ToolGovernanceNodeResultInput = {
   success?: boolean;
   metadata?: Record<string, unknown>;
@@ -292,14 +287,6 @@ export function syncSessionIdentifiersToMetadataWithNative(
   });
 }
 
-export function mergeClockReservationIntoMetadataWithNative(
-  input: MergeClockReservationMetadataInput
-): Record<string, unknown> {
-  return invokeRecordCapability('mergeClockReservationIntoMetadataJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
-}
 
 export function buildToolGovernanceNodeResultWithNative(
   input: ToolGovernanceNodeResultInput

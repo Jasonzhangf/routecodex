@@ -179,11 +179,6 @@ export interface NativeSessionIdentifiersMetadataSyncInput {
   conversationId?: string;
 }
 
-export interface NativeMergeClockReservationMetadataInput {
-  processedRequest?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-}
-
 export interface NativeToolGovernanceNodeResultInput {
   success?: boolean;
   metadata?: Record<string, unknown>;
@@ -226,7 +221,6 @@ export {
   buildRouterMetadataInputWithNative,
   buildToolGovernanceNodeResultWithNative,
   coerceStandardizedRequestFromPayloadWithNative,
-  mergeClockReservationIntoMetadataWithNative,
   prepareRuntimeMetadataForServertoolsWithNative,
   syncSessionIdentifiersToMetadataWithNative
 } from './native-hub-pipeline-orchestration-semantics-builders.js';

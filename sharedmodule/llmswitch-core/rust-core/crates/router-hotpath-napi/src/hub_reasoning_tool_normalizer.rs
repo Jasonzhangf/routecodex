@@ -4,6 +4,11 @@ use crate::hub_text_markup_normalizer::{
     extract_explicit_top_level_tool_calls_as_values, TextMarkupNormalizeOptions,
 };
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
+use crate::shared_json_utils::extract_balanced_json_candidate_at;
+use crate::shared_tooling::{
+    extract_rcc_tool_call_fence_segments, normalize_xml_scalar_text, repair_arguments_to_string,
+    value_to_string,
+};
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use regex::Regex;
@@ -897,23 +902,6 @@ fn join_command_array(mut obj: Value) -> Value {
     obj
 }
 
-pub(crate) fn repair_arguments_to_string(value: &Value) -> String {
-    match value {
-        Value::Null => "{}".to_string(),
-        Value::Object(_) | Value::Array(_) => {
-            serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
-        }
-        Value::String(raw) => {
-            if raw.trim().is_empty() {
-                return "{}".to_string();
-            }
-            raw.to_string()
-        }
-        other => serde_json::to_string(&serde_json::json!({ "_raw": other.to_string() }))
-            .unwrap_or_else(|_| "{}".to_string()),
-    }
-}
-
 fn looks_like_apply_patch(raw: &str) -> bool {
     if raw.is_empty() {
         return false;
@@ -948,41 +936,6 @@ fn normalize_tool_arg_key(raw: &str) -> Option<String> {
     }
 }
 
-fn unwrap_xml_cdata_sections(raw: &str) -> String {
-    if !raw.contains("<![CDATA[") {
-        return raw.to_string();
-    }
-    let mut out = String::with_capacity(raw.len());
-    let mut remaining = raw;
-    loop {
-        let Some(start) = remaining.find("<![CDATA[") else {
-            out.push_str(remaining);
-            break;
-        };
-        out.push_str(&remaining[..start]);
-        let after_start = &remaining[start + "<![CDATA[".len()..];
-        let Some(end) = after_start.find("]]>") else {
-            out.push_str(remaining);
-            break;
-        };
-        out.push_str(&after_start[..end]);
-        remaining = &after_start[end + "]]>".len()..];
-    }
-    out
-}
-
-fn decode_basic_xml_entities(raw: &str) -> String {
-    raw.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
-}
-
-fn normalize_markup_scalar_text(raw: &str) -> String {
-    decode_basic_xml_entities(unwrap_xml_cdata_sections(raw).trim())
-}
-
 fn parse_markup_argument_value(raw: &str) -> Value {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -999,7 +952,7 @@ fn parse_markup_argument_value(raw: &str) -> Value {
     if trimmed.is_empty() {
         return Value::String(String::new());
     }
-    let normalized_scalar = normalize_markup_scalar_text(trimmed.as_str());
+    let normalized_scalar = normalize_xml_scalar_text(trimmed.as_str());
     if let Ok(parsed) = serde_json::from_str::<Value>(normalized_scalar.as_str()) {
         return parsed;
     }
@@ -1130,19 +1083,6 @@ fn read_markup_explicit_name_candidate(trimmed: &str, name_hint: Option<&str>) -
     }
 
     None
-}
-
-fn value_to_string(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Null => String::new(),
-        Value::Array(entries) => entries
-            .iter()
-            .map(value_to_string)
-            .collect::<Vec<String>>()
-            .join(" "),
-        other => other.to_string(),
-    }
 }
 
 fn apply_markup_arg_aliases(tool_name: &str, args_obj: &mut Map<String, Value>) {
@@ -2132,33 +2072,6 @@ fn collect_sentinel_tool_calls_candidates(text: &str) -> Vec<String> {
     out
 }
 
-fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut seen = std::collections::HashSet::<String>::new();
-    let patterns = [
-        cached_regex(
-            r"(?ims)^[^\S\r\n]*(?:[•*-]\s+)?<<\s*RCC_TOOL_CALLS_JSON\s*$([\s\S]*?)^[^\S\r\n]*RCC_TOOL_CALLS_JSON\s*$",
-        ),
-        cached_regex(
-            r"(?ims)^[^\S\r\n]*(?:[•*-]\s+)?<<\s*RCC_TOOL_CALLS\s*$([\s\S]*?)^[^\S\r\n]*RCC_TOOL_CALLS\s*$",
-        ),
-    ];
-
-    for pattern in patterns {
-        for caps in pattern.captures_iter(raw) {
-            let Some(inner) = caps.get(1) else {
-                continue;
-            };
-            let candidate = inner.as_str().trim();
-            if !candidate.is_empty() && seen.insert(candidate.to_string()) {
-                out.push(candidate.to_string());
-            }
-        }
-    }
-
-    out
-}
-
 fn collect_explicit_tool_calls_json_candidates(text: &str) -> Vec<String> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -2373,6 +2286,64 @@ fn unmask_xml_cdata_sections(mut raw: String, masked: &[String]) -> String {
     raw
 }
 
+fn read_tool_invocation_name(tag: &str) -> Option<String> {
+    let name_re = cached_regex(r#"(?is)\bname\s*=\s*\"([^\"]+)\""#);
+    name_re
+        .captures(tag)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn read_tool_invocation_arguments(tag: &str) -> Option<Value> {
+    let args_re = cached_regex(r#"(?is)\barguments\s*="#);
+    let found = args_re.find(tag)?;
+    let mut cursor = found.end();
+    while cursor < tag.len() {
+        let ch = tag[cursor..].chars().next()?;
+        if ch.is_whitespace() {
+            cursor += ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+    let quoted = tag[cursor..].starts_with('"');
+    if quoted {
+        cursor += 1;
+    }
+    let open = tag[cursor..].chars().next()?;
+    let close = match open {
+        '{' => '}',
+        '[' => ']',
+        _ => return None,
+    };
+    let (_, raw_json) = extract_balanced_json_candidate_at(tag, cursor, open, close)?;
+    serde_json::from_str::<Value>(raw_json.as_str()).ok()
+}
+
+fn canonicalize_tool_invocation_self_closing(raw: &str) -> String {
+    if !raw.contains("<tool_invocation") {
+        return raw.to_string();
+    }
+    let tag_re = cached_regex(r#"(?is)<tool_invocation\b[\s\S]*?/\s*>"#);
+    tag_re
+        .replace_all(raw, |caps: &regex::Captures| {
+            let tag = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+            let Some(name) = read_tool_invocation_name(tag) else {
+                return tag.to_string();
+            };
+            let Some(arguments) = read_tool_invocation_arguments(tag) else {
+                return tag.to_string();
+            };
+            let payload = serde_json::json!({
+                "name": name,
+                "arguments": arguments,
+            });
+            format!("<tool_call>{}</tool_call>", payload)
+        })
+        .to_string()
+}
+
 fn canonicalize_dsml_tool_markup_variants(raw: &str) -> String {
     if !raw.contains("DSML") && !raw.contains("dsml") {
         return raw.to_string();
@@ -2436,7 +2407,9 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     if trimmed.is_empty() {
         return (text.to_string(), Vec::new());
     }
-    let canonicalized_text = canonicalize_dsml_tool_markup_variants(text);
+    let canonicalized_text = canonicalize_tool_invocation_self_closing(
+        canonicalize_dsml_tool_markup_variants(text).as_str(),
+    );
     let source = canonicalized_text.as_str();
 
     let mut matches: Vec<MatchEntry> = Vec::new();

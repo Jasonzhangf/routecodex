@@ -1,7 +1,6 @@
 export type {
   AnthropicChatCompletionOutcome,
   AnthropicStopReasonResolution,
-  ClockReservationFromContextOutput,
   NativeRespInboundReasoningNormalizeInput,
   ProviderResponseContextHelpersOutput,
   ProviderResponseToolCallSummary
@@ -32,7 +31,6 @@ export {
   buildAnthropicResponseFromChatFullWithNative,  parseJsonObjectCandidateWithNative,
   resolveAnthropicChatCompletionOutcomeWithNative,
   resolveAnthropicStopReasonWithNative,
-  resolveClockReservationFromContextWithNative,
   resolveProviderResponseContextHelpersWithNative,
   resolveProviderTypeFromProtocolWithNative,
   summarizeToolCallsFromProviderResponseWithNative

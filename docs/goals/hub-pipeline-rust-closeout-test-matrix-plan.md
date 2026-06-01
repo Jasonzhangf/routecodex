@@ -86,24 +86,11 @@
   - Flow：`execute-chat-process-entry` 与 `chat-process-roundtrip` 主链
   - 删除门禁：删除 TS 语义 helper 后 contract/flow 全绿
 
-##### A-1. req_process heartbeat / clock / sanitizer deletion gate（P0 当前第一批）
 - 目标：
-  - 为 `req_process_stage1_tool_governance/index.ts` 当前仍直接依赖的 heartbeat / clock runtime bridge / request sanitizer runtime bridge 建立删除前门禁。
 - 当前 TS residue：
-  - `chat-process-heartbeat-directives.ts`
-  - `blocks/chat-process-clock-runtime-bridge.ts`
   - `blocks/chat-process-request-sanitizer-runtime-bridge.ts`
 - 必须固定的 Jest 门禁套件：
   - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
-    - 作用：先红锁 stage 不得继续 import/call heartbeat/clock/sanitizer TS residue
-  - `tests/sharedmodule/heartbeat-directive-native-contract.spec.ts`
-    - 作用：直接锁定 active native `resolveHeartbeatDirectiveJson` 必须真正解析最新 hb directive，而不是返回 disabled stub
-  - `tests/sharedmodule/heartbeat-directive-bridge-contract-audit.spec.ts`
-    - 作用：锁定 TS heartbeat bridge 只允许消费 camelCase native contract，不允许继续读 `interval_ms` / `tmux_session_id` / `content_changed`
-  - `tests/servertool/servertool-heartbeat.spec.ts`
-    - 作用：覆盖 hb marker strip、state persistence、interval override、HEARTBEAT.md stop-marker 清理
-  - `tests/servertool/servertool-clock.spec.ts`
-    - 作用：覆盖 clock schema inject、clear directive、due reminder inject、reservation metadata、clock.md stop-marker 清理
   - `tests/servertool/chat-request-marker-strip.spec.ts`
     - 作用：覆盖 generic marker strip 与 routing marker 保留
   - `tests/sharedmodule/chat-process-request-sanitizer.spec.ts`
@@ -114,30 +101,21 @@
     - 作用：覆盖主链 req_process 入口在去除 TS bridge 后仍能维持 chat-process entry contract
 - 建议执行命令：
   - `npm run jest:run -- --runTestsByPath /Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache`
-  - `npm run jest:run -- --runTestsByPath /Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/heartbeat-directive-native-contract.spec.ts /Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/heartbeat-directive-bridge-contract-audit.spec.ts /Users/fanzhang/Documents/github/routecodex/tests/servertool/servertool-heartbeat.spec.ts /Users/fanzhang/Documents/github/routecodex/tests/servertool/servertool-clock.spec.ts /Users/fanzhang/Documents/github/routecodex/tests/servertool/chat-request-marker-strip.spec.ts /Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/chat-process-request-sanitizer.spec.ts /Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/apply-patch-chat-process-contract.spec.ts /Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/hub-pipeline-execute-chat-process-entry.spec.ts --runInBand --no-cache`
 - 进入 Rust 前置条件：
   - residue audit 已准确红掉当前 stage 残留
   - 以上 green baseline 套件已在当前工作树通过
   - 删除目标已明确指向 Rust req_process shared functions + blocks，而不是 TS bridge 平移
 
-##### A-1a. heartbeat directive 切片（已推进）
 - 当前状态：
   - 已完成从 disabled native export 到 active Rust truth 的接通；
-  - TS heartbeat bridge 已对齐 camelCase native contract；
   - 该切片的定向 contract + behavior 测试已通过。
 - 唯一真源文件：
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_heartbeat_directives.rs`
 - 边界文件：
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-heartbeat-directives.ts`
 - 通过证据：
   - `cargo test -p router-hotpath-napi resolves_latest_hb_directive_with_camelcase_metadata --release`
   - `node /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
-  - `npm run jest:run -- --runTestsByPath /Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/heartbeat-directive-native-contract.spec.ts --runInBand --no-cache`
-  - `npm run jest:run -- --runTestsByPath /Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/heartbeat-directive-bridge-contract-audit.spec.ts --runInBand --no-cache`
-  - `npm run jest:run -- --runTestsByPath /Users/fanzhang/Documents/github/routecodex/tests/servertool/servertool-heartbeat.spec.ts --runInBand --no-cache`
 - 注意：
-  - 这里只证明 heartbeat directive 解析/bridge path 已切到 active Rust；
   - 不代表整个 `req_process stage1` 已完成 Rust-only closeout。
 
 #### B. servertool followup orchestration
@@ -153,23 +131,11 @@
 
 ### P1 能力块
 
-#### C. clock / heartbeat / reminder
 - TS 目标文件：
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-clock-*.ts`
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-heartbeat-directives.ts`
 - Rust 真源：
-  - `chat_clock_clear_directive.rs`
-  - `chat_clock_reminder_directives.rs`
-  - `chat_clock_reminder_orchestration_semantics.rs`
-  - `chat_clock_reminder_semantics.rs`
-  - `chat_clock_reminder_time_tag_semantics.rs`
-  - `chat_clock_reminders_semantics.rs`
-  - `chat_clock_tool_schema_ops.rs`
-  - `hub_heartbeat_directives.rs`
 - 测试矩阵：
   - Contract：directive parse、due reminder inject、time tag、tool schema append
   - Rust：各语义模块单测
-  - Flow：clock injection、heartbeat apply、followup skip/re-entry
   - 删除门禁：directive/reminder/tool schema 语义不再留在 TS
 
 ### P2 能力块
@@ -213,7 +179,6 @@
    - governance block
    - sanitize/finalize block
    - servertool plan block
-   - clock/reminder block
    - web-search/review/media block
    - 每个 block 有明确输入输出结构，不直接跨层乱改 payload
 3. **编排层**
@@ -302,13 +267,11 @@
 
 1. P0 governance/sanitize/finalize/node-result
 2. P0 servertool followup orchestration
-3. P1 clock/heartbeat/reminder
 4. P2 web-search/review/media/marker-strip/readiness
 5. stage residue audit 收尾 + 全量删除门禁
 
 ## 11. 为什么这套顺序是当前唯一正确的
 
 - 你的硬约束把顺序锁死了：必须先测试矩阵、再 Rust、最后删 TS，所以不能先写实现。
-- P0 是 Hub/chat-process 主链真源；若不先收口，后面的 clock/web-search 只是局部漂亮，主链仍双实现。
 - “公共函数库 + blocks + 纯编排”要求先把语义拆到 Rust blocks，再允许 TS 退成壳；否则只能继续堆混合文件。
 - “不能有 fallback”要求我们不能保留 TS 兜底分支作为过渡，因此每块迁移都必须以测试矩阵和删除门禁作为前置条件。

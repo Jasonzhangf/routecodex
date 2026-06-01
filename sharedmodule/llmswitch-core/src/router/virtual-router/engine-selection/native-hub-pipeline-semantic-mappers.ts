@@ -110,13 +110,6 @@ export function buildSubmitToolOutputsPayloadWithNative(input: {
   return invokeRecordCapability('buildSubmitToolOutputsPayloadJson', [input]);
 }
 
-export function resolveHeartbeatDirectiveWithNative(input: {
-  messages: unknown;
-  metadata: Record<string, unknown>;
-}): Record<string, unknown> {
-  return invokeRecordCapability('resolveHeartbeatDirectiveJson', [input]);
-}
-
 export function extractToolSignaturesFromPayloadWithNative(payload: unknown): string[] {
   const raw = invokeStringCapability('extractToolSignaturesFromPayloadJson', [safeStringify(payload) ?? '{}']);
   try {

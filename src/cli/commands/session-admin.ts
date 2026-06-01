@@ -27,13 +27,6 @@ type SessionAdminCommandOptions = {
   host?: string;
   url?: string;
   config?: string;
-  sessionId?: string;
-  taskId?: string;
-  dueAt?: string;
-  task?: string;
-  recurrence?: string;
-  everyMinutes?: string;
-  maxRuns?: string;
   list?: boolean;
   create?: boolean;
   update?: boolean;
@@ -41,7 +34,6 @@ type SessionAdminCommandOptions = {
   clear?: boolean;
   cleanupDeadTmux?: boolean;
   unbindSession?: string;
-  clearTasks?: boolean;
   json?: boolean;
 };
 
@@ -184,26 +176,13 @@ async function callJson(
 export function createSessionAdminCommand(program: Command, ctx: SessionAdminCommandContext): void {
   program
     .command('session-admin')
-    .description('Manage session schedules and tmux/session bindings (list + CRUD + cleanup)')
+    .description('Manage session bindings and cleanup')
     .option('--port <port>', 'RouteCodex server port')
     .option('--host <host>', 'RouteCodex server host')
     .option('--url <url>', 'RouteCodex base URL')
     .option('-c, --config <config>', 'RouteCodex configuration file path')
-    .option('--session-id <sessionId>', 'Conversation/session id for session task CRUD')
-    .option('--task-id <taskId>', 'Task id for update/delete')
-    .option('--due-at <dueAt>', 'ISO8601 due time for create/update')
-    .option('--task <task>', 'Task text for create/update')
-    .option('--recurrence <kind>', 'Recurrence kind: daily|weekly|interval')
-    .option('--every-minutes <minutes>', 'everyMinutes for interval recurrence')
-    .option('--max-runs <count>', 'maxRuns for recurrence')
-    .option('--list', 'List session schedules/tasks', false)
-    .option('--create', 'Create session task', false)
-    .option('--update', 'Update session task', false)
-    .option('--delete', 'Delete one session task', false)
-    .option('--clear', 'Clear all tasks in a session', false)
     .option('--cleanup-dead-tmux', 'Cleanup daemons whose tmux session is gone', false)
     .option('--unbind-session <conversationSessionId>', 'Unbind conversation session mapping manually')
-    .option('--clear-tasks', 'With --unbind-session, clear its session tasks too', false)
     .option('--json', 'Print JSON output', false)
     .action(async (options: SessionAdminCommandOptions) => {
       try {
@@ -238,7 +217,7 @@ export function createSessionAdminCommand(program: Command, ctx: SessionAdminCom
           const result = await callJson(ctx, `${baseUrl}/daemon/session/cleanup`, 'POST', {
             mode: 'unbind',
             conversationSessionId: options.unbindSession.trim(),
-            clearTasks: Boolean(options.clearTasks)
+            clearTasks: false
           }, apiKey);
           if (!result.ok) {
             throw new Error(`unbind-session failed (${result.status})`);
@@ -247,91 +226,7 @@ export function createSessionAdminCommand(program: Command, ctx: SessionAdminCom
           return;
         }
 
-        if (options.create) {
-          const sessionId = typeof options.sessionId === 'string' ? options.sessionId.trim() : '';
-          const dueAt = typeof options.dueAt === 'string' ? options.dueAt.trim() : '';
-          const task = typeof options.task === 'string' ? options.task.trim() : '';
-          if (!sessionId || !dueAt || !task) {
-            throw new Error('--create requires --session-id --due-at --task');
-          }
-          const payload: Record<string, unknown> = { sessionId, dueAt, task };
-          const recurrence = typeof options.recurrence === 'string' ? options.recurrence.trim() : '';
-          if (recurrence) {
-            payload.recurrence = {
-              kind: recurrence,
-              ...(parseInteger(options.maxRuns) ? { maxRuns: parseInteger(options.maxRuns) } : {}),
-              ...(parseInteger(options.everyMinutes) ? { everyMinutes: parseInteger(options.everyMinutes) } : {})
-            };
-          }
-          const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'POST', payload, apiKey);
-          if (!result.ok) {
-            throw new Error(`create failed (${result.status})`);
-          }
-          print(result.data);
-          return;
-        }
-
-        if (options.update) {
-          const sessionId = typeof options.sessionId === 'string' ? options.sessionId.trim() : '';
-          const taskId = typeof options.taskId === 'string' ? options.taskId.trim() : '';
-          if (!sessionId || !taskId) {
-            throw new Error('--update requires --session-id --task-id');
-          }
-          const patch: Record<string, unknown> = {};
-          if (typeof options.dueAt === 'string' && options.dueAt.trim()) {
-            patch.dueAt = options.dueAt.trim();
-          }
-          if (typeof options.task === 'string' && options.task.trim()) {
-            patch.task = options.task.trim();
-          }
-          const recurrence = typeof options.recurrence === 'string' ? options.recurrence.trim() : '';
-          if (recurrence) {
-            patch.recurrence = {
-              kind: recurrence,
-              ...(parseInteger(options.maxRuns) ? { maxRuns: parseInteger(options.maxRuns) } : {}),
-              ...(parseInteger(options.everyMinutes) ? { everyMinutes: parseInteger(options.everyMinutes) } : {})
-            };
-          }
-          const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'PATCH', { sessionId, taskId, patch }, apiKey);
-          if (!result.ok) {
-            throw new Error(`update failed (${result.status})`);
-          }
-          print(result.data);
-          return;
-        }
-
-        if (options.delete || options.clear) {
-          const sessionId = typeof options.sessionId === 'string' ? options.sessionId.trim() : '';
-          if (!sessionId) {
-            throw new Error('--delete/--clear requires --session-id');
-          }
-          const taskId = options.clear ? '' : (typeof options.taskId === 'string' ? options.taskId.trim() : '');
-          if (options.delete && !taskId) {
-            throw new Error('--delete requires --task-id (or use --clear)');
-          }
-          const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'DELETE', {
-            sessionId,
-            ...(taskId ? { taskId } : {})
-          }, apiKey);
-          if (!result.ok) {
-            throw new Error(`delete/clear failed (${result.status})`);
-          }
-          print(result.data);
-          return;
-        }
-
-        const sessionId = typeof options.sessionId === 'string' && options.sessionId.trim() ? options.sessionId.trim() : undefined;
-        const listUrl = sessionId
-          ? `${baseUrl}/daemon/session/tasks?sessionId=${encodeURIComponent(sessionId)}`
-          : `${baseUrl}/daemon/session/tasks`;
-        const response = await ctx.fetch(listUrl, {
-          headers: apiKey ? { 'x-api-key': apiKey } : undefined
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(`list failed (${response.status})`);
-        }
-        print(data);
+        throw new Error('session-admin requires --cleanup-dead-tmux or --unbind-session');
       } catch (error) {
         ctx.logger.error(error instanceof Error ? error.message : String(error));
         ctx.exit(1);

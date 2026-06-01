@@ -1,5 +1,4 @@
 import {
-  parseClockClearDirectivePayload,
   parseChatProcessMediaAnalysisPayload,
   parseChatProcessMediaStripPayload,
   parseChatWebSearchIntentPayload,
@@ -88,18 +87,6 @@ export function analyzeContinueExecutionInjection(
     'analyzeContinueExecutionInjectionJson',
     [JSON.stringify(messages), normalizedMarker, normalizedTargetText],
     parseContinueExecutionInjectionPayload
-  );
-  return { ...parsed, source: 'native' };
-}
-
-export function stripClockClearDirectiveText(
-  text: string
-): { hadClear: boolean; next: string; source: 'native' } {
-  const parsed = callNativeJson(
-    'stripClockClearDirectiveTextJson',
-    'stripClockClearDirectiveTextJson',
-    [String(text || '')],
-    parseClockClearDirectivePayload
   );
   return { ...parsed, source: 'native' };
 }

@@ -4,7 +4,7 @@ const skeletonDocument = {
   servertool: {
     skeleton: {
       autoHooks: {
-        optionalPrimaryOrder: ['clock_auto', 'stop_message_auto'],
+        optionalPrimaryOrder: ['stop_message_auto'],
         mandatoryOrder: []
       },
       pendingInjection: {
@@ -32,12 +32,6 @@ const skeletonDocument = {
       pendingInjection: { enabled: true, strictContract: true }
     },
     internalTools: {
-      clock_auto: {
-        name: 'clock_auto',
-        enabled: true,
-        trigger: { type: 'auto', canonicalName: 'clock_auto', phase: 'default', priority: 30 },
-        execution: { mode: 'auto_hook', stripAfterExecute: true }
-      },
       stop_message_auto: {
         name: 'stop_message_auto',
         enabled: true,
@@ -81,11 +75,10 @@ describe('servertool skeleton config', () => {
   test('exposes declarative auto hook queue order from skeleton config', () => {
     const skeleton = getDefaultServertoolSkeletonDocument();
     expect(skeleton.servertool.skeleton.autoHooks.optionalPrimaryOrder).toEqual([
-      'clock_auto',
       'stop_message_auto'
     ]);
     expect(buildServertoolAutoHookQueueConfig()).toEqual({
-      optionalPrimaryOrder: ['clock_auto', 'empty_reply_continue', 'stop_message_auto'],
+      optionalPrimaryOrder: ['empty_reply_continue', 'stop_message_auto'],
       mandatoryOrder: []
     });
     expect(buildServertoolPendingInjectionConfig()).toEqual({
