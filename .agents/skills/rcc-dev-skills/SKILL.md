@@ -1731,3 +1731,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ## 2026-06-02 Hub Pipeline Phase 1 type skeleton 精华
 - 请求侧第一阶段只允许透明类型骨架：`HubReqInbound02Standardized -> HubReqChatProcess03Governed -> HubReqOutbound05ProviderSemantic`；不得在该阶段接入 runtime flow 或改变 provider wire。
 - 拓扑红测真源：`tests/red-tests/hub_pipeline_type_topology_contract.test.ts`，必须禁止新 `ReqProc` / `req_process` 类型骨架、非相邻 provider wire shortcut、正常 request payload 承载 metadata。
+
+## 2026-06-02 Hub Pipeline Phase 2 response type skeleton 精华
+- 响应侧第二阶段只允许透明类型骨架：`HubRespInbound02Parsed -> HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic`；不得在该阶段接入 runtime flow 或改变 client response。
+- 拓扑红测真源：`tests/red-tests/hub_pipeline_response_type_topology_contract.test.ts`，必须禁止新 `RespProc` / `resp_process` 类型骨架、provider raw 直达 server client frame、正常 response payload 承载 metadata 或 success-wrapped error。

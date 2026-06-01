@@ -2026,3 +2026,7 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 ## 2026-06-02 Hub Pipeline Phase 1 type skeleton
 - Verified request-side topology skeleton exists in Rust `hub_pipeline_types/`: `HubReqInbound02Standardized -> HubReqChatProcess03Governed -> HubReqOutbound05ProviderSemantic`. It is transparent and not wired into runtime flow, preserving existing stage order/provider wire behavior.
 - Red-test truth: `tests/red-tests/hub_pipeline_type_topology_contract.test.ts` locks phase naming, adjacent builders, no new `ReqProc`/`req_process` type skeleton names, no provider wire shortcut, and metadata via `Meta*` carrier only.
+
+## 2026-06-02 Hub Pipeline Phase 2 response type skeleton
+- Verified response-side topology skeleton exists in Rust `hub_pipeline_types/`: `HubRespInbound02Parsed -> HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic`. It is transparent and not wired into runtime flow, preserving existing native stage order and client response behavior.
+- Red-test truth: `tests/red-tests/hub_pipeline_response_type_topology_contract.test.ts` locks response phase naming, adjacent parser/projector, no new `RespProc`/`resp_process` type skeleton names, no provider raw -> server client frame shortcut, and metadata/error via `Meta*`/`Error*` boundaries only.
