@@ -13964,3 +13964,7 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - Added red tests: `hub_pipeline_vr_provider_boundary_contract`, `hub_pipeline_meta_error_carrier_contract`, `hub_pipeline_type_residue_contract`; updated request topology red test to allow Phase3 provider wire type while still forbidding non-adjacent shortcut builders.
 - Phase5 deletion audit: `docs/goals/hub-pipeline-phase-typing-residue-deletion-checklist.md` records no safe live-path deletion in this phase; existing `req_process_*` / `resp_process_*` Rust files remain live and require later migration before deletion.
 - Validation: `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml hub_pipeline_types --lib` passed 17/17; five topology Jest red tests passed 23/23; `no_provider_body_metadata_control` passed 1/1; `npm run -s build --prefix sharedmodule/llmswitch-core` passed; `git diff --check` passed.
+
+## 2026-06-02 Hub Pipeline typed entrypoint migration planning
+- Added `docs/goals/hub-pipeline-typed-entrypoint-migration-plan.md` as the next-stage plan after topology contracts. It defines Phase 6A request typed entrypoint wrappers, Phase 6B response typed entrypoint wrappers, and Phase 6C old direct import residue/deletion gates.
+- This is planning only: no runtime flow, route selection, provider wire, or client response behavior changed.
