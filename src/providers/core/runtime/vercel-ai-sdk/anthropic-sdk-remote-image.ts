@@ -384,7 +384,7 @@ export function hasRemoteAnthropicImageUrls(rawBody: UnknownRecord): boolean {
 }
 
 export function resolveAnthropicRemoteImagePolicy(context: ProviderContext, rawBody: UnknownRecord): RemoteImagePolicy {
-  const metadata = asRecord(rawBody.metadata);
+  const metadata = asRecord(context.metadata);
   const metadataMultimodal = asRecord(metadata.multimodal);
   const requestPolicy =
     normalizeRemoteImagePolicy(metadata.remoteImagePolicy) ||

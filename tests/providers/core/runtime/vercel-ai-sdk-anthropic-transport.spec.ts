@@ -632,12 +632,20 @@ describe('remote image policy resolution', () => {
     )).toBe('direct');
   });
 
-  it('accepts request metadata override as highest priority', () => {
+  it('accepts context metadata override as highest priority', () => {
+    process.env.ROUTECODEX_REMOTE_IMAGE_POLICY = 'direct';
+    expect(resolveAnthropicRemoteImagePolicy(
+      { providerId: 'ali-coding-plan', metadata: { remoteImagePolicy: 'direct_then_inline' } } as any,
+      { model: 'kimi-k2.5' }
+    )).toBe('direct_then_inline');
+  });
+
+  it('does not read remote image policy from request body metadata', () => {
     process.env.ROUTECODEX_REMOTE_IMAGE_POLICY = 'direct';
     expect(resolveAnthropicRemoteImagePolicy(
       { providerId: 'ali-coding-plan' } as any,
       { model: 'kimi-k2.5', metadata: { remoteImagePolicy: 'direct_then_inline' } }
-    )).toBe('direct_then_inline');
+    )).toBe('direct');
   });
 });
 

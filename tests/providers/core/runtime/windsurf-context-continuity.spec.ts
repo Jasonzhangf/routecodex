@@ -129,6 +129,18 @@ describe('Windsurf context continuity — sticky session + delta growth', () => 
     expect((provider as any).resolveWindsurfSessionStateKeyFromRequest(request)).toBe('codex-session-stable');
   });
 
+  test('does not read Windsurf session key from request body metadata', () => {
+    const provider = createProvider();
+    const request = {
+      body: {
+        session_id: 'wire-session',
+        metadata: { sessionId: 'must-not-leak' },
+      },
+    } as Record<string, unknown>;
+
+    expect((provider as any).resolveWindsurfSessionStateKeyFromRequest(request)).toBe('wire-session');
+  });
+
   test('RED: changing previous_response_id under one session reuses one cascade and offset', async () => {
     const provider = createProvider();
 

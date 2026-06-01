@@ -1839,9 +1839,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
 
   private resolveWindsurfSessionStateKeyFromRequest(request: UnknownObject): string {
     const body = this.readRequestBodyRecord(request);
-    const bodyMetadata = body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
-      ? body.metadata as Record<string, unknown>
-      : undefined;
     const runtimeMetadata = extractProviderRuntimeMetadata(request);
     const routeMetadata = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
       ? runtimeMetadata.metadata as Record<string, unknown>
@@ -1857,10 +1854,6 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       body.sessionId,
       body.conversation_id,
       body.conversationId,
-      bodyMetadata?.session_id,
-      bodyMetadata?.sessionId,
-      bodyMetadata?.conversation_id,
-      bodyMetadata?.conversationId,
       routeMetadata?.session_id,
       routeMetadata?.sessionId,
       routeMetadata?.conversation_id,
