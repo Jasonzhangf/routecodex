@@ -851,4 +851,27 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(findings).toEqual([]);
   });
+
+  it('legacy chat-process TS governance helpers must be physically removed', () => {
+    const processRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/process',
+    );
+    const testRoot = path.join(process.cwd(), 'tests');
+    const legacyFiles = [
+      'chat-process-anthropic-alias.ts',
+      'chat-process-governance-orchestration.ts',
+      'chat-process-request-sanitizer.ts',
+      'chat-process-servertool-orchestration.ts',
+      'blocks/chat-process-request-sanitizer-runtime-bridge.ts',
+    ];
+    const legacyTests = [
+      'sharedmodule/chat-process-request-sanitizer.spec.ts',
+    ];
+
+    const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(processRoot, relativePath)));
+    const existingTests = legacyTests.filter((relativePath) => fs.existsSync(path.join(testRoot, relativePath)));
+
+    expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
+  });
 });

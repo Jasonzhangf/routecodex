@@ -13840,3 +13840,9 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 红测：`legacy runHubChatProcess API must enter req_process total stage instead of TS governance orchestration` 先红，证明 legacy `runHubChatProcess` 仍 import/call `chat-process-governance-orchestration`，绕过 req_process total stage API。
 - 修复：`chat-process.ts` 改为调用 `runReqProcessStage1ToolGovernance`，不再直接调用 `applyReqProcessToolGovernanceWithNative` / TS governance orchestration；非治理路径保留 native `buildProcessedRequest` 封装。
 - 验证：`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 40/40 passed；`npx tsc --noEmit` exit 0。
+
+## 2026-06-01 legacy chat-process governance helper cleanup
+- 红测：`legacy chat-process TS governance helpers must be physically removed` 先红，命中 `chat-process-anthropic-alias.ts` / `chat-process-governance-orchestration.ts` / `chat-process-request-sanitizer.ts` / sanitizer runtime bridge / old sanitizer spec。
+- 修复：物理删除上述无活调用 TS governance/sanitizer helper 与旧测试；`runHubChatProcess` 已改走 req_process total stage，删除后无运行图引用。
+- 验证：定向 residue test passed；`npx tsc --noEmit` exit 0。
+- 剩余：`chat-process-clock-reminders.ts` / `blocks/chat-process-clock-runtime-bridge.ts` 仍由旧 deletion gate 标记为未清理，但内部还有 clock side-effect 逻辑，需单独迁移到 Rust/total stage 后删除，不能在本闭环盲删。
