@@ -13540,3 +13540,8 @@ Using skills: coding-principals + rcc-dev-skills
 - Remaining worktree after HubPipeline commits is VR rustification scope plus untracked Rust routing split files.
 - `cargo test -p router-hotpath-napi virtual_router` initially failed only on `shared_read_trimmed_string_deletion_gate_removed_gemini_and_virtual_router_local_clones`: Gemini still had local `read_trimmed_string` / `coerce_thought_signature` clone.
 - Fix: `gemini_openai_codec.rs` now imports shared `read_trimmed_string` and removes local thought-signature wrapper clone before committing VR changes.
+
+## 2026-06-01 VR routing split review fix
+- Review finding fixed: `routing/utils.rs` was present but not wired; `bootstrap.rs` still owned duplicate utility functions. Added `mod utils`, imported utility functions in `bootstrap.rs`, removed duplicated local implementations, and cleaned `target_expander.rs` unused imports.
+- Added red/green coverage: `utils` unit tests for scalar/bool/number/priority normalization and bootstrap blackbox-style JSON test `split_wrappers_match_bootstrap_json_routing_semantics` proving wrappers match `bootstrap_virtual_router_routing_json` output.
+- Evidence: `cargo test -p router-hotpath-napi virtual_router_engine::routing --lib` => 37 passed. `node scripts/build-core.mjs && npx tsc --noEmit` => exit 0. Wider `cargo test -p router-hotpath-napi --lib` remains non-VR dirty: 1219 passed, 62 failed, 1 ignored.

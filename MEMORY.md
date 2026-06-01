@@ -1937,3 +1937,7 @@ Slice 0（总控 API）→ Slice 1-4（P0）→ Slice 5（P1）
 ## 2026-05-31 HubPipeline normalize-request block removal
 - Verified closeout: legacy TS normalize-request block files are physically removed. Active normalize request shell only performs Node/SSE materialization and calls Rust `runHubPipelineStageWithNative({ stage: 'normalizeRequest' })` for semantics.
 - Gate: `hub-pipeline-stage-residue-audit` requires `hub-pipeline-normalize-request-*blocks.ts`, `hub-pipeline-request-normalization-utils.ts`, and `hub-pipeline-governance-blocks.ts` absent.
+
+## 2026-06-01 VR routing split validation
+- VR routing split cleanup must wire extracted helpers through `routing/mod.rs` and remove same helper bodies from `bootstrap.rs`; otherwise `utils.rs` is dead code despite existing in tree.
+- Current validated gate for VR routing split: `cargo test -p router-hotpath-napi virtual_router_engine::routing --lib` (37 passed) plus `node scripts/build-core.mjs && npx tsc --noEmit` (exit 0). Full `router-hotpath-napi --lib` has unrelated non-VR failures and is not a clean project gate yet.
