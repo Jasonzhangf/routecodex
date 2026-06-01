@@ -13866,3 +13866,9 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 发现并修复 Responses JSON->SSE `response.metadata`、SSE->JSON provider event metadata、direct `metadata.__raw_request_body.metadata` replay、Responses persisted context payload 四类泄露/持久化风险。
 - 验证：metadata Jest 回归 15 suites / 76 tests passed；Rust `cargo test -p router-hotpath-napi hub_req_outbound_format_build --lib` 13 tests passed（仅既有 warnings）。
 2026-06-01 continue Hub Pipeline boundary audit after clock/heartbeat removal: scanning TS semantic residues before edits.
+
+## 2026-06-01 TS tool-governor cleanup batch
+- 红测：`tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 增加 Provider Runtime 禁止调用 TS tool-governor/standard-tool-text-harvest、旧 TS tool governor API/文件/旧测试必须物理删除的删除门。
+- 清理：移除 legacy TS tool-governor/tool-filter/tool-governance 与旧测试，保留 Hub Pipeline/tool governance 语义在 Rust 真源。
+- 验证：`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 通过；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit` 通过；residue grep 无业务残留命中。
+- 已知非本批阻塞：根 `npx tsc --noEmit` 仍失败于 Windsurf native hotpath shim 模块声明缺失。

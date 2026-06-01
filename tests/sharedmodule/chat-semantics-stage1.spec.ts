@@ -7,25 +7,6 @@ import { chatEnvelopeToStandardized, standardizedToChatEnvelope } from '../../sh
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
 
-const mockRunChatRequestToolFilters = jest.fn(async (payload: any) => payload);
-const mockGovernRequest = jest.fn((request: any) => ({
-  request,
-  summary: { applied: false }
-}));
-
-jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/shared/tool-filter-pipeline.js', () => ({
-  runChatRequestToolFilters: mockRunChatRequestToolFilters
-}));
-
-jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/hub/tool-governance/index.js', () => ({
-  ToolGovernanceEngine: class {
-    governRequest(request: any) {
-      return mockGovernRequest(request);
-    }
-  },
-  ToolGovernanceError: class extends Error {}
-}));
-
 const { runHubChatProcess } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process.js');
 
 const adapterContext: AdapterContext = {
@@ -98,8 +79,6 @@ describe('Chat semantics stage 1 bridge', () => {
   });
 
   beforeEach(() => {
-    mockRunChatRequestToolFilters.mockClear();
-    mockGovernRequest.mockClear();
     saveRoutingInstructionStateSync('session:session-stopmessage-mode-only', null);
   });
 

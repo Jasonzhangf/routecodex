@@ -20,8 +20,6 @@ export * from './shared/tool-mapping.js';
 export * from './shared/reasoning-mapping.js';
 export * from './args-mapping.js';
 export * from './shared/text-markup-normalizer.js';
-export * from './shared/tool-governor.js';
-export { governTools } from './shared/tool-governor.js';
 export * from './shared/streaming-text-extractor.js';
 export * from './shared/tool-harvester.js';
 export * from './responses/responses-openai-bridge.js';

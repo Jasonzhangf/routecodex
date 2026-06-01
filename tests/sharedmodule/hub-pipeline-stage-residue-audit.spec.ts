@@ -875,4 +875,79 @@ describe('hub pipeline stage residue audit', () => {
 
     expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
   });
+
+  it('provider runtime must not call TS tool-governor response harvest outside HubPipeline resp_process', () => {
+    const providerRuntimeRoot = path.join(process.cwd(), 'src/providers/core/runtime');
+    const forbiddenFiles = [
+      'standard-tool-text-harvest.ts',
+    ];
+    const existingFiles = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(providerRuntimeRoot, relativePath)));
+
+    const findings: string[] = [];
+    const visit = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          visit(fullPath);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
+        const source = fs.readFileSync(fullPath, 'utf8');
+        const relativePath = path.relative(providerRuntimeRoot, fullPath);
+        const matches = collectMatches(source, [
+          { label: 'imports conversion/shared/tool-governor', pattern: /conversion\/shared\/tool-governor/ },
+          { label: 'calls processChatResponseTools', pattern: /\bprocessChatResponseTools\b/ },
+          { label: 'harvests standard tool text in provider runtime', pattern: /applyStandardToolTextHarvestToChatPayload/ },
+        ]);
+        findings.push(...matches.map((match) => `${relativePath}:${match}`));
+      }
+    };
+    visit(providerRuntimeRoot);
+
+    expect({ existingFiles, findings }).toEqual({ existingFiles: [], findings: [] });
+  });
+
+  it('legacy TS tool governor public APIs must be physically removed after Rust HubPipeline takeover', () => {
+    const repoRoot = process.cwd();
+    const legacyFiles = [
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-governor.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-governor-request.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-governor-response.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-governor-shared.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-governor-guards.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-filter-pipeline.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/tool-governance/engine.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/tool-governance/index.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/tool-governance/rules.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/tool-governance/types.ts',
+    ];
+    const legacyTests = [
+      'tests/sharedmodule/request-tool-governor-apply-patch-guidance.spec.ts',
+      'tests/sharedmodule/mcp-tool-descriptions.spec.ts',
+      'tests/sharedmodule/resp-process-tool-filters-exec-command-raw-shape.spec.ts',
+      'tests/sharedmodule/tool-filter-image-hints.spec.ts',
+      'tests/sharedmodule/tool-governor-apply-patch-failfast.spec.ts',
+      'tests/sharedmodule/tool-governor-apply-patch-rewrite.spec.ts',
+      'tests/sharedmodule/tool-governor-exec-command-guard.spec.ts',
+      'tests/v2/src/tool-processing-test.ts',
+      'tests/v2/tool-processing-test.ts',
+    ];
+    const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const existingTests = legacyTests.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+
+    const conversionIndex = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/index.ts'),
+      'utf8'
+    );
+    const indexFindings = collectMatches(conversionIndex, [
+      { label: 'exports shared tool-governor', pattern: /shared\/tool-governor/ },
+      { label: 'exports governTools TS API', pattern: /governTools/ },
+    ]);
+
+    expect({ existingFiles, existingTests, indexFindings }).toEqual({
+      existingFiles: [],
+      existingTests: [],
+      indexFindings: [],
+    });
+  });
 });
