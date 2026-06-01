@@ -1,4 +1,7 @@
 import { ProviderProtocolError } from '../provider-protocol-error.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { formatUnknownError, isRecord } from '../../shared/common-utils.js';
 import {
   assertResponsesConversationStoreNativeAvailable,
@@ -20,6 +23,95 @@ import type {
 } from './responses-conversation-store-types.js';
 
 const TTL_MS = 1000 * 60 * 30; // 30min
+const PERSIST_SCHEMA_VERSION = 1;
+
+function resolvePersistFilePath(): string {
+  const explicit = typeof process.env.ROUTECODEX_RESPONSES_CONVERSATION_STORE === 'string'
+    ? process.env.ROUTECODEX_RESPONSES_CONVERSATION_STORE.trim()
+    : '';
+  if (explicit) return explicit;
+  const home = typeof process.env.ROUTECODEX_HOME === 'string' && process.env.ROUTECODEX_HOME.trim()
+    ? process.env.ROUTECODEX_HOME.trim()
+    : path.join(os.homedir(), '.rcc');
+  return path.join(home, 'state', 'responses-conversation-store.json');
+}
+
+function cloneJsonRecord(value: unknown): AnyRecord | undefined {
+  if (!isRecord(value)) return undefined;
+  try {
+    const cloned = JSON.parse(JSON.stringify(value));
+    return isRecord(cloned) ? cloned : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function cloneJsonRecordArray(value: unknown): AnyRecord[] {
+  if (!Array.isArray(value)) return [];
+  const rows: AnyRecord[] = [];
+  for (const item of value) {
+    const cloned = cloneJsonRecord(item);
+    if (cloned) rows.push(cloned);
+  }
+  return rows;
+}
+
+function serializeEntry(entry: ConversationEntry): ConversationEntry | undefined {
+  const basePayload = cloneJsonRecord(entry.basePayload);
+  if (!basePayload) return undefined;
+  return {
+    requestId: entry.requestId,
+    basePayload,
+    input: cloneJsonRecordArray(entry.input),
+    allowContinuation: entry.allowContinuation,
+    releasedInputPrefix: cloneJsonRecordArray(entry.releasedInputPrefix),
+    releasedPendingToolCallIds: Array.isArray(entry.releasedPendingToolCallIds)
+      ? entry.releasedPendingToolCallIds.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      : undefined,
+    inputPrefixDigest: typeof entry.inputPrefixDigest === 'string' ? entry.inputPrefixDigest : undefined,
+    inputItemCount: typeof entry.inputItemCount === 'number' ? entry.inputItemCount : undefined,
+    tools: cloneJsonRecordArray(entry.tools),
+    providerKey: typeof entry.providerKey === 'string' ? entry.providerKey : undefined,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+    lastResponseId: typeof entry.lastResponseId === 'string' ? entry.lastResponseId : undefined,
+    sessionId: typeof entry.sessionId === 'string' ? entry.sessionId : undefined,
+    conversationId: typeof entry.conversationId === 'string' ? entry.conversationId : undefined,
+    scopeKeys: Array.isArray(entry.scopeKeys) ? entry.scopeKeys.filter((v): v is string => typeof v === 'string' && v.trim().length > 0) : [],
+    portScopeKey: typeof entry.portScopeKey === 'string' ? entry.portScopeKey : undefined
+  };
+}
+
+function deserializeEntry(value: unknown): ConversationEntry | undefined {
+  if (!isRecord(value)) return undefined;
+  const requestId = readScopeToken(value.requestId);
+  const basePayload = cloneJsonRecord(value.basePayload);
+  const lastResponseId = readScopeToken(value.lastResponseId);
+  if (!requestId || !basePayload || !lastResponseId) return undefined;
+  const createdAt = typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) ? value.createdAt : Date.now();
+  const updatedAt = typeof value.updatedAt === 'number' && Number.isFinite(value.updatedAt) ? value.updatedAt : createdAt;
+  return {
+    requestId,
+    basePayload,
+    input: cloneJsonRecordArray(value.input),
+    allowContinuation: value.allowContinuation === true,
+    releasedInputPrefix: cloneJsonRecordArray(value.releasedInputPrefix),
+    releasedPendingToolCallIds: Array.isArray(value.releasedPendingToolCallIds)
+      ? value.releasedPendingToolCallIds.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      : undefined,
+    inputPrefixDigest: readScopeToken(value.inputPrefixDigest),
+    inputItemCount: typeof value.inputItemCount === 'number' && Number.isFinite(value.inputItemCount) ? value.inputItemCount : undefined,
+    tools: cloneJsonRecordArray(value.tools),
+    providerKey: readScopeToken(value.providerKey),
+    createdAt,
+    updatedAt,
+    lastResponseId,
+    sessionId: readScopeToken(value.sessionId),
+    conversationId: readScopeToken(value.conversationId),
+    scopeKeys: Array.isArray(value.scopeKeys) ? value.scopeKeys.filter((v): v is string => typeof v === 'string' && v.trim().length > 0) : [],
+    portScopeKey: readScopeToken(value.portScopeKey)
+  };
+}
 
 function readScopeToken(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -143,6 +235,53 @@ class ResponsesConversationStore {
   private scopeIndex = new Map<string, ConversationEntry>();
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
   private lastPruneAt = 0;
+  private persistenceLoaded = false;
+
+  private ensurePersistenceLoaded(): void {
+    if (this.persistenceLoaded) return;
+    this.persistenceLoaded = true;
+    let parsed: unknown;
+    const persistFilePath = resolvePersistFilePath();
+    try {
+      if (!fs.existsSync(persistFilePath)) return;
+      parsed = JSON.parse(fs.readFileSync(persistFilePath, 'utf8'));
+    } catch (error) {
+      logResponsesStoreNonBlockingError('persist.load', error, { file: persistFilePath });
+      return;
+    }
+    if (!isRecord(parsed) || parsed.version !== PERSIST_SCHEMA_VERSION || !Array.isArray(parsed.entries)) {
+      return;
+    }
+    const now = Date.now();
+    for (const row of parsed.entries) {
+      const entry = deserializeEntry(row);
+      if (!entry || !entry.lastResponseId || now - entry.updatedAt > TTL_MS) continue;
+      this.requestMap.set(entry.requestId, entry);
+      this.responseIndex.set(entry.lastResponseId, entry);
+      this.attachEntryScopes(entry);
+    }
+  }
+
+  private flushPersistence(): void {
+    if (!this.persistenceLoaded) return;
+    const entries: ConversationEntry[] = [];
+    const persistFilePath = resolvePersistFilePath();
+    const seen = new Set<ConversationEntry>();
+    for (const entry of this.responseIndex.values()) {
+      if (seen.has(entry) || entry.allowContinuation !== true || !entry.lastResponseId) continue;
+      seen.add(entry);
+      const serialized = serializeEntry(entry);
+      if (serialized) entries.push(serialized);
+    }
+    try {
+      fs.mkdirSync(path.dirname(persistFilePath), { recursive: true });
+      const tmpFile = `${persistFilePath}.${process.pid}.tmp`;
+      fs.writeFileSync(tmpFile, JSON.stringify({ version: PERSIST_SCHEMA_VERSION, entries }, null, 2));
+      fs.renameSync(tmpFile, persistFilePath);
+    } catch (error) {
+      logResponsesStoreNonBlockingError('persist.flush', error, { file: persistFilePath });
+    }
+  }
 
   getDebugStats(): {
     requestMapSize: number;
@@ -182,6 +321,7 @@ class ResponsesConversationStore {
   }
 
   captureRequestContext(args: CaptureContextArgs): void {
+    this.ensurePersistenceLoaded();
     const { requestId, payload, context } = args;
     if (!requestId || !payload) return;
     this.prune();
@@ -217,9 +357,11 @@ class ResponsesConversationStore {
       updatedAt: Date.now()
     };
     this.requestMap.set(requestId, entry);
+    this.flushPersistence();
   }
 
   recordResponse(args: RecordResponseArgs): void {
+    this.ensurePersistenceLoaded();
     const response = args.response;
     const responseId = typeof response.id === 'string' ? response.id : undefined;
     const requestId = typeof args.requestId === 'string' ? args.requestId.trim() : '';
@@ -287,13 +429,18 @@ class ResponsesConversationStore {
     if (assistantBlocks.length) {
       entry.input.push(...assistantBlocks);
     }
+    if (collectPendingToolCallIds(entry.input).length > 0) {
+      entry.allowContinuation = true;
+    }
     entry.lastResponseId = responseId;
     entry.updatedAt = Date.now();
     this.responseIndex.set(responseId, entry);
     this.attachEntryScopes(entry);
+    this.flushPersistence();
   }
 
   resumeConversation(responseId: string, submitPayload: AnyRecord, options?: ResumeOptions): ResumeResult {
+    this.ensurePersistenceLoaded();
     if (typeof responseId !== 'string' || !responseId.trim()) {
       throw new ProviderProtocolError('Responses conversation requires valid response_id', {
         code: 'MALFORMED_REQUEST',
@@ -353,6 +500,7 @@ class ResponsesConversationStore {
     assertResponsesConversationStoreNativeAvailable();
     const resumed = resumeConversationPayload(entry, responseId, submitPayload, options?.requestId);
     this.cleanupEntry(entry, responseId);
+    this.flushPersistence();
     return {
       payload: resumed.payload,
       meta: ensureMetaProviderKey(resumed.meta, entry)
@@ -360,13 +508,16 @@ class ResponsesConversationStore {
   }
 
   clearRequest(requestId?: string): void {
+    this.ensurePersistenceLoaded();
     if (!requestId) return;
     const entry = this.requestMap.get(requestId);
     if (!entry) return;
     this.detachEntry(entry);
+    this.flushPersistence();
   }
 
   clearUnresolvedRequests(): number {
+    this.ensurePersistenceLoaded();
     let cleared = 0;
     for (const entry of [...this.requestMap.values()]) {
       if (typeof entry.lastResponseId === 'string' && entry.lastResponseId.trim()) {
@@ -376,10 +527,12 @@ class ResponsesConversationStore {
       cleared += 1;
     }
     this.pruneIndexes();
+    if (cleared > 0) this.flushPersistence();
     return cleared;
   }
 
   releaseRequestPayload(requestId?: string): void {
+    this.ensurePersistenceLoaded();
     if (!requestId) return;
     const entry = this.requestMap.get(requestId);
     if (!entry) return;
@@ -395,9 +548,11 @@ class ResponsesConversationStore {
     entry.input = [];
     entry.updatedAt = Date.now();
     this.attachEntryScopes(entry);
+    this.flushPersistence();
   }
 
   resumeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
+    this.ensurePersistenceLoaded();
     this.prune();
     const scopeKeys = buildScopeKeys(args);
     const portScopeKey = readPortScopeKey(args);
@@ -420,6 +575,7 @@ class ResponsesConversationStore {
   }
 
   materializeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
+    this.ensurePersistenceLoaded();
     this.prune();
     const scopeKeys = buildScopeKeys(args);
     const portScopeKey = readPortScopeKey(args);
@@ -470,6 +626,7 @@ class ResponsesConversationStore {
   }
 
   private prune(): void {
+    this.ensurePersistenceLoaded();
     this.lastPruneAt = Date.now();
     const now = Date.now();
     for (const [, entry] of this.requestMap.entries()) {
@@ -478,6 +635,7 @@ class ResponsesConversationStore {
       }
     }
     this.pruneIndexes();
+    this.flushPersistence();
   }
 
   private pruneIndexes(): void {
@@ -513,6 +671,17 @@ class ResponsesConversationStore {
     this.responseIndex.clear();
     this.scopeIndex.clear();
     this.stopPruneTimer();
+    this.persistenceLoaded = false;
+  }
+
+  clearAllAndPersist(): void {
+    this.ensurePersistenceLoaded();
+    this.requestMap.clear();
+    this.responseIndex.clear();
+    this.scopeIndex.clear();
+    this.stopPruneTimer();
+    this.flushPersistence();
+    this.persistenceLoaded = false;
   }
 
   getLastPruneAt(): number {
@@ -654,6 +823,10 @@ export function materializeLatestResponsesContinuationByScope(args: RestoreBySco
 }
 
 export function clearAllResponsesConversationState(): void {
+  store.clearAllAndPersist();
+}
+
+export function resetResponsesConversationStateForRestartSimulation(): void {
   store.clearAll();
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.2649",
+  "version": "0.90.2656",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -16,6 +16,8 @@
   },
   "files": [
     "dist/",
+    "sharedmodule/llmswitch-core/dist/",
+    "sharedmodule/llmswitch-core/package.json",
     "config/",
     "scripts/",
     "rcc",

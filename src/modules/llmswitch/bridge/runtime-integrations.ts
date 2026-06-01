@@ -128,6 +128,7 @@ type ResponsesConversationModule = {
     options?: { keepForSubmitToolOutputs?: boolean },
   ) => void;
   clearAllResponsesConversationState?: () => void;
+  resetResponsesConversationStateForRestartSimulation?: () => void;
   clearUnresolvedResponsesConversationRequests?: () => number;
 };
 
@@ -377,6 +378,22 @@ export async function clearUnresolvedResponsesConversationRequests(): Promise<nu
     );
   }
   return fn();
+}
+
+export async function resetResponsesConversationStateForRestartSimulation(): Promise<void> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.clearAll === "function") {
+    globalStore.clearAll();
+    return;
+  }
+  const mod = await getResponsesConversationModule();
+  const fn = mod.resetResponsesConversationStateForRestartSimulation;
+  if (typeof fn !== "function") {
+    throw new Error(
+      "[llmswitch-bridge] resetResponsesConversationStateForRestartSimulation not available",
+    );
+  }
+  fn();
 }
 
 type ResponsesSseToJsonModule = {

@@ -13930,3 +13930,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 红测：新增 `hub-pipeline-stage-residue-audit` 用例，先红命中 `responses-openai-pipeline.ts` 在 TS 中扫描 `function_call_output/tool_result/tool_message`、提取 tool id/output 并写 `__captured_tool_results`。
 - 修复：删除 TS `captureToolResults` 与非阻塞吞错日志，改为调用 Rust `applyBridgeCaptureToolResultsWithNative({ stage: 'request_inbound', rawRequest })`；TS 仅保留 native 结果 carrier 写入。
 - 验证：`cargo test -p router-hotpath-napi applies_bridge_capture_tool_results -- --nocapture` 2/2 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 绿；`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 49/49 绿；`git diff --check` 绿。
+
+## 2026-06-01 Responses previous_response_id persistence fix
+- Red: HTTP blackbox reproduced restart/reset losing pending Responses tool_call context; second /v1/responses previous_response_id + function_call_output returned malformed/orphan before persistence reload.
+- Fix: ResponsesConversationStore now persists pending continuation entries to ~/.rcc/state/responses-conversation-store.json; /v1/responses function_call_output resume normalizes to tool_outputs and restores local context before provider.
+- Runtime: package now includes sharedmodule/llmswitch-core/dist so global install can load core modules.

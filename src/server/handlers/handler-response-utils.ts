@@ -398,14 +398,7 @@ function shouldPersistResponsesToolCallContinuationRecord(
   if (entryEndpoint === '/v1/responses.submit_tool_outputs') {
     return true;
   }
-  if (entryEndpoint !== '/v1/responses') {
-    return false;
-  }
-  const payload =
-    requestContext?.payload && typeof requestContext.payload === 'object' && !Array.isArray(requestContext.payload)
-      ? (requestContext.payload as Record<string, unknown>)
-      : undefined;
-  return payload?.store === true;
+  return entryEndpoint === '/v1/responses' && !!requestContext;
 }
 
 async function recordResponsesConversationToolCallResponse(args: {

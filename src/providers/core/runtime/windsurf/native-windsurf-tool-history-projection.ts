@@ -1,5 +1,41 @@
-import { failNativeRequired } from 'rcc-llmswitch-core/v2/router/virtual-router/engine-selection/native-router-hotpath-policy';
-import { loadNativeRouterHotpathBindingForInternalUse } from 'rcc-llmswitch-core/v2/router/virtual-router/engine-selection/native-router-hotpath';
+import { requireCoreDist } from '../../../../modules/llmswitch/bridge/module-loader.js';
+
+type NativeRouterHotpathPolicyModule = {
+  failNativeRequired?: <T = never>(capability: string, reason?: string) => T;
+};
+
+type NativeRouterHotpathModule = {
+  loadNativeRouterHotpathBindingForInternalUse?: () => Record<string, unknown> | null;
+};
+
+let cachedNativePolicy: NativeRouterHotpathPolicyModule | null = null;
+let cachedNativeHotpath: NativeRouterHotpathModule | null = null;
+
+function failNativeRequired<T = never>(capability: string, reason?: string): T {
+  if (!cachedNativePolicy) {
+    cachedNativePolicy = requireCoreDist<NativeRouterHotpathPolicyModule>(
+      'router/virtual-router/engine-selection/native-router-hotpath-policy'
+    );
+  }
+  const fn = cachedNativePolicy.failNativeRequired;
+  if (typeof fn !== 'function') {
+    throw new Error(`[windsurf-native] native policy unavailable: ${capability}${reason ? `: ${reason}` : ''}`);
+  }
+  return fn<T>(capability, reason);
+}
+
+function loadNativeRouterHotpathBindingForInternalUse(): Record<string, unknown> | null {
+  if (!cachedNativeHotpath) {
+    cachedNativeHotpath = requireCoreDist<NativeRouterHotpathModule>(
+      'router/virtual-router/engine-selection/native-router-hotpath'
+    );
+  }
+  const fn = cachedNativeHotpath.loadNativeRouterHotpathBindingForInternalUse;
+  if (typeof fn !== 'function') {
+    return null;
+  }
+  return fn();
+}
 
 type NativeRccProjectionInput = {
   semanticConversation: unknown[];

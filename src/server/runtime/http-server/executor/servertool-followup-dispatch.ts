@@ -11,7 +11,21 @@ import {
   resolveServerToolNestedFollowupTimeoutMs
 } from './servertool-followup-fail-fast.js';
 import { preserveLiveClientAbortCarriers } from './request-executor-client-abort-block.js';
-import { normalizeServertoolFollowupPayloadShapeWithNative } from '../../../../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js';
+
+type NativeHubPipelineSemanticMappersModule = {
+  normalizeServertoolFollowupPayloadShapeWithNative?: (entryEndpoint: string, payload: Record<string, unknown>) => Record<string, unknown>;
+};
+
+let cachedNativeHubPipelineSemanticMappers: NativeHubPipelineSemanticMappersModule | null = null;
+
+async function getNativeHubPipelineSemanticMappers(): Promise<NativeHubPipelineSemanticMappersModule> {
+  if (!cachedNativeHubPipelineSemanticMappers) {
+    cachedNativeHubPipelineSemanticMappers = await importCoreDist<NativeHubPipelineSemanticMappersModule>(
+      'router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers'
+    );
+  }
+  return cachedNativeHubPipelineSemanticMappers;
+}
 
 type ServerToolNestedExecute = (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
 
@@ -21,8 +35,13 @@ type BuildNestedMetadataLogger = (error: unknown, details: {
   mode: 'reenter' | 'client_inject';
 }) => void;
 
-function normalizeFollowupPayloadShapeWithNative(entryEndpoint: string, payload: Record<string, unknown>): Record<string, unknown> {
-  return normalizeServertoolFollowupPayloadShapeWithNative(entryEndpoint, payload);
+async function normalizeFollowupPayloadShapeWithNative(entryEndpoint: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const mod = await getNativeHubPipelineSemanticMappers();
+  const fn = mod.normalizeServertoolFollowupPayloadShapeWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[servertool] normalizeServertoolFollowupPayloadShapeWithNative unavailable');
+  }
+  return fn(entryEndpoint, payload);
 }
 
 const SAME_PROVIDER_FOLLOWUP_MAX_ATTEMPTS = 3;
@@ -531,11 +550,11 @@ function stripResponsesOnlyRequestSemantics(
     : requestSemantics;
 }
 
-function cloneNestedBodyWithSemantics(
+async function cloneNestedBodyWithSemantics(
   entryEndpoint: string,
   body: Record<string, unknown> | undefined,
   requestSemantics: Record<string, unknown> | undefined
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   let out = restoreFollowupRootToolsIfNeeded(body ? { ...body } : {}, requestSemantics);
   if (
     requestSemantics
@@ -546,7 +565,7 @@ function cloneNestedBodyWithSemantics(
     out.semantics = requestSemantics;
   }
   out = stripResponsesOnlyRequestSettings(out, requestSemantics);
-  out = normalizeFollowupPayloadShapeWithNative(entryEndpoint, out);
+  out = await normalizeFollowupPayloadShapeWithNative(entryEndpoint, out);
   out = stripResponsesOnlyRequestSettings(out, requestSemantics);
   return out;
 }
@@ -616,7 +635,7 @@ function throwIfNestedPipelineReturnedError(result: PipelineExecutionResult): vo
   throw error;
 }
 
-function buildServerToolNestedInput(args: {
+async function buildServerToolNestedInput(args: {
   entryEndpoint: string;
   fallbackEntryEndpoint: string;
   requestId: string;
@@ -626,11 +645,11 @@ function buildServerToolNestedInput(args: {
   requestSemantics?: Record<string, unknown>;
   mode: 'reenter' | 'client_inject';
   onMergeRuntimeMetaError?: BuildNestedMetadataLogger;
-}): {
+}): Promise<{
   nestedEntry: string;
   nestedMetadata: Record<string, unknown>;
   nestedInput: PipelineExecutionInput;
-} {
+}> {
   const nestedEntry = args.entryEndpoint || args.fallbackEntryEndpoint;
   const nestedExtra = asRecord(args.metadata) ?? {};
   let materializedRequestSemantics = materializeFollowupRequestSemantics({
@@ -728,7 +747,7 @@ function buildServerToolNestedInput(args: {
     };
   }
 
-  const body = cloneNestedBodyWithSemantics(nestedEntry, args.body, materializedRequestSemantics);
+  const body = await cloneNestedBodyWithSemantics(nestedEntry, args.body, materializedRequestSemantics);
   const headers = stripSseRequestHeadersForNonStreamingFollowup(
     cloneStringHeaders(nestedMetadata.clientHeaders),
     body
@@ -767,7 +786,7 @@ export async function executeServerToolReenterPipeline(args: {
   const {
     nestedMetadata,
     nestedInput
-  } = buildServerToolNestedInput({
+  } = await buildServerToolNestedInput({
     entryEndpoint: args.entryEndpoint,
     fallbackEntryEndpoint: args.fallbackEntryEndpoint,
     requestId: args.requestId,
@@ -868,7 +887,7 @@ export async function executeServerToolClientInjectDispatch(args: {
   requestSemantics?: Record<string, unknown>;
   onMergeRuntimeMetaError?: BuildNestedMetadataLogger;
 }): Promise<{ ok: boolean; reason?: string }> {
-  const { nestedMetadata } = buildServerToolNestedInput({
+  const { nestedMetadata } = await buildServerToolNestedInput({
     entryEndpoint: args.entryEndpoint,
     fallbackEntryEndpoint: args.fallbackEntryEndpoint,
     requestId: args.requestId,

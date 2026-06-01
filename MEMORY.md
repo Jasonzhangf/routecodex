@@ -2010,3 +2010,7 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 
 - Responses JSON->SSE、SSE->JSON、direct passthrough raw replay、provider-request snapshot、Responses persisted request context 均已验证不把 internal/provider metadata 投射到 client response body、provider wire body 或持久 payload；snapshot root metadata 只作观测数据。
 - 已验证：metadata Jest 回归 15 suites / 76 tests passed；Rust `cargo test -p router-hotpath-napi hub_req_outbound_format_build --lib` 13 tests passed。
+
+## 2026-06-01 Responses previous_response_id continuation persistence
+- Verified: pending Responses tool calls must persist by response id until consumed; process restart/reset must reload the continuation before accepting /v1/responses previous_response_id + function_call_output. Missing response id must fail before provider, not forward orphan tool results.
+- Packaging baseline: routecodex global package must include sharedmodule/llmswitch-core/dist and package.json because runtime importCoreDist loads core modules from installed package.

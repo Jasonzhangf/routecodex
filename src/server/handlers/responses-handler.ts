@@ -67,6 +67,44 @@ function isResponsesSubmitToolOutputsPayload(payload: ResponsesPayload | undefin
   return Array.isArray(payload.tool_outputs);
 }
 
+function isResponsesFunctionCallOutputResumePayload(payload: ResponsesPayload | undefined): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  if (typeof payload.previous_response_id !== 'string' || !payload.previous_response_id.trim()) return false;
+  const input = Array.isArray(payload.input) ? payload.input : [];
+  return input.some((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+    return (item as Record<string, unknown>).type === 'function_call_output';
+  });
+}
+
+function normalizeResponsesResumeSubmitPayload(payload: ResponsesPayload): Record<string, unknown> {
+  if (Array.isArray(payload.tool_outputs)) {
+    return payload as Record<string, unknown>;
+  }
+  const previousResponseId = typeof payload.previous_response_id === 'string' ? payload.previous_response_id.trim() : '';
+  const input = Array.isArray(payload.input) ? payload.input : [];
+  const toolOutputs = input.flatMap((item): Record<string, unknown>[] => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    if (record.type !== 'function_call_output') return [];
+    const callId = typeof record.call_id === 'string' && record.call_id.trim()
+      ? record.call_id.trim()
+      : typeof record.tool_call_id === 'string' && record.tool_call_id.trim()
+        ? record.tool_call_id.trim()
+        : '';
+    if (!callId) return [];
+    return [{
+      tool_call_id: callId,
+      output: typeof record.output === 'string' ? record.output : JSON.stringify(record.output ?? '')
+    }];
+  });
+  return {
+    ...(payload as Record<string, unknown>),
+    ...(previousResponseId ? { response_id: previousResponseId } : {}),
+    tool_outputs: toolOutputs
+  };
+}
+
 
 function buildResponsesResumeRawRequestBody(originalPayload: ResponsesPayload, responseId?: string): Record<string, unknown> {
   const raw = originalPayload && typeof originalPayload === 'object' && !Array.isArray(originalPayload)
@@ -256,7 +294,7 @@ export async function handleResponses(
       entryEndpoint === '/v1/responses.submit_tool_outputs'
       || (
         entryEndpoint === '/v1/responses'
-        && isResponsesSubmitToolOutputsPayload(payload)
+        && (isResponsesSubmitToolOutputsPayload(payload) || isResponsesFunctionCallOutputResumePayload(payload))
       );
     const originalPayload = captureRawRequestBodyForMetadata(payload) as ResponsesPayload;
     const requestBodyMetadata = readRequestBodyMetadata(originalPayload);
@@ -269,13 +307,16 @@ export async function handleResponses(
     if (isSubmitToolOutputs) {
       const responseId = typeof payload?.response_id === 'string'
         ? payload.response_id
-        : options.responseIdFromPath;
+        : typeof payload?.previous_response_id === 'string'
+          ? payload.previous_response_id
+          : options.responseIdFromPath;
       if (!responseId) {
         res.status(400).json({ error: { message: 'response_id is required for submit_tool_outputs', type: 'invalid_request_error', code: 'bad_request' } });
         return;
       }
       try {
-        const resumeResult = await resumeResponsesConversation(responseId, payload, { requestId, ...responsesConversationPortScope });
+        const resumePayload = normalizeResponsesResumeSubmitPayload(payload);
+        const resumeResult = await resumeResponsesConversation(responseId, resumePayload, { requestId, ...responsesConversationPortScope });
         payload = (resumeResult.payload ?? {}) as ResponsesPayload;
         resumeMeta = resumeResult.meta;
         // Keep the synthetic submit endpoint through the pipeline.
@@ -390,7 +431,6 @@ export async function handleResponses(
         pipelineEntryEndpoint === '/v1/responses'
         || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
       )
-      && shouldPersistResponsesConversationForEndpoint(pipelineEntryEndpoint, payload)
     ) {
       await captureResponsesRequestContextForRequest({
         requestId,
@@ -483,7 +523,6 @@ export async function handleResponses(
         pipelineEntryEndpoint === '/v1/responses'
         || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
       )
-      && shouldPersistResponsesConversationForEndpoint(pipelineEntryEndpoint, payload)
     ) {
       result.metadata = {
         ...(result.metadata || {}),
@@ -509,7 +548,6 @@ export async function handleResponses(
         pipelineEntryEndpoint === '/v1/responses'
         || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
       )
-      && shouldPersistResponsesConversationForEndpoint(pipelineEntryEndpoint, payload)
     ) {
       try {
         const responseId = readResponsesResponseId(result.body);

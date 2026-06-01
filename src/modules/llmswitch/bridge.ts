@@ -54,6 +54,7 @@ export {
   clearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention,
   clearAllResponsesConversationState,
+  resetResponsesConversationStateForRestartSimulation,
   clearUnresolvedResponsesConversationRequests,
   createResponsesSseToJsonConverter,
   createResponsesJsonToSseConverter,
@@ -88,6 +89,7 @@ export {
   injectMcpToolsForResponsesJson,
   sanitizeFollowupText,
   sanitizeProviderOutboundPayload,
+  deriveFinishReasonNative,
   classifyProviderFailure,
   getNetworkErrorCodes
 } from './bridge/native-exports.js';

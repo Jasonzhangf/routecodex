@@ -1,6 +1,21 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
 import { STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
-import { detectRetryableEmptyAssistantResponseWithNative } from '../../../../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-node-result-semantics.js';
+import { requireCoreDist } from '../../../../modules/llmswitch/bridge/module-loader.js';
+
+type NativeChatProcessNodeResultSemanticsModule = {
+  detectRetryableEmptyAssistantResponseWithNative?: (body: unknown, requestSemantics?: Record<string, unknown>) => PayloadContractSignal | null;
+};
+
+let cachedNativeSemantics: NativeChatProcessNodeResultSemanticsModule | null = null;
+
+function getNativeSemantics(): NativeChatProcessNodeResultSemanticsModule {
+  if (!cachedNativeSemantics) {
+    cachedNativeSemantics = requireCoreDist<NativeChatProcessNodeResultSemanticsModule>(
+      'router/virtual-router/engine-selection/native-chat-process-node-result-semantics'
+    );
+  }
+  return cachedNativeSemantics;
+}
 
 type ProviderSnapshotWriteArgs = {
   phase:
@@ -52,7 +67,9 @@ export function detectRetryableEmptyAssistantResponse(
   body: unknown,
   requestSemantics?: Record<string, unknown>
 ): PayloadContractSignal | null {
-  return detectRetryableEmptyAssistantResponseWithNative(body, requestSemantics) as PayloadContractSignal | null;
+  const fn = getNativeSemantics().detectRetryableEmptyAssistantResponseWithNative;
+  if (typeof fn !== 'function') throw new Error('[response-contract] detectRetryableEmptyAssistantResponseWithNative unavailable');
+  return fn(body, requestSemantics);
 }
 
 function valueHasNonEmptyPayloadContent(value: unknown): boolean {

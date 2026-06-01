@@ -36,13 +36,7 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
                 tool_result_fallback_text: None,
                 normalize_function_name: Some("responses".to_string()),
                 allow_pending_terminal_tool_call: Some(true),
-                allow_orphan_tool_result: Some(
-                    payload
-                        .get("previous_response_id")
-                        .and_then(|v| v.as_str())
-                        .map(|v| !v.trim().is_empty())
-                        .unwrap_or(false),
-                ),
+                allow_orphan_tool_result: Some(false),
             })?
             .messages
         } else {
@@ -202,4 +196,34 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
     );
     output.insert("rawPayload".to_string(), Value::Object(raw_payload));
     Ok(Value::Object(output))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn responses_standardization_rejects_orphan_tool_result_even_with_previous_response_id() {
+        let input = json!({
+            "payload": {
+                "model": "minimax-m3-free",
+                "previous_response_id": "resp_previous",
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_function_snr978zyv21w_1",
+                    "output": "ok"
+                }]
+            },
+            "normalized": {
+                "id": "req_test",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "chat"
+            }
+        });
+
+        let err = coerce_standardized_request_from_payload(&input).unwrap_err();
+        assert!(err.contains("orphan_tool_result"));
+    }
 }
