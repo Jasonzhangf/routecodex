@@ -1715,3 +1715,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 HubPipeline normalize-request cleanup 精华
 - `hub-pipeline-normalize-request.ts` may keep Node/SSE materialization glue, but normalize semantics must be Rust `runHubPipelineStageWithNative({ stage: 'normalizeRequest' })`; old normalize block/helper files must stay physically absent.
+
+### 2026-06-01 native required export bootstrap 精华
+- 启动报 `native bootstrapVirtualRouterProvidersJson is required but unavailable` 不等于该函数本身缺失；先比对 `REQUIRED_NATIVE_HOTPATH_EXPORTS` 与 `router_hotpath_napi.node` 实际导出，任何 stale required export 都会让 native hotpath 前置校验整体 fail-fast。
+- clock/heartbeat 删除后若只剩 `resolveClockReservationFromContextJson` / `mergeClockReservationIntoMetadataJson` missing，应从 `native-router-hotpath-required-exports.ts` 物理删除 required 项，重建 core，并验证 local/global missing=0 后再重启服务。

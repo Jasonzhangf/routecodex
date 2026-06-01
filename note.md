@@ -13896,3 +13896,7 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 违规点：`sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts` 在 TS 中构造 assistant `tool_calls`、追加/删除 `tool_outputs`、构造 tool role messages、patch tool call arguments、过滤 executed tool_calls，并有 `catch { // ignore }` 静默吞错。
 - 修复：补 `hub-pipeline-stage-residue-audit` 红测；新增 Rust `run_servertool_orchestration_mutation_json` 承载上述工具响应/请求边界 mutation；TS `orchestration-blocks.ts` 收缩为 native 调用 + in-place replace 薄壳。
 - 验证：`hub-pipeline-stage-residue-audit` 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit` 绿；`cargo test -p router-hotpath-napi chat_servertool_orchestration::tests:: -- --nocapture` 绿；HTTP 黑盒 `responses-handler.stop-followup-metadata.blackbox.spec.ts` 绿；`npm run build:min` 绿并 bump 版本到 0.90.2646。
+
+## 2026-06-01 native required export bootstrap 修复
+- 启动报 `[virtual-router-native-hotpath] native bootstrapVirtualRouterProvidersJson is required but unavailable` 时，先跑 required-export vs `.node` probe；本次真实根因不是 bootstrap 函数缺失，而是 required 清单仍包含已移除的 `resolveClockReservationFromContextJson` / `mergeClockReservationIntoMetadataJson`，前置校验整体失败。
+- 修复：从 `native-router-hotpath-required-exports.ts` 移除两个 stale clock 导出，`build-core` 后 local/global missing=0，`bootstrapVirtualRouterProvidersJson` 为 function；全局安装 0.90.2647 后 5520/5555 health 200。
