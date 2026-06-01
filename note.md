@@ -13968,3 +13968,11 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 ## 2026-06-02 Hub Pipeline typed entrypoint migration planning
 - Added `docs/goals/hub-pipeline-typed-entrypoint-migration-plan.md` as the next-stage plan after topology contracts. It defines Phase 6A request typed entrypoint wrappers, Phase 6B response typed entrypoint wrappers, and Phase 6C old direct import residue/deletion gates.
 - This is planning only: no runtime flow, route selection, provider wire, or client response behavior changed.
+
+## 2026-06-02 Responses tool-result orphan + provider body isolation
+- Red: HTTP blackbox reproduced `/v1/responses` resumed tool output mismatch (`previous_response_id` restored but `function_call_output.call_id` not pending) must fail locally before provider; original mapper returned 502 or could let MiniMax/OpenCode surface 2013.
+- Fix: Rust no longer treats `previous_response_id` alone as permission for orphan tool results in `responses_context`, `hub_req_inbound_context_capture`, or `responses_openai_codec`; only explicit submit-tool-outputs shape remains allowed. HubPipeline string errors for orphan/missing tool id classify as `MALFORMED_REQUEST` so HTTP returns 400.
+- Fix: Rust req outbound compat strips top-level internal provider-body fields `semantics`, `processed`, `processingMetadata`, preventing `semantics.tools.clientToolsRaw` / MCP names from leaking into provider payload while preserving user content.
+- HTTP blackbox: `tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts` passed 7/7, including unknown previous_response_id, mismatched resumed tool id, persisted valid resume, Anthropic pairing, MCP filter, and OpenAI chat ordering.
+- Stage/Rust/build: `cargo test ... build_compat_result_strips_top_level_internal_fields` passed; `cargo test ... request_codec_rejects_orphan_tool_output_with_previous_response_id` passed; `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` passed 50/50; `npx tsc --noEmit --pretty false --skipLibCheck` passed; `npm run build:min` passed.
+- Caveat: broad `cargo test -p router-hotpath-napi req_outbound_stage3_compat -- --nocapture` still has existing/non-target failures in resp/profile tests; not fixed in this slice.

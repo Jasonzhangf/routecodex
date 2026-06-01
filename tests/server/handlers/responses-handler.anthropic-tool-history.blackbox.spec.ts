@@ -74,6 +74,195 @@ function findOpenAiChatToolOrderingViolation(payload: unknown): string | null {
 }
 
 describe('responses HTTP Anthropic tool history blackbox', () => {
+  it('rejects unknown previous_response_id tool outputs before provider send', async () => {
+    const artifacts = await bootstrapVirtualRouterConfig({
+      providers: {
+        minimax: {
+          id: 'minimax',
+          enabled: true,
+          type: 'openai',
+          baseURL: 'mock://minimax',
+          auth: { type: 'apikey', apiKey: 'mock' },
+          compatibilityProfile: 'openai-compatible',
+          models: { 'MiniMax-M3': {} }
+        }
+      },
+      routing: {
+        search: [{ id: 'search-minimax', targets: ['minimax.MiniMax-M3'] }]
+      }
+    } as any) as any;
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const pipeline = new HubPipeline({
+      virtualRouter: artifacts.config,
+      policy: { mode: 'off' }
+    });
+
+    let providerSendCount = 0;
+    const app = express();
+    app.use(express.json({ limit: '512kb' }));
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, {
+        executePipeline: async (input: any) => {
+          const result = await pipeline.execute({
+            id: 'req_http_unknown_previous_tool_output',
+            endpoint: '/v1/responses',
+            payload: input.body,
+            metadata: {
+              ...input.metadata,
+              entryEndpoint: '/v1/responses',
+              providerProtocol: 'openai-responses',
+              routeHint: 'search',
+              stream: false,
+              inboundStream: false,
+              outboundStream: false,
+            }
+          });
+          providerSendCount += 1;
+          return {
+            status: 500,
+            headers: {},
+            body: { error: { message: 'provider should not be reached', providerPayload: result.providerPayload } }
+          };
+        },
+        errorHandling: null,
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+    try {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          stream: false,
+          previous_response_id: 'resp_unknown_previous',
+          input: [
+            {
+              type: 'function_call_output',
+              call_id: 'call_function_snr978zyv21w_1',
+              output: '/Users/fanzhang/Documents/github/routecodex'
+            }
+          ]
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(400);
+      expect(text).toContain('Responses conversation expired or not found');
+      expect(providerSendCount).toBe(0);
+    } finally {
+      await closeServer(server);
+      pipeline.dispose?.();
+      clearAllResponsesConversationState();
+    }
+  });
+
+  it('rejects mismatched resumed tool output ids before provider send', async () => {
+    const artifacts = await bootstrapVirtualRouterConfig({
+      providers: {
+        minimax: {
+          id: 'minimax',
+          enabled: true,
+          type: 'openai',
+          baseURL: 'mock://minimax',
+          auth: { type: 'apikey', apiKey: 'mock' },
+          compatibilityProfile: 'openai-compatible',
+          models: { 'MiniMax-M3': {} }
+        }
+      },
+      routing: {
+        search: [{ id: 'search-minimax', targets: ['minimax.MiniMax-M3'] }]
+      }
+    } as any) as any;
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const pipeline = new HubPipeline({
+      virtualRouter: artifacts.config,
+      policy: { mode: 'off' }
+    });
+
+    let providerSendCount = 0;
+    const app = express();
+    app.use(express.json({ limit: '512kb' }));
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, {
+        executePipeline: async (input: any) => {
+          const result = await pipeline.execute({
+            id: `req_http_mismatched_resumed_tool_output_${providerSendCount}`,
+            endpoint: '/v1/responses',
+            payload: input.body,
+            metadata: {
+              ...input.metadata,
+              entryEndpoint: '/v1/responses',
+              providerProtocol: 'openai-responses',
+              routeHint: 'search',
+              stream: false,
+              inboundStream: false,
+              outboundStream: false,
+            }
+          });
+          providerSendCount += 1;
+          if (providerSendCount === 1) {
+            return {
+              status: 200,
+              headers: {},
+              body: {
+                id: 'resp_mismatched_resume_1',
+                object: 'response',
+                status: 'completed',
+                model: 'MiniMax-M3',
+                output: [{ type: 'function_call', call_id: 'call_expected', name: 'exec_command', arguments: '{"cmd":"pwd"}' }],
+                finish_reason: 'tool_calls'
+              }
+            };
+          }
+          return {
+            status: 400,
+            headers: {},
+            body: { error: { message: 'tool result tool id not found (2013)', providerPayload: result.providerPayload } }
+          };
+        },
+        errorHandling: null,
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+    try {
+      const first = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          stream: false,
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'run pwd' }] }],
+          tools: [{ name: 'exec_command', description: 'run command', input_schema: { type: 'object' } }]
+        })
+      });
+      expect(first.status).toBe(200);
+
+      const second = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          stream: false,
+          previous_response_id: 'resp_mismatched_resume_1',
+          input: [{ type: 'function_call_output', call_id: 'call_function_snr978zyv21w_1', output: 'cwd' }]
+        })
+      });
+      const text = await second.text();
+
+      expect(second.status).toBe(400);
+      expect(text).toContain('orphan_tool_result');
+      expect(text).toContain('call_function_snr978zyv21w_1');
+      expect(providerSendCount).toBe(1);
+    } finally {
+      await closeServer(server);
+      pipeline.dispose?.();
+      clearAllResponsesConversationState();
+    }
+  });
+
   it('persists pending Responses tool call ids across store reset before previous_response_id resume', async () => {
     const persistDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-responses-store-'));
     const previousStorePath = process.env.ROUTECODEX_RESPONSES_CONVERSATION_STORE;

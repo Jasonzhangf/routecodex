@@ -2,6 +2,16 @@ use serde_json::Value;
 
 use super::{CompatResult, ReqOutboundCompatInput};
 
+fn strip_top_level_provider_internal_fields(payload: Value) -> Value {
+    let Some(mut root) = payload.as_object().cloned() else {
+        return payload;
+    };
+    root.remove("semantics");
+    root.remove("processed");
+    root.remove("processingMetadata");
+    Value::Object(root)
+}
+
 fn normalize_profile(profile: Option<&String>) -> Option<String> {
     if let Some(profile) = profile {
         let trimmed = profile.trim();
@@ -19,7 +29,7 @@ pub(super) fn pick_compat_profile(input: &ReqOutboundCompatInput) -> Option<Stri
 
 pub(super) fn build_compat_result(payload: Value, profile: Option<String>) -> CompatResult {
     CompatResult {
-        payload,
+        payload: strip_top_level_provider_internal_fields(payload),
         applied_profile: profile,
         native_applied: true,
         rate_limit_detected: None,
@@ -83,5 +93,31 @@ pub(super) fn provider_protocol_matches(protocol: Option<&String>, expected: &st
     match protocol {
         Some(value) => value.trim().eq_ignore_ascii_case(expected),
         None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn build_compat_result_strips_top_level_internal_fields() {
+        let result = build_compat_result(
+            json!({
+                "model": "MiniMax-M3",
+                "messages": [{"role": "user", "content": "semantics word stays"}],
+                "semantics": {"tools": {"clientToolsRaw": [{"name": "mcp__node_repl"}]}},
+                "processed": {"status": "success"},
+                "processingMetadata": {"streaming": {"enabled": false}}
+            }),
+            None,
+        );
+        let root = result.payload.as_object().unwrap();
+        assert!(!root.contains_key("semantics"));
+        assert!(!root.contains_key("processed"));
+        assert!(!root.contains_key("processingMetadata"));
+        assert_eq!(root.get("model"), Some(&json!("MiniMax-M3")));
+        assert_eq!(root["messages"][0]["content"], json!("semantics word stays"));
     }
 }

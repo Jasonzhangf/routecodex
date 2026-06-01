@@ -1,4 +1,9 @@
+use crate::hub_bridge_actions::convert_bridge_input_to_chat_messages;
+use crate::hub_bridge_actions::BridgeInputToChatInput;
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
+use crate::hub_tool_session_compat::{
+    filter_namespace_mcp_aggregator_tool_definitions, normalize_tool_session_messages,
+};
 use crate::shared_tool_mapping::enforce_builtin_tool_schema;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
@@ -123,6 +128,26 @@ fn normalize_non_empty(value: Option<String>) -> Option<String> {
         return None;
     }
     Some(trimmed)
+}
+
+fn normalize_captured_responses_context(
+    input: Vec<Value>,
+    tools: Option<Vec<Value>>,
+    allow_orphan_tool_result: bool,
+) -> Result<(Vec<Value>, Option<Vec<Value>>), String> {
+    let mut tools_value = tools.clone().map(Value::Array).unwrap_or(Value::Null);
+    filter_namespace_mcp_aggregator_tool_definitions(&mut tools_value);
+    let normalized_tools = tools_value.as_array().cloned();
+    let converted = convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+        input,
+        tools: normalized_tools.clone(),
+        tool_result_fallback_text: Some(String::new()),
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: Some(allow_orphan_tool_result),
+    })?;
+    let messages = normalize_tool_session_messages(converted.messages);
+    Ok((messages, normalized_tools))
 }
 
 fn read_bool(value: Option<&Value>) -> Option<bool> {
@@ -443,6 +468,9 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
         }
         let mut name = read_trimmed_string(function_row.and_then(|v| v.get("name")))
             .or_else(|| read_trimmed_string(tool_row.get("name")));
+        if is_bare_client_mcp_bridge_tool(tool_row, name.as_deref()) {
+            continue;
+        }
         if name.is_none() {
             let lowered_type = raw_type.trim().to_ascii_lowercase();
             if lowered_type == "web_search" || lowered_type.starts_with("web_search") {
@@ -491,6 +519,21 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
     }
 
     mapped
+}
+
+fn is_bare_client_mcp_bridge_tool(tool_row: &Map<String, Value>, name: Option<&str>) -> bool {
+    let normalized = name.unwrap_or("").trim().to_ascii_lowercase();
+    if !normalized.starts_with("mcp__") {
+        return false;
+    }
+    if normalized.matches("__").count() >= 2 {
+        return false;
+    }
+    tool_row
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| !tools.is_empty())
+        .unwrap_or(false)
 }
 
 fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<Vec<Value>> {
@@ -730,8 +773,24 @@ pub fn capture_req_inbound_responses_context_snapshot(
         context.insert("requestId".to_string(), Value::String(request_id));
     }
 
+    let raw_tools = raw_request_row
+        .get("tools")
+        .and_then(|v| v.as_array())
+        .cloned();
     if let Some(input_array) = normalized_input {
+        let (normalized_messages, normalized_tools) = normalize_captured_responses_context(
+            input_array.clone(),
+            raw_tools.clone(),
+            is_submit_tool_outputs_resume,
+        )?;
         context.insert("input".to_string(), Value::Array(input_array));
+        context.insert(
+            "chatMessages".to_string(),
+            Value::Array(normalized_messages),
+        );
+        if let Some(tools) = normalized_tools.filter(|tools| !tools.is_empty()) {
+            context.insert("toolsNormalized".to_string(), Value::Array(tools));
+        }
     }
     if let Some(metadata) = raw_request_row.get("metadata").and_then(|v| v.as_object()) {
         context.insert("metadata".to_string(), Value::Object(metadata.clone()));
@@ -790,11 +849,19 @@ pub fn capture_req_inbound_responses_context_snapshot(
         context.insert("systemInstruction".to_string(), Value::String(instructions));
     }
 
-    if let Some(tools_raw) = raw_request_row.get("tools").and_then(|v| v.as_array()) {
-        context.insert("toolsRaw".to_string(), Value::Array(tools_raw.clone()));
-        let normalized = map_bridge_tools_to_chat(tools_raw.as_slice());
-        if !normalized.is_empty() {
-            context.insert("toolsNormalized".to_string(), Value::Array(normalized));
+    if let Some(tools_raw) = raw_tools.as_ref() {
+        let mut tools_raw_value = Value::Array(tools_raw.clone());
+        filter_namespace_mcp_aggregator_tool_definitions(&mut tools_raw_value);
+        let filtered_tools_raw = tools_raw_value.as_array().cloned().unwrap_or_default();
+        context.insert(
+            "toolsRaw".to_string(),
+            Value::Array(filtered_tools_raw.clone()),
+        );
+        if !context.contains_key("toolsNormalized") {
+            let normalized = map_bridge_tools_to_chat(filtered_tools_raw.as_slice());
+            if !normalized.is_empty() {
+                context.insert("toolsNormalized".to_string(), Value::Array(normalized));
+            }
         }
     }
 
@@ -1122,6 +1189,44 @@ mod tests {
     }
 
     #[test]
+    fn context_capture_normalizes_tool_history_and_namespace_mcp_tools() {
+        let raw_request = serde_json::json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"start"}]},
+                {"type":"function_call","call_id":"call_a","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"},
+                {"type":"function_call","call_id":"call_b","name":"exec_command","arguments":"{\"cmd\":\"ls\"}"},
+                {"type":"function_call_output","call_id":"call_a","output":"cwd"},
+                {"type":"function_call_output","call_id":"call_b","output":"files"}
+            ],
+            "tools": [
+                {"name":"exec_command","description":"Runs command","input_schema":{"type":"object"}},
+                {"name":"mcp__node_repl","description":"namespace aggregator","input_schema":{}}
+            ]
+        });
+        let captured =
+            capture_req_inbound_responses_context_snapshot(ResponsesContextCaptureInput {
+                raw_request,
+                request_id: Some("req_context_tool_history".to_string()),
+                tool_call_id_style: None,
+            })
+            .unwrap();
+        let input = captured["input"].as_array().unwrap();
+        assert_eq!(input[1]["type"].as_str(), Some("function_call"));
+        let chat_messages = captured["chatMessages"].as_array().unwrap();
+        assert_eq!(chat_messages[0]["role"].as_str(), Some("user"));
+        assert_eq!(chat_messages[1]["role"].as_str(), Some("assistant"));
+        assert_eq!(chat_messages[1]["tool_calls"].as_array().unwrap().len(), 2);
+        assert_eq!(chat_messages[2]["role"].as_str(), Some("tool"));
+        assert_eq!(chat_messages[3]["role"].as_str(), Some("tool"));
+        assert_eq!(captured["toolsRaw"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            captured["toolsRaw"][0]["name"].as_str(),
+            Some("exec_command")
+        );
+    }
+
+    #[test]
     fn normalize_responses_input_items_keeps_outputs_when_call_appears_later_in_batch() {
         let raw_request = json!({
           "tools": [
@@ -1344,6 +1449,36 @@ mod tests {
         assert_eq!(mapped[0]["name"], "mcp__computer_use");
         assert_eq!(mapped[0]["tools"][0]["name"], "get_app_state");
         assert_eq!(mapped[0]["tools"][0]["defer_loading"], Value::Bool(true));
+    }
+
+    #[test]
+    fn map_bridge_tools_to_chat_drops_bare_client_mcp_bridge_tools() {
+        let raw_tools = vec![json!({
+          "type": "function",
+          "name": "mcp__node_repl",
+          "description": "client MCP tool",
+          "tools": [{ "name": "js" }]
+        })];
+
+        let mapped = map_bridge_tools_to_chat(raw_tools.as_slice());
+        assert!(mapped.is_empty());
+    }
+
+    #[test]
+    fn map_bridge_tools_to_chat_preserves_concrete_mcp_function_tools() {
+        let raw_tools = vec![json!({
+          "type": "function",
+          "name": "mcp__computer_use__get_app_state",
+          "description": "Inspect app state",
+          "parameters": { "type": "object", "properties": {} }
+        })];
+
+        let mapped = map_bridge_tools_to_chat(raw_tools.as_slice());
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(
+            mapped[0]["function"]["name"],
+            "mcp__computer_use__get_app_state"
+        );
     }
 
     #[test]

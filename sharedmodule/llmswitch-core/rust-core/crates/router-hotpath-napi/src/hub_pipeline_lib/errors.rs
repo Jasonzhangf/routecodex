@@ -34,6 +34,9 @@ impl HubPipelineError {
 
 impl From<String> for HubPipelineError {
     fn from(message: String) -> Self {
+        if message.contains("orphan_tool_result") || message.contains("missing_tool_call_id") {
+            return Self::new("MALFORMED_REQUEST", message);
+        }
         Self::new("hub_pipeline_error", message)
     }
 }

@@ -62,6 +62,11 @@ fn build_request_from_responses_payload(
     let context_row = context
         .as_object()
         .ok_or_else(|| "responses-openai request context must be an object".to_string())?;
+    let chat_messages = context_row
+        .get("chatMessages")
+        .and_then(|v| v.as_array())
+        .filter(|messages| !messages.is_empty())
+        .cloned();
     let input = context_row
         .get("input")
         .and_then(|v| v.as_array())
@@ -71,21 +76,20 @@ fn build_request_from_responses_payload(
         .get("toolsNormalized")
         .and_then(|v| v.as_array())
         .cloned();
-    let has_previous_response_id = payload_row
-        .get("previous_response_id")
-        .and_then(Value::as_str)
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false);
-
-    let converted = convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
-        input,
-        tools: tools.clone(),
-        tool_result_fallback_text: Some(String::new()),
-        normalize_function_name: Some("responses".to_string()),
-        allow_pending_terminal_tool_call: Some(true),
-        allow_orphan_tool_result: Some(has_previous_response_id),
-    })?;
-    let messages = append_local_images(converted.messages).map_err(|e| e.to_string())?;
+    let messages = if let Some(messages) = chat_messages {
+        messages
+    } else {
+        convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+            input,
+            tools: tools.clone(),
+            tool_result_fallback_text: Some(String::new()),
+            normalize_function_name: Some("responses".to_string()),
+            allow_pending_terminal_tool_call: Some(true),
+            allow_orphan_tool_result: Some(false),
+        })?
+        .messages
+    };
+    let messages = append_local_images(messages).map_err(|e| e.to_string())?;
     if messages.is_empty() {
         return Err("Responses payload produced no chat messages".to_string());
     }
@@ -241,7 +245,7 @@ mod tests {
         );
         assert!(request.get("stream").is_none());
         assert_eq!(
-            request["tools"][0]["function"]["name"],
+            request["tools"][0]["name"],
             Value::String("exec_command".to_string())
         );
         assert_eq!(
@@ -249,14 +253,14 @@ mod tests {
             Value::String("req_responses_codec".to_string())
         );
         assert_eq!(
-            context["toolsNormalized"][0]["function"]["name"],
+            context["toolsNormalized"][0]["name"],
             Value::String("exec_command".to_string())
         );
     }
 
     #[test]
-    fn request_codec_allows_submit_tool_output_with_previous_response_id() {
-        let raw = run_responses_openai_request_codec_json(
+    fn request_codec_rejects_orphan_tool_output_with_previous_response_id() {
+        let err = run_responses_openai_request_codec_json(
             json!({
                 "model": "gpt-4.1",
                 "previous_response_id": "resp_prev_1",
@@ -271,19 +275,9 @@ mod tests {
             .to_string(),
             Some(json!({ "requestId": "req_responses_submit_tool_output" }).to_string()),
         )
-        .unwrap();
-
-        let value: Value = serde_json::from_str(&raw).unwrap();
-        let request = &value["request"];
-        assert_eq!(request["model"], Value::String("gpt-4.1".to_string()));
-        assert_eq!(
-            request["messages"][0]["role"],
-            Value::String("tool".to_string())
-        );
-        assert_eq!(
-            request["messages"][0]["tool_call_id"],
-            Value::String("native:run_command:3".to_string())
-        );
+        .unwrap_err();
+        assert!(err.to_string().contains("orphan_tool_result"));
+        assert!(err.to_string().contains("native:run_command:3"));
     }
 
     #[test]

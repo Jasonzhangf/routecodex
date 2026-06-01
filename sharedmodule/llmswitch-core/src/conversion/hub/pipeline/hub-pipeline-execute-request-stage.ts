@@ -15,7 +15,8 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
   config: HubPipelineConfig;
 }): Promise<HubPipelineResult> {
   const { normalized, config, routerEngine } = args;
-  const route = routerEngine.route(normalized.payload as never, normalized.metadata as never);
+  const route = normalized.metadata.__routecodexPreselectedRoute
+    ?? routerEngine.route(normalized.payload as never, normalized.metadata as never);
   const metadata = {
     ...normalized.metadata,
     __routecodexPreselectedRoute: route,
@@ -41,7 +42,19 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     },
   });
   if (nativePlan.success !== true) {
-    throw new Error(nativePlan.error?.message ?? 'Rust HubPipeline request path failed');
+    const error = new Error(nativePlan.error?.message ?? 'Rust HubPipeline request path failed') as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      details?: unknown;
+    };
+    error.code = nativePlan.error?.code;
+    error.details = nativePlan.error?.details;
+    if (nativePlan.error?.code === 'MALFORMED_REQUEST') {
+      error.status = 400;
+      error.statusCode = 400;
+    }
+    throw error;
   }
   const outputMetadata = nativePlan.metadata ?? {};
   const providerPayload = nativePlan.payload;
