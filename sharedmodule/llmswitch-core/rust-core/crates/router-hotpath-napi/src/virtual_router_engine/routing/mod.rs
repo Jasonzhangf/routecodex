@@ -6,11 +6,10 @@ mod metadata;
 mod selection;
 mod source_normalizer;
 mod target_expander;
+mod utils;
 
 #[allow(unused_imports)]
 pub(crate) use bootstrap::{bootstrap_virtual_router_routing_json, NormalizedRoutePoolConfig};
-pub(crate) use source_normalizer::normalize_routing;
-pub(crate) use target_expander::expand_routing_table;
 #[allow(unused_imports)]
 pub(crate) use config::{
     build_route_queue, default_pool_supports_capability, filter_pools_by_capability, parse_routing,
@@ -32,3 +31,5 @@ pub(crate) use selection::{
     filter_candidates_by_state, resolve_instruction_process_mode_for_selection,
     resolve_instruction_target, InstructionTargetMatchMode,
 };
+pub(crate) use source_normalizer::normalize_routing;
+pub(crate) use target_expander::expand_routing_table;

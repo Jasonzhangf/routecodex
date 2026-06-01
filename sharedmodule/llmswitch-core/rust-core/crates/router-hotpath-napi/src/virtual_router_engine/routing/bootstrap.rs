@@ -1,6 +1,6 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Number, Value};
+use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::shared_json_utils::read_trimmed_string as read_optional_string;
@@ -8,6 +8,9 @@ use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::load_balancer::LoadBalancingPolicy;
 
 use super::config::RoutePoolTier;
+use super::utils::{
+    normalize_positive_i64, normalize_priority_value, parse_bool_like, scalar_to_trimmed_string,
+};
 pub(crate) const PROVIDER_LEVEL_POOL_ALIAS: &str = "pool";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,9 +108,9 @@ pub(crate) fn bootstrap_virtual_router_routing_json(
 
     let normalized_routing = normalize_routing_impl(&routing_source_map);
     let (expanded_routing, target_keys) =
-        expand_routing_table_impl(&normalized_routing, &alias_index, &model_index).map_err(|error| {
-            napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error))
-        })?;
+        expand_routing_table_impl(&normalized_routing, &alias_index, &model_index).map_err(
+            |error| napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error)),
+        )?;
 
     let output = RoutingBootstrapOutput {
         routing_source: normalized_routing,
@@ -831,41 +834,6 @@ fn normalize_target_list(value: &Value) -> Vec<String> {
     }
 }
 
-fn scalar_to_trimmed_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        }
-        Value::Number(raw) => {
-            let trimmed = raw.to_string();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            }
-        }
-        _ => None,
-    }
-}
-
-fn normalize_priority_value(value: Option<&Value>, fallback: i64) -> i64 {
-    match value {
-        Some(Value::Number(number)) => normalize_json_number(number).unwrap_or(fallback),
-        Some(Value::String(raw)) => raw
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .map(|parsed| parsed as i64)
-            .unwrap_or(fallback),
-        _ => fallback,
-    }
-}
-
 fn parse_route_entry(
     entry: &str,
     alias_index: &BTreeMap<String, Vec<String>>,
@@ -932,43 +900,6 @@ fn split_model_priority(raw: &str) -> (String, i64) {
 
 fn build_runtime_key(provider_id: &str, key_alias: &str) -> String {
     format!("{}.{}", provider_id, key_alias)
-}
-
-fn parse_bool_like(value: &Value) -> Option<bool> {
-    if let Some(boolean) = value.as_bool() {
-        return Some(boolean);
-    }
-    value
-        .as_str()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.eq_ignore_ascii_case("true"))
-}
-
-fn normalize_positive_i64(value: &Value) -> Option<i64> {
-    let parsed = match value {
-        Value::Number(number) => normalize_json_number(number),
-        Value::String(raw) => raw.trim().parse::<f64>().ok().map(|parsed| parsed as i64),
-        _ => None,
-    }?;
-    if parsed > 0 {
-        Some(parsed)
-    } else {
-        None
-    }
-}
-
-fn normalize_json_number(number: &Number) -> Option<i64> {
-    if let Some(value) = number.as_i64() {
-        return Some(value);
-    }
-    number.as_f64().and_then(|value| {
-        if value.is_finite() {
-            Some(value as i64)
-        } else {
-            None
-        }
-    })
 }
 
 #[cfg(test)]
@@ -1103,7 +1034,6 @@ mod tests {
         );
     }
 
-
     // ========== 黑盒红测：锁定 bootstrap_virtual_router_routing_json 行为 ==========
 
     #[test]
@@ -1126,10 +1056,64 @@ mod tests {
         assert!(routing_obj.get("default").is_some());
         let pools = routing_obj.get("default").unwrap().as_array().unwrap();
         assert_eq!(pools.len(), 1);
-        let targets: Vec<String> = pools[0].get("targets").unwrap().as_array().unwrap()
-            .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        let targets: Vec<String> = pools[0]
+            .get("targets")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
         // Should expand "openai.gpt-4o" to "openai.key1.gpt-4o"
         assert!(targets.iter().any(|t| t.contains("gpt-4o")));
+    }
+
+    #[test]
+    fn split_wrappers_match_bootstrap_json_routing_semantics() {
+        let routing = json!({
+            "default": [{
+                "id": "default",
+                "priority": "7.8",
+                "force": "true",
+                "targets": [" openai.gpt-4o "]
+            }]
+        });
+        let alias_index = BTreeMap::from([("openai".to_string(), vec!["k1".to_string()])]);
+        let model_index = BTreeMap::from([(
+            "openai".to_string(),
+            ModelIndexEntry {
+                declared: true,
+                models: vec!["gpt-4o".to_string()],
+            },
+        )]);
+        let routing_map = routing.as_object().unwrap();
+
+        let normalized = crate::virtual_router_engine::routing::normalize_routing(routing_map);
+        assert_eq!(normalized["default"][0].priority, 7);
+        assert_eq!(normalized["default"][0].force, Some(true));
+        assert_eq!(normalized["default"][0].targets, vec!["openai.gpt-4o"]);
+
+        let (expanded, target_keys) = crate::virtual_router_engine::routing::expand_routing_table(
+            &normalized,
+            &alias_index,
+            &model_index,
+        )
+        .unwrap();
+        assert_eq!(expanded["default"][0].targets, vec!["openai.k1.gpt-4o"]);
+        assert_eq!(target_keys, vec!["openai.k1.gpt-4o"]);
+
+        let bootstrap = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            json!({ "openai": ["k1"] }).to_string(),
+            json!({ "openai": { "declared": true, "models": ["gpt-4o"] } }).to_string(),
+        )
+        .unwrap();
+        let bootstrap_output: serde_json::Value = serde_json::from_str(&bootstrap).unwrap();
+        assert_eq!(
+            bootstrap_output["routing"]["default"],
+            serde_json::to_value(expanded["default"].clone()).unwrap()
+        );
+        assert_eq!(bootstrap_output["targetKeys"], json!(["openai.k1.gpt-4o"]));
     }
 
     #[test]
@@ -1142,7 +1126,7 @@ mod tests {
             }]
         });
         let alias_index = json!({ "openai": ["key1"], "anthropic": ["key2"] });
-        let model_index = json!({ 
+        let model_index = json!({
             "openai": { "declared": true, "models": ["gpt-4o"] },
             "anthropic": { "declared": true, "models": ["claude-sonnet"] }
         });
@@ -1179,10 +1163,22 @@ mod tests {
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
 
-        let pools = output.get("routing").unwrap().get("coding").unwrap().as_array().unwrap();
+        let pools = output
+            .get("routing")
+            .unwrap()
+            .get("coding")
+            .unwrap()
+            .as_array()
+            .unwrap();
         assert_eq!(pools.len(), 1);
-        let targets: Vec<String> = pools[0].get("targets").unwrap().as_array().unwrap()
-            .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        let targets: Vec<String> = pools[0]
+            .get("targets")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
         assert!(targets.iter().any(|t| t.contains("gpt-4o")));
     }
 
@@ -1206,9 +1202,21 @@ mod tests {
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
 
-        let pools = output.get("routing").unwrap().get("default").unwrap().as_array().unwrap();
-        let targets: Vec<String> = pools[0].get("targets").unwrap().as_array().unwrap()
-            .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        let pools = output
+            .get("routing")
+            .unwrap()
+            .get("default")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        let targets: Vec<String> = pools[0]
+            .get("targets")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
         assert!(targets.contains(&"mimo.key1.mimo-v2.5".to_string()));
         assert!(targets.contains(&"mimo.key2.mimo-v2.5".to_string()));
         assert!(!targets.contains(&"mimo.mimo-v2.5".to_string()));
@@ -1223,7 +1231,7 @@ mod tests {
             ]
         });
         let alias_index = json!({ "a": ["k1"], "b": ["k2"] });
-        let model_index = json!({ 
+        let model_index = json!({
             "a": { "declared": true, "models": ["model"] },
             "b": { "declared": true, "models": ["model"] }
         });
@@ -1302,7 +1310,7 @@ mod tests {
             "default": ["anthropic.claude-sonnet"]
         });
         let alias_index = json!({ "openai": ["k1"], "anthropic": ["k2"] });
-        let model_index = json!({ 
+        let model_index = json!({
             "openai": { "declared": true, "models": ["gpt-4o"] },
             "anthropic": { "declared": true, "models": ["claude-sonnet"] }
         });
@@ -1356,7 +1364,7 @@ mod tests {
             ]
         });
         let alias_index = json!({ "a": ["k1"], "b": ["k2"] });
-        let model_index = json!({ 
+        let model_index = json!({
             "a": { "declared": true, "models": ["model"] },
             "b": { "declared": true, "models": ["model"] }
         });
@@ -1369,9 +1377,17 @@ mod tests {
         .unwrap();
         let output: serde_json::Value = serde_json::from_str(&result).unwrap();
 
-        let pools = output.get("routing").unwrap().get("default").unwrap().as_array().unwrap();
-        let backup = pools.iter().find(|p| p.get("id").unwrap().as_str().unwrap() == "backup").unwrap();
+        let pools = output
+            .get("routing")
+            .unwrap()
+            .get("default")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        let backup = pools
+            .iter()
+            .find(|p| p.get("id").unwrap().as_str().unwrap() == "backup")
+            .unwrap();
         assert_eq!(backup.get("backup").unwrap().as_bool().unwrap(), true);
     }
-
 }

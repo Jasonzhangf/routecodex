@@ -76,3 +76,31 @@ pub(crate) fn normalize_priority_value(value: Option<&Value>, fallback: i64) -> 
         _ => fallback,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn scalar_to_trimmed_string_accepts_strings_and_numbers_only() {
+        assert_eq!(
+            scalar_to_trimmed_string(&json!("  provider.model  ")),
+            Some("provider.model".to_string())
+        );
+        assert_eq!(scalar_to_trimmed_string(&json!(12)), Some("12".to_string()));
+        assert_eq!(scalar_to_trimmed_string(&json!("   ")), None);
+        assert_eq!(scalar_to_trimmed_string(&json!(true)), None);
+    }
+
+    #[test]
+    fn bool_and_number_normalizers_preserve_bootstrap_config_semantics() {
+        assert_eq!(parse_bool_like(&json!(true)), Some(true));
+        assert_eq!(parse_bool_like(&json!("false")), Some(false));
+        assert_eq!(normalize_positive_i64(&json!(3.9)), Some(3));
+        assert_eq!(normalize_positive_i64(&json!("4.2")), Some(4));
+        assert_eq!(normalize_positive_i64(&json!(0)), None);
+        assert_eq!(normalize_priority_value(Some(&json!("7.8")), 100), 7);
+        assert_eq!(normalize_priority_value(Some(&json!({})), 100), 100);
+    }
+}

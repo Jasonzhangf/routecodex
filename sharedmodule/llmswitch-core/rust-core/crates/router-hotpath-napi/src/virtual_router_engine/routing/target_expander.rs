@@ -1,8 +1,6 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
-use serde_json::Value;
-
-use super::bootstrap::{NormalizedRoutePoolConfig, ModelIndexEntry, ExpandedTargetCandidate, ParsedRouteEntry, PROVIDER_LEVEL_POOL_ALIAS};
+use super::bootstrap::{ModelIndexEntry, NormalizedRoutePoolConfig};
 use super::config::RoutePoolTier;
 
 /// Expand normalized routing table with provider aliases and model indices.
