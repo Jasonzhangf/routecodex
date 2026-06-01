@@ -4,7 +4,7 @@ import {
   buildProcessedRequest,
   buildSuccessResult
 } from './chat-process-node-result.js';
-import { applyRequestToolGovernance } from './chat-process-governance-orchestration.js';
+import { runReqProcessStage1ToolGovernance } from '../pipeline/stages/req_process/req_process_stage1_tool_governance/index.js';
 import { shouldRunHubChatProcessWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 import type { HubProcessNodeResult } from './chat-process-node-result.js';
 
@@ -30,15 +30,18 @@ export async function runHubChatProcess(options: HubChatProcessOptions): Promise
       options.requestId,
       options.entryEndpoint
     );
-    const governed = shouldRunGovernance
-      ? await applyRequestToolGovernance(options.request, {
+    const processedRequest = shouldRunGovernance
+      ? (await runReqProcessStage1ToolGovernance({
+          request: options.request,
+          rawPayload: options.rawPayload,
+          metadata: options.metadata,
           entryEndpoint: options.entryEndpoint,
           requestId: options.requestId,
-          metadata: options.metadata,
-          rawPayload: options.rawPayload
-        })
-      : options.request;
-    const processedRequest = buildProcessedRequest(governed);
+        })).processedRequest
+      : buildProcessedRequest(options.request);
+    if (!processedRequest) {
+      throw new Error('Rust req_process total stage returned no processed request');
+    }
     return {
       processedRequest,
       nodeResult: buildSuccessResult(startTime, processedRequest)

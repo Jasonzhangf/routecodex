@@ -833,4 +833,22 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(findings).toEqual([]);
   });
+
+  it('legacy runHubChatProcess API must enter req_process total stage instead of TS governance orchestration', () => {
+    const processRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/process',
+    );
+    const source = fs.readFileSync(path.join(processRoot, 'chat-process.ts'), 'utf8');
+
+    expect(source).toContain('runReqProcessStage1ToolGovernance');
+    const findings = collectMatches(source, [
+      { label: 'imports legacy TS governance orchestration', pattern: /chat-process-governance-orchestration\.js/ },
+      { label: 'calls legacy TS applyRequestToolGovernance', pattern: /\bapplyRequestToolGovernance\s*\(/ },
+      { label: 'imports direct req_process native helper', pattern: /native-hub-pipeline-req-process-semantics\.js/ },
+      { label: 'calls direct req_process native helper', pattern: /\bapplyReqProcessToolGovernanceWithNative\s*\(/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
 });

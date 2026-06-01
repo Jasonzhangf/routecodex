@@ -13827,3 +13827,16 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - `hub_req_outbound_format_build.rs` 红测：`test_build_openai_responses_request_preserves_tool_semantics_from_messages` 先红，证明 chat `tool_calls`/tool result 被错误降级为 Responses `message`。
 - 修复：request outbound Rust 编码将 assistant `tool_calls` 映射为 Responses `function_call`，tool role 映射为 `function_call_output`，避免工具语义变普通文本。
 - 绿测：`cargo test -p router-hotpath-napi test_build_openai_responses_request_preserves_tool_semantics_from_messages -- --nocapture` 与 `cargo test -p router-hotpath-napi hub_req_outbound_format_build::tests -- --nocapture` 通过。
+
+## 2026-06-01 metadata 隔离实现进展
+
+- 已提交 `971d7c3e5 fix: isolate metadata from provider requests`：Anthropic client 不再恢复 body metadata；OpenAI/Anthropic SDK 不再从 body/rawBody metadata 生成 provider options/request；Rust outbound 不再从 `payload.metadata.context` 回填 provider payload；新增 provider outbound metadata fail-fast invariant；AGENTS/RCC skill/goal 文档已落盘。
+- 已提交 `710acff93 fix: stop reading request body metadata`：Windsurf session key 与 Anthropic remote image policy 改为 runtime/context metadata，不再读 request body metadata。
+- 已提交 `62f11f32f fix: ignore response body metadata usage`：usage aggregator 不再从 response body/data/payload metadata.usage 抽取 token usage，避免 response metadata 成为数据通道。
+- 已提交 `2e693ad81 fix: require runtime metadata for responses direct`：Responses direct/passthrough 的 direct flag、entryEndpoint、routeParams 改走 runtime metadata；body.metadata 进入 direct passthrough 会 fail-fast。
+- 验证：Jest metadata 定向 35/35 绿；Rust `cargo test -p router-hotpath-napi hub_req_outbound_format_build --lib` 12/12 绿；第二批/第三批/第四批定向用例通过。已知非本批红：`windsurf-context-continuity.spec.ts` 全文件已有 context delta 4 红；`protocol-http-providers.unit.test.ts` 全文件已有 qwen max_tokens 断言红。
+
+## 2026-06-01 Hub Pipeline runHubChatProcess closeout
+- 红测：`legacy runHubChatProcess API must enter req_process total stage instead of TS governance orchestration` 先红，证明 legacy `runHubChatProcess` 仍 import/call `chat-process-governance-orchestration`，绕过 req_process total stage API。
+- 修复：`chat-process.ts` 改为调用 `runReqProcessStage1ToolGovernance`，不再直接调用 `applyReqProcessToolGovernanceWithNative` / TS governance orchestration；非治理路径保留 native `buildProcessedRequest` 封装。
+- 验证：`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 40/40 passed；`npx tsc --noEmit` exit 0。
