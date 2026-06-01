@@ -9,14 +9,14 @@
 6. **非授权不破坏**：未获明确授权，不做删除/回滚/迁移/发布类破坏动作。
 7. **禁止进程杀戮命令**：禁用 `kill/pkill/killall/taskkill/lsof|xargs kill` 等。
 8. **llmswitch-core 禁止新增 TS 功能代码**：如有必要，一律转为 Rust 实现，TS 仅允许保留最小调用壳层。
-9. **Hub Pipeline / Chat Process 必须 Rust-only**：凡属 Hub Pipeline / chat process / req_process / resp_process / servertool followup orchestration 的语义、判定、修复、兼容、sanitize、tool list 注入与裁剪，唯一真源必须在 Rust，TS 收缩为薄壳转发。
+9. **Hub Pipeline / Chat Process 必须 Rust-only**：凡属 Hub Pipeline / chat process / req_chatprocess / resp_chatprocess / servertool followup orchestration 的语义、判定、修复、兼容、sanitize、tool list 注入与裁剪，唯一真源必须在 Rust，TS 收缩为薄壳转发。
 10. **只写必要代码，且必须最小合规**：新增/修改代码前，先证明它是完成当前需求所必需的；禁止加入用户未要求、问题未证明需要、或不影响验收的代码。实现必须保持最小合规面，能删则删，能不加就不加。
 11. **Windsurf 工具禁止伪装 native**：Windsurf 中只有已证明完全等价的工具才能 native-map；`apply_patch` 不得映射到 `write_to_file/propose_code`，必须走 RCC 文本收割或显式 servertool。
 12. **Hub Pipeline / Virtual Router 禁止 provider 特例**：Hub Pipeline 与 Virtual Router 永远只承载协议、路由、工具治理的通用语义；禁止写入任何 provider-specific 分支、shape 修补、上下文补偿或 Windsurf/Cascade 特例。provider 差异只能在对应 Provider runtime 内解决。
 13. **direct passthrough 禁止换壳转换**：router-direct/provider-direct 的唯一职责是 provider passthrough + hooks；禁止进入 HubPipeline response conversion/chat-process/servertool response orchestration，禁止新增 direct response 专用壳、SSE materialize/remap/canonicalize、fallback/patch/shape 修补；禁止 direct 5xx/转换错误通过 `routecodexSameProtocolDirectDisabled` 重入 executor/reroute。
-14. **Hub Pipeline 流水线锁定原则**：靠“类型不可接 + 运行时必拦 + 导出不可见 + 红测必红”锁住 `req_inbound -> req_process -> req_outbound -> resp_inbound -> resp_process -> resp_outbound`，禁止靠约定维护阶段边界；`req_inbound` 是唯一标准化入口，`req_process` 禁止协议转换，`req_outbound` 是唯一 provider wire build。
+14. **Hub Pipeline 流水线锁定原则**：靠“类型不可接 + 运行时必拦 + 导出不可见 + 红测必红”锁住 `req_inbound -> req_chatprocess -> req_outbound -> resp_inbound -> resp_chatprocess -> resp_outbound`，禁止靠约定维护阶段边界；`req_inbound` 是唯一标准化入口，`req_chatprocess` 禁止协议转换，`req_outbound` 是唯一 provider wire build。
 15. **metadata 请求/响应闭环隔离**：metadata 只能作为单个 request/response 闭环内的无状态内部控制语义 carrier；provider 出站 body、provider SDK options、client response body、provider/runtime 持久状态均不得携带内部 metadata。闭环结束必须释放，不得跨 requestId / pipelineId / port(serverId) / sessionId / conversationId 复用或污染。禁止 `body.metadata -> provider options`、`rawBody.metadata -> SDK request`、`payload.metadata.context -> provider wire payload`、snapshot metadata 进入正常 live path。
-16. **全局流水线类型拓扑锁**：请求链、响应链、错误链、metadata carrier、Virtual Router、Provider Runtime、Server Runtime 的关键数据结构必须按“模块 + 方向 + 节点序号 + 节点语义”唯一命名并唯一拥有；只允许相邻节点 builder/parser 转换，禁止跨节点 shortcut、同义 DTO、重复 shape、散落 `From` 转换、裸 `unknown`/`Record`/`Value` 承载关键语义。拓扑、命名、插节点规则真源见 `docs/design/pipeline-type-topology-and-module-boundaries.md`。
+16. **全局流水线类型拓扑锁**：请求链、响应链、错误链、metadata carrier、Virtual Router、Provider Runtime、Server Runtime 的关键数据结构必须按“模块 + 阶段 + 节点序号 + 节点语义”唯一命名并唯一拥有；Hub 主链阶段固定为 `ReqInbound` / `ReqChatProcess` / `ReqOutbound` / `RespInbound` / `RespChatProcess` / `RespOutbound`。只允许相邻节点 builder/parser 转换，禁止跨节点 shortcut、同义 DTO、重复 shape、散落 `From` 转换、裸 `unknown`/`Record`/`Value` 承载关键语义。拓扑、命名、插节点规则真源见 `docs/design/pipeline-type-topology-and-module-boundaries.md`。
 
 ## Metadata 生命周期硬边界（醒目）
 1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。
@@ -28,21 +28,21 @@
 
 ## Hub Pipeline 节点职责硬边界（醒目）
 1. **req_inbound**：只做入口协议解析、上下文捕获、原始语义保留；不得伪造工具结果、不得吞非法工具顺序。
-2. **req_process**：请求侧工具治理唯一入口；工具声明注入/裁剪、文本工具 harvest、apply_patch/servertool/MCP/native 工具治理必须 Rust-only。
+2. **req_chatprocess**：请求侧工具治理唯一入口；工具声明注入/裁剪、文本工具 harvest、apply_patch/servertool/MCP/native 工具治理必须 Rust-only。
 3. **virtual_router**：只做路由分类与目标选择；不得修补 payload、不得处理工具结果、不得读取别的端口或别的路由池状态。
 4. **req_outbound**：只把 Hub 规范语义编码成 provider 协议；不得把 `tool_calls` / `function_call_output` / servertool 语义降级为普通文本。
 5. **provider_runtime**：只做 transport/auth/provider 内部协议兼容；不得承担 Hub 工具治理，provider-specific 差异不得写入 Hub Pipeline。
 6. **resp_inbound**：只把 provider 原始响应解析回 Hub 规范响应；SSE/JSON 解析失败必须显式错误。
-7. **resp_process**：响应侧工具治理唯一入口；文本工具收割、servertool followup、apply_patch 逆向转换、internal tool 剥离必须 Rust-only。
+7. **resp_chatprocess**：响应侧工具治理唯一入口；文本工具收割、servertool followup、apply_patch 逆向转换、internal tool 剥离必须 Rust-only。
 8. **resp_outbound**：只把 Hub 响应投影回客户端入口协议；不得修复请求侧历史污染、不得 provider 特例、不得吞上游错误。
 9. **servertool_followup**：只能基于 origin snapshot 重建 followup；不得从当前污染 payload 猜测补偿。
 10. **审计真源**：完整执行文档见 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
 
 ## 全局流水线类型拓扑（醒目）
-1. **双向链条固定**：请求链必须从 `ServerReqIn01ClientRaw` 单向进入 Hub/VR/Provider；响应链必须从 `ProviderRespIn01Raw` 单向回到 Hub/Server；错误链必须从发生点进入统一错误 pipeline，不得反向补请求 payload。
-2. **命名模板固定**：`<Module><Direction><NN><Node>`，例如 `HubReqIn01RawEnvelope`、`HubReqProc03GovernedRequest`、`VrRoute04SelectedTarget`、`ProviderReqOut05WirePayload`、`ServerRespOut08ClientFrame`、`ErrorErr03RuntimeClassified`。
+1. **双向链条固定**：请求链必须从 `ServerReqInbound01ClientRaw` 单向进入 Hub/VR/Provider；响应链必须从 `ProviderRespInbound01Raw` 单向回到 Hub/Server；错误链必须从发生点进入统一错误 pipeline，不得反向补请求 payload。
+2. **命名模板固定**：`<Module><Phase><NN><Node>`，例如 `HubReqInbound02Standardized`、`HubReqChatProcess03Governed`、`VrRoute04SelectedTarget`、`ProviderReqOutbound06WirePayload`、`ServerRespOutbound05ClientFrame`、`ErrorErr03RuntimeClassified`。
 3. **节点序号是位置**：序号表达拓扑位置，不表达版本；新增中间节点默认禁止。确需新增时必须先更新 `docs/design/pipeline-type-topology-and-module-boundaries.md`，优先归入既有节点内部 block / carrier；禁止重编号既有节点，禁止 `03b` / `03_1` / `03.5` 临时编号。
-4. **唯一 builder/parser**：每个节点类型只能有一个 owning builder/parser；转换函数必须写明相邻来源和目标，如 `build_hub_req_proc_03_from_hub_req_in_02`。
+4. **唯一 builder/parser**：每个节点类型只能有一个 owning builder/parser；转换函数必须写明相邻来源和目标，如 `build_hub_req_chatprocess_03_from_hub_req_inbound_02`。
 5. **禁止跨链污染**：metadata、error、debug/snapshot、provider runtime state 都不能伪装成 req/resp 正常 payload；进入下一链路前必须经对应 carrier 类型或错误类型显式投影。
 6. **红测锁边界**：所有关键链路必须有红测扫描非相邻转换、内部字段泄漏、重复 DTO、旧 TS 语义壳复活；红测路径和禁止模式写入拓扑文档。
 

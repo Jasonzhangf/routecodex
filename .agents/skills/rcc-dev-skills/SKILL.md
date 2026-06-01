@@ -8,8 +8,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ## Hub Pipeline 工具边界审计硬规则（最醒目）
 
 - 审计/修复 Hub Pipeline 工具问题前，先读 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
-- `req_inbound` 只解析入口协议和捕获上下文；`req_process` 是请求侧工具治理唯一入口；`req_outbound` 只做 Hub 语义到 provider 协议编码，禁止把工具语义降级成普通文本。
-- `resp_inbound` 只解析 provider 响应；`resp_process` 是响应侧工具治理唯一入口；`resp_outbound` 只做客户端协议投影，禁止修补请求侧历史污染。
+- 架构命名按 `inbound / chatprocess / outbound` 三段：`req_inbound` 只解析入口协议和捕获上下文；`req_chatprocess` 是请求侧工具治理唯一入口；`req_outbound` 只做 Hub 语义到 provider 协议编码，禁止把工具语义降级成普通文本。
+- 响应同构：`resp_inbound` 只解析 provider 响应；`resp_chatprocess` 是响应侧工具治理唯一入口；`resp_outbound` 只做客户端协议投影，禁止修补请求侧历史污染。
 - 工具声明、文本工具 harvest、apply_patch、servertool、MCP/native 工具治理、sanitize、tool list 注入/裁剪必须 Rust-only；TS 只能是 JSON parse/serialize + native 调用薄壳。
 - Virtual Router 只路由，不修 payload；Provider 只 transport/auth/provider 内部兼容，不做 Hub 工具治理；direct/provider passthrough 禁止进入 Hub Pipeline conversion。
 - 发现违规必须先写红测，红测要覆盖真实 Hub Pipeline stage 或 HTTP 黑盒入口；禁止 mock 私有方法冒充黑盒。
@@ -1725,5 +1725,9 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 全局安装包必须携带 `sharedmodule/llmswitch-core/dist`，否则 `importCoreDist` 在 release 包中会启动失败。
 
 ## 2026-06-01 Pipeline type topology 精华
-- 全局流水线类型按 `<Module><Direction><NN><Node>` 命名；请求链、响应链、错误链、metadata carrier 都必须只允许相邻节点 builder/parser 转换。
+- 全局流水线类型按 `<Module><Phase><NN><Node>` 命名；Hub 主链 phase 固定为 `ReqInbound` / `ReqChatProcess` / `ReqOutbound` / `RespInbound` / `RespChatProcess` / `RespOutbound`，只允许相邻节点 builder/parser 转换。
 - 中间插节点默认禁止；优先归入当前节点内部 block 或 `Meta*` / `Error*` / `Snapshot*` carrier，确需改变中段语义时开启新 chain version 或链尾追加，禁止 `03b` / `03_1` / `03.5` 临时编号。
+
+## 2026-06-02 Hub Pipeline Phase 1 type skeleton 精华
+- 请求侧第一阶段只允许透明类型骨架：`HubReqInbound02Standardized -> HubReqChatProcess03Governed -> HubReqOutbound05ProviderSemantic`；不得在该阶段接入 runtime flow 或改变 provider wire。
+- 拓扑红测真源：`tests/red-tests/hub_pipeline_type_topology_contract.test.ts`，必须禁止新 `ReqProc` / `req_process` 类型骨架、非相邻 provider wire shortcut、正常 request payload 承载 metadata。

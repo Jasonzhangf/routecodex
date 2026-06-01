@@ -13943,3 +13943,12 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 
 ## 2026-06-01 Pipeline type topology local rule
 - Added local AGENTS rule and `docs/design/pipeline-type-topology-and-module-boundaries.md` as RouteCodex topology truth for request chain, response chain, error chain, metadata carrier, naming, and mid-node insertion rules.
+
+## 2026-06-02 Pipeline phase naming follow-up
+- User corrected topology axis: use inbound / chatprocess / outbound for request and response, not generic process. Updated topology doc, AGENTS, and rcc-dev skill to `<Module><Phase><NN><Node>` and added phased data-structure rename plan.
+
+## 2026-06-02 Hub Pipeline Phase 1 type skeleton
+- Implemented request-side topology skeleton only, no runtime flow wiring: `HubReqInbound02Standardized`, `HubReqChatProcess03Governed`, `HubReqOutbound05ProviderSemantic` under Rust `hub_pipeline_types/` with adjacent builders only.
+- Added `tests/red-tests/hub_pipeline_type_topology_contract.test.ts` to lock canonical phase names, forbid new `ReqProc`/`req_process` type skeleton names, forbid non-adjacent provider wire shortcuts, and require Meta* carrier boundary for metadata.
+- Validation: `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml hub_pipeline_types --lib` passed 4/4; `npx jest tests/red-tests/hub_pipeline_type_topology_contract.test.ts --runInBand --silent` passed 6/6; `npm run -s build --prefix sharedmodule/llmswitch-core` passed; `git diff --check` passed.
+- Broader `cargo test ... hub_pipeline --lib` still has 3 pre-existing failures unrelated to this skeleton (`execute_hub_pipeline_json_uses_preselected_route_outbound_profile_for_responses_to_chat`, `test_coerce_standardized_request_from_payload_allows_submit_tool_output_with_previous_response_id`, `execute_request_path_preserves_client_tool_surface`).

@@ -2018,3 +2018,11 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 ## 2026-06-01 Pipeline topology naming rule
 - Local topology truth: `docs/design/pipeline-type-topology-and-module-boundaries.md`. Request chain, response chain, error chain, metadata carrier, module naming, and mid-node insertion rules must be updated before changing critical pipeline data structures.
 - Mid-node insertion is architecturally discouraged; prefer current-node internal block, `Meta*`, `Error*`, or `Snapshot*` side-car. If unavoidable, never renumber existing nodes and never use `03b` / `03_1` / `03.5`; open a new chain version or append a new phase with red tests and deletion plan.
+
+## 2026-06-02 Hub Pipeline phase naming rule
+- Hub Pipeline topology names use `<Module><Phase><NN><Node>`; canonical phases are `ReqInbound` / `ReqChatProcess` / `ReqOutbound` / `RespInbound` / `RespChatProcess` / `RespOutbound`.
+- Data-structure migration starts with docs/red tests, then Hub request three-phase skeleton, Hub response three-phase skeleton, VR/provider interface closure, Error/Metadata carriers, and finally physical deletion of old DTO/shell names.
+
+## 2026-06-02 Hub Pipeline Phase 1 type skeleton
+- Verified request-side topology skeleton exists in Rust `hub_pipeline_types/`: `HubReqInbound02Standardized -> HubReqChatProcess03Governed -> HubReqOutbound05ProviderSemantic`. It is transparent and not wired into runtime flow, preserving existing stage order/provider wire behavior.
+- Red-test truth: `tests/red-tests/hub_pipeline_type_topology_contract.test.ts` locks phase naming, adjacent builders, no new `ReqProc`/`req_process` type skeleton names, no provider wire shortcut, and metadata via `Meta*` carrier only.
