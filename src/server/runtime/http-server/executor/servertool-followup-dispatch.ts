@@ -11,6 +11,7 @@ import {
   resolveServerToolNestedFollowupTimeoutMs
 } from './servertool-followup-fail-fast.js';
 import { preserveLiveClientAbortCarriers } from './request-executor-client-abort-block.js';
+import { normalizeServertoolFollowupPayloadShapeWithNative } from '../../../../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js';
 
 type ServerToolNestedExecute = (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
 
@@ -20,69 +21,8 @@ type BuildNestedMetadataLogger = (error: unknown, details: {
   mode: 'reenter' | 'client_inject';
 }) => void;
 
-function toResponsesInputTextItem(text: string): Record<string, unknown> {
-  return { type: 'input_text', text };
-}
-
-function parseToolCallArguments(raw: unknown): string {
-  if (typeof raw === 'string') return raw;
-  if (raw === undefined || raw === null) return '{}';
-  try { return JSON.stringify(raw); } catch { return '{}'; }
-}
-
-function coerceMessageToResponsesInputItems(message: Record<string, unknown>): Record<string, unknown>[] {
-  const role = typeof message.role === 'string' ? message.role.trim().toLowerCase() : '';
-  const content = message.content;
-  if (role === 'tool') {
-    const callId = typeof message.tool_call_id === 'string' && message.tool_call_id.trim()
-      ? message.tool_call_id.trim()
-      : undefined;
-    const output = typeof content === 'string' ? content : content === undefined ? '' : JSON.stringify(content);
-    return callId
-      ? [{ type: 'function_call_output', call_id: callId, output }]
-      : [{ role: 'user', content: [toResponsesInputTextItem(output)] }];
-  }
-  if (role === 'assistant') {
-    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-    const out: Record<string, unknown>[] = [];
-    for (const entry of toolCalls) {
-      const record = entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>) : undefined;
-      const fn = record?.function && typeof record.function === 'object' && !Array.isArray(record.function)
-        ? (record.function as Record<string, unknown>)
-        : undefined;
-      const id = typeof record?.id === 'string' && record.id.trim() ? record.id.trim() : '';
-      const name = typeof fn?.name === 'string' && fn.name.trim()
-        ? fn.name.trim()
-        : (typeof record?.name === 'string' && record.name.trim() ? record.name.trim() : '');
-      if (id && name) {
-        out.push({ type: 'function_call', call_id: id, name, arguments: parseToolCallArguments(fn?.arguments) });
-      }
-    }
-    if (out.length) return out;
-  }
-  if (Array.isArray(content)) return [{ role: role || 'user', content }];
-  const text = typeof content === 'string' ? content : content === undefined ? '' : JSON.stringify(content);
-  return [{ role: role || 'user', content: [toResponsesInputTextItem(text)] }];
-}
-
-function normalizeResponsesFollowupPayloadShape(entryEndpoint: string, payload: Record<string, unknown>): Record<string, unknown> {
-  if (!String(entryEndpoint || '').toLowerCase().includes('/v1/responses')) return payload;
-  if (Array.isArray(payload.input) || !Array.isArray(payload.messages)) return payload;
-  const seenToolOutputs = new Set<string>();
-  const input = payload.messages
-    .flatMap((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
-      ? coerceMessageToResponsesInputItems(entry as Record<string, unknown>)
-      : [])
-    .filter((entry) => {
-      if (entry.type !== 'function_call_output') return true;
-      const callId = typeof entry.call_id === 'string' ? entry.call_id.trim() : '';
-      if (!callId || seenToolOutputs.has(callId)) return false;
-      seenToolOutputs.add(callId);
-      return true;
-    });
-  const next: Record<string, unknown> = { ...payload, input };
-  delete next.messages;
-  return next;
+function normalizeFollowupPayloadShapeWithNative(entryEndpoint: string, payload: Record<string, unknown>): Record<string, unknown> {
+  return normalizeServertoolFollowupPayloadShapeWithNative(entryEndpoint, payload);
 }
 
 const SAME_PROVIDER_FOLLOWUP_MAX_ATTEMPTS = 3;
@@ -606,7 +546,7 @@ function cloneNestedBodyWithSemantics(
     out.semantics = requestSemantics;
   }
   out = stripResponsesOnlyRequestSettings(out, requestSemantics);
-  out = normalizeResponsesFollowupPayloadShape(entryEndpoint, out);
+  out = normalizeFollowupPayloadShapeWithNative(entryEndpoint, out);
   out = stripResponsesOnlyRequestSettings(out, requestSemantics);
   return out;
 }
@@ -789,20 +729,6 @@ function buildServerToolNestedInput(args: {
   }
 
   const body = cloneNestedBodyWithSemantics(nestedEntry, args.body, materializedRequestSemantics);
-  if (materializedRequestSemantics && Array.isArray(body.input)) {
-    const hasFunctionCallOutput = body.input.some((entry) => {
-      const row = entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>) : undefined;
-      return typeof row?.type === 'string' && row.type.trim().toLowerCase() === 'function_call_output';
-    });
-    if (hasFunctionCallOutput) {
-      materializedRequestSemantics.toolOutputs = body.input.filter((entry) => {
-        const row = entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>) : undefined;
-        return typeof row?.type === 'string' && row.type.trim().toLowerCase() === 'function_call_output';
-      });
-      body.semantics = materializedRequestSemantics;
-      nestedMetadata.requestSemantics = materializedRequestSemantics;
-    }
-  }
   const headers = stripSseRequestHeadersForNonStreamingFollowup(
     cloneStringHeaders(nestedMetadata.clientHeaders),
     body

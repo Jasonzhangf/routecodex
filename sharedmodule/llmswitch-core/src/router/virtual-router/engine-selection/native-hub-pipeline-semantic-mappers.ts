@@ -110,6 +110,13 @@ export function buildSubmitToolOutputsPayloadWithNative(input: {
   return invokeRecordCapability('buildSubmitToolOutputsPayloadJson', [input]);
 }
 
+export function normalizeServertoolFollowupPayloadShapeWithNative(
+  entryEndpoint: string,
+  payload: Record<string, unknown>
+): Record<string, unknown> {
+  return invokeRecordCapability('normalizeServertoolFollowupPayloadShapeJson', [entryEndpoint, payload]);
+}
+
 export function extractToolSignaturesFromPayloadWithNative(payload: unknown): string[] {
   const raw = invokeStringCapability('extractToolSignaturesFromPayloadJson', [safeStringify(payload) ?? '{}']);
   try {

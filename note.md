@@ -13910,3 +13910,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 根因：HubPipeline 架构要求 `req_inbound -> req_process -> req_outbound`，但请求链在 `req_process` 前仍把 raw `/v1/responses.input[]` 交给工具治理，`messages` 缺失后被清成空数组，Anthropic/MiniMax provider 收到空 `messages` 报 2013。
 - 修复：`hub_pipeline_lib/engine.rs` 在 req inbound/lift 后调用 Rust `coerce_standardized_request_from_payload`，将 Responses `input[]` 转成 canonical `messages[]` 后再进入 `req_process`；`hub_req_outbound_format_build.rs` 保留 canonical chat payload -> Anthropic wire 的兜底转换，防止入口 format 与 routed payload 混态时泄空 messages。
 - 验证：Rust 定向 `execute_hub_pipeline_json_builds_non_empty_anthropic_messages_from_responses_input` 通过；`node scripts/build-core.mjs` 通过；全局安装 0.90.2650；5520/5555 health 200。
+
+## 2026-06-01 servertool followup TS coercion cleanup
+- 红测：新增 `hub-pipeline-stage-residue-audit` 用例，先红命中 `followup-shape-guard.ts` 与 `servertool-followup-dispatch.ts` 在 TS 中把 chat `messages/tool_calls/tool` 转成 Responses `input/function_call/function_call_output`，并静默修复工具参数。
+- 修复：新增 Rust SSOT `normalize_servertool_followup_payload_shape_json`，TS 只保留 native JSON 调用薄壳；删除 dispatch 中基于 `body.input` 回写 `requestSemantics.toolOutputs` 的 TS 工具语义扫描。
+- 验证：`cargo test -p router-hotpath-napi hub_submit_tool_outputs::tests -- --nocapture` 2/2 绿；`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 46/46 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 绿；`npm run jest:run -- --runTestsByPath ...server-side-tools.auto-hook-config.spec.ts --runInBand` 绿；`git diff --check` 绿。

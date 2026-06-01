@@ -638,6 +638,25 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('servertool followup dispatch and shape guard must not coerce tool semantics in TS', () => {
+    const files = [
+      'sharedmodule/llmswitch-core/src/servertool/followup-shape-guard.ts',
+      'src/server/runtime/http-server/executor/servertool-followup-dispatch.ts',
+    ];
+    const findings = files.flatMap((relativePath) => {
+      const filePath = path.join(process.cwd(), relativePath);
+      const source = fs.readFileSync(filePath, 'utf8');
+      return collectMatches(source, [
+        { label: `${relativePath}: converts chat messages to Responses input in TS`, pattern: /coerceMessageToResponsesInputItems|toResponsesInputTextItem|normalizeResponsesFollowupPayloadShape/ },
+        { label: `${relativePath}: converts assistant tool_calls in TS`, pattern: /coerceAssistantToolCallsToResponsesInputItems|message\.tool_calls|type:\s*['"]function_call['"]/ },
+        { label: `${relativePath}: converts tool outputs in TS`, pattern: /tool_call_id|function_call_output|call_id|seenToolOutputs/ },
+        { label: `${relativePath}: silently repairs tool arguments in TS`, pattern: /parseToolCallArguments|catch\s*\{\s*return\s+['"]\{\}['"]/ },
+      ]);
+    });
+
+    expect(findings).toEqual([]);
+  });
+
   it('servertool orchestration blocks must not retain TS tool call/output mutation semantics', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts');
     const source = fs.readFileSync(filePath, 'utf8');

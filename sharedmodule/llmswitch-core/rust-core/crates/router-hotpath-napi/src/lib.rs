@@ -1224,6 +1224,17 @@ pub fn harvest_tool_calls_from_text_json_bridge(
     )
 }
 
+#[napi(js_name = "normalizeServertoolFollowupPayloadShapeJson")]
+pub fn normalize_servertool_followup_payload_shape_json_bridge(
+    entry_endpoint: String,
+    payload_json: String,
+) -> NapiResult<String> {
+    hub_submit_tool_outputs::normalize_servertool_followup_payload_shape_json(
+        entry_endpoint,
+        payload_json,
+    )
+}
+
 #[napi(js_name = "applyFieldMappingsJson")]
 pub fn apply_field_mappings_json_bridge(
     payload_json: String,
