@@ -13846,3 +13846,11 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 修复：物理删除上述无活调用 TS governance/sanitizer helper 与旧测试；`runHubChatProcess` 已改走 req_process total stage，删除后无运行图引用。
 - 验证：定向 residue test passed；`npx tsc --noEmit` exit 0。
 - 剩余：`chat-process-clock-reminders.ts` / `blocks/chat-process-clock-runtime-bridge.ts` 仍由旧 deletion gate 标记为未清理，但内部还有 clock side-effect 逻辑，需单独迁移到 Rust/total stage 后删除，不能在本闭环盲删。
+
+## 2026-06-01 metadata 隔离收口补充
+
+- 已提交 `8a281d619 fix: stop mock provider body metadata control`：mock provider 不再从 request/body metadata 读取 `mockSampleReqId`，只读 runtime metadata carrier。
+- 已提交 `89dd96d6b fix: expose metadata drift in shadow checks`：shadow compare 不再忽略 `providerPayload.metadata.context*`，新增 metadata drift errorsample 测试，避免 providerPayload metadata 泄露被 shadow masking 掩盖。
+- 已提交 `d3a28ea78 test: forbid provider body metadata control`：新增静态红线测试，禁止 provider runtime / SDK / Rust outbound 从 `body.metadata`、`rawBody.metadata`、`payload.metadata.context` 等路径消费控制语义。
+- 最终本轮验证：metadata Jest 集合 9 suites / 59 tests 全绿；Rust `cargo test -p router-hotpath-napi hub_req_outbound_format_build --lib` 13/13 全绿。
+- 剩余 grep 命中分类：`body.metadata` delete/assert 类；`bridge-actions` 内部 state metadata；`stop-message-auto runtime-utils` 内部 metadata.context；`guardian-daemon` 非 provider 请求链路 metadata；`hub_chat_envelope_validator` schema 校验文本。未发现 provider wire body / SDK options / client response body 的 metadata 注入残留。

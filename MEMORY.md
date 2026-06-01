@@ -1941,3 +1941,62 @@ Slice 0（总控 API）→ Slice 1-4（P0）→ Slice 5（P1）
 ## 2026-06-01 VR routing split validation
 - VR routing split cleanup must wire extracted helpers through `routing/mod.rs` and remove same helper bodies from `bootstrap.rs`; otherwise `utils.rs` is dead code despite existing in tree.
 - Current validated gate for VR routing split: `cargo test -p router-hotpath-napi virtual_router_engine::routing --lib` (37 passed) plus `node scripts/build-core.mjs && npx tsc --noEmit` (exit 0). Full `router-hotpath-napi --lib` has unrelated non-VR failures and is not a clean project gate yet.
+
+## 2026-06-01 VR/Hub no-fallback correction
+- In VR/Hub rustification, do not add fallback/兜底 semantics or fallback naming. Tool declaration must not be treated as route activity; only real current-turn tool execution/continuation signals may drive `tools`/`coding`/`search` routing.
+
+## 2026-06-01 multi-port isolation truth
+- Multi-port v2 config must not implicitly merge `virtualrouter.routingPolicyGroups`; callers must select one `routingPolicyGroup` unless explicitly running audit-only `includeAllRoutingPolicyGroups`.
+- Port-scoped runtime state boundary is `__rt.sessionDir = sessions/<serverId>/ports/<routingPolicyGroup>`; provider health/error events must carry this through request metadata to avoid cross-port health spread.
+
+## 2026-06-01 tt and MiniMax provider truth
+- `tt` must stay aligned to `~/.codex/config.toml`: `base_url=https://api2.codewhisper.cc/v1`, `wire_api=responses`; never "fix" it by changing to OpenAI chat.
+- Standard MiniMax RCC provider for 5520 uses Anthropic compatibility: `type="anthropic"`, `baseURL="https://api.minimaxi.com/anthropic"`; verified `/v1/messages` with `MiniMax-M3` returns 200.
+
+## 2026-06-01 ProviderForwarder 实现完成
+
+### 实施内容
+- **Rust 真源** (forwarder.rs, 27KB):
+  - `ForwarderEntry` / `ForwarderTarget` / `ForwarderRegistry` / `StickyKey` / `ResolutionMode` / `ForwarderStrategy`
+  - `bootstrap` 在 `VirtualRouterEngineCore::initialize` 中调用
+  - `select()` 在 `engine/selection.rs::select_provider` 末尾 hook（替换 selected → real provider_key）
+  - sticky map 在 Rust 内部持有: `HashMap<(session_id, forwarder_id), real_provider_key>`
+  - 闭包借用冲突解决：预 clone targets → drop borrow → `is_provider_available` → 再调 `forwarder_registry.select`
+- **TS Profile** (forwarder-types.ts + provider-profile-loader.ts + adapter.ts):
+  - `ProviderForwarderProfile` / `ProviderForwarderTarget` / `ProviderForwarderStrategy`
+  - `validateForwarderId` 仅做前缀校验，禁止 split(".") 推算 model
+  - `buildForwarderProfiles(config, knownProviderIds)` 解析 forwarders 节点，校验：fwd 前缀、显式 model/protocol、target 引用、duplicate (protocol,model)、拒绝 transportOverride
+- **Host** (forwarder-sticky-hint.ts):
+  - 仅 `extractForwarderStickyHint(runtime)` 从 metadata/extensions 抽 sessionId，不持状态
+- **配置** (configsamples/forwarder-example.json): 4 个 openai provider + 1 个 weighted fwd
+
+### 验证结果
+- cargo test forwarder:: 15/15 绿
+- cargo test virtual_router_engine::routing 50/50 绿（基线 37 维持）
+- jest tests/providers/forwarder-selection 10/10 绿
+- jest tests/red-tests/no_provider_specific_in_hub_pipeline 2/2 绿
+- tsc --noEmit: 0 forwarder 错（仅 2 个 pre-existing native-router-hotpath 错误）
+- jest tests/providers/profile/provider-profile-loader.entries 8/8 绿（loader 改动不破坏现有）
+
+### 关键决策点（可复用规则）
+1. **forwarder id opaque**: 配置 schema 显式 model/protocol；loader 仅做 `fwd.` 前缀 namespace 校验；禁止 `split(".")` 推算语义（model 可能含点号）
+2. **availability 闭包借用冲突**: Rust 借用规则下，预 clone targets 到本地、计算可用集、再调 `forwarder_registry.select`；闭包内部不能再用 `self`
+3. **sticky 闭包不能直接调 mutating 方法**: 同上，需要预计算 available_real_keys: HashSet，再传给 select 闭包
+4. **build_target 维持原样**: 解析完全在 selection 阶段；forwarder 解析后 `SelectionResult.provider_key` 是 real key，`build_target(real_key)` 走原路径
+5. **priority → weight 转换**: `RouteLoadBalancer` 不支持 priority strategy；priority 模式转 weight = `max_priority - p + 1`
+6. **测试目录约定**: 通用 provider 测试在 `tests/providers/`，红测试门禁在 `tests/red-tests/`（新目录）
+- 2026-06-01: ProviderForwarder §3.6 字面契约补全：`routing/selection.rs` 新增 `select_with_forwarder_resolution(candidates, &mut ForwarderRegistry, &mut RouteLoadBalancer, availability_check, session_id) -> (Vec<String>, Vec<String>)`，签名接收 &mut forwarder_registry（因 `select` 内部 sticky map 需要 &mut self）。2 个新单元测试覆盖：fwd 展开为 real、全 disabled → errors 含 `ERR_FORWARDER_NO_AVAILABLE_TARGET`。Wrapper 是 §3.6 公开 API；实际 hot-path hook 仍在 `engine/selection::select_provider` 末尾。
+
+Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, sticky-mut, availability, fail-fast, §3.6-contract
+
+## 2026-06-01 Responses tool history / MCP namespace 真源
+- Responses→OpenAI-chat/Anthropic 的工具历史规范化必须由 Rust Hub Pipeline 的 context capture / chat process 生成 `chatMessages` 与 `toolsNormalized`，不得在 provider codec 或 TS handler raw metadata 中补丁式过滤。
+- `responses-handler.ts` 不得把 raw `responsesRequestContext` 注入 pipeline input metadata 覆盖 Rust result；响应后只能保留 Rust metadata 优先，raw context 只可作为缺失时兜底。
+
+- 2026-06-01: metadata 生命周期审计结论已确认：metadata 只应停留在入口到 provider 发出前的内部流水线 carrier；当前高风险泄露点在 Anthropic/OpenAI SDK transport 与 Rust outbound format build 的 `metadata.context` 回填路径，后续修复必须收紧为 provider body 不携带 metadata。
+
+- 2026-06-01: metadata 最终目标补充：它必须是无状态短生命周期 carrier，只在单个 request/response 闭环内存在；闭环结束释放；端口、session、requestId 互相隔离，不得污染 provider body、SDK options、client response 或持久 runtime state。
+
+- 2026-06-01: metadata 隔离实现已分批本地提交（未 push）：`971d7c3e5`、`710acff93`、`62f11f32f`、`2e693ad81`。核心规则：provider/request/response body 不读写内部 metadata；direct/route/entryEndpoint/control flags 必须走 runtime/context carrier；违规 body.metadata 在 provider outbound 边界 fail-fast。
+
+- 2026-06-01: metadata 隔离补充收口：mock provider 也不得读 body metadata；shadow compare 不得忽略 `providerPayload.metadata.*` drift；新增静态红线 `tests/red-tests/no_provider_body_metadata_control.test.ts` 防止 provider runtime/SDK/Rust outbound 再从 body/rawBody/payload.metadata.context 消费控制语义。
