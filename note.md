@@ -13883,3 +13883,10 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 违规残留：clock/heartbeat 功能删除后，VirtualRouter bootstrap/types、servertool skeleton、runtime metadata、RCC fence 与部分 Rust 单测仍保留 clock/clock_auto/clockConfig/clockDaemonId 语义入口；`followup-origin-delta.ts` 仍在 TS 中重建 tool_outputs/tool messages/tool list。
 - 修复：物理删除 active clock config/runtime/fence/skeleton 残留；将 followup delta 工具消息与工具列表变更迁入 Rust `servertool_followup_delta.rs`，TS `followup-origin-delta.ts` 收缩为 native 薄壳。
 - 验证：`npx jest tests/sharedmodule/clock-heartbeat-feature-removal-gate.spec.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand`、`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit`、定向 `cargo test -p router-hotpath-napi ...` 全部通过；`cargo test -p router-hotpath-napi rcc_fence` 宽匹配会命中既有 unrelated shared_tooling deletion gate，已用精确测试名验证 rcc_fence。
+
+## 2026-06-01 followup seed Rust closeout
+
+- 违规点：`sharedmodule/llmswitch-core/src/servertool/followup-seed.ts` 在 TS 中解析 responses/chat seed、过滤 followup 参数、解析 model precedence、删除 tool，属于 servertool_followup 工具/请求边界语义残留。
+- 修复：补 `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 红测；将 seed/model/parameter 语义迁入 Rust `servertool_followup_delta.rs`，TS `followup-seed.ts` 改为 native 薄壳并移除生成残留 d.ts。
+- 验证：`hub-pipeline-stage-residue-audit` 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit` 绿；`cargo test -p router-hotpath-napi servertool_followup_delta -- --nocapture` 绿；HTTP 黑盒 `responses-handler.stop-followup-metadata.blackbox.spec.ts` 用 `npm run jest:run` 绿；`npm run build:min` 绿并 bump 版本到 0.90.2645。
+- 噪音：`tests/servertool/stop-message-flow-followup-reentry.spec.ts` 仍因测试环境 native binding `getDefaultServertoolSkeletonDocumentJson` 不可用失败，未进入业务断言。

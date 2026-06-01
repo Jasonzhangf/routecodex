@@ -620,6 +620,24 @@ describe('hub pipeline stage residue audit', () => {
     expect({ existingFiles, findings }).toEqual({ existingFiles: [], findings: [] });
   });
 
+  it('servertool followup seed must not retain TS payload or tool semantics', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/followup-seed.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'imports non-native responses bridge conversion', pattern: /from ['"]\.\.\/conversion\/responses\/responses-openai-bridge\.js['"]/ },
+      { label: 'imports clone helper for TS semantic cloning', pattern: /from ['"]\.\/server-side-tools\.js['"]/ },
+      { label: 'implements responses top-level parameter extraction in TS', pattern: /function\s+extractResponsesTopLevelParameters/ },
+      { label: 'mutates followup parameter object in TS', pattern: /delete\s*\([^)]*\)\.stream|delete\s*\([^)]*\)\.tool_choice/ },
+      { label: 'iterates followup model precedence in TS', pattern: /record\.assignedModelId|record\.originalModelId/ },
+      { label: 'checks raw responses input in TS', pattern: /rawInput|textInput/ },
+      { label: 'converts responses input text to chat message in TS', pattern: /messages:\s*\[\{\s*role:\s*'user',\s*content:\s*textInput/s },
+      { label: 'drops tools by function name in TS', pattern: /dropToolByFunctionName|tools\.filter\(/ },
+      { label: 'calls responses bridge conversion from followup TS', pattern: /buildChatRequestFromResponses|captureResponsesContext/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('anthropic response bridge policy must fail fast instead of swallowing policy errors', () => {
     const filePath = path.join(
       process.cwd(),

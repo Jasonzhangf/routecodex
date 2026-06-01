@@ -30,12 +30,112 @@ fn clone_array(value: Option<&Value>) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+fn extract_responses_top_level_parameters(record: &Map<String, Value>) -> Option<Map<String, Value>> {
+    const ALLOWED: &[&str] = &[
+        "temperature",
+        "top_p",
+        "max_output_tokens",
+        "seed",
+        "logit_bias",
+        "user",
+        "parallel_tool_calls",
+        "tool_choice",
+        "response_format",
+        "stream",
+    ];
+    let mut out = Map::new();
+    if !record.contains_key("max_output_tokens") {
+        if let Some(value) = record.get("max_tokens") {
+            out.insert("max_output_tokens".to_string(), value.clone());
+        }
+    }
+    for key in ALLOWED {
+        if let Some(value) = record.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+pub(crate) fn normalize_followup_parameters(value: &Value) -> Option<Value> {
+    let mut row = value.as_object()?.clone();
+    row.remove("stream");
+    row.remove("tool_choice");
+    if row.is_empty() { None } else { Some(Value::Object(row)) }
+}
+
+fn first_normalized_parameters(candidates: Vec<Option<Value>>) -> Option<Value> {
+    candidates
+        .into_iter()
+        .flatten()
+        .find_map(|value| normalize_followup_parameters(&value))
+}
+
+pub(crate) fn resolve_followup_model(seed_model: &Value, adapter_context: &Value) -> String {
+    let seed = seed_model.as_str().map(str::trim).filter(|s| !s.is_empty());
+    let Some(record) = adapter_context.as_object() else {
+        return seed.unwrap_or("").to_string();
+    };
+    for key in ["assignedModelId", "modelId"] {
+        if let Some(value) = record.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
+            return value.to_string();
+        }
+    }
+    if let Some(value) = seed {
+        return value.to_string();
+    }
+    for key in ["model", "originalModelId"] {
+        if let Some(value) = record.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
+            return value.to_string();
+        }
+    }
+    String::new()
+}
+
+fn extract_responses_message_text(content: &Value) -> String {
+    if let Some(text) = content.as_str() {
+        return text.to_string();
+    }
+    let Some(parts) = content.as_array() else {
+        return String::new();
+    };
+    parts
+        .iter()
+        .filter_map(|part| {
+            let row = part.as_object()?;
+            row.get("text")
+                .or_else(|| row.get("input_text"))
+                .or_else(|| row.get("output_text"))
+                .and_then(Value::as_str)
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn extract_chat_messages_from_responses_input(input: &[Value]) -> Vec<Value> {
+    let mut messages = Vec::new();
+    for item in input {
+        let Some(row) = item.as_object() else { continue };
+        let item_type = row.get("type").and_then(Value::as_str).unwrap_or("");
+        if item_type == "message" || row.contains_key("role") {
+            let role = row.get("role").and_then(Value::as_str).unwrap_or("user");
+            let text = row
+                .get("content")
+                .map(extract_responses_message_text)
+                .unwrap_or_default();
+            if !text.trim().is_empty() {
+                messages.push(Value::Object(Map::from_iter([
+                    ("role".to_string(), Value::String(role.to_string())),
+                    ("content".to_string(), Value::String(text)),
+                ])));
+            }
+        }
+    }
+    messages
+}
+
 pub(crate) fn extract_captured_chat_seed(captured: &Value) -> Option<Value> {
     let row = captured.as_object()?;
-    let messages = row.get("messages").and_then(Value::as_array)?;
-    if messages.is_empty() {
-        return None;
-    }
     let mut out = Map::new();
     if let Some(model) = row
         .get("model")
@@ -45,12 +145,41 @@ pub(crate) fn extract_captured_chat_seed(captured: &Value) -> Option<Value> {
     {
         out.insert("model".to_string(), Value::String(model.to_string()));
     }
-    out.insert("messages".to_string(), Value::Array(messages.clone()));
+    if let Some(messages) = row.get("messages").and_then(Value::as_array) {
+        if messages.is_empty() {
+            return None;
+        }
+        out.insert("messages".to_string(), Value::Array(messages.clone()));
+    } else if let Some(text) = row
+        .get("input")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        out.insert(
+            "messages".to_string(),
+            Value::Array(vec![Value::Object(Map::from_iter([
+                ("role".to_string(), Value::String("user".to_string())),
+                ("content".to_string(), Value::String(text.to_string())),
+            ]))]),
+        );
+    } else if let Some(input) = row.get("input").and_then(Value::as_array) {
+        let messages = extract_chat_messages_from_responses_input(input);
+        if messages.is_empty() {
+            return None;
+        }
+        out.insert("messages".to_string(), Value::Array(messages));
+    } else {
+        return None;
+    }
     if let Some(tools) = row.get("tools").and_then(Value::as_array) {
         out.insert("tools".to_string(), Value::Array(tools.clone()));
     }
-    if let Some(parameters) = row.get("parameters").and_then(Value::as_object) {
-        out.insert("parameters".to_string(), Value::Object(parameters.clone()));
+    if let Some(parameters) = first_normalized_parameters(vec![
+        row.get("parameters").cloned(),
+        extract_responses_top_level_parameters(row).map(Value::Object),
+    ]) {
+        out.insert("parameters".to_string(), parameters);
     }
     Some(Value::Object(out))
 }
@@ -589,6 +718,24 @@ pub fn extract_captured_chat_seed_json(captured_json: String) -> NapiResult<Stri
 }
 
 #[napi]
+pub fn resolve_followup_model_json(seed_model_json: String, adapter_context_json: String) -> NapiResult<String> {
+    let seed_model: Value = serde_json::from_str(&seed_model_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let adapter_context: Value = serde_json::from_str(&adapter_context_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    serde_json::to_string(&resolve_followup_model(&seed_model, &adapter_context))
+        .map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+#[napi]
+pub fn normalize_followup_parameters_json(parameters_json: String) -> NapiResult<String> {
+    let parameters: Value = serde_json::from_str(&parameters_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    serde_json::to_string(&normalize_followup_parameters(&parameters).unwrap_or(Value::Null))
+        .map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+#[napi]
 pub fn extract_assistant_followup_message_json(final_chat_response_json: String) -> NapiResult<String> {
     let final_chat_response: Value = serde_json::from_str(&final_chat_response_json)
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
@@ -642,5 +789,50 @@ mod tests {
         assert_eq!(payload["messages"][2]["role"], "tool");
         assert_eq!(payload["tools"].as_array().unwrap().len(), 1);
         assert_eq!(payload["tools"][0]["function"]["name"], "exec_command");
+    }
+
+    #[test]
+    fn extracts_followup_seed_from_chat_and_responses_input() {
+        let chat = json!({
+            "model": " gpt-test ",
+            "messages": [{"role":"user", "content":"hello"}],
+            "tools": [{"type":"function", "function":{"name":"exec_command"}}],
+            "parameters": {"stream": true, "tool_choice": "auto", "temperature": 0.2}
+        });
+        let chat_seed = extract_captured_chat_seed(&chat).expect("chat seed");
+        assert_eq!(chat_seed["model"], "gpt-test");
+        assert_eq!(chat_seed["messages"][0]["content"], "hello");
+        assert_eq!(chat_seed["parameters"]["temperature"], 0.2);
+        assert!(chat_seed["parameters"].get("stream").is_none());
+        assert!(chat_seed["parameters"].get("tool_choice").is_none());
+
+        let responses = json!({
+            "model": "gpt-resp",
+            "input": "  explain this  ",
+            "max_tokens": 42,
+            "stream": true,
+            "tool_choice": "auto"
+        });
+        let responses_seed = extract_captured_chat_seed(&responses).expect("responses seed");
+        assert_eq!(responses_seed["messages"][0]["role"], "user");
+        assert_eq!(responses_seed["messages"][0]["content"], "explain this");
+        assert_eq!(responses_seed["parameters"]["max_output_tokens"], 42);
+        assert!(responses_seed["parameters"].get("stream").is_none());
+        assert!(responses_seed["parameters"].get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn resolves_followup_model_precedence() {
+        assert_eq!(
+            resolve_followup_model(
+                &Value::String("seed-model".to_string()),
+                &json!({"originalModelId":"orig", "model":"ctx", "modelId":"model-id", "assignedModelId":"assigned"})
+            ),
+            "assigned"
+        );
+        assert_eq!(
+            resolve_followup_model(&Value::String("seed-model".to_string()), &json!({"model":"ctx"})),
+            "seed-model"
+        );
     }
 }

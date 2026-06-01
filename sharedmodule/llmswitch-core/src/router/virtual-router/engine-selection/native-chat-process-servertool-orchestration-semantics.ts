@@ -720,6 +720,37 @@ export function extractCapturedChatSeedWithNative(captured: unknown): Record<str
   }
 }
 
+export function resolveFollowupModelWithNative(seedModel: unknown, adapterContext: unknown): string {
+  const capability = 'resolveFollowupModelJson';
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [seedModel ?? null, adapterContext ?? null]);
+    const parsed = parseJson('resolveFollowupModel', raw);
+    if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
+    if (typeof parsed !== 'string') return fail('invalid payload');
+    return parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function normalizeFollowupParametersWithNative(parameters: unknown): Record<string, unknown> | undefined {
+  const capability = 'normalizeFollowupParametersJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | undefined>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [parameters ?? null]);
+    const parsed = parseJson('normalizeFollowupParameters', raw);
+    if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
+    if (parsed === null) return undefined;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('invalid payload');
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function extractAssistantFollowupMessageWithNative(finalChatResponse: unknown): Record<string, unknown> | null {
   const capability = 'extractAssistantFollowupMessageJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);
