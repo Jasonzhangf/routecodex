@@ -13905,3 +13905,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 按需求物理移除 clock/heartbeat 功能面：HTTP daemon heartbeat/task API、session-admin task CRUD、WebUI/Ops Clock、clock/heartbeat 文档与相关测试残留均收敛到删除门。
 - Rust deletion gate 暴露 shared_tooling 重复实现残留：`value_to_string`、RCC fence extractor、structured apply_patch detector、XML scalar normalizer、repair args、chunked tool text wrapper。已改为直接消费 `shared_tooling.rs` 唯一真源，移除本地 clone。
 - 验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/clock-heartbeat-feature-removal-gate.spec.ts tests/servertool/server-side-tools.auto-hook-config.spec.ts tests/sharedmodule/native-semantics-parsers-observability.spec.ts --runInBand` 通过；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 通过；`npm run build:webui` 通过；`npm run build:min` 通过；`cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi shared_tooling_deletion_gate_removed -- --nocapture` 13/13 通过；`git diff --check` 通过。
+
+## 2026-06-01 HubPipeline Responses入口标准化修复
+- 根因：HubPipeline 架构要求 `req_inbound -> req_process -> req_outbound`，但请求链在 `req_process` 前仍把 raw `/v1/responses.input[]` 交给工具治理，`messages` 缺失后被清成空数组，Anthropic/MiniMax provider 收到空 `messages` 报 2013。
+- 修复：`hub_pipeline_lib/engine.rs` 在 req inbound/lift 后调用 Rust `coerce_standardized_request_from_payload`，将 Responses `input[]` 转成 canonical `messages[]` 后再进入 `req_process`；`hub_req_outbound_format_build.rs` 保留 canonical chat payload -> Anthropic wire 的兜底转换，防止入口 format 与 routed payload 混态时泄空 messages。
+- 验证：Rust 定向 `execute_hub_pipeline_json_builds_non_empty_anthropic_messages_from_responses_input` 通过；`node scripts/build-core.mjs` 通过；全局安装 0.90.2650；5520/5555 health 200。
