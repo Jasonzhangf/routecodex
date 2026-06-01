@@ -1,9 +1,6 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
-import {
-  STREAM_CONTRACT_PROBE_BODY_KEY,
-} from './servertool-response-normalizer.js';
-import { readString } from './request-executor-error-shared.js';
 import { STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
+import { detectRetryableEmptyAssistantResponseWithNative } from '../../../../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-node-result-semantics.js';
 
 type ProviderSnapshotWriteArgs = {
   phase:
@@ -27,7 +24,7 @@ import {
   isRequiredToolCallTurn,
   isToolResultFollowupTurn
 } from './request-executor-request-semantics.js';
-import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
+import { formatUnknownError } from '../../../../utils/common-utils.js';
 export { hasRequestedToolsInSemantics, isRequiredToolCallTurn, isToolResultFollowupTurn };
 
 export type PayloadContractSignal = {
@@ -37,127 +34,6 @@ export type PayloadContractSignal = {
 
 const EMPTY_ASSISTANT_SANITIZED_PLACEHOLDER =
   '[RouteCodex] assistant response became empty after response sanitization.';
-
-function unwrapStreamContractProbeBody(body: Record<string, unknown>): Record<string, unknown> | null {
-  if (!Object.prototype.hasOwnProperty.call(body, '__sse_responses')) {
-    return body;
-  }
-  const probe = body[STREAM_CONTRACT_PROBE_BODY_KEY];
-  if (!isRecord(probe)) {
-    return null;
-  }
-  return probe;
-}
-
-function valueHasVisibleAssistantText(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return value.trim().length > 0;
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => valueHasVisibleAssistantText(entry));
-  }
-  if (!isRecord(value)) {
-    return false;
-  }
-  const entryType = readString(value.type)?.toLowerCase();
-  if (
-    entryType === 'refusal'
-    || entryType === 'tool_result'
-    || entryType === 'function_call_output'
-    || entryType === 'reasoning'
-  ) {
-    return false;
-  }
-  return (
-    valueHasVisibleAssistantText(value.text)
-    || valueHasVisibleAssistantText(value.output_text)
-    || valueHasVisibleAssistantText(value.content)
-  );
-}
-
-function valueHasReasoningOnlyContent(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return false;
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => valueHasReasoningOnlyContent(entry));
-  }
-  if (!isRecord(value)) {
-    return false;
-  }
-  const entryType = readString(value.type)?.toLowerCase();
-  if (entryType === 'reasoning') {
-    return true;
-  }
-  return (
-    valueHasReasoningOnlyContent(value.reasoning)
-    || valueHasReasoningOnlyContent(value.content)
-    || valueHasReasoningOnlyContent(value.output)
-  );
-}
-
-function hasNonEmptyToolCalls(value: unknown): boolean {
-  return Array.isArray(value) && value.length > 0;
-}
-
-function hasOutputFunctionCalls(value: unknown): boolean {
-  if (!Array.isArray(value)) {
-    return false;
-  }
-  return value.some((entry) => {
-    if (!isRecord(entry)) {
-      return false;
-    }
-    const entryType = readString(entry.type)?.toLowerCase() ?? '';
-    return entryType === 'function_call' || entryType === 'tool_call';
-  });
-}
-
-function containsToolRegistryMissingText(value: unknown): boolean {
-  if (typeof value === 'string') {
-    const normalized = value.toLowerCase();
-    return (
-      normalized.includes('tool not found')
-      || normalized.includes('tool registry missing')
-      || normalized.includes('unknown tool')
-      || normalized.includes('missing tool')
-    );
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => containsToolRegistryMissingText(entry));
-  }
-  if (!isRecord(value)) {
-    return false;
-  }
-  return Object.values(value).some((entry) => containsToolRegistryMissingText(entry));
-}
-
-function isMeaninglessDotOnlyText(text: string): boolean {
-  const normalized = text.trim();
-  return normalized === '.' || normalized === '..' || normalized === '...';
-}
-
-function valueHasMeaningfulVisibleAssistantText(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return value.trim().length > 0 && !isMeaninglessDotOnlyText(value);
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => valueHasMeaningfulVisibleAssistantText(entry));
-  }
-  if (!isRecord(value)) {
-    return false;
-  }
-  const entryType = readString(value.type)?.toLowerCase();
-  if (entryType === 'reasoning' || entryType === 'thinking') {
-    return false;
-  }
-  return (
-    valueHasMeaningfulVisibleAssistantText(value.text)
-    || valueHasMeaningfulVisibleAssistantText(value.output_text)
-    || valueHasMeaningfulVisibleAssistantText(value.content)
-  );
-}
-
 
 function containsEmptyAssistantSanitizedPlaceholder(value: unknown): boolean {
   if (typeof value === 'string') {
@@ -176,104 +52,7 @@ export function detectRetryableEmptyAssistantResponse(
   body: unknown,
   requestSemantics?: Record<string, unknown>
 ): PayloadContractSignal | null {
-  if (!isRecord(body)) {
-    return null;
-  }
-  const effectiveBody = unwrapStreamContractProbeBody(body);
-  if (!effectiveBody) {
-    return null;
-  }
-
-  const choices = Array.isArray(effectiveBody.choices) ? effectiveBody.choices : [];
-  if (choices.length > 0) {
-    const firstChoice = isRecord(choices[0]) ? choices[0] : undefined;
-    if (!firstChoice) {
-      return null;
-    }
-    const finishReason = readString(firstChoice.finish_reason)?.toLowerCase() ?? '';
-    const message = isRecord(firstChoice.message) ? firstChoice.message : undefined;
-    const hasToolCalls = hasNonEmptyToolCalls(message?.tool_calls);
-    const hasText =
-      valueHasMeaningfulVisibleAssistantText(message?.content)
-      || valueHasMeaningfulVisibleAssistantText(firstChoice.content);
-    const combinedText = [message?.content, firstChoice.content]
-      .filter((item) => valueHasMeaningfulVisibleAssistantText(item))
-      .map((item) => String(item))
-      .join('\n');
-    if ((finishReason === 'stop' || finishReason === 'tool_calls' || !finishReason) && !hasToolCalls && !hasText) {
-      return {
-        reason: `finish_reason=${finishReason || 'unknown'} but assistant text/tool_calls are empty`,
-        marker: 'chat_empty_assistant'
-      };
-    }
-    if (
-      (finishReason === 'stop' || !finishReason)
-      && !hasToolCalls
-      && isRequiredToolCallTurn(requestSemantics)
-      && !isToolResultFollowupTurn(requestSemantics)
-    ) {
-      return {
-        reason: `finish_reason=${finishReason || 'unknown'} with declared request tools but no structured tool_calls`,
-        marker: 'chat_missing_required_tool_call'
-      };
-    }
-    if ((finishReason === 'stop' || finishReason === 'tool_calls' || !finishReason) && !hasToolCalls && containsToolRegistryMissingText(combinedText)) {
-      return {
-        reason: 'assistant emitted textual tool-not-found complaint without structured tool_calls',
-        marker: 'chat_textual_tool_registry_missing'
-      };
-    }
-  }
-
-  const status = readString(effectiveBody.status)?.toLowerCase() ?? '';
-  if (status === 'completed' || status === 'stop') {
-    const requiredAction = isRecord(effectiveBody.required_action) ? effectiveBody.required_action : undefined;
-    const submitToolOutputs =
-      requiredAction && isRecord(requiredAction.submit_tool_outputs)
-        ? requiredAction.submit_tool_outputs
-        : undefined;
-    const hasRequiredActionToolCalls = hasNonEmptyToolCalls(submitToolOutputs?.tool_calls);
-    const hasFunctionCalls = hasOutputFunctionCalls(effectiveBody.output);
-    const hasText =
-      valueHasMeaningfulVisibleAssistantText(effectiveBody.output_text)
-      || valueHasMeaningfulVisibleAssistantText(effectiveBody.output);
-    const hasReasoningOnly =
-      valueHasReasoningOnlyContent(effectiveBody.output)
-      || valueHasReasoningOnlyContent(effectiveBody.reasoning);
-    if (
-      !hasRequiredActionToolCalls
-      && !hasFunctionCalls
-      && !hasText
-      && !hasReasoningOnly
-      && !isToolResultFollowupTurn(requestSemantics)
-    ) {
-      return {
-        reason: `responses status=${status} but output text/tool_calls are empty${hasReasoningOnly ? ' (reasoning-only payload)' : ''}`,
-        marker: 'responses_empty_output'
-      };
-    }
-    if (
-      !hasRequiredActionToolCalls &&
-      !hasFunctionCalls &&
-      isRequiredToolCallTurn(requestSemantics) &&
-      !isToolResultFollowupTurn(requestSemantics) &&
-      !containsReasoningStopFinalizedMarker(effectiveBody.output) &&
-      !containsReasoningStopFinalizedMarker(effectiveBody.output_text)
-    ) {
-      return {
-        reason: `responses status=${status} with declared request tools but no function_call output`,
-        marker: 'responses_missing_required_tool_call'
-      };
-    }
-    if (!hasRequiredActionToolCalls && !hasFunctionCalls && containsToolRegistryMissingText(effectiveBody.output_text)) {
-      return {
-        reason: 'responses completed with textual tool-not-found complaint but no function_call output',
-        marker: 'responses_textual_tool_registry_missing'
-      };
-    }
-  }
-
-  return null;
+  return detectRetryableEmptyAssistantResponseWithNative(body, requestSemantics) as PayloadContractSignal | null;
 }
 
 function valueHasNonEmptyPayloadContent(value: unknown): boolean {
@@ -363,19 +142,6 @@ export function detectAssistantSanitizationPlaceholder(body: unknown): PayloadCo
     reason: 'assistant response was repaired with the empty-after-sanitization placeholder',
     marker: 'assistant_sanitized_empty_placeholder'
   };
-}
-
-function containsReasoningStopFinalizedMarker(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return value.includes('[app.finished:reasoning.stop]');
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => containsReasoningStopFinalizedMarker(entry));
-  }
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  return Object.values(value as Record<string, unknown>).some((entry) => containsReasoningStopFinalizedMarker(entry));
 }
 
 export async function persistPayloadContractProviderSnapshots(args: {

@@ -13920,3 +13920,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 红测：新增 `hub-pipeline-stage-residue-audit` 用例，先红命中 `request-executor-request-semantics.ts` 在 HTTP executor 层读取 `toolContinuation`、`toolOutputs`、`tool_call_id`、`function_call_output`、`tool_choice` 并分类工具轮次。
 - 修复：将 `hasRequestedToolsInSemantics` / `isRequiredToolCallTurn` / `isToolResultFollowupTurn` 迁到 Rust `chat_node_result_semantics.rs`，新增 NAPI；TS 文件收缩为 native 调用薄壳。
 - 验证：`cargo test -p router-hotpath-napi chat_node_result_semantics::request_semantics_tests -- --nocapture` 3/3 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 绿；`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 47/47 绿；`git diff --check` 绿。
+
+## 2026-06-01 request executor response contract cleanup
+- 红测：新增 `hub-pipeline-stage-residue-audit` 用例，先红命中 `request-executor-response-contract.ts` 在 HTTP executor 层读取 `tool_calls`、`function_call`、`required_action.submit_tool_outputs.tool_calls`、`function_call_output/tool_result/tool_message` 并分类响应工具语义。
+- 修复：将 `detectRetryableEmptyAssistantResponse` 的工具/空响应判定迁到 Rust `chat_node_result_semantics.rs`，新增 NAPI `detectRetryableEmptyAssistantResponseJson`；TS response contract 收缩为 native 调用薄壳，并物理删除未使用 probe/readString 壳。
+- 验证：Rust 定向红测先暴露 required-tool turn 被泛化 empty 抢先吞掉，调整 Rust 判定顺序后 `cargo test -p router-hotpath-napi chat_node_result_semantics::request_semantics_tests -- --nocapture` 5/5 绿；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` 绿；`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 48/48 绿；`git diff --check` 绿。

@@ -264,3 +264,40 @@ export function isRequiredToolCallTurnWithNative(requestSemantics?: Record<strin
 export function isToolResultFollowupTurnWithNative(requestSemantics?: Record<string, unknown>): boolean {
   return invokeBooleanCapability('isToolResultFollowupTurnJson', requestSemantics ?? null);
 }
+
+export function detectRetryableEmptyAssistantResponseWithNative(
+  body: unknown,
+  requestSemantics?: Record<string, unknown>
+): Record<string, unknown> | null {
+  const capability = 'detectRetryableEmptyAssistantResponseJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const bodyJson = safeStringify(body ?? null);
+  const requestSemanticsJson = safeStringify(requestSemantics ?? null);
+  if (!bodyJson || requestSemanticsJson === undefined) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(bodyJson, requestSemanticsJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseJson(raw);
+    if (parsed === null) {
+      return null;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}

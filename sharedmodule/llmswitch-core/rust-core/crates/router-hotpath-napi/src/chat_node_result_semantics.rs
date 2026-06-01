@@ -241,6 +241,222 @@ fn is_tool_result_followup_turn_value(request_semantics: Option<&Value>) -> bool
     false
 }
 
+fn stream_contract_probe_body(body: &Value) -> Option<&Value> {
+    let row = body.as_object()?;
+    if !row.contains_key("__sse_responses") {
+        return Some(body);
+    }
+    row.get("__routecodex_stream_contract_probe_body")
+        .or_else(|| row.get("streamContractProbeBody"))
+        .filter(|value| value.is_object())
+}
+
+fn value_has_visible_assistant_text(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        Some(Value::Array(items)) => items.iter().any(|entry| value_has_visible_assistant_text(Some(entry))),
+        Some(Value::Object(row)) => {
+            let item_type = read_string(row.get("type"))
+                .map(|value| value.to_ascii_lowercase())
+                .unwrap_or_default();
+            if matches!(item_type.as_str(), "refusal" | "tool_result" | "function_call_output" | "reasoning") {
+                return false;
+            }
+            value_has_visible_assistant_text(row.get("text"))
+                || value_has_visible_assistant_text(row.get("output_text"))
+                || value_has_visible_assistant_text(row.get("content"))
+        }
+        _ => false,
+    }
+}
+
+fn is_meaningless_dot_only_text(text: &str) -> bool {
+    matches!(text.trim(), "." | ".." | "...")
+}
+
+fn value_has_meaningful_visible_assistant_text(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(text)) => !text.trim().is_empty() && !is_meaningless_dot_only_text(text),
+        Some(Value::Array(items)) => items.iter().any(|entry| value_has_meaningful_visible_assistant_text(Some(entry))),
+        Some(Value::Object(row)) => {
+            let item_type = read_string(row.get("type"))
+                .map(|value| value.to_ascii_lowercase())
+                .unwrap_or_default();
+            if matches!(item_type.as_str(), "reasoning" | "thinking") {
+                return false;
+            }
+            value_has_meaningful_visible_assistant_text(row.get("text"))
+                || value_has_meaningful_visible_assistant_text(row.get("output_text"))
+                || value_has_meaningful_visible_assistant_text(row.get("content"))
+        }
+        _ => false,
+    }
+}
+
+fn value_has_reasoning_only_content(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(_)) => false,
+        Some(Value::Array(items)) => items.iter().any(|entry| value_has_reasoning_only_content(Some(entry))),
+        Some(Value::Object(row)) => {
+            if read_string(row.get("type"))
+                .map(|value| value.eq_ignore_ascii_case("reasoning"))
+                .unwrap_or(false)
+            {
+                return true;
+            }
+            value_has_reasoning_only_content(row.get("reasoning"))
+                || value_has_reasoning_only_content(row.get("content"))
+                || value_has_reasoning_only_content(row.get("output"))
+        }
+        _ => false,
+    }
+}
+
+fn has_non_empty_tool_calls(value: Option<&Value>) -> bool {
+    has_non_empty_array(value)
+}
+
+fn has_output_function_calls(value: Option<&Value>) -> bool {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return false;
+    };
+    items.iter().any(|entry| {
+        let item_type = entry
+            .as_object()
+            .and_then(|row| read_string(row.get("type")))
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        matches!(item_type.as_str(), "function_call" | "tool_call")
+    })
+}
+
+fn contains_tool_registry_missing_text(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(text)) => {
+            let normalized = text.to_ascii_lowercase();
+            normalized.contains("tool not found")
+                || normalized.contains("tool registry missing")
+                || normalized.contains("unknown tool")
+                || normalized.contains("missing tool")
+        }
+        Some(Value::Array(items)) => items.iter().any(|entry| contains_tool_registry_missing_text(Some(entry))),
+        Some(Value::Object(row)) => row.values().any(|entry| contains_tool_registry_missing_text(Some(entry))),
+        _ => false,
+    }
+}
+
+fn contains_reasoning_stop_finalized_marker(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(text)) => text.contains("[app.finished:reasoning.stop]"),
+        Some(Value::Array(items)) => items.iter().any(|entry| contains_reasoning_stop_finalized_marker(Some(entry))),
+        Some(Value::Object(row)) => row.values().any(|entry| contains_reasoning_stop_finalized_marker(Some(entry))),
+        _ => false,
+    }
+}
+
+fn payload_contract_signal(reason: String, marker: &str) -> Value {
+    let mut row = Map::new();
+    row.insert("reason".to_string(), Value::String(reason));
+    row.insert("marker".to_string(), Value::String(marker.to_string()));
+    Value::Object(row)
+}
+
+fn detect_retryable_empty_assistant_response_value(
+    body: &Value,
+    request_semantics: Option<&Value>,
+) -> Option<Value> {
+    let effective = stream_contract_probe_body(body)?;
+    let effective_row = effective.as_object()?;
+    let choices = effective_row
+        .get("choices")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(first_choice) = choices.first().and_then(Value::as_object) {
+        let finish_reason = read_string(first_choice.get("finish_reason"))
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        let message = first_choice.get("message").and_then(Value::as_object);
+        let has_tool_calls = has_non_empty_tool_calls(message.and_then(|row| row.get("tool_calls")));
+        let has_text = value_has_meaningful_visible_assistant_text(message.and_then(|row| row.get("content")))
+            || value_has_meaningful_visible_assistant_text(first_choice.get("content"));
+        let combined_text_has_registry_missing = contains_tool_registry_missing_text(message.and_then(|row| row.get("content")))
+            || contains_tool_registry_missing_text(first_choice.get("content"));
+        if (finish_reason == "stop" || finish_reason.is_empty())
+            && !has_tool_calls
+            && is_required_tool_call_turn_value(request_semantics)
+            && !is_tool_result_followup_turn_value(request_semantics)
+        {
+            return Some(payload_contract_signal(
+                format!("finish_reason={} with declared request tools but no structured tool_calls", if finish_reason.is_empty() { "unknown" } else { finish_reason.as_str() }),
+                "chat_missing_required_tool_call",
+            ));
+        }
+        if matches!(finish_reason.as_str(), "stop" | "tool_calls" | "") && !has_tool_calls && !has_text {
+            return Some(payload_contract_signal(
+                format!("finish_reason={} but assistant text/tool_calls are empty", if finish_reason.is_empty() { "unknown" } else { finish_reason.as_str() }),
+                "chat_empty_assistant",
+            ));
+        }
+        if matches!(finish_reason.as_str(), "stop" | "tool_calls" | "") && !has_tool_calls && combined_text_has_registry_missing {
+            return Some(payload_contract_signal(
+                "assistant emitted textual tool-not-found complaint without structured tool_calls".to_string(),
+                "chat_textual_tool_registry_missing",
+            ));
+        }
+    }
+
+    let status = read_string(effective_row.get("status"))
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if status == "completed" || status == "stop" {
+        let submit_tool_outputs = effective_row
+            .get("required_action")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("submit_tool_outputs"))
+            .and_then(Value::as_object);
+        let has_required_action_tool_calls = has_non_empty_tool_calls(submit_tool_outputs.and_then(|row| row.get("tool_calls")));
+        let has_function_calls = has_output_function_calls(effective_row.get("output"));
+        let has_text = value_has_meaningful_visible_assistant_text(effective_row.get("output_text"))
+            || value_has_meaningful_visible_assistant_text(effective_row.get("output"));
+        let has_reasoning_only = value_has_reasoning_only_content(effective_row.get("output"))
+            || value_has_reasoning_only_content(effective_row.get("reasoning"));
+        if !has_required_action_tool_calls
+            && !has_function_calls
+            && is_required_tool_call_turn_value(request_semantics)
+            && !is_tool_result_followup_turn_value(request_semantics)
+            && !contains_reasoning_stop_finalized_marker(effective_row.get("output"))
+            && !contains_reasoning_stop_finalized_marker(effective_row.get("output_text"))
+        {
+            return Some(payload_contract_signal(
+                format!("responses status={} with declared request tools but no function_call output", status),
+                "responses_missing_required_tool_call",
+            ));
+        }
+        if !has_required_action_tool_calls
+            && !has_function_calls
+            && !has_text
+            && !has_reasoning_only
+            && !is_tool_result_followup_turn_value(request_semantics)
+        {
+            return Some(payload_contract_signal(
+                format!("responses status={} but output text/tool_calls are empty{}", status, if has_reasoning_only { " (reasoning-only payload)" } else { "" }),
+                "responses_empty_output",
+            ));
+        }
+        if !has_required_action_tool_calls
+            && !has_function_calls
+            && contains_tool_registry_missing_text(effective_row.get("output_text"))
+        {
+            return Some(payload_contract_signal(
+                "responses completed with textual tool-not-found complaint but no function_call output".to_string(),
+                "responses_textual_tool_registry_missing",
+            ));
+        }
+    }
+    None
+}
+
 fn apply_chat_processed_request(request: Value, timestamp_ms: f64) -> Value {
     let mut request_obj = request.as_object().cloned().unwrap_or_else(Map::new);
 
@@ -608,6 +824,19 @@ pub fn is_tool_result_followup_turn_json(request_semantics_json: String) -> Napi
     Ok(is_tool_result_followup_turn_value(Some(&request_semantics)))
 }
 
+pub fn detect_retryable_empty_assistant_response_json(
+    body_json: String,
+    request_semantics_json: String,
+) -> NapiResult<String> {
+    let body: Value = serde_json::from_str(&body_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let request_semantics: Value = serde_json::from_str(&request_semantics_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = detect_retryable_empty_assistant_response_value(&body, Some(&request_semantics))
+        .unwrap_or(Value::Null);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[cfg(test)]
 mod request_semantics_tests {
     use super::*;
@@ -643,5 +872,23 @@ mod request_semantics_tests {
             "messages": [{ "role": "tool", "tool_call_id": "call_1", "content": "ok" }]
         });
         assert!(!is_tool_result_followup_turn_value(Some(&semantics)));
+    }
+
+    #[test]
+    fn detects_missing_required_responses_function_call_in_rust() {
+        let body = json!({ "status": "completed", "output": [] });
+        let semantics = json!({
+            "tools": { "clientToolsRaw": [{ "type": "function", "function": { "name": "exec_command" } }] },
+            "tool_choice": "required"
+        });
+        let signal = detect_retryable_empty_assistant_response_value(&body, Some(&semantics)).unwrap();
+        assert_eq!(signal["marker"], "responses_missing_required_tool_call");
+    }
+
+    #[test]
+    fn detects_chat_empty_assistant_in_rust() {
+        let body = json!({ "choices": [{ "finish_reason": "tool_calls", "message": { "content": "" } }] });
+        let signal = detect_retryable_empty_assistant_response_value(&body, Some(&Value::Null)).unwrap();
+        assert_eq!(signal["marker"], "chat_empty_assistant");
     }
 }

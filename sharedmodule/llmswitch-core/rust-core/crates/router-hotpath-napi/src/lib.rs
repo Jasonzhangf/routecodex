@@ -1152,6 +1152,17 @@ pub fn is_tool_result_followup_turn_json_bridge(request_semantics_json: String) 
     chat_node_result_semantics::is_tool_result_followup_turn_json(request_semantics_json)
 }
 
+#[napi(js_name = "detectRetryableEmptyAssistantResponseJson")]
+pub fn detect_retryable_empty_assistant_response_json_bridge(
+    body_json: String,
+    request_semantics_json: String,
+) -> NapiResult<String> {
+    chat_node_result_semantics::detect_retryable_empty_assistant_response_json(
+        body_json,
+        request_semantics_json,
+    )
+}
+
 #[napi(js_name = "normalizeToolCallIdsJson")]
 pub fn normalize_tool_call_ids_json(payload_json: String) -> NapiResult<String> {
     shared_response_compat::normalize_tool_call_ids_json(payload_json)

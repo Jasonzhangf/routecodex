@@ -673,6 +673,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('request executor response contract must not classify response tool semantics in TS', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'src/server/runtime/http-server/executor/request-executor-response-contract.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'checks chat tool_calls in TS', pattern: /message\?\.tool_calls|hasNonEmptyToolCalls|structured tool_calls/ },
+      { label: 'checks responses function_call output in TS', pattern: /hasOutputFunctionCalls|function_call|tool_call/ },
+      { label: 'checks required_action tool_calls in TS', pattern: /required_action|submit_tool_outputs|tool_calls/ },
+      { label: 'checks tool-result-like response content in TS', pattern: /tool_result|function_call_output|tool_message/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('servertool orchestration blocks must not retain TS tool call/output mutation semantics', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts');
     const source = fs.readFileSync(filePath, 'utf8');
