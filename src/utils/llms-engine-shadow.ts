@@ -161,9 +161,6 @@ function deletePath(root: unknown, pathExpr: string): void {
 const DEFAULT_EXCLUDED_COMPARE_PATHS = [
   // internal ids
   'providerPayload.requestId',
-  'providerPayload.metadata.context.requestId',
-  'providerPayload.metadata.responsesContext.requestId',
-  'providerPayload.metadata.context.__disableHubSnapshots',
   // debug-only fields
   'providerPayload.stageExpectations',
   'providerPayload.stages',

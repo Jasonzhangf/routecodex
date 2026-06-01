@@ -58,6 +58,32 @@ describe('Unified Hub runtime shadow compare -> errorsamples', () => {
     expect(files.some((f) => f.includes('diff-') && f.endsWith('.json'))).toBe(true);
   });
 
+  it('does not hide providerPayload metadata drift', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-shadow-runtime-metadata-'));
+    const errorsRoot = path.join(tmp, 'errorsamples');
+    process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsRoot;
+
+    await recordHubShadowCompareDiff({
+      requestId: 'req_shadow_runtime_metadata_test',
+      entryEndpoint: '/v1/responses',
+      routeHint: 'default',
+      candidateMode: 'enforce',
+      baselineMode: 'off',
+      baselineOut: {
+        providerPayload: { model: 'x', input: [] },
+        target: { providerKey: 'mock.key1.mock-model', runtimeKey: 'mock.key1' }
+      },
+      candidateOut: {
+        providerPayload: { model: 'x', input: [], metadata: { context: { requestId: 'must-not-hide' } } },
+        target: { providerKey: 'mock.key1.mock-model', runtimeKey: 'mock.key1' }
+      }
+    });
+
+    const dir = path.join(errorsRoot, 'unified-hub-shadow-runtime');
+    const files = await listFiles(dir);
+    expect(files.some((f) => f.includes('diff-') && f.endsWith('.json'))).toBe(true);
+  });
+
   it('writes a routing drift errorsample when only target differs and ignoreTargetSelection=true', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-shadow-runtime-routing-'));
     const errorsRoot = path.join(tmp, 'errorsamples');

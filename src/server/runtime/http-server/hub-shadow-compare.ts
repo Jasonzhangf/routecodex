@@ -109,9 +109,6 @@ export async function recordHubShadowCompareDiff(options: {
     ...(ignoreInternalIds
       ? [
         'providerPayload.requestId',
-        'providerPayload.metadata.context.requestId',
-        'providerPayload.metadata.responsesContext.requestId',
-        'providerPayload.metadata.context.__disableHubSnapshots'
       ]
       : []),
     ...(ignoreTargetSelection ? ['target.providerKey', 'target.runtimeKey'] : []),
