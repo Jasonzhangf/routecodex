@@ -83,4 +83,53 @@ describe('clock heartbeat feature removal gate', () => {
     }
     expect(findings).toEqual([]);
   });
+
+  it('keeps active runtime source free of clock heartbeat feature surfaces', () => {
+    const forbiddenFiles = [
+      'src/server/runtime/http-server/tmux-injection-runtime-config.ts',
+      'src/server/runtime/http-server/tmux-injection-history.ts',
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.d.ts',
+      'sharedmodule/llmswitch-core/src/servertool/handlers/clock-pure-blocks.d.ts',
+    ];
+    const survivors = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(process.cwd(), relativePath)));
+
+    const roots = [
+      'src/server/runtime/http-server/executor',
+      'sharedmodule/llmswitch-core/src/conversion/shared',
+      'sharedmodule/llmswitch-core/src/router/virtual-router',
+      'sharedmodule/llmswitch-core/src/servertool',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions',
+    ];
+    const activePatterns = [
+      /\bservertool\.clock\b/,
+      /\bservertool\.heartbeat\b/,
+      /<\*\*clock:\{/,
+      /\bhasClockDirective\b/,
+      /\bClockConfigOutput\b/,
+      /\bnormalize_clock\b/,
+      /\bclock_reservation\b/,
+      /\bcall_clock_fallback_\b/,
+      /\['clock',\s*new Set/,
+      /\bclock_hold_flow\b/,
+      /\bheartbeat_flow\b/,
+      /'clock',/,
+    ];
+    const findings: string[] = [];
+    for (const root of roots) {
+      for (const file of walkFiles(path.join(process.cwd(), root), ['.ts', '.d.ts', '.rs'])) {
+        const relative = path.relative(process.cwd(), file);
+        if (relative.endsWith('clock-heartbeat-feature-removal-gate.spec.ts')) continue;
+        const source = fs.readFileSync(file, 'utf8');
+        for (const pattern of activePatterns) {
+          if (pattern.test(source)) {
+            findings.push(`${relative}:${pattern.source}`);
+          }
+        }
+      }
+    }
+
+    expect({ survivors, findings }).toEqual({ survivors: [], findings: [] });
+  });
 });

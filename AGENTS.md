@@ -18,7 +18,7 @@
 
 ## Metadata 生命周期硬边界（醒目）
 1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。
-2. **内部可用**：Hub Pipeline、Virtual Router、Provider Runtime 可通过 runtime carrier / context side-channel 读取 metadata 作为控制语义（routeHint、entryEndpoint、stream intent、servertool/clock/web_search、snapshot 标签等）。
+2. **内部可用**：Hub Pipeline、Virtual Router、Provider Runtime 可通过 runtime carrier / context side-channel 读取 metadata 作为控制语义（routeHint、entryEndpoint、stream intent、servertool/web_search、snapshot 标签等）。
 3. **出站隔离**：provider HTTP body、SDK request/options、direct passthrough body、Responses/Anthropic/OpenAI/Gemini/Qwen/GLM provider body 不得出现内部 metadata；发现必须 fail-fast，禁止静默删除当作修复。
 4. **响应隔离**：resp_inbound/process/outbound 只能读取同一 requestId/pipelineId 的 metadata；不得把 metadata 注入 client response body。
 5. **闭环释放**：请求/响应闭环完成后 metadata 不得进入全局 singleton、provider health/quota、session cache、port-shared cache、snapshot replay normal path。
@@ -40,7 +40,7 @@
 1. 入口总览：`docs/agent-routing/00-entry-routing.md`
 2. 运行时与架构真源：`docs/agent-routing/10-runtime-ssot-routing.md`
 3. 构建/验证/发布：`docs/agent-routing/20-build-test-release-routing.md`
-4. servertool / stopMessage / heartbeat / clock：`docs/agent-routing/30-servertool-lifecycle-routing.md`
+4. servertool / stopMessage / stopless followup：`docs/agent-routing/30-servertool-lifecycle-routing.md`
 5. 任务跟踪与记忆：`docs/agent-routing/40-task-memory-routing.md`
 6. 权威细节文档：
    - Windsurf 当前事实入口：`.agents/skills/rcc-dev-skills/SKILL.md` 的 Windsurf 章节 + `docs/providers/windsurf-chat-provider-design.md`

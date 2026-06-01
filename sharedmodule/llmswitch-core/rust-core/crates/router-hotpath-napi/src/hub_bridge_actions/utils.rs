@@ -14,7 +14,7 @@ pub(crate) struct MediaBlock {
 
 pub(crate) fn is_synthetic_routecodex_tool_call_id(call_id: &str) -> bool {
     let lowered = call_id.trim().to_ascii_lowercase();
-    lowered.starts_with("call_servertool_fallback_") || lowered.starts_with("call_clock_fallback_")
+    lowered.starts_with("call_servertool_fallback_")
 }
 
 pub(crate) fn coerce_bridge_role(role: Option<&str>) -> String {
@@ -92,7 +92,7 @@ fn normalize_with_fallback(call_id: Option<&str>, fallback: &str, prefix: &str) 
 pub(crate) fn can_servertool_own_tool_call_id(tool_name: &str) -> bool {
     matches!(
         sanitize_servertool_name_token(tool_name).as_str(),
-        "clock" | "continue_execution" | "web_search"
+        "continue_execution" | "web_search"
     )
 }
 

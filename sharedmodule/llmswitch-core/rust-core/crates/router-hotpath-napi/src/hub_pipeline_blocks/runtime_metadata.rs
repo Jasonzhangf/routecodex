@@ -79,20 +79,3 @@ pub(crate) fn sync_session_identifiers_to_metadata(input: &Value) -> Result<Valu
 
     Ok(Value::Object(metadata))
 }
-
-pub(crate) fn merge_clock_reservation_into_metadata(input: &Value) -> Result<Value, String> {
-    let row = input
-        .as_object()
-        .ok_or_else(|| "clock reservation metadata input must be object".to_string())?;
-    let mut metadata = value_as_object_or_empty(row.get("metadata").unwrap_or(&Value::Null));
-    let reservation = row
-        .get("processedRequest")
-        .and_then(|v| v.as_object())
-        .and_then(|req| req.get("metadata"))
-        .and_then(|v| v.as_object())
-        .and_then(|meta| meta.get("__clockReservation"));
-    if let Some(Value::Object(obj)) = reservation {
-        metadata.insert("__clockReservation".to_string(), Value::Object(obj.clone()));
-    }
-    Ok(Value::Object(metadata))
-}

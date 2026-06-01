@@ -169,7 +169,7 @@ export function applyClientInjectOnlyMetadata(args: {
   record.clientInjectOnly = true;
   record.clientInjectText = args.normalizeClientInjectText(record.clientInjectText ?? args.defaultText);
   if (typeof record.clientInjectSource !== 'string') {
-    record.clientInjectSource = decision.clientInjectSource ?? 'servertool.heartbeat';
+    record.clientInjectSource = decision.clientInjectSource ?? 'servertool.followup';
   }
   return { forced: true };
 }

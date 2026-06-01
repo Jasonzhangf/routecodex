@@ -12,7 +12,7 @@
 ## 分类分发表
 1. 架构/语义真源边界 → `10-runtime-ssot-routing.md`
 2. 构建/测试/发布 → `20-build-test-release-routing.md`
-3. servertool 生命周期（sm/heartbeat/clock） → `30-servertool-lifecycle-routing.md`
+3. servertool 生命周期（stopless/followup） → `30-servertool-lifecycle-routing.md`
 4. BD/记忆/任务轨迹 → `40-task-memory-routing.md`
 5. 用户纠偏（全局） → `~/.codex/docs/agent-routing/10-alignment-and-profile.md`
 

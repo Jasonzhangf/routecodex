@@ -12,7 +12,7 @@ pub use crate::hub_resp_outbound_client_semantics_blocks::napi_bindings::{
     resolve_alias_map_from_resp_semantics_json, resolve_alias_map_from_sources_json,
     resolve_anthropic_chat_completion_outcome_json, resolve_anthropic_stop_reason_json,
     resolve_client_tools_raw_from_resp_semantics_json, resolve_client_tools_raw_json,
-    resolve_clock_reservation_from_context_json, resolve_provider_response_context_helpers_json,
+    resolve_provider_response_context_helpers_json,
     resolve_provider_type_from_protocol_json, resolve_sse_stream_mode_json,
     sanitize_chat_completion_like_json, sanitize_responses_function_name_json,
     summarize_tool_calls_from_provider_response_json,

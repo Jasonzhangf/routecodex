@@ -100,8 +100,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                         "exec_command_guard": "exec_command_guard",
                         "web_search_flow": "web_search",
                         "vision_flow": "vision_auto",
-                        "clock_flow": "clock",
-                        "clock_hold_flow": "clock_auto",
                         "recursive_detection_guard": "recursive_detection_guard"
                     },
                     "goldHighlightFlowIds": ["continue_execution_flow"]
@@ -141,14 +139,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                             "reasoning_stop_guard_flow": {},
                             "reasoning_stop_continue_flow": {},
                             "reasoning_stop_finalize_flow": {},
-                            "clock_hold_flow": {
-                                "clientInjectOnly": true,
-                                "clientInjectSource": "servertool.clock"
-                            },
-                            "heartbeat_flow": {
-                                "clientInjectOnly": true,
-                                "clientInjectSource": "servertool.heartbeat"
-                            },
                             "continue_execution_flow": {
                                 "contextDecorationMode": "continue_execution_summary"
                             },
@@ -283,36 +273,6 @@ mod tests {
             .expect("profilesByFlowId object");
         assert!(!profiles.contains_key("apply_patch_guard"));
         assert!(!profiles.contains_key("apply_patch_read_before_retry_guard"));
-    }
-
-    #[test]
-    fn resolves_followup_flow_profile() {
-        let raw = resolve_servertool_followup_flow_profile_json("clock_hold_flow".to_string())
-            .expect("profile json");
-        let parsed: Value = serde_json::from_str(&raw).expect("parse profile");
-        assert_eq!(
-            parsed.get("clientInjectOnly").and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        assert_eq!(
-            parsed.get("clientInjectSource").and_then(|v| v.as_str()),
-            Some("servertool.clock")
-        );
-    }
-
-    #[test]
-    fn resolves_followup_runtime_plan() {
-        let raw = plan_servertool_followup_runtime_json("clock_hold_flow".to_string())
-            .expect("runtime plan json");
-        let parsed: Value = serde_json::from_str(&raw).expect("parse runtime plan");
-        assert_eq!(
-            parsed.get("outcomeMode").and_then(|v| v.as_str()),
-            Some("client_inject_only")
-        );
-        assert_eq!(
-            parsed.get("clientInjectOnly").and_then(|v| v.as_bool()),
-            Some(true)
-        );
     }
 
     #[test]

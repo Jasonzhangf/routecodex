@@ -115,24 +115,6 @@ struct ExecCommandGuardConfigOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ClockConfigOutput {
-    enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    retention_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    due_window_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tick_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hold_non_streaming: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hold_max_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    include_time_tag: Option<bool>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct WebSearchEngineOutput {
     id: String,
     provider_key: String,
@@ -181,8 +163,6 @@ struct ConfigBootstrapOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     exec_command_guard: Option<ExecCommandGuardConfigOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    clock: Option<ClockConfigOutput>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     apply_patch: Option<ApplyPatchConfigOutput>,
 }
 
@@ -211,7 +191,6 @@ pub(crate) fn bootstrap_virtual_router_config_meta_json(
             |error| napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error)),
         )?,
         exec_command_guard: normalize_exec_command_guard(section.get("execCommandGuard")),
-        clock: normalize_clock(section.get("clock")),
         apply_patch: normalize_apply_patch_config(resolve_apply_patch_config_node(section))
             .map_err(|error| {
                 napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error))
@@ -438,30 +417,6 @@ fn normalize_exec_command_guard(value: Option<&Value>) -> Option<ExecCommandGuar
     Some(ExecCommandGuardConfigOutput {
         enabled: true,
         policy_file,
-    })
-}
-
-fn normalize_clock(value: Option<&Value>) -> Option<ClockConfigOutput> {
-    let record = value.and_then(Value::as_object)?;
-    let enabled = record
-        .get("enabled")
-        .and_then(parse_bool_like)
-        .unwrap_or(false);
-    if !enabled {
-        return None;
-    }
-    Some(ClockConfigOutput {
-        enabled: true,
-        retention_ms: record
-            .get("retentionMs")
-            .and_then(normalize_non_negative_i64),
-        due_window_ms: record
-            .get("dueWindowMs")
-            .and_then(normalize_non_negative_i64),
-        tick_ms: record.get("tickMs").and_then(normalize_non_negative_i64),
-        hold_non_streaming: truthy_option(record.get("holdNonStreaming")),
-        hold_max_ms: record.get("holdMaxMs").and_then(normalize_non_negative_i64),
-        include_time_tag: truthy_option(record.get("includeTimeTag")),
     })
 }
 

@@ -12,7 +12,6 @@ const ANTHROPIC_STABLE_TOOL_SCHEMA_NAMES = new Set<string>([
   'update_plan',
   'view_image',
   'web_search',
-  'clock',
   'continue_execution'
 ]);
 
@@ -34,8 +33,7 @@ const ANTHROPIC_STABLE_TOOL_SCHEMA_KEYS = new Map<string, Set<string>>([
   ['request_user_input', new Set(['questions'])],
   ['update_plan', new Set(['explanation', 'plan'])],
   ['view_image', new Set(['path'])],
-  ['web_search', new Set(['query', 'q', 'domains', 'recency'])],
-  ['clock', new Set(['action', 'items', 'taskId'])]
+  ['web_search', new Set(['query', 'q', 'domains', 'recency'])]
 ]);
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

@@ -1584,49 +1584,6 @@ fn test_sync_session_identifiers_to_metadata_ignores_blank_or_missing_values() {
 }
 
 #[test]
-fn test_merge_clock_reservation_into_metadata_merges_object_reservation() {
-    let input = json!({
-        "metadata": { "existing": true },
-        "processedRequest": {
-            "metadata": {
-                "__clockReservation": {
-                    "reservationId": "r1",
-                    "taskIds": ["a", "b"]
-                }
-            }
-        }
-    });
-    let output = merge_clock_reservation_into_metadata(&input)
-        .expect("merge clock reservation into metadata");
-    let row = output.as_object().expect("output object");
-    assert_eq!(row.get("existing").and_then(|v| v.as_bool()), Some(true));
-    assert_eq!(
-        row.get("__clockReservation")
-            .and_then(|v| v.as_object())
-            .and_then(|v| v.get("reservationId"))
-            .and_then(|v| v.as_str()),
-        Some("r1")
-    );
-}
-
-#[test]
-fn test_merge_clock_reservation_into_metadata_ignores_non_object_reservation() {
-    let input = json!({
-        "metadata": { "existing": true },
-        "processedRequest": {
-            "metadata": {
-                "__clockReservation": "invalid"
-            }
-        }
-    });
-    let output = merge_clock_reservation_into_metadata(&input)
-        .expect("merge clock reservation into metadata");
-    let row = output.as_object().expect("output object");
-    assert_eq!(row.get("existing").and_then(|v| v.as_bool()), Some(true));
-    assert!(!row.contains_key("__clockReservation"));
-}
-
-#[test]
 fn test_build_tool_governance_node_result_builds_expected_shape() {
     let input = json!({
         "success": true,

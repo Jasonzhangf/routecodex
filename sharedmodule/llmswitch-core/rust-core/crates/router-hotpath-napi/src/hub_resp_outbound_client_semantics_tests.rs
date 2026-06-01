@@ -141,6 +141,39 @@ fn build_responses_payload_from_chat_fails_fast_when_choices_missing() {
 }
 
 #[test]
+fn build_responses_payload_from_chat_preserves_client_model_over_upstream_provider_model() {
+    let payload = serde_json::json!({
+        "id": "chatcmpl_minimax_provider_model",
+        "model": "MiniMax-M3",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "ok"
+                },
+                "finish_reason": "stop"
+            }
+        ]
+    });
+
+    let output = build_responses_payload_from_chat_core(
+        &payload,
+        Some("req_provider_model_mask"),
+        &serde_json::json!({
+            "model": "MiniMax-M3",
+            "clientModelId": "gpt-5.5",
+            "originalModelId": "gpt-5.5",
+            "displayModel": "gpt-5.5",
+            "toolsRaw": []
+        }),
+    )
+    .expect("build responses payload");
+
+    assert_eq!(output["model"], Value::String("gpt-5.5".to_string()));
+    assert_eq!(output["output_text"], Value::String("ok".to_string()));
+}
+
+#[test]
 fn build_responses_payload_from_chat_filters_native_tool_output_id_alias_from_required_action() {
     let payload = serde_json::json!({
         "id": "resp_native_completed",
@@ -845,6 +878,9 @@ fn build_responses_payload_from_chat_merges_source_retention_and_context_fields(
         "metadata": {
             "toolCallIdStyle": "fc",
             "keep": true,
+            "__routecodexPreselectedRoute": { "providerKey": "mini27.key1.MiniMax-M2.7" },
+            "__raw_request_body": { "model": "mini27.MiniMax-M2.7" },
+            "target": { "providerKey": "mini27.key1.MiniMax-M2.7" },
             "extraFields": { "__rcc_debug": "drop" }
         },
         "parallelToolCalls": true,
@@ -878,6 +914,8 @@ fn build_responses_payload_from_chat_merges_source_retention_and_context_fields(
     assert_eq!(output["metadata"]["keep"], Value::Bool(true));
     assert_eq!(output["metadata"]["source"], Value::Bool(true));
     assert!(output["metadata"].get("toolCallIdStyle").is_none());
+    assert!(output["metadata"].get("__routecodexPreselectedRoute").is_none());
+    assert!(output["metadata"].get("__raw_request_body").is_none());
     assert_eq!(output["temperature"], Value::from(0.4));
     assert_eq!(output["top_p"], Value::from(0.8));
     assert_eq!(
@@ -1130,6 +1168,38 @@ fn build_responses_payload_from_chat_backfills_reasoning_summary_from_content() 
         Value::String("raw-only-2".to_string())
     );
     assert_eq!(reasoning_item["encrypted_content"], Value::Null);
+}
+
+#[test]
+fn build_responses_payload_from_chat_reasoning_only_does_not_emit_duplicate_message_item() {
+    let payload = serde_json::json!({
+        "id": "resp_reasoning_only_no_message",
+        "model": "gpt-5.2",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning": {
+                        "summary": [{ "type": "summary_text", "text": "Let me inspect tool_call_entry.rs." }],
+                        "content": [{ "type": "reasoning_text", "text": "Let me inspect tool_call_entry.rs." }]
+                    }
+                }
+            }
+        ]
+    });
+
+    let output = build_responses_payload_from_chat_core(
+        &payload,
+        Some("req_reasoning_only_no_message"),
+        &serde_json::json!({ "toolsRaw": [] }),
+    )
+    .expect("build responses payload");
+
+    let output_items = output["output"].as_array().expect("output array");
+    assert_eq!(output_items.len(), 1);
+    assert_eq!(output_items[0]["type"], Value::String("reasoning".to_string()));
+    assert!(output_items.iter().all(|item| item["type"] != Value::String("message".to_string())));
 }
 
 #[test]
@@ -1470,76 +1540,6 @@ fn resolve_sse_stream_mode_supports_gemini_chat() {
     assert!(!resolve_sse_stream_mode(false, "gemini-chat").unwrap());
     assert!(resolve_sse_stream_mode(true, " unknown-protocol ").is_err());
     assert!(resolve_sse_stream_mode(true, "gemini-chat-preview").is_err());
-}
-
-#[test]
-fn resolve_clock_reservation_from_context_normalizes_valid_payload() {
-    let output = resolve_clock_reservation_from_context(&serde_json::json!({
-        "__clockReservation": {
-            "reservationId": "  res-1  ",
-            "sessionId": "  sess-1  ",
-            "taskIds": ["  task-a  ", "", 1, "task-b"],
-            "reservedAtMs": 1234.9
-        }
-    }))
-    .expect("clock reservation");
-    assert_eq!(
-        output.get("reservationId").and_then(|v| v.as_str()),
-        Some("res-1")
-    );
-    assert_eq!(
-        output.get("sessionId").and_then(|v| v.as_str()),
-        Some("sess-1")
-    );
-    assert_eq!(
-        output.get("taskIds").and_then(|v| v.as_array()).cloned(),
-        Some(vec![
-            Value::String("task-a".to_string()),
-            Value::String("task-b".to_string())
-        ])
-    );
-    assert_eq!(
-        output.get("reservedAtMs").and_then(|v| v.as_i64()),
-        Some(1234)
-    );
-}
-
-#[test]
-fn resolve_clock_reservation_from_context_uses_now_when_reserved_at_invalid() {
-    let start = now_unix_millis() as i64;
-    let output = resolve_clock_reservation_from_context(&serde_json::json!({
-        "__clockReservation": {
-            "reservationId": "res-2",
-            "sessionId": "sess-2",
-            "taskIds": ["task-a"],
-            "reservedAtMs": "invalid"
-        }
-    }))
-    .expect("clock reservation");
-    let resolved = output
-        .get("reservedAtMs")
-        .and_then(|v| v.as_i64())
-        .expect("reservedAtMs");
-    assert!(resolved >= start);
-}
-
-#[test]
-fn resolve_clock_reservation_from_context_returns_none_when_required_fields_missing() {
-    assert!(resolve_clock_reservation_from_context(&serde_json::json!({
-        "__clockReservation": {
-            "reservationId": "res-1",
-            "taskIds": ["task-a"]
-        }
-    }))
-    .is_none());
-    assert!(resolve_clock_reservation_from_context(&serde_json::json!({
-        "__clockReservation": {
-            "reservationId": "res-1",
-            "sessionId": "sess-1",
-            "taskIds": []
-        }
-    }))
-    .is_none());
 }
 
 // P0: encrypted-only reasoning should emit reasoning item but NOT empty message

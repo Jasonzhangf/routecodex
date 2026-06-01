@@ -13872,3 +13872,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 清理：移除 legacy TS tool-governor/tool-filter/tool-governance 与旧测试，保留 Hub Pipeline/tool governance 语义在 Rust 真源。
 - 验证：`npx jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 通过；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit` 通过；residue grep 无业务残留命中。
 - 已知非本批阻塞：根 `npx tsc --noEmit` 仍失败于 Windsurf native hotpath shim 模块声明缺失。
+
+## 2026-06-01 clock/heartbeat residual cleanup
+- 发现：上一批 clock/heartbeat 删除门漏检 active source，仍有 VirtualRouter config `clock`、clock reservation metadata、`servertool.clock/servertool.heartbeat` followup/source、Anthropic stable tool schema `clock`、tmux injection runtime config 等残留。
+- 修复：补强 `tests/sharedmodule/clock-heartbeat-feature-removal-gate.spec.ts`，物理删除/移除上述残留；保留通用 session-client daemon heartbeat（注册存活检测）与 SSE heartbeat，不属于 RCC clock/heartbeat feature。
+- 验证：clock-heartbeat Jest 删除门通过；llmswitch-core TS typecheck 通过；router-hotpath-napi clock/heartbeat 三个 Rust 删除门单独通过。root `npx tsc --noEmit` 仍被既有 Windsurf shim module declaration 缺失阻塞。

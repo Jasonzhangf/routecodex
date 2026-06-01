@@ -28,8 +28,7 @@ type ClientInjectionTarget = {
 };
 
 function shouldSanitizeClientInjectText(source: string): boolean {
-  const normalized = typeof source === 'string' ? source.trim().toLowerCase() : '';
-  return normalized !== 'servertool.clock';
+  return true;
 }
 
 function createClientInjectFailureError(args: {
@@ -275,7 +274,6 @@ function buildInjectTargetFromMetadata(args: {
 
 function extractUserAndToolSignals(requestBody: Record<string, unknown>): {
   userText: string;
-  hasClockDirective: boolean;
   continueExecutionToolCalled: boolean;
 } {
   const messages = Array.isArray(requestBody.messages) ? (requestBody.messages as unknown[]) : [];
@@ -296,7 +294,6 @@ function extractUserAndToolSignals(requestBody: Record<string, unknown>): {
 
   return {
     userText,
-    hasClockDirective: userText.includes('<**clock:{') && userText.includes('}**>'),
     continueExecutionToolCalled: lastToolRole === 'tool' && lastToolName === 'continue_execution'
   };
 }
@@ -408,20 +405,6 @@ export async function runClientInjectionFlowBeforeReenter(args: {
     return { clientInjectOnlyHandled: true };
   }
 
-  if (signals.hasClockDirective) {
-    const strictTarget = resolveStrictTarget('servertool.clock');
-    await injectClientPromptStrict({
-      tmuxSessionId: strictTarget.tmuxSessionId,
-      sessionScope: strictTarget.sessionScope,
-      ...(injectTarget.tmuxTarget ? { tmuxTarget: injectTarget.tmuxTarget } : {}),
-      ...(injectTarget.clientType ? { clientType: injectTarget.clientType } : {}),
-      workdir: injectTarget.workdir,
-      requestId: injectTarget.requestId,
-      text: signals.userText,
-      source: 'servertool.clock'
-    });
-  }
-
   if (signals.continueExecutionToolCalled) {
     const strictTarget = resolveStrictTarget('servertool.continue_execution');
     await injectClientPromptStrict({
@@ -436,7 +419,7 @@ export async function runClientInjectionFlowBeforeReenter(args: {
     });
   }
 
-  if (signals.hasClockDirective || signals.continueExecutionToolCalled) {
+  if (signals.continueExecutionToolCalled) {
     return { clientInjectOnlyHandled: true };
   }
 

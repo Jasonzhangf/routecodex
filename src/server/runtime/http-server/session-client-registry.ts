@@ -13,7 +13,6 @@ import {
   resolveManagedTmuxSessionState
 } from './session-client-registry-utils.js';
 import { injectTmuxSessionText, isTmuxSessionAlive } from './tmux-session-probe.js';
-import { resolveTmuxInjectDelayMsFromRuntimeConfig } from './tmux-injection-runtime-config.js';
 import type {
   SessionCleanupResult,
   SessionClientInjectArgs,
@@ -58,10 +57,6 @@ function logSessionClientRegistryNonBlockingError(stage: string, error: unknown,
 }
 
 function resolveClientTmuxInjectDelayMs(): number {
-  const runtimeConfigDelay = resolveTmuxInjectDelayMsFromRuntimeConfig();
-  if (typeof runtimeConfigDelay === 'number' && Number.isFinite(runtimeConfigDelay) && runtimeConfigDelay >= 0) {
-    return runtimeConfigDelay;
-  }
   const raw =
     process.env.ROUTECODEX_CLIENT_INJECT_DELAY_MS ??
     process.env.RCC_CLIENT_INJECT_DELAY_MS;

@@ -40,8 +40,8 @@ use crate::hub_pipeline_blocks::responses_resume::{
 };
 use crate::hub_pipeline_blocks::router_metadata_input::build_router_metadata_input;
 use crate::hub_pipeline_blocks::runtime_metadata::{
-    apply_has_image_attachment_flag, merge_clock_reservation_into_metadata,
-    prepare_runtime_metadata_for_servertools, sync_session_identifiers_to_metadata,
+    apply_has_image_attachment_flag, prepare_runtime_metadata_for_servertools,
+    sync_session_identifiers_to_metadata,
 };
 use crate::hub_pipeline_blocks::standardized_request::coerce_standardized_request_from_payload;
 use crate::hub_pipeline_blocks::web_search::{
@@ -326,24 +326,6 @@ pub fn sync_session_identifiers_to_metadata_json(input_json: String) -> napi::Re
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
             "Failed to serialize synced session identifier metadata: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn merge_clock_reservation_into_metadata_json(input_json: String) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = merge_clock_reservation_into_metadata(&input).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to merge clock reservation into metadata: {}",
-            e
-        ))
-    })?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize merged clock reservation metadata: {}",
             e
         ))
     })

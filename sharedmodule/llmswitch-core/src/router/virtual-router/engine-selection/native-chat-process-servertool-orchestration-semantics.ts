@@ -19,10 +19,6 @@ export type NativeChatWebSearchPlan = {
   selectedEngineIndexes: number[];
 };
 
-export type NativeChatClockPlan = {
-  shouldInject: boolean;
-};
-
 export type NativeContinueExecutionPlan = {
   shouldInject: boolean;
 };
@@ -39,7 +35,6 @@ export type NativePayloadContractSignal = {
 
 export type NativeChatServerToolBundlePlan = {
   webSearch: NativeChatWebSearchPlan;
-  clock: NativeChatClockPlan;
   continueExecution: NativeContinueExecutionPlan;
 };
 
@@ -182,8 +177,8 @@ function parseWebSearchPlan(raw: string): NativeChatWebSearchPlan | null {
   };
 }
 
-function parseClockPlan(raw: string): NativeChatClockPlan | null {
-  const parsed = parseJson('parseClockPlan', raw);
+function parseBooleanInjectionPlan(raw: string): NativeContinueExecutionPlan | null {
+  const parsed = parseJson('parseBooleanInjectionPlan', raw);
   if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
@@ -195,7 +190,7 @@ function parseClockPlan(raw: string): NativeChatClockPlan | null {
 }
 
 function parseContinueExecutionPlan(raw: string): NativeContinueExecutionPlan | null {
-  return parseClockPlan(raw);
+  return parseBooleanInjectionPlan(raw);
 }
 
 function parseContinueDirectiveInjection(raw: string): NativeContinueDirectiveInjection | null {
@@ -220,16 +215,14 @@ function parseServerToolBundlePlan(raw: string): NativeChatServerToolBundlePlan 
   }
   const row = parsed as Record<string, unknown>;
   const webSearchRaw = typeof row.webSearch === 'object' ? JSON.stringify(row.webSearch) : '';
-  const clockRaw = typeof row.clock === 'object' ? JSON.stringify(row.clock) : '';
   const continueRaw =
     typeof row.continueExecution === 'object' ? JSON.stringify(row.continueExecution) : '';
   const webSearch = webSearchRaw ? parseWebSearchPlan(webSearchRaw) : null;
-  const clock = clockRaw ? parseClockPlan(clockRaw) : null;
   const continueExecution = continueRaw ? parseContinueExecutionPlan(continueRaw) : null;
-  if (!webSearch || !clock || !continueExecution) {
+  if (!webSearch || !continueExecution) {
     return null;
   }
-  return { webSearch, clock, continueExecution };
+  return { webSearch, continueExecution };
 }
 
 function parsePayloadContractSignal(raw: string): NativePayloadContractSignal | null {
@@ -475,21 +468,6 @@ export function planChatWebSearchOperationsWithNative(
   try {
     const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [request ?? null, runtimeMetadata]);
     const parsed = parseWebSearchPlan(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function planChatClockOperationsWithNative(
-  runtimeMetadata: Record<string, unknown>
-): NativeChatClockPlan {
-  const capability = 'planChatClockOperationsJson';
-  const fail = (reason?: string) => failNativeRequired<NativeChatClockPlan>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [runtimeMetadata]);
-    const parsed = parseClockPlan(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

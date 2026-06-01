@@ -120,7 +120,7 @@ describe('resp_process stage3 servertool followup reentry', () => {
       payload: buildStopResponse('普通 followup') as any,
       adapterContext: {
         sessionId: 'stage3-bypass-normal-followup',
-        clientInjectSource: 'servertool.clock',
+        clientInjectSource: 'servertool.followup',
         __rt: { serverToolFollowup: true }
       } as unknown as AdapterContext,
       requestId: 'req_stage3_bypass_normal_followup',

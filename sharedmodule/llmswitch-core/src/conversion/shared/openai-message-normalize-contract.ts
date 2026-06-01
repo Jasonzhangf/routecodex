@@ -15,8 +15,7 @@ export type ToolHistoryContractViolation = {
 };
 
 const SYNTHETIC_SERVERTOOL_ID_PATTERNS: RegExp[] = [
-  /^call_servertool_fallback_/i,
-  /^call_clock_fallback_/i
+  /^call_servertool_fallback_/i
 ];
 
 export function isSyntheticRouteCodexToolCallId(callId: string | undefined): boolean {

@@ -10,8 +10,7 @@ use crate::hub_resp_outbound_client_semantics_blocks::chat_reasoning::{
 use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::normalize_responses_tool_call_arguments_for_client;
 use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::{
     resolve_client_facing_request_id_from_context, resolve_client_protocol_for_response_entry,
-    resolve_clock_reservation_from_context, resolve_display_model_from_context,
-    resolve_tool_surface_shadow_enabled, resolve_truthy_flag,
+    resolve_display_model_from_context, resolve_tool_surface_shadow_enabled, resolve_truthy_flag,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::provider_outcome::{
     infer_provider_type_from_protocol, resolve_anthropic_chat_completion_outcome,
@@ -200,14 +199,6 @@ pub fn resolve_provider_response_context_helpers_json(
 
     serde_json::to_string(&Value::Object(output))
         .map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn resolve_clock_reservation_from_context_json(context_json: String) -> NapiResult<String> {
-    let context: Value =
-        serde_json::from_str(&context_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_clock_reservation_from_context(&context).unwrap_or(Value::Null);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi]

@@ -1,14 +1,14 @@
-# Servertool 生命周期路由（sm / heartbeat / clock）
+# Servertool 生命周期路由（stopless / followup）
 
 ## 索引概要
 - L1-L7 `scope`：覆盖范围。
-- L9-L17 `sm-lifecycle`：sm 生命周期。
-- L19-L27 `heartbeat-delivery`：heartbeat/DELIVERY 执行顺序。
-- L29-L34 `clock-rule`：异步等待规则。
-- L36-L41 `authoritative-docs`：权威文档。
+- L9-L17 `stopless-lifecycle`：stopless 生命周期。
+- L19-L24 `followup-boundary`：followup 边界。
+- L26-L31 `removed-features`：已移除功能禁区。
+- L33-L38 `authoritative-docs`：权威文档。
 
 ## 覆盖范围
-适用于：自动续轮、tmux 注入、heartbeat 巡检、定时回查。
+适用于：servertool stopless 自动续轮、stop followup 重建、tmux 注入边界。
 
 ## stopless 生命周期
 1. 当前 stopless 默认开启，默认注入 `继续执行`，默认次数 2。
@@ -17,20 +17,20 @@
 4. 非 `/goal` 时收到 `finish_reason=stop`：自动注入一次 `继续执行`。
 5. 注入失败必须清理状态，防止循环。
 
-## heartbeat / DELIVERY 顺序
-1. 读取 `HEARTBEAT.md`。
-2. 先核对上次交付完整性。
-3. 有缺口就继续修复，不只汇报。
-4. 更新 `DELIVERY.md` 后执行 review 并落盘证据。
+## followup 边界
+1. followup 只能基于 origin snapshot 重建。
+2. 不得从当前污染 payload 猜测补偿。
+3. 不得绕过 Hub Pipeline req/resp process 的 Rust 工具治理。
+4. 失败必须 fail-fast，禁止吞异常或降级。
 
-## clock 规则
-- 未知时长异步任务必须设置回查提醒。
-- 汇报后不停止，按提醒自动续跑。
+## 已移除功能禁区
+- clock / reminder / 定时回查功能已移除，禁止重新接入。
+- heartbeat / DELIVERY 巡检功能已移除，禁止重新接入。
+- 新需求不得通过 TS 或 servertool 旁路恢复上述功能。
 
 ## 权威文档
 - `docs/stop-message-auto.md`
 - `docs/design/servertool-stopmessage-lifecycle.md`
 - `docs/design/rcc-unified-fence-marker-spec.md`
-- `docs/design/servertool-unified-skeleton.md`
 - `docs/design/servertool-rust-only-architecture.md`
 - `docs/routing-instructions.md`

@@ -1,5 +1,6 @@
 use serde_json::{Map, Value};
 use std::collections::HashSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, normalize_message_reasoning_ssot,
@@ -8,12 +9,18 @@ use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::{
     build_client_tool_index, normalize_call_args,
     normalize_responses_tool_call_arguments_for_client, resolve_client_tool_name,
 };
-use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::now_unix_millis;
 use crate::hub_resp_outbound_client_semantics_blocks::responses_reasoning::{
     merge_responses_output_items, normalize_reasoning_summary_for_codex_display,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::normalize_responses_usage;
 use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
+
+fn now_unix_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
 
 fn now_unix_seconds() -> i64 {
     (now_unix_millis() / 1000) as i64
@@ -61,9 +68,7 @@ fn read_object_string(row: &Map<String, Value>, key: &str) -> Option<String> {
 fn require_explicit_tool_call_id(call_id: Option<String>, reason: &str) -> Result<String, String> {
     let resolved = call_id.ok_or_else(|| reason.to_string())?;
     let lowered = resolved.trim().to_ascii_lowercase();
-    if lowered.starts_with("call_servertool_fallback_")
-        || lowered.starts_with("call_clock_fallback_")
-    {
+    if lowered.starts_with("call_servertool_fallback_") {
         return Err(format!(
             "synthetic_tool_call_id: RouteCodex synthetic fallback tool_call id is forbidden: {}",
             resolved
@@ -329,9 +334,9 @@ fn read_response_semantics_pointer_field(context: &Value, key: &str) -> Option<S
         .or_else(|| resume_from.and_then(|row| read_object_string(row, key)))
 }
 
-fn read_context_model(context: &Value) -> Option<String> {
+fn read_context_client_model(context: &Value) -> Option<String> {
     let row = context.as_object()?;
-    for key in ["model", "displayModel", "clientModelId", "originalModelId"] {
+    for key in ["displayModel", "clientModelId", "originalModelId", "model"] {
         if let Some(value) = row
             .get(key)
             .and_then(Value::as_str)
@@ -344,7 +349,7 @@ fn read_context_model(context: &Value) -> Option<String> {
     row.get("metadata")
         .and_then(Value::as_object)
         .and_then(|metadata| {
-            for key in ["displayModel", "clientModelId", "originalModelId"] {
+            for key in ["displayModel", "clientModelId", "originalModelId", "model"] {
                 if let Some(value) = metadata
                     .get(key)
                     .and_then(Value::as_str)
@@ -375,8 +380,15 @@ fn apply_context_passthrough(out: &mut Map<String, Value>, context: &Value) {
         }
     }
 
+    if !out.contains_key("metadata") {
+        if let Some(value) = context_value(context, "metadata") {
+            if let Some(metadata) = sanitize_client_visible_metadata(value) {
+                out.insert("metadata".to_string(), metadata);
+            }
+        }
+    }
+
     for (context_key, output_key) in [
-        ("metadata", "metadata"),
         ("parallelToolCalls", "parallel_tool_calls"),
         ("toolChoice", "tool_choice"),
         ("include", "include"),
@@ -393,6 +405,29 @@ fn apply_context_passthrough(out: &mut Map<String, Value>, context: &Value) {
             out.insert("store".to_string(), value.clone());
         }
     }
+}
+
+fn sanitize_client_visible_metadata(value: &Value) -> Option<Value> {
+    let row = value.as_object()?;
+    let mut out = Map::new();
+    for (key, item) in row {
+        if key.starts_with("__")
+            || matches!(
+                key.as_str(),
+                "target"
+                    | "route"
+                    | "routing"
+                    | "requestContext"
+                    | "responsesRequestContext"
+                    | "clientHeaders"
+                    | "originalRequest"
+            )
+        {
+            continue;
+        }
+        out.insert(key.clone(), item.clone());
+    }
+    Some(Value::Object(out))
 }
 
 fn merge_source_retention(out: &mut Map<String, Value>, source_row: &Map<String, Value>) {
@@ -520,29 +555,12 @@ pub(crate) fn build_responses_payload_from_chat_core(
             .and_then(|text| build_message_reasoning_value(&[], &[text], None))
     });
 
-    // has_text_reasoning: text-only (summary or content) — drives message emission
-    let has_text_reasoning = reasoning_payload
-        .as_ref()
-        .and_then(Value::as_object)
-        .map_or(false, |rp| {
-            rp.get("summary")
-                .and_then(Value::as_array)
-                .map_or(false, |s| !s.is_empty())
-                || rp
-                    .get("content")
-                    .and_then(Value::as_array)
-                    .map_or(false, |c| !c.is_empty())
-        });
-
     let tool_calls = message
         .get("tool_calls")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
-    let has_tool_calls = !tool_calls.is_empty();
-    // Encrypted-only reasoning emits reasoning item but NOT message (P0 boundary fix)
-    // Only emit message if has real content OR visible text reasoning; not for tool-call-only or empty reasoning
-    let should_emit_message = !content_parts.is_empty() || (has_text_reasoning && !has_tool_calls);
+    let should_emit_message = !content_parts.is_empty();
 
     let response_id = allocate_responses_id(response_row);
     let request_id_value = read_request_id(response_row, request_id_hint);
@@ -792,7 +810,12 @@ pub(crate) fn build_responses_payload_from_chat_core(
     if let Some(model) = response_row
         .get("model")
         .cloned()
-        .or_else(|| read_context_model(context).map(Value::String))
+        .map(|upstream_model| {
+            read_context_client_model(context)
+                .map(Value::String)
+                .unwrap_or(upstream_model)
+        })
+        .or_else(|| read_context_client_model(context).map(Value::String))
     {
         out.insert("model".to_string(), model);
     }
