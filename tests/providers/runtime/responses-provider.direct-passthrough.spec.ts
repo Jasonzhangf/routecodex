@@ -14,6 +14,7 @@ jest.mock('../../../src/modules/llmswitch/bridge/state-integrations.js', () => (
 import type { OpenAIStandardConfig } from '../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { ResponsesProvider } from '../../../src/providers/core/runtime/responses-provider.js';
+import { attachProviderRuntimeMetadata } from '../../../src/providers/core/runtime/provider-runtime-metadata.js';
 
 const emptyDeps: ModuleDependencies = {
   logger: {
@@ -23,6 +24,34 @@ const emptyDeps: ModuleDependencies = {
 } as ModuleDependencies;
 
 describe('ResponsesProvider direct passthrough', () => {
+  test('fails fast when direct passthrough body contains metadata', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-metadata-boundary',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'cc',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+      metadata: { __responsesDirectPassthrough: true }
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { __responsesDirectPassthrough: true }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toThrow(/metadata is not allowed/);
+  });
+
   test('strips reasoning.content before provider HTTP send for non-DeepSeek responses provider', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-reasoning-filter',
@@ -68,9 +97,11 @@ describe('ResponsesProvider direct passthrough', () => {
           summary: [{ type: 'summary_text', text: 'summary stays' }]
         }
       ],
-      stream: true,
-      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+      stream: true
     } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
     expect(capturedBody.input[1].type).toBe('reasoning');
@@ -118,11 +149,12 @@ describe('ResponsesProvider direct passthrough', () => {
       store: false,
       stream: true,
       prompt_cache_key: 'cache-key-1',
-      instructions: 'keep-original-instructions',
-      metadata: { entryEndpoint: '/v1/responses' }
+      instructions: 'keep-original-instructions'
     } as any;
 
-    inbound.metadata.__responsesDirectPassthrough = true;
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
     expect(capturedHeaders?.Accept).toBe('text/event-stream');
     expect(capturedBody.model).toBe('gpt-5.4');

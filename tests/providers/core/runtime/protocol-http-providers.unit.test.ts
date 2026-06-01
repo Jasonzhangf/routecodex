@@ -185,10 +185,11 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       reasoning: { effort: 'high' },
       store: false,
       stream: true,
-      prompt_cache_key: 'cache-key-1',
-      metadata: { entryEndpoint: '/v1/responses' }
+      prompt_cache_key: 'cache-key-1'
     } as any;
-    inbound.metadata.__responsesDirectPassthrough = true;
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
     const captured = provider.__lastDirect.body;
     expect(captured.model).toBe('gpt-5.4');

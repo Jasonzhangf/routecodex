@@ -105,11 +105,6 @@ export function extractEntryEndpoint(source: unknown): string | undefined {
     const value = runtimeNode.entryEndpoint;
     return typeof value === 'string' ? value : undefined;
   }
-  const metadata = (source as { metadata?: unknown }).metadata;
-  if (metadata && typeof metadata === 'object' && 'entryEndpoint' in metadata) {
-    const value = (metadata as Record<string, unknown>).entryEndpoint;
-    return typeof value === 'string' ? value : undefined;
-  }
   return undefined;
 }
 
@@ -124,13 +119,6 @@ export function extractResponsesDirectPassthroughFlag(source: unknown): boolean 
       : undefined;
   if (runtimeNode?.__responsesDirectPassthrough === true) {
     return true;
-  }
-  const metadata = (source as { metadata?: unknown }).metadata;
-  if (metadata && typeof metadata === 'object') {
-    const candidate = (metadata as Record<string, unknown>).__responsesDirectPassthrough;
-    if (candidate === true) {
-      return true;
-    }
   }
   return false;
 }

@@ -22,6 +22,7 @@ import {
 } from '../../../modules/llmswitch/bridge.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
+import { extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import { emitProviderError, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
 import {
   buildSubmitToolOutputsEndpoint,
@@ -287,10 +288,10 @@ export class ResponsesProvider extends HttpTransportProvider {
     body: Record<string, unknown>,
     request: Record<string, unknown>
   ): void {
-    const metadata =
-      request.metadata && typeof request.metadata === 'object' && !Array.isArray(request.metadata)
-        ? (request.metadata as Record<string, unknown>)
-        : undefined;
+    const runtimeMetadata = extractProviderRuntimeMetadata(request);
+    const metadata = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
+      ? runtimeMetadata.metadata as Record<string, unknown>
+      : undefined;
     const routeParams =
       metadata?.routeParams && typeof metadata.routeParams === 'object' && !Array.isArray(metadata.routeParams)
         ? (metadata.routeParams as Record<string, unknown>)
@@ -323,8 +324,8 @@ export class ResponsesProvider extends HttpTransportProvider {
 
   private buildPassthroughResponsesBody(request: UnknownObject): Record<string, unknown> {
     const body = stripInternalKeysDeep({ ...(request as Record<string, unknown>) }) as Record<string, unknown>;
-    if (body.metadata && typeof body.metadata === 'object') {
-      delete body.metadata;
+    if (Object.prototype.hasOwnProperty.call(body, 'metadata')) {
+      throw new Error('provider-runtime-error: metadata is not allowed in direct passthrough responses payload');
     }
     const inboundModel = typeof body.model === 'string' ? body.model.trim() : '';
     if (!inboundModel) {
