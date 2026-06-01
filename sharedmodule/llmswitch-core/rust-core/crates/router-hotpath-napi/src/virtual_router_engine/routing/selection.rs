@@ -227,3 +227,178 @@ pub(crate) fn resolve_instruction_process_mode_for_selection(
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::{HashMap, HashSet};
+
+    fn make_registry() -> ProviderRegistry {
+        let mut registry = ProviderRegistry::default();
+        let mut providers = serde_json::Map::new();
+        providers.insert(
+            "openai.key1.gpt-4o".to_string(),
+            json!({
+                "providerKey": "openai.key1.gpt-4o",
+                "providerType": "openai",
+                "modelId": "gpt-4o",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "openai.key2.gpt-4o".to_string(),
+            json!({
+                "providerKey": "openai.key2.gpt-4o",
+                "providerType": "openai",
+                "modelId": "gpt-4o",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "anthropic.key1.claude-sonnet".to_string(),
+            json!({
+                "providerKey": "anthropic.key1.claude-sonnet",
+                "providerType": "anthropic",
+                "modelId": "claude-sonnet",
+                "enabled": true
+            }),
+        );
+        registry.load(&providers);
+        registry
+    }
+
+    #[test]
+    fn filter_empty_state_passes_all() {
+        let registry = make_registry();
+        let candidates = vec![
+            "openai.key1.gpt-4o".to_string(),
+            "anthropic.key1.claude-sonnet".to_string(),
+        ];
+        let state = RoutingInstructionState::default();
+        let result = filter_candidates_by_state(&candidates, &state, &registry);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn filter_empty_candidates_returns_empty() {
+        let registry = make_registry();
+        let candidates: Vec<String> = vec![];
+        let state = RoutingInstructionState::default();
+        let result = filter_candidates_by_state(&candidates, &state, &registry);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_allowed_providers_restricts() {
+        let registry = make_registry();
+        let candidates = vec![
+            "openai.key1.gpt-4o".to_string(),
+            "anthropic.key1.claude-sonnet".to_string(),
+        ];
+        let mut state = RoutingInstructionState::default();
+        state.allowed_providers = vec!["openai".to_string()].into_iter().collect();
+        let result = filter_candidates_by_state(&candidates, &state, &registry);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "openai.key1.gpt-4o");
+    }
+
+    #[test]
+    fn filter_disabled_providers_removes() {
+        let registry = make_registry();
+        let candidates = vec![
+            "openai.key1.gpt-4o".to_string(),
+            "anthropic.key1.claude-sonnet".to_string(),
+        ];
+        let mut state = RoutingInstructionState::default();
+        state.disabled_providers = vec!["openai".to_string()].into_iter().collect();
+        let result = filter_candidates_by_state(&candidates, &state, &registry);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "anthropic.key1.claude-sonnet");
+    }
+
+    #[test]
+    fn filter_disabled_keys_removes_specific_key() {
+        let registry = make_registry();
+        let candidates = vec![
+            "openai.key1.gpt-4o".to_string(),
+            "openai.key2.gpt-4o".to_string(),
+        ];
+        let mut state = RoutingInstructionState::default();
+        let mut disabled_keys = HashMap::new();
+        disabled_keys.insert(
+            "openai".to_string(),
+            vec!["key1".to_string()].into_iter().collect(),
+        );
+        state.disabled_keys = disabled_keys;
+        let result = filter_candidates_by_state(&candidates, &state, &registry);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "openai.key2.gpt-4o");
+    }
+
+    #[test]
+    fn filter_disabled_models_removes_by_model() {
+        let registry = make_registry();
+        let candidates = vec![
+            "openai.key1.gpt-4o".to_string(),
+            "anthropic.key1.claude-sonnet".to_string(),
+        ];
+        let mut state = RoutingInstructionState::default();
+        let mut disabled_models = HashMap::new();
+        disabled_models.insert(
+            "openai".to_string(),
+            vec!["gpt-4o".to_string()].into_iter().collect(),
+        );
+        state.disabled_models = disabled_models;
+        let result = filter_candidates_by_state(&candidates, &state, &registry);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "anthropic.key1.claude-sonnet");
+    }
+
+    #[test]
+    fn resolve_instruction_target_with_explicit_alias() {
+        let registry = make_registry();
+        let target = InstructionTarget {
+            provider: Some("openai".to_string()),
+            key_alias: Some("key1".to_string()),
+            key_index: None,
+            model: None,
+            path_length: Some(3),
+            process_mode: None,
+        };
+        let result = resolve_instruction_target(&target, &registry);
+        assert!(result.is_some());
+        let resolved = result.unwrap();
+        assert!(resolved.keys.contains(&"openai.key1.gpt-4o".to_string()));
+    }
+
+    #[test]
+    fn resolve_instruction_target_unknown_provider_returns_none() {
+        let registry = make_registry();
+        let target = InstructionTarget {
+            provider: Some("nonexistent".to_string()),
+            key_alias: None,
+            key_index: None,
+            model: None,
+            path_length: None,
+            process_mode: None,
+        };
+        let result = resolve_instruction_target(&target, &registry);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn resolve_instruction_target_none_provider_returns_none() {
+        let registry = make_registry();
+        let target = InstructionTarget {
+            provider: None,
+            key_alias: None,
+            key_index: None,
+            model: None,
+            path_length: None,
+            process_mode: None,
+        };
+        let result = resolve_instruction_target(&target, &registry);
+        assert!(result.is_none());
+    }
+}

@@ -69,8 +69,7 @@ impl RoutingClassifier {
         // Web-search routing must be decided from current-turn signals only.
         // Do not inherit web_search intent from historical tool continuation.
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
-        let has_tool_activity =
-            features.has_tools || (!latest_message_from_user && features.has_tool_call_responses);
+        let has_tool_activity = !latest_message_from_user && features.has_tool_call_responses;
         let has_visual = features.has_image_attachment
             || (features.has_video_attachment && features.has_remote_video_attachment);
         // Jason 规则：thinking 只看当前轮是否为 fresh user input。
@@ -280,7 +279,7 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
-        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert!(!result.reasoning.contains("tools:tool-request-detected"));
     }
 
     #[test]
@@ -312,7 +311,7 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
-        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert!(!result.reasoning.contains("tools:tool-request-detected"));
     }
 
     #[test]

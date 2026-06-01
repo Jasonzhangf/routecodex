@@ -133,9 +133,10 @@ pub(crate) fn build_route_queue(
         }
     }
 
-    let should_fallback_tool_route_to_tools =
-        is_tool_route_with_tools_fallback(requested_route_trimmed, features) && has_tools_targets;
-    if should_fallback_tool_route_to_tools && !queue.iter().any(|v| v == "tools") {
+    let should_insert_tools_continuation =
+        should_insert_tools_for_current_tool_continuation(requested_route_trimmed, features)
+            && has_tools_targets;
+    if should_insert_tools_continuation && !queue.iter().any(|v| v == "tools") {
         if let Some(requested_index) = queue
             .iter()
             .position(|route| route == requested_route_trimmed)
@@ -163,9 +164,17 @@ pub(crate) fn build_route_queue(
     deduped
 }
 
-fn is_tool_route_with_tools_fallback(route: &str, features: &RoutingFeatures) -> bool {
-    matches!(route, "tools" | "search" | "read" | "write" | "web_search")
-        || (route == "thinking" && features.has_tools)
+fn should_insert_tools_for_current_tool_continuation(
+    route: &str,
+    features: &RoutingFeatures,
+) -> bool {
+    if features.latest_message_from_user || !features.has_tool_call_responses {
+        return false;
+    }
+    matches!(
+        route,
+        "tools" | "search" | "read" | "write" | "web_search" | "thinking"
+    )
 }
 
 pub(crate) fn filter_pools_by_capability(
@@ -256,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn thinking_route_with_targets_still_keeps_default_fallback_in_queue() {
+    fn thinking_route_with_targets_still_keeps_default_in_queue() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "thinking".to_string(),
@@ -285,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn thinking_tool_request_falls_back_to_tools_before_default() {
+    fn thinking_tool_continuation_inserts_tools_before_default() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "thinking".to_string(),
@@ -313,7 +322,8 @@ mod tests {
             ),
         ]));
         let features = RoutingFeatures {
-            has_tools: true,
+            latest_message_from_user: false,
+            has_tool_call_responses: true,
             ..Default::default()
         };
         let queue = build_route_queue(
@@ -337,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn coding_route_without_targets_can_still_fall_back_to_default() {
+    fn coding_route_without_targets_keeps_default_available() {
         let routing = parse_routing(&Map::from_iter([(
             "default".to_string(),
             Value::Array(vec![serde_json::json!({
@@ -356,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn search_route_without_targets_falls_back_to_tools_before_default() {
+    fn search_route_without_tool_continuation_keeps_default_available() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "tools".to_string(),
@@ -381,6 +391,35 @@ mod tests {
             &RoutingFeatures::default(),
             &routing,
         );
+        assert_eq!(queue, vec!["search".to_string(), "default".to_string()]);
+    }
+
+    #[test]
+    fn search_tool_continuation_inserts_tools_before_default() {
+        let routing = parse_routing(&Map::from_iter([
+            (
+                "tools".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "tools",
+                    "priority": 100,
+                    "targets": ["provider.tools"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "default",
+                    "priority": 100,
+                    "targets": ["provider.default"]
+                })]),
+            ),
+        ]));
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tool_call_responses: true,
+            ..Default::default()
+        };
+        let queue = build_route_queue("search", &["default".to_string()], &features, &routing);
         assert_eq!(
             queue,
             vec![

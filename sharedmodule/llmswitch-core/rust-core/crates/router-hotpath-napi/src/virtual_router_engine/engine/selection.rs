@@ -196,7 +196,7 @@ impl VirtualRouterEngineCore {
             }
         }
 
-        let mut route_queue = build_route_queue(
+        let route_queue = build_route_queue(
             requested_route,
             &classification.candidates,
             features,
@@ -214,11 +214,9 @@ impl VirtualRouterEngineCore {
         let has_explicit_web_search_route = route_has_targets(&self.routing, "web_search");
         let default_pool_supports_web_search =
             default_pool_supports_capability(&self.routing, &self.provider_registry, "web_search");
-        let default_pool_supports_multimodal =
-            default_pool_supports_capability(&self.routing, &self.provider_registry, "multimodal");
-        let use_default_pool_web_search_fallback =
+        let select_default_pool_for_web_search =
             web_search_route_requested && default_pool_supports_web_search;
-        let use_default_pool_multimodal_fallback = multimodal_route_requested;
+        let select_default_pool_for_multimodal = multimodal_route_requested;
         let longcontext_candidate_active = requested_route == "longcontext"
             || classification
                 .candidates
@@ -237,16 +235,15 @@ impl VirtualRouterEngineCore {
                 self.routing.get("web_search")
             } else if web_search_route_requested
                 && route_name == DEFAULT_ROUTE
-                && use_default_pool_web_search_fallback
+                && select_default_pool_for_web_search
             {
                 self.routing.get(DEFAULT_ROUTE)
             } else if multimodal_route_requested
                 && route_name == DEFAULT_ROUTE
-                && use_default_pool_multimodal_fallback
+                && select_default_pool_for_multimodal
             {
                 self.routing.get(DEFAULT_ROUTE)
             } else {
-                // Per-port isolation: try group-prefixed key first, fall back to bare route name
                 resolve_route_pools_for_selection(
                     &self.routing,
                     &route_name,
@@ -255,7 +252,7 @@ impl VirtualRouterEngineCore {
             };
             if web_search_route_requested
                 && route_name == DEFAULT_ROUTE
-                && use_default_pool_web_search_fallback
+                && select_default_pool_for_web_search
             {
                 pools = filter_pools_by_capability(&pools, &self.provider_registry, "web_search");
             }
@@ -275,10 +272,7 @@ impl VirtualRouterEngineCore {
                     filter_pools_by_capability(&pools, &self.provider_registry, "multimodal");
                 if !capability_filtered.is_empty() {
                     pools = capability_filtered;
-                } else if use_default_pool_multimodal_fallback && route_name == "multimodal" {
-                    // Multimodal direct-routing may point to non-multimodal targets.
-                    // When default pool contains multimodal-capable targets, skip this route
-                    // and fall through to default-pool capability fallback instead.
+                } else if select_default_pool_for_multimodal && route_name == "multimodal" {
                     continue;
                 }
             }
@@ -817,9 +811,7 @@ pub(crate) fn build_provider_not_available_error(
     }
 
     if let Some(min_wait_ms) = min_recoverable_cooldown_ms {
-        let has_concurrency_busy = hints
-            .iter()
-            .any(|item| item.source == "concurrency.busy");
+        let has_concurrency_busy = hints.iter().any(|item| item.source == "concurrency.busy");
         let mut sorted_hints = hints;
         sorted_hints.sort_by_key(|item| item.wait_ms);
         let details = json!({
@@ -1162,5 +1154,99 @@ mod tests {
             selected.is_err(),
             "runtime active 503 cooldown must stay out of the routing pool until startup import grants a passive reprobe"
         );
+    }
+
+    #[test]
+    fn weighted_selection_distributes_across_providers() {
+        let mut core = build_priority_test_core();
+        // Add weighted routing
+        let routing = Map::from_iter([(
+            "default".to_string(),
+            Value::Array(vec![json!({
+                "id": "default-weighted",
+                "priority": 100,
+                "mode": "weighted",
+                "targets": ["sdfv.key1.gpt-5.4", "mimo.key1.mimo-v2.5-pro"],
+                "loadBalancing": { "strategy": "weighted" }
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+
+        let classification = ClassificationResult {
+            route_name: "default".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["default".to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let routing_state = RoutingInstructionState::default();
+
+        // Run selection multiple times - should get valid provider each time
+        for _ in 0..10 {
+            let selected = core
+                .select_provider(
+                    "default",
+                    &json!({}),
+                    &classification,
+                    &features,
+                    &routing_state,
+                    None,
+                    unsafe { Env::from_raw(std::ptr::null_mut()) },
+                )
+                .expect("selection should succeed");
+            assert!(
+                selected.provider_key == "sdfv.key1.gpt-5.4"
+                    || selected.provider_key == "mimo.key1.mimo-v2.5-pro"
+            );
+        }
+    }
+
+    #[test]
+    fn select_provider_returns_error_when_no_providers_available() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "test.key1.model".to_string(),
+            json!({
+                "providerKey": "test.key1.model",
+                "providerType": "openai",
+                "modelId": "model",
+                "enabled": false
+            }),
+        );
+        core.provider_registry.load(&providers);
+        core.health_manager
+            .register_providers(&core.provider_registry.list_keys());
+
+        let routing = Map::from_iter([(
+            "default".to_string(),
+            Value::Array(vec![json!({
+                "id": "default-pool",
+                "priority": 100,
+                "targets": ["test.key1.model"]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+
+        let classification = ClassificationResult {
+            route_name: "default".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["default".to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let routing_state = RoutingInstructionState::default();
+
+        let result = core.select_provider(
+            "default",
+            &json!({}),
+            &classification,
+            &features,
+            &routing_state,
+            None,
+            unsafe { Env::from_raw(std::ptr::null_mut()) },
+        );
+        // Should fail because no providers are available
+        assert!(result.is_err());
     }
 }

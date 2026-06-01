@@ -198,6 +198,38 @@ fn get_responses_context_message(entry: &Value, role: &str) -> Option<Value> {
     Some(json!({ "role": role, "content": content }))
 }
 
+fn collect_responses_message_tool_calls(entry: &Value) -> Vec<Value> {
+    let mut out = Vec::new();
+    if let Some(tool_calls) = entry.get("tool_calls").and_then(|v| v.as_array()) {
+        for call in tool_calls {
+            out.push(call.clone());
+        }
+    }
+    if let Some(tool_calls) = entry.get("content").and_then(|v| v.as_array()) {
+        for item in tool_calls {
+            let item_type = get_responses_entry_type(item);
+            if item_type == "function_call" {
+                out.push(item.clone());
+            }
+        }
+    }
+    out
+}
+
+fn classify_responses_function_call(entry: &Value) -> Option<tools::ToolClassification> {
+    let obj = entry.as_object()?;
+    let name = obj.get("name").and_then(|v| v.as_str())?;
+    let synthesized = json!({
+        "type": "function",
+        "id": obj.get("id").or_else(|| obj.get("call_id")).cloned().unwrap_or(Value::Null),
+        "function": {
+            "name": name,
+            "arguments": obj.get("arguments").cloned().unwrap_or(Value::Null),
+        }
+    });
+    classify_tool_call_for_report(&synthesized)
+}
+
 fn collect_responses_tool_signals(entries: &[Value]) -> (bool, Option<tools::ToolClassification>) {
     let mut has_tool_call_responses = false;
     let mut last_assistant_tool = None;
@@ -214,22 +246,28 @@ fn collect_responses_tool_signals(entries: &[Value]) -> (bool, Option<tools::Too
         ) {
             has_tool_call_responses = true;
         }
-        if entry_type != "function_call" {
+        if entry_type == "function_call" {
+            if let Some(classification) = classify_responses_function_call(entry) {
+                last_assistant_tool = Some(classification);
+            }
             continue;
         }
-        let Some(name) = obj.get("name").and_then(|v| v.as_str()) else {
+        if entry_type != "message"
+            || !get_responses_message_role(entry)
+                .as_deref()
+                .is_some_and(|role| role == "assistant")
+        {
             continue;
-        };
-        let synthesized = json!({
-            "type": "function",
-            "id": obj.get("id").cloned().unwrap_or(Value::Null),
-            "function": {
-                "name": name,
-                "arguments": obj.get("arguments").cloned().unwrap_or(Value::Null),
+        }
+        for call in collect_responses_message_tool_calls(entry) {
+            let classification = if get_responses_entry_type(&call) == "function_call" {
+                classify_responses_function_call(&call)
+            } else {
+                classify_tool_call_for_report(&call)
+            };
+            if let Some(classification) = classification {
+                last_assistant_tool = Some(classification);
             }
-        });
-        if let Some(classification) = classify_tool_call_for_report(&synthesized) {
-            last_assistant_tool = Some(classification);
         }
     }
 
@@ -321,13 +359,18 @@ struct TurnSegmentState {
 
 fn extract_turn_state(request: &Value) -> TurnSegmentState {
     let has_responses_input = request
-        .get("semantics")
-        .and_then(|v| v.get("responses"))
-        .and_then(|v| v.get("context"))
-        .and_then(|v| v.get("input"))
+        .get("input")
         .and_then(|v| v.as_array())
         .map(|arr| !arr.is_empty())
-        .unwrap_or(false);
+        .unwrap_or(false)
+        || request
+            .get("semantics")
+            .and_then(|v| v.get("responses"))
+            .and_then(|v| v.get("context"))
+            .and_then(|v| v.get("input"))
+            .and_then(|v| v.as_array())
+            .map(|arr| !arr.is_empty())
+            .unwrap_or(false);
 
     let message_state = {
         let messages = request
@@ -974,6 +1017,55 @@ mod tests {
             Some("search")
         );
         assert_eq!(features.user_text_sample, "");
+    }
+
+    #[test]
+    fn responses_wire_input_user_message_is_current_user_turn() {
+        let request = json!({
+            "model": "glm-5",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "Please answer normally." }]
+            }],
+            "tools": [{ "type": "function", "function": { "name": "apply_patch" } }]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(features.latest_message_from_user);
+        assert_eq!(features.user_text_sample, "Please answer normally.");
+        assert!(!features.has_tool_call_responses);
+        assert_eq!(features.last_assistant_tool_category, None);
+    }
+
+    #[test]
+    fn responses_wire_input_function_call_output_uses_current_turn_tool_call() {
+        let request = json!({
+            "model": "glm-5",
+            "input": [
+                { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "Patch this file." }] },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "tool_calls": [{
+                        "id": "call_apply_patch_1",
+                        "type": "function",
+                        "function": { "name": "apply_patch", "arguments": "{\"patch\":\"*** Begin Patch\"}" }
+                    }]
+                },
+                { "type": "function_call_output", "call_id": "call_apply_patch_1", "output": "ok" }
+            ],
+            "tools": [{ "type": "function", "function": { "name": "read_file" } }]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(!features.latest_message_from_user);
+        assert!(features.has_tool_call_responses);
+        assert_eq!(
+            features.last_assistant_tool_category.as_deref(),
+            Some("coding")
+        );
     }
 
     #[test]
