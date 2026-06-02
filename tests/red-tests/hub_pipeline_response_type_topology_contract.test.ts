@@ -65,15 +65,18 @@ describe('Hub Pipeline response type topology contract', () => {
     }
   });
 
-  it('wires Phase 6B wrappers into the Rust live response engine', () => {
+  it('keeps Phase 6B-1 response wrappers out of the Rust live response engine', () => {
     const source = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs');
     for (const token of [
       'run_hub_resp_inbound_02_parsed_entrypoint',
       'run_hub_resp_chatprocess_03_governed_entrypoint',
       'run_hub_resp_outbound_04_client_semantic_entrypoint',
     ]) {
-      expect(source).toContain(token);
+      expect(source).not.toContain(token);
     }
+    expect(source).toContain('govern_response');
+    expect(source).toContain('finalize_chat_response');
+    expect(source).toContain('build_client_payload_for_protocol');
   });
 
   it('forbids new generic RespProc/resp_process names in the topology type skeleton', () => {

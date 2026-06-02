@@ -7,8 +7,6 @@ use crate::hub_pipeline_blocks::standardized_request::coerce_standardized_reques
 use crate::hub_pipeline_types::{
     run_hub_req_chatprocess_03_governed_entrypoint, run_hub_req_inbound_02_standardized_entrypoint,
     run_hub_req_outbound_05_provider_semantic_entrypoint,
-    run_hub_resp_chatprocess_03_governed_entrypoint, run_hub_resp_inbound_02_parsed_entrypoint,
-    run_hub_resp_outbound_04_client_semantic_entrypoint,
 };
 use crate::hub_req_inbound_context_capture::{
     capture_req_inbound_responses_context_snapshot, ResponsesContextCaptureInput,
@@ -458,10 +456,6 @@ impl HubPipelineEngine {
             &normalized_metadata,
             output.request_id.as_str(),
         )?;
-        let resp_inbound_02 = run_hub_resp_inbound_02_parsed_entrypoint(canonical_payload.clone())
-            .map_err(|message| {
-                HubPipelineError::new("hub_pipeline_resp_inbound_02_failed", message)
-            })?;
         let governed = govern_response(RespToolGovernanceInput {
             payload: canonical_payload,
             client_protocol: normalized_metadata
@@ -496,13 +490,6 @@ impl HubPipelineEngine {
                 "summary": governed.summary,
             })),
         ));
-        let resp_chatprocess_03 = run_hub_resp_chatprocess_03_governed_entrypoint(
-            resp_inbound_02,
-            governed.governed_payload.clone(),
-        )
-        .map_err(|message| {
-            HubPipelineError::new("hub_pipeline_resp_chatprocess_03_failed", message)
-        })?;
         diagnostics.push(diagnostic(
             HubPipelineStageId::RespProcessFinalize,
             HubPipelineDiagnosticStatus::Started,
@@ -541,14 +528,6 @@ impl HubPipelineEngine {
             &normalized_metadata,
             output.request_id.as_str(),
         )?;
-        let resp_outbound_04 = run_hub_resp_outbound_04_client_semantic_entrypoint(
-            resp_chatprocess_03,
-            project_normal_response_payload(&client_payload),
-        )
-        .map_err(|message| {
-            HubPipelineError::new("hub_pipeline_resp_outbound_04_failed", message)
-        })?;
-        drop(resp_outbound_04);
         diagnostics.push(diagnostic(
             HubPipelineStageId::RespOutboundClientRemap,
             HubPipelineDiagnosticStatus::Completed,
