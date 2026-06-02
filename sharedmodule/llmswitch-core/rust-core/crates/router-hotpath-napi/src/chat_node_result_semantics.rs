@@ -277,6 +277,19 @@ fn value_has_visible_assistant_text(value: Option<&Value>) -> bool {
     }
 }
 
+fn value_has_non_empty_text(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|entry| value_has_non_empty_text(Some(entry))),
+        Some(Value::Object(row)) => value_has_non_empty_text(row.get("text"))
+            || value_has_non_empty_text(row.get("output_text"))
+            || value_has_non_empty_text(row.get("content")),
+        _ => false,
+    }
+}
+
 fn is_meaningless_dot_only_text(text: &str) -> bool {
     matches!(text.trim(), "." | ".." | "...")
 }
@@ -482,6 +495,86 @@ fn is_tool_call_continuation_response_value(body: &Value) -> bool {
     derive_finish_reason_value(body)
         .as_deref()
         .is_some_and(|reason| reason == "tool_calls")
+}
+
+fn has_servertool_followup_tool_bearing_payload(record: &Map<String, Value>) -> bool {
+    if record.get("required_action").is_some_and(Value::is_object) {
+        return true;
+    }
+    if record
+        .get("output")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                let item_type = item
+                    .as_object()
+                    .and_then(|row| read_string(row.get("type")))
+                    .map(|value| value.to_ascii_lowercase())
+                    .unwrap_or_default();
+                matches!(item_type.as_str(), "function_call" | "tool_call" | "tool_use")
+                    || item_type.contains("tool")
+            })
+        })
+    {
+        return true;
+    }
+    record
+        .get("choices")
+        .and_then(Value::as_array)
+        .is_some_and(|choices| {
+            choices.iter().any(|choice| {
+                choice
+                    .as_object()
+                    .and_then(|row| row.get("message"))
+                    .and_then(Value::as_object)
+                    .is_some_and(|message| has_non_empty_array(message.get("tool_calls")))
+            })
+        })
+}
+
+fn is_empty_client_response_payload_value(payload: &Value) -> bool {
+    let Some(record) = payload.as_object() else {
+        return true;
+    };
+    if record.contains_key("__sse_responses") || record.contains_key("__sse_stream") {
+        return false;
+    }
+    if record.contains_key("error") || has_servertool_followup_tool_bearing_payload(record) {
+        return false;
+    }
+
+    if let Some(choices) = record.get("choices").and_then(Value::as_array) {
+        if choices.is_empty() {
+            return true;
+        }
+        let Some(message) = choices
+            .first()
+            .and_then(Value::as_object)
+            .and_then(|choice| choice.get("message"))
+            .and_then(Value::as_object)
+        else {
+            return true;
+        };
+        return !(value_has_non_empty_text(message.get("content"))
+            || value_has_non_empty_text(message.get("reasoning_content"))
+            || value_has_non_empty_text(message.get("reasoning")));
+    }
+
+    if let Some(output) = record.get("output").and_then(Value::as_array) {
+        if output.is_empty() {
+            return true;
+        }
+        return !output.iter().any(|item| {
+            let Some(row) = item.as_object() else {
+                return false;
+            };
+            value_has_non_empty_text(row.get("content"))
+                || value_has_non_empty_text(row.get("text"))
+                || value_has_non_empty_text(row.get("output_text"))
+        });
+    }
+
+    true
 }
 
 fn derive_finish_reason_value(body: &Value) -> Option<String> {
@@ -1058,6 +1151,12 @@ pub fn is_tool_call_continuation_response_json(body_json: String) -> NapiResult<
     Ok(is_tool_call_continuation_response_value(&body))
 }
 
+pub fn is_empty_client_response_payload_json(body_json: String) -> NapiResult<bool> {
+    let body: Value =
+        serde_json::from_str(&body_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(is_empty_client_response_payload_value(&body))
+}
+
 #[cfg(test)]
 mod request_semantics_tests {
     use super::*;
@@ -1158,5 +1257,22 @@ mod request_semantics_tests {
             "output": []
         });
         assert!(!is_tool_call_continuation_response_value(&empty_required_action));
+    }
+
+    #[test]
+    fn classifies_empty_client_response_payload_in_rust() {
+        assert!(is_empty_client_response_payload_value(&json!({}))); 
+        assert!(!is_empty_client_response_payload_value(&json!({"error":{"message":"bad"}})));
+        assert!(!is_empty_client_response_payload_value(&json!({"choices":[{"message":{"content":"ok"}}]})));
+        assert!(is_empty_client_response_payload_value(&json!({"choices":[{"message":{"content":""}}]})));
+        assert!(!is_empty_client_response_payload_value(&json!({
+            "choices":[{"message":{"tool_calls":[{"id":"call_1"}]}}]
+        })));
+        assert!(!is_empty_client_response_payload_value(&json!({
+            "output":[{"type":"function_call","call_id":"call_1"}]
+        })));
+        assert!(!is_empty_client_response_payload_value(&json!({
+            "output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]
+        })));
     }
 }

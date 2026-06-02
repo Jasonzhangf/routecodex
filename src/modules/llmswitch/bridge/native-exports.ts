@@ -52,6 +52,7 @@ type NativeSharedConversionSemantics = {
 type NativeChatProcessNodeResultSemantics = {
   deriveFinishReasonJson?: (bodyJson: string) => string;
   isToolCallContinuationResponseJson?: (bodyJson: string) => boolean;
+  isEmptyClientResponsePayloadJson?: (bodyJson: string) => boolean;
 };
 
 type NativeHubPipelineRespSemantics = {
@@ -371,6 +372,14 @@ export function isToolCallContinuationResponseNative(body: unknown): boolean {
   const fn = getChatProcessNodeResultSemantics().isToolCallContinuationResponseJson;
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-bridge] isToolCallContinuationResponseJson not available');
+  }
+  return Boolean(fn(JSON.stringify(body ?? null)));
+}
+
+export function isEmptyClientResponsePayloadNative(body: unknown): boolean {
+  const fn = getChatProcessNodeResultSemantics().isEmptyClientResponsePayloadJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] isEmptyClientResponsePayloadJson not available');
   }
   return Boolean(fn(JSON.stringify(body ?? null)));
 }

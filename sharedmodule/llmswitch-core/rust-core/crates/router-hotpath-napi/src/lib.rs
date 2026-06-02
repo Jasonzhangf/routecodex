@@ -1181,6 +1181,11 @@ pub fn is_tool_call_continuation_response_json_bridge(body_json: String) -> Napi
     chat_node_result_semantics::is_tool_call_continuation_response_json(body_json)
 }
 
+#[napi(js_name = "isEmptyClientResponsePayloadJson")]
+pub fn is_empty_client_response_payload_json_bridge(body_json: String) -> NapiResult<bool> {
+    chat_node_result_semantics::is_empty_client_response_payload_json(body_json)
+}
+
 #[napi(js_name = "normalizeToolCallIdsJson")]
 pub fn normalize_tool_call_ids_json(payload_json: String) -> NapiResult<String> {
     shared_response_compat::normalize_tool_call_ids_json(payload_json)

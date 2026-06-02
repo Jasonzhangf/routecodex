@@ -331,3 +331,11 @@ export function deriveFinishReasonWithNative(body: unknown): string | undefined 
     return fail(reason);
   }
 }
+
+export function isToolCallContinuationResponseWithNative(body: unknown): boolean {
+  return invokeBooleanCapability('isToolCallContinuationResponseJson', body ?? null);
+}
+
+export function isEmptyClientResponsePayloadWithNative(body: unknown): boolean {
+  return invokeBooleanCapability('isEmptyClientResponsePayloadJson', body ?? null);
+}

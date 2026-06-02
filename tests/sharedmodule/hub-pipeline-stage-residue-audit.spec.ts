@@ -186,7 +186,7 @@ describe('hub pipeline stage residue audit', () => {
         'hub_resp_outbound_04_finalize_boundary.rs',
         'resp_process_stage2_finalize.rs',
       ]),
-      build_client_payload_for_protocol: new Set(['hub_pipeline_lib/engine.rs']),
+      build_client_payload_for_protocol: new Set(['hub_resp_outbound_04_client_payload_boundary.rs']),
     };
     const findings: string[] = [];
 
@@ -804,6 +804,40 @@ describe('hub pipeline stage residue audit', () => {
     ]);
     expect(body).toContain('isToolCallContinuationResponseNative(body)');
     expect(findings).toEqual([]);
+  });
+
+  it('servertool followup response block must not classify tool-bearing client payloads in TS', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/servertool/followup-response-block.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const bodyStart = source.indexOf('export function isEmptyClientResponsePayload');
+    expect(bodyStart).toBeGreaterThanOrEqual(0);
+    const nextExport = source.indexOf('\nexport function ', bodyStart + 1);
+    const body = source.slice(bodyStart, nextExport > bodyStart ? nextExport : undefined);
+    const findings = collectMatches(body, [
+      { label: 'checks required_action tool_calls in TS', pattern: /required_action|submit_tool_outputs|tool_calls/ },
+      { label: 'checks output function/tool calls in TS', pattern: /function_call|tool_call|tool_use/ },
+      { label: 'loops response choices/output in TS', pattern: /for \(const (choice|item) of/ },
+    ]);
+    expect(body).toContain('isEmptyClientResponsePayloadWithNative(payload)');
+    expect(findings).toEqual([]);
+
+    const requiresActionStart = source.indexOf('export function hasRequiresActionShape');
+    expect(requiresActionStart).toBeGreaterThanOrEqual(0);
+    const requiresActionNextExport = source.indexOf('\nexport function ', requiresActionStart + 1);
+    const requiresActionBody = source.slice(
+      requiresActionStart,
+      requiresActionNextExport > requiresActionStart ? requiresActionNextExport : undefined,
+    );
+    const requiresActionFindings = collectMatches(requiresActionBody, [
+      { label: 'checks required_action tool_calls in TS', pattern: /required_action|submit_tool_outputs|tool_calls/ },
+      { label: 'checks output function/tool calls in TS', pattern: /function_call|tool_call|tool_use/ },
+      { label: 'loops response choices/output in TS', pattern: /for \(const (choice|item) of/ },
+    ]);
+    expect(requiresActionBody).toContain('isToolCallContinuationResponseWithNative(payload)');
+    expect(requiresActionFindings).toEqual([]);
   });
 
   it('provider response shared blocks must not keep dead TS converted tool-call validators', () => {

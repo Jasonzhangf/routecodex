@@ -1,6 +1,10 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
+import {
+  isEmptyClientResponsePayloadWithNative,
+  isToolCallContinuationResponseWithNative
+} from '../router/virtual-router/engine-selection/native-chat-process-node-result-semantics.js';
 import { extractCapturedChatSeed } from './followup-seed.js';
 
 export function extractAppendUserTextFromFollowupPlan(followupPlan: unknown): string | undefined {
@@ -37,130 +41,12 @@ export function coerceFollowupPayloadStream(payload: JsonObject, stream: boolean
   return payload;
 }
 
-function hasNonEmptyText(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return value.trim().length > 0;
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => hasNonEmptyText(entry));
-  }
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const record = value as Record<string, unknown>;
-    if (hasNonEmptyText(record.text)) return true;
-    if (hasNonEmptyText(record.output_text)) return true;
-    if (hasNonEmptyText(record.content)) return true;
-  }
-  return false;
-}
-
 export function isEmptyClientResponsePayload(payload: JsonObject): boolean {
-  if (!payload || typeof payload !== 'object') {
-    return true;
-  }
-  if (
-    Object.prototype.hasOwnProperty.call(payload as Record<string, unknown>, '__sse_responses')
-    || Object.prototype.hasOwnProperty.call(payload as Record<string, unknown>, '__sse_stream')
-  ) {
-    return false;
-  }
-  if (Object.prototype.hasOwnProperty.call(payload as Record<string, unknown>, 'error')) {
-    return false;
-  }
-
-  const requiredAction = (payload as Record<string, unknown>).required_action;
-  if (requiredAction && typeof requiredAction === 'object') {
-    return false;
-  }
-  const outputForResponses = Array.isArray((payload as { output?: unknown }).output)
-    ? (((payload as { output: unknown[] }).output) as unknown[])
-    : [];
-  if (outputForResponses.length > 0) {
-    for (const item of outputForResponses) {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-      const type = typeof (item as { type?: unknown }).type === 'string' ? String((item as { type: string }).type).trim().toLowerCase() : '';
-      if (type === 'function_call' || type === 'tool_call' || type === 'tool_use' || type.includes('tool')) {
-        return false;
-      }
-    }
-  }
-
-  const choices = Array.isArray((payload as { choices?: unknown }).choices)
-    ? (((payload as { choices: unknown[] }).choices) as unknown[])
-    : [];
-  if (choices.length > 0) {
-    const first = choices[0] && typeof choices[0] === 'object' && !Array.isArray(choices[0]) ? choices[0] : null;
-    const message =
-      first && typeof (first as { message?: unknown }).message === 'object' && (first as { message?: unknown }).message !== null && !Array.isArray((first as { message?: unknown }).message)
-        ? ((first as { message: unknown }).message as Record<string, unknown>)
-        : null;
-    if (!message) {
-      return true;
-    }
-    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-    if (toolCalls.length > 0) {
-      return false;
-    }
-    if (hasNonEmptyText(message.content)) return false;
-    if (hasNonEmptyText((message as { reasoning_content?: unknown }).reasoning_content)) return false;
-    if (hasNonEmptyText((message as { reasoning?: unknown }).reasoning)) return false;
-    return true;
-  }
-
-  const output = Array.isArray((payload as { output?: unknown }).output)
-    ? (((payload as { output: unknown[] }).output) as unknown[])
-    : [];
-  if (output.length > 0) {
-    for (const item of output) {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-      const content = (item as { content?: unknown }).content;
-      if (hasNonEmptyText(content)) {
-        return false;
-      }
-      if (hasNonEmptyText((item as { text?: unknown }).text)) return false;
-      if (hasNonEmptyText((item as { output_text?: unknown }).output_text)) return false;
-    }
-    return true;
-  }
-
-  return true;
+  return isEmptyClientResponsePayloadWithNative(payload);
 }
 
 export function hasRequiresActionShape(payload: JsonObject): boolean {
-  if (!payload || typeof payload !== 'object') {
-    return false;
-  }
-  const record = payload as Record<string, unknown>;
-  if (record.required_action && typeof record.required_action === 'object') {
-    return true;
-  }
-  const choices = Array.isArray(record.choices) ? (record.choices as Array<Record<string, unknown>>) : [];
-  for (const choice of choices) {
-    if (!choice || typeof choice !== 'object') {
-      continue;
-    }
-    const finishReason = typeof choice.finish_reason === 'string' ? choice.finish_reason.trim().toLowerCase() : '';
-    if (finishReason === 'tool_calls' || finishReason === 'requires_action') {
-      return true;
-    }
-    const message =
-      choice.message && typeof choice.message === 'object' && !Array.isArray(choice.message)
-        ? (choice.message as Record<string, unknown>)
-        : undefined;
-    if (message && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-      return true;
-    }
-  }
-  const output = Array.isArray(record.output) ? (record.output as Array<Record<string, unknown>>) : [];
-  for (const item of output) {
-    if (!item || typeof item !== 'object') {
-      continue;
-    }
-    const type = typeof item.type === 'string' ? item.type.trim().toLowerCase() : '';
-    if (type === 'function_call' || type === 'tool_call' || type === 'tool_use') {
-      return true;
-    }
-  }
-  return false;
+  return isToolCallContinuationResponseWithNative(payload);
 }
 
 export function choosePreferredFinalChatResponse(args: {

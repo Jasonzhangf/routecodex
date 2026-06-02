@@ -54,6 +54,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildToolGovernanceNodeResultJson",
   "buildProviderProtocolErrorJson",
   "deriveFinishReasonJson",
+  "isToolCallContinuationResponseJson",
+  "isEmptyClientResponsePayloadJson",
   "buildFormatRequestJson",
   "buildResponsesPayloadFromChatJson",
   "buildBridgeHistoryJson",
