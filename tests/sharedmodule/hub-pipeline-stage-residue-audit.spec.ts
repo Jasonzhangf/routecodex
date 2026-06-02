@@ -948,6 +948,18 @@ describe('hub pipeline stage residue audit', () => {
     expect({ existingFiles, findings }).toEqual({ existingFiles: [], findings: [] });
   });
 
+  it('legacy TS virtual router tool-signal classifier must be physically removed', () => {
+    const repoRoot = process.cwd();
+    const legacyFiles = [
+      'sharedmodule/llmswitch-core/src/router/virtual-router/tool-signals.ts',
+      'tests/sharedmodule/router/virtual-router/tool-signals.spec.ts',
+    ];
+
+    const existing = legacyFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+
+    expect(existing).toEqual([]);
+  });
+
   it('legacy TS request route/outbound/inbound orchestrators must be physically removed', () => {
     const pipelineRoot = path.join(
       process.cwd(),
