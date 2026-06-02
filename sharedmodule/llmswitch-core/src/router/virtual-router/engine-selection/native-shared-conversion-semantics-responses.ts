@@ -55,6 +55,50 @@ function parseNullableResponsesConversationResumeResult(
   };
 }
 
+type ResponsesConversationClientError = Error & {
+  status: number;
+  code: string;
+  origin: 'client';
+};
+
+function makeResponsesConversationClientError(message: string): ResponsesConversationClientError {
+  const normalized = message.trim() || 'Responses conversation tool result is invalid';
+  const error = new Error(`orphan_tool_result: ${normalized}`) as ResponsesConversationClientError;
+  error.status = 400;
+  error.code = 'hub_pipeline_context_capture_failed';
+  error.origin = 'client';
+  return error;
+}
+
+function readResponsesConversationClientError(parsed: Record<string, unknown>): ResponsesConversationClientError | null {
+  const error = parsed.error;
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return null;
+  }
+  const row = error as Record<string, unknown>;
+  const type = typeof row.type === 'string' ? row.type : '';
+  const origin = typeof row.origin === 'string' ? row.origin : '';
+  if (type !== 'orphan_tool_result' && origin !== 'client') {
+    return null;
+  }
+  const message = typeof row.message === 'string' ? row.message : 'Responses conversation tool result is invalid';
+  const clientError = makeResponsesConversationClientError(message);
+  if (typeof row.status === 'number' && Number.isFinite(row.status)) {
+    clientError.status = row.status;
+  }
+  if (typeof row.code === 'string' && row.code.trim()) {
+    clientError.code = row.code.trim();
+  }
+  return clientError;
+}
+
+function isResponsesConversationToolResultError(reason: string): boolean {
+  const normalized = reason.toLowerCase();
+  return normalized.includes('does not match any pending function_call')
+    || normalized.includes('missing tool_call_id/call_id')
+    || normalized.includes('orphan_tool_result');
+}
+
 export function pickResponsesPersistedFieldsWithNative(payload: unknown): Record<string, unknown> {
   const capability = 'pickResponsesPersistedFieldsJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
@@ -78,6 +122,9 @@ export function pickResponsesPersistedFieldsWithNative(payload: unknown): Record
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    if (isResponsesConversationToolResultError(reason)) {
+      throw makeResponsesConversationClientError(reason);
+    }
     return fail(reason);
   }
 }
@@ -200,9 +247,22 @@ export function resumeResponsesConversationPayloadWithNative(
       return fail('empty result');
     }
     const parsed = parseResponsesConversationResumeResult(raw);
+    if (!parsed) {
+      const row = parseRecord(raw);
+      const clientError = row ? readResponsesConversationClientError(row) : null;
+      if (clientError) {
+        throw clientError;
+      }
+    }
     return parsed ?? fail('invalid payload');
   } catch (error) {
+    if (error && typeof error === 'object' && (error as { origin?: unknown }).origin === 'client') {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    if (isResponsesConversationToolResultError(reason)) {
+      throw makeResponsesConversationClientError(reason);
+    }
     return fail(reason);
   }
 }

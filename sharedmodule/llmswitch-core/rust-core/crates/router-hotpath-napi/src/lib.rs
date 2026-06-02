@@ -1528,3 +1528,7 @@ pub use responses_reasoning_registry::{
     register_responses_output_text_meta_json, register_responses_passthrough_json,
     register_responses_payload_snapshot_json, register_responses_reasoning_json,
 };
+pub use shared_responses_conversation_utils::{
+    materialize_responses_continuation_payload_json, plan_responses_handler_entry_json,
+    prepare_responses_conversation_entry_json, resume_responses_conversation_payload_json,
+};

@@ -1341,7 +1341,17 @@ pub fn resume_responses_conversation_payload_json(
         &submit_payload,
         request_id.as_deref(),
     )
-    .map_err(napi::Error::from_reason)?;
+    .unwrap_or_else(|reason| {
+        serde_json::json!({
+            "error": {
+                "type": "orphan_tool_result",
+                "message": reason,
+                "status": 400,
+                "code": "hub_pipeline_context_capture_failed",
+                "origin": "client"
+            }
+        })
+    });
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
