@@ -1091,4 +1091,30 @@ describe('hub pipeline stage residue audit', () => {
       indexFindings: [],
     });
   });
+
+  it('legacy TS filters must not expose tool semantics after Rust HubPipeline takeover', () => {
+    const filtersRoot = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/filters');
+    const publicIndex = fs.readFileSync(path.join(filtersRoot, 'index.ts'), 'utf8');
+    const forbiddenModules = [
+      'request-tool-choice-policy',
+      'request-tool-list-filter',
+      'request-toolcalls-stringify',
+      'request-tools-normalize',
+      'response-finish-invariants',
+      'response-openai-to-responses-bridge',
+      'response-tool-text-canonicalize',
+      'tool-filter-hooks',
+      'tool-post-constraints',
+      'response-tool-arguments-stringify',
+      'response-tool-arguments-schema-converge',
+      'response-tool-arguments-blacklist',
+      'response-tool-arguments-whitelist',
+    ];
+    const exported = forbiddenModules.filter((name) => publicIndex.includes(name));
+    const existing = forbiddenModules
+      .map((name) => `special/${name}.ts`)
+      .filter((relativePath) => fs.existsSync(path.join(filtersRoot, relativePath)));
+
+    expect({ exported, existing }).toEqual({ exported: [], existing: [] });
+  });
 });

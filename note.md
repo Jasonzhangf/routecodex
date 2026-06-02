@@ -14152,3 +14152,10 @@ P2（架构干净）：
 - 已有 handler 黑盒验证覆盖：普通 `/v1/responses` continuation 不在 handler 边界裁剪，scope continuation 在 Hub context capture 前 materialize，均 200。
 - 下一步需 build/install/restart 后用线上业务复测确认全局服务不再跑旧逻辑。
 2026-06-02 tool-id provider-wire fix: target request_outbound only. Evidence: four targeted router-hotpath-napi tests pass; broad hub_bridge_actions currently has unrelated failures tool_argument_repairer_validate_tool_arguments_json, ensure_bridge_output_fields_strips_tool_transcript_wrapper, convert_bridge_input_harvests_malformed_assistant_parameter_markup_into_tool_calls before commit scope.
+2026-06-02 correction: helper-only tool id red test was insufficient; live MiniMax 400 still occurs on request openai-responses-minimax.key1-MiniMax-M3-20260602T195325858-247142-653. Must inspect actual provider-request snapshot before claiming runtime fix.
+
+## 2026-06-02 Hub Pipeline audit: legacy TS filters removed
+- Red test added: `legacy TS filters must not expose tool semantics after Rust HubPipeline takeover`.
+- Confirmed `sharedmodule/llmswitch-core/src/filters/special/*` tool/protocol filters were only exported via `filters/index.ts` and old tests, with no runtime registration; they contained TS tool_calls/tool_outputs/MCP/protocol mutation and non-blocking swallow patterns.
+- Physically removed legacy special tool/protocol filters and old direct tests; Rust Hub Pipeline remains the only tool/protocol governance truth.
+- Verification: residue audit 52/52 PASS; `npx tsc --noEmit --pretty false --skipLibCheck` PASS.
