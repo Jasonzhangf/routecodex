@@ -131,6 +131,103 @@ fn normalizes_raw_request_and_captured_results() {
 }
 
 #[test]
+fn normalizes_reused_tool_call_ids_by_turn_for_provider_wire() {
+    let output =
+        apply_bridge_normalize_tool_identifiers(ApplyBridgeNormalizeToolIdentifiersInput {
+            stage: "request_outbound".to_string(),
+            protocol: Some("openai-responses".to_string()),
+            module_type: None,
+            messages: vec![
+                json!({
+                  "role": "assistant",
+                  "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "ls"}}]
+                }),
+                json!({"role": "tool", "tool_call_id": "call_1", "content": "first"}),
+                json!({
+                  "role": "assistant",
+                  "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "cat"}}]
+                }),
+                json!({"role": "tool", "tool_call_id": "call_1", "content": "second"}),
+            ],
+            raw_request: None,
+            captured_tool_results: None,
+            id_prefix: Some("bridge_tool".to_string()),
+        });
+    let first_call = output.messages[0]["tool_calls"][0]["id"].as_str().unwrap();
+    let first_result = output.messages[1]["tool_call_id"].as_str().unwrap();
+    let second_call = output.messages[2]["tool_calls"][0]["id"].as_str().unwrap();
+    let second_result = output.messages[3]["tool_call_id"].as_str().unwrap();
+
+    assert_eq!(first_call, "call_1");
+    assert_eq!(first_result, first_call);
+    assert_eq!(second_call, "call_1__dup2");
+    assert_eq!(second_result, second_call);
+}
+
+#[test]
+fn does_not_rewrite_reused_tool_call_ids_outside_request_outbound_provider_wire() {
+    let output =
+        apply_bridge_normalize_tool_identifiers(ApplyBridgeNormalizeToolIdentifiersInput {
+            stage: "response_inbound".to_string(),
+            protocol: Some("openai-responses".to_string()),
+            module_type: None,
+            messages: vec![
+                json!({
+                  "role": "assistant",
+                  "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "ls"}}]
+                }),
+                json!({"role": "tool", "tool_call_id": "call_1", "content": "first"}),
+                json!({
+                  "role": "assistant",
+                  "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "cat"}}]
+                }),
+                json!({"role": "tool", "tool_call_id": "call_1", "content": "second"}),
+            ],
+            raw_request: None,
+            captured_tool_results: None,
+            id_prefix: Some("bridge_tool".to_string()),
+        });
+
+    assert_eq!(
+        output.messages[2]["tool_calls"][0]["id"].as_str(),
+        Some("call_1")
+    );
+    assert_eq!(output.messages[3]["tool_call_id"].as_str(), Some("call_1"));
+}
+
+#[test]
+fn generic_bridge_tool_id_normalization_preserves_reused_call_ids() {
+    let input = NormalizeBridgeToolCallIdsInput {
+        messages: vec![
+            json!({
+              "role": "assistant",
+              "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "ls"}}]
+            }),
+            json!({"role": "tool", "tool_call_id": "call_1", "content": "first"}),
+            json!({
+              "role": "assistant",
+              "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "cat"}}]
+            }),
+            json!({"role": "tool", "tool_call_id": "call_1", "content": "second"}),
+        ],
+        raw_request: None,
+        captured_tool_results: None,
+        id_prefix: Some("bridge_tool".to_string()),
+    };
+
+    let output = normalize_bridge_tool_call_ids(input);
+    let first_call = output.messages[0]["tool_calls"][0]["id"].as_str().unwrap();
+    let first_result = output.messages[1]["tool_call_id"].as_str().unwrap();
+    let second_call = output.messages[2]["tool_calls"][0]["id"].as_str().unwrap();
+    let second_result = output.messages[3]["tool_call_id"].as_str().unwrap();
+
+    assert_eq!(first_call, "call_1");
+    assert_eq!(first_result, first_call);
+    assert_eq!(second_call, "call_1");
+    assert_eq!(second_result, second_call);
+}
+
+#[test]
 fn applies_bridge_normalize_tool_identifiers_openai_responses_inbound_trim() {
     let output = apply_bridge_normalize_tool_identifiers(
         ApplyBridgeNormalizeToolIdentifiersInput {

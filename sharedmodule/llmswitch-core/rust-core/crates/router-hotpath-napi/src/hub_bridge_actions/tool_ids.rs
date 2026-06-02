@@ -1,5 +1,5 @@
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::shared_json_utils::read_trimmed_string;
 
@@ -11,12 +11,16 @@ use super::types::{
 #[derive(Debug)]
 struct ToolIdNormalizer {
     alias_map: HashMap<String, String>,
+    raw_call_counts: HashMap<String, usize>,
+    pending_by_raw: HashMap<String, VecDeque<String>>,
 }
 
 impl ToolIdNormalizer {
     fn new(_id_prefix: Option<String>) -> Self {
         Self {
             alias_map: HashMap::new(),
+            raw_call_counts: HashMap::new(),
+            pending_by_raw: HashMap::new(),
         }
     }
 
@@ -43,16 +47,53 @@ impl ToolIdNormalizer {
         }
         None
     }
+
+    fn normalize_new_tool_call_id(&mut self, raw: Option<&str>) -> Option<String> {
+        let existing = raw
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())?;
+        let count = self.raw_call_counts.entry(existing.clone()).or_insert(0);
+        *count += 1;
+        let normalized = if *count == 1 {
+            existing.clone()
+        } else {
+            format!("{}__dup{}", existing, *count)
+        };
+        self.register_alias(Some(existing.as_str()), normalized.as_str());
+        self.pending_by_raw
+            .entry(existing)
+            .or_insert_with(VecDeque::new)
+            .push_back(normalized.clone());
+        Some(normalized)
+    }
+
+    fn normalize_tool_result_id(&mut self, raw: Option<&str>) -> Option<String> {
+        let existing = raw
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())?;
+        if let Some(queue) = self.pending_by_raw.get_mut(existing.as_str()) {
+            if let Some(next) = queue.pop_front() {
+                self.register_alias(Some(existing.as_str()), next.as_str());
+                return Some(next);
+            }
+        }
+        self.normalize_id_value(Some(existing.as_str()))
+    }
 }
 
 fn normalize_tool_call_obj(
     call_obj: &mut Map<String, Value>,
     normalizer: &mut ToolIdNormalizer,
+    unique_call_turn_ids: bool,
 ) -> Option<String> {
     let raw_id = read_trimmed_string(call_obj.get("id"))
         .or_else(|| read_trimmed_string(call_obj.get("tool_call_id")))
         .or_else(|| read_trimmed_string(call_obj.get("call_id")));
-    let normalized = normalizer.normalize_id_value(raw_id.as_deref())?;
+    let normalized = if unique_call_turn_ids {
+        normalizer.normalize_new_tool_call_id(raw_id.as_deref())?
+    } else {
+        normalizer.normalize_id_value(raw_id.as_deref())?
+    };
     let prev_id = read_trimmed_string(call_obj.get("id"));
     let prev_tool_call_id = read_trimmed_string(call_obj.get("tool_call_id"));
     let prev_call_id = read_trimmed_string(call_obj.get("call_id"));
@@ -75,7 +116,7 @@ fn normalize_tool_message_obj(
     let raw_id = read_trimmed_string(message_obj.get("tool_call_id"))
         .or_else(|| read_trimmed_string(message_obj.get("call_id")))
         .or_else(|| read_trimmed_string(message_obj.get("id")));
-    let normalized = normalizer.normalize_id_value(raw_id.as_deref())?;
+    let normalized = normalizer.normalize_tool_result_id(raw_id.as_deref())?;
     let prev_tool_call_id = read_trimmed_string(message_obj.get("tool_call_id"));
     let prev_call_id = read_trimmed_string(message_obj.get("call_id"));
     let prev_id = read_trimmed_string(message_obj.get("id"));
@@ -100,7 +141,7 @@ fn normalize_tool_output_obj(
     let raw_id = read_trimmed_string(row.get("tool_call_id"))
         .or_else(|| read_trimmed_string(row.get("call_id")))
         .or_else(|| read_trimmed_string(row.get("id")));
-    let normalized = normalizer.normalize_id_value(raw_id.as_deref())?;
+    let normalized = normalizer.normalize_tool_result_id(raw_id.as_deref())?;
     let prev_tool_call_id = read_trimmed_string(row.get("tool_call_id"));
     let prev_call_id = read_trimmed_string(row.get("call_id"));
     normalizer.register_alias(prev_tool_call_id.as_deref(), normalized.as_str());
@@ -113,7 +154,11 @@ fn normalize_tool_output_obj(
     Some(normalized)
 }
 
-fn normalize_messages(messages: &mut [Value], normalizer: &mut ToolIdNormalizer) {
+fn normalize_messages(
+    messages: &mut [Value],
+    normalizer: &mut ToolIdNormalizer,
+    unique_call_turn_ids: bool,
+) {
     for message in messages.iter_mut() {
         let Some(message_obj) = message.as_object_mut() else {
             continue;
@@ -135,7 +180,7 @@ fn normalize_messages(messages: &mut [Value], normalizer: &mut ToolIdNormalizer)
                 let Some(call_obj) = call.as_object_mut() else {
                     continue;
                 };
-                let _ = normalize_tool_call_obj(call_obj, normalizer);
+                let _ = normalize_tool_call_obj(call_obj, normalizer, unique_call_turn_ids);
             }
             continue;
         }
@@ -179,7 +224,7 @@ fn normalize_raw_request(raw_request: &mut Option<Value>, normalizer: &mut ToolI
         let Some(call_obj) = call.as_object_mut() else {
             continue;
         };
-        let _ = normalize_tool_call_obj(call_obj, normalizer);
+        let _ = normalize_tool_call_obj(call_obj, normalizer, false);
     }
 }
 
@@ -201,12 +246,23 @@ fn normalize_captured_tool_results(
 pub(crate) fn normalize_bridge_tool_call_ids(
     input: NormalizeBridgeToolCallIdsInput,
 ) -> NormalizeBridgeToolCallIdsOutput {
+    normalize_bridge_tool_call_ids_with_policy(input, false)
+}
+
+fn normalize_bridge_tool_call_ids_with_policy(
+    input: NormalizeBridgeToolCallIdsInput,
+    unique_call_turn_ids: bool,
+) -> NormalizeBridgeToolCallIdsOutput {
     let mut messages = input.messages;
     let mut raw_request = input.raw_request;
     let mut captured_tool_results = input.captured_tool_results;
     let mut normalizer = ToolIdNormalizer::new(input.id_prefix);
 
-    normalize_messages(messages.as_mut_slice(), &mut normalizer);
+    normalize_messages(
+        messages.as_mut_slice(),
+        &mut normalizer,
+        unique_call_turn_ids,
+    );
     normalize_raw_request(&mut raw_request, &mut normalizer);
     normalize_captured_tool_results(&mut captured_tool_results, &mut normalizer);
 
@@ -261,12 +317,16 @@ pub(crate) fn apply_bridge_normalize_tool_identifiers(
     let stage = input.stage.trim().to_ascii_lowercase();
     let protocol = input.protocol.as_deref();
     let module_type = input.module_type.as_deref();
-    let mut output = normalize_bridge_tool_call_ids(NormalizeBridgeToolCallIdsInput {
-        messages: input.messages,
-        raw_request: input.raw_request,
-        captured_tool_results: input.captured_tool_results,
-        id_prefix: input.id_prefix,
-    });
+    let unique_call_turn_ids = stage == "request_outbound";
+    let mut output = normalize_bridge_tool_call_ids_with_policy(
+        NormalizeBridgeToolCallIdsInput {
+            messages: input.messages,
+            raw_request: input.raw_request,
+            captured_tool_results: input.captured_tool_results,
+            id_prefix: input.id_prefix,
+        },
+        unique_call_turn_ids,
+    );
     if stage == "request_inbound" && is_openai_responses_context(protocol, module_type) {
         trim_responses_inbound_tool_aliases(&mut output.messages);
     }
