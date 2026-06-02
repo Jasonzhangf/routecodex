@@ -399,8 +399,7 @@ fn should_merge_adjacent_anthropic_messages(role: &str, previous: &Value, next: 
     }
     if role.eq_ignore_ascii_case("user") {
         return content_blocks_contain_type(previous, "tool_result")
-            && (content_blocks_are_all_type(next, "tool_result")
-                || content_blocks_are_all_type(next, "text"));
+            && content_blocks_are_all_type(next, "tool_result");
     }
     false
 }
@@ -1197,6 +1196,52 @@ mod tests {
             messages[1]["content"][0]["tool_use_id"].as_str(),
             Some("call_stringified_tool_use_1")
         );
+    }
+
+    #[test]
+    fn build_anthropic_from_openai_chat_keeps_tool_result_and_user_text_in_separate_turns() {
+        let payload = json!({
+            "model": "MiniMax-M3",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"pwd\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "ok"
+                },
+                {
+                    "role": "user",
+                    "content": "继续"
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_anthropic_from_openai_chat_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        let messages = output["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["role"].as_str(), Some("user"));
+        assert_eq!(messages[1]["content"].as_array().unwrap().len(), 1);
+        assert_eq!(messages[1]["content"][0]["type"].as_str(), Some("tool_result"));
+        assert_eq!(messages[2]["role"].as_str(), Some("user"));
+        assert_eq!(messages[2]["content"].as_array().unwrap().len(), 1);
+        assert_eq!(messages[2]["content"][0]["type"].as_str(), Some("text"));
     }
 
     #[test]

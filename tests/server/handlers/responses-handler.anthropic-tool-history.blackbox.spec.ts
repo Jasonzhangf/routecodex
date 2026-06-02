@@ -50,6 +50,20 @@ function findDanglingAnthropicToolUse(payload: unknown): string | null {
   return null;
 }
 
+function findMixedAnthropicToolResultAndText(payload: unknown): string | null {
+  const messages = (payload as any)?.messages;
+  if (!Array.isArray(messages)) return null;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message?.role !== 'user') continue;
+    const content = Array.isArray(message?.content) ? message.content : [];
+    const hasToolResult = content.some((block) => block?.type === 'tool_result');
+    const hasText = content.some((block) => block?.type === 'text');
+    if (hasToolResult && hasText) return `mixed_tool_result_text_at_${index}`;
+  }
+  return null;
+}
+
 function findOpenAiChatToolOrderingViolation(payload: unknown): string | null {
   const messages = (payload as any)?.messages;
   if (!Array.isArray(messages)) return null;
@@ -500,6 +514,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
       expect(text).toContain('resp_http_anthropic_paired_tool_history');
       const serializedProviderPayload = JSON.stringify(capturedProviderPayload);
       expect(findDanglingAnthropicToolUse(capturedProviderPayload)).toBeNull();
+      expect(findMixedAnthropicToolResultAndText(capturedProviderPayload)).toBeNull();
       expect(serializedProviderPayload).toContain('call_second');
       expect(serializedProviderPayload).toContain('second ok');
     } finally {
