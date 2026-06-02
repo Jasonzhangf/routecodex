@@ -182,6 +182,38 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('legacy runHubPipelineStageJson Rust NAPI owner must stay single-export only', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const ownerFilesBySymbol: Record<string, Set<string>> = {
+      'js_name = "runHubPipelineStageJson"': new Set(['lib.rs']),
+      'hub_pipeline_lib::run_hub_pipeline_stage_json(': new Set(['lib.rs']),
+      run_hub_pipeline_stage_json: new Set([
+        'hub_pipeline_lib/engine.rs',
+        'hub_pipeline_lib/mod.rs',
+        'lib.rs',
+      ]),
+    };
+    const findings: string[] = [];
+
+    for (const fullPath of walkFiles(crateRoot, ['.rs'])) {
+      if (fullPath.endsWith('_tests.rs') || fullPath.endsWith(path.join('shared_tooling', 'tests.rs'))) {
+        continue;
+      }
+      const relativePath = path.relative(crateRoot, fullPath).split(path.sep).join('/');
+      const source = fs.readFileSync(fullPath, 'utf8');
+      for (const [symbol, allowedFiles] of Object.entries(ownerFilesBySymbol)) {
+        if (source.includes(symbol) && !allowedFiles.has(relativePath)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy normalize-request TS block files must be physically removed', () => {
     const pipelineRoot = path.join(
       process.cwd(),

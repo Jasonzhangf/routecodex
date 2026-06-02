@@ -99,6 +99,11 @@ Phase 8C-1 required-export review proof: `runHubPipelineStageJson` is still cons
 - New runtime consumers of `runHubPipelineStageJson` are forbidden; red tests now allow the string only in the native protocol wrapper and required-export declaration/generated files.
 - Required-export tests now document that `runHubPipelineStageJson` is retained only alongside `runHubPipelineLibJson` / `executeHubPipelineJson` until the wrapper contract is retired.
 
+Phase 8C-2 Rust NAPI owner proof: Rust `#[napi(js_name = "runHubPipelineStageJson")]` is locked to `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`; the only Rust wrapper call to `hub_pipeline_lib::run_hub_pipeline_stage_json(...)` is that NAPI export wrapper. The legacy implementation remains live in `hub_pipeline_lib/engine.rs`, with `hub_pipeline_lib/mod.rs` only re-exporting it for the existing NAPI wrapper; do not add new Rust call sites.
+
+- Red tests now forbid additional Rust NAPI exports or Rust call sites for `run_hub_pipeline_stage_json` outside `lib.rs` / `hub_pipeline_lib/engine.rs` / `hub_pipeline_lib/mod.rs`.
+- Exit condition remains paired with Phase 8C-1: remove Rust NAPI export, TS wrapper contract, and required-export entry together only after no legacy stage API contract remains.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:
