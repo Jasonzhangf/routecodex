@@ -39,6 +39,13 @@ Known response governance direct-call residue after Phase 7A:
 
 These remain live owner / implementation points and are not safe deletion targets.
 
+Known response finalize direct-call residue after Phase 7B:
+
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_04_finalize_boundary.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage2_finalize.rs`
+
+These remain live owner / implementation points and are not safe deletion targets.
+
 ## Covered By Typed Boundary — Future Delete Candidates
 
 These categories can become deletion candidates only after the required proof gates pass:
@@ -50,6 +57,8 @@ These categories can become deletion candidates only after the required proof ga
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/lmstudio/response.rs`
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
 - Phase 7A renamed the private `hub_tool_governance_semantics.rs` response helper to `govern_tool_name_response`, so it no longer collides with Hub response chatprocess stage naming.
+- Phase 7B covered response finalize callers now enter `hub_resp_outbound_04_finalize_boundary.rs` instead of importing `finalize_chat_response` directly:
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
 - Legacy external direct access to `run_req_process_pipeline` once no NAPI caller or TS shell consumes it outside the total HubPipeline path.
 - Legacy direct access to request stage functions once all live request callers enter `HubReqInbound02Standardized -> HubReqChatProcess03Governed -> HubReqOutbound05ProviderSemantic`.
 - Legacy direct access to response stage functions once all live response callers enter `HubRespInbound02Parsed -> HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic`.

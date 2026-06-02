@@ -144,7 +144,7 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(engineSource).toContain('parse_resp_format_envelope');
     expect(engineSource).toContain('govern_hub_resp_chatprocess_03_response');
-    expect(engineSource).toContain('finalize_chat_response');
+    expect(engineSource).toContain('finalize_hub_resp_outbound_04_client_semantic');
     expect(engineSource).toContain('build_client_payload_for_protocol');
     expect(engineSource).toContain('process_sse_stream');
     expect(engineSource).toContain('HubPipelineEffectKind::StreamPipe');
@@ -183,7 +183,7 @@ describe('hub pipeline stage residue audit', () => {
         'resp_process_stage1_tool_governance_blocks/orchestrator.rs',
       ]),
       finalize_chat_response: new Set([
-        'hub_pipeline_lib/engine.rs',
+        'hub_resp_outbound_04_finalize_boundary.rs',
         'resp_process_stage2_finalize.rs',
       ]),
       build_client_payload_for_protocol: new Set(['hub_pipeline_lib/engine.rs']),

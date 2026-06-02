@@ -28,6 +28,7 @@ use crate::hub_resp_outbound_client_semantics::{
     build_openai_chat_response_from_anthropic_message, build_responses_payload_from_chat_core,
     normalize_openai_chat_reasoning_outbound,
 };
+use crate::hub_resp_outbound_04_finalize_boundary::finalize_hub_resp_outbound_04_client_semantic;
 use crate::hub_resp_outbound_sse_stream::{process_sse_stream, SseStreamInput};
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
@@ -37,7 +38,7 @@ use crate::req_process_stage1_tool_governance::{
 };
 use crate::req_process_stage2_route_select::{apply_route_selection, RouteSelectionApplyInput};
 use crate::resp_process_stage1_tool_governance::ToolGovernanceInput as RespToolGovernanceInput;
-use crate::resp_process_stage2_finalize::{finalize_chat_response, FinalizeInput};
+use crate::resp_process_stage2_finalize::FinalizeInput;
 use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 use crate::servertool_skeleton::finalize_strip::filter_out_executed_servertool_calls;
 
@@ -507,7 +508,7 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "stream": normalized_metadata.get("stream").and_then(Value::as_bool).unwrap_or(false) })),
         ));
-        let finalized_payload = finalize_chat_response(FinalizeInput {
+        let finalized_payload = finalize_hub_resp_outbound_04_client_semantic(FinalizeInput {
             payload: governed.governed_payload,
             stream: normalized_metadata
                 .get("stream")
@@ -1259,7 +1260,7 @@ fn run_resp_process_finalize_stage(raw: Value) -> HubPipelineResult<String> {
         .and_then(Value::as_str)
         .or_else(|| raw.get("endpoint").and_then(Value::as_str))
         .map(str::to_string);
-    let finalized = finalize_chat_response(FinalizeInput {
+    let finalized = finalize_hub_resp_outbound_04_client_semantic(FinalizeInput {
         payload: raw.get("payload").cloned().unwrap_or(Value::Null),
         stream: wants_stream,
         reasoning_mode,
