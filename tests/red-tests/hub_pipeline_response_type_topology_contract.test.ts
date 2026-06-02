@@ -76,7 +76,7 @@ describe('Hub Pipeline response type topology contract', () => {
     }
     expect(source).toContain('govern_hub_resp_chatprocess_03_response');
     expect(source).toContain('finalize_hub_resp_outbound_04_client_semantic');
-    expect(source).toContain('build_client_payload_for_protocol');
+    expect(source).toContain('build_hub_resp_outbound_04_client_payload_for_protocol');
   });
 
   it('forbids new generic RespProc/resp_process names in the topology type skeleton', () => {
