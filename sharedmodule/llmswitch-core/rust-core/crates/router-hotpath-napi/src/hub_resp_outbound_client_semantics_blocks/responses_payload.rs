@@ -300,6 +300,119 @@ fn collect_executed_tool_call_ids(response: &Map<String, Value>) -> HashSet<Stri
 
 type PendingToolCall = (usize, String, String, String);
 
+fn build_chat_payload_from_anthropic_message_for_responses(
+    response_row: &Map<String, Value>,
+) -> Value {
+    let mut content_parts: Vec<Value> = Vec::new();
+    let mut reasoning_texts: Vec<String> = Vec::new();
+    let mut tool_calls: Vec<Value> = Vec::new();
+
+    for (index, part) in response_row
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        let Some(part_row) = part.as_object() else {
+            continue;
+        };
+        let kind = read_object_string(part_row, "type")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        match kind.as_str() {
+            "text" => {
+                if let Some(text) = read_raw_object_string(part_row, "text") {
+                    if !text.trim().is_empty() {
+                        content_parts.push(Value::Object(Map::from_iter([
+                            ("type".to_string(), Value::String("text".to_string())),
+                            ("text".to_string(), Value::String(text)),
+                        ])));
+                    }
+                }
+            }
+            "thinking" => {
+                if let Some(text) = read_raw_object_string(part_row, "thinking")
+                    .or_else(|| read_raw_object_string(part_row, "text"))
+                {
+                    if !text.trim().is_empty() {
+                        reasoning_texts.push(text);
+                    }
+                }
+            }
+            "tool_use" => {
+                let Some(name) = read_object_string(part_row, "name") else {
+                    continue;
+                };
+                let Some(id) = read_object_string(part_row, "id") else {
+                    continue;
+                };
+                let arguments = serde_json::to_string(
+                    part_row.get("input").unwrap_or(&Value::Object(Map::new())),
+                )
+                .unwrap_or_else(|_| "{}".to_string());
+                tool_calls.push(Value::Object(Map::from_iter([
+                    ("id".to_string(), Value::String(id)),
+                    ("type".to_string(), Value::String("function".to_string())),
+                    (
+                        "function".to_string(),
+                        Value::Object(Map::from_iter([
+                            ("name".to_string(), Value::String(name)),
+                            ("arguments".to_string(), Value::String(arguments)),
+                        ])),
+                    ),
+                ])));
+            }
+            _ => {
+                let _ = index;
+            }
+        }
+    }
+
+    let finish_reason = match read_object_string(response_row, "stop_reason")
+        .unwrap_or_default()
+        .as_str()
+    {
+        "tool_use" => "tool_calls",
+        "max_tokens" => "length",
+        "stop_sequence" => "stop",
+        _ if !tool_calls.is_empty() => "tool_calls",
+        _ => "stop",
+    };
+
+    let mut message = Map::new();
+    message.insert("role".to_string(), Value::String("assistant".to_string()));
+    message.insert("content".to_string(), Value::Array(content_parts));
+    if !reasoning_texts.is_empty() {
+        message.insert(
+            "reasoning_content".to_string(),
+            Value::String(reasoning_texts.join("\n")),
+        );
+    }
+    if !tool_calls.is_empty() {
+        message.insert("tool_calls".to_string(), Value::Array(tool_calls));
+    }
+
+    let mut out = Map::new();
+    for key in ["id", "model", "usage"] {
+        if let Some(value) = response_row.get(key) {
+            out.insert(key.to_string(), value.clone());
+        }
+    }
+    out.insert(
+        "choices".to_string(),
+        Value::Array(vec![Value::Object(Map::from_iter([
+            ("index".to_string(), Value::from(0)),
+            ("message".to_string(), Value::Object(message)),
+            (
+                "finish_reason".to_string(),
+                Value::String(finish_reason.to_string()),
+            ),
+        ]))]),
+    );
+    Value::Object(out)
+}
+
 fn read_context_object<'a>(context: &'a Value, key: &str) -> Option<&'a Map<String, Value>> {
     context.as_object()?.get(key)?.as_object()
 }
@@ -524,6 +637,20 @@ pub(crate) fn build_responses_payload_from_chat_core(
             .is_some()
     {
         return Ok(Value::Object(response_row.clone()));
+    }
+
+    if response_row
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|value| value == "message")
+        .unwrap_or(false)
+        && response_row
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some()
+    {
+        let chat_payload = build_chat_payload_from_anthropic_message_for_responses(response_row);
+        return build_responses_payload_from_chat_core(&chat_payload, request_id_hint, context);
     }
 
     let choices = response_row

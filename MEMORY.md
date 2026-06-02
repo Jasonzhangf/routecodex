@@ -2039,3 +2039,8 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 ## 2026-06-02 Hub Pipeline Phase 6A-1 request typed wrappers
 - Verified request typed wrappers exist in `hub_pipeline_types/request_typed_entrypoints.rs` and only delegate to existing transparent type builders. They are deliberately not wired into `hub_pipeline.rs`, `hub_pipeline_lib/engine.rs`, or NAPI `lib.rs`, so live request flow/provider wire behavior is unchanged.
 - Red-test truth: `tests/red-tests/hub_pipeline_request_typed_entrypoint_contract.test.ts` locks wrapper names, forbids runtime-stage logic inside wrappers, and forbids live runtime path wiring in Phase 6A-1.
+
+## 2026-06-02 MiniMax Anthropic tool_use -> Responses 结构化投影
+- 证据：`--snap` raw provider response 落盘在 `~/.rcc/codex-samples/openai-responses/minimax.key1.MiniMax-M3/req_1780361351618_3e08ea1c/provider-response.json`，原始 `content` 包含 `tool_use`，不是文本工具调用。
+- 修复真源：`hub_resp_outbound_client_semantics_blocks/responses_payload.rs` 在 OpenAI Responses client remap 中直接支持 Anthropic `type=message/content[].tool_use`，转为 Responses `output[].function_call` + `required_action.submit_tool_outputs.tool_calls`；禁止通过文本收割修这类结构化工具调用。
+- 红测：`build_responses_payload_from_anthropic_tool_use_preserves_structured_calls` 锁住 `output_text` 不含 `minimax:tool_call`，并断言 raw `tool_use` 保持为结构化 function_call。

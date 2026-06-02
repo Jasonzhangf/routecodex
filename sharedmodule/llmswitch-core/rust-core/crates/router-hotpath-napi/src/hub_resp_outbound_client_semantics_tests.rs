@@ -174,6 +174,78 @@ fn build_responses_payload_from_chat_preserves_client_model_over_upstream_provid
 }
 
 #[test]
+fn build_responses_payload_from_anthropic_tool_use_preserves_structured_calls() {
+    let payload = serde_json::json!({
+        "id": "msg_minimax_tool_use",
+        "type": "message",
+        "role": "assistant",
+        "model": "MiniMax-M3",
+        "content": [
+            { "type": "text", "text": "Jason，我先读项目状态。" },
+            {
+                "type": "tool_use",
+                "id": "call_function_obb2jil9jfzs_1",
+                "name": "exec_command",
+                "input": { "cmd": "cd /Volumes/extension/code/zterm && ls -la", "yield_time_ms": 5000 }
+            },
+            {
+                "type": "tool_use",
+                "id": "call_function_obb2jil9jfzs_2",
+                "name": "read_mcp_resource",
+                "input": { "server": "filesystem", "uri": "file:///Volumes/extension/code/zterm/mac/CACHE.md" }
+            }
+        ],
+        "stop_reason": "tool_use"
+    });
+
+    let output = build_responses_payload_from_chat_core(
+        &payload,
+        Some("req_minimax_tool_use"),
+        &serde_json::json!({ "toolsRaw": [] }),
+    )
+    .expect("build responses payload");
+
+    assert_eq!(
+        output["status"],
+        Value::String("requires_action".to_string())
+    );
+    assert_eq!(
+        output["output_text"],
+        Value::String("Jason，我先读项目状态。".to_string())
+    );
+    assert!(!output["output_text"]
+        .as_str()
+        .unwrap_or("")
+        .contains("minimax:tool_call"));
+
+    let output_items = output["output"].as_array().cloned().expect("output array");
+    let function_items: Vec<&Value> = output_items
+        .iter()
+        .filter(|item| item["type"] == Value::String("function_call".to_string()))
+        .collect();
+    assert_eq!(function_items.len(), 2);
+    assert_eq!(
+        function_items[0]["name"],
+        Value::String("exec_command".to_string())
+    );
+    assert_eq!(
+        function_items[0]["call_id"],
+        Value::String("call_function_obb2jil9jfzs_1".to_string())
+    );
+    let args: Value = serde_json::from_str(function_items[0]["arguments"].as_str().unwrap())
+        .expect("arguments json");
+    assert_eq!(
+        args["cmd"],
+        Value::String("cd /Volumes/extension/code/zterm && ls -la".to_string())
+    );
+    let required_calls = output["required_action"]["submit_tool_outputs"]["tool_calls"]
+        .as_array()
+        .cloned()
+        .expect("required tool calls");
+    assert_eq!(required_calls.len(), 2);
+}
+
+#[test]
 fn build_responses_payload_from_chat_filters_native_tool_output_id_alias_from_required_action() {
     let payload = serde_json::json!({
         "id": "resp_native_completed",

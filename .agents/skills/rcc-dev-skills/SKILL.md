@@ -1744,3 +1744,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ## 2026-06-02 Hub Pipeline Phase 6A-1 request typed wrapper 精华
 - request typed wrappers 只允许做 type-boundary delegation：`run_hub_req_inbound_02_standardized_entrypoint`、`run_hub_req_chatprocess_03_governed_entrypoint`、`run_hub_req_outbound_05_provider_semantic_entrypoint`；不得调用 runtime stage、route selection、provider encoder。
 - Phase 6A-1 必须保持未接 live path；红测 `hub_pipeline_request_typed_entrypoint_contract` 要禁止 `hub_pipeline.rs` / `hub_pipeline_lib/engine.rs` / `lib.rs` 引用这些 wrapper。
+
+### 2026-06-02 MiniMax tool_call 文本化排障精华
+- Trigger: UI 出现 `minimax:tool_call` 或 provider 工具调用进文本。Action: 先查 `--snap` raw `provider-response.json` 的字段归属（`content[].tool_use` vs text/content），再定位 resp outbound 投影；禁止先按文本收割修复结构化工具调用。
