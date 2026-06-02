@@ -89,7 +89,7 @@ Phase 8A-1 physically removed the legacy request process TS shell after call gra
 Phase 8A-2 physically removed the final request-side TS stage shell after migrating the live `HubPipeline.execute` caller to Rust total HubPipeline entry:
 
 - Deleted `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.ts`.
-- Moved request payload materialization in `hub-pipeline.ts` to direct `runHubPipelineLibWithNative` ownership; JSON/SSE input materialization remains TS I/O glue, while normalize semantics are executed by Rust total pipeline.
+- Moved request payload materialization into `hub-pipeline.ts` as TS I/O glue only; route selection still happens before Rust total pipeline entry, and normalize semantics are executed by the downstream Rust total request path.
 - Migrated the SSE protocol contract test from `normalizeHubPipelineRequest` to `HubPipeline.execute`, proving canonical SSE payloads enter `runHubPipelineLibWithNative`.
 - Updated residue red tests so `hub-pipeline-normalize-request.ts` must remain absent, and `runHubPipelineStageWithNative` is allowed only in the native protocol wrapper declarations/implementation.
 

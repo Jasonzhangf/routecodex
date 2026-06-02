@@ -12,7 +12,6 @@ import {
   extractModelHintFromMetadataWithNative,
   resolveSseProtocolWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
-import { runHubPipelineLibWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js";
 import { isRecord } from "../../../shared/common-utils.js";
 import type {
   HubPipelineConfig,
@@ -181,7 +180,7 @@ async function convertSsePayloadToJson(
   return result;
 }
 
-function buildNormalizedRequestFromNative(args: {
+function buildMaterializedRequest(args: {
   id: string;
   endpoint: string;
   payload: Record<string, unknown>;
@@ -246,31 +245,20 @@ async function materializeHubPipelineRequest(request: HubPipelineRequest): Promi
     throw new Error("HubPipeline requires JSON object payload");
   }
   const stream = Boolean(metadataRecord.stream === true || payload.stream === true || streamCandidate);
-  const nativePlan = runHubPipelineLibWithNative({
-    request: {
-      requestId: id,
+  return buildMaterializedRequest({
+    id,
+    endpoint: request.endpoint,
+    payload,
+    metadata: {
+      ...metadataRecord,
       endpoint: request.endpoint,
       entryEndpoint: readString(metadataRecord.entryEndpoint) ?? request.endpoint,
       providerProtocol,
-      payload,
-      metadata: metadataRecord,
       stream,
       processMode: "chat",
       direction: metadataRecord.direction === "response" ? "response" : "request",
       stage: metadataRecord.stage === "outbound" ? "outbound" : "inbound",
     },
-  });
-  if (nativePlan.success !== true) {
-    throw new Error(nativePlan.error?.message ?? "Rust HubPipeline request materialization failed");
-  }
-  if (!isRecord(nativePlan.payload) || !isRecord(nativePlan.metadata)) {
-    throw new Error("Rust HubPipeline request materialization returned invalid envelope");
-  }
-  return buildNormalizedRequestFromNative({
-    id: nativePlan.requestId || id,
-    endpoint: request.endpoint,
-    payload: nativePlan.payload,
-    metadata: nativePlan.metadata,
     externalStageRecorder,
   });
 }
