@@ -136,6 +136,18 @@ function readTrimmedString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+function isServerToolFollowupInput(input: PipelineExecutionInput): boolean {
+  const metadata = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+    ? (input.metadata as Record<string, unknown>)
+    : {};
+  const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+    ? (metadata.__rt as Record<string, unknown>)
+    : {};
+  return metadata.serverToolFollowup === true
+    || rt.serverToolFollowup === true
+    || String(input.requestId || '').includes(':stop_followup');
+}
+
 function hasDeclaredApplyPatchTool(body: unknown): boolean {
   const record = body && typeof body === 'object' && !Array.isArray(body)
     ? body as Record<string, unknown>
@@ -480,12 +492,32 @@ export class RouteCodexHttpServer {
   }
 
   private resolvePortSessionDir(portConfig?: PortConfig | null, localPort?: number): string | undefined {
+    if (typeof localPort === 'number') {
+      const inst = this.portRegistry.get(localPort);
+      if (inst?.sessionDir) {
+        return inst.sessionDir;
+      }
+    }
     const resolved = resolvePortScopedSessionDir({
-      serverId: this.serverId,
+      serverId: this.resolvePortServerId(portConfig, localPort),
       port: typeof portConfig?.port === 'number' ? portConfig.port : localPort,
       routingPolicyGroup: portConfig?.routingPolicyGroup,
     });
     return resolved ?? undefined;
+  }
+
+  private resolvePortServerId(portConfig?: PortConfig | null, localPort?: number): string {
+    if (typeof localPort === 'number') {
+      const inst = this.portRegistry.get(localPort);
+      if (inst?.serverId) {
+        return inst.serverId;
+      }
+    }
+    const port = typeof portConfig?.port === 'number' ? portConfig.port : localPort;
+    const host = typeof portConfig?.host === 'string' && portConfig.host.trim()
+      ? portConfig.host
+      : this.config.server.host;
+    return canonicalizeServerId(host, typeof port === 'number' ? port : this.config.server.port);
   }
 
   private isProviderVisibleInMetadataScope(providerKey: string | undefined, metadata?: Record<string, unknown>): boolean {
@@ -1014,10 +1046,23 @@ export class RouteCodexHttpServer {
     if (portConfig?.mode === 'router' && portConfig.routingPolicyGroup) {
       const groupPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
       if (!groupPipeline) {
-        throw Object.assign(
-          new Error(`Routing policy group pipeline not available for port ${portConfig.port}: ${portConfig.routingPolicyGroup}`),
-          { code: 'PROVIDER_NOT_AVAILABLE' }
+        const scopeLabel = this.resolvePortServerId(portConfig, localPort);
+        const message = `Routing policy group pipeline not available for port ${portConfig.port} ` +
+          `(serverId=${scopeLabel}, routingPolicyGroup=${portConfig.routingPolicyGroup}). ` +
+          `Server is misconfigured for this port.`;
+        // Hard fail-fast: do not silently drop the request.
+        // Routes must catch this and return HTTP 500 JSON, never an empty reply.
+        const err = Object.assign(
+          new Error(message),
+          {
+            code: 'ROUTECODEX_HUB_PIPELINE_NOT_READY',
+            status: 500,
+            port: portConfig.port,
+            serverId: scopeLabel,
+            routingPolicyGroup: portConfig.routingPolicyGroup,
+          }
         );
+        throw err;
       }
     }
 
@@ -1040,6 +1085,8 @@ export class RouteCodexHttpServer {
       routecodexPortMode: portConfig?.mode ?? 'router',
       routecodexPortBinding: portConfig?.providerBinding,
       routecodexRoutingPolicyGroup: portConfig?.routingPolicyGroup,
+      routecodexServerId: this.resolvePortServerId(portConfig, localPort),
+      entryPort: typeof portConfig?.port === 'number' ? portConfig.port : localPort,
       stopMessageEnabled: effectiveStopMessageEnabled,
       routecodexPortStopMessageEnabled: effectiveStopMessageEnabled,
       ...(routeHint ? { routeHint } : {}),
@@ -1073,6 +1120,12 @@ export class RouteCodexHttpServer {
         portConfig?.mode === 'router'
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
       ) {
+        if (isServerToolFollowupInput(nextInput)) {
+          this.logStage('router-direct.skipped', input.requestId, {
+            reason: 'servertool_followup_requires_single_hub_reentry',
+          });
+          return await this.executePipeline(nextInput);
+        }
         // apply_patch servertool mode requires Hub response-stage tool dispatch.
         // Router direct bypass skips response conversion/servertool execution,
         // so we must force relay when request declares apply_patch.
@@ -1120,7 +1173,7 @@ export class RouteCodexHttpServer {
     const behavior = portConfig.protocolBehavior ?? 'auto';
     const shouldUseDirect =
       behavior === 'direct' || (behavior === 'auto' && inboundProtocol === handle.providerProtocol);
-    if (shouldUseDirect) {
+    if (shouldUseDirect && !isServerToolFollowupInput(nextInput)) {
       return await this.executeProviderDirectPipelineForPort(portConfig, nextInput);
     }
 

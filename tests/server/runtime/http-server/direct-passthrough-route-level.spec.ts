@@ -404,6 +404,116 @@ describe('direct passthrough route-level', () => {
     expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay' });
   });
 
+  it('router same-protocol direct is skipped for servertool stop_followup reentry', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { object: 'response', id: 'resp_stop_followup_relay' },
+      headers: {},
+      metadata: {},
+    } as any);
+    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: false,
+      reason: 'should-not-run',
+    } as any);
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5555,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline]
+    ]);
+
+    const result = await (server as any).executePortAwarePipeline(5555, {
+      requestId: 'openai-responses-provider-20260602T213049095-247628-1139:stop_followup',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: { model: 'gpt-5.5', input: 'continue' },
+      metadata: { __rt: { serverToolFollowup: true } },
+    });
+
+    expect(routerDirectSpy).not.toHaveBeenCalled();
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_stop_followup_relay' });
+  });
+
+  it('provider direct is skipped for servertool stop_followup reentry', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { object: 'response', id: 'resp_provider_followup_relay' },
+      headers: {},
+      metadata: {},
+    } as any);
+    const providerDirectSpy = jest.spyOn(server as any, 'executeProviderDirectPipelineForPort').mockResolvedValue({
+      status: 200,
+      body: { object: 'response', id: 'resp_provider_direct_should_not_run' },
+      headers: {},
+      metadata: {},
+    } as any);
+    const handle = { providerProtocol: 'openai-responses' };
+    jest.spyOn(server as any, 'resolveProviderHandleForBinding').mockReturnValue(handle);
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5520,
+          host: '127.0.0.1',
+          mode: 'provider',
+          protocolBehavior: 'direct',
+          providerBinding: 'direct.key1.gpt-test',
+        }],
+      },
+    };
+
+    const result = await (server as any).executePortAwarePipeline(5520, {
+      requestId: 'openai-responses-provider-20260602T213049095-247628-1139:stop_followup',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: { model: 'gpt-5.5', input: 'continue' },
+      metadata: { __rt: { serverToolFollowup: true } },
+    });
+
+    expect(providerDirectSpy).not.toHaveBeenCalled();
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    expect(executePipelineSpy.mock.calls[0]?.[0]?.metadata).toEqual(expect.objectContaining({
+      routecodexProviderRelayBinding: 'direct.key1.gpt-test',
+      routecodexProviderRelayProtocol: 'openai-responses',
+    }));
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_provider_followup_relay' });
+  });
+
   it('router same-protocol direct passes x-route-hint into direct preroute metadata', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
