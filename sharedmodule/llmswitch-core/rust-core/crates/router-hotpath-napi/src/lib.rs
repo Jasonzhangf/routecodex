@@ -44,6 +44,7 @@ mod hub_req_inbound_semantic_lift;
 mod hub_req_inbound_tool_call_normalization;
 mod hub_req_inbound_tool_output_diagnostics;
 mod hub_req_inbound_tool_output_snapshot;
+mod hub_req_chatprocess_03_governance_boundary;
 mod hub_req_outbound_context_merge;
 mod hub_req_outbound_format_build;
 mod hub_resp_inbound_format_parse;

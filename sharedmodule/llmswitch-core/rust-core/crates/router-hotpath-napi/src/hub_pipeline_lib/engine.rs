@@ -13,6 +13,7 @@ use crate::hub_pipeline_types::{
 use crate::hub_req_inbound_context_capture::{
     capture_req_inbound_responses_context_snapshot, ResponsesContextCaptureInput,
 };
+use crate::hub_req_chatprocess_03_governance_boundary::apply_hub_req_chatprocess_03_tool_governance;
 use crate::hub_req_inbound_format_parse::{parse_format_envelope, FormatParseInput};
 use crate::hub_req_inbound_semantic_lift::{
     apply_req_inbound_semantic_lift, ReqInboundSemanticLiftApplyInput,
@@ -32,14 +33,13 @@ use crate::hub_resp_outbound_sse_stream::{process_sse_stream, SseStreamInput};
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
 };
-use crate::req_process_stage1_tool_governance::{
-    apply_req_process_tool_governance, ToolGovernanceInput,
-};
-use crate::req_process_stage2_route_select::{apply_route_selection, RouteSelectionApplyInput};
+use crate::req_process_stage1_tool_governance::ToolGovernanceInput;
+use crate::req_process_stage2_route_select::RouteSelectionApplyInput;
 use crate::resp_process_stage1_tool_governance::ToolGovernanceInput as RespToolGovernanceInput;
 use crate::resp_process_stage2_finalize::FinalizeInput;
 use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 use crate::servertool_skeleton::finalize_strip::filter_out_executed_servertool_calls;
+use crate::vr_route_04_selection_boundary::apply_vr_route_04_selection;
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
 use super::effect_plan::{HubPipelineEffect, HubPipelineEffectKind, HubPipelineEffectPlan};
@@ -259,7 +259,7 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "metadataObject": normalized_metadata.is_object() })),
         ));
-        let governed = apply_req_process_tool_governance(ToolGovernanceInput {
+        let governed = apply_hub_req_chatprocess_03_tool_governance(ToolGovernanceInput {
             request: standardized_payload,
             raw_payload: standardized_raw_payload,
             metadata: normalized_metadata.clone(),
@@ -299,7 +299,7 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "targetObject": target.is_object() })),
         ));
-        let mut routed = apply_route_selection(RouteSelectionApplyInput {
+        let mut routed = apply_vr_route_04_selection(RouteSelectionApplyInput {
             request: governed.processed_request,
             normalized_metadata,
             target,
@@ -1153,7 +1153,7 @@ fn run_req_process_tool_governance_stage(raw: Value) -> HubPipelineResult<String
     let has_active_stop_message_for_continue_execution = metadata
         .get("hasActiveStopMessageForContinueExecution")
         .and_then(Value::as_bool);
-    let governed = apply_req_process_tool_governance(ToolGovernanceInput {
+    let governed = apply_hub_req_chatprocess_03_tool_governance(ToolGovernanceInput {
         request: raw.get("payload").cloned().unwrap_or(Value::Null),
         raw_payload,
         metadata,

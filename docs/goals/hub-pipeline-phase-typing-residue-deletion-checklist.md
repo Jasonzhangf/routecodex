@@ -52,6 +52,18 @@ Known response client payload direct-call residue after Phase 7C:
 
 This remains the live owner point and is not a safe deletion target.
 
+Known request direct-call residue after Phase 7D:
+
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_chatprocess_03_governance_boundary.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/vr_route_04_selection_boundary.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage2_route_select.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+
+These remain live owner / implementation / NAPI bridge points and are not safe deletion targets.
+
 ## Covered By Typed Boundary — Future Delete Candidates
 
 These categories can become deletion candidates only after the required proof gates pass:
@@ -67,6 +79,11 @@ These categories can become deletion candidates only after the required proof ga
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
 - Phase 7C covered response outbound client payload projection callers now enter `hub_resp_outbound_04_client_payload_boundary.rs` instead of calling `build_client_payload_for_protocol` directly:
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+- Phase 7D covered request governance callers now enter `hub_req_chatprocess_03_governance_boundary.rs` instead of calling `apply_req_process_tool_governance` directly:
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+- Phase 7D covered request route selection callers now enter `vr_route_04_selection_boundary.rs` instead of calling `apply_route_selection` directly:
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+- Phase 7D leaves `run_req_process_pipeline` at its current Rust/NAPI owner boundary only; no new caller is allowed outside `hub_pipeline.rs` and `hub_pipeline_blocks/napi_bindings.rs`.
 - Legacy external direct access to `run_req_process_pipeline` once no NAPI caller or TS shell consumes it outside the total HubPipeline path.
 - Legacy direct access to request stage functions once all live request callers enter `HubReqInbound02Standardized -> HubReqChatProcess03Governed -> HubReqOutbound05ProviderSemantic`.
 - Legacy direct access to response stage functions once all live response callers enter `HubRespInbound02Parsed -> HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic`.

@@ -72,8 +72,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).toContain('parse_format_envelope');
     expect(engineSource).toContain('apply_req_inbound_semantic_lift');
     expect(engineSource).toContain('capture_req_inbound_responses_context_snapshot');
-    expect(engineSource).toContain('apply_req_process_tool_governance');
-    expect(engineSource).toContain('apply_route_selection');
+    expect(engineSource).toContain('apply_hub_req_chatprocess_03_tool_governance');
+    expect(engineSource).toContain('apply_vr_route_04_selection');
     expect(engineSource).toContain('apply_req_outbound_context_snapshot');
     expect(engineSource).toContain('build_format_request');
     expect(engineSource).toContain('run_req_outbound_stage3_compat');
@@ -169,13 +169,13 @@ describe('hub pipeline stage residue audit', () => {
         'hub_pipeline_blocks/napi_bindings.rs',
       ]),
       apply_req_process_tool_governance: new Set([
-        'hub_pipeline_lib/engine.rs',
+        'hub_req_chatprocess_03_governance_boundary.rs',
         'req_process_stage1_tool_governance.rs',
         'req_process_stage1_tool_governance_blocks/orchestrator.rs',
       ]),
       apply_route_selection: new Set([
-        'hub_pipeline_lib/engine.rs',
         'req_process_stage2_route_select.rs',
+        'vr_route_04_selection_boundary.rs',
       ]),
       govern_response: new Set([
         'hub_resp_chatprocess_03_governance_boundary.rs',
