@@ -20,6 +20,20 @@ function collectMatches(source: string, checks: ResidueCheck[]): string[] {
   return findings;
 }
 
+function walkFiles(dir: string, suffixes: string[], out: string[] = []): string[] {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkFiles(fullPath, suffixes, out);
+      continue;
+    }
+    if (entry.isFile() && suffixes.some((suffix) => entry.name.endsWith(suffix))) {
+      out.push(fullPath);
+    }
+  }
+  return out;
+}
+
 describe('hub pipeline stage residue audit', () => {
   it('rust lib total entry must exist before HubPipeline mainline can be switched', () => {
     const crateRoot = path.join(
@@ -142,6 +156,81 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).not.toContain('stages/resp_inbound');
     expect(engineSource).not.toContain('stages/resp_process');
     expect(engineSource).not.toContain('stages/resp_outbound');
+  });
+
+  it('phase 6C forbids new direct stage calls outside typed pipeline owners', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const ownerFilesBySymbol: Record<string, Set<string>> = {
+      run_req_process_pipeline: new Set([
+        'hub_pipeline.rs',
+        'hub_pipeline_blocks/napi_bindings.rs',
+      ]),
+      apply_req_process_tool_governance: new Set([
+        'hub_pipeline_lib/engine.rs',
+        'req_process_stage1_tool_governance.rs',
+        'req_process_stage1_tool_governance_blocks/orchestrator.rs',
+      ]),
+      apply_route_selection: new Set([
+        'hub_pipeline_lib/engine.rs',
+        'req_process_stage2_route_select.rs',
+      ]),
+      govern_response: new Set([
+        'anthropic_openai_codec.rs',
+        'hub_pipeline_lib/engine.rs',
+        'hub_tool_governance_semantics.rs',
+        'openai_openai_codec.rs',
+        'req_outbound_stage3_compat/deepseek_web/response.rs',
+        'req_outbound_stage3_compat/lmstudio/response.rs',
+        'resp_process_stage1_tool_governance.rs',
+        'resp_process_stage1_tool_governance_blocks/orchestrator.rs',
+      ]),
+      finalize_chat_response: new Set([
+        'hub_pipeline_lib/engine.rs',
+        'resp_process_stage2_finalize.rs',
+      ]),
+      build_client_payload_for_protocol: new Set(['hub_pipeline_lib/engine.rs']),
+    };
+    const findings: string[] = [];
+
+    for (const fullPath of walkFiles(crateRoot, ['.rs'])) {
+      if (fullPath.endsWith('_tests.rs') || fullPath.endsWith(path.join('shared_tooling', 'tests.rs'))) {
+        continue;
+      }
+      const relativePath = path.relative(crateRoot, fullPath).split(path.sep).join('/');
+      const source = fs.readFileSync(fullPath, 'utf8');
+      for (const [symbol, allowedFiles] of Object.entries(ownerFilesBySymbol)) {
+        if (new RegExp(`\\b${symbol}\\b`).test(source) && !allowedFiles.has(relativePath)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('phase 6C forbids old req_process/resp_process names in typed topology files', () => {
+    const typedRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types',
+    );
+    const findings: string[] = [];
+
+    for (const fullPath of walkFiles(typedRoot, ['.rs'])) {
+      const relativePath = path.relative(typedRoot, fullPath).split(path.sep).join('/');
+      const source = fs.readFileSync(fullPath, 'utf8');
+      const matches = collectMatches(source, [
+        { label: 'HubReqProcess', pattern: /HubReqProcess/ },
+        { label: 'HubRespProcess', pattern: /HubRespProcess/ },
+        { label: 'req_process', pattern: /req_process/ },
+        { label: 'resp_process', pattern: /resp_process/ },
+      ]);
+      findings.push(...matches.map((match) => `${relativePath}:${match}`));
+    }
+
+    expect(findings).toEqual([]);
   });
 
   it('legacy resp_process stage2 and resp outbound SSE TS shells must be physically removed', () => {

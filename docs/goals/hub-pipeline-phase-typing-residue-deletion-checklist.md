@@ -2,19 +2,70 @@
 
 ## Status
 
-No safe live-path deletion in this phase.
+Phase 6C is a boundary-locking phase only. It adds red-test coverage and deletion criteria; it does not delete live stages and does not change runtime behavior, provider wire payload, or client response body.
 
-Phase 3/4/5 adds contract wrappers and red tests only. Existing `req_process_*` and `resp_process_*` files remain live Rust stage implementations and must not be deleted as part of this typing pass.
+Request typed wrappers from Phase 6A and response typed wrappers from Phase 6B-2 are live entry boundaries, but the historical Rust stage implementations still carry live business semantics. They remain until a later deletion phase proves the call graph has fully moved behind typed nodes.
 
-## Not Safe To Delete Yet
+## Current Live Implementation — Do Not Delete
 
+These files are still live Rust implementation or current NAPI/engine owners:
+
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs`
-- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage2_route_select.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage2_route_select.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs`
-- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage2_finalize.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage2_finalize.rs`
 
-## Deletion Rule
+## Current Known Direct-Call Residue — Locked, Not Expanded
 
-Delete only after a later migration proves the live path has moved behind `ReqChatProcess` / `RespChatProcess` typed entrypoints, with red tests failing on old direct imports and green runtime verification after deletion.
+Phase 6C red tests lock the current direct-call owner list. New direct calls to these symbols outside the allowed files must fail tests:
+
+- `run_req_process_pipeline`
+- `apply_req_process_tool_governance`
+- `apply_route_selection`
+- `govern_response`
+- `finalize_chat_response`
+- `build_client_payload_for_protocol`
+
+Known response governance direct-call residue that must be migrated in a later phase before deletion:
+
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/openai_openai_codec.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web/response.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/lmstudio/response.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_tool_governance_semantics.rs`
+
+These are not safe deletion targets in Phase 6C because they are still reachable compatibility or native semantics paths.
+
+## Covered By Typed Boundary — Future Delete Candidates
+
+These categories can become deletion candidates only after the required proof gates pass:
+
+- Legacy external direct access to `run_req_process_pipeline` once no NAPI caller or TS shell consumes it outside the total HubPipeline path.
+- Legacy direct access to request stage functions once all live request callers enter `HubReqInbound02Standardized -> HubReqChatProcess03Governed -> HubReqOutbound05ProviderSemantic`.
+- Legacy direct access to response stage functions once all live response callers enter `HubRespInbound02Parsed -> HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic`.
+- Any remaining TS stage shell, helper, or public export that exposes `req_process` / `resp_process` semantics after typed Rust total pipeline ownership is proven.
+
+## Required Proof Before Deletion
+
+Deletion is allowed only after all evidence is present:
+
+1. Call graph: `rg` proves the candidate has no live imports or calls outside its owning typed wrapper / total engine.
+2. Red tests: topology residue tests fail when a forbidden direct import or old API name is reintroduced.
+3. Typed wrapper tests: request and response wrapper tests pass.
+4. Runtime equivalence: provider wire payload and client response body snapshots remain semantically equivalent.
+5. Build: Rust crate build and relevant TypeScript/Jest checks pass.
+6. Smoke: global install + explicit port-scoped restart + `/health` confirms runtime after deletion.
+7. No fallback: deletion must not introduce fallback, alternate route, or provider-specific patch in Hub Pipeline / Virtual Router.
+
+## Phase 6C Validation Commands
+
+- `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/red-tests/hub_pipeline_request_typed_entrypoint_contract.test.ts tests/red-tests/hub_pipeline_response_type_topology_contract.test.ts tests/red-tests/hub_pipeline_type_topology_contract.test.ts`
+- `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi request_typed_entrypoints --lib`
+- `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi response_typed_entrypoints --lib`
+- `cargo build --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi`
+- `git diff --check`
