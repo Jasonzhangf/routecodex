@@ -484,6 +484,75 @@ mod tests {
     }
 
     #[test]
+    fn test_build_anthropic_messages_from_responses_preserves_tool_result_pair() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "MiniMax-M3",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "start"}]
+                        },
+                        {
+                            "type": "function_call",
+                            "call_id": "call_keep_result",
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"tail -n 60 note.md\"}"
+                        },
+                        {
+                            "type": "function_call_output",
+                            "call_id": "call_keep_result",
+                            "output": "Total output lines: 141\n\n## verified tool output"
+                        },
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "continue"}]
+                        }
+                    ],
+                    "tools": [{
+                        "type": "function",
+                        "name": "exec_command",
+                        "description": "run command",
+                        "parameters": {"type": "object"}
+                    }]
+                }
+            }),
+            protocol: "anthropic-messages".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        let messages = result.payload["messages"].as_array().unwrap();
+        let tool_use_index = messages
+            .iter()
+            .position(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        part["type"].as_str() == Some("tool_use")
+                            && part["id"].as_str() == Some("call_keep_result")
+                    })
+                })
+            })
+            .expect("assistant tool_use message");
+        let result_message = messages
+            .get(tool_use_index + 1)
+            .expect("tool_result must immediately follow tool_use");
+        assert_eq!(result_message["role"].as_str(), Some("user"));
+        assert_eq!(
+            result_message["content"][0]["type"].as_str(),
+            Some("tool_result")
+        );
+        assert_eq!(
+            result_message["content"][0]["tool_use_id"].as_str(),
+            Some("call_keep_result")
+        );
+    }
+
+    #[test]
     fn test_strip_private_fields() {
         let input = FormatBuildInput {
             format_envelope: serde_json::json!({
