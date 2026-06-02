@@ -93,6 +93,12 @@ Phase 8B-3 review proof: `runHubPipelineStageWithNative` remains live only in `n
 
 Deletion condition for remaining stage wrapper/export: do not delete `runHubPipelineStageWithNative` / `runHubPipelineStageJson` until the legacy stage API contract test and required native export list are retired together. Live mainline must stay on `executeHubPipelineWithNative` / `runHubPipelineLibWithNative` typed/total boundary.
 
+Phase 8C-1 required-export review proof: `runHubPipelineStageJson` is still consumed by the native hotpath required-export loader as part of `REQUIRED_NATIVE_HOTPATH_EXPORTS`; this is a load-time availability gate, not a live business mainline caller. The only source-level business wrapper that names it remains `runHubPipelineStageWithNative` in `native-hub-pipeline-orchestration-semantics-protocol.ts`, and the only test caller is the API contract test.
+
+- Do not delete `runHubPipelineStageJson` from `native-router-hotpath-required-exports.ts` while `runHubPipelineStageWithNative` and `hub-pipeline-rust-lib-api-contract.spec.ts` still assert the legacy stage wrapper contract.
+- New runtime consumers of `runHubPipelineStageJson` are forbidden; red tests now allow the string only in the native protocol wrapper and required-export declaration/generated files.
+- Required-export tests now document that `runHubPipelineStageJson` is retained only alongside `runHubPipelineLibJson` / `executeHubPipelineJson` until the wrapper contract is retired.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:
