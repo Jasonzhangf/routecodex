@@ -66,6 +66,11 @@ type StreamContractProbeEnvelope = {
   emitted?: boolean;
 };
 
+type ClientSseSnapshotRecorder = {
+  record: (chunk: unknown) => void;
+  flush: (error?: unknown) => void;
+};
+
 function isResponsesTerminalProbeStatus(status: unknown): boolean {
   if (typeof status !== 'string') {
     return false;
@@ -1401,13 +1406,16 @@ export async function sendPipelineResponse(
       return;
     }
     const restoredStream = createClientVisibleSseRestoreStream(stream, restoreContext);
-    const outboundStream = captureClientResponse
-      ? maybeAttachClientSseSnapshotStream(restoredStream, {
+    const clientSseSnapshotRecorder = captureClientResponse
+      ? createClientSseSnapshotRecorder(restoredStream, res, {
         requestId: requestLabel,
         entryEndpoint,
         status,
         headers: result.headers
       })
+      : undefined;
+    const outboundStream = captureClientResponse
+      ? maybeAttachClientSseSnapshotStream(restoredStream, clientSseSnapshotRecorder)
       : restoredStream;
     applyHeaders(res, result.headers, true);
     const streamUsage = resolveNormalizedChatUsage(body, {
@@ -1427,6 +1435,15 @@ export async function sendPipelineResponse(
     }
     logPipelineStage('response.sse.stream.start', requestLabel, { status });
     getSessionExecutionStateTracker().recordSseStreamStart(requestLabel);
+
+    const writeClientSseFrame = (frame: string, errorLabel: string) => {
+      clientSseSnapshotRecorder?.record(frame);
+      try {
+        res.write(frame);
+      } catch (error) {
+        logResponseNonBlockingError(`${errorLabel}:${requestLabel}`, error);
+      }
+    };
 
     let ended = false;
     let completedLogged = false;
@@ -1573,17 +1590,14 @@ export async function sendPipelineResponse(
       clearTimers();
       detachOutboundStream();
       logPipelineStage('response.sse.stream.timeout', requestLabel, { code, message });
-      try {
-        const payload = { type: 'error', status: 504, error: { message, code } };
-        res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
-      } catch (error) {
-        logResponseNonBlockingError(`response.sse.timeout.write_error_event:${requestLabel}`, error);
-      }
+      const payload = { type: 'error', status: 504, error: { message, code } };
+      writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.timeout.write_error_event');
       try {
         res.end();
       } catch (error) {
         logResponseNonBlockingError(`response.sse.timeout.end:${requestLabel}`, error);
       }
+      clientSseSnapshotRecorder?.flush();
       try {
         stream.destroy?.(Object.assign(new Error(message), { code }));
       } catch (error) {
@@ -1602,23 +1616,14 @@ export async function sendPipelineResponse(
     // Comment frames (": ...") are ignored by SSE parsers and safe across OpenAI/Anthropic streams.
     // Emit one frame immediately so short client read deadlines are refreshed before first upstream token arrives.
     if (!ended) {
-      try {
-        res.write(`: keepalive\n\n`);
-      } catch (error) {
-        logResponseNonBlockingError(`response.sse.keepalive.initial_write:${requestLabel}`, error);
-      }
+      writeClientSseFrame(`: keepalive\n\n`, 'response.sse.keepalive.initial_write');
     }
     if (Number.isFinite(keepaliveMs) && keepaliveMs > 0) {
       keepaliveTimer = setInterval(() => {
         if (ended) {
           return;
         }
-        try {
-          res.write(`: keepalive\n\n`);
-        } catch (error) {
-          // keepalive is best-effort; stream close handlers still run.
-          logResponseNonBlockingError(`response.sse.keepalive.write:${requestLabel}`, error);
-        }
+        writeClientSseFrame(`: keepalive\n\n`, 'response.sse.keepalive.write');
       }, keepaliveMs);
       keepaliveTimer.unref?.();
     }
@@ -1703,7 +1708,7 @@ export async function sendPipelineResponse(
             if (repairedFrames.length > 0) {
               try {
                 for (const frame of repairedFrames) {
-                  res.write(frame);
+                  writeClientSseFrame(frame, 'response.sse.required_action.auto_close.write_terminal');
                 }
                 finishTracker.seenTerminalEvent = true;
                 finishTracker.finishReason = finishTracker.finishReason ?? 'tool_calls';
@@ -1723,6 +1728,7 @@ export async function sendPipelineResponse(
               } catch (endError) {
                 logResponseNonBlockingError(`response.sse.required_action.auto_close.end:${requestLabel}`, endError);
               }
+              clientSseSnapshotRecorder?.flush();
             }
           }, 120);
           terminalAutoCloseTimer.unref?.();
@@ -1761,7 +1767,7 @@ export async function sendPipelineResponse(
             request_id: requestLabel
           }
         };
-        res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+        writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.stream_error.write_error_event');
       } catch (writeError) {
         logResponseNonBlockingError(`response.sse.stream_error.write_error_event:${requestLabel}`, writeError);
       }
@@ -1770,6 +1776,7 @@ export async function sendPipelineResponse(
       } catch (endError) {
         logResponseNonBlockingError(`response.sse.stream_error.end:${requestLabel}`, endError);
       }
+      clientSseSnapshotRecorder?.flush(error);
     });
     stream.on('end', () => {
       ended = true;
@@ -1803,7 +1810,7 @@ export async function sendPipelineResponse(
       if (repairedTerminalFrames.length > 0 && !res.writableEnded && !res.destroyed) {
         try {
           for (const frame of repairedTerminalFrames) {
-            res.write(frame);
+            writeClientSseFrame(frame, 'response.sse.stream.end.write_terminal_probe');
           }
           finishTracker.seenTerminalEvent = true;
           finishTracker.finishReason = finishTracker.finishReason ?? (contractProbe.probe?.required_action ? 'tool_calls' : 'stop');
@@ -1839,7 +1846,7 @@ export async function sendPipelineResponse(
                     request_id: requestLabel
                   }
                 };
-                res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+                writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.stream.end.write_error_event');
               } catch (writeError) {
                 logResponseNonBlockingError(`response.sse.stream.end.write_error_event:${requestLabel}`, writeError);
               }
@@ -1851,6 +1858,7 @@ export async function sendPipelineResponse(
             } catch (endError) {
               logResponseNonBlockingError(`response.sse.stream.end:${requestLabel}`, endError);
             }
+            clientSseSnapshotRecorder?.flush();
           }
         });
     });
@@ -2026,45 +2034,78 @@ function shouldCaptureClientStreamSnapshots(): boolean {
   }
   const flag = String(process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS || '').trim().toLowerCase();
   if (flag === '1' || flag === 'true') {
-    return false;
+    return true;
   }
   if (flag === '0' || flag === 'false') {
     return false;
   }
-  return false;
+  return isSnapshotsEnabled();
 }
 
 function maybeAttachClientSseSnapshotStream(
   stream: NodeJS.ReadableStream,
+  recorder?: ClientSseSnapshotRecorder
+): NodeJS.ReadableStream {
+  stream.on('data', (chunk: unknown) => recorder?.record(chunk));
+  stream.on('error', (error: unknown) => recorder?.flush(error));
+
+  return stream;
+}
+
+function createClientSseSnapshotRecorder(
+  stream: NodeJS.ReadableStream,
+  res: Response,
   options: {
     requestId: string;
     entryEndpoint?: string;
     status: number;
     headers?: Record<string, string>;
   }
-): NodeJS.ReadableStream {
-  if (!shouldCaptureClientStreamSnapshots()) {
-    return stream;
-  }
-
+): ClientSseSnapshotRecorder {
   let flushed = false;
+  const chunks: Buffer[] = [];
+  let capturedBytes = 0;
+  const maxCaptureBytes = 256 * 1024;
 
-  const flushSnapshot = (error?: unknown) => {
+  const record = (chunk: unknown) => {
+    if (capturedBytes >= maxCaptureBytes) {
+      return;
+    }
+    const buf = Buffer.isBuffer(chunk)
+      ? chunk
+      : typeof chunk === 'string'
+        ? Buffer.from(chunk)
+        : chunk instanceof Uint8Array
+          ? Buffer.from(chunk)
+          : null;
+    if (!buf || buf.length === 0) {
+      return;
+    }
+    const remaining = Math.max(0, maxCaptureBytes - capturedBytes);
+    const slice = buf.length > remaining ? buf.subarray(0, remaining) : buf;
+    chunks.push(slice);
+    capturedBytes += slice.length;
+  };
+
+  const flush = (error?: unknown) => {
     if (flushed) {
       return;
     }
     flushed = true;
     try {
-      stream.removeListener('end', onEnd);
-      stream.removeListener('close', onClose);
+      res.removeListener('finish', onFinish);
+      res.removeListener('close', onClose);
+      res.removeListener('end', onEnd);
       stream.removeListener('error', onError);
-    } catch (error) {
-      logResponseNonBlockingError(`stream.removeListener:${options.requestId}`, error);
+    } catch (removeError) {
+      logResponseNonBlockingError(`client-sse-snapshot.removeListener:${options.requestId}`, removeError);
     }
     const payload: Record<string, unknown> = {
       mode: 'sse',
       status: options.status,
-      headers: options.headers
+      headers: options.headers,
+      bodyText: Buffer.concat(chunks).toString('utf8'),
+      truncated: capturedBytes >= maxCaptureBytes
     };
     if (error) {
       payload.error = error instanceof Error ? error.message : String(error);
@@ -2074,18 +2115,20 @@ function maybeAttachClientSseSnapshotStream(
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint,
       data: payload
-    }).catch((error) => {
-      logResponseNonBlockingError(`writeServerSnapshot:sse_payload:${options.requestId}`, error);
+    }).catch((snapshotError) => {
+      logResponseNonBlockingError(`writeServerSnapshot:sse_payload:${options.requestId}`, snapshotError);
     });
   };
 
-  const onEnd = () => flushSnapshot();
-  const onClose = () => flushSnapshot();
-  const onError = (error: unknown) => flushSnapshot(error);
+  const onFinish = () => flush();
+  const onClose = () => flush();
+  const onEnd = () => flush();
+  const onError = (error: unknown) => flush(error);
 
-  stream.on('end', onEnd);
-  stream.on('close', onClose);
+  res.on('finish', onFinish);
+  res.on('close', onClose);
+  res.on('end', onEnd);
   stream.on('error', onError);
 
-  return stream;
+  return { record, flush };
 }

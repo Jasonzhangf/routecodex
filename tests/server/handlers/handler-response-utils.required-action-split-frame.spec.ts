@@ -1,5 +1,10 @@
 import { PassThrough, Readable } from 'node:stream';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, jest } from '@jest/globals';
+
+const writeServerSnapshotMock = jest.fn(async () => undefined);
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', async () => ({
   createResponsesJsonToSseConverter: jest.fn(),
@@ -14,8 +19,8 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', async () =>
 }));
 
 jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
-  isSnapshotsEnabled: () => false,
-  writeServerSnapshot: async () => undefined
+  isSnapshotsEnabled: () => true,
+  writeServerSnapshot: writeServerSnapshotMock
 }));
 
 class MockResponse extends PassThrough {
@@ -48,9 +53,54 @@ async function waitForEndWithTimeout(stream: PassThrough, timeoutMs: number): Pr
   ]);
 }
 
+async function readClientSnapshotFromDir(root: string): Promise<{ meta?: { stage?: string }; data?: { bodyText?: string } } | undefined> {
+  async function walk(dir: string): Promise<string[]> {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    const files: string[] = [];
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...await walk(fullPath));
+      } else if (entry.isFile() && entry.name.includes('client-response') && entry.name.endsWith('.json')) {
+        files.push(fullPath);
+      }
+    }
+    return files;
+  }
+  const files = await walk(root);
+  for (const file of files) {
+    const parsed = JSON.parse(await readFile(file, 'utf8')) as { meta?: { stage?: string }; data?: { bodyText?: string } };
+    if (parsed.meta?.stage === 'client-response') {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+async function waitForClientSnapshot(root: string, timeoutMs: number): Promise<{ meta?: { stage?: string }; data?: { bodyText?: string } } | undefined> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const snapshot = await readClientSnapshotFromDir(root);
+    if (snapshot) {
+      return snapshot;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return undefined;
+}
+
 describe('handler-response-utils required_action split frame regression', () => {
   it('RED: split response.required_action SSE frames must not terminate before data payload arrives', async () => {
+    const previousCapture = process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS;
+    const previousSnapshotDir = process.env.RCC_SNAPSHOT_DIR;
+    const previousGlobalSnapshotFlag = (globalThis as { rccSnapshotsEnabled?: boolean }).rccSnapshotsEnabled;
+    const snapshotRoot = await mkdtemp(path.join(tmpdir(), 'rcc-client-sse-snap-'));
+    process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS = '1';
+    process.env.RCC_SNAPSHOT_DIR = snapshotRoot;
+    (globalThis as { rccSnapshotsEnabled?: boolean }).rccSnapshotsEnabled = true;
+    writeServerSnapshotMock.mockClear();
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const { allowSnapshotLocalDiskWrite } = await import('../../../src/utils/snapshot-local-disk-gate.js');
     const requestId = 'openai-responses-router-gpt-5.3-codex-native-sse-required-action-split-frame';
     const responseId = 'resp_native_sse_required_action_split_frame_1';
     const callId = 'call_native_sse_required_action_split_frame_1';
@@ -74,6 +124,7 @@ describe('handler-response-utils required_action split frame regression', () => 
     const res = new MockResponse();
     const chunks: string[] = [];
     res.on('data', (chunk) => chunks.push(String(chunk)));
+    allowSnapshotLocalDiskWrite(requestId);
 
     void sendPipelineResponse(
       res as any,
@@ -134,5 +185,24 @@ describe('handler-response-utils required_action split frame regression', () => 
     expect(text).not.toContain('event: response.completed');
     expect(text).toContain('event: response.done');
     expect(text).toContain('data: [DONE]');
+    const clientSnapshot = await waitForClientSnapshot(snapshotRoot, 500);
+    expect(clientSnapshot?.data?.bodyText).toContain('event: response.required_action');
+    expect(clientSnapshot?.data?.bodyText).toContain(callId);
+    await rm(snapshotRoot, { recursive: true, force: true });
+    if (previousCapture === undefined) {
+      delete process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS;
+    } else {
+      process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS = previousCapture;
+    }
+    if (previousSnapshotDir === undefined) {
+      delete process.env.RCC_SNAPSHOT_DIR;
+    } else {
+      process.env.RCC_SNAPSHOT_DIR = previousSnapshotDir;
+    }
+    if (previousGlobalSnapshotFlag === undefined) {
+      delete (globalThis as { rccSnapshotsEnabled?: boolean }).rccSnapshotsEnabled;
+    } else {
+      (globalThis as { rccSnapshotsEnabled?: boolean }).rccSnapshotsEnabled = previousGlobalSnapshotFlag;
+    }
   });
 });

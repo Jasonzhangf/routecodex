@@ -3,6 +3,8 @@ const DEFAULT_SNAPSHOT_ALLOWED_STAGES = Object.freeze([
   'provider-request-contract',
   'provider-response',
   'provider-response-contract',
+  'client-response',
+  'client-response.error',
   'chat_process.resp.stage1.sse_decode',
   'chat_process.resp.stage4.semantic_map_to_chat.chat',
   'chat_process.resp.stage6.canonicalize_chat_completion',

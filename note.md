@@ -14003,3 +14003,8 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 修复：该文件收缩为 `buildAnthropicFromOpenAIChatWithNative` 薄壳，只保留 `coerceAnthropicAliasRecord` 简单 metadata map 读取；工具语义由 Rust `anthropic_openai_codec::build_anthropic_from_openai_chat_json` 负责。
 - 验证：residue grep 从命中转空；`cargo test -p router-hotpath-napi build_anthropic_from_openai_chat_preserves_stringified_tool_use_blocks` 通过；`npx tsc --noEmit --pretty false --skipLibCheck` 通过；`npm run build:min` 通过。
 2026-06-02 required_action SSE 污染复盘：MiniMax raw/provider 投影已是结构化 tool_use/function_call；UI 仍出现 minimax 碎片时，排查到 `buildResponsesTerminalSseFramesFromProbe` 对 required_action 同时补 `response.completed`，导致客户端把工具等待态误当完成态。修复为 required_action -> response.done -> [DONE]，不再发 completed。
+
+## 2026-06-02 client-response snap blind spot
+- 已验证：工具调用 UI 文本污染排查必须先看 provider-response/raw client-response snap；本次 blind spot 是 client SSE snapshot 只监听 stream chunk，漏掉 required_action auto-close repair 的 `res.write(frame)`。
+- 修复点：`handler-response-utils.ts` 增加 client SSE recorder，把 stream chunk 与 direct `res.write` repair/error/keepalive 帧统一写入 `client-response` snapshot；`--snap/isSnapshotsEnabled` 默认打开 client stream capture。
+- 红测：`tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` 读取真实临时 `RCC_SNAPSHOT_DIR`，断言 client-response snap 包含 `response.required_action` 和 callId。
