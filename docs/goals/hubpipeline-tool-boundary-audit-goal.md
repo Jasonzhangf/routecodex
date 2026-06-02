@@ -35,7 +35,7 @@
 6. `resp_inbound`：把 provider 原始响应解析回 Hub 规范响应。负责 SSE/JSON 解析与协议归一；不得做客户端展示修补；解析失败必须显式错误。
 7. `resp_process`：响应侧工具治理唯一入口。负责文本工具收割、servertool followup、apply_patch 逆向转换、已执行 internal tool 剥离、工具调用合法性检查；必须 Rust-only，禁止 TS 复制逻辑。
 8. `resp_outbound`：把 Hub 响应投影回客户端入口协议。负责 model/metadata/client protocol 对称还原与输出字段整理；不得修复请求侧历史污染，不得 provider 特例，不得吞掉上游错误。
-9. `servertool_followup`：只能基于 origin snapshot 重建 followup；不得从当前污染 payload 猜测补偿；不得绕过 req/resp process 的工具治理。
+9. `servertool_followup`：只能基于 origin snapshot 重建 followup；只能走 relay Hub Pipeline 单次复入；不得进入 router-direct/provider-direct 预跑或直通；不得从当前污染 payload 猜测补偿；不得绕过 req/resp process 的工具治理。
 10. `direct/provider passthrough`：只做 provider passthrough + hooks；禁止进入 Hub Pipeline response conversion、chat-process、servertool orchestration 或转换错误 reroute。
 
 ## 违规判定

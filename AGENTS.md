@@ -35,7 +35,7 @@
 6. **resp_inbound**：只把 provider 原始响应解析回 Hub 规范响应；SSE/JSON 解析失败必须显式错误。
 7. **resp_chatprocess**：响应侧工具治理唯一入口；文本工具收割、servertool followup、apply_patch 逆向转换、internal tool 剥离必须 Rust-only。
 8. **resp_outbound**：只把 Hub 响应投影回客户端入口协议；不得修复请求侧历史污染、不得 provider 特例、不得吞上游错误。
-9. **servertool_followup**：只能基于 origin snapshot 重建 followup；不得从当前污染 payload 猜测补偿。
+9. **servertool_followup**：只能基于 origin snapshot 重建 followup；只能走 relay Hub Pipeline 单次复入；不得进入 router-direct/provider-direct 预跑或直通；不得从当前污染 payload 猜测补偿。
 10. **审计真源**：完整执行文档见 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
 
 ## 全局流水线类型拓扑（醒目）
