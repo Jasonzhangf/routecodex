@@ -14,6 +14,26 @@ const mockCaptureResponsesRequestContext = jest.fn(async () => undefined);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
 const mockResumeResponsesConversation = jest.fn();
 const mockResumeLatestResponsesContinuationByScope = jest.fn();
+const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
+function defaultPlanResponsesHandlerEntry(payload: any, entryEndpoint?: string, responseIdFromPath?: string) {
+  const body = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  const responseId = typeof body.response_id === 'string'
+    ? body.response_id
+    : typeof body.previous_response_id === 'string'
+      ? body.previous_response_id
+      : responseIdFromPath;
+  if (entryEndpoint === '/v1/responses.submit_tool_outputs' || (responseId && Array.isArray(body.tool_outputs))) {
+    return { mode: 'submit_tool_outputs', responseId, payload: body };
+  }
+  if (Array.isArray(body.input) && body.input[0]?.type === 'function_call_output') {
+    return { mode: 'scope_materialize', payload: body };
+  }
+  return { mode: 'none', payload: body };
+}
+
+const mockPlanResponsesHandlerEntry = jest.fn(async (payload: any, entryEndpoint?: string, responseIdFromPath?: string) =>
+  defaultPlanResponsesHandlerEntry(payload, entryEndpoint, responseIdFromPath)
+);
 
 const mockBridgeModule = () => ({
   ...actualBridge,
@@ -24,7 +44,9 @@ const mockBridgeModule = () => ({
   loadRoutingInstructionStateSync: () => undefined,
   rebindResponsesConversationRequestId: async () => {},
   resumeLatestResponsesContinuationByScope: mockResumeLatestResponsesContinuationByScope,
+  materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
   resumeResponsesConversation: mockResumeResponsesConversation,
+  planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
   extractSessionIdentifiersFromMetadata: (metadata?: Record<string, unknown>) => ({
     sessionId:
       typeof metadata?.sessionId === 'string'
@@ -204,6 +226,11 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     mockRecordResponsesResponseForRequest.mockClear();
     mockResumeResponsesConversation.mockReset();
     mockResumeLatestResponsesContinuationByScope.mockReset();
+    mockMaterializeLatestResponsesContinuationByScope.mockReset();
+    mockPlanResponsesHandlerEntry.mockReset();
+    mockPlanResponsesHandlerEntry.mockImplementation(async (payload: any, entryEndpoint?: string, responseIdFromPath?: string) =>
+      defaultPlanResponsesHandlerEntry(payload, entryEndpoint, responseIdFromPath)
+    );
   });
 
   afterEach(async () => {
@@ -933,6 +960,11 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
 
   it('auto-detects submit_tool_outputs payload posted to /v1/responses and resumes the conversation', async () => {
+    mockPlanResponsesHandlerEntry.mockImplementationOnce(async (payload: any) => ({
+      mode: 'submit_tool_outputs',
+      responseId: 'resp_submit_prev_auto_1',
+      payload
+    }));
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {
         model: 'claude-sonnet-4-5',
@@ -1250,6 +1282,91 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineInput.metadata?.__raw_request_body?.input).toHaveLength(3);
       expect(pipelineInput.metadata?.session_id).toBe('sess-1');
       expect(pipelineInput.metadata?.__shadowCompareForcedProviderKey).toBe('crs.key2.gpt-5.3-codex');
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('materializes local scope continuation before Hub context capture when input starts with tool output', async () => {
+    mockPlanResponsesHandlerEntry.mockImplementationOnce(async (payload: any) => ({
+      mode: 'scope_materialize',
+      payload
+    }));
+    mockMaterializeLatestResponsesContinuationByScope.mockResolvedValueOnce({
+      payload: {
+        model: 'gpt-5.5',
+        input: [
+          { type: 'function_call', call_id: 'call_1', name: 'exec_command', arguments: '{"cmd":"pwd"}' },
+          { type: 'function_call_output', call_id: 'call_1', output: '/tmp' },
+          { role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }
+        ],
+        tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object' } }]
+      },
+      meta: {
+        restoredFromResponseId: 'resp_local_scope_1',
+        previousRequestId: 'req_prev_scope_1',
+        providerKey: 'cc.key1.gpt-5.5',
+        materialized: true,
+        materializedMode: 'local_full_input'
+      }
+    });
+
+    const pipelineExecute = jest.fn(async (input: any) => {
+      const firstInput = input.body?.input?.[0];
+      if (firstInput?.type === 'function_call_output') {
+        throw new Error('orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id: call_1');
+      }
+      return {
+        status: 200,
+        body: {
+          object: 'response',
+          id: 'resp_after_local_scope_1',
+          status: 'completed',
+          output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+        }
+      };
+    });
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses', (req, res) => {
+      void handleResponses(req as any, res as any, {
+        executePipeline: pipelineExecute,
+        errorHandling: null,
+        portContext: { matchedPort: 5555 }
+      } as any);
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const result = await fetchJson(baseUrl, '/v1/responses', {
+        model: 'gpt-5.5',
+        metadata: { session_id: 'rcc-zterm' },
+        input: [
+          { type: 'function_call_output', call_id: 'call_1', output: '/tmp' },
+          { role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }
+        ]
+      });
+
+      expect(result.status).toBe(200);
+      expect(mockMaterializeLatestResponsesContinuationByScope).toHaveBeenCalledTimes(1);
+      expect(mockMaterializeLatestResponsesContinuationByScope).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: expect.stringContaining('openai-responses-router-gpt-5.5-'),
+        matchedPort: 5555,
+        sessionId: 'rcc-zterm'
+      }));
+      const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
+      expect(pipelineInput.body.input[0]).toMatchObject({ type: 'function_call', call_id: 'call_1' });
+      expect(pipelineInput.body.input[1]).toMatchObject({ type: 'function_call_output', call_id: 'call_1' });
+      expect(pipelineInput.metadata.responsesResume).toMatchObject({
+        materialized: true,
+        providerKey: 'cc.key1.gpt-5.5'
+      });
+      expect(pipelineInput.metadata.__raw_request_body.input[0]).toMatchObject({
+        type: 'function_call_output',
+        call_id: 'call_1'
+      });
     } finally {
       await closeServer(server);
     }

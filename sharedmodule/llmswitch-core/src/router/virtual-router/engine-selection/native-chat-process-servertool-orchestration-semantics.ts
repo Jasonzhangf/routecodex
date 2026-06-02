@@ -837,6 +837,39 @@ export function runApplyPatchWithNative(input: {
   }
 }
 
+export function buildServertoolToolOutputPayloadWithNative(input: {
+  base: Record<string, unknown>;
+  toolCallId: string;
+  toolName: string;
+  arguments?: string;
+  content: unknown;
+  stripToolCallName?: string;
+}): Record<string, unknown> {
+  const capability = 'buildServertoolToolOutputPayloadJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  try {
+    if (isNativeDisabledByEnv()) {
+      return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+      return fail();
+    }
+    const raw = fn(JSON.stringify(input));
+    if (typeof raw !== 'string') {
+      return fail('non-string result');
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 // ── Web Search Pure Blocks ────────────────────────────────────────────
 
 function invokeWebSearchNative(capability: string, args: unknown[]): string {

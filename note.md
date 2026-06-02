@@ -14022,3 +14022,133 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - Red tests green: `cargo test -p router-hotpath-napi minimax_namespace --lib` and `cargo test -p router-hotpath-napi response_codec_harvests_minimax_namespace_tool_call_into_requires_action --lib`.
 - Build/install green: `npm run build:dev` installed RouteCodex `0.90.2669` and restarted port 5555.
 - Runtime smoke: `GET /health` on 5555 returned ready/pipelineReady true; mini27 live response no longer exposed `<minimax:tool_call>` in client body. Client response still contains metadata and remains a separate metadata isolation defect.
+
+## 2026-06-02 orphan_tool_result(call_1) 调试记录
+- 线上失败 `hub_pipeline_context_capture_failed/orphan_tool_result call_1` 的触发点是 `/v1/responses` 普通 continuation 输入以 `function_call_output` 开头，Hub context capture 早于 route-aware continuation materialize，导致合法本地 scope pending tool result 在恢复前被当 orphan 拦截。
+- 真实 state 证据：`~/.rcc/state/responses-conversation-store.json` 存在 `releasedPendingToolCallIds:["call_1"]` 与 `scopeKeys:["port:5555|session:rcc-zterm"]`。
+- 当前修复点：handler 在非 submit_tool_outputs 且 input 首项为 `function_call_output` 时，调用 Rust-backed `materializeLatestResponsesContinuationByScope`，将本地持久化 prefix+delta materialize 后再进入 Hub Pipeline；普通历史 payload 不触发。
+- 验证：新增 HTTP 黑盒用例先复现 502/orphan，修复后 `materializes local scope continuation...` 与 `keeps ordinary /v1/responses payload untouched...` 均通过；`npx tsc --noEmit --pretty false --skipLibCheck` 与 `npm run build:min` 通过。
+- 注意：`hub_req_inbound_context_capture.rs` 仍有在途 diff（output-only history drop/previous_response_id gate），这不是本次 orphan 根因修复的必要点，后续需单独审计是否违反 fail-fast/no silent swallow。
+
+## 2026-06-02 Hub handler 工具入口判定 Rust 化
+- 违规点：`responses-handler.ts` 曾直接扫描 `function_call_output/call_id/tool_outputs` 来判定 submit/materialize，属于 TS 工具语义处理。
+- 修复：新增 Rust `plan_responses_handler_entry_json`，统一输出 `none|submit_tool_outputs|scope_materialize`；TS handler 只调用 native plan 并按 mode 编排 `resumeResponsesConversation` 或 `materializeLatestResponsesContinuationByScope`。
+- 验证：handler residue grep 已无 `function_call_output/tool_call_id/call_id/input.some/input.flatMap`；HTTP 黑盒 `materializes local scope continuation...` 和 `keeps ordinary /v1/responses payload untouched...` 通过；Rust `handler_entry_plan` 通过；`hub-pipeline-stage-residue-audit` 三个相关用例通过；`npm run build:min` 通过。
+- 已知：`auto-detects submit_tool_outputs...` 全链 Jest 用例当前撞现有 ESM mock 环境 `Must use import to load ES Module`，非本次 orphan/materialize 用例；需后续单独修测试环境或改该用例为纯 handler 黑盒。
+
+## 2026-06-02 审计：config.toml 多端口服务器隔离
+
+### 背景
+config.toml 配置了 3 个 router 端口：5520 / 10000 / 5555，均在同一 RouteCodexHttpServer 实例（单进程 + 单 app.listen）。10000 实际表现为 "TCP listen 成功，但 HTTP 请求返回 empty reply"，5520/5555 正常。
+
+---
+
+### 隔离审计结果
+
+#### ✅ 已有隔离
+1. **per-port HubPipeline**：`hubPipelinesByRoutingPolicyGroup: Map<group, HubPipeline>` — 10000/5555 各自有独立 HubPipeline 实例
+2. **per-port PortRegistry**：`PortRegistry.instances: Map<port, PortInstance>` — 各 port 有独立 server/socket 跟踪
+3. **per-port portLogContext**：`AsyncLocalStorage` + `console.log` 包裹写 `ROUTECODEX_PORT_LOG_ROOT/<port>/server-<port>.log` — 理论上 per-port 隔离
+4. **per-port routingPolicyGroup**：metadata 注入 `allowedProviders` 按 group 过滤 provider visibility
+
+#### ❌ 非隔离（已验证/高度疑似）
+
+**1. 单一 Express Application**
+- 文件：`index.ts:235` — `this.app = express()`
+- 影响：所有端口共享同一个 middleware 栈、中间件实例、locals
+- 证据：routes.ts 所有 `app.get/post/use` 都在同一个 app 上
+- 风险：middleware 状态跨端口泄露（如 req.locals）
+
+**2. 单一 serverId（全 server 共享 session dir / tmux state）**
+- 文件：`index.ts:240` — `this.serverId = canonicalizeServerId(this.config.server.host, this.config.server.port)`
+- 值：基于 `httpserver.ports[0]` 即 `0.0.0.0:5520`，**永不重算**
+- 影响：
+  - `ensureServerScopedSessionDir(serverId)` → 全部写到 `~/.rcc/sessions/0.0.0.0:5520/`
+  - `resolvePortScopedSessionDir()` 虽然参数里有 `port`，但 session 文件本身以 `0.0.0.0:5520` 为 root prefix
+  - tmux heartbeat state / registry dirs 全按 5520 命名
+- 证据：
+  - `httpserver.ports[0]` 固定是 5520（config.toml）
+  - `lsof` 显示 57853 只有 `5520/` 和 `5555/` log 目录，无 `10000/`
+  - 10000 请求打 `curl http://127.0.0.1:10000` → empty reply，无任何 session 记录
+
+**3. 单一 StatsManager（全局共享）**
+- 文件：`index.ts:215` — `private readonly stats = new StatsManager()`
+- 影响：所有端口的请求数/token/错误数混在一起，`getStatsSnapshot()` 返回聚合数据，无法按端口拆分
+- 证据：`lifecycle.ts:63` → `getStatsSnapshot: () => ({ session: server.stats.snapshot(...) })` 无 port 维度
+
+**4. 单一 QuietErrorHandlingCenter**
+- 文件：`index.ts:237` — `this.errorHandling = new QuietErrorHandlingCenter()`
+- 影响：所有端口错误汇入同一个 error center，无 per-port 错误隔离
+- 证据：`resolveReportedRouteErrorHttpResponse` 查不到 port 字段
+
+**5. 单一 ManagerDaemon（共享 Token/Routing/Health/Quota 模块）**
+- 文件：`lifecycle.ts:49` — `new ManagerDaemon({ serverId: canonicalizeServerId(...) })`
+- `serverId` = `0.0.0.0:5520`（构造时固定）
+- 影响：
+  - `RoutingStateManager` 的 session state store 按 `session:<id>` 扁平存储，无 port 维度
+  - `HealthManager` 的 provider health 状态跨端口共享
+  - 5520 的 health 状态会覆盖 10000 的 provider 可用性感知
+
+**6. 单一 pipelineLogger（PipelineDebugLogger）**
+- 文件：`index.ts:384` → 注入 `moduleDependencies.logger`
+- 影响：所有端口的 pipeline stage 日志混在同一 logger 实例
+- 证据：`stage-logger.ts` 无 port 维度参数
+
+**7. 单一 `currentRouterArtifacts`（VirtualRouterArtifacts）**
+- 文件：`index.ts:207` — `private currentRouterArtifacts: VirtualRouterArtifacts | null = null`
+- 影响：只存主 pipeline 的 artifacts；group pipeline artifacts 存各 `HubPipeline` 内部，但 `VirtualRouterArtifacts` 共享
+- 证据：`buildAllRouterGroupArtifacts` 遍历 groups，但主 artifacts 共享
+
+**8. Global log 文件（非 per-port）**
+- 文件：
+  - `process-lifecycle.jsonl` — `resolveRccLogsDir()` 统一路径
+  - `servertool-events.jsonl` — `resolveRccLogsDir()` 统一路径
+  - `provider-stats.jsonl` — 统一路径
+- 影响：全 server 所有事件写到同一个 `.jsonl`，无端口标签
+
+**9. `this.app.locals.routecodexServer`（跨路由单例引用）**
+- 文件：`index.ts:236` — `(this.app.locals as Record<string, unknown>).routecodexServer = this`
+- 影响：所有 handler 通过 `req.app.locals.routecodexServer` 访问同一个 server 实例
+- 本身是设计意图（共享同一 server），但意味着 port 无法独立替换 server 行为
+
+---
+
+### 10000 Empty Reply 根因分析
+
+**已排除**：
+- 端口未被 listen ✅（`nc` 确认 TCP listen 成功）
+- hubPipelinesByRoutingPolicyGroup 缺 entry（理论上 10000 有 entry）
+- 启动抛错被吞（串行启动，抛错会 `stopAll` + 进程 exit）
+
+**待查**：
+- `buildVirtualRouterInputV2(cfg, undefined, { routingPolicyGroup: 'gateway_coding_10000' })` 是否成功
+- 10000 listener 的 `startPortListener` 是否被 `startHttpServer` 串行执行到
+- `executePortAwarePipeline` 是否被调用（需要加 `ROUTECODEX_PORT_RESOLVE_LOGS=1` + curl 重放）
+
+**可能真因**：`buildVirtualRouterInputV2('gateway_coding_10000')` 内部调用 `buildVirtualRouterInputV2` → forwarder 引用 `fwd.minimax.MiniMax-M2.7` → provider profile loader 失败但静默 → hubPipeline 构建一半 → `resolveHubPipelineForRoutingPolicyGroup` 返回不完整的 pipeline → 处理请求时抛未捕获异常 → Express connection 被 reset → empty reply。
+
+---
+
+### 修复优先级建议
+
+P0（破坏性）：
+1. `serverId` 必须 per-port，或 `session dir` 必须包含 `port` 维度（否则 5520/10000/5555 session 冲突）
+2. `StatsManager` 必须 per-port 聚合，否则无法做 per-port 计费/观测
+3. Global `.jsonl` 文件必须加 port/tag 标签
+
+P1（功能正确性）：
+4. 10000 empty reply 根因修复（forwarder + provider profile bootstrap）
+5. `ManagerDaemon` / health state per-port 隔离
+
+P2（架构干净）：
+6. 单一 `app` 是否需要 per-port 独立 Express 实例
+7. `currentRouterArtifacts` 共享问题
+8. `pipelineLogger` per-port 注入
+
+
+## 2026-06-02 orphan_tool_result call_1 follow-up
+- 19:01 三个错误 diag 只保留 requestId/message/code，没有 contextSnapshot/provider payload；无法从 diag 还原原始 input。
+- `~/.rcc/state/responses-conversation-store.json` 当前无 `call_1` 活跃 entry；现有 entries 的 releasedPendingToolCallIds 为 `call_CRwka...` 与 `call_function_6nrl...`，scope 含 `port:5555|session:rcc-zterm`。
+- 已有 handler 黑盒验证覆盖：普通 `/v1/responses` continuation 不在 handler 边界裁剪，scope continuation 在 Hub context capture 前 materialize，均 200。
+- 下一步需 build/install/restart 后用线上业务复测确认全局服务不再跑旧逻辑。
+2026-06-02 tool-id provider-wire fix: target request_outbound only. Evidence: four targeted router-hotpath-napi tests pass; broad hub_bridge_actions currently has unrelated failures tool_argument_repairer_validate_tool_arguments_json, ensure_bridge_output_fields_strips_tool_transcript_wrapper, convert_bridge_input_harvests_malformed_assistant_parameter_markup_into_tool_calls before commit scope.

@@ -42,6 +42,11 @@ type NativeSharedConversionSemantics = {
     message: Record<string, unknown>,
     options?: Record<string, unknown>
   ) => Record<string, unknown>;
+  planResponsesHandlerEntryWithNative?: (
+    payload: unknown,
+    entryEndpoint?: string,
+    responseIdFromPath?: string
+  ) => { mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: Record<string, unknown> };
 };
 
 type NativeChatProcessNodeResultSemantics = {
@@ -113,6 +118,9 @@ async function assertSharedBindings(): Promise<void> {
   }
   if (typeof shared.normalizeAssistantTextToToolCallsWithNative !== 'function') {
     missing.push('normalizeAssistantTextToToolCallsJson');
+  }
+  if (typeof shared.planResponsesHandlerEntryWithNative !== 'function') {
+    missing.push('planResponsesHandlerEntryJson');
   }
   if (missing.length > 0) {
     throw new Error(`[llmswitch-bridge] native shared bindings missing: ${missing.join(', ')}`);
@@ -284,6 +292,20 @@ export async function normalizeAssistantTextToToolCallsJson(
     throw new Error('[llmswitch-bridge] normalizeAssistantTextToToolCallsJson not available');
   }
   return fn(message, options) as AnyRecord;
+}
+
+export async function planResponsesHandlerEntry(
+  payload: unknown,
+  entryEndpoint?: string,
+  responseIdFromPath?: string
+): Promise<{ mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: AnyRecord }> {
+  await assertSharedBindings();
+  const mod = await getSharedConversionSemantics();
+  const fn = mod.planResponsesHandlerEntryWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] planResponsesHandlerEntryJson not available');
+  }
+  return fn(payload, entryEndpoint, responseIdFromPath) as { mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: AnyRecord };
 }
 
 export async function buildAnthropicResponseFromChatJson(

@@ -81,6 +81,16 @@ type ResponsesConversationStoreLike = {
     sessionId?: string;
     conversationId?: string;
     requestId?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+  }) => { payload: AnyRecord; meta: AnyRecord } | null;
+  materializeLatestContinuationByScope?: (args: {
+    payload: AnyRecord;
+    sessionId?: string;
+    conversationId?: string;
+    requestId?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
   }) => { payload: AnyRecord; meta: AnyRecord } | null;
   clearRequest?: (requestId?: string) => void;
   releaseRequestPayload?: (requestId?: string) => void;
@@ -120,6 +130,16 @@ type ResponsesConversationModule = {
     sessionId?: string;
     conversationId?: string;
     requestId?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+  }) => { payload: AnyRecord; meta: AnyRecord } | null;
+  materializeLatestResponsesContinuationByScope?: (args: {
+    payload: AnyRecord;
+    sessionId?: string;
+    conversationId?: string;
+    requestId?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
   }) => { payload: AnyRecord; meta: AnyRecord } | null;
   rebindResponsesConversationRequestId?: (oldId: string, newId: string) => void;
   clearResponsesConversationByRequestId?: (requestId?: string) => void;
@@ -317,6 +337,8 @@ export async function resumeLatestResponsesContinuationByScope(args: {
   sessionId?: string;
   conversationId?: string;
   requestId?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
 }): Promise<{ payload: AnyRecord; meta: AnyRecord } | null> {
   const globalStore = readGlobalResponsesConversationStore();
   if (typeof globalStore?.resumeLatestContinuationByScope === "function") {
@@ -327,6 +349,28 @@ export async function resumeLatestResponsesContinuationByScope(args: {
   if (typeof fn !== "function") {
     throw new Error(
       "[llmswitch-bridge] resumeLatestResponsesContinuationByScope not available",
+    );
+  }
+  return fn(args);
+}
+
+export async function materializeLatestResponsesContinuationByScope(args: {
+  payload: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
+  requestId?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+}): Promise<{ payload: AnyRecord; meta: AnyRecord } | null> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.materializeLatestContinuationByScope === "function") {
+    return globalStore.materializeLatestContinuationByScope(args);
+  }
+  const mod = await getResponsesConversationModule();
+  const fn = mod.materializeLatestResponsesContinuationByScope;
+  if (typeof fn !== "function") {
+    throw new Error(
+      "[llmswitch-bridge] materializeLatestResponsesContinuationByScope not available",
     );
   }
   return fn(args);
@@ -516,6 +560,8 @@ export async function preloadCriticalBridgeRuntimeModules(): Promise<{
     typeof responsesConversationModule.resumeResponsesConversation !==
       "function" ||
     typeof responsesConversationModule.resumeLatestResponsesContinuationByScope !==
+      "function" ||
+    typeof responsesConversationModule.materializeLatestResponsesContinuationByScope !==
       "function"
   ) {
     throw new Error(

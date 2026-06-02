@@ -2468,6 +2468,39 @@ mod tests {
     }
 
     #[test]
+    fn build_servertool_tool_output_payload_appends_output_and_strips_consumed_call() {
+        let raw = build_servertool_tool_output_payload_json(
+            json!({
+                "base": {
+                    "choices": [{"message": {"role": "assistant", "tool_calls": [
+                        {"id":"keep_1", "type":"function", "function":{"name":"client_tool", "arguments":"{}"}},
+                        {"id":"ap_1", "type":"function", "function":{"name":"apply_patch", "arguments":"old"}}
+                    ]}}]
+                },
+                "toolCallId": "ap_1",
+                "toolName": "apply_patch",
+                "arguments": "{}",
+                "content": {"ok": true},
+                "stripToolCallName": "apply_patch"
+            })
+            .to_string(),
+        )
+        .expect("payload");
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        let output = &value["tool_outputs"][0];
+        assert_eq!(output["tool_call_id"], "ap_1");
+        assert_eq!(output["name"], "apply_patch");
+        assert_eq!(output["arguments"], "{}");
+        assert_eq!(output["content"], r#"{"ok":true}"#);
+
+        let calls = value["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["id"], "keep_1");
+    }
+
+    #[test]
     fn test_run_servertool_response_stage_skips_transcript_like_exec_command() {
         let mut payload = json!({
             "choices": [
@@ -3161,6 +3194,114 @@ fn parse_apply_patch_arguments(raw: &str) -> serde_json::Value {
             serde_json::Value::Object(map)
         }
     }
+}
+
+fn stringify_servertool_output_content(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Null => "null".to_string(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| other.to_string()),
+    }
+}
+
+fn strip_servertool_call(base: &mut Value, tool_call_id: &str, tool_name: &str) {
+    let Some(choices) = base.get_mut("choices").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for choice in choices {
+        let Some(message) = choice.get_mut("message") else {
+            continue;
+        };
+        let Some(message_obj) = message.as_object_mut() else {
+            continue;
+        };
+        let Some(calls) = message_obj
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+        else {
+            continue;
+        };
+        let kept: Vec<Value> = calls
+            .into_iter()
+            .filter(|call| {
+                let Some(row) = call.as_object() else {
+                    return true;
+                };
+                let id = row
+                    .get("id")
+                    .or_else(|| row.get("call_id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if id != tool_call_id {
+                    return true;
+                }
+                let name = row
+                    .get("function")
+                    .and_then(Value::as_object)
+                    .and_then(|function| function.get("name"))
+                    .or_else(|| row.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                name != tool_name
+            })
+            .collect();
+        if kept.is_empty() {
+            message_obj.remove("tool_calls");
+        } else {
+            message_obj.insert("tool_calls".to_string(), Value::Array(kept));
+        }
+    }
+}
+
+#[napi]
+pub fn build_servertool_tool_output_payload_json(input_json: String) -> NapiResult<String> {
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Input {
+        base: Value,
+        tool_call_id: String,
+        tool_name: String,
+        #[serde(default)]
+        arguments: Option<String>,
+        content: Value,
+        #[serde(default)]
+        strip_tool_call_name: Option<String>,
+    }
+
+    let input: Input = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize: {e}")))?;
+    let mut base = input.base;
+    let base_obj = base
+        .as_object_mut()
+        .ok_or_else(|| napi::Error::from_reason("base must be an object".to_string()))?;
+    let existing_outputs = base_obj
+        .get("tool_outputs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut outputs = existing_outputs;
+    let mut output = Map::new();
+    output.insert(
+        "tool_call_id".to_string(),
+        Value::String(input.tool_call_id.clone()),
+    );
+    output.insert("name".to_string(), Value::String(input.tool_name.clone()));
+    if let Some(arguments) = input.arguments {
+        output.insert("arguments".to_string(), Value::String(arguments));
+    }
+    output.insert(
+        "content".to_string(),
+        Value::String(stringify_servertool_output_content(&input.content)),
+    );
+    outputs.push(Value::Object(output));
+    base_obj.insert("tool_outputs".to_string(), Value::Array(outputs));
+
+    if let Some(strip_name) = input.strip_tool_call_name.as_deref() {
+        strip_servertool_call(&mut base, &input.tool_call_id, strip_name);
+    }
+
+    serde_json::to_string(&base).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 /// Read patch text from parsed args — try `patch`, `input`, `diff`, `changes` fields.

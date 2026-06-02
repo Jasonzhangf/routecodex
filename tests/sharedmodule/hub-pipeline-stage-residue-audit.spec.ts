@@ -657,6 +657,24 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('servertool handlers must not inject or strip tool protocol payloads in TS', () => {
+    const files = [
+      'sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts',
+      'sharedmodule/llmswitch-core/src/servertool/handlers/web-search.ts',
+    ];
+    const findings = files.flatMap((relativePath) => {
+      const filePath = path.join(process.cwd(), relativePath);
+      const source = fs.readFileSync(filePath, 'utf8');
+      return collectMatches(source, [
+        { label: `${relativePath}: appends Responses tool_outputs in TS`, pattern: /tool_outputs\s*=|tool_outputs\s*\?/ },
+        { label: `${relativePath}: emits tool_call_id in TS`, pattern: /tool_call_id\s*:/ },
+        { label: `${relativePath}: scans or mutates assistant tool_calls in TS`, pattern: /messageRow\.tool_calls|delete\s+messageRow\.tool_calls|\.filter\(\(call\)/ },
+      ]);
+    });
+
+    expect(findings).toEqual([]);
+  });
+
   it('request executor must not classify tool request semantics in TS', () => {
     const filePath = path.join(
       process.cwd(),

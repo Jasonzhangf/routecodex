@@ -304,6 +304,52 @@ export function enforceChatBudgetWithNative(
   }
 }
 
+export function planResponsesHandlerEntryWithNative(
+  payload: unknown,
+  entryEndpoint?: string,
+  responseIdFromPath?: string
+): { mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: Record<string, unknown> } {
+  const capability = 'planResponsesHandlerEntryJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<{ mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: Record<string, unknown> }>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(payload ?? null);
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson, entryEndpoint, responseIdFromPath);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed || typeof parsed.mode !== 'string') {
+      return fail('invalid payload');
+    }
+    const plannedPayload = parsed.payload;
+    if (!plannedPayload || typeof plannedPayload !== 'object' || Array.isArray(plannedPayload)) {
+      return fail('invalid payload');
+    }
+    if (parsed.mode !== 'none' && parsed.mode !== 'submit_tool_outputs' && parsed.mode !== 'scope_materialize') {
+      return fail('invalid mode');
+    }
+    return {
+      mode: parsed.mode,
+      ...(typeof parsed.responseId === 'string' && parsed.responseId.trim() ? { responseId: parsed.responseId } : {}),
+      payload: plannedPayload as Record<string, unknown>
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function resolveBudgetForModelWithNative(
   modelId: string,
   fallback: { maxBytes: number; safetyRatio: number; allowedBytes: number; source: string } | null | undefined

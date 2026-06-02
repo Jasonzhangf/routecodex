@@ -31,6 +31,7 @@ export {
   enforceChatBudgetWithNative,
   materializeResponsesContinuationPayloadWithNative,
   pickResponsesPersistedFieldsWithNative,
+  planResponsesHandlerEntryWithNative,
   prepareResponsesConversationEntryWithNative,
   resolveBudgetForModelWithNative,
   restoreResponsesContinuationPayloadWithNative,

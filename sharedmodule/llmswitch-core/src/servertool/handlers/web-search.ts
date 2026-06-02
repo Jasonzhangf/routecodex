@@ -2,7 +2,7 @@ import type { JsonObject, JsonValue } from '../../conversion/hub/types/json.js';
 import { buildOpenAIChatFromGeminiResponse } from '../../conversion/codecs/gemini-openai-codec.js';
 import type { ServerSideToolEngineOptions, ServerToolBackendPlan, ServerToolBackendResult, ServerToolHandler, ServerToolHandlerContext, ServerToolHandlerPlan, ToolCall } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
-import { cloneJson, extractTextFromChatLike } from '../server-side-tools.js';
+import { extractTextFromChatLike } from '../server-side-tools.js';
 import {
   extractCapturedChatSeed
 } from '../followup-seed.js';
@@ -21,6 +21,7 @@ import {
   webSearchSanitizeBackendErrorWithNative,
   webSearchBuildSystemPromptWithNative,
   webSearchFindArrayWithNative,
+  buildServertoolToolOutputPayloadWithNative,
 } from '../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 interface WebSearchEngineConfig {
@@ -728,10 +729,6 @@ function injectWebSearchToolResult(
   query: string,
   backendResult: WebSearchBackendResult
 ): JsonObject {
-  const cloned = cloneJson(base);
-  const existingOutputs = Array.isArray((cloned as { tool_outputs?: unknown }).tool_outputs)
-    ? ((cloned as { tool_outputs: JsonValue[] }).tool_outputs as JsonValue[])
-    : [];
   const resultsPayload = backendResult.hits.map((hit, index) => ({
     index: index + 1,
     title: hit.title ?? '',
@@ -740,20 +737,17 @@ function injectWebSearchToolResult(
     source: hit.media ?? '',
     publish_date: hit.publish_date ?? ''
   }));
-  (cloned as Record<string, unknown>).tool_outputs = [
-    ...existingOutputs,
-    {
-      tool_call_id: toolCall.id,
-      name: toolName,
-      content: JSON.stringify({
-        engine: engine.id,
-        query,
-        summary: backendResult.summary,
-        results: resultsPayload
-      })
-    }
-  ];
-  return cloned;
+  return buildServertoolToolOutputPayloadWithNative({
+    base,
+    toolCallId: toolCall.id,
+    toolName,
+    content: JSON.stringify({
+      engine: engine.id,
+      query,
+      summary: backendResult.summary,
+      results: resultsPayload
+    })
+  }) as JsonObject;
 }
 function logServerToolWebSearch(engine: WebSearchEngineConfig, requestId: string, query: string): void {
   const providerAlias = engine.providerKey.split('.')[0] || engine.providerKey;

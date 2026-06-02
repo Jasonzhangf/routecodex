@@ -51,6 +51,7 @@ export {
   recordResponsesResponseForRequest,
   resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,
+  materializeLatestResponsesContinuationByScope,
   rebindResponsesConversationRequestId,
   clearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention,
@@ -84,6 +85,7 @@ export {
 
 export {
   mapChatToolsToBridgeJson,
+  planResponsesHandlerEntry,
   normalizeAssistantTextToToolCallsJson,
   buildAnthropicResponseFromChatJson,
   injectMcpToolsForChatJson,

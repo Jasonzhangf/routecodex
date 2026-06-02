@@ -399,6 +399,164 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     }
 }
 
+fn stringify_responses_tool_output(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Null) | None => "\"\"".to_string(),
+        Some(other) => {
+            serde_json::to_string(other).unwrap_or_else(|_| "[object Object]".to_string())
+        }
+    }
+}
+
+fn responses_input_starts_with_tool_output(payload_obj: &Map<String, Value>) -> bool {
+    let Some(input) = payload_obj.get("input").and_then(Value::as_array) else {
+        return false;
+    };
+    let Some(first) = input.first().and_then(Value::as_object) else {
+        return false;
+    };
+    first.get("type").and_then(Value::as_str) == Some("function_call_output")
+}
+
+fn normalize_responses_handler_submit_payload(
+    payload_obj: &Map<String, Value>,
+    response_id_from_path: Option<&str>,
+) -> Result<(Option<String>, Value), String> {
+    let response_id = read_trimmed_string(payload_obj.get("response_id"))
+        .or_else(|| read_trimmed_string(payload_obj.get("previous_response_id")))
+        .or_else(|| response_id_from_path.map(str::to_string));
+
+    if response_id.is_some()
+        && payload_obj
+            .get("tool_outputs")
+            .and_then(Value::as_array)
+            .is_some()
+    {
+        let mut normalized = payload_obj.clone();
+        if !normalized.contains_key("response_id") {
+            if let Some(response_id) = response_id.as_ref() {
+                normalized.insert(
+                    "response_id".to_string(),
+                    Value::String(response_id.clone()),
+                );
+            }
+        }
+        return Ok((response_id, Value::Object(normalized)));
+    }
+
+    let input = payload_obj
+        .get("input")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut saw_function_call_output = false;
+    let mut tool_outputs: Vec<Value> = Vec::new();
+
+    for (index, item) in input.iter().enumerate() {
+        let Some(row) = item.as_object() else {
+            continue;
+        };
+        if row.get("type").and_then(Value::as_str) != Some("function_call_output") {
+            continue;
+        }
+        saw_function_call_output = true;
+        let Some(call_id) = read_trimmed_string(row.get("call_id"))
+            .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+            .or_else(|| read_trimmed_string(row.get("id")))
+        else {
+            return Err(format!(
+                "Responses function_call_output at input index {} is missing call_id/tool_call_id",
+                index
+            ));
+        };
+        tool_outputs.push(serde_json::json!({
+            "tool_call_id": call_id,
+            "output": stringify_responses_tool_output(row.get("output")),
+        }));
+    }
+
+    if !saw_function_call_output {
+        let mut normalized = payload_obj.clone();
+        if !normalized.contains_key("response_id") {
+            if let Some(response_id) = response_id.as_ref() {
+                normalized.insert(
+                    "response_id".to_string(),
+                    Value::String(response_id.clone()),
+                );
+            }
+        }
+        return Ok((response_id, Value::Object(normalized)));
+    }
+    if tool_outputs.is_empty() {
+        return Err(
+            "Responses function_call_output resume payload produced no tool outputs".to_string(),
+        );
+    }
+    let Some(response_id) = response_id else {
+        return Err("Responses function_call_output resume payload requires response_id or previous_response_id".to_string());
+    };
+
+    let mut normalized = payload_obj.clone();
+    normalized.insert(
+        "response_id".to_string(),
+        Value::String(response_id.clone()),
+    );
+    normalized.insert("tool_outputs".to_string(), Value::Array(tool_outputs));
+
+    Ok((Some(response_id), Value::Object(normalized)))
+}
+
+fn plan_responses_handler_entry(
+    payload: &Value,
+    entry_endpoint: Option<&str>,
+    response_id_from_path: Option<&str>,
+) -> Result<Value, String> {
+    let Some(payload_obj) = payload.as_object() else {
+        return Ok(serde_json::json!({ "mode": "none", "payload": {} }));
+    };
+    let endpoint = entry_endpoint.unwrap_or("/v1/responses");
+    let is_submit_endpoint = endpoint == "/v1/responses.submit_tool_outputs";
+    let is_submit_payload = endpoint == "/v1/responses"
+        && read_trimmed_string(payload_obj.get("response_id")).is_some()
+        && payload_obj
+            .get("tool_outputs")
+            .and_then(Value::as_array)
+            .is_some();
+    let is_previous_response_tool_output = endpoint == "/v1/responses"
+        && read_trimmed_string(payload_obj.get("previous_response_id")).is_some()
+        && payload_obj
+            .get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|input| {
+                input.iter().any(|item| {
+                    item.as_object()
+                        .and_then(|row| row.get("type"))
+                        .and_then(Value::as_str)
+                        == Some("function_call_output")
+                })
+            });
+
+    if is_submit_endpoint || is_submit_payload || is_previous_response_tool_output {
+        let (response_id, normalized_payload) =
+            normalize_responses_handler_submit_payload(payload_obj, response_id_from_path)?;
+        return Ok(serde_json::json!({
+            "mode": "submit_tool_outputs",
+            "responseId": response_id.map(Value::String).unwrap_or(Value::Null),
+            "payload": normalized_payload,
+        }));
+    }
+
+    if endpoint == "/v1/responses" && responses_input_starts_with_tool_output(payload_obj) {
+        return Ok(serde_json::json!({
+            "mode": "scope_materialize",
+            "payload": payload,
+        }));
+    }
+
+    Ok(serde_json::json!({ "mode": "none", "payload": payload }))
+}
+
 fn normalize_submitted_tool_outputs(
     tool_outputs: &[Value],
     merged_input: &[Value],
@@ -1227,14 +1385,75 @@ pub fn materialize_responses_continuation_payload_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi]
+pub fn plan_responses_handler_entry_json(
+    payload_json: String,
+    entry_endpoint: Option<String>,
+    response_id_from_path: Option<String>,
+) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_handler_entry(
+        &payload,
+        entry_endpoint.as_deref(),
+        response_id_from_path.as_deref(),
+    )
+    .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         convert_responses_output_to_input_items, materialize_responses_continuation_payload,
-        prepare_responses_conversation_entry, restore_responses_continuation_payload,
-        resume_responses_conversation_payload,
+        plan_responses_handler_entry, prepare_responses_conversation_entry,
+        restore_responses_continuation_payload, resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
+
+    #[test]
+    fn handler_entry_plan_materializes_leading_tool_output_without_ts_tool_scan() {
+        let planned = plan_responses_handler_entry(
+            &json!({
+                "model": "gpt-5.5",
+                "input": [
+                    { "type": "function_call_output", "call_id": "call_1", "output": "/tmp" },
+                    { "role": "user", "content": [{ "type": "input_text", "text": "继续" }] }
+                ]
+            }),
+            Some("/v1/responses"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(planned["mode"], json!("scope_materialize"));
+        assert_eq!(planned["payload"]["input"][0]["call_id"], json!("call_1"));
+    }
+
+    #[test]
+    fn handler_entry_plan_normalizes_previous_response_function_call_output_submit() {
+        let planned = plan_responses_handler_entry(
+            &json!({
+                "model": "gpt-5.5",
+                "previous_response_id": "resp_prev_1",
+                "input": [
+                    { "type": "message", "role": "user", "content": "ignored" },
+                    { "type": "function_call_output", "call_id": "call_1", "output": { "ok": true } }
+                ]
+            }),
+            Some("/v1/responses"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(planned["mode"], json!("submit_tool_outputs"));
+        assert_eq!(planned["responseId"], json!("resp_prev_1"));
+        assert_eq!(planned["payload"]["response_id"], json!("resp_prev_1"));
+        assert_eq!(
+            planned["payload"]["tool_outputs"][0]["tool_call_id"],
+            json!("call_1")
+        );
+    }
 
     #[test]
     fn shared_responses_conversation_prepare_and_resume_json() {

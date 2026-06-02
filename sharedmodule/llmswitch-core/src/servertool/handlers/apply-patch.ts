@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import type { JsonObject, JsonValue, ServerToolHandler, ServerToolHandlerContext, ToolCall } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
 import { resolveWorkingDirectoryFromAdapterContextOrFallback } from './memory/cache-writer.js';
-import { runApplyPatchWithNative } from '../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+import { buildServertoolToolOutputPayloadWithNative, runApplyPatchWithNative } from '../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 
 const FLOW_ID = 'apply_patch_flow';
 
@@ -44,52 +44,14 @@ function stringifyCanonicalArgs(canonicalArgs: CanonicalApplyPatchArgs): string 
 }
 
 function injectApplyPatchToolOutput(base: JsonObject, toolCall: ToolCall, canonicalArgs: CanonicalApplyPatchArgs, content: ApplyPatchPayload): JsonObject {
-  const cloned = cloneJson(base);
-  const existingOutputs = Array.isArray((cloned as { tool_outputs?: unknown }).tool_outputs)
-    ? ((cloned as { tool_outputs: JsonValue[] }).tool_outputs as JsonValue[])
-    : [];
-  (cloned as Record<string, unknown>).tool_outputs = [
-    ...existingOutputs,
-    {
-      tool_call_id: toolCall.id,
-      name: 'apply_patch',
-      arguments: stringifyCanonicalArgs(canonicalArgs),
-      content: stringifyContent(content)
-    }
-  ];
-  stripApplyPatchToolCall(cloned, toolCall.id);
-  return cloned;
-}
-
-function stripApplyPatchToolCall(base: JsonObject, toolCallId: string): void {
-  const choices = Array.isArray((base as { choices?: unknown }).choices)
-    ? ((base as { choices: unknown[] }).choices as unknown[])
-    : [];
-  for (const choice of choices) {
-    if (!choice || typeof choice !== 'object' || Array.isArray(choice)) continue;
-    const choiceRow = choice as Record<string, unknown>;
-    const message = choiceRow.message;
-    if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
-    const messageRow = message as Record<string, unknown>;
-    const calls = Array.isArray(messageRow.tool_calls) ? messageRow.tool_calls as unknown[] : [];
-    if (!calls.length) continue;
-    const kept = calls.filter((call) => {
-      if (!call || typeof call !== 'object' || Array.isArray(call)) return true;
-      const row = call as Record<string, unknown>;
-      const id = typeof row.id === 'string' ? row.id : typeof row.call_id === 'string' ? row.call_id : '';
-      if (id !== toolCallId) return true;
-      const fn = row.function;
-      const name = fn && typeof fn === 'object' && !Array.isArray(fn)
-        ? (fn as Record<string, unknown>).name
-        : row.name;
-      return name !== 'apply_patch';
-    });
-    if (kept.length) {
-      messageRow.tool_calls = kept as JsonValue[];
-    } else {
-      delete messageRow.tool_calls;
-    }
-  }
+  return buildServertoolToolOutputPayloadWithNative({
+    base,
+    toolCallId: toolCall.id,
+    toolName: 'apply_patch',
+    arguments: stringifyCanonicalArgs(canonicalArgs),
+    content: stringifyContent(content),
+    stripToolCallName: 'apply_patch'
+  }) as JsonObject;
 }
 
 function resolveSafeTargetPath(workspace: string, filePath: string): { ok: true; absPath: string; relPath: string } | { ok: false; payload: ApplyPatchPayload } {

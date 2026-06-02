@@ -202,10 +202,8 @@ impl HubPipelineEngine {
         ));
         let (normal_request_payload, inline_payload_metadata) =
             split_normal_payload_and_inline_metadata(normalized_payload.clone());
-        let standardizer_metadata = merge_standardizer_metadata(
-            normalized_metadata.clone(),
-            inline_payload_metadata,
-        );
+        let standardizer_metadata =
+            merge_standardizer_metadata(normalized_metadata.clone(), inline_payload_metadata);
         let standardized = coerce_standardized_request_from_payload(&serde_json::json!({
             "payload": normal_request_payload,
             "normalized": {
@@ -1304,11 +1302,11 @@ fn split_normal_payload_and_inline_metadata(payload: Value) -> (Value, Value) {
     (Value::Object(object), inline_metadata)
 }
 
-fn merge_standardizer_metadata(normalized_metadata: Value, inline_payload_metadata: Value) -> Value {
-    let mut merged = normalized_metadata
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
+fn merge_standardizer_metadata(
+    normalized_metadata: Value,
+    inline_payload_metadata: Value,
+) -> Value {
+    let mut merged = normalized_metadata.as_object().cloned().unwrap_or_default();
     if let Some(inline) = inline_payload_metadata.as_object() {
         for (key, value) in inline {
             merged.insert(key.clone(), value.clone());
