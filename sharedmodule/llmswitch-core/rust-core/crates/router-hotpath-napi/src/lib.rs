@@ -49,6 +49,7 @@ mod hub_req_outbound_format_build;
 mod hub_resp_inbound_format_parse;
 mod hub_resp_inbound_sse_decode_semantics;
 mod hub_resp_inbound_sse_stream_sniffer;
+mod hub_resp_chatprocess_03_governance_boundary;
 mod hub_resp_outbound_client_semantics;
 mod hub_resp_outbound_client_semantics_blocks;
 mod hub_resp_outbound_sse_stream;

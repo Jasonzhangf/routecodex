@@ -74,7 +74,7 @@ describe('Hub Pipeline response type topology contract', () => {
     ]) {
       expect(source).toContain(token);
     }
-    expect(source).toContain('govern_response');
+    expect(source).toContain('govern_hub_resp_chatprocess_03_response');
     expect(source).toContain('finalize_chat_response');
     expect(source).toContain('build_client_payload_for_protocol');
   });

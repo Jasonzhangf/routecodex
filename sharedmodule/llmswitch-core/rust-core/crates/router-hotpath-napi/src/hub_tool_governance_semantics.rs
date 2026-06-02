@@ -615,7 +615,7 @@ fn sanitize_response_payload(
     Ok(())
 }
 
-fn govern_response(input: GovernResponseInput) -> Result<GovernResponseOutput, String> {
+fn govern_tool_name_response(input: GovernResponseInput) -> Result<GovernResponseOutput, String> {
     let protocol = normalize_protocol(input.protocol.as_deref());
     let registry = parse_registry_candidate(input.registry.as_ref());
     let Some(rule) = resolve_response_rule(&protocol, &registry) else {
@@ -685,7 +685,7 @@ pub fn govern_tool_name_response_json(input_json: String) -> NapiResult<String> 
     }
     let input: GovernResponseInput = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = govern_response(input).map_err(napi::Error::from_reason)?;
+    let output = govern_tool_name_response(input).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
@@ -823,7 +823,7 @@ mod tests {
             })),
         };
 
-        let output = govern_response(input).expect("govern response");
+        let output = govern_tool_name_response(input).expect("govern response");
         let payload = output.payload.as_object().expect("payload object");
         let choices = payload
             .get("choices")
@@ -874,7 +874,7 @@ mod tests {
             })),
         };
 
-        let error = govern_response(input).expect_err("expected reject error");
+        let error = govern_tool_name_response(input).expect_err("expected reject error");
         assert!(error.contains("Tool name exceeds max length"));
     }
 }

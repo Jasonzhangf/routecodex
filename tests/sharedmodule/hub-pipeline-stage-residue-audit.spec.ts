@@ -143,7 +143,7 @@ describe('hub pipeline stage residue audit', () => {
     const engineSource = fs.readFileSync(path.join(crateRoot, 'hub_pipeline_lib/engine.rs'), 'utf8');
 
     expect(engineSource).toContain('parse_resp_format_envelope');
-    expect(engineSource).toContain('govern_response');
+    expect(engineSource).toContain('govern_hub_resp_chatprocess_03_response');
     expect(engineSource).toContain('finalize_chat_response');
     expect(engineSource).toContain('build_client_payload_for_protocol');
     expect(engineSource).toContain('process_sse_stream');
@@ -178,12 +178,7 @@ describe('hub pipeline stage residue audit', () => {
         'req_process_stage2_route_select.rs',
       ]),
       govern_response: new Set([
-        'anthropic_openai_codec.rs',
-        'hub_pipeline_lib/engine.rs',
-        'hub_tool_governance_semantics.rs',
-        'openai_openai_codec.rs',
-        'req_outbound_stage3_compat/deepseek_web/response.rs',
-        'req_outbound_stage3_compat/lmstudio/response.rs',
+        'hub_resp_chatprocess_03_governance_boundary.rs',
         'resp_process_stage1_tool_governance.rs',
         'resp_process_stage1_tool_governance_blocks/orchestrator.rs',
       ]),

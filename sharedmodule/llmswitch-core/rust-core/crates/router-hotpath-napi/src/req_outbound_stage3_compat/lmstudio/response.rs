@@ -2,7 +2,8 @@ use serde_json::{json, Map, Number, Value};
 use uuid::Uuid;
 
 use super::request::normalize_lmstudio_tool_call_ids;
-use crate::resp_process_stage1_tool_governance::{govern_response, ToolGovernanceInput};
+use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatprocess_03_response;
+use crate::resp_process_stage1_tool_governance::ToolGovernanceInput;
 
 fn ensure_default_field(root: &mut Map<String, Value>, key: &str, value: Value) {
     if root.get(key).is_some() {
@@ -90,7 +91,7 @@ fn recover_tool_calls_from_text(text: &str, request_id: &str) -> Vec<Value> {
             }
         ]
     });
-    let governed = match govern_response(ToolGovernanceInput {
+    let governed = match govern_hub_resp_chatprocess_03_response(ToolGovernanceInput {
         payload: synthetic_payload,
         client_protocol: "openai-chat".to_string(),
         entry_endpoint: "/v1/chat/completions".to_string(),
@@ -249,7 +250,7 @@ pub(crate) fn apply_lmstudio_response_compat(payload: Value, request_id: Option<
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "req_lmstudio_compat".to_string());
 
-    let mut governed_payload = match govern_response(ToolGovernanceInput {
+    let mut governed_payload = match govern_hub_resp_chatprocess_03_response(ToolGovernanceInput {
         payload: payload.clone(),
         client_protocol: "openai-chat".to_string(),
         entry_endpoint: "/v1/chat/completions".to_string(),

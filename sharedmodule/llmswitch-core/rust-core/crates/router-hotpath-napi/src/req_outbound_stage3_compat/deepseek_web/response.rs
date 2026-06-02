@@ -1,7 +1,8 @@
 use regex::Regex;
 use serde_json::Value;
 
-use crate::resp_process_stage1_tool_governance::{govern_response, ToolGovernanceInput};
+use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatprocess_03_response;
+use crate::resp_process_stage1_tool_governance::ToolGovernanceInput;
 
 use self::envelope::normalize_deepseek_business_envelope;
 use self::tool_state::{
@@ -612,7 +613,7 @@ pub(crate) fn apply_deepseek_web_response_compat(
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "req_deepseek_web_compat".to_string());
 
-    let mut governed = match govern_response(ToolGovernanceInput {
+    let mut governed = match govern_hub_resp_chatprocess_03_response(ToolGovernanceInput {
         payload: normalized.clone(),
         client_protocol: "openai-chat".to_string(),
         entry_endpoint: "/v1/chat/completions".to_string(),

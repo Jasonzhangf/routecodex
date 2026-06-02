@@ -22,6 +22,7 @@ use crate::hub_req_outbound_context_merge::{
 };
 use crate::hub_req_outbound_format_build::{build_format_request, FormatBuildInput};
 use crate::hub_resp_inbound_format_parse::{parse_resp_format_envelope, RespFormatParseInput};
+use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatprocess_03_response;
 use crate::hub_resp_outbound_client_semantics::{
     apply_client_passthrough_patch, build_anthropic_response_from_chat_value,
     build_openai_chat_response_from_anthropic_message, build_responses_payload_from_chat_core,
@@ -35,9 +36,7 @@ use crate::req_process_stage1_tool_governance::{
     apply_req_process_tool_governance, ToolGovernanceInput,
 };
 use crate::req_process_stage2_route_select::{apply_route_selection, RouteSelectionApplyInput};
-use crate::resp_process_stage1_tool_governance::{
-    govern_response, ToolGovernanceInput as RespToolGovernanceInput,
-};
+use crate::resp_process_stage1_tool_governance::ToolGovernanceInput as RespToolGovernanceInput;
 use crate::resp_process_stage2_finalize::{finalize_chat_response, FinalizeInput};
 use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 use crate::servertool_skeleton::finalize_strip::filter_out_executed_servertool_calls;
@@ -462,7 +461,7 @@ impl HubPipelineEngine {
             .map_err(|message| {
                 HubPipelineError::new("hub_pipeline_resp_inbound_02_failed", message)
             })?;
-        let governed = govern_response(RespToolGovernanceInput {
+        let governed = govern_hub_resp_chatprocess_03_response(RespToolGovernanceInput {
             payload: canonical_payload,
             client_protocol: normalized_metadata
                 .get("clientProtocol")

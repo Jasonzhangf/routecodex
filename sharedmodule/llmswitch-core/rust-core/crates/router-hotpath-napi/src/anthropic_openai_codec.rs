@@ -5,8 +5,9 @@ use serde_json::{Map, Value};
 use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, normalize_message_reasoning_ssot, project_message_reasoning_text,
 };
+use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatprocess_03_response;
 use crate::hub_resp_outbound_client_semantics::build_anthropic_response_from_chat_value;
-use crate::resp_process_stage1_tool_governance::{govern_response, ToolGovernanceInput};
+use crate::resp_process_stage1_tool_governance::ToolGovernanceInput;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tooling::normalize_tool_result_text;
@@ -1512,7 +1513,7 @@ pub(crate) fn build_anthropic_from_openai_chat_json(
         .entry_endpoint
         .unwrap_or_else(|| "/v1/messages".to_string());
 
-    let governed = govern_response(ToolGovernanceInput {
+    let governed = govern_hub_resp_chatprocess_03_response(ToolGovernanceInput {
         payload: unwrapped,
         client_protocol: "anthropic-messages".to_string(),
         entry_endpoint,

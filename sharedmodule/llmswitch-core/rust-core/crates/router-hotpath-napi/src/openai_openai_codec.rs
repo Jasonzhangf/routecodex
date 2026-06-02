@@ -3,7 +3,8 @@ use napi_derive::napi;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::resp_process_stage1_tool_governance::{govern_response, ToolGovernanceInput};
+use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatprocess_03_response;
+use crate::resp_process_stage1_tool_governance::ToolGovernanceInput;
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -146,7 +147,7 @@ pub fn run_openai_openai_response_codec_json(
             options.id_prefix_base.clone(),
         )?;
     let normalized = parse_value(&normalized_raw)?;
-    let governed = govern_response(ToolGovernanceInput {
+    let governed = govern_hub_resp_chatprocess_03_response(ToolGovernanceInput {
         payload: normalized,
         client_protocol: "openai-chat".to_string(),
         entry_endpoint: options
