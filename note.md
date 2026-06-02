@@ -14008,3 +14008,17 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - 已验证：工具调用 UI 文本污染排查必须先看 provider-response/raw client-response snap；本次 blind spot 是 client SSE snapshot 只监听 stream chunk，漏掉 required_action auto-close repair 的 `res.write(frame)`。
 - 修复点：`handler-response-utils.ts` 增加 client SSE recorder，把 stream chunk 与 direct `res.write` repair/error/keepalive 帧统一写入 `client-response` snapshot；`--snap/isSnapshotsEnabled` 默认打开 client stream capture。
 - 红测：`tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` 读取真实临时 `RCC_SNAPSHOT_DIR`，断言 client-response snap 包含 `response.required_action` 和 callId。
+
+## 2026-06-02 MiniMax tool_call text leak root cause
+- 已验证：`mini27.key1.MiniMax-M2.7` 的 `provider-request.json` 已带 native `tools` 且没有 `<minimax:tool_call>` prompt；`provider-response.json` 的 `choices[0].message.content` 自身返回 `<minimax:tool_call>...` 文本，`finish_reason=stop`。
+- 根因：两天前旧 `mimoweb-tool-harvest.ts` 能解析 `<tool_call>/<toolcall>` XML + `<invoke name>`/`<parameter>`；Rust resp_process harvest 迁移后只识别非 namespace `<tool_call>`，漏掉 `<minimax:tool_call>`，导致文本 wrapper 未结构化。
+- 修复方向：在 Rust resp_process XML harvest 中支持 `namespace:tool_call` tag，并加真实 MiniMax namespace red test；这不是 Virtual Router/provider 特例。
+
+## 2026-06-02 Anthropic protocol probe for MiniMax M2.7
+- mini27 (`http://guizhouyun.site:2080`) direct Anthropic probe: `/v1/messages` returns 404 Invalid URL, `/messages` returns nginx 405; do not treat as Anthropic-capable.
+- minimonth (`https://api.53hk.cn`) direct Anthropic probe: `/messages` returns 200 Anthropic message shape; provider config needs Anthropic type with root baseURL, not `/v1`.
+
+## 2026-06-02 MiniMax namespace harvest fix verification
+- Red tests green: `cargo test -p router-hotpath-napi minimax_namespace --lib` and `cargo test -p router-hotpath-napi response_codec_harvests_minimax_namespace_tool_call_into_requires_action --lib`.
+- Build/install green: `npm run build:dev` installed RouteCodex `0.90.2669` and restarted port 5555.
+- Runtime smoke: `GET /health` on 5555 returned ready/pipelineReady true; mini27 live response no longer exposed `<minimax:tool_call>` in client body. Client response still contains metadata and remains a separate metadata isolation defect.

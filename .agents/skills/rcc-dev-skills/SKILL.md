@@ -10,6 +10,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 审计/修复 Hub Pipeline 工具问题前，先读 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
 - 定位线上/黑盒工具错误时，第一步必须按 requestId / provider request_id / tool_call_id / 时间段读取 `~/.rcc/codex-samples/**` 与 `~/.rcc/diag/error-*.json`；先还原真实 client input、provider payload、provider response、contextSnapshot，再看代码，禁止跳过样本凭日志表象脑补。
 - 若怀疑“工具调用进文本”，先对照 provider raw response 与 client-response snapshot：确认原始内容到底是结构化 tool_call/tool_use 还是文本；不得从客户端渲染结果反推解析器结论。`--snap` 必须能抓客户端最终 SSE 文本，包括 stream chunk 与 direct `res.write` repair 帧。
+- 若 provider raw response 本身把工具调用吐成文本，继续查 provider-request 是否已带 native `tools`、文本 wrapper 是否属于已知 XML/namespace 形态、resp_chatprocess 是否已结构化 harvest；不得先假设上游改变，也不得从 UI 渲染反推。
 - 样本最小证据包：`requestId`、端口/route/provider、`contextSnapshot.input`、`contextSnapshot.chatMessages`、provider wire payload、上游 error/message、相关 `tool_call_id` 前后 3-5 条历史。
 - 架构命名按 `inbound / chatprocess / outbound` 三段：`req_inbound` 只解析入口协议和捕获上下文；`req_chatprocess` 是请求侧工具治理唯一入口；`req_outbound` 只做 Hub 语义到 provider 协议编码，禁止把工具语义降级成普通文本。
 - 响应同构：`resp_inbound` 只解析 provider 响应；`resp_chatprocess` 是响应侧工具治理唯一入口；`resp_outbound` 只做客户端协议投影，禁止修补请求侧历史污染。

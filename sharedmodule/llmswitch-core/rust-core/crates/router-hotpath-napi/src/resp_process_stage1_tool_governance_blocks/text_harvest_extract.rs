@@ -15,7 +15,7 @@ use crate::resp_process_stage1_tool_governance_blocks::xml_text_utils::{
     decode_basic_xml_entities, is_xml_named_tool_container_tag, normalize_dsml_tool_markup,
     parse_xml_tag_attributes, resolve_xml_named_child_arg_key,
     resolve_xml_wrapper_tool_name_from_attrs, should_attempt_xml_wrapper_harvest,
-    strip_xml_tags_preserve_text, unwrap_xml_cdata_sections,
+    strip_xml_tags_preserve_text, unwrap_xml_cdata_sections, xml_local_tag_name,
 };
 use crate::shared_tooling::extract_rcc_tool_call_fence_segments;
 
@@ -372,7 +372,7 @@ fn build_xml_named_tool_call_entry(
 ) -> Option<Value> {
     let canonical_name = resolve_xml_wrapper_tool_name_from_attrs(raw_tool_name, wrapper_attrs)?;
     let child_open_pattern =
-        Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)(?:\s+[^<>]*?)?>").ok()?;
+        Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.:-]*)(?:\s+[^<>]*?)?>").ok()?;
     let body_lower = body.to_ascii_lowercase();
 
     let mut args = Map::new();
@@ -462,7 +462,7 @@ pub(crate) fn extract_xml_named_tool_call_blocks(
     fallback_start_id: usize,
 ) -> Vec<Value> {
     let normalized_text = normalize_dsml_tool_markup(text);
-    let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)(?:\s+[^<>]*?)?>") else {
+    let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.:-]*)(?:\s+[^<>]*?)?>") else {
         return Vec::new();
     };
     let text_lower = normalized_text.to_ascii_lowercase();
@@ -481,6 +481,7 @@ pub(crate) fn extract_xml_named_tool_call_blocks(
         let wrapper_attrs = parse_xml_tag_attributes(whole.as_str());
         let open_end = cursor + whole.end();
         let raw_name_lower = raw_name.to_ascii_lowercase();
+        let local_name = xml_local_tag_name(raw_name);
         if is_xml_named_tool_container_tag(raw_name_lower.as_str()) {
             if open_end <= cursor {
                 break;
@@ -500,6 +501,10 @@ pub(crate) fn extract_xml_named_tool_call_blocks(
         if !raw_name.is_empty()
             && !matches!(
                 raw_name_lower.as_str(),
+                "tool_call" | "function_calls" | "function_results" | "quote"
+            )
+            && !matches!(
+                local_name.as_str(),
                 "tool_call" | "function_calls" | "function_results" | "quote"
             )
             && should_attempt_xml_wrapper_harvest(raw_name_lower.as_str())
@@ -531,7 +536,7 @@ pub(crate) fn extract_xml_named_tool_call_blocks(
 
 pub(crate) fn extract_xml_tool_call_blocks(text: &str, fallback_start_id: usize) -> Vec<Value> {
     let Ok(pattern) = Regex::new(
-        r#"(?is)<tool_call(?:\s+name\s*=\s*["']([^"']+)["'])?\s*>\s*([\s\S]*?)\s*</tool_call>"#,
+        r#"(?is)<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?tool_?call(?:\s+name\s*=\s*["']([^"']+)["'])?\s*>\s*([\s\S]*?)\s*</(?:[A-Za-z_][A-Za-z0-9_.-]*:)?tool_?call>"#,
     ) else {
         return Vec::new();
     };
@@ -552,6 +557,10 @@ pub(crate) fn extract_xml_tool_call_blocks(text: &str, fallback_start_id: usize)
             try_parse_json_value_lenient(repaired.as_str())
         });
         let Some(mut value) = parsed else {
+            let nested = extract_xml_named_tool_call_blocks(raw, fallback_start_id + idx);
+            if !nested.is_empty() {
+                recovered.extend(nested);
+            }
             continue;
         };
         if let Some(explicit_name) = wrapper_name {

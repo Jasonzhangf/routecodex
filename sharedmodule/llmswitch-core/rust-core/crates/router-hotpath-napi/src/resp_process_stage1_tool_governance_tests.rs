@@ -2759,6 +2759,24 @@ fn test_extract_xml_tool_call_blocks_exec_command() {
 }
 
 #[test]
+fn test_extract_xml_tool_call_blocks_minimax_namespace_invoke() {
+    let text = r#"
+<minimax:tool_call>
+<invoke name="exec_command">
+<parameter name="cmd">cat note.md 2>/dev/null | sed -n '400,600p'</parameter>
+</invoke>
+</minimax:tool_call>
+"#;
+    let out = extract_xml_tool_call_blocks(text, 1);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0]["function"]["name"], "exec_command");
+    let args: Value =
+        serde_json::from_str(out[0]["function"]["arguments"].as_str().unwrap_or("{}"))
+            .unwrap_or(Value::Null);
+    assert_eq!(args["cmd"], "cat note.md 2>/dev/null | sed -n '400,600p'");
+}
+
+#[test]
 fn test_extract_xml_tool_call_blocks_repairs_extra_trailing_closer_inside_wrapper() {
     let text = r#"
 <tool_call>
@@ -3595,6 +3613,46 @@ fn test_govern_response_harvest_respects_requested_allowlist_and_preserves_text(
         .as_str()
         .unwrap_or("");
     assert_eq!(content, "保留正文");
+}
+
+#[test]
+fn test_govern_response_harvests_minimax_namespace_tool_call_text() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "__rcc_tool_governance": {
+                "requestedToolNames": ["exec_command"]
+            },
+            "choices": [{
+                "message": {
+                    "tool_calls": [],
+                    "content": "\n<minimax:tool_call>\n<invoke name=\"exec_command\">\n<parameter name=\"cmd\">cat note.md 2&gt;/dev/null | sed -n '400,600p'</parameter>\n</invoke>\n</minimax:tool_call>"
+                },
+                "finish_reason": "stop"
+            }]
+        }),
+        client_protocol: "openai-responses".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_minimax_namespace_tool_call".to_string(),
+    };
+
+    let result = govern_response(input).unwrap();
+    assert_eq!(result.summary.tool_calls_normalized, 1);
+    assert_eq!(
+        result.governed_payload["choices"][0]["finish_reason"],
+        "tool_calls"
+    );
+    assert_eq!(
+        result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    assert!(result.governed_payload["choices"][0]["message"]["content"].is_null());
+    let args: Value = serde_json::from_str(
+        result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(args["cmd"], "cat note.md 2>/dev/null | sed -n '400,600p'");
 }
 
 #[test]

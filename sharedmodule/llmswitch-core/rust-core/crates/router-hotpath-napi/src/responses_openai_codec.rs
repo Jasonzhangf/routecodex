@@ -424,6 +424,77 @@ mod tests {
     }
 
     #[test]
+    fn response_codec_harvests_minimax_namespace_tool_call_into_requires_action() {
+        let request_raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "gpt-4.1",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "run command" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_codec_minimax_namespace" }).to_string()),
+        )
+        .unwrap();
+        let request_value: Value = serde_json::from_str(&request_raw).unwrap();
+        let context = request_value["context"].clone();
+
+        let raw = run_responses_openai_response_codec_json(
+            json!({
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "\n<minimax:tool_call>\n<invoke name=\"exec_command\">\n<parameter name=\"cmd\">cat note.md 2&gt;/dev/null | sed -n '400,600p'</parameter>\n</invoke>\n</minimax:tool_call>"
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+            context.to_string(),
+        )
+        .unwrap();
+
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            value["status"],
+            Value::String("requires_action".to_string())
+        );
+        assert_eq!(
+            value["required_action"]["submit_tool_outputs"]["tool_calls"][0]["name"],
+            Value::String("exec_command".to_string())
+        );
+        let args: Value = serde_json::from_str(
+            value["required_action"]["submit_tool_outputs"]["tool_calls"][0]["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap();
+        assert_eq!(
+            args["cmd"],
+            Value::String("cat note.md 2>/dev/null | sed -n '400,600p'".to_string())
+        );
+        let output = value["output"].as_array().cloned().unwrap_or_default();
+        assert!(output
+            .iter()
+            .all(|item| !item.to_string().contains("minimax:tool_call")));
+    }
+
+    #[test]
     fn response_codec_harvests_bullet_prefixed_heredoc_tool_calls_into_requires_action() {
         let request_raw = run_responses_openai_request_codec_json(
             json!({

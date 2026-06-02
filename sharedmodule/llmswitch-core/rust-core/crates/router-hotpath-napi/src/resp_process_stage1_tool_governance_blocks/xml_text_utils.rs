@@ -111,7 +111,17 @@ pub(crate) fn looks_like_apply_patch_wrapper_name(raw_name: &str) -> bool {
 }
 
 pub(crate) fn is_xml_named_tool_container_tag(raw_name: &str) -> bool {
-    matches!(raw_name, "tool_calls")
+    matches!(xml_local_tag_name(raw_name).as_str(), "tool_calls")
+}
+
+pub(crate) fn xml_local_tag_name(raw_name: &str) -> String {
+    raw_name
+        .trim()
+        .to_ascii_lowercase()
+        .rsplit(':')
+        .next()
+        .unwrap_or("")
+        .to_string()
 }
 
 pub(crate) fn should_attempt_xml_wrapper_harvest(raw_name: &str) -> bool {
@@ -122,7 +132,7 @@ pub(crate) fn should_attempt_xml_wrapper_harvest(raw_name: &str) -> bool {
 }
 
 pub(crate) fn resolve_xml_wrapper_tool_name(raw_name: &str) -> Option<String> {
-    let normalized = raw_name.trim().to_ascii_lowercase();
+    let normalized = xml_local_tag_name(raw_name);
     if normalized.is_empty() {
         return None;
     }

@@ -32,6 +32,9 @@ pub(crate) fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
         || lowered.contains("</|dsml|parameter>")
         || lowered.contains("<tool_call>")
         || lowered.contains("</tool_call>")
+        || Regex::new(r"(?is)</?[a-z_][a-z0-9_.-]*:tool_?call(?:\s|>)")
+            .map(|re| re.is_match(lowered.as_str()))
+            .unwrap_or(false)
         || lowered.contains("<tool_calls>")
         || lowered.contains("</tool_calls>")
         || lowered.contains("<invoke")
@@ -47,7 +50,7 @@ use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::{
 };
 use crate::resp_process_stage1_tool_governance_blocks::xml_text_utils::{
     normalize_dsml_tool_markup, normalize_preserved_text_whitespace,
-    should_attempt_xml_wrapper_harvest, strip_xml_tags_preserve_text,
+    should_attempt_xml_wrapper_harvest, strip_xml_tags_preserve_text, xml_local_tag_name,
 };
 
 pub(crate) fn mask_tool_wrapper_markup(raw: &str) -> String {
@@ -224,7 +227,7 @@ pub(crate) fn strip_tool_call_marker_payload(raw: &str) -> String {
         .filter_map(|marker| raw.find(marker))
         .min();
 
-        if let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)>") {
+        if let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.:-]*)>") {
             for caps in open_pattern.captures_iter(raw) {
                 let Some(whole) = caps.get(0) else {
                     continue;
@@ -233,12 +236,16 @@ pub(crate) fn strip_tool_call_marker_payload(raw: &str) -> String {
                     continue;
                 };
                 let normalized = raw_name.to_ascii_lowercase();
+                let local_name = xml_local_tag_name(raw_name);
                 let is_supported = if normalized == "quote" {
                     raw[whole.end()..]
                         .to_ascii_lowercase()
                         .contains("tool_calls")
                 } else if matches!(
                     normalized.as_str(),
+                    "tool_call" | "function_calls" | "function_results"
+                ) || matches!(
+                    local_name.as_str(),
                     "tool_call" | "function_calls" | "function_results"
                 ) {
                     true
@@ -532,7 +539,7 @@ fn is_wrapper_only_explicit_tool_markup(raw: &str) -> bool {
     }
     let patterns = [
         r"(?is)\A<function_calls>\s*[\s\S]*?\s*</function_calls>\z",
-        r"(?is)\A<tool_call>\s*[\s\S]*?\s*</tool_call>\z",
+        r"(?is)\A<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?tool_?call(?:\s+[^<>]*?)?>\s*[\s\S]*?\s*</(?:[A-Za-z_][A-Za-z0-9_.-]*:)?tool_?call>\z",
         r"(?is)\A<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)[\s\S]*?(?:\n?\s*RCC_TOOL_CALLS_JSON\b)\s*\z",
         r"(?is)\A<<RCC_TOOL_CALLS(?:\s*\n|\s+)[\s\S]*?(?:\n?\s*RCC_TOOL_CALLS\b)\s*\z",
     ];
@@ -1031,7 +1038,7 @@ pub(crate) fn strip_orphan_function_calls_tag(payload: &mut Value) {
 
 fn strip_supported_xml_named_tool_blocks(raw: &str) -> String {
     let normalized_raw = normalize_dsml_tool_markup(raw);
-    let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)(?:\s+[^<>]*?)?>") else {
+    let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.:-]*)(?:\s+[^<>]*?)?>") else {
         return normalized_raw;
     };
     let raw_lower = normalized_raw.to_ascii_lowercase();
@@ -1047,8 +1054,12 @@ fn strip_supported_xml_named_tool_blocks(raw: &str) -> String {
         let start = cursor + whole.start();
         let open_end = cursor + whole.end();
         let raw_name_lower = raw_name.to_ascii_lowercase();
+        let local_name = xml_local_tag_name(raw_name);
         if matches!(
             raw_name_lower.as_str(),
+            "tool_call" | "function_calls" | "function_results" | "quote"
+        ) || matches!(
+            local_name.as_str(),
             "tool_call" | "function_calls" | "function_results" | "quote"
         ) || !should_attempt_xml_wrapper_harvest(raw_name_lower.as_str())
         {
