@@ -9,7 +9,7 @@ import type {
   TargetMetadata,
   VirtualRouterHealthStore,
 } from "../../../router/virtual-router/types.js";
-import { type HubProcessNodeResult } from "../process/chat-process.js";
+import { type HubProcessNodeResult } from "../process/chat-process-node-result.js";
 import {
   type HubPolicyConfig,
   type HubPolicyMode,

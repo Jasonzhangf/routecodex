@@ -4,8 +4,7 @@ import * as path from 'node:path';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
-import { runReqProcessStage1ToolGovernance } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.js';
-import { applyPostGovernedNormalization } from '../../sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-post-governed-normalization.js';
+import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-mixed-tools-sessions');
 
@@ -26,6 +25,35 @@ function buildRequest(messages: StandardizedRequest['messages']): StandardizedRe
     parameters: {},
     metadata: { originalEndpoint: '/v1/chat/completions' }
   };
+}
+
+function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string): StandardizedRequest {
+  const result = runHubPipelineLibWithNative({
+    config: { virtualRouter: {} },
+    request: {
+      requestId,
+      endpoint: '/v1/chat/completions',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      payload: request as unknown as Record<string, unknown>,
+      metadata: {
+        ...metadata,
+        __routecodexPreselectedRoute: {
+          target: { providerKey: 'test.key1.gpt-test', modelId: 'gpt-test', outboundProfile: 'openai-chat' },
+          decision: { routeName: 'test/preselected' },
+          diagnostics: {},
+        },
+      },
+      stream: false,
+      processMode: 'chat',
+      direction: 'request',
+      stage: 'inbound',
+    },
+  });
+  if (result.success !== true) {
+    throw new Error(result.error?.message ?? 'Rust HubPipeline request pipeline failed');
+  }
+  return result.payload as unknown as StandardizedRequest;
 }
 
 describe('servertool: mixed tool_calls (servertool + client tools)', () => {
@@ -147,20 +175,12 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
       } as any
     ]);
 
-    const processed = await runReqProcessStage1ToolGovernance({
-      request: req,
-      rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', sessionId },
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-mixed-2'
-    });
-    const normalized = await applyPostGovernedNormalization({
-      request: processed.processedRequest as any,
-      metadata: { originalEndpoint: '/v1/chat/completions', sessionId },
-      originalEndpoint: '/v1/chat/completions'
-    });
-
-    const messages = (normalized as any).messages ?? [];
+    const processed = runRequestPipeline(
+      req,
+      { originalEndpoint: '/v1/chat/completions', sessionId },
+      'req-mixed-2',
+    );
+    const messages = (processed as any).messages ?? [];
     const clientToolIdx = messages.findIndex((m: any) => m?.role === 'tool' && m?.tool_call_id === clientCallId);
     expect(clientToolIdx).toBeGreaterThanOrEqual(0);
     // Injected assistant/tool messages appear AFTER client tool results.
@@ -258,20 +278,12 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
       } as any
     ]);
 
-    const processed = await runReqProcessStage1ToolGovernance({
-      request: req,
-      rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', conversationId },
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-mixed-conv-2'
-    });
-    const normalized = await applyPostGovernedNormalization({
-      request: processed.processedRequest as any,
-      metadata: { originalEndpoint: '/v1/chat/completions', conversationId },
-      originalEndpoint: '/v1/chat/completions'
-    });
-
-    const messages = (normalized as any).messages ?? [];
+    const processed = runRequestPipeline(
+      req,
+      { originalEndpoint: '/v1/chat/completions', conversationId },
+      'req-mixed-conv-2',
+    );
+    const messages = (processed as any).messages ?? [];
     const clientToolIdx = messages.findIndex((m: any) => m?.role === 'tool' && m?.tool_call_id === clientCallId);
     expect(clientToolIdx).toBeGreaterThanOrEqual(0);
     expect(messages[clientToolIdx + 1]?.role).toBe('assistant');

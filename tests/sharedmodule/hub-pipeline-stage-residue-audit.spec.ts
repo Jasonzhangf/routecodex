@@ -89,16 +89,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).not.toContain('stages/req_outbound');
   });
 
-  it('req_process stage1 TS shell must enter Rust total stage API instead of direct native helper', () => {
+  it('req_process stage1 TS shell must be physically removed', () => {
     const stagePath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts',
     );
-    const stageSource = fs.readFileSync(stagePath, 'utf8');
 
-    expect(stageSource).toContain('runHubPipelineStageWithNative');
-    expect(stageSource).not.toContain('applyReqProcessToolGovernanceWithNative');
-    expect(stageSource).not.toContain('native-hub-pipeline-req-process-semantics');
+    expect(fs.existsSync(stagePath)).toBe(false);
   });
 
   it('hub pipeline normalize request TS shell must enter Rust total stage API instead of orchestration helper', () => {
@@ -122,7 +119,6 @@ describe('hub pipeline stage residue audit', () => {
     ];
     const allowed = new Set([
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.ts',
-      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts',
       'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.d.ts',
       'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
     ]);
@@ -401,56 +397,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(functionBody).not.toContain('runHubPipelineJson');
   });
 
-  it('req_process stage1 must not directly depend on process-level TS semantic residue', () => {
+  it('req_process stage1 legacy TS shell must not be resurrected with semantic residue', () => {
     const filePath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
 
-    const findings = collectMatches(source, [
-      {
-        label: 'imports chat-process-heartbeat-directives',
-        pattern: /chat-process-heartbeat-directives\.js/,
-      },
-      {
-        label: 'imports chat-process-clock-runtime-bridge',
-        pattern: /chat-process-clock-runtime-bridge\.js/,
-      },
-      {
-        label: 'imports chat-process-request-sanitizer-runtime-bridge',
-        pattern: /chat-process-request-sanitizer-runtime-bridge\.js/,
-      },
-      {
-        label: 'calls applyHeartbeatDirectives',
-        pattern: /\bapplyHeartbeatDirectives\s*\(/,
-      },
-      {
-        label: 'calls applyChatProcessClockRuntimeBridge',
-        pattern: /\bapplyChatProcessClockRuntimeBridge\s*\(/,
-      },
-      {
-        label: 'calls applyChatProcessRequestSanitizerRuntimeBridge',
-        pattern: /\bapplyChatProcessRequestSanitizerRuntimeBridge\s*\(/,
-      },
-    ]);
-
-    expect(findings).toEqual([]);
-  });
-
-  it('req_process stage1 wrapper must not mutate native nodeResult semantics', () => {
-    const filePath = path.join(
-      process.cwd(),
-      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts',
-    );
-    const source = fs.readFileSync(filePath, 'utf8');
-
-    const findings = collectMatches(source, [
-      { label: 'rewrites native nodeResult dataProcessed', pattern: /dataProcessed\.(messages|tools)\s*=/ },
-      { label: 'mutates native nodeResult metadata', pattern: /nodeResultMetadata/ },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('legacy resp_process stage1 TS governance shell must be physically removed', () => {
@@ -1179,22 +1132,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('legacy runHubChatProcess API must enter req_process total stage instead of TS governance orchestration', () => {
-    const processRoot = path.join(
+  it('legacy runHubChatProcess API must be physically removed', () => {
+    const filePath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/conversion/hub/process',
+      'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process.ts',
     );
-    const source = fs.readFileSync(path.join(processRoot, 'chat-process.ts'), 'utf8');
 
-    expect(source).toContain('runReqProcessStage1ToolGovernance');
-    const findings = collectMatches(source, [
-      { label: 'imports legacy TS governance orchestration', pattern: /chat-process-governance-orchestration\.js/ },
-      { label: 'calls legacy TS applyRequestToolGovernance', pattern: /\bapplyRequestToolGovernance\s*\(/ },
-      { label: 'imports direct req_process native helper', pattern: /native-hub-pipeline-req-process-semantics\.js/ },
-      { label: 'calls direct req_process native helper', pattern: /\bapplyReqProcessToolGovernanceWithNative\s*\(/ },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('legacy chat-process TS governance helpers must be physically removed', () => {

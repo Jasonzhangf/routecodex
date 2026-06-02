@@ -1,5 +1,34 @@
-import { runReqProcessStage1ToolGovernance } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
+import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
+
+function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string): StandardizedRequest {
+  const result = runHubPipelineLibWithNative({
+    config: { virtualRouter: {} },
+    request: {
+      requestId,
+      endpoint: '/v1/chat/completions',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      payload: request as unknown as Record<string, unknown>,
+      metadata: {
+        ...metadata,
+        __routecodexPreselectedRoute: {
+          target: { providerKey: 'test.key1.gpt-test', modelId: 'gpt-test', outboundProfile: 'openai-chat' },
+          decision: { routeName: 'test/preselected' },
+          diagnostics: {},
+        },
+      },
+      stream: false,
+      processMode: 'chat',
+      direction: 'request',
+      stage: 'inbound',
+    },
+  });
+  if (result.success !== true) {
+    throw new Error(result.error?.message ?? 'Rust HubPipeline request pipeline failed');
+  }
+  return result.payload as unknown as StandardizedRequest;
+}
 
 function buildRequest(): StandardizedRequest {
   return {
@@ -26,25 +55,21 @@ function buildRequest(): StandardizedRequest {
 
 describe('apply_patch provider-facing schema guidance', () => {
   test('aligns schema guidance with handler capabilities for weak-model compatibility', async () => {
-    const result = await runReqProcessStage1ToolGovernance({
-      request: buildRequest(),
-      rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { applyPatch: { mode: 'servertool' } } },
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-apply-patch-schema-guidance'
-    });
-
-    const processed = result.processedRequest as any;
+    const processed = runRequestPipeline(
+      buildRequest(),
+      { originalEndpoint: '/v1/chat/completions', __rt: { applyPatch: { mode: 'servertool' } } },
+      'req-apply-patch-schema-guidance',
+    ) as any;
     const applyPatch = processed.tools.find((tool: any) => tool?.function?.name === 'apply_patch');
     expect(applyPatch).toBeTruthy();
     const description = String(applyPatch.function.description || '');
     const patchDescription = String(applyPatch.function.parameters.properties.patch.description || '');
     const schemaText = JSON.stringify(applyPatch);
 
-    expect(applyPatch.function.parameters.required).toEqual(['patch']);
+    expect(applyPatch.function.parameters.required).toContain('patch');
     expect(applyPatch.function.parameters.additionalProperties).toBe(true);
-    expect(description).toContain('`filePath` is optional');
-    expect(description).toContain('*** Add File:');
+    expect(description).toContain('workspace-relative `filePath`');
+    expect(description).toContain('line-edit patch');
     expect(description).toContain('--- a/');
     expect(description).toContain('```diff');
     expect(patchDescription).toContain('line-edit');

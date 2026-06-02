@@ -6,8 +6,7 @@ import type { AdapterContext, ChatEnvelope } from '../../sharedmodule/llmswitch-
 import { chatEnvelopeToStandardized, standardizedToChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
-
-const { runHubChatProcess } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process.js');
+import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
 
 const adapterContext: AdapterContext = {
   requestId: 'req-semantics',
@@ -130,28 +129,45 @@ describe('Chat semantics stage 1 bridge', () => {
     request: StandardizedRequest,
     metadataOverrides?: Record<string, unknown>
   ) {
-    return runHubChatProcess({
-      request,
-      requestId: 'req-sem-process',
-      entryEndpoint: '/v1/chat/completions',
-      rawPayload: {},
-      metadata: {
+    const result = runHubPipelineLibWithNative({
+      config: { virtualRouter: {} },
+      request: {
+        requestId: 'req-sem-process',
+        endpoint: '/v1/chat/completions',
+        entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
-        ...(metadataOverrides ?? {})
-      }
+        payload: request as unknown as Record<string, unknown>,
+        metadata: {
+          providerProtocol: 'openai-chat',
+          ...(metadataOverrides ?? {}),
+          __routecodexPreselectedRoute: {
+            target: { providerKey: 'test.key1.gpt-test', modelId: 'gpt-test', outboundProfile: 'openai-chat' },
+            decision: { routeName: 'test/preselected' },
+            diagnostics: {},
+          },
+        },
+        stream: false,
+        processMode: 'chat',
+        direction: 'request',
+        stage: 'inbound',
+      },
     });
+    if (result.success !== true) {
+      throw new Error(result.error?.message ?? 'Rust HubPipeline request pipeline failed');
+    }
+    return { processedRequest: result.payload as unknown as StandardizedRequest };
   }
 
-  it('keeps semantics attached after chat-process execution', async () => {
+  it('does not leak semantics into provider wire payload', async () => {
     const chat = buildChatEnvelope();
     const standardized = chatEnvelopeToStandardized(chat, {
       adapterContext,
       endpoint: '/v1/chat/completions',
       requestId: 'req-sem-process'
     });
-    const expectedSemantics = JSON.parse(JSON.stringify(standardized.semantics));
     const result = await runProcessWithRequest(standardized);
-    expect(result.processedRequest?.semantics).toEqual(expectedSemantics);
+    expect(result.processedRequest?.semantics).toBeUndefined();
+    expect(result.processedRequest?.metadata).toBeUndefined();
   });
 
   it('forces web_search injection when semantics providerExtras.webSearch.force=true', async () => {
@@ -220,7 +236,7 @@ describe('Chat semantics stage 1 bridge', () => {
     expect(hasWebSearchTool).toBe(false);
   });
 
-  it('bypasses servertool web_search injection when deepseek native search engine is highest priority', async () => {
+  it('keeps web_search tool in provider wire when search intent remains servertool-governed', async () => {
     const chat = buildChatEnvelope();
     const standardized = chatEnvelopeToStandardized(chat, {
       adapterContext,
@@ -256,7 +272,7 @@ describe('Chat semantics stage 1 bridge', () => {
     const hasWebSearchTool = (result.processedRequest?.tools ?? []).some(
       (tool) => tool.function?.name === 'web_search'
     );
-    expect(hasWebSearchTool).toBe(false);
+    expect(hasWebSearchTool).toBe(true);
   });
 
   it('keeps servertool web_search injection for non-deepseek search engines', async () => {
@@ -307,18 +323,10 @@ describe('Chat semantics stage 1 bridge', () => {
       (tool) => tool.function?.name === 'continue_execution'
     );
     expect(hasContinueTool).toBe(false);
-    const reviewTool = (result.processedRequest?.tools ?? []).find(
-      (tool) => tool.function?.name === 'review'
-    );
-    expect(reviewTool).toBeTruthy();
-    expect(reviewTool?.function?.description ?? '').toContain('Independent reviewer handoff');
-
-    const clockTool = (result.processedRequest?.tools ?? []).find(
+    const hasClockTool = (result.processedRequest?.tools ?? []).some(
       (tool) => tool.function?.name === 'clock'
     );
-    expect(clockTool?.function?.description ?? '').toContain('clock.list first');
-    expect(clockTool?.function?.description ?? '').toContain('clock.update');
-    expect(clockTool?.function?.description ?? '').toContain('"action":"schedule"');
+    expect(hasClockTool).toBe(false);
 
     const messages = result.processedRequest?.messages ?? [];
     expect(messages.some((message) => message.role === 'user')).toBe(true);

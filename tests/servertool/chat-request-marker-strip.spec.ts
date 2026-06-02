@@ -1,5 +1,34 @@
-import { runReqProcessStage1ToolGovernance } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
+import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
+
+function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string): StandardizedRequest {
+  const result = runHubPipelineLibWithNative({
+    config: { virtualRouter: {} },
+    request: {
+      requestId,
+      endpoint: '/v1/chat/completions',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      payload: request as unknown as Record<string, unknown>,
+      metadata: {
+        ...metadata,
+        __routecodexPreselectedRoute: {
+          target: { providerKey: 'test.key1.gpt-test', modelId: 'gpt-test', outboundProfile: 'openai-chat' },
+          decision: { routeName: 'test/preselected' },
+          diagnostics: {},
+        },
+      },
+      stream: false,
+      processMode: 'chat',
+      direction: 'request',
+      stage: 'inbound',
+    },
+  });
+  if (result.success !== true) {
+    throw new Error(result.error?.message ?? 'Rust HubPipeline request pipeline failed');
+  }
+  return result.payload as unknown as StandardizedRequest;
+}
 
 function buildRequest(messages: StandardizedRequest['messages']): StandardizedRequest {
   return {
@@ -13,17 +42,14 @@ function buildRequest(messages: StandardizedRequest['messages']): StandardizedRe
 
 describe('chat request marker strip', () => {
   test('strips any generic <**...**> marker syntax before request leaves chat process', async () => {
-    const result = await runReqProcessStage1ToolGovernance({
-      request: buildRequest([
+    const processed = runRequestPipeline(
+      buildRequest([
         { role: 'user', content: 'a\n<**unknown:anything**>\nb\n<**clock:not-json**>\nc\n<**broken-marker' },
         { role: 'assistant', content: 'seen <**bad:marker**> too' }
       ]),
-      rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', tmuxSessionId: 'generic-marker-strip' },
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-generic-marker-strip'
-    });
-    const processed = result.processedRequest as StandardizedRequest;
+      { originalEndpoint: '/v1/chat/completions', tmuxSessionId: 'generic-marker-strip' },
+      'req-generic-marker-strip',
+    );
     const userContent = typeof processed.messages[0]?.content === 'string' ? processed.messages[0].content : '';
     const assistantContent = typeof processed.messages[1]?.content === 'string' ? processed.messages[1].content : '';
 
@@ -34,19 +60,17 @@ describe('chat request marker strip', () => {
     expect(assistantContent).not.toContain('<**');
   });
 
-  test('keeps routing markers (sm) for route stage consumption', async () => {
-    const result = await runReqProcessStage1ToolGovernance({
-      request: buildRequest([
+  test('does not leak routing markers (sm) into provider wire payload', async () => {
+    const processed = runRequestPipeline(
+      buildRequest([
         { role: 'user', content: '<**sm:30**>继续执行当前任务' }
       ]),
-      rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', sessionId: 'marker-keep-sm-30' },
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-marker-keep-sm-30'
-    });
-    const processed = result.processedRequest as StandardizedRequest;
+      { originalEndpoint: '/v1/chat/completions', sessionId: 'marker-keep-sm-30' },
+      'req-marker-keep-sm-30',
+    );
     const userContent = typeof processed.messages[0]?.content === 'string' ? processed.messages[0].content : '';
 
-    expect(userContent).toContain('<**sm:30**>');
+    expect(userContent).not.toContain('<**sm:30**>');
+    expect(userContent).toContain('继续执行当前任务');
   });
 });

@@ -1,7 +1,36 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { runReqProcessStage1ToolGovernance } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
+import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
+
+function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string) {
+  const result = runHubPipelineLibWithNative({
+    config: { virtualRouter: {} },
+    request: {
+      requestId,
+      endpoint: '/v1/chat/completions',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      payload: request as unknown as Record<string, unknown>,
+      metadata: {
+        ...metadata,
+        __routecodexPreselectedRoute: {
+          target: { providerKey: 'test.key1.gpt-test', modelId: 'gpt-test', outboundProfile: 'openai-chat' },
+          decision: { routeName: 'test/preselected' },
+          diagnostics: {},
+        },
+      },
+      stream: false,
+      processMode: 'chat',
+      direction: 'request',
+      stage: 'inbound',
+    },
+  });
+  if (result.success !== true) {
+    throw new Error(result.error?.message ?? 'Rust HubPipeline request pipeline failed');
+  }
+  return result.payload as unknown as StandardizedRequest;
+}
 
 describe('apply_patch chat-process contract', () => {
   it('keeps hub envelope standardization out of apply_patch argument rewriting', async () => {
@@ -72,15 +101,13 @@ describe('apply_patch chat-process contract', () => {
       metadata: { originalEndpoint: '/v1/chat/completions' },
     };
 
-    const result = await runReqProcessStage1ToolGovernance({
+    const processedRequest = runRequestPipeline(
       request,
-      rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions' },
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-apply-patch-client-mode-contract',
-    });
+      { originalEndpoint: '/v1/chat/completions' },
+      'req-apply-patch-client-mode-contract',
+    );
 
-    const tool = (result.processedRequest as any)?.tools?.[0]?.function;
+    const tool = (processedRequest as any)?.tools?.[0]?.function;
     expect(tool?.name).toBe('apply_patch');
     const properties = tool?.parameters?.properties ?? {};
     expect(Object.keys(properties).sort()).toEqual(['patch']);
@@ -116,18 +143,16 @@ describe('apply_patch chat-process contract', () => {
       metadata: { originalEndpoint: '/v1/chat/completions' },
     };
 
-    const result = await runReqProcessStage1ToolGovernance({
+    const processedRequest = runRequestPipeline(
       request,
-      rawPayload: {},
-      metadata: {
+      {
         originalEndpoint: '/v1/chat/completions',
         __rt: { applyPatch: { mode: 'servertool' } },
       },
-      entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-apply-patch-servertool-mode-contract',
-    });
+      'req-apply-patch-servertool-mode-contract',
+    );
 
-    const tool = (result.processedRequest as any)?.tools?.[0]?.function;
+    const tool = (processedRequest as any)?.tools?.[0]?.function;
     expect(tool?.name).toBe('apply_patch');
     expect(String(tool?.description)).toContain('workspace-relative');
     const properties = tool?.parameters?.properties ?? {};

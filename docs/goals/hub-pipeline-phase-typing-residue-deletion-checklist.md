@@ -75,11 +75,18 @@ Known legacy NAPI / TS stage bridge residue after Phase 7E:
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.ts`
   - Still calls `runHubPipelineStageWithNative` for `normalizeRequest`.
   - Deletion candidate only after request normalize caller is fully moved behind Rust total HubPipeline / typed request entrypoints.
-- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts`
-  - Still calls `runHubPipelineStageWithNative` for `reqProcessToolGovernance`.
-  - Deletion candidate only after all TS req_process shell callers are removed or moved behind Rust total HubPipeline.
 
-Phase 7E red tests lock `runHubPipelineStageWithNative` to these two known TS shells only. New TS stage direct callers are forbidden.
+Phase 8A-1 red tests lock `runHubPipelineStageWithNative` to the normalize-request TS shell and native protocol wrapper only. New TS stage direct callers are forbidden.
+
+## Deleted Proof — Phase 8A-1
+
+Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/README.md`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process.ts`, the only remaining source caller of the stage shell.
+- Migrated request-side contract tests that called `runReqProcessStage1ToolGovernance` / `runHubChatProcess` to `runHubPipelineLibWithNative` so tests exercise the Rust total request pipeline instead of the deleted TS stage shell.
+- Updated residue red tests so `req_process_stage1_tool_governance/index.ts` and `chat-process.ts` must remain absent, and `runHubPipelineStageWithNative` cannot expand beyond the remaining known shell/wrapper list.
 
 ## Covered By Typed Boundary — Future Delete Candidates
 
