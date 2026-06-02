@@ -72,11 +72,7 @@ Known legacy NAPI / TS stage bridge residue after Phase 7E:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
   - Owns `runHubPipelineStageJson` bridge and still calls the three legacy Rust stage functions.
   - Still live NAPI bridge; not safe to delete.
-- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.ts`
-  - Still calls `runHubPipelineStageWithNative` for `normalizeRequest`.
-  - Deletion candidate only after request normalize caller is fully moved behind Rust total HubPipeline / typed request entrypoints.
-
-Phase 8A-1 red tests lock `runHubPipelineStageWithNative` to the normalize-request TS shell and native protocol wrapper only. New TS stage direct callers are forbidden.
+Phase 8A-2 red tests lock `runHubPipelineStageWithNative` to the native protocol wrapper only. New TS stage direct callers are forbidden.
 
 ## Deleted Proof — Phase 8A-1
 
@@ -87,6 +83,15 @@ Phase 8A-1 physically removed the legacy request process TS shell after call gra
 - Deleted `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process.ts`, the only remaining source caller of the stage shell.
 - Migrated request-side contract tests that called `runReqProcessStage1ToolGovernance` / `runHubChatProcess` to `runHubPipelineLibWithNative` so tests exercise the Rust total request pipeline instead of the deleted TS stage shell.
 - Updated residue red tests so `req_process_stage1_tool_governance/index.ts` and `chat-process.ts` must remain absent, and `runHubPipelineStageWithNative` cannot expand beyond the remaining known shell/wrapper list.
+
+## Deleted Proof — Phase 8A-2
+
+Phase 8A-2 physically removed the final request-side TS stage shell after migrating the live `HubPipeline.execute` caller to Rust total HubPipeline entry:
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.ts`.
+- Moved request payload materialization in `hub-pipeline.ts` to direct `runHubPipelineLibWithNative` ownership; JSON/SSE input materialization remains TS I/O glue, while normalize semantics are executed by Rust total pipeline.
+- Migrated the SSE protocol contract test from `normalizeHubPipelineRequest` to `HubPipeline.execute`, proving canonical SSE payloads enter `runHubPipelineLibWithNative`.
+- Updated residue red tests so `hub-pipeline-normalize-request.ts` must remain absent, and `runHubPipelineStageWithNative` is allowed only in the native protocol wrapper declarations/implementation.
 
 ## Covered By Typed Boundary — Future Delete Candidates
 
