@@ -53,6 +53,7 @@ type NativeChatProcessNodeResultSemantics = {
   deriveFinishReasonJson?: (bodyJson: string) => string;
   isToolCallContinuationResponseJson?: (bodyJson: string) => boolean;
   isEmptyClientResponsePayloadJson?: (bodyJson: string) => boolean;
+  classifyEmptyResponseSignalJson?: (stage: string, bodyJson: string) => string;
 };
 
 type NativeHubPipelineRespSemantics = {
@@ -382,6 +383,25 @@ export function isEmptyClientResponsePayloadNative(body: unknown): boolean {
     throw new Error('[llmswitch-bridge] isEmptyClientResponsePayloadJson not available');
   }
   return Boolean(fn(JSON.stringify(body ?? null)));
+}
+
+export function classifyEmptyResponseSignalNative(
+  stage: string,
+  body: unknown
+): { errorType: string; matchedText: string; responseSummary: Record<string, unknown> } | null {
+  const fn = getChatProcessNodeResultSemantics().classifyEmptyResponseSignalJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] classifyEmptyResponseSignalJson not available');
+  }
+  const raw = fn(String(stage || ''), JSON.stringify(body ?? null));
+  const parsed = JSON.parse(raw) as unknown;
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] classifyEmptyResponseSignalJson returned invalid payload');
+  }
+  return parsed as { errorType: string; matchedText: string; responseSummary: Record<string, unknown> };
 }
 
 export function isBlockingRecoverableNative(

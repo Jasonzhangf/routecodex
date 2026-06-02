@@ -30,6 +30,7 @@ import {
   detectToolExecutionFailures,
   shouldLogClientToolErrorToConsole
 } from './snapshot-recorder-tool-failures.js';
+import { classifyEmptyResponseSignalNative } from './native-exports.js';
 
 let cachedSnapshotRecorderFactory:
   | ((context: AnyRecord, endpoint: string) => SnapshotRecorder)
@@ -208,142 +209,8 @@ function resolveRequestTailFromPayload(stage: string, payload: Record<string, un
   return null;
 }
 
-function collectTextParts(value: unknown): string[] {
-  if (typeof value === 'string') {
-    const text = value.trim();
-    return text ? [text] : [];
-  }
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const texts: string[] = [];
-  for (const item of value) {
-    if (typeof item === 'string') {
-      const text = item.trim();
-      if (text) {
-        texts.push(text);
-      }
-      continue;
-    }
-    const row = asRecord(item);
-    if (!row) {
-      continue;
-    }
-    for (const key of ['text', 'output_text', 'input_text']) {
-      const text = readTrimmedString(row[key]);
-      if (text) {
-        texts.push(text);
-      }
-    }
-  }
-  return texts;
-}
-
-function hasAnyRequiredActionToolCalls(payload: Record<string, unknown>): boolean {
-  const requiredAction = asRecord(payload.required_action);
-  if (!requiredAction) {
-    return false;
-  }
-  const submit = asRecord(requiredAction.submit_tool_outputs);
-  const toolCalls = submit?.tool_calls;
-  return Array.isArray(toolCalls) && toolCalls.length > 0;
-}
-
-function hasAnyOutputFunctionCalls(payload: Record<string, unknown>): boolean {
-  const output = payload.output;
-  if (!Array.isArray(output)) {
-    return false;
-  }
-  for (const item of output) {
-    const row = asRecord(item);
-    if (!row) {
-      continue;
-    }
-    const itemType = readTrimmedString(row.type).toLowerCase();
-    if (itemType === 'function_call' || itemType === 'function') {
-      return true;
-    }
-    const toolCalls = row.tool_calls;
-    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function classifyEmptyResponseSignal(stage: string, payload: Record<string, unknown>): EmptyResponseSignal | null {
-  if (!stage.startsWith('chat_process.resp.')) {
-    return null;
-  }
-  if (payload.error && typeof payload.error !== 'undefined') {
-    return null;
-  }
-  if (hasAnyRequiredActionToolCalls(payload) || hasAnyOutputFunctionCalls(payload)) {
-    return null;
-  }
-
-  const choices = Array.isArray(payload.choices) ? payload.choices : [];
-  if (choices.length > 0) {
-    const first = asRecord(choices[0]);
-    if (!first) {
-      return null;
-    }
-    const finishReason = readTrimmedString(first.finish_reason).toLowerCase();
-    const message = asRecord(first.message);
-    const toolCalls = message?.tool_calls;
-    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-      return null;
-    }
-    const textCandidates = [
-      ...collectTextParts(message?.content),
-      ...collectTextParts(first.content)
-    ];
-    if (finishReason === 'stop' && textCandidates.length <= 0) {
-      return {
-        errorType: 'empty_response_no_text_or_tool_calls',
-        matchedText: 'finish_reason=stop but assistant text/tool_calls are empty',
-        responseSummary: {
-          protocol: 'chat',
-          finishReason,
-          hasToolCalls: false,
-          textCount: 0
-        }
-      };
-    }
-    return null;
-  }
-
-  const status = readTrimmedString(payload.status).toLowerCase();
-  if (status !== 'completed' && status !== 'stop') {
-    return null;
-  }
-  const outputText = readTrimmedString(payload.output_text);
-  const output = Array.isArray(payload.output) ? payload.output : [];
-  const outputTexts: string[] = [];
-  for (const item of output) {
-    const row = asRecord(item);
-    if (!row) {
-      continue;
-    }
-    outputTexts.push(...collectTextParts(row.content));
-    outputTexts.push(...collectTextParts(row.text));
-    outputTexts.push(...collectTextParts(row.output_text));
-  }
-  if (!outputText && outputTexts.length <= 0) {
-    return {
-      errorType: 'empty_response_no_text_or_tool_calls',
-      matchedText: 'responses status completed but output_text/output content are empty',
-      responseSummary: {
-        protocol: 'responses',
-        status,
-        hasRequiredAction: false,
-        hasOutputFunctionCalls: false,
-        outputItems: output.length,
-        textCount: 0
-      }
-    };
-  }
-  return null;
+  return classifyEmptyResponseSignalNative(stage, payload);
 }
 
 /**

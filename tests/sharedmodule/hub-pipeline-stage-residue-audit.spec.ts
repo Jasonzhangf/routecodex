@@ -840,6 +840,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(requiresActionFindings).toEqual([]);
   });
 
+  it('bridge snapshot recorder must not classify empty response tool semantics in TS', () => {
+    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/snapshot-recorder.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const bodyStart = source.indexOf('function classifyEmptyResponseSignal');
+    expect(bodyStart).toBeGreaterThanOrEqual(0);
+    const nextMarker = source.indexOf('\n/**', bodyStart + 1);
+    const body = source.slice(bodyStart, nextMarker > bodyStart ? nextMarker : undefined);
+    const findings = collectMatches(body, [
+      { label: 'checks required_action tool calls in TS', pattern: /required_action|submit_tool_outputs|tool_calls/ },
+      { label: 'checks output function/tool calls in TS', pattern: /function_call|tool_call|tool_use/ },
+      { label: 'loops choices/output for semantic classification in TS', pattern: /for \(const item of output\)|choices\.length/ },
+    ]);
+    expect(body).toContain('classifyEmptyResponseSignalNative(stage, payload)');
+    expect(findings).toEqual([]);
+  });
+
   it('provider response shared blocks must not keep dead TS converted tool-call validators', () => {
     const filePath = path.join(
       process.cwd(),

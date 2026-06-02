@@ -577,6 +577,99 @@ fn is_empty_client_response_payload_value(payload: &Value) -> bool {
     true
 }
 
+fn classify_empty_response_signal_value(stage: &str, payload: &Value) -> Option<Value> {
+    if !stage.starts_with("chat_process.resp.") {
+        return None;
+    }
+    let record = payload.as_object()?;
+    if record.contains_key("error") || has_servertool_followup_tool_bearing_payload(record) {
+        return None;
+    }
+
+    if let Some(choices) = record.get("choices").and_then(Value::as_array) {
+        if choices.is_empty() {
+            return None;
+        }
+        let first = choices.first()?.as_object()?;
+        let finish_reason = read_string(first.get("finish_reason"))
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        let has_text = first
+            .get("message")
+            .and_then(Value::as_object)
+            .is_some_and(|message| value_has_non_empty_text(message.get("content")))
+            || value_has_non_empty_text(first.get("content"));
+        if finish_reason == "stop" && !has_text {
+            return Some(json_object(vec![
+                ("errorType", Value::String("empty_response_no_text_or_tool_calls".to_string())),
+                (
+                    "matchedText",
+                    Value::String("finish_reason=stop but assistant text/tool_calls are empty".to_string()),
+                ),
+                (
+                    "responseSummary",
+                    json_object(vec![
+                        ("protocol", Value::String("chat".to_string())),
+                        ("finishReason", Value::String(finish_reason)),
+                        ("hasToolCalls", Value::Bool(false)),
+                        ("textCount", Value::from(0)),
+                    ]),
+                ),
+            ]));
+        }
+        return None;
+    }
+
+    let status = read_string(record.get("status"))
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if status != "completed" && status != "stop" {
+        return None;
+    }
+    let output_text = read_string(record.get("output_text")).unwrap_or_default();
+    let output = record.get("output").and_then(Value::as_array);
+    let output_items = output.map_or(0, Vec::len);
+    let has_output_text = output.is_some_and(|items| {
+        items.iter().any(|item| {
+            let Some(row) = item.as_object() else {
+                return false;
+            };
+            value_has_non_empty_text(row.get("content"))
+                || value_has_non_empty_text(row.get("text"))
+                || value_has_non_empty_text(row.get("output_text"))
+        })
+    });
+    if output_text.is_empty() && !has_output_text {
+        return Some(json_object(vec![
+            ("errorType", Value::String("empty_response_no_text_or_tool_calls".to_string())),
+            (
+                "matchedText",
+                Value::String("responses status completed but output_text/output content are empty".to_string()),
+            ),
+            (
+                "responseSummary",
+                json_object(vec![
+                    ("protocol", Value::String("responses".to_string())),
+                    ("status", Value::String(status)),
+                    ("hasRequiredAction", Value::Bool(false)),
+                    ("hasOutputFunctionCalls", Value::Bool(false)),
+                    ("outputItems", Value::from(output_items)),
+                    ("textCount", Value::from(0)),
+                ]),
+            ),
+        ]));
+    }
+    None
+}
+
+fn json_object(entries: Vec<(&str, Value)>) -> Value {
+    let mut row = Map::new();
+    for (key, value) in entries {
+        row.insert(key.to_string(), value);
+    }
+    Value::Object(row)
+}
+
 fn derive_finish_reason_value(body: &Value) -> Option<String> {
     let record = resolve_finish_reason_record(body)?;
     let first_choice = first_choice_record(record);
@@ -1157,6 +1250,13 @@ pub fn is_empty_client_response_payload_json(body_json: String) -> NapiResult<bo
     Ok(is_empty_client_response_payload_value(&body))
 }
 
+pub fn classify_empty_response_signal_json(stage: String, body_json: String) -> NapiResult<String> {
+    let body: Value =
+        serde_json::from_str(&body_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = classify_empty_response_signal_value(stage.as_str(), &body).unwrap_or(Value::Null);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[cfg(test)]
 mod request_semantics_tests {
     use super::*;
@@ -1274,5 +1374,22 @@ mod request_semantics_tests {
         assert!(!is_empty_client_response_payload_value(&json!({
             "output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]
         })));
+    }
+
+    #[test]
+    fn classifies_snapshot_empty_response_signal_in_rust() {
+        let chat = json!({ "choices": [{ "finish_reason": "stop", "message": { "content": "" } }] });
+        let signal = classify_empty_response_signal_value("chat_process.resp.final", &chat).unwrap();
+        assert_eq!(signal["responseSummary"]["protocol"], "chat");
+
+        let tool_chat = json!({ "choices": [{ "finish_reason": "stop", "message": { "tool_calls": [{ "id": "call_1" }] } }] });
+        assert!(classify_empty_response_signal_value("chat_process.resp.final", &tool_chat).is_none());
+
+        let responses = json!({ "status": "completed", "output": [] });
+        let signal = classify_empty_response_signal_value("chat_process.resp.final", &responses).unwrap();
+        assert_eq!(signal["responseSummary"]["protocol"], "responses");
+
+        let text_responses = json!({ "status": "completed", "output_text": "ok" });
+        assert!(classify_empty_response_signal_value("chat_process.resp.final", &text_responses).is_none());
     }
 }

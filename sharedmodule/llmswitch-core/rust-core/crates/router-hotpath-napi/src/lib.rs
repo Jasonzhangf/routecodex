@@ -103,6 +103,7 @@ mod streaming_tool_extractor;
 mod thought_signature_validator;
 mod tool_harvester;
 mod virtual_router_engine;
+mod vr_route_04_selection_boundary;
 mod virtual_router_provider_key;
 mod virtual_router_stop_message_actions;
 mod virtual_router_stop_message_instruction;
@@ -1185,6 +1186,14 @@ pub fn is_tool_call_continuation_response_json_bridge(body_json: String) -> Napi
 #[napi(js_name = "isEmptyClientResponsePayloadJson")]
 pub fn is_empty_client_response_payload_json_bridge(body_json: String) -> NapiResult<bool> {
     chat_node_result_semantics::is_empty_client_response_payload_json(body_json)
+}
+
+#[napi(js_name = "classifyEmptyResponseSignalJson")]
+pub fn classify_empty_response_signal_json_bridge(
+    stage: String,
+    body_json: String,
+) -> NapiResult<String> {
+    chat_node_result_semantics::classify_empty_response_signal_json(stage, body_json)
 }
 
 #[napi(js_name = "normalizeToolCallIdsJson")]

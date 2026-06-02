@@ -56,6 +56,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "deriveFinishReasonJson",
   "isToolCallContinuationResponseJson",
   "isEmptyClientResponsePayloadJson",
+  "classifyEmptyResponseSignalJson",
   "buildFormatRequestJson",
   "buildResponsesPayloadFromChatJson",
   "buildBridgeHistoryJson",
