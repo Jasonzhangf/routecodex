@@ -64,6 +64,23 @@ Known request direct-call residue after Phase 7D:
 
 These remain live owner / implementation / NAPI bridge points and are not safe deletion targets.
 
+Known legacy NAPI / TS stage bridge residue after Phase 7E:
+
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs`
+  - Defines `run_req_inbound_pipeline`, `run_req_process_pipeline`, and `run_resp_outbound_pipeline`.
+  - Still live as Rust stage implementation / legacy stage API source; not safe to delete.
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+  - Owns `runHubPipelineStageJson` bridge and still calls the three legacy Rust stage functions.
+  - Still live NAPI bridge; not safe to delete.
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.ts`
+  - Still calls `runHubPipelineStageWithNative` for `normalizeRequest`.
+  - Deletion candidate only after request normalize caller is fully moved behind Rust total HubPipeline / typed request entrypoints.
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts`
+  - Still calls `runHubPipelineStageWithNative` for `reqProcessToolGovernance`.
+  - Deletion candidate only after all TS req_process shell callers are removed or moved behind Rust total HubPipeline.
+
+Phase 7E red tests lock `runHubPipelineStageWithNative` to these two known TS shells only. New TS stage direct callers are forbidden.
+
 ## Covered By Typed Boundary — Future Delete Candidates
 
 These categories can become deletion candidates only after the required proof gates pass:
@@ -84,6 +101,7 @@ These categories can become deletion candidates only after the required proof ga
 - Phase 7D covered request route selection callers now enter `vr_route_04_selection_boundary.rs` instead of calling `apply_route_selection` directly:
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
 - Phase 7D leaves `run_req_process_pipeline` at its current Rust/NAPI owner boundary only; no new caller is allowed outside `hub_pipeline.rs` and `hub_pipeline_blocks/napi_bindings.rs`.
+- Phase 7E call graph proof: `rg` shows `run_req_inbound_pipeline`, `run_req_process_pipeline`, and `run_resp_outbound_pipeline` are defined in `hub_pipeline.rs`, bridged only by `hub_pipeline_blocks/napi_bindings.rs`, and otherwise referenced by Rust tests. `runHubPipelineStageWithNative` is used by only two TS shell files listed above plus native wrapper/API tests.
 - Legacy external direct access to `run_req_process_pipeline` once no NAPI caller or TS shell consumes it outside the total HubPipeline path.
 - Legacy direct access to request stage functions once all live request callers enter `HubReqInbound02Standardized -> HubReqChatProcess03Governed -> HubReqOutbound05ProviderSemantic`.
 - Legacy direct access to response stage functions once all live response callers enter `HubRespInbound02Parsed -> HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic`.

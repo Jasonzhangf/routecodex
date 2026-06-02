@@ -115,6 +115,31 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('buildNormalizedMetadataRecord');
   });
 
+  it('legacy TS stage native entrypoints must stay locked to known bridge shells', () => {
+    const sourceRoots = [
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
+      path.join(process.cwd(), 'src'),
+    ];
+    const allowed = new Set([
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.ts',
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.d.ts',
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
+    ]);
+    const findings: string[] = [];
+
+    for (const root of sourceRoots) {
+      for (const fullPath of walkFiles(root, ['.ts', '.tsx'])) {
+        const source = fs.readFileSync(fullPath, 'utf8');
+        if (!source.includes('runHubPipelineStageWithNative')) continue;
+        const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
+        if (!allowed.has(relativePath)) findings.push(relativePath);
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy normalize-request TS block files must be physically removed', () => {
     const pipelineRoot = path.join(
       process.cwd(),
