@@ -110,6 +110,11 @@ Phase 8C-3 legacy branch proof: `run_hub_pipeline_stage_json` currently has exac
 - Red tests also forbid wiring request-process or response-outbound legacy JSON stage APIs into `hub_pipeline_lib/engine.rs` as new stage-only branch targets.
 - Exit condition: delete these branches together with the legacy `runHubPipelineStageJson` wrapper/export after the wrapper contract is retired; do not add replacement branch names.
 
+Phase 8D-1 request-side bridge proof: `run_req_inbound_pipeline`, `run_req_inbound_pipeline_json`, `run_req_process_pipeline`, and `run_req_process_pipeline_json` remain locked to the legacy Rust stage implementation / NAPI bridge owner pair only: `hub_pipeline.rs` and `hub_pipeline_blocks/napi_bindings.rs`. Rust tests may exercise the implementation, but no production Rust module may add a direct caller outside that owner pair.
+
+- Red tests now forbid adding request-side legacy stage bridge direct callers outside the owner pair.
+- Exit condition: delete these request-side bridge symbols only together with the legacy `runHubPipelineStageJson` wrapper/export after the stage API contract is retired; live mainline must stay on `run_hub_pipeline_lib_json` / `execute_hub_pipeline_json`.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:
