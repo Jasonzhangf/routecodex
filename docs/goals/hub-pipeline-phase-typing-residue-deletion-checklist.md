@@ -115,6 +115,11 @@ Phase 8D-1 request-side bridge proof: `run_req_inbound_pipeline`, `run_req_inbou
 - Red tests now forbid adding request-side legacy stage bridge direct callers outside the owner pair.
 - Exit condition: delete these request-side bridge symbols only together with the legacy `runHubPipelineStageJson` wrapper/export after the stage API contract is retired; live mainline must stay on `run_hub_pipeline_lib_json` / `execute_hub_pipeline_json`.
 
+Phase 8D-2 response-side bridge proof: `run_resp_outbound_pipeline` and `run_resp_outbound_pipeline_json` remain locked to the legacy Rust stage implementation / NAPI bridge owner pair only: `hub_pipeline.rs` and `hub_pipeline_blocks/napi_bindings.rs`. Rust tests may exercise the implementation, but no production Rust module may add a direct caller outside that owner pair.
+
+- Red tests now forbid adding response-side legacy stage bridge direct callers outside the owner pair.
+- Exit condition: delete these response-side bridge symbols only together with the legacy `runHubPipelineStageJson` wrapper/export after the stage API contract is retired; live response mainline must stay on `execute_hub_pipeline_json` / typed response boundaries.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

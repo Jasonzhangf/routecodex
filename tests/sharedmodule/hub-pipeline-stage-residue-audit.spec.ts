@@ -264,7 +264,38 @@ describe('hub pipeline stage residue audit', () => {
       const relativePath = path.relative(crateRoot, fullPath).split(path.sep).join('/');
       const source = fs.readFileSync(fullPath, 'utf8');
       for (const symbol of symbols) {
-        if (new RegExp(`\b${symbol}\b`).test(source) && !allowedOwnerFiles.has(relativePath)) {
+        if (new RegExp(`\\b${symbol}\\b`).test(source) && !allowedOwnerFiles.has(relativePath)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('legacy response-side Rust stage bridge owner pair must stay fixed', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const allowedOwnerFiles = new Set([
+      'hub_pipeline.rs',
+      'hub_pipeline_blocks/napi_bindings.rs',
+    ]);
+    const symbols = [
+      'run_resp_outbound_pipeline',
+      'run_resp_outbound_pipeline_json',
+    ];
+    const findings: string[] = [];
+
+    for (const fullPath of walkFiles(crateRoot, ['.rs'])) {
+      if (fullPath.endsWith('_tests.rs') || fullPath.endsWith(path.join('shared_tooling', 'tests.rs'))) {
+        continue;
+      }
+      const relativePath = path.relative(crateRoot, fullPath).split(path.sep).join('/');
+      const source = fs.readFileSync(fullPath, 'utf8');
+      for (const symbol of symbols) {
+        if (new RegExp(`\\b${symbol}\\b`).test(source) && !allowedOwnerFiles.has(relativePath)) {
           findings.push(`${relativePath}:${symbol}`);
         }
       }
