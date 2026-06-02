@@ -120,6 +120,11 @@ Phase 8D-2 response-side bridge proof: `run_resp_outbound_pipeline` and `run_res
 - Red tests now forbid adding response-side legacy stage bridge direct callers outside the owner pair.
 - Exit condition: delete these response-side bridge symbols only together with the legacy `runHubPipelineStageJson` wrapper/export after the stage API contract is retired; live response mainline must stay on `execute_hub_pipeline_json` / typed response boundaries.
 
+Phase 8E-1 stage wrapper deletion-blocker proof: tracked source consumers of `runHubPipelineStageWithNative` are now locked to the native protocol wrapper plus contract/red-test files only; tracked source consumers of `runHubPipelineStageJson` are locked to the Rust NAPI export, native protocol wrapper, required-export list, and contract/red-test files only. This proves the remaining blocker is the explicit wrapper contract / required-export gate, not live mainline usage.
+
+- Red tests now forbid adding new tracked source consumers of `runHubPipelineStageWithNative` or `runHubPipelineStageJson` outside that blocker set.
+- Exit condition: retire the API contract test expectation, required-export entry, native wrapper export, Rust NAPI wrapper, and Rust stage implementation together after a separate deletion phase proves no wrapper contract remains.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

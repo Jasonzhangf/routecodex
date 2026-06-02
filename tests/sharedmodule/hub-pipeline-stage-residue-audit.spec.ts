@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from '@jest/globals';
 
 interface ResidueCheck {
@@ -302,6 +303,42 @@ describe('hub pipeline stage residue audit', () => {
     }
 
     expect(findings).toEqual([]);
+  });
+
+  it('legacy HubPipeline stage wrapper deletion blockers must stay fixed', () => {
+    const trackedFiles = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .filter((relativePath) => !relativePath.endsWith('.map'));
+    const stageWrapperConsumers = trackedFiles.filter((relativePath) => {
+      if (!/\.(ts|js|rs)$/.test(relativePath)) return false;
+      const fullPath = path.join(process.cwd(), relativePath);
+      if (!fs.existsSync(fullPath)) return false;
+      const source = fs.readFileSync(fullPath, 'utf8');
+      return source.includes('runHubPipelineStageWithNative');
+    });
+    const stageExportConsumers = trackedFiles.filter((relativePath) => {
+      if (!/\.(ts|js|rs)$/.test(relativePath)) return false;
+      const fullPath = path.join(process.cwd(), relativePath);
+      if (!fs.existsSync(fullPath)) return false;
+      const source = fs.readFileSync(fullPath, 'utf8');
+      return source.includes('runHubPipelineStageJson');
+    });
+
+    expect(stageWrapperConsumers).toEqual([
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
+      'tests/sharedmodule/hub-pipeline-rust-lib-api-contract.spec.ts',
+      'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts',
+    ]);
+    expect(stageExportConsumers).toEqual([
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts',
+      'tests/sharedmodule/hub-pipeline-rust-lib-api-contract.spec.ts',
+      'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts',
+      'tests/sharedmodule/native-required-exports-sse-stream.spec.ts',
+    ]);
   });
 
   it('legacy normalize-request TS block files must be physically removed', () => {
