@@ -85,6 +85,14 @@ Phase 8B-2 call graph proof: `run_resp_outbound_pipeline` and `run_resp_outbound
 
 Phase 8B-2 red tests now lock `run_resp_outbound_pipeline` and `run_resp_outbound_pipeline_json` to those owner files only. New response outbound legacy stage bridge callers are forbidden.
 
+Phase 8B-3 review proof: `runHubPipelineStageWithNative` remains live only in `native-hub-pipeline-orchestration-semantics-protocol.ts` / `.d.ts` / generated `.js` and the API contract test; `runHubPipelineStageJson` remains required as the Rust NAPI capability string / export. Live request/response mainlines use `runHubPipelineLibWithNative` / `executeHubPipelineWithNative`, not the stage wrapper.
+
+- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-lib.js` is a local untracked generated barrel in this worktree, not a committed deletion target for Phase 8B-3.
+- No tracked TS/JS/d.ts source imports `native-hub-pipeline-lib`; red tests now forbid making that barrel a live import surface.
+- Red tests continue to lock `runHubPipelineStageWithNative` source consumers to the native protocol wrapper declarations/implementation only.
+
+Deletion condition for remaining stage wrapper/export: do not delete `runHubPipelineStageWithNative` / `runHubPipelineStageJson` until the legacy stage API contract test and required native export list are retired together. Live mainline must stay on `executeHubPipelineWithNative` / `runHubPipelineLibWithNative` typed/total boundary.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

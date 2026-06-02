@@ -130,6 +130,31 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('legacy TS stage barrel must not become a tracked live import surface', () => {
+    const sourceRoots = [
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
+      path.join(process.cwd(), 'src'),
+      path.join(process.cwd(), 'tests'),
+    ];
+    const findings: string[] = [];
+
+    for (const root of sourceRoots) {
+      for (const fullPath of walkFiles(root, ['.ts', '.tsx', '.js', '.jsx', '.d.ts'])) {
+        const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
+        if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') {
+          continue;
+        }
+        if (relativePath === 'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-lib.js') {
+          continue;
+        }
+        const source = fs.readFileSync(fullPath, 'utf8');
+        if (source.includes('native-hub-pipeline-lib')) findings.push(relativePath);
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy normalize-request TS block files must be physically removed', () => {
     const pipelineRoot = path.join(
       process.cwd(),
