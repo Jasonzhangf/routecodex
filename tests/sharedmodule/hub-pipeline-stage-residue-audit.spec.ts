@@ -791,6 +791,21 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('server response handler must not classify response tool continuation in TS', () => {
+    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const bodyStart = source.indexOf('function isToolCallContinuationResponse');
+    expect(bodyStart).toBeGreaterThanOrEqual(0);
+    const body = source.slice(bodyStart, source.indexOf('\n}', bodyStart) + 2);
+    const findings = collectMatches(body, [
+      { label: 'derives tool_calls finish reason in TS', pattern: /deriveFinishReason\([^)]*\)\s*===\s*['"]tool_calls['"]/ },
+      { label: 'checks required_action tool_calls in TS', pattern: /required_action|submit_tool_outputs|tool_calls/ },
+      { label: 'checks output function/tool calls in TS', pattern: /function_call|tool_call/ },
+    ]);
+    expect(body).toContain('isToolCallContinuationResponseNative(body)');
+    expect(findings).toEqual([]);
+  });
+
   it('provider response shared blocks must not keep dead TS converted tool-call validators', () => {
     const filePath = path.join(
       process.cwd(),

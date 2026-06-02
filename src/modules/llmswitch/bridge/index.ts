@@ -58,5 +58,6 @@ export {
 export {
   classifyProviderFailure,
   deriveFinishReasonNative,
+  isToolCallContinuationResponseNative,
   getNetworkErrorCodes
 } from './native-exports.js';

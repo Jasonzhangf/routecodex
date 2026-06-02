@@ -18,7 +18,7 @@ import {
 } from '../utils/request-log-color.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { extractClientModelId } from '../runtime/http-server/executor/provider-response-utils.js';
-import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, createResponsesJsonToSseConverter, finalizeResponsesConversationRequestRetention, importCoreDist, recordResponsesResponseForRequest, rebindResponsesConversationRequestId, requireCoreDist } from '../../modules/llmswitch/bridge.js';
+import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, createResponsesJsonToSseConverter, finalizeResponsesConversationRequestRetention, importCoreDist, isToolCallContinuationResponseNative, recordResponsesResponseForRequest, rebindResponsesConversationRequestId, requireCoreDist } from '../../modules/llmswitch/bridge.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 
@@ -315,35 +315,7 @@ function readResponsesConversationResponseId(body: unknown): string | undefined 
 }
 
 function isToolCallContinuationResponse(body: unknown): boolean {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
-  const record = body as Record<string, unknown>;
-  if (deriveFinishReason(record) === 'tool_calls') return true;
-  if (typeof record.status === 'string' && record.status.trim().toLowerCase() === 'requires_action') {
-    return true;
-  }
-  const requiredAction =
-    record.required_action && typeof record.required_action === 'object' && !Array.isArray(record.required_action)
-      ? (record.required_action as Record<string, unknown>)
-      : undefined;
-  const submit =
-    requiredAction?.submit_tool_outputs
-    && typeof requiredAction.submit_tool_outputs === 'object'
-    && !Array.isArray(requiredAction.submit_tool_outputs)
-      ? (requiredAction.submit_tool_outputs as Record<string, unknown>)
-      : undefined;
-  const toolCalls = submit?.tool_calls;
-  if (Array.isArray(toolCalls) && toolCalls.length > 0) return true;
-  const output = record.output;
-  if (Array.isArray(output)) {
-    return output.some((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-      const type = typeof (item as Record<string, unknown>).type === 'string'
-        ? String((item as Record<string, unknown>).type).trim().toLowerCase()
-        : '';
-      return type === 'function_call' || type === 'tool_call';
-    });
-  }
-  return false;
+  return isToolCallContinuationResponseNative(body);
 }
 
 async function cleanupResponsesConversationSupersededRequestIds(args: {

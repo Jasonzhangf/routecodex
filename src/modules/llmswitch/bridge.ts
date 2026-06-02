@@ -93,6 +93,7 @@ export {
   sanitizeFollowupText,
   sanitizeProviderOutboundPayload,
   deriveFinishReasonNative,
+  isToolCallContinuationResponseNative,
   classifyProviderFailure,
   getNetworkErrorCodes
 } from './bridge/native-exports.js';

@@ -457,7 +457,9 @@ fn has_responses_tool_call(record: &Map<String, Value>) -> bool {
         .and_then(Value::as_object)
         .and_then(|row| row.get("submit_tool_outputs"))
         .and_then(Value::as_object)
-        .is_some()
+        .and_then(|row| row.get("tool_calls"))
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty())
     {
         return true;
     }
@@ -474,6 +476,12 @@ fn has_responses_tool_call(record: &Map<String, Value>) -> bool {
                 matches!(item_type.as_str(), "function_call" | "tool_call")
             })
         })
+}
+
+fn is_tool_call_continuation_response_value(body: &Value) -> bool {
+    derive_finish_reason_value(body)
+        .as_deref()
+        .is_some_and(|reason| reason == "tool_calls")
 }
 
 fn derive_finish_reason_value(body: &Value) -> Option<String> {
@@ -1044,6 +1052,12 @@ pub fn derive_finish_reason_json(body_json: String) -> NapiResult<String> {
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+pub fn is_tool_call_continuation_response_json(body_json: String) -> NapiResult<bool> {
+    let body: Value =
+        serde_json::from_str(&body_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(is_tool_call_continuation_response_value(&body))
+}
+
 #[cfg(test)]
 mod request_semantics_tests {
     use super::*;
@@ -1124,5 +1138,25 @@ mod request_semantics_tests {
             derive_finish_reason_value(&anthropic).as_deref(),
             Some("tool_calls")
         );
+    }
+
+    #[test]
+    fn detects_tool_call_continuation_response_in_rust() {
+        let required_action = json!({
+            "status": "requires_action",
+            "required_action": {
+                "submit_tool_outputs": {
+                    "tool_calls": [{ "id": "call_1" }]
+                }
+            }
+        });
+        assert!(is_tool_call_continuation_response_value(&required_action));
+
+        let empty_required_action = json!({
+            "status": "completed",
+            "required_action": { "submit_tool_outputs": {} },
+            "output": []
+        });
+        assert!(!is_tool_call_continuation_response_value(&empty_required_action));
     }
 }
