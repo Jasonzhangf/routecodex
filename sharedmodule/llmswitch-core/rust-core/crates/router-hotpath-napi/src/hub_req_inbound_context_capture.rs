@@ -4,6 +4,7 @@ use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
 use crate::hub_tool_session_compat::{
     filter_namespace_mcp_aggregator_tool_definitions, normalize_tool_session_messages,
 };
+use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tool_mapping::enforce_builtin_tool_schema;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
@@ -38,18 +39,6 @@ struct ResponsesHostPolicyInput {
 struct ResponsesHostPolicyOutput {
     should_strip_host_managed_fields: bool,
     target_protocol: String,
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
 }
 
 fn is_servertool_followup(adapter_context: &Value) -> bool {
@@ -543,6 +532,21 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
             if items.is_empty() {
                 return None;
             }
+            let has_previous_response_id =
+                read_trimmed_string(raw_request.get("previous_response_id")).is_some();
+            let allow_output_only_resume = has_previous_response_id
+                && items.iter().all(|entry| {
+                    let Some(row) = entry.as_object() else {
+                        return true;
+                    };
+                    let ty = read_trimmed_string(row.get("type"))
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    matches!(
+                        ty.as_str(),
+                        "function_call_output" | "tool_result" | "tool_message"
+                    )
+                });
             let allowed_tool_names = raw_request
                 .get("tools")
                 .and_then(Value::as_array)
@@ -676,6 +680,21 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                 }
 
                 normalized.push(entry.clone());
+            }
+
+            if !saw_function_calls && !allow_output_only_resume {
+                normalized.retain(|entry| {
+                    let Some(row) = entry.as_object() else {
+                        return true;
+                    };
+                    let ty = read_trimmed_string(row.get("type"))
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    !matches!(
+                        ty.as_str(),
+                        "function_call_output" | "tool_result" | "tool_message"
+                    )
+                });
             }
 
             Some(filter_orphan_responses_tool_outputs(normalized))
@@ -1171,6 +1190,7 @@ mod tests {
     #[test]
     fn normalize_responses_input_items_preserves_output_only_resume_batches() {
         let raw_request = json!({
+          "previous_response_id": "resp_prev",
           "input": [
             {
               "type": "function_call_output",
@@ -1186,6 +1206,47 @@ mod tests {
         assert_eq!(normalized.len(), 1);
         assert_eq!(normalized[0]["type"], "function_call_output");
         assert_eq!(normalized[0]["call_id"], "call_resume");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_drops_orphan_output_only_history() {
+        let raw_request = json!({
+          "input": [
+            { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "next" }] },
+            {
+              "type": "function_call_output",
+              "id": "out_orphan",
+              "call_id": "call_1",
+              "output": "stale output from prior polluted context"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0]["type"], "message");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_drops_orphan_output_mixed_with_resume_history() {
+        let raw_request = json!({
+          "previous_response_id": "resp_prev",
+          "input": [
+            { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "continue" }] },
+            {
+              "type": "function_call_output",
+              "id": "out_stale",
+              "call_id": "call_1",
+              "output": "stale output from prior polluted context"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0]["type"], "message");
     }
 
     #[test]

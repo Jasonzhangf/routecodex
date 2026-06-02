@@ -1,5 +1,6 @@
 use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
 use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
+use crate::shared_json_utils::read_trimmed_string;
 use serde_json::{Map, Value};
 
 pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<Value, String> {
@@ -28,31 +29,37 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
     let tools = payload
         .get("tools")
         .and_then(|v| v.as_array())
-        .map(|tools| tools.iter().map(normalize_tool_definition).collect::<Vec<_>>());
-    let messages = if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
-        messages
-    } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
-        convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
-            input: input_items,
-            tools: tools.clone(),
-            tool_result_fallback_text: None,
-            normalize_function_name: Some("responses".to_string()),
-            allow_pending_terminal_tool_call: Some(true),
-            allow_orphan_tool_result: Some(false),
-        })?
-        .messages
-    } else if let Some(input_text) = payload
-        .get("input")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-    {
-        vec![serde_json::json!({ "role": "user", "content": input_text })]
-    } else {
-        return Err(
-            "[HubPipeline] outbound stage requires payload.messages[] or payload.input[]"
-                .to_string(),
-        );
-    };
+        .map(|tools| {
+            tools
+                .iter()
+                .map(normalize_tool_definition)
+                .collect::<Vec<_>>()
+        });
+    let messages =
+        if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
+            messages
+        } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
+            convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+                input: drop_stale_orphan_responses_tool_outputs(payload, input_items),
+                tools: tools.clone(),
+                tool_result_fallback_text: None,
+                normalize_function_name: Some("responses".to_string()),
+                allow_pending_terminal_tool_call: Some(true),
+                allow_orphan_tool_result: Some(false),
+            })?
+            .messages
+        } else if let Some(input_text) = payload
+            .get("input")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        {
+            vec![serde_json::json!({ "role": "user", "content": input_text })]
+        } else {
+            return Err(
+                "[HubPipeline] outbound stage requires payload.messages[] or payload.input[]"
+                    .to_string(),
+            );
+        };
     let parameters = payload
         .get("parameters")
         .and_then(|v| v.as_object())
@@ -247,11 +254,60 @@ fn copy_optional_payload_fields(
     }
 }
 
+fn is_responses_tool_output_item(value: &Value) -> bool {
+    let Some(row) = value.as_object() else {
+        return false;
+    };
+    let ty = read_trimmed_string(row.get("type"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(
+        ty.as_str(),
+        "function_call_output" | "tool_result" | "tool_message"
+    )
+}
+
+fn is_responses_function_call_item(value: &Value) -> bool {
+    let Some(row) = value.as_object() else {
+        return false;
+    };
+    let ty = read_trimmed_string(row.get("type"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(ty.as_str(), "function_call" | "tool_call")
+}
+
+fn drop_stale_orphan_responses_tool_outputs(
+    payload: &Map<String, Value>,
+    input_items: Vec<Value>,
+) -> Vec<Value> {
+    if input_items.iter().any(is_responses_function_call_item) {
+        return input_items;
+    }
+    let has_previous_response_id =
+        read_trimmed_string(payload.get("previous_response_id")).is_some();
+    let is_output_only_resume = has_previous_response_id
+        && input_items
+            .iter()
+            .all(|entry| !entry.is_object() || is_responses_tool_output_item(entry));
+    if is_output_only_resume {
+        return input_items;
+    }
+    input_items
+        .into_iter()
+        .filter(|entry| !is_responses_tool_output_item(entry))
+        .collect()
+}
+
 fn normalize_tool_definition(tool: &Value) -> Value {
     let Some(tool_map) = tool.as_object() else {
         return tool.clone();
     };
-    if tool_map.get("function").and_then(Value::as_object).is_some() {
+    if tool_map
+        .get("function")
+        .and_then(Value::as_object)
+        .is_some()
+    {
         return tool.clone();
     }
     if tool_map.get("type").and_then(Value::as_str) != Some("function") {
@@ -280,7 +336,37 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn responses_standardization_rejects_orphan_tool_result_even_with_previous_response_id() {
+    fn responses_standardization_drops_mixed_orphan_tool_result_even_with_previous_response_id() {
+        let input = json!({
+            "payload": {
+                "model": "minimax-m3-free",
+                "previous_response_id": "resp_previous",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "continue" }] },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": "stale output from prior polluted context"
+                    }
+                ]
+            },
+            "normalized": {
+                "id": "req_test",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        let standardized = output.get("standardizedRequest").unwrap();
+        assert_eq!(standardized["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(standardized["messages"][0]["role"], json!("user"));
+    }
+
+    #[test]
+    fn responses_standardization_rejects_output_only_orphan_tool_result_even_with_previous_response_id(
+    ) {
         let input = json!({
             "payload": {
                 "model": "minimax-m3-free",
