@@ -54,7 +54,10 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         .get("semantics")
         .and_then(|v| v.as_object())
         .cloned();
-    let metadata_from_payload = payload.get("metadata").and_then(|v| v.as_object()).cloned();
+    let metadata_from_normalized = normalized
+        .get("metadata")
+        .and_then(|v| v.as_object())
+        .cloned();
     let previous_response_id = payload
         .get("previous_response_id")
         .and_then(|v| v.as_str())
@@ -72,7 +75,7 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
                 .to_string(),
         ),
     );
-    if let Some(source_metadata) = metadata_from_payload {
+    if let Some(source_metadata) = metadata_from_normalized {
         for (key, value) in source_metadata {
             metadata.insert(key, value);
         }
@@ -225,5 +228,28 @@ mod tests {
 
         let err = coerce_standardized_request_from_payload(&input).unwrap_err();
         assert!(err.contains("orphan_tool_result"));
+    }
+
+    #[test]
+    fn takes_internal_metadata_from_normalized_carrier_not_payload() {
+        let input = json!({
+            "payload": {
+                "model": "m",
+                "input": [{ "role": "user", "content": "hi" }]
+            },
+            "normalized": {
+                "id": "req_test",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "chat",
+                "metadata": { "routeHint": "tools", "sessionId": "s1" }
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        let standardized = output.get("standardizedRequest").unwrap();
+        assert_eq!(standardized["metadata"]["routeHint"], json!("tools"));
+        assert_eq!(standardized["metadata"]["sessionId"], json!("s1"));
+        assert!(output["rawPayload"].get("metadata").is_none());
     }
 }

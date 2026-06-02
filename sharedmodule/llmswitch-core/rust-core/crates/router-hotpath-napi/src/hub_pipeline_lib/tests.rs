@@ -43,6 +43,48 @@ fn engine_execute_normalizes_request_and_returns_empty_effect_plan() {
 }
 
 #[test]
+fn request_live_path_keeps_inline_metadata_out_of_typed_normal_payload() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig {
+        virtual_router: json!({
+            "target": {
+                "providerKey": "openai.m",
+                "runtimeKey": "openai",
+                "modelId": "m"
+            },
+            "routeName": "default"
+        }),
+        ..HubPipelineConfig::default()
+    })
+    .unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-inline-metadata-normal-boundary".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            payload: json!({
+                "model": "m",
+                "input": [{ "role": "user", "content": "hi" }],
+                "metadata": { "routeHint": "tools" }
+            }),
+            metadata: json!({
+                "entryEndpoint": "/v1/responses",
+                "routeHint": "tools"
+            }),
+            stream: true,
+            process_mode: "chat".to_string(),
+            direction: "request".to_string(),
+            stage: "inbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.unwrap();
+    assert!(payload.get("metadata").is_none());
+    assert_eq!(payload["model"], json!("m"));
+}
+
+#[test]
 fn execute_hub_pipeline_json_fails_fast_on_empty_input() {
     let error = execute_hub_pipeline_json("   ".to_string()).unwrap_err();
     assert_eq!(error.code, "hub_pipeline_empty_input");
