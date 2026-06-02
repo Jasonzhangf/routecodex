@@ -57,6 +57,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "isToolCallContinuationResponseJson",
   "isEmptyClientResponsePayloadJson",
   "classifyEmptyResponseSignalJson",
+  "detectToolExecutionFailuresJson",
   "buildFormatRequestJson",
   "buildResponsesPayloadFromChatJson",
   "buildBridgeHistoryJson",

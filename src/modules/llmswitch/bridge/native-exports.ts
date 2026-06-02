@@ -7,6 +7,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { importCoreDist, requireCoreDist, resolveCoreModulePath, type AnyRecord } from './module-loader.js';
+import type { ToolExecutionFailureSignal } from './snapshot-recorder-types.js';
 
 type NativeFailureClassification = unknown;
 type NativeFailurePolicyModule = {
@@ -54,6 +55,7 @@ type NativeChatProcessNodeResultSemantics = {
   isToolCallContinuationResponseJson?: (bodyJson: string) => boolean;
   isEmptyClientResponsePayloadJson?: (bodyJson: string) => boolean;
   classifyEmptyResponseSignalJson?: (stage: string, bodyJson: string) => string;
+  detectToolExecutionFailuresJson?: (bodyJson: string) => string;
 };
 
 type NativeHubPipelineRespSemantics = {
@@ -402,6 +404,19 @@ export function classifyEmptyResponseSignalNative(
     throw new Error('[llmswitch-bridge] classifyEmptyResponseSignalJson returned invalid payload');
   }
   return parsed as { errorType: string; matchedText: string; responseSummary: Record<string, unknown> };
+}
+
+export function detectToolExecutionFailuresNative(body: unknown): ToolExecutionFailureSignal[] {
+  const fn = getChatProcessNodeResultSemantics().detectToolExecutionFailuresJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] detectToolExecutionFailuresJson not available');
+  }
+  const raw = fn(JSON.stringify(body ?? null));
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] detectToolExecutionFailuresJson returned invalid payload');
+  }
+  return parsed as ToolExecutionFailureSignal[];
 }
 
 export function isBlockingRecoverableNative(

@@ -351,7 +351,7 @@ export async function createSnapshotRecorder(
                 callId: failure.callId,
                 trace: cloneStageTraceSummary(stageTrace, MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES)
               },
-              observation: summarizeClientToolObservation(p)
+              observation: summarizeClientToolObservation(p, toolFailures)
             });
           }
         }

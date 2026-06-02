@@ -14,8 +14,7 @@ import {
   MAX_STAGE_TRACE_PAYLOAD_CHARS
 } from './snapshot-recorder-types.js';
 import {
-  classifyRuntimeErrorSignalFromText,
-  collectToolMessages
+  classifyRuntimeErrorSignalFromText
 } from './snapshot-recorder-tool-failures.js';
 
 const DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS = 30 * 60_000;
@@ -389,16 +388,26 @@ export function shouldWriteClientToolErrorsample(args: {
   return true;
 }
 
-export function summarizeClientToolObservation(payload: AnyRecord): Record<string, unknown> {
-  const toolMessages = collectToolMessages(payload);
+export function summarizeClientToolObservation(
+  payload: AnyRecord,
+  failures: ToolExecutionFailureSignal[]
+): Record<string, unknown> {
   return {
     topLevelKeys: Object.keys(payload || {}).slice(0, 20),
-    toolMessageCount: toolMessages.length,
-    toolMessages: toolMessages.slice(-4).map((msg) => ({
-      name: typeof msg.name === 'string' ? msg.name : undefined,
-      tool_call_id: typeof msg.tool_call_id === 'string' ? msg.tool_call_id : undefined,
-      call_id: typeof msg.call_id === 'string' ? msg.call_id : undefined,
-      contentPreview: clipText(typeof msg.content === 'string' ? msg.content : '', 180)
+    failureCount: failures.length,
+    toolMessageCount: failures.length,
+    failures: failures.slice(-4).map((failure) => ({
+      toolName: failure.toolName,
+      errorType: failure.errorType,
+      toolCallId: failure.toolCallId,
+      callId: failure.callId,
+      matchedPreview: clipText(failure.matchedText, 180)
+    })),
+    toolMessages: failures.slice(-4).map((failure) => ({
+      name: failure.toolName,
+      tool_call_id: failure.toolCallId,
+      call_id: failure.callId,
+      contentPreview: clipText(failure.matchedText, 180)
     }))
   };
 }

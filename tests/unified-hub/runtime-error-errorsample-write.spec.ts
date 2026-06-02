@@ -7,6 +7,10 @@ import {
   createSnapshotRecorder,
   resetSnapshotRecorderErrorsampleStateForTests
 } from '../../src/modules/llmswitch/bridge.js';
+import {
+  __flushErrorsampleQueueForTests,
+  __resetErrorsampleQueueForTests
+} from '../../src/utils/errorsamples.js';
 
 async function waitForFile(dir: string, predicate: (name: string) => boolean, timeoutMs = 1500): Promise<string> {
   const started = Date.now();
@@ -38,7 +42,9 @@ describe('runtime parse/exec errorsamples', () => {
   });
 
   afterEach(async () => {
+    await __flushErrorsampleQueueForTests();
     resetSnapshotRecorderErrorsampleStateForTests();
+    __resetErrorsampleQueueForTests();
     delete process.env.ROUTECODEX_SNAPSHOT_DIR;
     delete process.env.ROUTECODEX_ERRORSAMPLES_DIR;
     delete process.env.ROUTECODEX_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS;

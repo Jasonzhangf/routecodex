@@ -84,6 +84,7 @@ mod shared_chat_request_filters;
 mod shared_compaction_detect;
 mod shared_gemini_tool_utils;
 mod shared_json_utils;
+mod snapshot_tool_failures;
 mod shared_mcp_injection;
 mod shared_metadata_semantics;
 mod shared_openai_message_normalize;
@@ -1194,6 +1195,11 @@ pub fn classify_empty_response_signal_json_bridge(
     body_json: String,
 ) -> NapiResult<String> {
     chat_node_result_semantics::classify_empty_response_signal_json(stage, body_json)
+}
+
+#[napi(js_name = "detectToolExecutionFailuresJson")]
+pub fn detect_tool_execution_failures_json_bridge(payload_json: String) -> NapiResult<String> {
+    snapshot_tool_failures::detect_tool_execution_failures_json(payload_json)
 }
 
 #[napi(js_name = "normalizeToolCallIdsJson")]

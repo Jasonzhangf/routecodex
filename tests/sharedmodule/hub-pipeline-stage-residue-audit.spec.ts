@@ -834,6 +834,23 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('bridge snapshot recorder tool failures must stay a native thin wrapper', () => {
+    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/snapshot-recorder-tool-failures.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const bodyStart = source.indexOf('export function detectToolExecutionFailures');
+    expect(bodyStart).toBeGreaterThanOrEqual(0);
+    const nextExport = source.indexOf('\nexport function ', bodyStart + 1);
+    const body = source.slice(bodyStart, nextExport > bodyStart ? nextExport : undefined);
+    const findings = collectMatches(body, [
+      { label: 'collects tool messages in TS', pattern: /collectToolMessages|messages|input/ },
+      { label: 'classifies tool names in TS', pattern: /exec_command|apply_patch|shell_command/ },
+      { label: 'maps tool ids in TS', pattern: /tool_call_id|call_id/ },
+      { label: 'deduplicates tool failures in TS', pattern: /new Set|dedup/ },
+    ]);
+    expect(body).toContain('detectToolExecutionFailuresNative(payload)');
+    expect(findings).toEqual([]);
+  });
+
   it('provider response shared blocks must not keep dead TS converted tool-call validators', () => {
     const filePath = path.join(
       process.cwd(),
