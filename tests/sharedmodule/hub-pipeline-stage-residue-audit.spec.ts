@@ -201,6 +201,9 @@ describe('hub pipeline stage residue audit', () => {
         'hub_resp_outbound_04_finalize_boundary.rs',
         'resp_process_stage2_finalize.rs',
       ]),
+      finalize_chat_response_json: new Set([
+        'resp_process_stage2_finalize.rs',
+      ]),
       build_client_payload_for_protocol: new Set(['hub_resp_outbound_04_client_payload_boundary.rs']),
     };
     const findings: string[] = [];

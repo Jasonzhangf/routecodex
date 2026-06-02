@@ -4,7 +4,9 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatprocess_03_response;
+use crate::hub_resp_outbound_04_finalize_boundary::finalize_hub_resp_outbound_04_client_semantic;
 use crate::resp_process_stage1_tool_governance::ToolGovernanceInput;
+use crate::resp_process_stage2_finalize::FinalizeInput;
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -162,25 +164,13 @@ pub fn run_openai_openai_response_codec_json(
     .map_err(napi::Error::from_reason)?
     .governed_payload;
 
-    let finalized_raw = crate::resp_process_stage2_finalize::finalize_chat_response_json(
-        serde_json::to_string(&serde_json::json!({
-            "payload": governed,
-            "stream": options.stream,
-            "reasoningMode": options.reasoning_mode,
-            "endpoint": options.endpoint,
-            "requestId": options.request_id,
-        }))
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?,
-    )?;
-    let finalized = parse_value(&finalized_raw)?;
-    let output = finalized
-        .as_object()
-        .and_then(|row| {
-            row.get("finalizedPayload")
-                .or_else(|| row.get("finalized_payload"))
-        })
-        .cloned()
-        .unwrap_or(finalized);
+    let output = finalize_hub_resp_outbound_04_client_semantic(FinalizeInput {
+        payload: governed,
+        stream: options.stream,
+        reasoning_mode: options.reasoning_mode,
+        endpoint: options.endpoint,
+        request_id: options.request_id,
+    });
     stringify_value(&output)
 }
 

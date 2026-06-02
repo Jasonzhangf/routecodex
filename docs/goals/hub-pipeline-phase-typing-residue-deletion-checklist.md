@@ -106,6 +106,9 @@ These categories can become deletion candidates only after the required proof ga
 - Phase 7A renamed the private `hub_tool_governance_semantics.rs` response helper to `govern_tool_name_response`, so it no longer collides with Hub response chatprocess stage naming.
 - Phase 7B covered response finalize callers now enter `hub_resp_outbound_04_finalize_boundary.rs` instead of importing `finalize_chat_response` directly:
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+- Phase 8B-1 covered response codec finalize caller now enters `hub_resp_outbound_04_finalize_boundary.rs` instead of calling `finalize_chat_response_json` directly:
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/openai_openai_codec.rs`
+  - `finalize_chat_response` and `finalize_chat_response_json` are now red-test locked to their owner implementation file / typed boundary only.
 - Phase 7C covered response outbound client payload projection callers now enter `hub_resp_outbound_04_client_payload_boundary.rs` instead of calling `build_client_payload_for_protocol` directly:
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
 - Phase 7D covered request governance callers now enter `hub_req_chatprocess_03_governance_boundary.rs` instead of calling `apply_req_process_tool_governance` directly:
