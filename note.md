@@ -14159,3 +14159,129 @@ P2（架构干净）：
 - Confirmed `sharedmodule/llmswitch-core/src/filters/special/*` tool/protocol filters were only exported via `filters/index.ts` and old tests, with no runtime registration; they contained TS tool_calls/tool_outputs/MCP/protocol mutation and non-blocking swallow patterns.
 - Physically removed legacy special tool/protocol filters and old direct tests; Rust Hub Pipeline remains the only tool/protocol governance truth.
 - Verification: residue audit 52/52 PASS; `npx tsc --noEmit --pretty false --skipLibCheck` PASS.
+|------|------|
+| `provider-traffic-governor.ts` | **1426-1432** |
+
+```typescript
+let sharedGovernor: ProviderTrafficGovernor | null = null;  // 1426: 进程单例
+export function getSharedProviderTrafficGovernor(): ProviderTrafficGovernor {
+  if (!sharedGovernor) { sharedGovernor = new ProviderTrafficGovernor(); }
+  return sharedGovernor;
+}
+```
+
+**影响**：provider 并发限流、cooldown bucket、adaptive state **跨端口共享**。10000 的请求消耗 5520 的 traffic quota。
+
+### 7. 单一 providerHandles（全 server 共享 Map）
+| 文件 | 行号 |
+|------|------|
+| `index.ts` | **192** |
+
+```typescript
+private providerHandles: Map<string, ProviderHandle> = new Map();  // 192: 进程唯一
+```
+
+**影响**：各端口通过 `isProviderVisibleInMetadataScope(allowedProviders)` 软隔离，**但底层 runtime 实例（connection pool、warmup 状态）是共享的**。
+
+### 8. Global log 文件（无 port 标签）
+| 文件 | 行号 |
+|------|------|
+| `stats-manager.ts` | **114** |
+| `servertool-admin-state.ts` | **57** |
+| `process-lifecycle-logger.ts` | **27** |
+
+```typescript
+// stats-manager.ts:114
+const DEFAULT_STATS_LOG_PATH = path.join(resolveRccLogsDir(), 'provider-stats.jsonl');
+// servertool-admin-state.ts:57
+const DEFAULT_LOG_PATH = path.join(resolveRccLogsDir(), 'servertool-events.jsonl');
+// process-lifecycle-logger.ts:27
+const DEFAULT_LOG_PATH = path.join(DEFAULT_LOG_DIR, 'process-lifecycle.jsonl');
+```
+
+**影响**：`provider-stats.jsonl`、`servertool-events.jsonl`、`process-lifecycle.jsonl` 无 port 标签，所有事件混写。
+
+### 9. errorsamples 全局目录（无 port 维度）
+| 文件 | 行号 |
+|------|------|
+| `errorsamples.ts` | **55-63** |
+
+```typescript
+function resolveErrorsamplesRoot(): string {  // 55
+  const envOverride = process.env.ROUTECODEX_ERRORSAMPLES_DIR || ...;
+  return envOverride || resolveRccPath('errorsamples');  // 63: 无 port 维度
+}
+```
+
+**影响**：所有端口的错误样本写到同一池，**无端口标签**。
+
+### 10. provider snapshot 不按端口分桶
+| 文件 | 行号 |
+|------|------|
+| `snapshot-writer.ts` | **130-148** |
+
+```typescript
+function resolveEndpoint(entryEndpoint?: string): { endpoint, folder } {
+  // folder = 'openai-responses' | 'anthropic-messages' | 'openai-chat'
+  // **没有 port 维度**
+}
+```
+
+`snapshot-store.ts:38-54`（sessionFile）的 `portContext` 来自 `metadata.portContext.matchedPort`，但 provider snapshot 写入路径 `<SNAPSHOT_DIR>/<endpoint-folder>/<providerKey>/<groupRequestId>/` **没有 port 子目录**。`matchedPort` 仅注入 marker 文件，不参与路径路由。
+
+### 11. daemon admin 路由（安全隐患）
+| 文件 | 行号 |
+|------|------|
+| `ports-handler.ts` | **22, 48, 111** |
+| `quota-handler.ts` | **197, 234, 268, 299, 330** |
+| `credentials-handler.ts` | **22, 76, 105** |
+| `stats-handler.ts` | **39** |
+
+全部挂在单一 `app` 上（经 `registerHttpRoutes({ app: server.app })` 注入）。**任何端口都能访问全 server 管理接口**。
+
+---
+
+## 三、10000 Empty Reply 根因分析
+
+### 排除项
+- ❌ 端口未 listen ✅（`nc` 确认 TCP listen 成功）
+- ❌ 启动串行抛错被吞 ✅（`startHttpServer` throw 时 `stopAll` + 进程 exit，57853 存活）
+- ❌ hubPipelinesByRoutingPolicyGroup 缺 entry ✅（10000 有独立 HubPipeline）
+
+### 待验证
+- `buildVirtualRouterInputV2(cfg, undefined, { routingPolicyGroup: 'gateway_coding_10000' })` 是否成功
+- forwarder `fwd.minimax.MiniMax-M2.7` 的 provider profile loader 是否失败但静默
+- `executePortAwarePipeline` 是否被调用（需加 `ROUTECODEX_PORT_RESOLVE_LOGS=1`）
+
+### 可能真因
+forwarder 引用的 provider profile（minimax/mini27/minimonth）加载失败 → HubPipeline 构建不完整 → 处理请求时抛未捕获异常 → Express connection reset → empty reply。
+
+---
+
+## 四、审计清单汇总
+
+| 资源 | 隔离 | 严重度 | 备注 |
+|------|------|--------|------|
+| HubPipeline per group | ✅ | — | 唯一隔离资源 |
+| PortRegistry per port | ✅ | — | |
+| per-port allowedProviders | ✅ | — | 软隔离 |
+| PortLogContext (AsyncLocalStorage) | ✅ | — | 需包裹 |
+| Express Application | ❌ | P0 | middleware 跨端口 |
+| serverId + session dir | ❌ | **P0** | 全写 5520 目录 |
+| StatsManager | ❌ | P1 | 无 port 聚合 |
+| QuietErrorHandlingCenter | ❌ | P1 | 错误汇合 |
+| ManagerDaemon (T/R/H/Q) | ❌ | **P1** | health/quota/routing 跨端口 |
+| SharedProviderTrafficGovernor | ❌ | **P1** | 限流/cooldown 共享 |
+| providerHandles (Map) | ❌ | P2 | runtime 共享 |
+| provider-stats.jsonl | ❌ | P1 | 无 port 标签 |
+| servertool-events.jsonl | ❌ | P2 | 无 port 标签 |
+| process-lifecycle.jsonl | ❌ | P2 | 无 port 标签 |
+| errorsamples | ❌ | P2 | 无 port 维度 |
+| provider snapshot paths | ❌ | P2 | 无 port 子目录 |
+| daemon admin routes | ❌ | **P1 安全** | 任意端口可管理全 server |
+
+## 2026-06-02 Hub Pipeline audit: provider response shared dead TS validators removed
+- Red test added: `provider response shared blocks must not keep dead TS converted tool-call validators`.
+- Removed unused TS exports `collectConvertedProviderToolCalls`, `collectValidatedConvertedProviderToolCallsOrThrow`, `normalizeValidatedConvertedProviderToolCallsInPlace`, `validateConvertedProviderToolCallsOrThrow` from provider response shared pure blocks.
+- Kept active `normalizeRecoveredToolCalls` path because provider response converter still uses it for native/Rust recovered rows validation.
+- Verification: targeted residue PASS, full residue audit PASS, `npx tsc --noEmit --pretty false --skipLibCheck` PASS.

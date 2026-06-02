@@ -707,6 +707,23 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('provider response shared blocks must not keep dead TS converted tool-call validators', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'src/server/runtime/http-server/executor/provider-response-shared-pure-blocks.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'exports TS provider tool call collector', pattern: /export function collectConvertedProviderToolCalls/ },
+      { label: 'exports TS provider tool call validator', pattern: /export function collectValidatedConvertedProviderToolCallsOrThrow/ },
+      { label: 'exports TS provider tool call mutator', pattern: /export function normalizeValidatedConvertedProviderToolCallsInPlace/ },
+      { label: 'exports TS provider tool call validate wrapper', pattern: /export function validateConvertedProviderToolCallsOrThrow/ },
+      { label: 'scans required_action tool calls for converted validation', pattern: /required_action|submit_tool_outputs\.tool_calls/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('responses openai pipeline must not capture tool results in TS', () => {
     const filePath = path.join(
       process.cwd(),
