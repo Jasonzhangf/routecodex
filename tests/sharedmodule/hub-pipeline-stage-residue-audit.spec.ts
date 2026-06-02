@@ -98,18 +98,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(stagePath)).toBe(false);
   });
 
-  it('hub pipeline normalize request TS shell must enter Rust total stage API instead of orchestration helper', () => {
+  it('hub pipeline normalize request TS shell must be physically removed', () => {
     const normalizePath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.ts',
     );
-    const source = fs.readFileSync(normalizePath, 'utf8');
 
-    expect(source).toContain('runHubPipelineStageWithNative');
-    expect(source).toContain("stage: 'normalizeRequest'");
-    expect(source).not.toContain('runHubPipelineOrchestrationWithNative');
-    expect(source).not.toContain('resolveNormalizedRouteShape');
-    expect(source).not.toContain('buildNormalizedMetadataRecord');
+    expect(fs.existsSync(normalizePath)).toBe(false);
   });
 
   it('legacy TS stage native entrypoints must stay locked to known bridge shells', () => {
@@ -118,7 +113,6 @@ describe('hub pipeline stage residue audit', () => {
       path.join(process.cwd(), 'src'),
     ];
     const allowed = new Set([
-      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.ts',
       'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.d.ts',
       'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
     ]);

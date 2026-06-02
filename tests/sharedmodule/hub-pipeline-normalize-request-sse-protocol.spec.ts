@@ -3,38 +3,26 @@ import { Readable } from 'node:stream';
 
 const resolveSseProtocolWithNative = jest.fn();
 const extractModelHintFromMetadataWithNative = jest.fn(() => 'gpt-test');
-const normalizeHubEndpointWithNative = jest.fn((endpoint: string) => endpoint);
-const runHubPipelineOrchestrationWithNative = jest.fn((input: Record<string, unknown>) => ({
+const runHubPipelineLibWithNative = jest.fn((input: Record<string, any>) => ({
+  requestId: input.request.requestId,
   success: true,
-  payload: input.payload,
-  metadata: input.metadata,
+  payload: input.request.payload,
+  metadata: {
+    ...input.request.metadata,
+    endpoint: input.request.endpoint,
+    entryEndpoint: input.request.entryEndpoint,
+    providerProtocol: input.request.providerProtocol,
+    stream: input.request.stream,
+    processMode: input.request.processMode,
+    direction: input.request.direction,
+    stage: input.request.stage,
+    target: input.request.metadata.__routecodexPreselectedRoute.target,
+    routingDecision: input.request.metadata.__routecodexPreselectedRoute.decision,
+    routingDiagnostics: input.request.metadata.__routecodexPreselectedRoute.diagnostics,
+  },
+  effectPlan: { effects: [] },
+  diagnostics: [],
 }));
-const readHubPipelineSemanticMapperHintWithNative = jest.fn(() => null);
-const coerceHubPipelineStageTagWithNative = jest.fn(() => null);
-const resolveHubPipelineDirectionWithNative = jest.fn(() => null);
-const resolveHubPipelineProcessModeWithNative = jest.fn(() => null);
-const resolveHubPipelineProviderProtocolWithNative = jest.fn(() => null);
-const resolveHubPipelineRouteHintWithNative = jest.fn(() => null);
-const resolveHubPipelineStageWithNative = jest.fn(() => null);
-const normalizeHubPipelineMetadataShapeWithNative = jest.fn((metadata: Record<string, unknown>) => metadata);
-const decideHubPipelineDirectionWithNative = jest.fn((_stage: string, fallback: string) => fallback);
-const resolveHubPipelineDirectionStageWithNative = jest.fn((stage: string) => stage);
-const resolveHubPipelineProviderProtocolAndProcessModeWithNative = jest.fn((args: any) => ({
-  providerProtocol: args.fallbackProviderProtocol,
-  processMode: args.fallbackProcessMode,
-}));
-const resolveHubPipelineProcessStageWithNative = jest.fn((stage: string) => ({
-  directionStage: stage,
-  inbound: stage !== 'outbound',
-  stageTag: stage,
-}));
-const resolveHubPipelineStreamWithNative = jest.fn((_payload: any, fallback: boolean) => fallback);
-const resolveHubProviderProtocolWithNative = jest.fn((value: unknown) => {
-  if (typeof value === 'string' && value.trim()) return value.trim();
-  return 'openai-chat';
-});
-const resolveHubPolicyOverrideFromMetadataWithNative = jest.fn(() => undefined);
-const resolveHubShadowCompareConfigWithNative = jest.fn(() => undefined);
 
 const convertSseToJson = jest.fn(async () => ({ model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] }));
 const getCodec = jest.fn(() => ({ convertSseToJson }));
@@ -53,32 +41,32 @@ jest.unstable_mockModule(
   () => ({
     resolveSseProtocolWithNative,
     extractModelHintFromMetadataWithNative,
-    normalizeHubEndpointWithNative,
-    runHubPipelineOrchestrationWithNative,
-    readHubPipelineSemanticMapperHintWithNative,
-    coerceHubPipelineStageTagWithNative,
-    resolveHubPipelineDirectionWithNative,
-    resolveHubPipelineProcessModeWithNative,
-    resolveHubPipelineProviderProtocolWithNative,
-    resolveHubPipelineRouteHintWithNative,
-    resolveHubPipelineStageWithNative,
-    normalizeHubPipelineMetadataShapeWithNative,
-    decideHubPipelineDirectionWithNative,
-    resolveHubPipelineDirectionStageWithNative,
-    resolveHubPipelineProviderProtocolAndProcessModeWithNative,
-    resolveHubPipelineProcessStageWithNative,
-    resolveHubPipelineStreamWithNative,
-    resolveHubProviderProtocolWithNative,
-    resolveHubPolicyOverrideFromMetadataWithNative,
-    resolveHubShadowCompareConfigWithNative,
   }),
 );
 
-const { normalizeHubPipelineRequest } = await import(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-normalize-request.js'
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js',
+  () => ({
+    runHubPipelineLibWithNative,
+  }),
 );
 
-describe('hub pipeline normalize request sse protocol matrix', () => {
+const { HubPipeline } = await import(
+  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.js'
+);
+
+const preselectedRoute = {
+  target: {
+    providerKey: 'test.key1.gpt-test',
+    providerType: 'openai',
+    outboundProfile: 'openai-chat',
+    modelId: 'gpt-test',
+  },
+  decision: { routeName: 'test/preselected' },
+  diagnostics: {},
+};
+
+describe('hub pipeline request materialization sse protocol matrix', () => {
   const matrix = [
     { protocol: 'openai-chat', providerProtocol: 'openai-chat', endpoint: '/v1/chat/completions' },
     { protocol: 'openai-responses', providerProtocol: 'openai-responses', endpoint: '/v1/responses' },
@@ -87,29 +75,50 @@ describe('hub pipeline normalize request sse protocol matrix', () => {
   ] as const;
 
   for (const entry of matrix) {
-    it(`uses ${entry.protocol} codec path and keeps normalized payload canonical`, async () => {
+    it(`uses ${entry.protocol} codec path and passes canonical payload into Rust total pipeline`, async () => {
       resolveSseProtocolWithNative.mockReturnValueOnce(entry.protocol);
       convertSseToJson.mockResolvedValueOnce({
         model: 'gpt-test',
         messages: [{ role: 'user', content: `hi:${entry.protocol}` }],
       });
+      const pipeline = new HubPipeline({
+        virtualRouter: {},
+      } as any);
 
-      const normalized = await normalizeHubPipelineRequest({
+      const result = await pipeline.execute({
         id: `req_${entry.protocol}`,
         endpoint: entry.endpoint,
-        providerProtocol: entry.providerProtocol,
         payload: { readable: Readable.from(['event: message\ndata: {}\n\n']) },
-        metadata: { x: 1 },
+        metadata: {
+          providerProtocol: entry.providerProtocol,
+          __routecodexPreselectedRoute: preselectedRoute,
+          x: 1,
+        },
       } as any);
 
       expect(resolveSseProtocolWithNative).toHaveBeenCalled();
       expect(getCodec).toHaveBeenCalledWith(entry.protocol);
-      expect(normalized.payload).toMatchObject({
-        model: 'gpt-test',
-      });
-      expect((normalized.payload as Record<string, unknown>).messages).toEqual([
-        { role: 'user', content: `hi:${entry.protocol}` },
-      ]);
+      expect(runHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
+        request: expect.objectContaining({
+          requestId: `req_${entry.protocol}`,
+          endpoint: entry.endpoint,
+          entryEndpoint: entry.endpoint,
+          providerProtocol: entry.providerProtocol,
+          payload: expect.objectContaining({
+            model: 'gpt-test',
+            messages: [{ role: 'user', content: `hi:${entry.protocol}` }],
+          }),
+          metadata: expect.objectContaining({
+            x: 1,
+            __routecodexPreselectedRoute: preselectedRoute,
+          }),
+          stream: true,
+          processMode: 'chat',
+          direction: 'request',
+          stage: 'inbound',
+        }),
+      }));
+      expect(result.providerPayload).toMatchObject({ model: 'gpt-test' });
     });
   }
 });
