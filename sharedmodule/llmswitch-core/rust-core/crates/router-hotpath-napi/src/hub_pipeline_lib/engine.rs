@@ -7,6 +7,8 @@ use crate::hub_pipeline_blocks::standardized_request::coerce_standardized_reques
 use crate::hub_pipeline_types::{
     run_hub_req_chatprocess_03_governed_entrypoint, run_hub_req_inbound_02_standardized_entrypoint,
     run_hub_req_outbound_05_provider_semantic_entrypoint,
+    run_hub_resp_chatprocess_03_governed_entrypoint, run_hub_resp_inbound_02_parsed_entrypoint,
+    run_hub_resp_outbound_04_client_semantic_entrypoint,
 };
 use crate::hub_req_inbound_context_capture::{
     capture_req_inbound_responses_context_snapshot, ResponsesContextCaptureInput,
@@ -200,6 +202,10 @@ impl HubPipelineEngine {
         ));
         let (normal_request_payload, inline_payload_metadata) =
             split_normal_payload_and_inline_metadata(normalized_payload.clone());
+        let standardizer_metadata = merge_standardizer_metadata(
+            normalized_metadata.clone(),
+            inline_payload_metadata,
+        );
         let standardized = coerce_standardized_request_from_payload(&serde_json::json!({
             "payload": normal_request_payload,
             "normalized": {
@@ -208,7 +214,7 @@ impl HubPipelineEngine {
                 "stream": normalized_metadata.get("stream").and_then(Value::as_bool).unwrap_or(false),
                 "processMode": normalized_metadata.get("processMode").and_then(Value::as_str).unwrap_or("chat"),
                 "routeHint": normalized_metadata.get("routeHint").cloned().unwrap_or(Value::Null),
-                "metadata": inline_payload_metadata
+                "metadata": standardizer_metadata
             }
         }))
         .map_err(HubPipelineError::from)?;
@@ -454,6 +460,10 @@ impl HubPipelineEngine {
             &normalized_metadata,
             output.request_id.as_str(),
         )?;
+        let resp_inbound_02 = run_hub_resp_inbound_02_parsed_entrypoint(canonical_payload.clone())
+            .map_err(|message| {
+                HubPipelineError::new("hub_pipeline_resp_inbound_02_failed", message)
+            })?;
         let governed = govern_response(RespToolGovernanceInput {
             payload: canonical_payload,
             client_protocol: normalized_metadata
@@ -488,6 +498,13 @@ impl HubPipelineEngine {
                 "summary": governed.summary,
             })),
         ));
+        let resp_chatprocess_03 = run_hub_resp_chatprocess_03_governed_entrypoint(
+            resp_inbound_02,
+            governed.governed_payload.clone(),
+        )
+        .map_err(|message| {
+            HubPipelineError::new("hub_pipeline_resp_chatprocess_03_failed", message)
+        })?;
         diagnostics.push(diagnostic(
             HubPipelineStageId::RespProcessFinalize,
             HubPipelineDiagnosticStatus::Started,
@@ -526,6 +543,14 @@ impl HubPipelineEngine {
             &normalized_metadata,
             output.request_id.as_str(),
         )?;
+        let resp_outbound_04 = run_hub_resp_outbound_04_client_semantic_entrypoint(
+            resp_chatprocess_03,
+            project_normal_response_payload(&client_payload),
+        )
+        .map_err(|message| {
+            HubPipelineError::new("hub_pipeline_resp_outbound_04_failed", message)
+        })?;
+        drop(resp_outbound_04);
         diagnostics.push(diagnostic(
             HubPipelineStageId::RespOutboundClientRemap,
             HubPipelineDiagnosticStatus::Completed,
@@ -1279,6 +1304,19 @@ fn split_normal_payload_and_inline_metadata(payload: Value) -> (Value, Value) {
     (Value::Object(object), inline_metadata)
 }
 
+fn merge_standardizer_metadata(normalized_metadata: Value, inline_payload_metadata: Value) -> Value {
+    let mut merged = normalized_metadata
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    if let Some(inline) = inline_payload_metadata.as_object() {
+        for (key, value) in inline {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(merged)
+}
+
 fn project_normal_request_payload(request: &Value) -> Value {
     let Some(request_map) = request.as_object() else {
         return Value::Null;
@@ -1299,6 +1337,15 @@ fn project_normal_request_payload(request: &Value) -> Value {
         }
     }
     Value::Object(payload)
+}
+
+fn project_normal_response_payload(response: &Value) -> Value {
+    let Value::Object(mut object) = response.clone() else {
+        return Value::Null;
+    };
+    object.remove("metadata");
+    object.remove("processingMetadata");
+    Value::Object(object)
 }
 
 fn diagnostic(

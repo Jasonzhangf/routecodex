@@ -195,7 +195,6 @@ fn execute_hub_pipeline_json_uses_preselected_route_outbound_profile_for_respons
     });
     let output: serde_json::Value =
         serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
-
     assert_eq!(
         output.get("success").and_then(|value| value.as_bool()),
         Some(true)

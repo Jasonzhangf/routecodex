@@ -22,11 +22,15 @@ impl HubRespChatProcess03Governed {
 
 pub(crate) fn build_hub_resp_chatprocess_03_from_hub_resp_inbound_02(
     inbound: HubRespInbound02Parsed,
+    governed_payload: Value,
 ) -> Result<HubRespChatProcess03Governed, String> {
-    let payload = inbound.into_payload();
-    assert_no_inline_metadata(&payload, "HubRespChatProcess03Governed")?;
-    assert_not_success_error_payload(&payload, "HubRespChatProcess03Governed")?;
-    Ok(HubRespChatProcess03Governed { payload })
+    assert_no_inline_metadata(inbound.payload(), "HubRespChatProcess03Governed.source")?;
+    assert_not_success_error_payload(inbound.payload(), "HubRespChatProcess03Governed.source")?;
+    assert_no_inline_metadata(&governed_payload, "HubRespChatProcess03Governed")?;
+    assert_not_success_error_payload(&governed_payload, "HubRespChatProcess03Governed")?;
+    Ok(HubRespChatProcess03Governed {
+        payload: governed_payload,
+    })
 }
 
 #[cfg(test)]
@@ -40,7 +44,9 @@ mod tests {
         let payload = json!({"id":"resp_1","output":[{"type":"message"}]});
         let inbound =
             parse_hub_resp_inbound_02_from_provider_resp_inbound_01(payload.clone()).unwrap();
-        let governed = build_hub_resp_chatprocess_03_from_hub_resp_inbound_02(inbound).unwrap();
+        let governed =
+            build_hub_resp_chatprocess_03_from_hub_resp_inbound_02(inbound, payload.clone())
+                .unwrap();
         assert_eq!(governed.payload(), &payload);
         assert_eq!(governed.into_payload(), payload);
     }

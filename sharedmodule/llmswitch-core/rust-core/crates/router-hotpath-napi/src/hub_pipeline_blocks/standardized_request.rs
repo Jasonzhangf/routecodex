@@ -25,26 +25,34 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .ok_or_else(|| "[HubPipeline] outbound stage requires payload.model".to_string())?;
-    let tools = payload.get("tools").and_then(|v| v.as_array()).cloned();
-    let messages =
-        if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
-            messages
-        } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
-            convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
-                input: input_items,
-                tools: tools.clone(),
-                tool_result_fallback_text: None,
-                normalize_function_name: Some("responses".to_string()),
-                allow_pending_terminal_tool_call: Some(true),
-                allow_orphan_tool_result: Some(false),
-            })?
-            .messages
-        } else {
-            return Err(
-                "[HubPipeline] outbound stage requires payload.messages[] or payload.input[]"
-                    .to_string(),
-            );
-        };
+    let tools = payload
+        .get("tools")
+        .and_then(|v| v.as_array())
+        .map(|tools| tools.iter().map(normalize_tool_definition).collect::<Vec<_>>());
+    let messages = if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
+        messages
+    } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
+        convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+            input: input_items,
+            tools: tools.clone(),
+            tool_result_fallback_text: None,
+            normalize_function_name: Some("responses".to_string()),
+            allow_pending_terminal_tool_call: Some(true),
+            allow_orphan_tool_result: Some(false),
+        })?
+        .messages
+    } else if let Some(input_text) = payload
+        .get("input")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    {
+        vec![serde_json::json!({ "role": "user", "content": input_text })]
+    } else {
+        return Err(
+            "[HubPipeline] outbound stage requires payload.messages[] or payload.input[]"
+                .to_string(),
+        );
+    };
     let parameters = payload
         .get("parameters")
         .and_then(|v| v.as_object())
@@ -172,6 +180,19 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
     if let Some(tools_array) = tools.as_ref() {
         standardized_request.insert("tools".to_string(), Value::Array(tools_array.clone()));
     }
+    copy_optional_payload_fields(
+        payload,
+        &mut standardized_request,
+        &[
+            "tool_choice",
+            "parallel_tool_calls",
+            "temperature",
+            "top_p",
+            "max_tokens",
+            "max_completion_tokens",
+            "reasoning_effort",
+        ],
+    );
     standardized_request.insert("parameters".to_string(), Value::Object(parameters.clone()));
     standardized_request.insert("metadata".to_string(), Value::Object(metadata));
     standardized_request.insert("semantics".to_string(), Value::Object(semantics));
@@ -188,6 +209,19 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
     if let Some(tools_array) = tools {
         raw_payload.insert("tools".to_string(), Value::Array(tools_array));
     }
+    copy_optional_payload_fields(
+        payload,
+        &mut raw_payload,
+        &[
+            "tool_choice",
+            "parallel_tool_calls",
+            "temperature",
+            "top_p",
+            "max_tokens",
+            "max_completion_tokens",
+            "reasoning_effort",
+        ],
+    );
     if !parameters.is_empty() {
         raw_payload.insert("parameters".to_string(), Value::Object(parameters));
     }
@@ -199,6 +233,45 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
     );
     output.insert("rawPayload".to_string(), Value::Object(raw_payload));
     Ok(Value::Object(output))
+}
+
+fn copy_optional_payload_fields(
+    source: &Map<String, Value>,
+    target: &mut Map<String, Value>,
+    keys: &[&str],
+) {
+    for key in keys {
+        if let Some(value) = source.get(*key).cloned() {
+            target.insert((*key).to_string(), value);
+        }
+    }
+}
+
+fn normalize_tool_definition(tool: &Value) -> Value {
+    let Some(tool_map) = tool.as_object() else {
+        return tool.clone();
+    };
+    if tool_map.get("function").and_then(Value::as_object).is_some() {
+        return tool.clone();
+    }
+    if tool_map.get("type").and_then(Value::as_str) != Some("function") {
+        return tool.clone();
+    }
+    let Some(name) = tool_map.get("name").cloned() else {
+        return tool.clone();
+    };
+    let mut function = Map::new();
+    function.insert("name".to_string(), name);
+    if let Some(description) = tool_map.get("description").cloned() {
+        function.insert("description".to_string(), description);
+    }
+    if let Some(parameters) = tool_map.get("parameters").cloned() {
+        function.insert("parameters".to_string(), parameters);
+    }
+    let mut normalized = Map::new();
+    normalized.insert("type".to_string(), Value::String("function".to_string()));
+    normalized.insert("function".to_string(), Value::Object(function));
+    Value::Object(normalized)
 }
 
 #[cfg(test)]

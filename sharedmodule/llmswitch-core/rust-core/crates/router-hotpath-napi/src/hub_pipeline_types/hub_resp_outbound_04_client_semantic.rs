@@ -26,12 +26,18 @@ impl HubRespOutbound04ClientSemantic {
 
 pub(crate) fn project_hub_resp_outbound_04_from_hub_resp_chatprocess_03(
     governed: HubRespChatProcess03Governed,
+    client_payload: Value,
 ) -> Result<HubRespOutbound04ClientSemantic, String> {
-    let payload = governed.into_payload();
-    assert_no_inline_metadata(&payload, "HubRespOutbound04ClientSemantic")?;
-    assert_payload_has_no_meta_or_error_carrier(&payload, "HubRespOutbound04ClientSemantic")?;
-    assert_not_success_error_payload(&payload, "HubRespOutbound04ClientSemantic")?;
-    let payload = clone_response_object_payload(&payload, "HubRespOutbound04ClientSemantic")?;
+    assert_no_inline_metadata(governed.payload(), "HubRespOutbound04ClientSemantic.source")?;
+    assert_not_success_error_payload(governed.payload(), "HubRespOutbound04ClientSemantic.source")?;
+    assert_no_inline_metadata(&client_payload, "HubRespOutbound04ClientSemantic")?;
+    assert_payload_has_no_meta_or_error_carrier(
+        &client_payload,
+        "HubRespOutbound04ClientSemantic",
+    )?;
+    assert_not_success_error_payload(&client_payload, "HubRespOutbound04ClientSemantic")?;
+    let payload =
+        clone_response_object_payload(&client_payload, "HubRespOutbound04ClientSemantic")?;
     Ok(HubRespOutbound04ClientSemantic { payload })
 }
 
@@ -49,8 +55,12 @@ mod tests {
         let payload = json!({"id":"resp_1","output":[{"type":"message"}]});
         let inbound =
             parse_hub_resp_inbound_02_from_provider_resp_inbound_01(payload.clone()).unwrap();
-        let governed = build_hub_resp_chatprocess_03_from_hub_resp_inbound_02(inbound).unwrap();
-        let outbound = project_hub_resp_outbound_04_from_hub_resp_chatprocess_03(governed).unwrap();
+        let governed =
+            build_hub_resp_chatprocess_03_from_hub_resp_inbound_02(inbound, payload.clone())
+                .unwrap();
+        let outbound =
+            project_hub_resp_outbound_04_from_hub_resp_chatprocess_03(governed, payload.clone())
+                .unwrap();
         assert_eq!(outbound.payload().get("id"), Some(&json!("resp_1")));
         assert_eq!(outbound.into_payload(), payload);
     }

@@ -29,6 +29,7 @@ function responseSources(): string {
     'hub_resp_inbound_02_parsed.rs',
     'hub_resp_chatprocess_03_governed.rs',
     'hub_resp_outbound_04_client_semantic.rs',
+    'response_typed_entrypoints.rs',
     'mod.rs',
   ]
     .map((file) => fs.readFileSync(path.join(HUB_TYPES_DIR, file), 'utf8'))
@@ -56,8 +57,22 @@ describe('Hub Pipeline response type topology contract', () => {
       'parse_hub_resp_inbound_02_from_provider_resp_inbound_01',
       'build_hub_resp_chatprocess_03_from_hub_resp_inbound_02',
       'project_hub_resp_outbound_04_from_hub_resp_chatprocess_03',
+      'run_hub_resp_inbound_02_parsed_entrypoint',
+      'run_hub_resp_chatprocess_03_governed_entrypoint',
+      'run_hub_resp_outbound_04_client_semantic_entrypoint',
     ]) {
       expect(sources).toContain(token);
+    }
+  });
+
+  it('wires Phase 6B wrappers into the Rust live response engine', () => {
+    const source = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs');
+    for (const token of [
+      'run_hub_resp_inbound_02_parsed_entrypoint',
+      'run_hub_resp_chatprocess_03_governed_entrypoint',
+      'run_hub_resp_outbound_04_client_semantic_entrypoint',
+    ]) {
+      expect(source).toContain(token);
     }
   });
 
