@@ -23,10 +23,13 @@ impl HubReqChatProcess03Governed {
 
 pub(crate) fn build_hub_req_chatprocess_03_from_hub_req_inbound_02(
     inbound: HubReqInbound02Standardized,
+    governed_payload: Value,
 ) -> Result<HubReqChatProcess03Governed, String> {
-    let payload = inbound.into_payload();
-    assert_no_inline_metadata(&payload, "HubReqChatProcess03Governed")?;
-    Ok(HubReqChatProcess03Governed { payload })
+    assert_no_inline_metadata(inbound.payload(), "HubReqChatProcess03Governed.source")?;
+    assert_no_inline_metadata(&governed_payload, "HubReqChatProcess03Governed")?;
+    Ok(HubReqChatProcess03Governed {
+        payload: governed_payload,
+    })
 }
 
 #[cfg(test)]
@@ -39,7 +42,8 @@ mod tests {
     fn builds_chatprocess_request_from_inbound_only() {
         let payload = json!({"model":"m","messages":[{"role":"user","content":"hi"}]});
         let inbound = build_hub_req_inbound_02_from_payload(payload.clone()).unwrap();
-        let governed = build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound).unwrap();
+        let governed =
+            build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound, payload.clone()).unwrap();
         assert_eq!(governed.payload(), &payload);
         assert_eq!(governed.into_payload(), payload);
     }

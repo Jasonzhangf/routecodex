@@ -4,6 +4,10 @@ use serde_json::Value;
 use crate::chat_node_result_semantics::build_processed_request_from_chat_response;
 use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
 use crate::hub_pipeline_blocks::standardized_request::coerce_standardized_request_from_payload;
+use crate::hub_pipeline_types::{
+    run_hub_req_chatprocess_03_governed_entrypoint, run_hub_req_inbound_02_standardized_entrypoint,
+    run_hub_req_outbound_05_provider_semantic_entrypoint,
+};
 use crate::hub_req_inbound_context_capture::{
     capture_req_inbound_responses_context_snapshot, ResponsesContextCaptureInput,
 };
@@ -221,6 +225,10 @@ impl HubPipelineEngine {
                     "Rust HubPipeline req inbound returned no standardized raw payload",
                 )
             })?;
+        let req_inbound_02 = run_hub_req_inbound_02_standardized_entrypoint(
+            standardized_payload.clone(),
+        )
+        .map_err(|message| HubPipelineError::new("hub_pipeline_req_inbound_02_failed", message))?;
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqInboundContextCapture,
             HubPipelineDiagnosticStatus::Started,
@@ -245,7 +253,7 @@ impl HubPipelineEngine {
             Some(serde_json::json!({ "metadataObject": normalized_metadata.is_object() })),
         ));
         let governed = apply_req_process_tool_governance(ToolGovernanceInput {
-            request: standardized_payload,
+            request: req_inbound_02.payload().clone(),
             raw_payload: standardized_raw_payload,
             metadata: normalized_metadata.clone(),
             entry_endpoint: entry_endpoint.clone(),
@@ -260,7 +268,14 @@ impl HubPipelineEngine {
                 "nodeResult": governed.node_result,
             })),
         ));
-        let route_output = self.select_route(&governed.processed_request, &normalized_metadata)?;
+        let req_chatprocess_03 = run_hub_req_chatprocess_03_governed_entrypoint(
+            req_inbound_02,
+            governed.processed_request.clone(),
+        )
+        .map_err(|message| {
+            HubPipelineError::new("hub_pipeline_req_chatprocess_03_failed", message)
+        })?;
+        let route_output = self.select_route(req_chatprocess_03.payload(), &normalized_metadata)?;
         let target = route_output.get("target").cloned().ok_or_else(|| {
             HubPipelineError::new(
                 "hub_pipeline_missing_route_target",
@@ -278,7 +293,7 @@ impl HubPipelineEngine {
             Some(serde_json::json!({ "targetObject": target.is_object() })),
         ));
         let mut routed = apply_route_selection(RouteSelectionApplyInput {
-            request: governed.processed_request,
+            request: req_chatprocess_03.payload().clone(),
             normalized_metadata,
             target,
             route_name,
@@ -308,9 +323,14 @@ impl HubPipelineEngine {
                 "metadataObject": routed.normalized_metadata.is_object(),
             })),
         ));
+        let req_outbound_05 = run_hub_req_outbound_05_provider_semantic_entrypoint(
+            req_chatprocess_03,
+            routed.request.clone(),
+        )
+        .map_err(|message| HubPipelineError::new("hub_pipeline_req_outbound_05_failed", message))?;
         let mut format_envelope = serde_json::to_value(&parsed.envelope)?;
         if let Some(envelope) = format_envelope.as_object_mut() {
-            envelope.insert("payload".to_string(), routed.request);
+            envelope.insert("payload".to_string(), req_outbound_05.into_payload());
         }
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqOutboundContextMerge,

@@ -63,11 +63,10 @@ mod tests {
 
     #[test]
     fn builds_selected_target_without_changing_route_decision() {
-        let inbound = build_hub_req_inbound_02_from_payload(
-            json!({"model":"m","messages":[{"role":"user","content":"hi"}]}),
-        )
-        .unwrap();
-        let governed = build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound).unwrap();
+        let payload = json!({"model":"m","messages":[{"role":"user","content":"hi"}]});
+        let inbound = build_hub_req_inbound_02_from_payload(payload.clone()).unwrap();
+        let governed =
+            build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound, payload).unwrap();
         let decision = json!({"providerKey":"p.key","model":"m","routeId":"r1"});
         let selected =
             build_vr_route_04_from_hub_req_chatprocess_03(&governed, decision.clone()).unwrap();
@@ -80,9 +79,10 @@ mod tests {
 
     #[test]
     fn rejects_payload_patch_inside_route_decision() {
-        let inbound =
-            build_hub_req_inbound_02_from_payload(json!({"model":"m","messages":[]})).unwrap();
-        let governed = build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound).unwrap();
+        let payload = json!({"model":"m","messages":[]});
+        let inbound = build_hub_req_inbound_02_from_payload(payload.clone()).unwrap();
+        let governed =
+            build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound, payload).unwrap();
         let err = build_vr_route_04_from_hub_req_chatprocess_03(
             &governed,
             json!({"providerKey":"p.key","patchedPayload":{}}),

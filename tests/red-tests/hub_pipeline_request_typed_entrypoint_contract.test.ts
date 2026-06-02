@@ -48,31 +48,22 @@ describe('Hub Pipeline request typed entrypoint contract', () => {
     }
   });
 
-  it('does not wire Phase 6A wrappers into live runtime paths yet', () => {
-    const liveFiles = [
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
-    ];
+  it('wires Phase 6A wrappers into the Rust live request engine', () => {
+    const source = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs');
     const wrapperNames = [
       'run_hub_req_inbound_02_standardized_entrypoint',
       'run_hub_req_chatprocess_03_governed_entrypoint',
       'run_hub_req_outbound_05_provider_semantic_entrypoint',
     ];
-    const violations: string[] = [];
-    for (const file of liveFiles) {
-      const source = read(file);
-      for (const name of wrapperNames) {
-        if (source.includes(name)) violations.push(`${file}: ${name}`);
-      }
+    for (const name of wrapperNames) {
+      expect(source).toContain(name);
     }
-    expect(violations).toEqual([]);
   });
 
   it('keeps topology docs aligned with Phase 6A plan', () => {
     const plan = read('docs/goals/hub-pipeline-typed-entrypoint-migration-plan.md');
     expect(plan).toContain('Phase 6A：Request typed entrypoint wrapper');
     expect(plan).toContain('run_hub_req_inbound_02_standardized_entrypoint');
-    expect(plan).toContain('不切调用点');
+    expect(plan).toContain('让一个最小 request live path 调用 typed wrapper');
   });
 });

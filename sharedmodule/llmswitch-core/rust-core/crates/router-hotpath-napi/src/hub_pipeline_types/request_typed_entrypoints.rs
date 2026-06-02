@@ -14,14 +14,16 @@ pub(crate) fn run_hub_req_inbound_02_standardized_entrypoint(
 
 pub(crate) fn run_hub_req_chatprocess_03_governed_entrypoint(
     inbound: HubReqInbound02Standardized,
+    governed_payload: Value,
 ) -> Result<HubReqChatProcess03Governed, String> {
-    build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound)
+    build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound, governed_payload)
 }
 
 pub(crate) fn run_hub_req_outbound_05_provider_semantic_entrypoint(
     governed: HubReqChatProcess03Governed,
+    outbound_payload: Value,
 ) -> Result<HubReqOutbound05ProviderSemantic, String> {
-    build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed)
+    build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, outbound_payload)
 }
 
 #[cfg(test)]
@@ -30,11 +32,14 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn request_typed_entrypoints_preserve_payload_without_live_path_wiring() {
+    fn request_typed_entrypoints_preserve_payload_for_live_path_wiring() {
         let payload = json!({"model":"m","messages":[{"role":"user","content":"hi"}]});
         let inbound = run_hub_req_inbound_02_standardized_entrypoint(payload.clone()).unwrap();
-        let governed = run_hub_req_chatprocess_03_governed_entrypoint(inbound).unwrap();
-        let outbound = run_hub_req_outbound_05_provider_semantic_entrypoint(governed).unwrap();
+        let governed =
+            run_hub_req_chatprocess_03_governed_entrypoint(inbound, payload.clone()).unwrap();
+        let outbound =
+            run_hub_req_outbound_05_provider_semantic_entrypoint(governed, payload.clone())
+                .unwrap();
         assert_eq!(outbound.into_payload(), payload);
     }
 

@@ -74,13 +74,16 @@ mod tests {
     fn builds_wire_payload_from_selected_target_and_outbound_semantic() {
         let payload = json!({"model":"m","messages":[{"role":"user","content":"hi"}]});
         let inbound = build_hub_req_inbound_02_from_payload(payload.clone()).unwrap();
-        let governed = build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound).unwrap();
+        let governed =
+            build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound, payload.clone()).unwrap();
         let selected = build_vr_route_04_from_hub_req_chatprocess_03(
             &governed,
             json!({"providerKey":"p.key","model":"m"}),
         )
         .unwrap();
-        let semantic = build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed).unwrap();
+        let semantic =
+            build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, payload.clone())
+                .unwrap();
         let wire =
             build_provider_req_outbound_06_from_hub_req_outbound_05(&selected, semantic).unwrap();
         assert_eq!(wire.payload().get("model"), Some(&json!("m")));
@@ -90,14 +93,16 @@ mod tests {
     #[test]
     fn rejects_provider_options_metadata() {
         let payload = json!({"model":"m","providerOptions":{"metadata":{"x":1}}});
-        let inbound = build_hub_req_inbound_02_from_payload(payload).unwrap();
-        let governed = build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound).unwrap();
+        let inbound = build_hub_req_inbound_02_from_payload(payload.clone()).unwrap();
+        let governed =
+            build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound, payload.clone()).unwrap();
         let selected = build_vr_route_04_from_hub_req_chatprocess_03(
             &governed,
             json!({"providerKey":"p.key","model":"m"}),
         )
         .unwrap();
-        let semantic = build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed).unwrap();
+        let semantic =
+            build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, payload).unwrap();
         let err = build_provider_req_outbound_06_from_hub_req_outbound_05(&selected, semantic)
             .unwrap_err();
         assert!(err.contains("provider SDK options"));

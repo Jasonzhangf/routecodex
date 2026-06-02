@@ -23,11 +23,18 @@ impl HubReqOutbound05ProviderSemantic {
 
 pub(crate) fn build_hub_req_outbound_05_from_hub_req_chatprocess_03(
     governed: HubReqChatProcess03Governed,
+    outbound_payload: Value,
 ) -> Result<HubReqOutbound05ProviderSemantic, String> {
-    let payload = governed.into_payload();
-    assert_no_inline_metadata(&payload, "HubReqOutbound05ProviderSemantic")?;
-    assert_payload_has_no_meta_or_error_carrier(&payload, "HubReqOutbound05ProviderSemantic")?;
-    let payload = clone_object_payload(&payload, "HubReqOutbound05ProviderSemantic")?;
+    assert_no_inline_metadata(
+        governed.payload(),
+        "HubReqOutbound05ProviderSemantic.source",
+    )?;
+    assert_no_inline_metadata(&outbound_payload, "HubReqOutbound05ProviderSemantic")?;
+    assert_payload_has_no_meta_or_error_carrier(
+        &outbound_payload,
+        "HubReqOutbound05ProviderSemantic",
+    )?;
+    let payload = clone_object_payload(&outbound_payload, "HubReqOutbound05ProviderSemantic")?;
     Ok(HubReqOutbound05ProviderSemantic { payload })
 }
 
@@ -43,8 +50,11 @@ mod tests {
     fn builds_provider_semantic_from_chatprocess_only() {
         let payload = json!({"model":"m","messages":[{"role":"user","content":"hi"}]});
         let inbound = build_hub_req_inbound_02_from_payload(payload.clone()).unwrap();
-        let governed = build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound).unwrap();
-        let outbound = build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed).unwrap();
+        let governed =
+            build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound, payload.clone()).unwrap();
+        let outbound =
+            build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, payload.clone())
+                .unwrap();
         assert_eq!(outbound.payload().get("model"), Some(&json!("m")));
         assert_eq!(outbound.into_payload(), payload);
     }
