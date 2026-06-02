@@ -18,7 +18,7 @@ import {
 } from '../utils/request-log-color.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { extractClientModelId } from '../runtime/http-server/executor/provider-response-utils.js';
-import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, createResponsesJsonToSseConverter, finalizeResponsesConversationRequestRetention, importCoreDist, isToolCallContinuationResponseNative, recordResponsesResponseForRequest, rebindResponsesConversationRequestId, requireCoreDist } from '../../modules/llmswitch/bridge.js';
+import { buildResponsesTerminalSseFramesFromProbeNative, captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, createResponsesJsonToSseConverter, finalizeResponsesConversationRequestRetention, importCoreDist, isToolCallContinuationResponseNative, recordResponsesResponseForRequest, rebindResponsesConversationRequestId, requireCoreDist, updateResponsesContractProbeFromSseChunkNative } from '../../modules/llmswitch/bridge.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 
@@ -71,151 +71,18 @@ type ClientSseSnapshotRecorder = {
   flush: (error?: unknown) => void;
 };
 
-function isResponsesTerminalProbeStatus(status: unknown): boolean {
-  if (typeof status !== 'string') {
-    return false;
-  }
-  const normalized = status.trim().toLowerCase();
-  return normalized === 'completed' || normalized === 'requires_action';
-}
-
 function updateContractProbeFromSseChunk(
   chunk: unknown,
   contractProbe: StreamContractProbeEnvelope
 ): void {
-  const text =
-    typeof chunk === 'string'
-      ? chunk
-      : Buffer.isBuffer(chunk)
-        ? chunk.toString('utf8')
-        : chunk instanceof Uint8Array
-          ? Buffer.from(chunk).toString('utf8')
-          : '';
-  if (!text) return;
-  const blocks = text.split(/\n\n+/);
-  for (const block of blocks) {
-    if (!block) continue;
-    const lines = block.split(/\n/);
-    const eventName = lines
-      .filter((line) => line.startsWith('event:'))
-      .map((line) => line.slice('event:'.length).trim())
-      .find(Boolean);
-    const dataText = lines
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice('data:'.length).trim())
-      .join('\n');
-    if (!dataText || dataText === '[DONE]') continue;
-    let parsed: Record<string, unknown> | undefined;
-    try {
-      const value = JSON.parse(dataText);
-      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-      parsed = value as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    const response =
-      parsed.response && typeof parsed.response === 'object' && !Array.isArray(parsed.response)
-        ? (parsed.response as Record<string, unknown>)
-        : undefined;
-    const requiredAction =
-      parsed.required_action && typeof parsed.required_action === 'object' && !Array.isArray(parsed.required_action)
-        ? (parsed.required_action as Record<string, unknown>)
-        : undefined;
-    const outputItem =
-      parsed.item && typeof parsed.item === 'object' && !Array.isArray(parsed.item)
-        ? (parsed.item as Record<string, unknown>)
-        : undefined;
-    if (!response && !requiredAction && eventName !== 'response.required_action' && parsed.type !== 'response.required_action') {
-      const isOutputItemEvent =
-        eventName === 'response.output_item.done'
-        || eventName === 'response.output_item.added'
-        || parsed.type === 'response.output_item.done'
-        || parsed.type === 'response.output_item.added';
-      if (!isOutputItemEvent || !outputItem) {
-        continue;
-      }
-    }
-    if (!contractProbe.probe) contractProbe.probe = {};
-    const probe = contractProbe.probe;
-    if (response) {
-      if (typeof response.id === 'string' && response.id.trim()) probe.id = response.id;
-      if (typeof response.object === 'string' && response.object.trim()) probe.object = response.object;
-      if (typeof response.status === 'string' && response.status.trim()) {
-        const nextStatus = response.status;
-        if (!isResponsesTerminalProbeStatus(probe.status) || isResponsesTerminalProbeStatus(nextStatus)) {
-          probe.status = nextStatus;
-        }
-      }
-    }
-    if ((eventName === 'response.required_action' || parsed.type === 'response.required_action') && requiredAction) {
-      probe.required_action = requiredAction;
-    }
-    const isOutputItemEvent =
-      eventName === 'response.output_item.done'
-      || eventName === 'response.output_item.added'
-      || parsed.type === 'response.output_item.done'
-      || parsed.type === 'response.output_item.added';
-    if (isOutputItemEvent && outputItem) {
-      const existing = Array.isArray(probe.output) ? probe.output : [];
-      const itemId = typeof outputItem.id === 'string' ? outputItem.id : undefined;
-      const callId = typeof outputItem.call_id === 'string' ? outputItem.call_id : undefined;
-      const alreadyExists = existing.some((item) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) {
-          return false;
-        }
-        const record = item as Record<string, unknown>;
-        const existingId = typeof record.id === 'string' ? record.id : undefined;
-        const existingCallId = typeof record.call_id === 'string' ? record.call_id : undefined;
-        return (itemId && existingId === itemId) || (callId && existingCallId === callId);
-      });
-      if (!alreadyExists) {
-        probe.output = [...existing, outputItem];
-      }
-    }
-  }
+  contractProbe.probe = updateResponsesContractProbeFromSseChunkNative(chunk, contractProbe.probe);
 }
 
 function buildResponsesTerminalSseFramesFromProbe(
   probe: Record<string, unknown> | undefined,
   requestLabel: string,
 ): string[] {
-  if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
-    return [];
-  }
-  const status = typeof probe.status === 'string' ? probe.status.trim().toLowerCase() : '';
-  const requiredAction =
-    probe.required_action && typeof probe.required_action === 'object' && !Array.isArray(probe.required_action)
-      ? (probe.required_action as Record<string, unknown>)
-      : undefined;
-  const hasCompletedOutput = Array.isArray(probe.output) && probe.output.length > 0;
-  if (!requiredAction && status !== 'completed' && !hasCompletedOutput) {
-    return [];
-  }
-  const responseId = typeof probe.id === 'string' && probe.id.trim()
-    ? probe.id.trim()
-    : `resp_${requestLabel.replace(/[^A-Za-z0-9_-]/g, '_')}`;
-  const responsePayload: Record<string, unknown> = {
-    id: responseId,
-    object: 'response',
-    status: requiredAction ? 'requires_action' : (status || 'completed')
-  };
-  if (Array.isArray(probe.output)) responsePayload.output = probe.output;
-  if (typeof probe.output_text === 'string') responsePayload.output_text = probe.output_text;
-  if (probe.reasoning && typeof probe.reasoning === 'object' && !Array.isArray(probe.reasoning)) responsePayload.reasoning = probe.reasoning;
-  const frames: string[] = [];
-  const donePayload = { type: 'response.done', response: responsePayload };
-  if (requiredAction) {
-    frames.push(`event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response: responsePayload, required_action: requiredAction })}\n\n`);
-    frames.push(`event: response.done\ndata: ${JSON.stringify(donePayload)}\n\n`);
-    frames.push('data: [DONE]\n\n');
-    return frames;
-  }
-  if (status === 'completed' || Object.keys(probe).length > 0) {
-    frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
-    frames.push(`event: response.done\ndata: ${JSON.stringify(donePayload)}\n\n`);
-    frames.push('data: [DONE]\n\n');
-  }
-  return frames;
+  return buildResponsesTerminalSseFramesFromProbeNative(probe, requestLabel);
 }
 
 type ChatUsageNormalizationResult = {

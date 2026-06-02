@@ -566,6 +566,226 @@ pub fn build_chat_response_from_responses_json(payload_json: String) -> NapiResu
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+fn is_responses_terminal_probe_status(status: Option<&Value>) -> bool {
+    let Some(status) = status.and_then(Value::as_str) else {
+        return false;
+    };
+    matches!(status.trim().to_ascii_lowercase().as_str(), "completed" | "requires_action")
+}
+
+fn parse_sse_block(block: &str) -> Option<(String, Value)> {
+    let mut event_name = String::new();
+    let mut data_lines: Vec<String> = Vec::new();
+    for line in block.lines() {
+        if let Some(rest) = line.strip_prefix("event:") {
+            let trimmed = rest.trim();
+            if !trimmed.is_empty() && event_name.is_empty() {
+                event_name = trimmed.to_string();
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("data:") {
+            data_lines.push(rest.trim().to_string());
+        }
+    }
+    let data_text = data_lines.join("\n");
+    if data_text.is_empty() || data_text == "[DONE]" {
+        return None;
+    }
+    let parsed: Value = serde_json::from_str(&data_text).ok()?;
+    if !parsed.is_object() {
+        return None;
+    }
+    Some((event_name, parsed))
+}
+
+fn merge_response_probe_fields(probe: &mut Map<String, Value>, response: &Map<String, Value>) {
+    if let Some(id) = read_trimmed_string(response.get("id")) {
+        probe.insert("id".to_string(), Value::String(id));
+    }
+    if let Some(object) = read_trimmed_string(response.get("object")) {
+        probe.insert("object".to_string(), Value::String(object));
+    }
+    if let Some(next_status) = read_trimmed_string(response.get("status")) {
+        if !is_responses_terminal_probe_status(probe.get("status"))
+            || matches!(next_status.to_ascii_lowercase().as_str(), "completed" | "requires_action")
+        {
+            probe.insert("status".to_string(), Value::String(next_status));
+        }
+    }
+}
+
+fn upsert_probe_output_item(probe: &mut Map<String, Value>, output_item: &Value) {
+    let Some(item_obj) = output_item.as_object() else {
+        return;
+    };
+    let item_id = read_trimmed_string(item_obj.get("id"));
+    let call_id = read_trimmed_string(item_obj.get("call_id"));
+    let mut existing = probe
+        .get("output")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let already_exists = existing.iter().any(|item| {
+        let Some(record) = item.as_object() else {
+            return false;
+        };
+        let existing_id = read_trimmed_string(record.get("id"));
+        let existing_call_id = read_trimmed_string(record.get("call_id"));
+        item_id
+            .as_ref()
+            .zip(existing_id.as_ref())
+            .map(|(left, right)| left == right)
+            .unwrap_or(false)
+            || call_id
+                .as_ref()
+                .zip(existing_call_id.as_ref())
+                .map(|(left, right)| left == right)
+                .unwrap_or(false)
+    });
+    if !already_exists {
+        existing.push(output_item.clone());
+        probe.insert("output".to_string(), Value::Array(existing));
+    }
+}
+
+pub fn update_responses_contract_probe_from_sse_chunk_json(
+    chunk_json: String,
+    probe_json: String,
+) -> NapiResult<String> {
+    let chunk: Value = serde_json::from_str(&chunk_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let text = match chunk {
+        Value::String(text) => text,
+        other => other.as_str().unwrap_or_default().to_string(),
+    };
+    let mut probe = serde_json::from_str::<Value>(&probe_json)
+        .ok()
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    if text.is_empty() {
+        return serde_json::to_string(&Value::Object(probe))
+            .map_err(|e| napi::Error::from_reason(e.to_string()));
+    }
+    for block in text.split("\n\n") {
+        let Some((event_name, parsed)) = parse_sse_block(block) else {
+            continue;
+        };
+        let Some(parsed_obj) = parsed.as_object() else {
+            continue;
+        };
+        let parsed_type = read_trimmed_string(parsed_obj.get("type")).unwrap_or_default();
+        let response = parsed_obj.get("response").and_then(Value::as_object);
+        let required_action = parsed_obj.get("required_action").and_then(Value::as_object);
+        let output_item = parsed_obj.get("item");
+        let is_output_item_event = matches!(
+            event_name.as_str(),
+            "response.output_item.done" | "response.output_item.added"
+        ) || matches!(
+            parsed_type.as_str(),
+            "response.output_item.done" | "response.output_item.added"
+        );
+        if response.is_none()
+            && required_action.is_none()
+            && event_name != "response.required_action"
+            && parsed_type != "response.required_action"
+            && (!is_output_item_event || output_item.is_none())
+        {
+            continue;
+        }
+        if let Some(response) = response {
+            merge_response_probe_fields(&mut probe, response);
+        }
+        if (event_name == "response.required_action" || parsed_type == "response.required_action")
+            && required_action.is_some()
+        {
+            probe.insert(
+                "required_action".to_string(),
+                Value::Object(required_action.cloned().unwrap_or_default()),
+            );
+        }
+        if is_output_item_event {
+            if let Some(output_item) = output_item {
+                upsert_probe_output_item(&mut probe, output_item);
+            }
+        }
+    }
+    serde_json::to_string(&Value::Object(probe)).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+fn safe_response_id_from_request_label(request_label: &str) -> String {
+    let safe: String = request_label
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' { ch } else { '_' })
+        .collect();
+    format!("resp_{}", safe)
+}
+
+pub fn build_responses_terminal_sse_frames_from_probe_json(
+    probe_json: String,
+    request_label: String,
+) -> NapiResult<String> {
+    let probe_value: Value = serde_json::from_str(&probe_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let Some(probe) = probe_value.as_object() else {
+        return Ok("[]".to_string());
+    };
+    let status = read_trimmed_string(probe.get("status"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let required_action = probe.get("required_action").and_then(Value::as_object);
+    let has_completed_output = probe
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|output| !output.is_empty())
+        .unwrap_or(false);
+    if required_action.is_none() && status != "completed" && !has_completed_output {
+        return Ok("[]".to_string());
+    }
+    let response_id = read_trimmed_string(probe.get("id"))
+        .unwrap_or_else(|| safe_response_id_from_request_label(&request_label));
+    let mut response_payload = Map::new();
+    response_payload.insert("id".to_string(), Value::String(response_id));
+    response_payload.insert("object".to_string(), Value::String("response".to_string()));
+    response_payload.insert(
+        "status".to_string(),
+        Value::String(if required_action.is_some() { "requires_action" } else { status.as_str() }.to_string()),
+    );
+    if let Some(output) = probe.get("output").and_then(Value::as_array) {
+        response_payload.insert("output".to_string(), Value::Array(output.clone()));
+    }
+    if let Some(output_text) = probe.get("output_text").and_then(Value::as_str) {
+        response_payload.insert("output_text".to_string(), Value::String(output_text.to_string()));
+    }
+    if let Some(reasoning) = probe.get("reasoning").and_then(Value::as_object) {
+        response_payload.insert("reasoning".to_string(), Value::Object(reasoning.clone()));
+    }
+    let response_value = Value::Object(response_payload.clone());
+    let done_payload = serde_json::json!({"type":"response.done","response":response_value});
+    let mut frames: Vec<String> = Vec::new();
+    if let Some(required_action) = required_action {
+        let required_payload = serde_json::json!({
+            "type":"response.required_action",
+            "response": Value::Object(response_payload.clone()),
+            "required_action": Value::Object(required_action.clone())
+        });
+        frames.push(format!("event: response.required_action\ndata: {}\n\n", required_payload));
+        frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
+        frames.push("data: [DONE]\n\n".to_string());
+        return serde_json::to_string(&frames).map_err(|e| napi::Error::from_reason(e.to_string()));
+    }
+    if status == "completed" || !probe.is_empty() {
+        let completed_payload = serde_json::json!({
+            "type":"response.completed",
+            "response": Value::Object(response_payload)
+        });
+        frames.push(format!("event: response.completed\ndata: {}\n\n", completed_payload));
+        frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
+        frames.push("data: [DONE]\n\n".to_string());
+    }
+    serde_json::to_string(&frames).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

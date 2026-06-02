@@ -778,6 +778,39 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('server response handler SSE contract probe must not classify response tool semantics in TS', () => {
+    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const bodyStart = source.indexOf('function updateContractProbeFromSseChunk');
+    expect(bodyStart).toBeGreaterThanOrEqual(0);
+    const bodyEnd = source.indexOf('\nfunction buildResponsesTerminalSseFramesFromProbe', bodyStart);
+    expect(bodyEnd).toBeGreaterThan(bodyStart);
+    const body = source.slice(bodyStart, bodyEnd);
+    const findings = collectMatches(body, [
+      { label: 'checks required_action in TS SSE probe', pattern: /required_action|response\.required_action/ },
+      { label: 'maps output call_id in TS SSE probe', pattern: /call_id|output_item/ },
+      { label: 'deduplicates output items in TS SSE probe', pattern: /alreadyExists|existingCallId|existingId/ },
+    ]);
+    expect(body).toContain('updateResponsesContractProbeFromSseChunkNative(chunk, contractProbe.probe)');
+    expect(findings).toEqual([]);
+  });
+
+  it('server response handler terminal probe frames must be built by native', () => {
+    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const bodyStart = source.indexOf('function buildResponsesTerminalSseFramesFromProbe');
+    expect(bodyStart).toBeGreaterThanOrEqual(0);
+    const nextFunction = source.indexOf('\nfunction ', bodyStart + 1);
+    const body = source.slice(bodyStart, nextFunction > bodyStart ? nextFunction : undefined);
+    const findings = collectMatches(body, [
+      { label: 'checks required_action in TS terminal frames', pattern: /required_action|response\.required_action/ },
+      { label: 'checks output in TS terminal frames', pattern: /probe\.output|hasCompletedOutput/ },
+      { label: 'serializes response.done frames in TS terminal frames', pattern: /response\.done|response\.required_action/ },
+    ]);
+    expect(body).toContain('buildResponsesTerminalSseFramesFromProbeNative(probe, requestLabel)');
+    expect(findings).toEqual([]);
+  });
+
   it('servertool followup response block must not classify tool-bearing client payloads in TS', () => {
     const filePath = path.join(
       process.cwd(),

@@ -56,6 +56,8 @@ type NativeChatProcessNodeResultSemantics = {
   isEmptyClientResponsePayloadJson?: (bodyJson: string) => boolean;
   classifyEmptyResponseSignalJson?: (stage: string, bodyJson: string) => string;
   detectToolExecutionFailuresJson?: (bodyJson: string) => string;
+  updateResponsesContractProbeFromSseChunkJson?: (chunkJson: string, probeJson: string) => string;
+  buildResponsesTerminalSseFramesFromProbeJson?: (probeJson: string, requestLabel: string) => string;
 };
 
 type NativeHubPipelineRespSemantics = {
@@ -417,6 +419,38 @@ export function detectToolExecutionFailuresNative(body: unknown): ToolExecutionF
     throw new Error('[llmswitch-bridge] detectToolExecutionFailuresJson returned invalid payload');
   }
   return parsed as ToolExecutionFailureSignal[];
+}
+
+export function updateResponsesContractProbeFromSseChunkNative(
+  chunk: unknown,
+  probe: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  const fn = getChatProcessNodeResultSemantics().updateResponsesContractProbeFromSseChunkJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] updateResponsesContractProbeFromSseChunkJson not available');
+  }
+  const raw = fn(JSON.stringify(typeof chunk === 'string' ? chunk : String(chunk ?? '')), JSON.stringify(probe ?? {}));
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] updateResponsesContractProbeFromSseChunkJson returned invalid payload');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+export function buildResponsesTerminalSseFramesFromProbeNative(
+  probe: Record<string, unknown> | undefined,
+  requestLabel: string
+): string[] {
+  const fn = getChatProcessNodeResultSemantics().buildResponsesTerminalSseFramesFromProbeJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] buildResponsesTerminalSseFramesFromProbeJson not available');
+  }
+  const raw = fn(JSON.stringify(probe ?? {}), String(requestLabel || 'unknown'));
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed) || !parsed.every((frame) => typeof frame === 'string')) {
+    throw new Error('[llmswitch-bridge] buildResponsesTerminalSseFramesFromProbeJson returned invalid payload');
+  }
+  return parsed as string[];
 }
 
 export function isBlockingRecoverableNative(

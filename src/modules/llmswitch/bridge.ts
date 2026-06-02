@@ -94,6 +94,8 @@ export {
   sanitizeProviderOutboundPayload,
   deriveFinishReasonNative,
   isToolCallContinuationResponseNative,
+  updateResponsesContractProbeFromSseChunkNative,
+  buildResponsesTerminalSseFramesFromProbeNative,
   classifyProviderFailure,
   getNetworkErrorCodes
 } from './bridge/native-exports.js';

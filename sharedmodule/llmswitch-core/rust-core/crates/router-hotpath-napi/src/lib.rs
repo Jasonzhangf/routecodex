@@ -643,6 +643,28 @@ pub fn build_chat_response_from_responses_json(payload_json: String) -> NapiResu
     shared_responses_response_utils::build_chat_response_from_responses_json(payload_json)
 }
 
+#[napi(js_name = "updateResponsesContractProbeFromSseChunkJson")]
+pub fn update_responses_contract_probe_from_sse_chunk_json_bridge(
+    chunk_json: String,
+    probe_json: String,
+) -> NapiResult<String> {
+    shared_responses_response_utils::update_responses_contract_probe_from_sse_chunk_json(
+        chunk_json,
+        probe_json,
+    )
+}
+
+#[napi(js_name = "buildResponsesTerminalSseFramesFromProbeJson")]
+pub fn build_responses_terminal_sse_frames_from_probe_json_bridge(
+    probe_json: String,
+    request_label: String,
+) -> NapiResult<String> {
+    shared_responses_response_utils::build_responses_terminal_sse_frames_from_probe_json(
+        probe_json,
+        request_label,
+    )
+}
+
 #[napi]
 pub fn validate_tool_arguments_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::validate_tool_arguments_json(input_json)
