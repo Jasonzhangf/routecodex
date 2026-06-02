@@ -22,9 +22,9 @@ use super::thinking_history::{
 };
 use super::{CompatResult, ReqOutboundCompatInput};
 use crate::chat_process_media_semantics::{
-    strip_chat_process_historical_images, strip_latest_responses_input_media,
-    strip_latest_user_turn_media, strip_responses_context_input_historical_media,
-    strip_tool_result_media_content,
+    strip_chat_process_historical_images, strip_historical_visual_tool_uses_without_results,
+    strip_latest_responses_input_media, strip_latest_user_turn_media,
+    strip_responses_context_input_historical_media, strip_tool_result_media_content,
 };
 use serde_json::Value;
 
@@ -98,6 +98,13 @@ fn strip_historical_media(payload: Value) -> Value {
             messages.clone()
         };
         let stripped = strip_tool_result_media_content(messages, placeholder.clone());
+        if stripped.changed {
+            messages_changed = true;
+        }
+        let stripped = strip_historical_visual_tool_uses_without_results(
+            stripped.messages,
+            placeholder.clone(),
+        );
         if stripped.changed {
             messages_changed = true;
         }

@@ -286,6 +286,137 @@ fn tool_result_media_text_from_parts(parts: &[Value], placeholder: &str) -> Opti
     Some(text_parts.join("\n"))
 }
 
+fn read_tool_use_id(part: &Value) -> Option<String> {
+    part.as_object()
+        .and_then(|obj| obj.get("id"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn read_tool_use_name(part: &Value) -> Option<String> {
+    part.as_object()
+        .and_then(|obj| obj.get("name"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+}
+
+fn is_visual_tool_use(part: &Value) -> bool {
+    let Some(obj) = part.as_object() else {
+        return false;
+    };
+    let part_type = obj
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    part_type == "tool_use" && read_tool_use_name(part).as_deref() == Some("view_image")
+}
+
+fn message_has_tool_result_for_id(message: &Value, call_id: &str) -> bool {
+    let Some(parts) = message
+        .as_object()
+        .and_then(|obj| obj.get("content"))
+        .and_then(|v| v.as_array())
+    else {
+        return false;
+    };
+    parts.iter().any(|part| {
+        let Some(obj) = part.as_object() else {
+            return false;
+        };
+        let part_type = obj
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if part_type != "tool_result" {
+            return false;
+        }
+        obj.get("tool_use_id")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim() == call_id)
+            .unwrap_or(false)
+    })
+}
+
+fn replacement_text_part(text: &str) -> Value {
+    let mut replacement = serde_json::Map::new();
+    replacement.insert("type".to_string(), Value::String("text".to_string()));
+    replacement.insert("text".to_string(), Value::String(text.to_string()));
+    Value::Object(replacement)
+}
+
+pub fn strip_historical_visual_tool_uses_without_results(
+    messages: Vec<Value>,
+    placeholder_text: String,
+) -> ChatProcessMediaStripOutput {
+    if messages.is_empty() {
+        return ChatProcessMediaStripOutput {
+            changed: false,
+            messages,
+        };
+    }
+    let placeholder = if placeholder_text.trim().is_empty() {
+        "[Image omitted]".to_string()
+    } else {
+        placeholder_text
+    };
+    let mut next_messages = messages.clone();
+    let mut changed = false;
+
+    for idx in 0..next_messages.len() {
+        if read_role(&next_messages[idx]) != "assistant" {
+            continue;
+        }
+        let Some(parts) = next_messages[idx]
+            .as_object()
+            .and_then(|row| row.get("content"))
+            .and_then(|v| v.as_array())
+            .cloned()
+        else {
+            continue;
+        };
+        let mut filtered: Vec<Value> = Vec::with_capacity(parts.len());
+        let mut removed_visual_tool = false;
+        for part in &parts {
+            if is_visual_tool_use(part) {
+                let call_id = read_tool_use_id(part).unwrap_or_default();
+                let has_matching_result = !call_id.is_empty()
+                    && next_messages
+                        .iter()
+                        .skip(idx + 1)
+                        .find(|message| read_role(message) == "user")
+                        .map(|message| message_has_tool_result_for_id(message, call_id.as_str()))
+                        .unwrap_or(false);
+                if !has_matching_result {
+                    removed_visual_tool = true;
+                    continue;
+                }
+            }
+            filtered.push(part.clone());
+        }
+        if removed_visual_tool {
+            if filtered.is_empty() {
+                filtered.push(replacement_text_part(&placeholder));
+            }
+            if let Some(content) = next_messages[idx]
+                .as_object_mut()
+                .and_then(|row| row.get_mut("content"))
+            {
+                *content = Value::Array(filtered);
+            }
+            changed = true;
+        }
+    }
+
+    ChatProcessMediaStripOutput {
+        changed,
+        messages: if changed { next_messages } else { messages },
+    }
+}
+
 pub fn strip_chat_process_historical_images(
     messages: Vec<Value>,
     placeholder_text: String,
@@ -778,6 +909,64 @@ mod tests {
         assert_eq!(
             output.messages[0]["content"][1],
             json!({"type": "input_text", "text": "[Image omitted]"})
+        );
+    }
+
+    #[test]
+    fn strips_visual_tool_use_when_result_was_materialized_as_image_omitted_text() {
+        let output = strip_historical_visual_tool_uses_without_results(
+            vec![
+                json!({
+                    "role": "assistant",
+                    "content": [{"type":"tool_use","id":"call_img","name":"view_image","input":{"path":"/tmp/a.png"}}]
+                }),
+                json!({
+                    "role": "user",
+                    "content": [{"type":"text","text":"[Image omitted]"}]
+                }),
+                json!({
+                    "role": "assistant",
+                    "content": [{"type":"tool_use","id":"call_shell","name":"exec_command","input":{"cmd":"pwd"}}]
+                }),
+                json!({
+                    "role": "user",
+                    "content": [{"type":"tool_result","tool_use_id":"call_shell","content":"ok"}]
+                }),
+            ],
+            "[Image omitted]".to_string(),
+        );
+
+        assert!(output.changed);
+        assert_eq!(
+            output.messages[0]["content"],
+            json!([{"type":"text","text":"[Image omitted]"}])
+        );
+        assert_eq!(
+            output.messages[2]["content"][0]["type"].as_str(),
+            Some("tool_use")
+        );
+    }
+
+    #[test]
+    fn keeps_visual_tool_use_when_matching_tool_result_is_present() {
+        let output = strip_historical_visual_tool_uses_without_results(
+            vec![
+                json!({
+                    "role": "assistant",
+                    "content": [{"type":"tool_use","id":"call_img","name":"view_image","input":{"path":"/tmp/a.png"}}]
+                }),
+                json!({
+                    "role": "user",
+                    "content": [{"type":"tool_result","tool_use_id":"call_img","content":"looked"}]
+                }),
+            ],
+            "[Image omitted]".to_string(),
+        );
+
+        assert!(!output.changed);
+        assert_eq!(
+            output.messages[0]["content"][0]["type"].as_str(),
+            Some("tool_use")
         );
     }
 }

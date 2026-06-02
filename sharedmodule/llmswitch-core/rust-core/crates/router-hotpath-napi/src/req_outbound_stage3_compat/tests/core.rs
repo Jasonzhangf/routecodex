@@ -120,6 +120,37 @@ fn test_empty_profile_treated_as_none() {
 }
 
 #[test]
+fn req_outbound_compat_strips_visual_tool_use_without_tool_result() {
+    let input = json!({
+        "payload": {
+            "model": "MiniMax-M3",
+            "messages": [
+                {"role":"assistant","content":[{"type":"tool_use","id":"call_img","name":"view_image","input":{"path":"/tmp/a.png"}}]},
+                {"role":"user","content":[{"type":"text","text":"[Image omitted]"}]},
+                {"role":"assistant","content":[{"type":"tool_use","id":"call_shell","name":"exec_command","input":{"cmd":"pwd"}}]},
+                {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_shell","content":"ok"}]}
+            ]
+        },
+        "adapterContext": {
+            "providerProtocol": "anthropic-messages",
+            "compatibilityProfile": "anthropic:claude-code"
+        }
+    });
+
+    let output = run_req_outbound_stage3_compat_json(input.to_string()).unwrap();
+    let result: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+    assert_eq!(
+        result["payload"]["messages"][0]["content"],
+        json!([{"type":"text","text":"[Image omitted]"}])
+    );
+    assert_eq!(
+        result["payload"]["messages"][2]["content"][0]["type"].as_str(),
+        Some("tool_use")
+    );
+}
+
+#[test]
 fn test_json_roundtrip() {
     let input_json = r#"{
         "payload": {"model": "gpt-4", "messages": [{"role": "user", "content": "hello"}]},
