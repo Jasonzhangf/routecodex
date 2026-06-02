@@ -515,6 +515,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
       const serializedProviderPayload = JSON.stringify(capturedProviderPayload);
       expect(findDanglingAnthropicToolUse(capturedProviderPayload)).toBeNull();
       expect(findMixedAnthropicToolResultAndText(capturedProviderPayload)).toBeNull();
+      expect(serializedProviderPayload).not.toContain('data:image/');
       expect(serializedProviderPayload).toContain('call_second');
       expect(serializedProviderPayload).toContain('second ok');
     } finally {

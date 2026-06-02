@@ -2,7 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use std::{collections::HashSet, sync::OnceLock};
+use std::{collections::HashSet, sync::{LazyLock, OnceLock}};
 
 fn parse_lenient_string(value: &str) -> Value {
     let s0 = value.trim();
@@ -432,7 +432,16 @@ pub(crate) fn normalize_ran_tree_or_chunked_tool_text(raw: &str) -> String {
 }
 
 pub(crate) fn normalize_tool_result_text(raw: &str) -> String {
-    normalize_ran_tree_or_chunked_tool_text(raw)
+    replace_inline_data_images_with_placeholder(normalize_ran_tree_or_chunked_tool_text(raw).as_str())
+}
+
+fn replace_inline_data_images_with_placeholder(raw: &str) -> String {
+    static DATA_IMAGE_RE: OnceLock<Regex> = OnceLock::new();
+    let re = DATA_IMAGE_RE.get_or_init(|| {
+        Regex::new(r"data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+")
+            .expect("valid data image regex")
+    });
+    re.replace_all(raw, "[Image omitted]").to_string()
 }
 
 pub(crate) fn normalize_tool_result_value(value: &Value) -> String {

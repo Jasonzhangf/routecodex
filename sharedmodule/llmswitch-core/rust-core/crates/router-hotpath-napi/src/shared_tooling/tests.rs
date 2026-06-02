@@ -4,7 +4,8 @@ use super::{
     extract_structured_apply_patch_payloads_with, find_last_user_message_index,
     flatten_by_comma_json, is_chunked_exec_transcript_header_line, is_image_path,
     is_structured_apply_patch_payload, normalize_ran_tree_or_chunked_tool_text,
-    normalize_standard_chunked_tool_text, normalize_tool_result_value, pack_shell_args_json,
+    normalize_standard_chunked_tool_text, normalize_tool_result_text, normalize_tool_result_value,
+    pack_shell_args_json,
     repair_find_meta_json, split_command_string_json, strip_terminal_right_gutter_noise,
     unwrap_chunked_exec_transcript_shape, unwrap_ran_transcript_shape, unwrap_xml_cdata_sections,
     value_to_string,
@@ -137,6 +138,17 @@ fn shared_tooling_detects_image_paths() {
 #[test]
 fn shared_tooling_stringifies_values_like_markup_modules() {
     assert_eq!(value_to_string(&json!(["a", 2, null])), "a 2 ".to_string());
+}
+
+#[test]
+fn shared_tooling_replaces_tool_result_data_images_with_placeholder() {
+    let raw = "before data:image/png;base64,AAAABBBBCCCC after";
+    let normalized = normalize_tool_result_text(raw);
+    assert!(normalized.contains("before"));
+    assert!(normalized.contains("after"));
+    assert!(normalized.contains("[Image omitted]"));
+    assert!(!normalized.contains("data:image/png;base64"));
+    assert!(!normalized.contains("AAAABBBBCCCC"));
 }
 
 #[test]
