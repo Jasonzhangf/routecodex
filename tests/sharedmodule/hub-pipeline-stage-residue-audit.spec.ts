@@ -183,6 +183,14 @@ describe('hub pipeline stage residue audit', () => {
         'hub_pipeline.rs',
         'hub_pipeline_blocks/napi_bindings.rs',
       ]),
+      run_resp_outbound_pipeline: new Set([
+        'hub_pipeline.rs',
+        'hub_pipeline_blocks/napi_bindings.rs',
+      ]),
+      run_resp_outbound_pipeline_json: new Set([
+        'hub_pipeline.rs',
+        'hub_pipeline_blocks/napi_bindings.rs',
+      ]),
       apply_req_process_tool_governance: new Set([
         'hub_req_chatprocess_03_governance_boundary.rs',
         'req_process_stage1_tool_governance.rs',

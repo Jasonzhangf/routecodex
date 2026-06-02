@@ -74,6 +74,17 @@ Known legacy NAPI / TS stage bridge residue after Phase 7E:
   - Still live NAPI bridge; not safe to delete.
 Phase 8A-2 red tests lock `runHubPipelineStageWithNative` to the native protocol wrapper only. New TS stage direct callers are forbidden.
 
+Phase 8B-2 call graph proof: `run_resp_outbound_pipeline` and `run_resp_outbound_pipeline_json` remain referenced only by the legacy Rust stage implementation / NAPI bridge owner pair:
+
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs`
+  - Defines `run_resp_outbound_pipeline` and re-exports `run_resp_outbound_pipeline_json` from the bridge module.
+  - Still live as the Rust legacy stage API source; not safe to delete during Phase 8B-2.
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+  - Owns `run_resp_outbound_pipeline_json` and is the only current bridge caller of `run_resp_outbound_pipeline`.
+  - Still live as `runHubPipelineStageJson` bridge owner; not safe to delete until the legacy stage API has no external stage wrapper consumer.
+
+Phase 8B-2 red tests now lock `run_resp_outbound_pipeline` and `run_resp_outbound_pipeline_json` to those owner files only. New response outbound legacy stage bridge callers are forbidden.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:
