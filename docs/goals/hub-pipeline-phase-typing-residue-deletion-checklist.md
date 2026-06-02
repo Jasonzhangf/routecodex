@@ -104,6 +104,12 @@ Phase 8C-2 Rust NAPI owner proof: Rust `#[napi(js_name = "runHubPipelineStageJso
 - Red tests now forbid additional Rust NAPI exports or Rust call sites for `run_hub_pipeline_stage_json` outside `lib.rs` / `hub_pipeline_lib/engine.rs` / `hub_pipeline_lib/mod.rs`.
 - Exit condition remains paired with Phase 8C-1: remove Rust NAPI export, TS wrapper contract, and required-export entry together only after no legacy stage API contract remains.
 
+Phase 8C-3 legacy branch proof: `run_hub_pipeline_stage_json` currently has exactly three stage-only branches in `hub_pipeline_lib/engine.rs`: `normalizeRequest`, `reqProcessToolGovernance`, and `respProcessFinalize`. These are retirement-list branches for the legacy stage wrapper only; live mainline must continue through `execute_hub_pipeline_json` / `run_hub_pipeline_lib_json`.
+
+- Red tests now forbid adding new legacy stage names or branch helpers under `run_hub_pipeline_stage_json`.
+- Red tests also forbid wiring request-process or response-outbound legacy JSON stage APIs into `hub_pipeline_lib/engine.rs` as new stage-only branch targets.
+- Exit condition: delete these branches together with the legacy `runHubPipelineStageJson` wrapper/export after the wrapper contract is retired; do not add replacement branch names.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

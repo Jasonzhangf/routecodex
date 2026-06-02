@@ -214,6 +214,32 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('legacy runHubPipelineStageJson stage branches must stay fixed to retirement list', () => {
+    const enginePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
+    );
+    const source = fs.readFileSync(enginePath, 'utf8');
+    const stageNames = Array.from(source.matchAll(/Some\("([A-Za-z0-9]+)"\)/g)).map((match) => match[1]);
+    const legacyStageNames = stageNames.filter((name) =>
+      ['normalizeRequest', 'reqProcessToolGovernance', 'respProcessFinalize'].includes(name)
+    );
+    const branchHelpers = Array.from(source.matchAll(/return\s+(run_[a-z_]+_stage)\(raw\);/g)).map((match) => match[1]);
+
+    expect(legacyStageNames).toEqual([
+      'normalizeRequest',
+      'reqProcessToolGovernance',
+      'respProcessFinalize',
+    ]);
+    expect(branchHelpers).toEqual([
+      'run_normalize_request_stage',
+      'run_req_process_tool_governance_stage',
+      'run_resp_process_finalize_stage',
+    ]);
+    expect(source).not.toContain('run_resp_outbound_pipeline_json');
+    expect(source).not.toContain('run_req_process_pipeline_json');
+  });
+
   it('legacy normalize-request TS block files must be physically removed', () => {
     const pipelineRoot = path.join(
       process.cwd(),
