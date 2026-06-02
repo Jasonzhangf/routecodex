@@ -21,6 +21,39 @@ import type {
   RespInboundSseErrorDescriptor
 } from './native-hub-pipeline-resp-semantics-types.js';
 
+export function buildOpenAIChatResponseFromAnthropicMessageWithNative(
+  payload: Record<string, unknown>,
+  requestId?: string
+): Record<string, unknown> {
+  const capability = 'buildOpenaiChatResponseFromAnthropicMessageJson';
+  const fail = (reason?: string): Record<string, unknown> => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(payload ?? {});
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson, typeof requestId === 'string' ? requestId : undefined);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function normalizeAliasMapWithNative(
   candidate: unknown
 ): Record<string, string> | undefined {

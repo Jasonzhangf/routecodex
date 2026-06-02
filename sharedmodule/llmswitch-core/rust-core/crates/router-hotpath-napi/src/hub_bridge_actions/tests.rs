@@ -2370,7 +2370,7 @@ fn applies_metadata_provider_sentinel_response_outbound() {
         raw_response: Some(json!({ "ok": true })),
         metadata: Some(json!({
           "providerMetadata": {
-            "provider": "iflow",
+            "provider": "demo",
             "alias": "173"
           }
         })),
@@ -2380,7 +2380,7 @@ fn applies_metadata_provider_sentinel_response_outbound() {
         .get("__rcc_provider_metadata")
         .and_then(Value::as_str)
         .unwrap_or("");
-    assert!(sentinel.contains("\"provider\":\"iflow\""));
+    assert!(sentinel.contains("\"provider\":\"demo\""));
     assert!(sentinel.contains("\"alias\":\"173\""));
 }
 

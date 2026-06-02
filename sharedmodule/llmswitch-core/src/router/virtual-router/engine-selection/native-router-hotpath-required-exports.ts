@@ -21,6 +21,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "augmentContextSnapshotJson",
   "buildAnthropicToolAliasMapJson",
   "buildOpenaiChatFromAnthropicJson",
+  "buildOpenaiChatResponseFromAnthropicMessageJson",
   "buildAnthropicFromOpenaiChatJson",
   "buildAnthropicResponseFromChatJson",
   "resolveAnthropicStopReasonJson",

@@ -201,7 +201,6 @@ function buildResponsesTerminalSseFramesFromProbe(
   const donePayload = { type: 'response.done', response: responsePayload };
   if (requiredAction) {
     frames.push(`event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response: responsePayload, required_action: requiredAction })}\n\n`);
-    frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
     frames.push(`event: response.done\ndata: ${JSON.stringify(donePayload)}\n\n`);
     frames.push('data: [DONE]\n\n');
     return frames;

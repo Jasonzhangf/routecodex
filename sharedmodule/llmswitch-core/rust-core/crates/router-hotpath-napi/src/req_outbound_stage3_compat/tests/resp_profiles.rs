@@ -224,40 +224,6 @@ fn test_resp_profile_chat_deepseek_web_harvests_real_sample_with_extra_trailing_
 }
 
 #[test]
-fn test_resp_inbound_iflow_protocol_mismatch_native_noop() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({"id": "resp_2", "output": []}),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:iflow".to_string()),
-            provider_protocol: Some("openai-responses".to_string()),
-            request_id: Some("req_resp_2".to_string()),
-            entry_endpoint: Some("/v1/responses".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_resp_inbound_stage3_compat(input).unwrap();
-    assert!(result.applied_profile.is_none());
-    assert!(result.native_applied);
-}
-
-#[test]
 fn test_resp_profile_chat_claude_code_protocol_mismatch_native_noop() {
     let input = ReqOutboundCompatInput {
         payload: json!({"id": "resp_3", "output": []}),
@@ -768,60 +734,6 @@ fn test_resp_profile_chat_qwen_repairs_newline_inside_marker_json_and_split_toke
     let command = args_json["command"].as_str().unwrap_or("");
     assert!(command.contains("head -70 /tmp/a.py"));
     assert!(command.contains("more.py"));
-}
-
-#[test]
-fn test_resp_profile_chat_iflow_unwraps_body_and_harvests_tool_calls() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "status": 200,
-            "msg": "ok",
-            "body": {
-                "choices": [{
-                    "index": 0,
-                    "finish_reason": "stop",
-                    "message": {
-                        "role": "assistant",
-                        "tool_calls": [],
-                        "content": "<function_calls>{\"tool_calls\":[{\"id\":\"call_iflow_1\",\"type\":\"function\",\"function\":{\"name\":\"shell_command\",\"arguments\":{\"command\":\"pwd\",\"cwd\":\"/tmp\"}}}]}</function_calls>"
-                    }
-                }]
-            }
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:iflow".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_iflow_resp_1".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_resp_inbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert_eq!(result.applied_profile, Some("chat:iflow".to_string()));
-    assert!(result.payload.get("status").is_none());
-    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
-    assert_eq!(
-        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
-        "exec_command"
-    );
 }
 
 #[test]

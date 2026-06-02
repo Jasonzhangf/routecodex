@@ -873,10 +873,6 @@ export function webSearchIsQwenEngineWithNative(providerKey: string): boolean {
   return invokeWebSearchNative('webSearchIsQwenEngine', [providerKey]) === 'true';
 }
 
-export function webSearchIsIflowRetrieveEngineWithNative(searchEngineListJson: string): boolean {
-  return invokeWebSearchNative('webSearchIsIflowRetrieveEngine', [searchEngineListJson]) === 'true';
-}
-
 export function webSearchNormalizeResultCountWithNative(valueJson: string): number {
   const raw = invokeWebSearchNative('webSearchNormalizeResultCountJson', [valueJson]);
   const n = parseInt(raw, 10);

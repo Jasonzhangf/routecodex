@@ -222,6 +222,22 @@ pub fn build_openai_chat_from_anthropic_json_bridge(
     crate::anthropic_openai_codec::build_openai_chat_from_anthropic_json(payload_json, options_json)
 }
 
+#[napi(js_name = "buildOpenaiChatResponseFromAnthropicMessageJson")]
+pub fn build_openai_chat_response_from_anthropic_message_json(
+    payload_json: String,
+    request_id: Option<String>,
+) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let resolved_request_id = request_id.unwrap_or_else(|| "unknown".to_string());
+    let output = crate::hub_resp_outbound_client_semantics_blocks::anthropic_chat_response::build_openai_chat_response_from_anthropic_message(
+        &payload,
+        resolved_request_id.as_str(),
+    )
+    .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi(js_name = "buildAnthropicFromOpenaiChatJson")]
 pub fn build_anthropic_from_openai_chat_json_bridge(
     chat_response_json: String,

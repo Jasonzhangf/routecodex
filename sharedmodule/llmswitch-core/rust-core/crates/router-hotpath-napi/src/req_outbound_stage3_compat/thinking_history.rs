@@ -87,8 +87,11 @@ fn provider_matches_deepseek(adapter_context: &AdapterContext) -> bool {
     if matches!(provider_id.as_deref(), Some("deepseek")) {
         return true;
     }
+    if matches!(provider_id.as_deref(), Some("openai")) {
+        return false;
+    }
     let provider_key = read_trimmed(adapter_context.provider_key.as_ref());
-    matches!(provider_key.as_deref(), Some(key) if key.starts_with("deepseek."))
+    matches!(provider_key.as_deref(), Some(key) if key.starts_with("deepseek.") || key.starts_with("opencode-zen-free.") && key.contains(".deepseek-"))
 }
 
 fn model_matches_deepseek_family(adapter_context: &AdapterContext, payload: &Value) -> bool {
@@ -337,7 +340,11 @@ pub(crate) fn ensure_deepseek_anthropic_thinking_block_for_tool_use_history(
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-        if role != "assistant" || !has_non_empty_tool_calls(row) {
+        let content_has_tool_use = row
+            .get("content")
+            .map(anthropic_content_has_tool_use)
+            .unwrap_or(false);
+        if role != "assistant" || (!has_non_empty_tool_calls(row) && !content_has_tool_use) {
             continue;
         }
         let existing_content = row.get("content").cloned();
@@ -354,10 +361,7 @@ pub(crate) fn ensure_deepseek_anthropic_thinking_block_for_tool_use_history(
         if let Some(Value::Array(items)) = existing_content {
             blocks.extend(items);
         }
-        row.insert(
-            "content".to_string(),
-            Value::Array(blocks),
-        );
+        row.insert("content".to_string(), Value::Array(blocks));
     }
 }
 

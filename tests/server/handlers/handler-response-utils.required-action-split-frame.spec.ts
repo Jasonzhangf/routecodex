@@ -131,7 +131,8 @@ describe('handler-response-utils required_action split frame regression', () => 
     const text = chunks.join('');
     expect(text).toContain('event: response.required_action');
     expect(text).toContain('data: {"type":"response.required_action"');
-    expect(text).toContain('event: response.completed');
+    expect(text).not.toContain('event: response.completed');
+    expect(text).toContain('event: response.done');
     expect(text).toContain('data: [DONE]');
   });
 });

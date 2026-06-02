@@ -12,7 +12,6 @@ import {
   webSearchParseToolArgumentsWithNative,
   webSearchIsGeminiEngineWithNative,
   webSearchIsQwenEngineWithNative,
-  webSearchIsIflowRetrieveEngineWithNative,
   webSearchNormalizeResultCountWithNative,
   webSearchExtractAssistantMessageWithNative,
   webSearchBuildToolMessagesWithNative,
@@ -77,10 +76,6 @@ function isGeminiWebSearchEngine(engine: WebSearchEngineConfig): boolean {
 
 function isQwenWebSearchEngine(engine: WebSearchEngineConfig): boolean {
   return webSearchIsQwenEngineWithNative(engine.providerKey);
-}
-
-function isIflowRetrieveWebSearchEngine(engine: WebSearchEngineConfig): boolean {
-  return webSearchIsIflowRetrieveEngineWithNative(JSON.stringify(engine.searchEngineList ?? []));
 }
 
 function normalizeResultCount(value: unknown): number {
@@ -378,18 +373,6 @@ async function executeWebSearchBackend(args: {
         options,
         engine,
         query,
-        count: args.resultCount,
-        requestSuffix
-      });
-      summary = backendResult.summary;
-      hits = backendResult.hits;
-      ok = backendResult.ok;
-    } else if (isIflowRetrieveWebSearchEngine(engine) && options.providerInvoker) {
-      const backendResult = await executeIflowRetrieveWebSearchViaProvider({
-        options,
-        engine,
-        query,
-        recency,
         count: args.resultCount,
         requestSuffix
       });
@@ -736,78 +719,6 @@ async function executeQwenWebSearchViaProvider(args: {
   const summary = message || (hits.length ? formatHitsSummary(hits) : '');
   const ok = status === 0 || hits.length > 0;
   return { summary, hits, ok };
-}
-async function executeIflowRetrieveWebSearchViaProvider(args: {
-  options: ServerSideToolEngineOptions;
-  engine: WebSearchEngineConfig;
-  query: string;
-  recency?: string;
-  count: number;
-  requestSuffix: string;
-}): Promise<WebSearchBackendResult> {
-  const { options, engine, query, recency, count, requestSuffix } = args;
-  if (!options.providerInvoker) return { summary: '', hits: [], ok: false };
-  const payload: JsonObject = {
-    data: {
-      query,
-      ...(recency ? { recency } : {}),
-      count,
-      ...(Array.isArray(engine.searchEngineList) && engine.searchEngineList.length
-        ? { searchEngineList: [...engine.searchEngineList] }
-        : {})
-    },
-    metadata: {
-      glmWebSearch: true,
-      routeName: 'web_search'
-    }
-  };
-  const backend = await options.providerInvoker({
-    providerKey: engine.providerKey,
-    providerType: undefined,
-    modelId: undefined,
-    providerProtocol: options.providerProtocol,
-    payload,
-    entryEndpoint: '/v1/chat/retrieve',
-    requestId: `${options.requestId}${requestSuffix}`,
-    routeHint: 'web_search'
-  });
-  const providerResponse = backend.providerResponse && typeof backend.providerResponse === 'object' && !Array.isArray(backend.providerResponse)
-    ? (backend.providerResponse as JsonObject)
-    : null;
-  if (!providerResponse) return { summary: '', hits: [], ok: false };
-  const success = providerResponse.success;
-  const rawMessage = typeof providerResponse.message === 'string' ? providerResponse.message.trim() : '';
-  const rawData = Array.isArray(providerResponse.data) ? providerResponse.data : [];
-  const hits: WebSearchItem[] = [];
-  for (const item of rawData) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-    const row = item as Record<string, unknown>;
-    const link = typeof row.link === 'string' && row.link.trim()
-      ? row.link.trim()
-      : typeof row.url === 'string' && row.url.trim()
-        ? row.url.trim()
-        : '';
-    if (!link) continue;
-    hits.push({
-      title: typeof row.title === 'string' && row.title.trim() ? row.title.trim() : undefined,
-      link,
-      media: typeof row.media === 'string' && row.media.trim() ? row.media.trim() : undefined,
-      publish_date:
-        typeof row.publish_date === 'string' && row.publish_date.trim()
-          ? row.publish_date.trim()
-          : typeof row.publishDate === 'string' && row.publishDate.trim()
-            ? row.publishDate.trim()
-            : undefined,
-      content:
-        typeof row.content === 'string' && row.content.trim()
-          ? row.content.trim()
-          : typeof row.snippet === 'string' && row.snippet.trim()
-            ? row.snippet.trim()
-            : undefined
-    });
-    if (hits.length >= count) break;
-  }
-  return { summary: rawMessage || (hits.length ? formatHitsSummary(hits) : ''), hits, ok: success === true && hits.length > 0 };
 }
 function injectWebSearchToolResult(
   base: JsonObject,

@@ -1217,19 +1217,6 @@ pub fn apply_gemini_web_search_request_compat_json(
     )
 }
 
-#[napi(js_name = "applyIflowToolTextFallbackJson")]
-pub fn apply_iflow_tool_text_fallback_json(
-    payload_json: String,
-    adapter_context_json: Option<String>,
-    models_json: Option<String>,
-) -> NapiResult<String> {
-    req_outbound_stage3_compat::apply_iflow_tool_text_fallback_json(
-        payload_json,
-        adapter_context_json,
-        models_json,
-    )
-}
-
 #[napi(js_name = "applyLmstudioResponsesInputStringifyJson")]
 pub fn apply_lmstudio_responses_input_stringify_json_bridge(
     payload_json: String,

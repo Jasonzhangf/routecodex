@@ -764,14 +764,14 @@ mod tests {
         let section = json!({
             "webSearch": {
                 "engines": [{
-                    "id": "iflow:web_search",
-                    "providerKey": "iflow"
+                    "id": "demo:web_search",
+                    "providerKey": "demo"
                 }]
             }
         });
         let routing_source = json!({
             "web_search": [{
-                "targets": ["iflow.key1.kimi-k2"]
+                "targets": ["demo.key1.kimi-k2"]
             }]
         });
         let output = normalize_web_search(
@@ -780,6 +780,6 @@ mod tests {
         )
         .expect("normalize")
         .expect("web search");
-        assert_eq!(output.engines[0].provider_key, "iflow.key1.kimi-k2");
+        assert_eq!(output.engines[0].provider_key, "demo.key1.kimi-k2");
     }
 }

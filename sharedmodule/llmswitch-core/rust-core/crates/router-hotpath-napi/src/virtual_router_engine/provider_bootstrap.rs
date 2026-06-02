@@ -2349,9 +2349,6 @@ fn detect_provider_type(provider: &Map<String, Value>) -> String {
     if lexicon.contains("gemini") {
         return "gemini".to_string();
     }
-    if lexicon.contains("iflow") {
-        return "iflow".to_string();
-    }
     if lexicon.contains("qwen") {
         return "qwen".to_string();
     }

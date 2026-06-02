@@ -8,6 +8,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ## Hub Pipeline 工具边界审计硬规则（最醒目）
 
 - 审计/修复 Hub Pipeline 工具问题前，先读 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
+- 定位线上/黑盒工具错误时，第一步必须按 requestId / provider request_id / tool_call_id / 时间段读取 `~/.rcc/codex-samples/**` 与 `~/.rcc/diag/error-*.json`；先还原真实 client input、provider payload、provider response、contextSnapshot，再看代码，禁止跳过样本凭日志表象脑补。
+- 样本最小证据包：`requestId`、端口/route/provider、`contextSnapshot.input`、`contextSnapshot.chatMessages`、provider wire payload、上游 error/message、相关 `tool_call_id` 前后 3-5 条历史。
 - 架构命名按 `inbound / chatprocess / outbound` 三段：`req_inbound` 只解析入口协议和捕获上下文；`req_chatprocess` 是请求侧工具治理唯一入口；`req_outbound` 只做 Hub 语义到 provider 协议编码，禁止把工具语义降级成普通文本。
 - 响应同构：`resp_inbound` 只解析 provider 响应；`resp_chatprocess` 是响应侧工具治理唯一入口；`resp_outbound` 只做客户端协议投影，禁止修补请求侧历史污染。
 - 工具声明、文本工具 harvest、apply_patch、servertool、MCP/native 工具治理、sanitize、tool list 注入/裁剪必须 Rust-only；TS 只能是 JSON parse/serialize + native 调用薄壳。

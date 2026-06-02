@@ -8,6 +8,7 @@ export type {
 
 export {
   applyClientPassthroughPatchWithNative,
+  buildOpenAIChatResponseFromAnthropicMessageWithNative,
   buildAnthropicResponseFromChatWithNative,
   buildRespInboundSseErrorDescriptorWithNative,
   extractContextLengthDiagnosticsWithNative,

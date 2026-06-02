@@ -422,8 +422,8 @@ mod tests {
             }),
             normalized_metadata: serde_json::json!({}),
             target: serde_json::json!({
-              "providerKey": "iflow.kimi-k2.5",
-              "providerType": "iflow"
+              "providerKey": "demo.kimi-k2.5",
+              "providerType": "openai"
             }),
             route_name: None,
             original_model: None,

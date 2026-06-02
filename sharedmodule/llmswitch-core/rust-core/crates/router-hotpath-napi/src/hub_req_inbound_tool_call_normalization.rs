@@ -79,8 +79,70 @@ fn is_synthetic_apply_patch_guard_call(arguments: Option<&Value>) -> bool {
         .unwrap_or(false)
 }
 
+fn read_function_call_name(item_row: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(item_row.get("name")).or_else(|| {
+        item_row
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| read_trimmed_string(function.get("name")))
+    })
+}
+
+fn is_namespace_mcp_aggregator_call_name(name: &str) -> bool {
+    let normalized = name.trim();
+    normalized.starts_with("mcp__") && !normalized[5..].contains("__")
+}
+
 fn prune_responses_input_tool_history(items: &mut Vec<Value>) {
-    let _ = items;
+    let mut dropped_call_ids = HashSet::<String>::new();
+    let mut normalized_items = Vec::<Value>::with_capacity(items.len());
+
+    for item in std::mem::take(items) {
+        let item_obj = item.as_object();
+        let item_type = item_obj
+            .and_then(|row| read_trimmed_string(row.get("type")))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        if item_type == "function_call" || item_type == "tool_call" {
+            if let Some(row) = item_obj {
+                if read_function_call_name(row)
+                    .as_deref()
+                    .map(is_namespace_mcp_aggregator_call_name)
+                    .unwrap_or(false)
+                {
+                    if let Some(call_id) = read_trimmed_string(row.get("call_id"))
+                        .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                        .or_else(|| read_trimmed_string(row.get("id")))
+                    {
+                        dropped_call_ids.insert(call_id);
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if item_type == "function_call_output"
+            || item_type == "tool_result"
+            || item_type == "tool_message"
+        {
+            if let Some(row) = item_obj {
+                if read_trimmed_string(row.get("call_id"))
+                    .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                    .or_else(|| read_trimmed_string(row.get("tool_use_id")))
+                    .or_else(|| read_trimmed_string(row.get("id")))
+                    .map(|call_id| dropped_call_ids.contains(call_id.as_str()))
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+            }
+        }
+
+        normalized_items.push(item);
+    }
+
+    *items = normalized_items;
 }
 
 fn prune_message_tool_history(messages: &mut Vec<Value>) {
@@ -118,6 +180,7 @@ fn prune_message_tool_history(messages: &mut Vec<Value>) {
                                     && is_synthetic_apply_patch_guard_call(
                                         function_row.get("arguments"),
                                     ))
+                                    && !is_namespace_mcp_aggregator_call_name(raw_name.as_str())
                                 {
                                     return Some(false);
                                 }
@@ -913,6 +976,74 @@ mod tests {
         let args: Value = serde_json::from_str(args_text).expect("args object");
         assert_eq!(args["cmd"], "pwd");
         assert!(args.get("command").is_none());
+    }
+
+    #[test]
+    fn drops_namespace_mcp_aggregator_input_call_and_matching_output() {
+        let mut payload = json!({
+          "tools": [
+            {"name":"exec_command","description":"Runs command","input_schema":{"type":"object"}},
+            {"name":"mcp__node_repl","description":"namespace aggregator","input_schema":{}},
+            {"name":"mcp__node_repl__js","description":"child tool","input_schema":{"type":"object"}}
+          ],
+          "input": [
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"about to patch"}]},
+            {
+              "type":"function_call",
+              "call_id":"call_function_snr978zyv21w_1",
+              "name":"mcp__node_repl",
+              "arguments":"{\"js\":\"import fs from 'node:fs'\"}"
+            },
+            {
+              "type":"function_call_output",
+              "call_id":"call_function_snr978zyv21w_1",
+              "output":"unsupported call: mcp__node_repl"
+            },
+            {
+              "type":"function_call",
+              "call_id":"call_keep",
+              "name":"mcp__node_repl__js",
+              "arguments":"{\"code\":\"1+1\"}"
+            },
+            {
+              "type":"function_call_output",
+              "call_id":"call_keep",
+              "output":"2"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let items = payload["input"].as_array().expect("input items");
+        let serialized = serde_json::to_string(items).expect("serialize items");
+        assert!(!serialized.contains("call_function_snr978zyv21w_1"));
+        assert!(!serialized.contains("unsupported call: mcp__node_repl"));
+        assert!(serialized.contains("call_keep"));
+    }
+
+    #[test]
+    fn drops_namespace_mcp_aggregator_message_call_and_matching_tool_message() {
+        let mut payload = json!({
+          "messages": [
+            {
+              "role":"assistant",
+              "content":"",
+              "tool_calls":[
+                {"id":"call_drop","type":"function","function":{"name":"mcp__node_repl","arguments":"{}"}},
+                {"id":"call_keep","type":"function","function":{"name":"mcp__node_repl__js","arguments":"{}"}}
+              ]
+            },
+            {"role":"tool","tool_call_id":"call_drop","content":"unsupported call: mcp__node_repl"},
+            {"role":"tool","tool_call_id":"call_keep","content":"ok"}
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let messages = payload["messages"].as_array().expect("messages");
+        let serialized = serde_json::to_string(messages).expect("serialize messages");
+        assert!(!serialized.contains("call_drop"));
+        assert!(!serialized.contains("unsupported call: mcp__node_repl"));
+        assert!(serialized.contains("call_keep"));
     }
 
     #[test]

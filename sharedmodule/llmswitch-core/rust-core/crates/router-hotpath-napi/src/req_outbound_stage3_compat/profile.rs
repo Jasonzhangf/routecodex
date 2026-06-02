@@ -65,10 +65,6 @@ pub(super) fn is_lmstudio_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:lmstudio")
 }
 
-pub(super) fn is_iflow_profile(profile: &str) -> bool {
-    profile_matches(profile, "chat:iflow")
-}
-
 pub(super) fn is_deepseek_web_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:deepseek-web")
 }

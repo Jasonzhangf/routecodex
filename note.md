@@ -13981,5 +13981,25 @@ assert!(!result.reasoning.contains("tools:tool-request-detected"),
 - Added request-side typed entrypoint wrappers only: `run_hub_req_inbound_02_standardized_entrypoint`, `run_hub_req_chatprocess_03_governed_entrypoint`, `run_hub_req_outbound_05_provider_semantic_entrypoint` in `hub_pipeline_types/request_typed_entrypoints.rs`.
 - Wrappers only delegate to existing transparent type builders and are not wired into `hub_pipeline.rs`, `hub_pipeline_lib/engine.rs`, or NAPI `lib.rs` live runtime paths.
 - Validation: `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml request_typed_entrypoints --lib` passed 2/2; request typed entrypoint + request topology Jest passed 10/10; `npm run -s build --prefix sharedmodule/llmswitch-core` passed; `git diff --check` passed.
+
+## 2026-06-02 MiniMax 2013 tool id 样本根因
+- 真实证据：`~/.rcc/diag/error-openai-responses-router-gpt-5.5-20260601T233850335-246285-2009.json`，`contextSnapshot.input[72]` 是 `mcp__node_repl` namespace aggregator `function_call`，`input[73]` 是同 `call_function_snr978zyv21w_1` 的 `function_call_output`；但 `contextSnapshot.chatMessages` 只剩 tool message，没有对应 assistant `tool_calls`，导致上游 MiniMax 报 `tool result's tool id ... not found (2013)`。
+- 根因：namespace MCP aggregator 工具定义/assistant tool_call 被过滤，但 Responses input 历史里的 matching `function_call_output` 未同步删除，形成孤儿 tool result。
+- 修复方向：Rust `hub_req_inbound_tool_call_normalization` 在 responses input 与 chat messages 两种形态都成对删除 aggregator call + matching output/tool message；禁止 fallback 生成假 call。
 2026-06-02 纠正：工具调用进文本问题必须先查原始 provider 响应字段归属（text/content vs structured tool_calls），禁止先假设文本收割修复。
+
+## 2026-06-02 Anthropic response TS 工具语义收缩
+- 违规点：`response-runtime-anthropic.ts` 直接在 TS 中解析 Anthropic `tool_use`、文本工具 markup、shell-like input，并合成 OpenAI chat `tool_calls`；这违反 resp_inbound/resp_process Rust-only 工具语义边界。
+- 修复：新增 Rust NAPI `buildOpenaiChatResponseFromAnthropicMessageJson`，TS `buildOpenAIChatFromAnthropicMessage` 收缩为 native 调用 + Responses registry metadata 续接薄壳；红测/验证为 residue grep 从命中转空、native smoke `stop_reason=tool_use` -> `finish_reason=tool_calls`、Rust tool_use 定向测试和 `build:min`。
+
+## 2026-06-02 servertool followup dead TS 工具语义移除
+- 违规点：`sharedmodule/llmswitch-core/src/servertool/handlers/followup-message-blocks.ts` 自行识别 textual tool transport、从 `tool_outputs` 拼 `tool` messages、重建 vision followup messages；这些能力已有 Rust `servertool_followup_delta.rs` + native wrappers (`followup-origin-delta.ts`) 承接。
+- 证据：全仓只剩该文件自身及生成 `.js/.d.ts/.map` 引用，无运行时 import；物理删除源与生成残留。
+- 验证：`cargo test -p router-hotpath-napi servertool_followup_delta` 3/3 通过；`npx tsc --noEmit --pretty false --skipLibCheck` 通过；`npm run build:min` 通过。
 2026-06-02 MiniMax tool_call 文本化复盘：--snap raw 落在 ~/.rcc/codex-samples/openai-responses/minimax.key1.MiniMax-M3/req_1780361351618_3e08ea1c/provider-response.json；原始响应 contentTypes=[thinking,text,tool_use,tool_use]，因此不是模型纯文本输出，也不是应该文本收割的问题。唯一修复方向：Anthropic message content[].tool_use 在 Responses outbound client remap 阶段结构化投影为 output[].function_call + required_action，禁止生成 minimax:tool_call 文本。
+
+## 2026-06-02 anthropic shared response TS 工具语义收缩
+- 违规点：`sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-response.ts` 在 TS 中遍历 `tool_calls`、解析 arguments、normalize shell-like input、catch 后忽略 malformed tool call，并映射 finish_reason -> Anthropic stop_reason。
+- 修复：该文件收缩为 `buildAnthropicFromOpenAIChatWithNative` 薄壳，只保留 `coerceAnthropicAliasRecord` 简单 metadata map 读取；工具语义由 Rust `anthropic_openai_codec::build_anthropic_from_openai_chat_json` 负责。
+- 验证：residue grep 从命中转空；`cargo test -p router-hotpath-napi build_anthropic_from_openai_chat_preserves_stringified_tool_use_blocks` 通过；`npx tsc --noEmit --pretty false --skipLibCheck` 通过；`npm run build:min` 通过。
+2026-06-02 required_action SSE 污染复盘：MiniMax raw/provider 投影已是结构化 tool_use/function_call；UI 仍出现 minimax 碎片时，排查到 `buildResponsesTerminalSseFramesFromProbe` 对 required_action 同时补 `response.completed`，导致客户端把工具等待态误当完成态。修复为 required_action -> response.done -> [DONE]，不再发 completed。

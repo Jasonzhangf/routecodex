@@ -402,7 +402,7 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
 fn normalize_submitted_tool_outputs(
     tool_outputs: &[Value],
     merged_input: &[Value],
-) -> (Vec<Value>, Vec<Value>) {
+) -> Result<(Vec<Value>, Vec<Value>), String> {
     let mut call_id_to_function_item_id: Map<String, Value> = Map::new();
     for item in merged_input {
         let Some(row) = item.as_object() else {
@@ -444,21 +444,17 @@ fn normalize_submitted_tool_outputs(
             .filter(|value| !value.is_empty());
 
         let output_id = if let Some(mapped) = mapped_item_id {
-            Some(normalize_function_call_output_id(
-                Some(mapped.as_str()),
-                mapped.as_str(),
-            ))
+            normalize_function_call_output_id(Some(mapped.as_str()), mapped.as_str())
         } else if let Some(resolved_call_id) = call_id.as_ref() {
-            let fallback = raw_id
-                .clone()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| resolved_call_id.clone());
-            Some(normalize_function_call_output_id(
-                Some(resolved_call_id.as_str()),
-                fallback.as_str(),
-            ))
+            return Err(format!(
+                "Responses tool output id '{}' does not match any pending function_call in previous_response_id context",
+                resolved_call_id
+            ));
         } else {
-            None
+            return Err(format!(
+                "Responses tool output at index {} is missing tool_call_id/call_id",
+                index
+            ));
         };
 
         let output_text = match row.get("output") {
@@ -472,9 +468,7 @@ fn normalize_submitted_tool_outputs(
             "type".to_string(),
             Value::String("function_call_output".to_string()),
         );
-        if let Some(output_id_value) = output_id {
-            item.insert("id".to_string(), Value::String(output_id_value));
-        }
+        item.insert("id".to_string(), Value::String(output_id));
         if let Some(resolved_call_id) = call_id.clone() {
             item.insert("call_id".to_string(), Value::String(resolved_call_id));
         }
@@ -488,7 +482,7 @@ fn normalize_submitted_tool_outputs(
         }));
     }
 
-    (items, submitted)
+    Ok((items, submitted))
 }
 
 fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Value {
@@ -582,7 +576,7 @@ fn resume_responses_conversation_payload(
     response_id: &str,
     submit_payload: &Value,
     request_id: Option<&str>,
-) -> Value {
+) -> Result<Value, String> {
     let entry_obj = entry.as_object().cloned().unwrap_or_default();
     let base_payload = clone_object(entry_obj.get("basePayload"));
     let mut payload = base_payload.clone();
@@ -598,7 +592,7 @@ fn resume_responses_conversation_payload(
     );
 
     let (normalized_items, submitted_details) =
-        normalize_submitted_tool_outputs(&tool_outputs, &merged_input);
+        normalize_submitted_tool_outputs(&tool_outputs, &merged_input)?;
     merged_input.extend(normalized_items);
     payload.insert("input".to_string(), Value::Array(merged_input));
 
@@ -649,7 +643,7 @@ fn resume_responses_conversation_payload(
     payload.remove("tool_outputs");
     payload.remove("response_id");
 
-    serde_json::json!({
+    Ok(serde_json::json!({
         "payload": Value::Object(payload),
         "meta": {
             "restoredFromResponseId": response_id,
@@ -659,7 +653,7 @@ fn resume_responses_conversation_payload(
             "toolOutputsDetailed": submitted_details,
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
         }
-    })
+    }))
 }
 
 fn canonicalize_continuation_item(value: &Value) -> Value {
@@ -1188,7 +1182,8 @@ pub fn resume_responses_conversation_payload_json(
         &response_id,
         &submit_payload,
         request_id.as_deref(),
-    );
+    )
+    .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -1271,7 +1266,8 @@ mod tests {
                 "stream": false
             }),
             Some("req_2"),
-        );
+        )
+        .unwrap();
 
         let payload = resumed.get("payload").and_then(Value::as_object).unwrap();
         assert_eq!(
@@ -1335,12 +1331,49 @@ mod tests {
                 "stream": true
             }),
             Some("req_2"),
-        );
+        )
+        .unwrap();
 
         let serialized = serde_json::to_string(resumed.get("payload").unwrap()).unwrap();
         assert!(!serialized.contains("data:image/png;base64,HISTORY"));
         assert!(serialized.contains("[Image omitted]"));
         assert!(serialized.contains("data:image/png;base64,CURRENT"));
+    }
+
+    #[test]
+    fn resume_rejects_unknown_tool_output_id_before_provider_send() {
+        let payload = json!({
+            "model": "gpt-base",
+            "tools": [{ "type": "function", "function": { "name": "exec_command" } }]
+        });
+        let context = json!({
+            "input": [
+                { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hi" }] },
+                { "type": "function_call", "id": "fc_expected", "call_id": "call_expected", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+            ]
+        });
+        let entry = prepare_responses_conversation_entry(&payload, &context);
+
+        let error = resume_responses_conversation_payload(
+            &json!({
+                "requestId": "req_1",
+                "basePayload": entry.get("basePayload").cloned().unwrap_or(Value::Null),
+                "input": entry.get("input").cloned().unwrap_or(Value::Null),
+                "tools": entry.get("tools").cloned().unwrap_or(Value::Null)
+            }),
+            "resp_1",
+            &json!({
+                "tool_outputs": [{
+                    "call_id": "call_function_snr978zyv21w_1",
+                    "output": "/Users/fanzhang/Documents/github/routecodex"
+                }]
+            }),
+            Some("req_2"),
+        )
+        .expect_err("unknown tool output id must fail fast");
+
+        assert!(error.contains("call_function_snr978zyv21w_1"));
+        assert!(error.contains("does not match any pending function_call"));
     }
 
     #[test]

@@ -2044,3 +2044,8 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 - 证据：`--snap` raw provider response 落盘在 `~/.rcc/codex-samples/openai-responses/minimax.key1.MiniMax-M3/req_1780361351618_3e08ea1c/provider-response.json`，原始 `content` 包含 `tool_use`，不是文本工具调用。
 - 修复真源：`hub_resp_outbound_client_semantics_blocks/responses_payload.rs` 在 OpenAI Responses client remap 中直接支持 Anthropic `type=message/content[].tool_use`，转为 Responses `output[].function_call` + `required_action.submit_tool_outputs.tool_calls`；禁止通过文本收割修这类结构化工具调用。
 - 红测：`build_responses_payload_from_anthropic_tool_use_preserves_structured_calls` 锁住 `output_text` 不含 `minimax:tool_call`，并断言 raw `tool_use` 保持为结构化 function_call。
+
+## 2026-06-02 Responses required_action SSE 不得伪 completed
+- 证据：MiniMax raw `content[].tool_use` 与 native Anthropic->Responses 投影均保持结构化；UI 仍有 `minimax` 碎片时，问题在 server SSE terminal repair。
+- 修复：`buildResponsesTerminalSseFramesFromProbe` 对 `required_action` 只发 `response.required_action`、`response.done`、`[DONE]`，不得再追加 `response.completed`，避免客户端把 tool-call 等待态误当完成态。
+- 红测：`tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` 断言 split required_action 不含 `event: response.completed`。

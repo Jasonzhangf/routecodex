@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn prefer_model_id_when_present() {
         let input = json!({
-          "providerKey": "iflow.2-173.kimi-k2.5",
+          "providerKey": "demo.2-173.kimi-k2.5",
           "modelId": "kimi-k2.5"
         });
         assert_eq!(
@@ -358,8 +358,8 @@ mod tests {
     #[test]
     fn derive_from_runtime_key_prefix() {
         let input = json!({
-          "providerKey": "iflow.2-173.kimi-k2.5",
-          "runtimeKey": "iflow"
+          "providerKey": "demo.2-173.kimi-k2.5",
+          "runtimeKey": "demo"
         });
         assert_eq!(
             extract_target_model_id(&input).as_deref(),
@@ -382,8 +382,8 @@ mod tests {
     fn apply_target_metadata_sets_force_flags_and_assigned_model() {
         let mut metadata = json!({});
         let target = json!({
-          "providerKey": "iflow.2-173.kimi-k2.5",
-          "providerType": "iflow",
+          "providerKey": "demo.2-173.kimi-k2.5",
+          "providerType": "openai",
           "modelId": "kimi-k2.5",
           "processMode": "chat",
           "forceWebSearch": true

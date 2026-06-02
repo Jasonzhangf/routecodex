@@ -89,7 +89,6 @@ pub(crate) mod claude_code;
 mod deepseek_web;
 pub(crate) mod gemini;
 mod glm;
-mod iflow;
 mod lmstudio;
 mod profile;
 mod qwen;
@@ -155,15 +154,6 @@ pub fn apply_tool_text_request_guidance_json(
     config_json: Option<String>,
 ) -> napi::Result<String> {
     tool_text_request_guidance::apply_tool_text_request_guidance_json(payload_json, config_json)
-}
-
-#[napi_derive::napi]
-pub fn apply_iflow_tool_text_fallback_json(
-    payload_json: String,
-    adapter_context_json: Option<String>,
-    models_json: Option<String>,
-) -> napi::Result<String> {
-    iflow::apply_iflow_tool_text_fallback_json(payload_json, adapter_context_json, models_json)
 }
 
 #[napi_derive::napi]
