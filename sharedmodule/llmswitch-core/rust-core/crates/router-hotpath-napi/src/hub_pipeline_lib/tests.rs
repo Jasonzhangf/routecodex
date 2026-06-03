@@ -457,6 +457,51 @@ fn anthropic_response_remaps_to_openai_responses_client_payload() {
 }
 
 #[test]
+fn anthropic_end_turn_stopless_effect_uses_chatprocess_payload() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-anthropic-stopless-chatprocess".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "anthropic-messages".to_string(),
+            payload: json!({
+                "id": "msg_anthropic_stopless_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "MiniMax-M3",
+                "content": [{ "type": "text", "text": "Jason，继续。先核 coder2 工具。" }],
+                "stop_reason": "end_turn",
+                "usage": { "input_tokens": 7, "output_tokens": 3 }
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "runtimeEffects": { "providerInvoker": true }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let effect = output
+        .effect_plan
+        .effects
+        .iter()
+        .find(|effect| {
+            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+                && effect.payload["reason"] == json!("stop_eligible_followup")
+        })
+        .unwrap();
+    assert_eq!(effect.payload["stopGateway"]["source"], json!("chat"));
+    assert_eq!(effect.payload["stopGateway"]["reason"], json!("finish_reason_stop"));
+    assert_eq!(effect.payload["payload"]["choices"][0]["finish_reason"], json!("stop"));
+    assert_eq!(effect.payload["payload"]["choices"][0]["message"]["content"], json!("Jason，继续。先核 coder2 工具。"));
+}
+
+#[test]
 fn response_stream_path_returns_stream_pipe_effect_plan() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine
@@ -555,6 +600,9 @@ fn response_stop_with_runtime_callbacks_returns_servertool_effect_plan() {
         .unwrap();
     assert_eq!(effect.payload["action"], json!("requireRuntimeExecutor"));
     assert_eq!(effect.payload["reason"], json!("stop_eligible_followup"));
+    assert_eq!(effect.payload["payload"]["choices"][0]["finish_reason"], json!("stop"));
+    assert_eq!(effect.payload["payload"]["choices"][0]["message"]["content"], json!("done"));
+    assert_eq!(effect.payload["stopGateway"]["source"], json!("chat"));
     assert_eq!(
         effect.payload["requestId"],
         json!("req-servertool-effect-1")

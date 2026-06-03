@@ -318,6 +318,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 禁止任何“把非 stop 改成 stop”的语义改写（仅允许既定例外：text harvest；stop -> tool_calls）。
 - 2026-06-03 更新：`stop_message_flow` 只能走 servertool reenter，禁止 `clientInjectOnly/clientInjectSource=servertool.stop_message` 与 tmux/client injection；`stop_message_flow` followup hop 是正常带工具列表的 bounded continuation，必须保留 stopMessage eligible，并由 `used/max_repeats` 计数防循环。只有非 `stop_message_flow` 的 generic followup hop 才进入 Rust skip 防递归。
 - 2026-06-03 更新：stopless schema 的 `learned` 字段属于 Rust `stop-message-core` 默认 schema；只有 `schemaGate.action=allow_stop` 且 `learned` 非空时，TS IO 薄壳才可写入项目 `note.md`。followup / invalid schema / missing schema / budget exhausted 不得写入记忆。
+- 2026-06-04 更新：stopless/servertool gateway 只能检查 `HubRespChatProcess03Governed` chat 标准态；禁止用 provider raw `stop_reason` 或 client outbound/SSE payload 判定。Rust effect 必须携带 chat-process payload，TS shell 缺 payload 必须 fail-fast。
 
 
 ## Windsurf 对齐固定参考（2026-05-21，强制）

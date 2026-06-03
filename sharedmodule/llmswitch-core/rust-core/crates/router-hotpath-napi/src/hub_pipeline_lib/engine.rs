@@ -502,6 +502,7 @@ impl HubPipelineEngine {
         .map_err(|message| {
             HubPipelineError::new("hub_pipeline_resp_chatprocess_03_failed", message)
         })?;
+        let servertool_chatprocess_payload = governed.governed_payload.clone();
         diagnostics.push(diagnostic(
             HubPipelineStageId::RespProcessFinalize,
             HubPipelineDiagnosticStatus::Started,
@@ -590,7 +591,7 @@ impl HubPipelineEngine {
             })),
         ));
         let mut effects = Vec::new();
-        let stop_gateway = inspect_stop_gateway_signal(&stream_decision.payload.to_string())
+        let stop_gateway = inspect_stop_gateway_signal(&servertool_chatprocess_payload.to_string())
             .ok()
             .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
             .unwrap_or(Value::Null);
@@ -607,6 +608,7 @@ impl HubPipelineEngine {
                         "reason": "stop_eligible_followup",
                         "requestId": output.request_id,
                         "stopGateway": stop_gateway,
+                        "payload": servertool_chatprocess_payload.clone(),
                     }),
                 });
             }

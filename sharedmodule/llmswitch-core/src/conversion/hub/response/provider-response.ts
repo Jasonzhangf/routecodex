@@ -228,6 +228,14 @@ function readNativeServertoolRuntimeActionEffects(effectPlan: { effects: Array<R
     });
 }
 
+function readServertoolRuntimeActionChatPayload(effect: Record<string, unknown>): JsonObject {
+  const payload = effect.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Rust HubPipeline servertoolRuntimeAction missing chat-process payload');
+  }
+  return payload as JsonObject;
+}
+
 async function executeProviderResponseNativeServertoolEffects(args: {
   effectPlan: { effects: Array<Record<string, unknown>> };
   payload: JsonObject;
@@ -254,7 +262,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         });
       }
       const orchestration = await runServertoolResponseStageOrchestrationShell({
-        payload,
+        payload: readServertoolRuntimeActionChatPayload(effect),
         adapterContext: args.context,
         requestId: args.requestId,
         entryEndpoint: args.entryEndpoint,
@@ -265,7 +273,9 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         reenterPipeline: args.reenterPipeline as any,
         clientInjectDispatch: args.clientInjectDispatch as any
       });
-      payload = orchestration.payload;
+      if (orchestration.executed) {
+        payload = orchestration.payload;
+      }
       continue;
     }
     if (effect.action === 'requireRuntimeExecutor') {
@@ -280,7 +290,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         });
       }
       const orchestration = await runServertoolResponseStageOrchestrationShell({
-        payload,
+        payload: readServertoolRuntimeActionChatPayload(effect),
         adapterContext: args.context,
         requestId: args.requestId,
         entryEndpoint: args.entryEndpoint,
@@ -290,7 +300,9 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         reenterPipeline: args.reenterPipeline as any,
         clientInjectDispatch: args.clientInjectDispatch as any
       });
-      payload = orchestration.payload;
+      if (orchestration.executed) {
+        payload = orchestration.payload;
+      }
       continue;
     }
     throw new Error('Rust HubPipeline servertoolRuntimeAction returned unsupported action');

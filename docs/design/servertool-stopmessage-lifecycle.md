@@ -62,6 +62,11 @@ Design goals:
 - `note.md` write is allowed only on `schemaGate.action=allow_stop` and non-empty `learned`.
 - No write on followup, invalid schema, missing schema, budget exhausted, or reenter failure.
 
+1.3. Chat-process stop gateway:
+- Stopless/servertool gateway must inspect `HubRespChatProcess03Governed` chat payload, not provider raw payload and not client outbound/SSE payload.
+- Anthropic `end_turn` / provider-native stop reasons must already be mapped into chat `finish_reason=stop` before stopless is evaluated.
+- TS servertool shell may receive the Rust-provided chat-process payload for execution, but must not synthesize or fallback to client payload when it is missing.
+
 2. Continue-execution stripping:
 - `continue_execution` 的 tool_call 对客户端必须透明；响应侧在 chat process 的
   `resp_process_stage2_finalize` 统一剥离该 tool_call，并将对应 choice 的
