@@ -2049,3 +2049,14 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 - 证据：MiniMax raw `content[].tool_use` 与 native Anthropic->Responses 投影均保持结构化；UI 仍有 `minimax` 碎片时，问题在 server SSE terminal repair。
 - 修复：`buildResponsesTerminalSseFramesFromProbe` 对 `required_action` 只发 `response.required_action`、`response.done`、`[DONE]`，不得再追加 `response.completed`，避免客户端把 tool-call 等待态误当完成态。
 - 红测：`tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` 断言 split required_action 不含 `event: response.completed`。
+
+## 2026-06-02 config.toml multi-port isolation
+- Verified fix: config.toml ports 5520/10000/5555 run under global `routecodex 0.90.2695` with per-port `serverId`, session dir, logs, snapshots, stats `entryPort`, and non-primary admin mutate guard. 10000 returns real HTTP JSON through RouteCodex (`/health` 200, `/admin/ports` 404 JSON, chat 200 JSON) when using LAN IP because `127.0.0.1:10000` is occupied by `netdisk_s` and is not RouteCodex.
+  Tags: routecodex, multi-port, isolation, live-smoke, config-toml
+- Reusable rule: when debugging port 10000 Empty reply, first run `lsof -nP -iTCP:10000 -sTCP:LISTEN`; if another process owns `127.0.0.1:10000`, smoke RouteCodex via its wildcard/LAN listener before concluding server failure. Empty reply on loopback can be external port shadowing, not HTTP handler failure.
+  Tags: routecodex, port-10000, smoke-test, troubleshooting
+
+## 2026-06-02 config.toml multi-port traffic isolation closeout
+- Verified closeout on global `routecodex 0.90.2704`: 10000 via LAN IP returns HTTP JSON (502 upstream JSON, not Empty reply), 10000/5555 `/admin/ports` return 404 JSON with port tag, 5520 admin returns 401 JSON, and per-port log path `/Volumes/extension/.rcc/log/config.toml/ports/10000/server-10000.log` exists.
+- Traffic governor scope truth: provider traffic files must include `server:<serverId>::<runtimeKey>` in encoded state keys, e.g. `server%3A127.0.0.1%3A10000%3A%3A...json`; bare runtimeKey files are legacy/shared and cannot prove per-port isolation.
+- Red-test gate: `tests/red-tests/multi_port_server_isolation.test.ts` locks PortRegistry serverId/session dirs, async error JSON wrapping, admin guard, errorsample/snapshot/stats port paths, and ProviderTrafficGovernor per-server concurrency scope.

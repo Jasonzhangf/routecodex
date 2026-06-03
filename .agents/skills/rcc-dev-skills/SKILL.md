@@ -8,6 +8,10 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ## Hub Pipeline 工具边界审计硬规则（最醒目）
 
 - 审计/修复 Hub Pipeline 工具问题前，先读 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
+- 请求/响应转换必须是唯一语义链：`req_inbound -> req_chatprocess -> req_outbound -> provider_runtime -> resp_inbound -> resp_chatprocess -> resp_outbound`；`req_inbound/resp_inbound` 只解析入口协议和捕获上下文，所有字段的唯一语义映射必须发生在 `req_chatprocess/resp_chatprocess`，再由 outbound 只编码目标协议 wire，禁止绕过 chatprocess 直接重建上下文。
+- 字段守恒规则：正常传输链路不得丢字段、不得把工具语义/`thinking`/`reasoning`/`tool_use`/`tool_result` 降级成普通文本；协议不支持的字段必须进入明确 canonical carrier 或 fail-fast，不允许静默删除、合并、清理、fallback。
+- Anthropic reasoning 映射规则：入口 Anthropic `thinking` block / `reasoning_content` 必须先由 `req_inbound` 保留原始语义，再在 `req_chatprocess` 唯一映射为 Hub Chat canonical reasoning part；`req_outbound` 只编码为 provider wire 的 Anthropic `thinking` block / 合法字段；响应链同构在 `resp_chatprocess` 映射回 canonical reasoning，再由 `resp_outbound` 投影到 Responses reasoning，provider runtime 不得补做 reasoning/history 转换。
+- `rawBody` 只能用于 snapshot/debug/errorsample 取证，不能作为正常请求/响应构造输入；provider runtime 只能发送 `req_outbound` 已生成的 provider wire payload，不能读取 `rawBody.messages`、不能从 raw history restore/coalesce/sanitize/prune/rebuild 上下文。
 - 定位线上/黑盒工具错误时，第一步必须按 requestId / provider request_id / tool_call_id / 时间段读取 `~/.rcc/codex-samples/**` 与 `~/.rcc/diag/error-*.json`；先还原真实 client input、provider payload、provider response、contextSnapshot，再看代码，禁止跳过样本凭日志表象脑补。
 - 若怀疑“工具调用进文本”，先对照 provider raw response 与 client-response snapshot：确认原始内容到底是结构化 tool_call/tool_use 还是文本；不得从客户端渲染结果反推解析器结论。`--snap` 必须能抓客户端最终 SSE 文本，包括 stream chunk 与 direct `res.write` repair 帧。
 - 若 provider raw response 本身把工具调用吐成文本，继续查 provider-request 是否已带 native `tools`、文本 wrapper 是否属于已知 XML/namespace 形态、resp_chatprocess 是否已结构化 harvest；不得先假设上游改变，也不得从 UI 渲染反推。
@@ -1752,3 +1756,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-06-02 MiniMax tool_call 文本化排障精华
 - Trigger: UI 出现 `minimax:tool_call` 或 provider 工具调用进文本。Action: 先查 `--snap` raw `provider-response.json` 的字段归属（`content[].tool_use` vs text/content），再定位 resp outbound 投影；禁止先按文本收割修复结构化工具调用。
+
+### 2026-06-02 multi-port / 10000 smoke 精华
+- 10000 Empty reply 排障先查 `lsof -nP -iTCP:10000 -sTCP:LISTEN`：若 `127.0.0.1:10000` 被其他进程占用，而 RouteCodex 监听 `*:10000`，必须用 LAN IP/实际绑定地址打 smoke，禁止把 loopback Empty reply 直接归因给 RouteCodex。
+- 多端口隔离验收必须同时看：`ports/<port>/server-<port>.log`、`codex-samples/<entry>/ports/<port>/...`、`provider-stats.jsonl` 的 `entryPort`、非主端口 `/admin/ports` 404 JSON、以及真实 `/v1/chat/completions` HTTP JSON。
