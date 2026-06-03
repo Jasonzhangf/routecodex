@@ -26,6 +26,58 @@
 5. **闭环释放**：请求/响应闭环完成后 metadata 不得进入全局 singleton、provider health/quota、session cache、port-shared cache、snapshot replay normal path。
 6. **错误模式**：禁止从 `metadata.context` 补 provider payload；禁止从 `metadata.user_id/session_id/conversation_id` 生成上游 body/options；禁止跨端口或跨 session 复用 metadata 对象；禁止把 debug/snapshot metadata 当作 live runtime metadata。
 
+## 标准接口契约流水线图（醒目）
+
+```text
+                         Meta* carrier / ErrorErr* chain / Snapshot* carrier
+                                      (side-channel, never normal payload)
+                                                ^
+                                                |
+Client HTTP
+  |
+  v
+[ServerReqInbound01ClientRaw]
+  |  owner: server adapter / Express route
+  v
+[HubReqInbound02Standardized]
+  |  owner: req_inbound; parse entry protocol, capture context, bind metadata scope
+  v
+[HubReqChatProcess03Governed]
+  |  owner: req_chatprocess; Rust-only tools/reasoning/history governance
+  v
+[VrRoute04SelectedTarget]
+  |  owner: virtual_router; route classify/select only, no payload patch
+  v
+[HubReqOutbound05ProviderSemantic]
+  |  owner: req_outbound; provider semantic envelope only
+  v
+[ProviderReqOutbound06WirePayload]
+  |  owner: provider runtime/outbound codec; provider HTTP body, no internal metadata
+  v
+[ProviderReqOutbound07TransportRequest] ---> upstream provider
+  |                                           |
+  |                                           v
+  |                              [ProviderRespInbound01Raw]
+  |                                           |
+  |                                           v
+  |                              [HubRespInbound02Parsed]
+  |                                           |  owner: resp_inbound; parse provider raw only
+  |                                           v
+  |                              [HubRespChatProcess03Governed]
+  |                                           |  owner: resp_chatprocess; Rust-only tool harvest / servertool followup
+  |                                           v
+  |                              [HubRespOutbound04ClientSemantic]
+  |                                           |  owner: resp_outbound; client protocol projection only
+  |                                           v
+  +----------------------------> [ServerRespOutbound05ClientFrame] ---> Client HTTP/SSE
+```
+
+- 图中每个 `[]` 都是唯一接口契约节点；只能相邻转换，禁止跨节点 shortcut。
+- metadata / error / snapshot 永远走图顶 side-channel carrier，不得混入 request/response normal payload。
+- `Virtual Router` 只能消费 `HubReqChatProcess03Governed`，只产出 `VrRoute04SelectedTarget`；不得修 payload、不得处理工具结果。
+- provider runtime 只能消费 `HubReqOutbound05ProviderSemantic` / `ProviderReqOutbound06WirePayload`，不得读取 `rawBody` 重建上下文。
+- direct passthrough 仍必须遵守 provider wire / hooks 边界，禁止重入 Hub response conversion 或 fallback reroute。
+
 ## Hub Pipeline 节点职责硬边界（醒目）
 1. **req_inbound**：只做入口协议解析、上下文捕获、原始语义保留；不得伪造工具结果、不得吞非法工具顺序。
 2. **req_chatprocess**：请求侧工具治理唯一入口；工具声明注入/裁剪、文本工具 harvest、apply_patch/servertool/MCP/native 工具治理必须 Rust-only。

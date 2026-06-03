@@ -23,6 +23,35 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Virtual Router 只路由，不修 payload；Provider 只 transport/auth/provider 内部兼容，不做 Hub 工具治理；direct/provider passthrough 禁止进入 Hub Pipeline conversion。
 - 发现违规必须先写红测，红测要覆盖真实 Hub Pipeline stage 或 HTTP 黑盒入口；禁止 mock 私有方法冒充黑盒。
 
+## 标准契约流水线定位法（先看 AGENTS.md 图）
+
+遇到请求/响应/工具/路由/metadata 问题时，先按 `AGENTS.md` 的“标准接口契约流水线图”定位出错节点，再改唯一 owner；禁止直接跨层补丁。
+
+```text
+ServerReqInbound01 -> HubReqInbound02 -> HubReqChatProcess03 -> VrRoute04
+  -> HubReqOutbound05 -> ProviderReqOutbound06/07 -> ProviderRespInbound01
+  -> HubRespInbound02 -> HubRespChatProcess03 -> HubRespOutbound04 -> ServerRespOutbound05
+```
+
+| 现象 / 证据 | 先查节点 | 唯一修改对象 | 禁止动作 |
+|---|---|---|---|
+| client input / headers / endpoint / port scope 丢失 | `ServerReqInbound01ClientRaw` / `HubReqInbound02Standardized` | HTTP route adapter、Rust `req_inbound` context capture | 在 provider runtime 补 header/body |
+| metadata 泄到 provider body / SDK options | `HubReqInbound02` 到 `HubReqOutbound05` 的 Meta carrier 边界 | metadata carrier / outbound fail-fast guard | 静默删除 metadata 当修复 |
+| tool declarations、tool_choice、reasoning/history 请求侧错误 | `HubReqChatProcess03Governed` | Rust req_chatprocess / tool governance / canonical reasoning | provider-specific Hub patch、rawBody restore |
+| 选错 provider / route reason 错 | `VrRoute04SelectedTarget` | Rust Virtual Router selection / health/quota input | 修改 payload 影响路由 |
+| provider request wire shape 错、tool_result 顺序错 | `HubReqOutbound05ProviderSemantic` / `ProviderReqOutbound06WirePayload` | Rust req_outbound codec 或 provider runtime transport/auth | 在 req_inbound/resp_outbound 回补 provider wire |
+| upstream raw response 解析错 | `ProviderRespInbound01Raw` / `HubRespInbound02Parsed` | provider response parser / Rust resp_inbound | 从 client render 反推解析 |
+| tool_call 进入文本、servertool followup、internal tool 剥离错误 | `HubRespChatProcess03Governed` | Rust resp_chatprocess / text harvest / servertool followup | 在 client SSE frame 修工具语义 |
+| client JSON/SSE frame、required_action、done 事件错误 | `HubRespOutbound04ClientSemantic` / `ServerRespOutbound05ClientFrame` | resp_outbound projection / server frame writer | 修改 provider raw 或 request history |
+| 错误 status/code/retry/backoff 错 | `ErrorErr01..05` | provider error catalog / failure policy / retry plan | fallback 成成功响应、message-only 分叉 |
+| snapshot/errorsample/stats 跨端口污染 | `Meta*` / `Snapshot*` carrier + server port scope | snapshot writer、errorsamples、stats/traffic scope key | 共享 singleton 不带 `entryPort/serverId` |
+
+定位流程：
+1. 先用 requestId 找 `codex-samples`：`client-request`、`provider-request`、`provider-response`、`client-response`。
+2. 判断污染首次出现在哪个契约节点；只改该节点 owner 或相邻 builder/parser。
+3. 新增红测必须锁同一节点边界：非相邻 shortcut、metadata 泄漏、旧 stage shell、required export 扩展、owner-pair 扩展。
+4. 修改后跑对应节点定向测试，再跑 Phase residue/API contract 门禁。
+
 ## Metadata 请求/响应闭环隔离硬规则（2026-06-01，强制）
 
 - metadata 是无状态、短生命周期、单个 request/response 闭环内的内部控制语义 carrier；不是 provider request/response 的一部分。
