@@ -1,6 +1,8 @@
 use regex::Regex;
 use serde_json::{Map, Value};
 
+use crate::shared_tooling::strip_provider_tool_sentinel_residue;
+
 pub(crate) fn text_contains_explicit_tool_markup(text: &str) -> bool {
     contains_explicit_tool_wrapper_marker(text)
 }
@@ -366,7 +368,7 @@ fn strip_known_non_tool_xml_tags_preserve_text(raw: &str) -> String {
 }
 
 pub(crate) fn strip_text_tool_wrapper_noise(raw: &str) -> String {
-    let mut text = raw.to_string();
+    let mut text = strip_provider_tool_sentinel_residue(raw);
     let patterns = [
         r"(?im)^\s*\[Time/Date\]:.*$",
         r"(?is)<\|ChunkingError\|>[\s\S]*?(?:<｜end▁of▁thinking｜>|<\|end▁of▁thinking\|>|$)",
@@ -625,20 +627,21 @@ pub(crate) fn sanitize_textual_marker_field_in_message(
     else {
         return false;
     };
-    let cleaned = strip_tool_call_marker_payload(raw.as_str());
-    if cleaned == raw {
+    let normalized_raw = strip_provider_tool_sentinel_residue(raw.as_str());
+    let cleaned = strip_tool_call_marker_payload(normalized_raw.as_str());
+    if cleaned == raw && normalized_raw == raw {
         return false;
     }
     if cleaned.is_empty() {
         if let Some(preserved) =
-            resolve_cleaned_empty_marker_preservation(raw.as_str(), cleaned.as_str(), false)
+            resolve_cleaned_empty_marker_preservation(normalized_raw.as_str(), cleaned.as_str(), false)
         {
             message.insert(key.to_string(), Value::String(preserved));
         } else {
             message.remove(key);
         }
     } else {
-        let cleaned = if raw.contains("<<RCC_TOOL_CALLS") {
+        let cleaned = if normalized_raw.contains("<<RCC_TOOL_CALLS") {
             strip_rcc_wrapper_trailing_terminal_noise(cleaned.as_str())
         } else {
             cleaned
@@ -660,13 +663,14 @@ pub(crate) fn sanitize_textual_marker_field_in_message_with_policy(
     else {
         return false;
     };
-    let mut cleaned = strip_tool_call_marker_payload(raw.as_str());
+    let normalized_raw = strip_provider_tool_sentinel_residue(raw.as_str());
+    let mut cleaned = strip_tool_call_marker_payload(normalized_raw.as_str());
     if allow_empty_removal
         && !cleaned.trim().is_empty()
-        && contains_explicit_tool_wrapper_marker(raw.as_str())
+        && contains_explicit_tool_wrapper_marker(normalized_raw.as_str())
     {
-        let transcript_unwrapped = sanitize_text_harvest_shape(raw.as_str());
-        if transcript_unwrapped != raw {
+        let transcript_unwrapped = sanitize_text_harvest_shape(normalized_raw.as_str());
+        if transcript_unwrapped != normalized_raw {
             let transcript_cleaned = strip_rcc_wrapper_trailing_terminal_noise(
                 strip_tool_call_marker_payload(transcript_unwrapped.as_str()).as_str(),
             );
@@ -675,12 +679,12 @@ pub(crate) fn sanitize_textual_marker_field_in_message_with_policy(
             }
         }
     }
-    if cleaned == raw {
+    if cleaned == raw && normalized_raw == raw {
         return false;
     }
     if cleaned.is_empty() {
         if let Some(preserved) = resolve_cleaned_empty_marker_preservation(
-            raw.as_str(),
+            normalized_raw.as_str(),
             cleaned.as_str(),
             allow_empty_removal,
         ) {
@@ -691,7 +695,7 @@ pub(crate) fn sanitize_textual_marker_field_in_message_with_policy(
             message.insert(key.to_string(), Value::String(String::new()));
         }
     } else {
-        let cleaned = if allow_empty_removal && raw.contains("<<RCC_TOOL_CALLS") {
+        let cleaned = if allow_empty_removal && normalized_raw.contains("<<RCC_TOOL_CALLS") {
             strip_rcc_wrapper_trailing_terminal_noise(cleaned.as_str())
         } else {
             cleaned
@@ -702,7 +706,8 @@ pub(crate) fn sanitize_textual_marker_field_in_message_with_policy(
 }
 
 pub(crate) fn strip_tool_markup_for_display_text(raw: &str) -> String {
-    let cleaned = strip_orphan_tool_markup_lines(strip_tool_call_marker_payload(raw).as_str());
+    let normalized_raw = strip_provider_tool_sentinel_residue(raw);
+    let cleaned = strip_orphan_tool_markup_lines(strip_tool_call_marker_payload(normalized_raw.as_str()).as_str());
     if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(raw, cleaned.as_str())
     {
         return preserved;

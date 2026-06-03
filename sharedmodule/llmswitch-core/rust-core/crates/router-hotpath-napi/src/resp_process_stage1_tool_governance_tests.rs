@@ -3656,6 +3656,56 @@ fn test_govern_response_harvests_minimax_namespace_tool_call_text() {
 }
 
 #[test]
+fn test_govern_response_harvests_sentinel_split_provider_tool_call_text() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "__rcc_tool_governance": {
+                "requestedToolNames": ["exec_command"]
+            },
+            "choices": [{
+                "message": {
+                    "tool_calls": [],
+                    "content": "让我看 req_process_stage2_route_select：]<]provider[>[\n<tool_call>\n]<]provider[>[<invoke name=\"exec_command\">]<]provider[>[<cmd>find sharedmodule/llmswitch-core -name 'route_select*.rs' 2>/dev/null</cmd>]<]provider[>[</invoke>\n]<]provider[>[</tool_call>"
+                },
+                "finish_reason": "stop"
+            }]
+        }),
+        client_protocol: "openai-responses".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_provider_sentinel_split_tool_call".to_string(),
+    };
+
+    let result = govern_response(input).unwrap();
+    let serialized = serde_json::to_string(&result.governed_payload).unwrap();
+    assert!(!serialized.contains("]<]provider[>["));
+    assert_eq!(result.summary.tool_calls_normalized, 1);
+    assert_eq!(
+        result.governed_payload["choices"][0]["finish_reason"],
+        "tool_calls"
+    );
+    assert_eq!(
+        result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    let content = result.governed_payload["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    assert_eq!(content, "让我看 req_process_stage2_route_select：");
+    assert!(!content.contains("invoke"));
+    assert!(!content.contains("tool_call"));
+    let args: Value = serde_json::from_str(
+        result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(
+        args["cmd"],
+        "find sharedmodule/llmswitch-core -name 'route_select*.rs' 2>/dev/null"
+    );
+}
+
+#[test]
 fn test_govern_response_cleans_explicit_wrapper_when_tool_calls_are_unharvested() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
