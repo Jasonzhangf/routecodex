@@ -346,6 +346,8 @@ describe('Responses协议转换器测试', () => {
       expect(requiredActionEvent).toBeDefined();
       expect(requiredActionEvent!.data.required_action.type).toBe('submit_tool_outputs');
       expect(requiredActionEvent!.data.required_action.submit_tool_outputs.tool_calls).toHaveLength(1);
+      expect(events.map(e => e.type)).not.toContain('response.completed');
+      expect(events.map(e => e.type)).toContain('response.done');
     });
 
     it('应该容忍缺少 reasoning.content 的响应', async () => {
@@ -384,9 +386,9 @@ describe('Responses协议转换器测试', () => {
         'response.created',
         'response.in_progress',
         'response.output_item.added',
-        'response.completed',
         'response.done'
       ]));
+      expect(eventTypes).not.toContain('response.completed');
       expect(eventTypes).not.toContain('error');
     });
   });
