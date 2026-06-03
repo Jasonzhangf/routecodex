@@ -1,7 +1,7 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
-import { isSyntheticRouteCodexControlText } from '../conversion/shared/openai-message-normalize.js';
+import { containsSyntheticRouteCodexControlTextWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import { sanitizeFollowupText } from './handlers/followup-sanitize.js';
 import { inspectStopGatewaySignal } from './stop-gateway-context.js';
 
@@ -126,15 +126,5 @@ export function resolveAdapterContextProviderKey(adapterContext: unknown): strin
 }
 
 export function containsSyntheticRouteCodexControlText(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return isSyntheticRouteCodexControlText(value);
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => containsSyntheticRouteCodexControlText(entry));
-  }
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  return Object.values(value as Record<string, unknown>)
-    .some((entry) => containsSyntheticRouteCodexControlText(entry));
+  return containsSyntheticRouteCodexControlTextWithNative(value);
 }

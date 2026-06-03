@@ -1487,6 +1487,39 @@ fn build_bridge_history_rejects_dangling_tool_call() {
 }
 
 #[test]
+fn build_bridge_history_rejects_synthetic_routecodex_control_text() {
+    let input = BuildBridgeHistoryInput {
+        messages: vec![json!({
+          "role":"assistant",
+          "content":"[RouteCodex] assistant response became empty after response sanitization."
+        })],
+        tools: None,
+        allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
+    };
+    let error = build_bridge_history(input).unwrap_err();
+    assert!(error.contains("synthetic_local_control_text"));
+}
+
+#[test]
+fn convert_bridge_input_rejects_synthetic_routecodex_control_text() {
+    let input = BridgeInputToChatInput {
+        input: vec![json!({
+          "type":"message",
+          "role":"assistant",
+          "content":"[RouteCodex] tool output was empty; execution status unknown."
+        })],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
+    };
+    let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
+    assert!(error.contains("synthetic_local_control_text"));
+}
+
+#[test]
 fn build_bridge_history_allows_terminal_pending_tool_call_when_enabled() {
     let input = BuildBridgeHistoryInput {
         messages: vec![json!({

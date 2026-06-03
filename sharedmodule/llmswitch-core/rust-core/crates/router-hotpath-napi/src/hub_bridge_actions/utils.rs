@@ -17,6 +17,67 @@ pub(crate) fn is_synthetic_routecodex_tool_call_id(call_id: &str) -> bool {
     lowered.starts_with("call_servertool_fallback_")
 }
 
+fn normalize_control_text_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
+pub(crate) fn is_synthetic_routecodex_control_text(text: &str) -> bool {
+    let normalized = normalize_control_text_whitespace(text);
+    let lowered = normalized.to_ascii_lowercase();
+    lowered.starts_with("[routecodex]")
+        && (lowered.starts_with("[routecodex] request timed out before a response was received")
+            || lowered == "[routecodex] assistant response became empty after response sanitization."
+            || lowered == "[routecodex] assistant response became empty after response sanitization"
+            || lowered == "[routecodex] tool output was empty; execution status unknown."
+            || lowered == "[routecodex] tool output was empty; execution status unknown"
+            || lowered.starts_with("[routecodex] tool call result unknown"))
+}
+
+fn extract_plain_text_from_control_content(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => {
+            let normalized = normalize_control_text_whitespace(text);
+            if normalized.is_empty() { None } else { Some(normalized) }
+        }
+        Value::Array(items) => {
+            let mut fragments: Vec<String> = Vec::new();
+            for item in items {
+                let row = item.as_object()?;
+                let text = row
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| row.get("input_text").and_then(Value::as_str))
+                    .or_else(|| row.get("output_text").and_then(Value::as_str))
+                    .or_else(|| row.get("content").and_then(Value::as_str))?;
+                let normalized = normalize_control_text_whitespace(text);
+                if !normalized.is_empty() {
+                    fragments.push(normalized);
+                }
+            }
+            if fragments.is_empty() { None } else { Some(fragments.join("\n")) }
+        }
+        Value::Object(row) => {
+            if let Some(text) = row.get("text").and_then(Value::as_str) {
+                return extract_plain_text_from_control_content(&Value::String(text.to_string()));
+            }
+            if let Some(text) = row.get("output_text").and_then(Value::as_str) {
+                return extract_plain_text_from_control_content(&Value::String(text.to_string()));
+            }
+            if let Some(text) = row.get("output").and_then(Value::as_str) {
+                return extract_plain_text_from_control_content(&Value::String(text.to_string()));
+            }
+            row.get("content").and_then(extract_plain_text_from_control_content)
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn is_synthetic_routecodex_control_content(value: &Value) -> bool {
+    extract_plain_text_from_control_content(value)
+        .map(|text| is_synthetic_routecodex_control_text(text.as_str()))
+        .unwrap_or(false)
+}
+
 pub(crate) fn coerce_bridge_role(role: Option<&str>) -> String {
     let normalized = role.unwrap_or("user").trim().to_ascii_lowercase();
     match normalized.as_str() {

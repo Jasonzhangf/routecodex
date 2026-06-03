@@ -1533,4 +1533,28 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(findings).toEqual([]);
   });
+
+  it('responses bridge wrappers must not run TS synthetic control-text inspectors', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'runs TS synthetic bridge input inspector', pattern: /inspectSyntheticRouteCodexBridgeInput\s*\(/ },
+      { label: 'runs TS synthetic assistant message inspector', pattern: /inspectSyntheticRouteCodexAssistantMessages\s*\(/ },
+      { label: 'keeps TS synthetic bridge assertion helper', pattern: /assertNoSyntheticOrMalformedBridgeInput|assertNoSyntheticAssistantMessages/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('servertool orchestration policy must not run TS synthetic control-text recursion', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'imports TS synthetic control text helper', pattern: /isSyntheticRouteCodexControlText/ },
+      { label: 'recurses over Object.values in TS synthetic scan', pattern: /Object\.values\([\s\S]*containsSyntheticRouteCodexControlText/ },
+      { label: 'recurses over arrays in TS synthetic scan', pattern: /\.some\(\(entry\) => containsSyntheticRouteCodexControlText\(entry\)\)/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
 });

@@ -356,6 +356,19 @@ export function isCanonicalChatCompletionPayloadWithNative(payload: unknown): bo
   }
 }
 
+export function containsSyntheticRouteCodexControlTextWithNative(payload: unknown): boolean {
+  const capability = 'containsSyntheticRoutecodexControlTextJson';
+  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? null]);
+    const parsed = parseBoolean(raw);
+    return parsed === null ? fail('invalid payload') : parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function isStopMessageStateActiveWithNative(raw: unknown): boolean {
   const capability = 'isStopMessageStateActiveJson';
   const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);

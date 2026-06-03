@@ -18,7 +18,10 @@ use super::types::{
     ExtractReasoningSegmentsOutput, RepairToolCallInput, ValidateToolArgumentsInput,
     ValidateToolArgumentsOutput,
 };
-use super::utils::{coerce_bridge_role, is_synthetic_routecodex_tool_call_id, MediaBlock};
+use super::utils::{
+    coerce_bridge_role, is_synthetic_routecodex_control_content,
+    is_synthetic_routecodex_tool_call_id, MediaBlock,
+};
 
 #[derive(Clone)]
 struct DeferredToolResult {
@@ -701,6 +704,19 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
             }
 
             let role = coerce_bridge_role(entry_obj.get("role").and_then(Value::as_str));
+            if role == "assistant"
+                && !entry_obj
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .map(|items| !items.is_empty())
+                    .unwrap_or(false)
+                && is_synthetic_routecodex_control_content(&Value::String(content.clone()))
+            {
+                return Err(format!(
+                    "synthetic_local_control_text: bridge input contains synthetic RouteCodex local control text at index {}",
+                    entry_index
+                ));
+            }
             if role == "assistant" {
                 if append_harvested_assistant_tool_message(
                     &mut messages,

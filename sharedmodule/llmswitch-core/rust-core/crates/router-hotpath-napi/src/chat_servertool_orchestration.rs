@@ -6,7 +6,8 @@ use sha2::{Digest, Sha256};
 
 use crate::chat_web_search_intent::analyze_chat_web_search_intent;
 use crate::hub_bridge_actions::utils::{
-    can_servertool_own_tool_call_id, is_synthetic_routecodex_tool_call_id,
+    can_servertool_own_tool_call_id, is_synthetic_routecodex_control_text,
+    is_synthetic_routecodex_tool_call_id,
 };
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 use crate::virtual_router_engine::routing::{
@@ -17,6 +18,31 @@ use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecuti
 /// Tool names treated as pure noop — acknowledged and auto-continued without handler execution.
 /// Outcome is a standard delta: tool_outputs entry + clientInjectOnly followup.
 const NOOP_SERVERTOOL_NAMES: [&str; 1] = ["continue_execution"];
+
+fn is_visible_text_field(key: Option<&str>) -> bool {
+    matches!(key, None | Some("content" | "text" | "input_text" | "output_text" | "output"))
+}
+
+fn contains_synthetic_routecodex_control_text_value(value: &Value, key: Option<&str>) -> bool {
+    match value {
+        Value::String(text) => is_visible_text_field(key) && is_synthetic_routecodex_control_text(text),
+        Value::Array(items) => items
+            .iter()
+            .any(|item| contains_synthetic_routecodex_control_text_value(item, key)),
+        Value::Object(row) => row.iter().any(|(child_key, child_value)| {
+            contains_synthetic_routecodex_control_text_value(child_value, Some(child_key.as_str()))
+        }),
+        _ => false,
+    }
+}
+
+#[napi]
+pub fn contains_synthetic_routecodex_control_text_json(input_json: String) -> NapiResult<String> {
+    let value: Value = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    serde_json::to_string(&contains_synthetic_routecodex_control_text_value(&value, None))
+        .map_err(|error| napi::Error::from_reason(error.to_string()))
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2347,6 +2373,36 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_synthetic_routecodex_control_text_scans_visible_content_only() {
+        let payload = json!({
+            "id": "chatcmpl-stop-client-inject-fail",
+            "metadata": {
+                "debug": "[RouteCodex] assistant response became empty after response sanitization."
+            },
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "ok"
+                }
+            }]
+        });
+        assert!(!contains_synthetic_routecodex_control_text_value(&payload, None));
+    }
+
+    #[test]
+    fn test_synthetic_routecodex_control_text_detects_visible_message_content() {
+        let payload = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "[RouteCodex] assistant response became empty after response sanitization."
+                }
+            }]
+        });
+        assert!(contains_synthetic_routecodex_control_text_value(&payload, None));
+    }
 
     #[test]
     fn test_is_canonical_chat_completion_payload_true_when_first_choice_has_message_object() {

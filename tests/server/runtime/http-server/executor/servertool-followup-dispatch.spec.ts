@@ -22,6 +22,45 @@ jest.unstable_mockModule(
           rebindResponsesConversationRequestId: mockRebindResponsesConversationRequestId
         };
       }
+      if (subpath === 'router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers') {
+        return {
+          normalizeServertoolFollowupPayloadShapeWithNative: (_entryEndpoint: string, payload: Record<string, unknown>) => {
+            const messages = Array.isArray(payload.messages) ? payload.messages as any[] : undefined;
+            if (!messages) {
+              return payload;
+            }
+            const semanticsRecord =
+              payload.semantics && typeof payload.semantics === 'object' && !Array.isArray(payload.semantics)
+                ? payload.semantics as Record<string, any>
+                : {};
+            const semanticToolChoice = semanticsRecord.responses?.requestParameters?.tool_choice;
+            const input = messages.map((message) => {
+              if (message?.role === 'tool') {
+                return {
+                  type: 'function_call_output',
+                  call_id: message.tool_call_id,
+                  output: message.content
+                };
+              }
+              return message;
+            });
+            const toolOutputs = input.filter((entry) => entry?.type === 'function_call_output');
+            const semantics = {
+              ...semanticsRecord,
+              toolOutputs
+            };
+            return {
+              ...payload,
+              ...(payload.tool_choice === undefined && semanticToolChoice !== undefined
+                ? { tool_choice: semanticToolChoice }
+                : {}),
+              messages: undefined,
+              input,
+              semantics
+            };
+          }
+        };
+      }
       throw new Error(`unexpected importCoreDist ${subpath}`);
     })
   })
@@ -718,7 +757,7 @@ describe('servertool followup dispatch helper', () => {
     });
   });
 
-  it('reenter path strips responses-only request settings from real apply_patch followup shape', async () => {
+  it('reenter path strips responses-only request settings without stripping followup tool_choice', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
@@ -810,20 +849,20 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.body?.max_tokens).toBeUndefined();
     expect(nestedInput?.body?.max_output_tokens).toBeUndefined();
     expect(nestedInput?.body?.parallel_tool_calls).toBeUndefined();
-    expect(nestedInput?.body?.tool_choice).toBeUndefined();
+    expect(nestedInput?.body?.tool_choice).toBe('auto');
     expect(nestedInput?.body?.reasoning).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.model).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.parallel_tool_calls).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.tool_choice).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.tool_choice).toBe('auto');
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.stream).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.model).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.parallel_tool_calls).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.tool_choice).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.tool_choice).toBe('auto');
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.stream).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
@@ -1192,7 +1231,46 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.body?.messages).toBeUndefined();
     expect(nestedInput?.body?.input?.some((entry: any) => entry?.type === 'function_call_output')).toBe(true);
     expect(nestedInput?.body?.semantics?.toolOutputs?.length).toBe(1);
-    expect(nestedInput?.metadata?.requestSemantics?.toolOutputs?.length).toBe(1);
+    expect(nestedInput?.metadata?.requestSemantics?.tools?.clientToolsRaw).toHaveLength(1);
+  });
+
+  it('RED: stop_followup preserves client tool_choice as normal request semantics', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: { body: input.body, metadata: input.metadata }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'openai-responses-minimax.key1-MiniMax-M3-20260603T080503707-252032-5543:stop_followup',
+      body: {
+        model: 'gpt-5.5',
+        stream: false,
+        input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }],
+        tools: [{ type: 'function', name: 'apply_patch', parameters: { type: 'object', properties: {} } }],
+        tool_choice: { type: 'auto' },
+        max_output_tokens: 8192
+      },
+      metadata: {
+        __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.stop_message' }
+      },
+      requestSemantics: {
+        __routecodex: { serverToolFollowup: true, serverToolFollowupSource: 'servertool.stop_message' },
+        tools: { clientToolsRaw: [{ type: 'function', name: 'apply_patch', parameters: { type: 'object', properties: {} } }] },
+        responses: { requestParameters: { tool_choice: { type: 'auto' }, max_output_tokens: 8192 } }
+      },
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.body?.tool_choice).toEqual({ type: 'auto' });
+    expect(nestedInput?.body?.tools).toHaveLength(1);
   });
 
   it('strips legacy responses context metadata before stop_followup hub reentry', async () => {

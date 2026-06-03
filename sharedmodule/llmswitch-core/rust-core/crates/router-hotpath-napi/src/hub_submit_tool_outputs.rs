@@ -162,6 +162,21 @@ fn normalize_servertool_followup_payload_shape_value(
     {
         return Value::Object(object);
     }
+    if object.get("tool_choice").is_none() {
+        if let Some(tool_choice) = object
+            .get("semantics")
+            .and_then(Value::as_object)
+            .and_then(|semantics| semantics.get("responses"))
+            .and_then(Value::as_object)
+            .and_then(|responses| responses.get("requestParameters"))
+            .and_then(Value::as_object)
+            .and_then(|request_parameters| request_parameters.get("tool_choice"))
+            .filter(|value| !value.is_null())
+            .cloned()
+        {
+            object.insert("tool_choice".to_string(), tool_choice);
+        }
+    }
     let mut input = Vec::new();
     if let Some(messages) = object.get("messages").and_then(|value| value.as_array()) {
         let mut seen_tool_outputs = std::collections::HashSet::<String>::new();
@@ -341,6 +356,13 @@ mod tests {
     fn normalizes_responses_followup_messages_to_input_in_rust() {
         let payload = json!({
             "model": "gpt-5.5",
+            "semantics": {
+                "responses": {
+                    "requestParameters": {
+                        "tool_choice": "auto"
+                    }
+                }
+            },
             "messages": [
                 {
                     "role": "assistant",
@@ -371,6 +393,29 @@ mod tests {
         assert_eq!(input[1]["call_id"], "call_1");
         assert_eq!(input[1]["output"], r#"{"ok":true}"#);
         assert_eq!(input[2]["role"], "user");
+        assert_eq!(normalized["tool_choice"], "auto");
+    }
+
+    #[test]
+    fn normalizes_responses_followup_preserves_root_tool_choice() {
+        let payload = json!({
+            "model": "gpt-5.5",
+            "tool_choice": "required",
+            "semantics": {
+                "responses": {
+                    "requestParameters": {
+                        "tool_choice": "auto"
+                    }
+                }
+            },
+            "messages": [
+                { "role": "user", "content": "continue" }
+            ]
+        });
+
+        let normalized =
+            normalize_servertool_followup_payload_shape_value("/v1/responses", payload);
+        assert_eq!(normalized["tool_choice"], "required");
     }
 
     #[test]

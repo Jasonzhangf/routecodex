@@ -2732,6 +2732,7 @@ describe('stop_message_auto servertool', () => {
     expect(enginePreview.mode).toBe('tool_flow');
     expect(enginePreview.execution?.flowId).toBe('stop_message_flow');
     expect(enginePreview.execution?.followup).toBeDefined();
+    writeRoutingStateForSession(sessionId, state);
 
     const clientInjectDispatch = jest.fn(async () => ({ ok: false as const, reason: 'inject_failed' }));
     const reenterPipeline = jest.fn(async () => ({ body: chatResponse }));

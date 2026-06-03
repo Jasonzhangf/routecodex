@@ -29,8 +29,8 @@ use super::types::{
     ResolveResponsesRequestBridgeDecisionsInput, ResolveResponsesRequestBridgeDecisionsOutput,
 };
 use super::utils::{
-    coerce_bridge_role, flatten_content_to_string, is_synthetic_routecodex_tool_call_id,
-    normalize_function_call_output_id, MediaBlock,
+    coerce_bridge_role, flatten_content_to_string, is_synthetic_routecodex_control_content,
+    is_synthetic_routecodex_tool_call_id, normalize_function_call_output_id, MediaBlock,
 };
 
 fn require_explicit_tool_call_id(call_id: Option<String>, reason: &str) -> Result<String, String> {
@@ -1134,6 +1134,20 @@ pub(crate) fn build_bridge_history(
             continue;
         }
         non_system_message_indices.push(message_index);
+
+        if role == "assistant"
+            && !row
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .map(|items| !items.is_empty())
+                .unwrap_or(false)
+            && is_synthetic_routecodex_control_content(&content)
+        {
+            return Err(format!(
+                "synthetic_local_control_text: bridge history contains synthetic RouteCodex local control text at index {}",
+                message_index
+            ));
+        }
 
         if role == "tool" {
             let resolved_call_id = require_explicit_tool_call_id(
