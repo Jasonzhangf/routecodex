@@ -46,6 +46,10 @@ import {
   normalizeStopMessageStageMode,
   resolveStopMessageSnapshot
 } from './stop-message-auto/routing-state.js';
+import {
+  resolveWorkingDirectoryFromAdapterContext,
+  writeStoplessLearnedNoteEntry
+} from './memory/cache-writer.js';
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
 
@@ -206,6 +210,34 @@ function buildStopSchemaFinalPlan(chatResponse: JsonObject): ServerToolHandlerPl
       execution: { flowId: FLOW_ID }
     })
   };
+}
+
+function readNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function persistStoplessLearnedNoteOnAllowStop(args: {
+  adapterContext: Record<string, unknown>;
+  requestId: string;
+  parsed?: Record<string, unknown>;
+}): void {
+  const learned = readNonEmptyString(args.parsed?.learned);
+  if (!learned) {
+    return;
+  }
+  writeStoplessLearnedNoteEntry({
+    workingDirectory: resolveWorkingDirectoryFromAdapterContext(args.adapterContext),
+    requestId: args.requestId,
+    sessionId: readNonEmptyString(args.adapterContext.sessionId),
+    timestampMs: Date.now(),
+    learned,
+    reason: readNonEmptyString(args.parsed?.reason),
+    evidence: readNonEmptyString(args.parsed?.evidence)
+  });
 }
 
 function prefixChatChoiceContent(payload: JsonObject, prefix: string): boolean {
@@ -626,6 +658,11 @@ const handler: ServerToolHandler = async (
 
     if (schemaGate.action === 'allow_stop') {
       const prefixed = applyStopSummaryPrefix(ctx.base, schemaGate.summary_prefix);
+      persistStoplessLearnedNoteOnAllowStop({
+        adapterContext: ctx.adapterContext as unknown as Record<string, unknown>,
+        requestId: ctx.requestId,
+        parsed: schemaGate.parsed
+      });
       clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
       return buildStopSchemaFinalPlan(prefixed);
     }

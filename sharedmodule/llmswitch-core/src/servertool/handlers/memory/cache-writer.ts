@@ -38,9 +38,21 @@ export interface CacheWriteOptions {
   };
 }
 
+export interface StoplessLearnedNoteWriteOptions {
+  workingDirectory?: string;
+  requestId: string;
+  sessionId?: string;
+  timestampMs: number;
+  learned: string;
+  reason?: string;
+  evidence?: string;
+}
+
 export type CacheWriteResult =
   | { ok: true; path: string }
   | { ok: false; reason: string };
+
+export type StoplessLearnedNoteWriteResult = CacheWriteResult;
 
 interface ParsedCacheEntry {
   role: 'user' | 'assistant';
@@ -544,6 +556,48 @@ export function writeCacheEntry(options: CacheWriteOptions): CacheWriteResult {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[cache-writer] write failed for requestId=${options.requestId}: ${message}`);
+    return { ok: false, reason: `write_error: ${message}` };
+  }
+}
+
+export function writeStoplessLearnedNoteEntry(
+  options: StoplessLearnedNoteWriteOptions
+): StoplessLearnedNoteWriteResult {
+  const learned = options.learned.trim();
+  if (!learned) {
+    return { ok: false, reason: 'empty_learned' };
+  }
+  if (!options.workingDirectory || !options.workingDirectory.trim()) {
+    return { ok: false, reason: 'missing_working_directory' };
+  }
+
+  const notePath = path.join(options.workingDirectory.trim(), 'note.md');
+  const timestamp = new Date(options.timestampMs).toISOString();
+  const reason = options.reason?.trim();
+  const evidence = options.evidence?.trim();
+  const lines = [
+    `## ${timestamp} stopless learned`,
+    '',
+    `- requestId: ${options.requestId}`,
+  ];
+  if (options.sessionId?.trim()) {
+    lines.push(`- sessionId: ${options.sessionId.trim()}`);
+  }
+  if (reason) {
+    lines.push(`- stopReason: ${reason}`);
+  }
+  if (evidence) {
+    lines.push(`- evidence: ${evidence}`);
+  }
+  lines.push('', learned, '');
+
+  try {
+    ensureDir(path.dirname(notePath));
+    const existing = fs.existsSync(notePath) ? fs.readFileSync(notePath, 'utf-8') : '';
+    fs.writeFileSync(notePath, `${existing.trimEnd()}\n\n${lines.join('\n')}`.trimStart(), 'utf-8');
+    return { ok: true, path: notePath };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return { ok: false, reason: `write_error: ${message}` };
   }
 }

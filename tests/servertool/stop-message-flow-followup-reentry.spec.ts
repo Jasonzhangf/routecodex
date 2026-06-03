@@ -278,6 +278,58 @@ describe("stop_message_flow reentry", () => {
     expect(reenterPipeline).toHaveBeenCalledTimes(3);
   });
 
+  test("stopless writes learned note only when schema allows final stop", async () => {
+    const sessionId = "stopless-learned-final-stop";
+    const tempWorkdir = path.join(SESSION_DIR, "workdir-learned-final-stop");
+    fs.mkdirSync(tempWorkdir, { recursive: true });
+    const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
+    const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
+
+    const invalidSchemaWithLearned = '{"stopreason":2,"reason":"未完成","has_evidence":0,"next_step":"继续验证","learned":"不应写入"}';
+    const invalid = await runServerToolOrchestration({
+      chat: buildStopResponse(invalidSchemaWithLearned),
+      adapterContext: {
+        sessionId,
+        workingDirectory: tempWorkdir,
+        capturedChatRequest: {
+          model: "gpt-test",
+          messages: [{ role: "user", content: "start" }],
+        },
+      } as unknown as AdapterContext,
+      requestId: "req_stopless_learned_invalid",
+      entryEndpoint: "/v1/chat/completions",
+      providerProtocol: "openai-chat",
+      clientInjectDispatch,
+      reenterPipeline,
+    });
+    expect(invalid.executed).toBe(true);
+    expect(fs.existsSync(path.join(tempWorkdir, "note.md"))).toBe(false);
+
+    const validSchemaWithLearned = '{"stopreason":0,"reason":"目标完成","has_evidence":1,"evidence":"测试通过","next_step":"","learned":"只在真正停止时写 note.md"}';
+    const valid = await runServerToolOrchestration({
+      chat: buildStopResponse(validSchemaWithLearned),
+      adapterContext: {
+        sessionId,
+        workingDirectory: tempWorkdir,
+        capturedChatRequest: {
+          model: "gpt-test",
+          messages: [{ role: "user", content: "start" }],
+        },
+      } as unknown as AdapterContext,
+      requestId: "req_stopless_learned_valid",
+      entryEndpoint: "/v1/chat/completions",
+      providerProtocol: "openai-chat",
+      clientInjectDispatch,
+      reenterPipeline,
+    });
+
+    expect(valid.executed).toBe(true);
+    const note = fs.readFileSync(path.join(tempWorkdir, "note.md"), "utf8");
+    expect(note).toContain("requestId: req_stopless_learned_valid");
+    expect(note).toContain("只在真正停止时写 note.md");
+    expect(note).not.toContain("不应写入");
+  });
+
   test("servertool followup hop stop does not trigger stopless client injection", async () => {
     const sessionId = "stopless-after-apply-patch-followup-stop";
     const stateKey = `session:${sessionId}`;

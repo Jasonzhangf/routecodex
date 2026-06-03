@@ -40,6 +40,7 @@ Design goals:
 9. Reenter success increments/persists `used`; if followup response again ends with `stop`, it may retrigger until `used >= max_repeats`.
 10. Reenter failure is explicit/fail-fast through servertool followup error handling; do not hide it as client-visible success.
 11. Main request response must include the materialized followup result on the same client stream/response chain.
+12. When stop schema allows the final stop, `learned` may be written to project `note.md`; followup / invalid schema / missing schema / budget exhausted must not write memory.
 
 ## 4. Hard Rules
 
@@ -54,6 +55,12 @@ Design goals:
 - Preserved stop-message followup metadata must not contain `stopMessageEnabled=false` or `routecodexPortStopMessageEnabled=false`, including inside `__rt`.
 - Rust `stop-message-core` must allow followup eligibility only from `stop_message_followup_policy=preserve_eligibility`, not from `followup_flow_id` string matching.
 - Do not change router-direct/provider selection to fix stopless continuation; stopless eligibility belongs to servertool dispatch + Rust stop-message decision only.
+
+1.2. Final-stop learned note:
+- Stop schema includes `learned` as the model-provided “what was learned in past turns” text.
+- Rust `stop-message-core` is the schema parse / gate truth; TS may only do the final file IO.
+- `note.md` write is allowed only on `schemaGate.action=allow_stop` and non-empty `learned`.
+- No write on followup, invalid schema, missing schema, budget exhausted, or reenter failure.
 
 2. Continue-execution stripping:
 - `continue_execution` 的 tool_call 对客户端必须透明；响应侧在 chat process 的

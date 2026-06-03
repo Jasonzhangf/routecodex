@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   writeCacheEntry,
+  writeStoplessLearnedNoteEntry,
   extractAssistantTextFromResponse,
   resolveWorkingDirectoryFromAdapterContext,
 } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/memory/cache-writer.js';
@@ -55,6 +56,34 @@ describe('cache-writer request dedupe', () => {
     expect(content).toContain('requestId: req-1');
     expect(content).not.toContain('requestId: req-2');
     expect(content).toMatch(/### User · .*?\n\n继续\n\n<!-- cache-meta/s);
+  });
+
+  it('writes stopless learned notes to note.md only with learned content', () => {
+    const skipped = writeStoplessLearnedNoteEntry({
+      workingDirectory: tempDir,
+      requestId: 'req-empty-learned',
+      timestampMs: Date.UTC(2026, 5, 3, 12, 0, 0),
+      learned: '   ',
+    });
+    expect(skipped.ok).toBe(false);
+    expect(fs.existsSync(path.join(tempDir, 'note.md'))).toBe(false);
+
+    const written = writeStoplessLearnedNoteEntry({
+      workingDirectory: tempDir,
+      requestId: 'req-learned',
+      sessionId: 'sess-learned',
+      timestampMs: Date.UTC(2026, 5, 3, 12, 0, 0),
+      learned: 'stopless 只有真正停止时写入 learned。',
+      reason: '目标完成',
+      evidence: 'focused tests green',
+    });
+
+    expect(written.ok).toBe(true);
+    const content = fs.readFileSync(path.join(tempDir, 'note.md'), 'utf8');
+    expect(content).toContain('## 2026-06-03T12:00:00.000Z stopless learned');
+    expect(content).toContain('requestId: req-learned');
+    expect(content).toContain('sessionId: sess-learned');
+    expect(content).toContain('stopless 只有真正停止时写入 learned。');
   });
 
   it('allows the same user content after an assistant reply', () => {
