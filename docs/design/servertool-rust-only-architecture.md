@@ -4,6 +4,25 @@
 
 本文定义 servertool 的 **Rust-only 目标架构**、模块边界、JSON skeleton 契约、迁移顺序与验证门禁。
 
+## Pipeline 节点锁
+
+servertool 只能作为 Hub response chat-process 的子链执行，固定拓扑为：
+
+```text
+HubRespChatProcess03Governed
+  -> ServertoolResp03RuntimeAction
+  -> ServertoolReq04FollowupBuilt
+  -> normal Hub request/reenter chain
+  -> ServertoolResp03FollowupResult
+  -> HubRespOutbound04ClientSemantic
+```
+
+- `ServertoolResp03RuntimeAction`：Rust effect plan 中的动作 carrier；只决定是否需要 runtime/followup。
+- `ServertoolReq04FollowupBuilt`：只从 origin snapshot 构造正常 followup 请求；不得从当前污染 payload 猜测补齐。
+- `ServertoolResp03FollowupResult`：followup 回来的 governed response；若存在且非空，必须成为 `HubRespOutbound04ClientSemantic` 的唯一输入。
+- TS 只允许作为 runtime IO/reenter 薄壳；不得做工具语义判断、工具列表清洗、requires_action 修补或旧 payload 回填。
+- SSE/JSON client projection 必须使用 post-servertool governed payload；禁止使用 pre-followup native `streamPipe.payload` 覆盖 followup truth。
+
 目标不是“把 TS 文件搬成 Rust”这么简单，而是一次性解决四个根问题：
 
 1. **servertool 运行时真源统一到 Rust**

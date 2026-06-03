@@ -197,6 +197,42 @@ ServerReqInbound01ClientRaw
 3. provider direct/passthrough 仍必须遵守出口不可见：internal metadata 不得进入 upstream，也不得进入 client response。
 4. servertool followup 只能从 origin snapshot 重建，不得从当前污染 payload 猜测补齐。
 
+### 4.1.1 Servertool followup 子链拓扑
+
+servertool 是 `HubRespChatProcess03Governed` 内部的响应治理子链，不是独立 pipeline，也不是 direct/provider 旁路：
+
+```text
+ProviderRespInbound01Raw
+  -> HubRespInbound02Parsed
+  -> HubRespChatProcess03Governed
+      -> ServertoolResp03RuntimeAction
+      -> ServertoolReq04FollowupBuilt
+      -> HubReqInbound02Standardized
+      -> HubReqChatProcess03Governed
+      -> VrRoute04SelectedTarget
+      -> HubReqOutbound05ProviderSemantic
+      -> ProviderReqOutbound06WirePayload
+      -> ProviderRespInbound01Raw
+      -> HubRespInbound02Parsed
+      -> HubRespChatProcess03Governed
+      -> ServertoolResp03FollowupResult
+  -> HubRespOutbound04ClientSemantic
+  -> ServerRespOutbound05ClientFrame
+```
+
+| 节点 | 输入 | 输出 | 唯一职责 | 禁止连接 |
+|---|---|---|---|---|
+| `ServertoolResp03RuntimeAction` | `HubRespChatProcess03Governed` | runtime action/effect | 判断是否需要 servertool runtime/followup；只产出动作 | 直接构造 client frame；provider 特例 |
+| `ServertoolReq04FollowupBuilt` | origin snapshot + runtime action | followup request | 基于 origin snapshot 构造正常 followup 请求 | 从当前污染 payload 猜测补齐；清洗工具列表 |
+| `ServertoolResp03FollowupResult` | nested `HubRespChatProcess03Governed` | governed followup response | 选择 followup 结果作为后续响应真相 | 用 pre-followup 响应覆盖 requires_action/tool_use |
+
+约束：
+
+1. `servertoolRuntimeAction` 只允许作为 Rust effect plan 的 runtime action carrier；TS shell 只能执行 IO/reenter，不能判断工具语义。
+2. followup 返回后，`HubRespOutbound04ClientSemantic` 的唯一输入是 post-servertool governed payload；禁止继续使用原始 native `streamPipe.payload` 或 pre-followup `clientPayload` 投影 SSE。
+3. `finalChatResponse` 只表示 pre-followup governed response；`followupBody` / `ServertoolResp03FollowupResult` 一旦存在且非空，就是响应链进入 `HubRespOutbound04ClientSemantic` 的真相。
+4. direct/provider passthrough 不得进入 servertool followup orchestration；followup 只能 relay 复入完整 Hub Pipeline。
+
 ### 4.2 ProviderRespInbound01Raw
 
 - 作用：provider HTTP/SSE/raw JSON 的原始响应承载。

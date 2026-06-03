@@ -1610,4 +1610,17 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(findings).toEqual([]);
   });
+
+  it('servertool response SSE projection must use post-governance client semantic truth', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'uses stale native streamEffect payload after servertool governance', pattern: /streamEffect\.payload/ },
+      { label: 'keeps streamPipe payload as response truth in TS shell', pattern: /payload:\s*streamPayload|streamPayload\s+as\s+JsonObject/ },
+    ]);
+
+    expect(source).toContain('hubRespOutbound04ClientSemantic = await executeProviderResponseNativeServertoolEffects');
+    expect(source).toContain('codec.convertJsonToSse(hubRespOutbound04ClientSemantic');
+    expect(findings).toEqual([]);
+  });
 });

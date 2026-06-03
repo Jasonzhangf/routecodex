@@ -8,6 +8,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ## Hub Pipeline 工具边界审计硬规则（最醒目）
 
 - 审计/修复 Hub Pipeline 工具问题前，先读 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
+- Servertool followup 固定节点锁：`HubRespChatProcess03Governed -> ServertoolResp03RuntimeAction -> ServertoolReq04FollowupBuilt -> normal Hub reenter -> ServertoolResp03FollowupResult -> HubRespOutbound04ClientSemantic`；TS 只能做 IO/reenter 薄壳，禁止判断工具语义、清洗工具列表、修补 `requires_action`、从 `rawBody` 正常构造请求、或用旧 `streamPipe.payload` 覆盖 post-servertool payload。
+- Servertool 命名真相：`finalChatResponse` 只代表 pre-followup governed response；`followupBody` / `ServertoolResp03FollowupResult` 非空时必须成为 `HubRespOutbound04ClientSemantic` 的唯一输入。
 - 请求/响应转换必须是唯一语义链：`req_inbound -> req_chatprocess -> req_outbound -> provider_runtime -> resp_inbound -> resp_chatprocess -> resp_outbound`；`req_inbound/resp_inbound` 只解析入口协议和捕获上下文，所有字段的唯一语义映射必须发生在 `req_chatprocess/resp_chatprocess`，再由 outbound 只编码目标协议 wire，禁止绕过 chatprocess 直接重建上下文。
 - 字段守恒规则：正常传输链路不得丢字段、不得把工具语义/`thinking`/`reasoning`/`tool_use`/`tool_result` 降级成普通文本；协议不支持的字段必须进入明确 canonical carrier 或 fail-fast，不允许静默删除、合并、清理、fallback。
 - Anthropic reasoning 映射规则：入口 Anthropic `thinking` block / `reasoning_content` 必须先由 `req_inbound` 保留原始语义，再在 `req_chatprocess` 唯一映射为 Hub Chat canonical reasoning part；`req_outbound` 只编码为 provider wire 的 Anthropic `thinking` block / 合法字段；响应链同构在 `resp_chatprocess` 映射回 canonical reasoning，再由 `resp_outbound` 投影到 Responses reasoning，provider runtime 不得补做 reasoning/history 转换。

@@ -180,7 +180,6 @@ function runProviderResponseRustHubPipeline(options: ProviderResponseConversionO
 function readNativeStreamPipeEffect(effectPlan: { effects: Array<Record<string, unknown>> }): {
   codec: SseProtocol;
   requestId: string;
-  payload: JsonObject;
 } | null {
   const streamEffects = effectPlan.effects.filter((effect) => effect?.kind === 'streamPipe');
   if (streamEffects.length === 0) return null;
@@ -193,7 +192,6 @@ function readNativeStreamPipeEffect(effectPlan: { effects: Array<Record<string, 
   const record = payload as Record<string, unknown>;
   const codec = record.codec;
   const requestId = record.requestId;
-  const streamPayload = record.payload;
   if (
     codec !== 'openai-chat'
     && codec !== 'openai-responses'
@@ -205,13 +203,9 @@ function readNativeStreamPipeEffect(effectPlan: { effects: Array<Record<string, 
   if (typeof requestId !== 'string' || !requestId.trim()) {
     throw new Error('Rust HubPipeline streamPipe effect missing requestId');
   }
-  if (!streamPayload || typeof streamPayload !== 'object' || Array.isArray(streamPayload)) {
-    throw new Error('Rust HubPipeline streamPipe effect missing stream payload');
-  }
   return {
     codec,
-    requestId,
-    payload: streamPayload as JsonObject
+    requestId
   };
 }
 
@@ -380,8 +374,8 @@ async function executeProviderResponseNativeOutboundEffects(args: {
   reenterPipeline?: ProviderResponseConversionOptions['reenterPipeline'];
   clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
 }): Promise<ProviderResponseConversionResult> {
-  let clientPayload = args.nativeResponsePlan.payload;
-  if (!clientPayload || typeof clientPayload !== 'object') {
+  let hubRespOutbound04ClientSemantic = args.nativeResponsePlan.payload;
+  if (!hubRespOutbound04ClientSemantic || typeof hubRespOutbound04ClientSemantic !== 'object') {
     throw new Error('Rust HubPipeline native response payload unavailable');
   }
   assertKnownNativeResponseEffectKinds(args.nativeResponsePlan.effectPlan);
@@ -391,9 +385,9 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     reenterPipeline: args.reenterPipeline,
     clientInjectDispatch: args.clientInjectDispatch
   });
-  clientPayload = await executeProviderResponseNativeServertoolEffects({
+  hubRespOutbound04ClientSemantic = await executeProviderResponseNativeServertoolEffects({
     effectPlan: args.nativeResponsePlan.effectPlan,
-    payload: clientPayload,
+    payload: hubRespOutbound04ClientSemantic,
     requestId: args.requestId,
     context: args.context,
     entryEndpoint: args.entryEndpoint,
@@ -409,35 +403,35 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     context: args.context
   });
   if (!streamEffect) {
-    recordStage(args.stageRecorder, 'chat_process.resp.stage9.client_remap', clientPayload);
+    recordStage(args.stageRecorder, 'chat_process.resp.stage9.client_remap', hubRespOutbound04ClientSemantic);
     recordStage(args.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
       passthrough: false,
       protocol: 'native-effect-plan',
-      payload: clientPayload
+      payload: hubRespOutbound04ClientSemantic
     });
-    return { body: clientPayload };
+    return { body: hubRespOutbound04ClientSemantic };
   }
   const codec = defaultSseCodecRegistry.get(streamEffect.codec);
   logHubStageTiming(args.requestId, 'resp_outbound.stage2_codec_stream', 'start', {
     clientProtocol: streamEffect.codec
   });
   const codecStart = Date.now();
-  const stream = await codec.convertJsonToSse(streamEffect.payload, {
+  const stream = await codec.convertJsonToSse(hubRespOutbound04ClientSemantic, {
     requestId: streamEffect.requestId
   });
   logHubStageTiming(args.requestId, 'resp_outbound.stage2_codec_stream', 'completed', {
     elapsedMs: Date.now() - codecStart,
     clientProtocol: streamEffect.codec
   });
-  recordStage(args.stageRecorder, 'chat_process.resp.stage9.client_remap', clientPayload);
+  recordStage(args.stageRecorder, 'chat_process.resp.stage9.client_remap', hubRespOutbound04ClientSemantic);
   recordStage(args.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
     passthrough: false,
     protocol: streamEffect.codec,
-    payload: streamEffect.payload
+    payload: hubRespOutbound04ClientSemantic
   });
   return {
     __sse_responses: stream,
-    body: clientPayload,
+    body: hubRespOutbound04ClientSemantic,
     format: streamEffect.codec
   };
 }
