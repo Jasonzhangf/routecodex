@@ -5,6 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
+const LEGACY_DEFAULT_TEXT: &str = "继续执行";
+const DEFAULT_EXECUTION_PROMPT: &str = "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。";
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -218,8 +221,16 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
         skip_reason: None,
         used: snapshot.used,
         max_repeats: effective_max_repeats,
-        followup_text: Some(snapshot.text),
+        followup_text: Some(normalize_followup_text(snapshot.text)),
         provider_pin: ctx.provider_pin.clone(),
+    }
+}
+
+fn normalize_followup_text(text: String) -> String {
+    if text.trim() == LEGACY_DEFAULT_TEXT {
+        DEFAULT_EXECUTION_PROMPT.to_string()
+    } else {
+        text
     }
 }
 
@@ -420,7 +431,31 @@ mod tests {
         let result = decide(&ctx);
         // Default now applies even without followup flow context.
         assert_eq!(result.action, Action::Trigger);
-        assert_eq!(result.followup_text, Some("继续执行".to_string()));
+        assert_eq!(result.followup_text, Some(DEFAULT_EXECUTION_PROMPT.to_string()));
+    }
+
+    #[test]
+    fn upgrades_legacy_default_followup_text_but_preserves_custom_text() {
+        let mut ctx = base_ctx();
+        ctx.persisted_snapshot = Some(StopMessageSnapshot {
+            text: "继续执行".to_string(),
+            max_repeats: 3,
+            used: 0,
+            source: SnapshotSource::Persisted,
+            stage_mode: StageMode::On,
+        });
+        let result = decide(&ctx);
+        assert_eq!(result.followup_text, Some(DEFAULT_EXECUTION_PROMPT.to_string()));
+
+        ctx.persisted_snapshot = Some(StopMessageSnapshot {
+            text: "继续执行，不要中断总结".to_string(),
+            max_repeats: 3,
+            used: 0,
+            source: SnapshotSource::Persisted,
+            stage_mode: StageMode::On,
+        });
+        let result = decide(&ctx);
+        assert_eq!(result.followup_text, Some("继续执行，不要中断总结".to_string()));
     }
 
     #[test]
