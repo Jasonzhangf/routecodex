@@ -1,6 +1,5 @@
 import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import {
-  isBlockingRecoverableProviderFailure,
   isProviderFailureHealthNeutral,
   normalizeProviderFailureCodeKey,
   resolveProviderFailureClassification
@@ -92,14 +91,6 @@ export function shouldApplyProviderTransportBackoff(args: {
   if (stage === 'provider.followup' || isHostRequestExecutorErrorStage(stage)) {
     return false;
   }
-  if (isBlockingRecoverableProviderFailure({
-    statusCode: args.retryError.statusCode,
-    errorCode: args.retryError.errorCode,
-    upstreamCode: args.retryError.upstreamCode,
-    reason: args.retryError.reason
-  })) {
-    return true;
-  }
   return resolveRequestExecutorProviderErrorClassification({
     error: args.error,
     retryError: args.retryError,
@@ -175,17 +166,6 @@ export function resolveReportedProviderErrorRecoverable(args: {
     retryError: args.retryError,
     stage: args.stage
   });
-  if (
-    !classification
-    && isBlockingRecoverableProviderFailure({
-      statusCode: args.retryError.statusCode,
-      errorCode: args.retryError.errorCode,
-      upstreamCode: args.retryError.upstreamCode,
-      reason: args.retryError.reason
-    })
-  ) {
-    return true;
-  }
   if (classification === 'special_400') {
     return false;
   }

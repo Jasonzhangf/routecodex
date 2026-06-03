@@ -5,7 +5,6 @@ import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/p
 import {
   computeProviderFailureBackoffDelayMs,
   describeProviderFailureDecision,
-  isBlockingRecoverableProviderFailure,
   resolveProviderFailureExclusionDecision,
   isProviderFailureHealthNeutral,
   normalizeProviderFailureCodeKey,

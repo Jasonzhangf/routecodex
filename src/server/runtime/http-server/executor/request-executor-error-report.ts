@@ -55,53 +55,6 @@ export function logNonBlockingError(stage: string, error: unknown, details?: Rec
   }
 }
 
-export function isNetworkTransportLikeError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-  const record = error as { code?: unknown; message?: unknown; name?: unknown };
-  const statusCode = typeof (record as { statusCode?: unknown }).statusCode === 'number'
-    ? ((record as { statusCode?: number }).statusCode)
-    : undefined;
-  const known = normalizeKnownProviderError({
-    statusCode,
-    code: record.code,
-    upstreamCode: (record as { upstreamCode?: unknown }).upstreamCode,
-    message: record.message,
-  });
-  if (known?.code === '0.1000' || known?.code === '0.2000' || known?.code === '0.3000' || known?.code === '0.4000' || known?.code === '0.6000') {
-    return true;
-  }
-  const code = typeof record.code === 'string' ? record.code.trim().toUpperCase() : '';
-  if (
-    code === 'ECONNRESET'
-    || code === 'ECONNREFUSED'
-    || code === 'EHOSTUNREACH'
-    || code === 'ENOTFOUND'
-    || code === 'EAI_AGAIN'
-    || code === 'EPIPE'
-    || code === 'ETIMEDOUT'
-    || code === 'ECONNABORTED'
-  ) {
-    return true;
-  }
-  const name = typeof record.name === 'string' ? record.name : '';
-  const message = typeof record.message === 'string' ? record.message.toLowerCase() : '';
-  if (name === 'AbortError' || message.includes('operation was aborted')) {
-    return true;
-  }
-  return (
-    message.includes('fetch failed')
-    || message.includes('network timeout')
-    || message.includes('socket hang up')
-    || message.includes('client network socket disconnected')
-    || message.includes('tls handshake timeout')
-    || message.includes('unable to verify the first certificate')
-    || message.includes('network error')
-    || message.includes('temporarily unreachable')
-  );
-}
-
 export function resetErrorReportStateForTests(): void {
   nonBlockingLogState.clear();
 }
