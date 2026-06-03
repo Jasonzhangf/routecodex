@@ -1450,4 +1450,60 @@ describe('hub pipeline stage residue audit', () => {
 
     expect({ exported, existing }).toEqual({ exported: [], existing: [] });
   });
+
+  it('shared openai message normalize must not inject MCP tools or swallow native failures in TS', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'imports MCP injection helper in TS normalize path', pattern: /injectMcpToolsForChat|mcp-injection/ },
+      { label: 'reads MCP env flags in TS normalize path', pattern: /ROUTECODEX_MCP_ENABLE|RCC_MCP_SERVERS|__rcc_disable_mcp_tools/ },
+      { label: 'discovers MCP servers from tool result text in TS', pattern: /list_mcp_resources|resourceTemplates|extractFromOutput/ },
+      { label: 'keeps non-blocking normalize logger', pattern: /logNormalizeNonBlocking|formatUnknownError/ },
+      { label: 'swallows native normalize failure', pattern: /catch\s*\(error\)\s*\{[\s\S]*?chat_messages\.normalize_native/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('ignored src-side JS build artifacts must not carry retired tool semantics', () => {
+    const repoRoot = process.cwd();
+    const forbiddenArtifacts = [
+      'sharedmodule/llmswitch-core/src/servertool/followup-seed.js',
+      'sharedmodule/llmswitch-core/src/servertool/followup-seed.js.map',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/utils.js',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/utils.js.map',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/utils.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/mcp-injection.js',
+    ];
+    const existing = forbiddenArtifacts.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+
+    expect(existing).toEqual([]);
+  });
+
+  it('servertool pending-session TS persistence must not inspect tool semantics or swallow load failures', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/pending-session.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'imports chat tool-history inspector into TS persistence', pattern: /inspectOpenAiChatToolHistory/ },
+      { label: 'imports synthetic tool-call id predicate into TS persistence', pattern: /isSyntheticRouteCodexToolCallId/ },
+      { label: 'validates pending injection tool semantics in TS persistence', pattern: /validatePendingInjection/ },
+      { label: 'reads tool_call ids for semantic filtering in TS persistence', pattern: /afterToolCallIds[\s\S]{0,240}synthetic|tool_call_id[\s\S]{0,240}message contract/ },
+      { label: 'silently swallows pending-session load failures', pattern: /catch\s*\{\s*return null;\s*\}/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('legacy chat-process pending tool-sync TS helper and tests must stay removed', () => {
+    const repoRoot = process.cwd();
+    const forbiddenFiles = [
+      'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-pending-tool-sync.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-pending-tool-sync.js',
+      'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-pending-tool-sync.d.ts',
+      'tests/sharedmodule/chat-process-pending-tool-sync.spec.ts',
+    ];
+    const existing = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+
+    expect(existing).toEqual([]);
+  });
 });

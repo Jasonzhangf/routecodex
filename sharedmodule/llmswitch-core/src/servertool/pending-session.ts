@@ -3,8 +3,6 @@ import path from 'node:path';
 
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
-import { inspectOpenAiChatToolHistory } from '../conversion/shared/openai-message-normalize.js';
-import { isSyntheticRouteCodexToolCallId } from '../conversion/shared/openai-message-normalize.js';
 
 export interface PendingServerToolInjection {
   version: 1;
@@ -128,19 +126,6 @@ async function dropPendingFile(file: string, message: string): Promise<void> {
   }
 }
 
-function validatePendingInjection(pending: PendingServerToolInjection): string | null {
-  for (const callId of pending.afterToolCallIds) {
-    if (isSyntheticRouteCodexToolCallId(callId)) {
-      return `synthetic afterToolCallIds detected: ${callId}`;
-    }
-  }
-  const violation = inspectOpenAiChatToolHistory(pending.messages);
-  if (violation) {
-    return `message contract violated: ${violation.code}${violation.callId ? ` (${violation.callId})` : ''}`;
-  }
-  return null;
-}
-
 export async function savePendingServerToolInjection(
   sessionId: string,
   pending: Omit<PendingServerToolInjection, 'version' | 'sessionId'>
@@ -181,16 +166,15 @@ export async function loadPendingServerToolInjection(sessionId: string): Promise
       );
       return null;
     }
-    const validationError = validatePendingInjection(pending);
-    if (validationError) {
-      await dropPendingFile(
-        file,
-        `[servertool-pending] invalid pending injection dropped session=${pending.sessionId} reason=${validationError}`
-      );
-      return null;
-    }
     return pending;
-  } catch {
+  } catch (error) {
+    const code = typeof (error as { code?: unknown } | null)?.code === 'string'
+      ? String((error as { code: string }).code)
+      : '';
+    if (code !== 'ENOENT') {
+      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+      await dropPendingFile(file, `[servertool-pending] pending injection read failed session=${sessionId} reason=${message}`);
+    }
     return null;
   }
 }

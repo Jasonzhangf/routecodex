@@ -60,7 +60,7 @@ describe('servertool pending-session', () => {
     expect((loaded?.messages?.[0] as any)?.tool_calls?.[0]?.id).toBe('call_servertool_clock_req_1');
   });
 
-  test('drops polluted pending injection that contains synthetic fallback ids', async () => {
+  test('loads synthetic-looking pending injection unchanged because tool semantics are validated by Rust pipeline', async () => {
     await savePendingServerToolInjection('sess-synthetic', {
       createdAtMs: Date.now(),
       afterToolCallIds: ['call_servertool_fallback_1777378574502_510'],
@@ -89,9 +89,10 @@ describe('servertool pending-session', () => {
     });
 
     const loaded = await loadPendingServerToolInjection('sess-synthetic');
-    expect(loaded).toBeNull();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.afterToolCallIds).toEqual(['call_servertool_fallback_1777378574502_510']);
 
     const pendingFile = path.join(sessionDir, 'servertool-pending', 'sess-synthetic.json');
-    expect(fs.existsSync(pendingFile)).toBe(false);
+    expect(fs.existsSync(pendingFile)).toBe(true);
   });
 });
