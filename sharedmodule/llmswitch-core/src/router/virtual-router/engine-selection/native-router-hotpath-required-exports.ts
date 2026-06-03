@@ -49,6 +49,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "describeVirtualRouterContractsJson",
   "describeMetaCarrierContractsJson",
   "describePipelineContractJson",
+  "describeServerContractsJson",
+  "describeServerModuleHelpJson",
   "validatePipelineNodeContractBoundaryJson",
   "buildReqOutboundNodeResultJson",
   "buildReqInboundNodeResultJson",

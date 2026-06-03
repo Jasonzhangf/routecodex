@@ -68,3 +68,11 @@ export function validatePipelineNodeContractBoundaryWithNative(
     JSON.stringify(after ?? null)
   ]);
 }
+
+export function describeServerContractsWithNative(): PipelineContractHelp {
+  return invokeContractHelp('describeServerContractsJson');
+}
+
+export function describeServerModuleHelpWithNative(moduleId: string): PipelineContractHelp {
+  return invokeContractHelp('describeServerModuleHelpJson', [String(moduleId || '')]);
+}

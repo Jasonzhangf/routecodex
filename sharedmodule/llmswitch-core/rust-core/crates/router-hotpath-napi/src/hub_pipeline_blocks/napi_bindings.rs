@@ -52,6 +52,7 @@ use crate::hub_pipeline_contracts::{
     describe_hub_pipeline_contracts, describe_meta_carrier_contracts, describe_pipeline_contract,
     describe_virtual_router_contracts, validate_pipeline_node_contract_boundary,
 };
+use crate::server_contracts::{describe_server_contracts, describe_server_module_help};
 
 #[napi_derive::napi]
 pub fn normalize_hub_endpoint_json(endpoint: String) -> napi::Result<String> {
@@ -759,4 +760,20 @@ pub fn run_resp_outbound_pipeline_json(
 
     serde_json::to_string(&envelope)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize envelope: {}", e)))
+}
+#[napi_derive::napi]
+pub fn describe_server_contracts_json() -> napi::Result<String> {
+    serde_json::to_string(&describe_server_contracts()).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to serialize server contracts: {}", e))
+    })
+}
+
+#[napi_derive::napi]
+pub fn describe_server_module_help_json(module_id: String) -> napi::Result<String> {
+    let output = describe_server_module_help(&module_id).ok_or_else(|| {
+        napi::Error::from_reason(format!("unknown server module help: {module_id}"))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to serialize server module help: {}", e))
+    })
 }

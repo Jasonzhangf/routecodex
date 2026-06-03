@@ -59,6 +59,7 @@ mod hub_resp_outbound_client_semantics;
 mod hub_resp_outbound_client_semantics_blocks;
 mod hub_resp_outbound_sse_stream;
 mod hub_semantic_mapper_chat;
+mod server_contracts;
 mod hub_snapshot_hooks;
 mod hub_standardized_bridge;
 mod hub_submit_tool_outputs;
@@ -982,6 +983,21 @@ pub fn decide_stop_message_action(ctx_json: String) -> NapiResult<String> {
     let decision = stop_message_auto_blocks::decide_stop_message_action(&ctx);
     serde_json::to_string(&decision)
         .map_err(|e| napi::Error::from_reason(format!("serialize StopMessageDecision: {e}")))
+}
+
+#[napi]
+pub fn evaluate_stop_schema_gate_json(
+    assistant_text: String,
+    used: u32,
+    max_repeats: u32,
+) -> NapiResult<String> {
+    let decision = stop_message_auto_blocks::evaluate_stop_schema(
+        &assistant_text,
+        used,
+        max_repeats,
+    );
+    serde_json::to_string(&decision)
+        .map_err(|e| napi::Error::from_reason(format!("serialize StopSchemaGateDecision: {e}")))
 }
 
 #[napi]
