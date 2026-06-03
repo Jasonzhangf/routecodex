@@ -6,7 +6,7 @@ pub mod stage_catalog;
 pub mod types;
 
 pub use engine::{
-    execute_hub_pipeline_json, run_hub_pipeline_lib_json, run_hub_pipeline_stage_json,
+    execute_hub_pipeline_json, run_hub_pipeline_lib_json,
     HubPipelineEngine,
 };
 pub use errors::{HubPipelineError, HubPipelineResult};

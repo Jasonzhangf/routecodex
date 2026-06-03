@@ -21,12 +21,10 @@ describe('native required exports for sse stream helpers', () => {
     expect(new Set(REQUIRED_NATIVE_HOTPATH_EXPORTS).size).toBe(REQUIRED_NATIVE_HOTPATH_EXPORTS.length);
   });
 
-  test('keeps legacy HubPipeline stage export only while wrapper contract remains', () => {
-    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('runHubPipelineStageJson');
+  test('does not require retired legacy HubPipeline stage export', () => {
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('runHubPipelineStageJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('runHubPipelineLibJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('executeHubPipelineJson');
-    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS.indexOf('runHubPipelineStageJson'))
-      .toBeGreaterThan(REQUIRED_NATIVE_HOTPATH_EXPORTS.indexOf('runHubPipelineLibJson'));
   });
 
   test('required export list matches the packaged native binding', () => {

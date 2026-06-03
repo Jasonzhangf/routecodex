@@ -108,23 +108,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(normalizePath)).toBe(false);
   });
 
-  it('legacy TS stage native entrypoints must stay locked to known bridge shells', () => {
+  it('legacy TS stage native entrypoints must be retired from tracked source', () => {
     const sourceRoots = [
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
       path.join(process.cwd(), 'src'),
     ];
-    const allowed = new Set([
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.d.ts',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
-    ]);
     const findings: string[] = [];
 
     for (const root of sourceRoots) {
-      for (const fullPath of walkFiles(root, ['.ts', '.tsx'])) {
+      for (const fullPath of walkFiles(root, ['.ts', '.tsx', '.js', '.jsx', '.d.ts'])) {
         const source = fs.readFileSync(fullPath, 'utf8');
         if (!source.includes('runHubPipelineStageWithNative')) continue;
-        const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
-        if (!allowed.has(relativePath)) findings.push(relativePath);
+        findings.push(path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
       }
     }
 
@@ -156,47 +151,29 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('legacy runHubPipelineStageJson required export must not gain runtime consumers', () => {
+  it('legacy runHubPipelineStageJson required export must be retired from tracked source', () => {
     const sourceRoots = [
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
       path.join(process.cwd(), 'src'),
     ];
-    const allowed = new Set([
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.d.ts',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.d.ts',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.js',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts',
-    ]);
     const findings: string[] = [];
 
     for (const root of sourceRoots) {
       for (const fullPath of walkFiles(root, ['.ts', '.tsx', '.js', '.jsx', '.d.ts'])) {
         const source = fs.readFileSync(fullPath, 'utf8');
         if (!source.includes('runHubPipelineStageJson')) continue;
-        const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
-        if (!allowed.has(relativePath)) findings.push(relativePath);
+        findings.push(path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
       }
     }
 
     expect(findings).toEqual([]);
   });
 
-  it('legacy runHubPipelineStageJson Rust NAPI owner must stay single-export only', () => {
+  it('legacy runHubPipelineStageJson Rust export and stage branches must be physically removed', () => {
     const crateRoot = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
     );
-    const ownerFilesBySymbol: Record<string, Set<string>> = {
-      'js_name = "runHubPipelineStageJson"': new Set(['lib.rs']),
-      'hub_pipeline_lib::run_hub_pipeline_stage_json(': new Set(['lib.rs']),
-      run_hub_pipeline_stage_json: new Set([
-        'hub_pipeline_lib/engine.rs',
-        'hub_pipeline_lib/mod.rs',
-        'lib.rs',
-      ]),
-    };
     const findings: string[] = [];
 
     for (const fullPath of walkFiles(crateRoot, ['.rs'])) {
@@ -205,40 +182,19 @@ describe('hub pipeline stage residue audit', () => {
       }
       const relativePath = path.relative(crateRoot, fullPath).split(path.sep).join('/');
       const source = fs.readFileSync(fullPath, 'utf8');
-      for (const [symbol, allowedFiles] of Object.entries(ownerFilesBySymbol)) {
-        if (source.includes(symbol) && !allowedFiles.has(relativePath)) {
-          findings.push(`${relativePath}:${symbol}`);
-        }
+      for (const symbol of [
+        'js_name = "runHubPipelineStageJson"',
+        'hub_pipeline_lib::run_hub_pipeline_stage_json(',
+        'run_hub_pipeline_stage_json',
+        'run_normalize_request_stage',
+        'run_req_process_tool_governance_stage',
+        'run_resp_process_finalize_stage',
+      ]) {
+        if (source.includes(symbol)) findings.push(`${relativePath}:${symbol}`);
       }
     }
 
     expect(findings).toEqual([]);
-  });
-
-  it('legacy runHubPipelineStageJson stage branches must stay fixed to retirement list', () => {
-    const enginePath = path.join(
-      process.cwd(),
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
-    );
-    const source = fs.readFileSync(enginePath, 'utf8');
-    const stageNames = Array.from(source.matchAll(/Some\("([A-Za-z0-9]+)"\)/g)).map((match) => match[1]);
-    const legacyStageNames = stageNames.filter((name) =>
-      ['normalizeRequest', 'reqProcessToolGovernance', 'respProcessFinalize'].includes(name)
-    );
-    const branchHelpers = Array.from(source.matchAll(/return\s+(run_[a-z_]+_stage)\(raw\);/g)).map((match) => match[1]);
-
-    expect(legacyStageNames).toEqual([
-      'normalizeRequest',
-      'reqProcessToolGovernance',
-      'respProcessFinalize',
-    ]);
-    expect(branchHelpers).toEqual([
-      'run_normalize_request_stage',
-      'run_req_process_tool_governance_stage',
-      'run_resp_process_finalize_stage',
-    ]);
-    expect(source).not.toContain('run_resp_outbound_pipeline_json');
-    expect(source).not.toContain('run_req_process_pipeline_json');
   });
 
   it('legacy request-side Rust stage bridge owner pair must stay fixed', () => {
@@ -303,42 +259,6 @@ describe('hub pipeline stage residue audit', () => {
     }
 
     expect(findings).toEqual([]);
-  });
-
-  it('legacy HubPipeline stage wrapper deletion blockers must stay fixed', () => {
-    const trackedFiles = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .filter((relativePath) => !relativePath.endsWith('.map'));
-    const stageWrapperConsumers = trackedFiles.filter((relativePath) => {
-      if (!/\.(ts|js|rs)$/.test(relativePath)) return false;
-      const fullPath = path.join(process.cwd(), relativePath);
-      if (!fs.existsSync(fullPath)) return false;
-      const source = fs.readFileSync(fullPath, 'utf8');
-      return source.includes('runHubPipelineStageWithNative');
-    });
-    const stageExportConsumers = trackedFiles.filter((relativePath) => {
-      if (!/\.(ts|js|rs)$/.test(relativePath)) return false;
-      const fullPath = path.join(process.cwd(), relativePath);
-      if (!fs.existsSync(fullPath)) return false;
-      const source = fs.readFileSync(fullPath, 'utf8');
-      return source.includes('runHubPipelineStageJson');
-    });
-
-    expect(stageWrapperConsumers).toEqual([
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
-      'tests/sharedmodule/hub-pipeline-rust-lib-api-contract.spec.ts',
-      'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts',
-    ]);
-    expect(stageExportConsumers).toEqual([
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts',
-      'tests/sharedmodule/hub-pipeline-rust-lib-api-contract.spec.ts',
-      'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts',
-      'tests/sharedmodule/native-required-exports-sse-stream.spec.ts',
-    ]);
   });
 
   it('legacy normalize-request TS block files must be physically removed', () => {

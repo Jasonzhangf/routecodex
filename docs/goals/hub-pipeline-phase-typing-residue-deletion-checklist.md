@@ -125,6 +125,12 @@ Phase 8E-1 stage wrapper deletion-blocker proof: tracked source consumers of `ru
 - Red tests now forbid adding new tracked source consumers of `runHubPipelineStageWithNative` or `runHubPipelineStageJson` outside that blocker set.
 - Exit condition: retire the API contract test expectation, required-export entry, native wrapper export, Rust NAPI wrapper, and Rust stage implementation together after a separate deletion phase proves no wrapper contract remains.
 
+Phase 8E-2 deletion proof: the explicit wrapper contract / required-export gate was the final blocker, and it has been retired as a single group. `runHubPipelineStageWithNative`, `runHubPipelineStageJson`, the Rust NAPI wrapper, the Rust `run_hub_pipeline_stage_json` implementation, and its three stage-only helpers (`normalizeRequest`, `reqProcessToolGovernance`, `respProcessFinalize`) were physically removed together.
+
+- Contract tests now assert only the total Rust HubPipeline entries (`runHubPipelineLibJson` / `executeHubPipelineJson`) and required exports must not include `runHubPipelineStageJson`.
+- Red tests now fail if the legacy TS wrapper, required export, Rust NAPI wrapper, Rust stage implementation, or stage-only helper names are reintroduced.
+- Live mainline remains on `runHubPipelineLibWithNative` / `executeHubPipelineWithNative`; provider wire and client response body semantics were not changed by this deletion.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:
