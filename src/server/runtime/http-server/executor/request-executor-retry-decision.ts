@@ -158,10 +158,7 @@ export function resolveProviderRetryExclusionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys
   });
 
-  // Unified recoverable rule: after 3 consecutive recoverable failures on current provider,
-  // exclude this provider so the same request can move to next priority target.
-  // This intentionally applies to 429/5xx/network recoverable classes without per-error special cases.
-  if (args.classification === 'recoverable' && (args.attempt ?? 0) >= 3 && hasAlternativeCandidate) {
+  if (args.classification === 'recoverable' && hasAlternativeCandidate && args.status !== 429) {
     return {
       excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
         providerKey,

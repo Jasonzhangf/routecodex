@@ -507,9 +507,13 @@ impl ProviderHealthManager {
         reason: Option<String>,
         now_ms: i64,
     ) {
-        let threshold = self.config.failure_threshold.max(3);
-        let cooldown_ms = self.config.cooldown_ms;
+        let base_threshold = self.config.failure_threshold.max(3);
         let state = self.get_state_mut(provider_key);
+        let threshold = if state.recoverable_cooldown_cycles > 0 {
+            1
+        } else {
+            base_threshold
+        };
         state.failure_count += 1;
         state.consecutive_http_502_failures += 1;
         state.consecutive_recoverable_failures += 1;
@@ -520,7 +524,8 @@ impl ProviderHealthManager {
         }
         if state.consecutive_http_502_failures >= threshold {
             state.state = "tripped".to_string();
-            state.cooldown_expires_at = Some(now_ms + cooldown_ms);
+            state.cooldown_expires_at = Some(now_ms + next_recoverable_cooldown_ms(state.recoverable_cooldown_cycles));
+            state.recoverable_cooldown_cycles += 1;
         }
     }
 
@@ -583,8 +588,12 @@ impl ProviderHealthManager {
         reason: Option<String>,
         now_ms: i64,
     ) -> Http429ControlOutcome {
-        const RECOVERABLE_THRESHOLD: i64 = 3;
         let state = self.get_state_mut(provider_key);
+        let threshold = if state.recoverable_cooldown_cycles > 0 {
+            1
+        } else {
+            3
+        };
         state.failure_count += 1;
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures = 0;
@@ -594,13 +603,13 @@ impl ProviderHealthManager {
         if let Some(reason) = reason {
             state.reason = Some(reason);
         }
-        if state.consecutive_recoverable_failures < RECOVERABLE_THRESHOLD {
+        if state.consecutive_recoverable_failures < threshold {
             return Http429ControlOutcome::None;
         }
         state.consecutive_recoverable_failures = 0;
         state.state = "tripped".to_string();
         state.cooldown_expires_at =
-            Some(now_ms + next_ladder_cooldown_ms(state.recoverable_cooldown_cycles));
+            Some(now_ms + next_recoverable_cooldown_ms(state.recoverable_cooldown_cycles));
         state.recoverable_cooldown_cycles += 1;
         Http429ControlOutcome::CooldownApplied
     }
@@ -644,12 +653,20 @@ const DEFAULT_FATAL_COOLDOWN_MS: i64 = 120_000;
 const LADDER_COOLDOWN_10M_MS: i64 = 10 * 60_000;
 const LADDER_COOLDOWN_30M_MS: i64 = 30 * 60_000;
 const LADDER_COOLDOWN_5H_MS: i64 = 5 * 60 * 60_000;
+const LADDER_COOLDOWN_3H_MS: i64 = 3 * 60 * 60_000;
 
 fn next_ladder_cooldown_ms(cycles: i64) -> i64 {
     match cycles {
         i64::MIN..=0 => LADDER_COOLDOWN_10M_MS,
         1 => LADDER_COOLDOWN_30M_MS,
         _ => LADDER_COOLDOWN_5H_MS,
+    }
+}
+
+fn next_recoverable_cooldown_ms(cycles: i64) -> i64 {
+    match cycles {
+        i64::MIN..=0 => LADDER_COOLDOWN_30M_MS,
+        _ => LADDER_COOLDOWN_3H_MS,
     }
 }
 

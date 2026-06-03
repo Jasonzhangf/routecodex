@@ -85,6 +85,11 @@ impl VirtualRouterEngineCore {
         let reason = extract_error_reason(event);
         let now = now_ms();
         let status_code = extract_status_code(event);
+        if let Some(classification) = extract_provider_error_classification(event) {
+            if self.apply_classified_provider_error(event, classification) {
+                return;
+            }
+        }
         // Single policy gate:
         // - HTTP 503 triggers a persisted daily cooldown immediately (not the
         //   recoverable-failure ladder). This matches extract_recoverable_cooldown_ms.
@@ -206,6 +211,13 @@ impl VirtualRouterEngineCore {
                         Some(cooldown_ms),
                         now,
                     );
+                    self.persist_provider_health();
+                    return true;
+                }
+                if status == Some(502) {
+                    self.health_manager
+                        .record_http_502_failure(provider_key, reason, now);
+                    self.apply_series_cooldown(event);
                     self.persist_provider_health();
                     return true;
                 }
@@ -900,8 +912,8 @@ mod tests {
         assert_eq!(state.state, "tripped");
         let ttl = state.cooldown_expires_at.expect("cooldown expiry") - now_ms();
         assert!(
-            ttl > 9 * 60_000 && ttl <= 11 * 60_000,
-            "expected ~10m ttl, got {ttl}"
+            ttl > 29 * 60_000 && ttl <= 31 * 60_000,
+            "expected ~30m ttl, got {ttl}"
         );
     }
 
@@ -1115,7 +1127,7 @@ mod tests {
     }
 
     #[test]
-    fn recoverable_non_429_three_strikes_cooldown_ladder_10m_30m_5h() {
+    fn recoverable_non_429_three_strikes_then_reprobe_failure_uses_30m_3h() {
         let provider_key = "test.key1.model-a";
         let mut core = build_test_core_with_providers(&[
             (provider_key, "gpt-test"),
@@ -1141,16 +1153,14 @@ mod tests {
         let first_expiry = first_cycle.cooldown_expires_at.expect("cooldown expiry");
         let first_ttl = first_expiry - now_ms();
         assert!(
-            first_ttl > 9 * 60_000 && first_ttl <= 11 * 60_000,
-            "first cooldown should be ~10m, ttl={first_ttl}"
+            first_ttl > 29 * 60_000 && first_ttl <= 31 * 60_000,
+            "first cooldown should be ~30m, ttl={first_ttl}"
         );
         assert!(core
             .health_manager
             .is_available(provider_key, first_expiry + 1));
 
         core.handle_provider_error(&mk("req-4"));
-        core.handle_provider_error(&mk("req-5"));
-        core.handle_provider_error(&mk("req-6"));
         let second_cycle = provider_state(&core, provider_key);
         assert_eq!(second_cycle.state, "tripped");
         let second_expiry = second_cycle
@@ -1158,25 +1168,39 @@ mod tests {
             .expect("second cooldown expiry");
         let second_ttl = second_expiry - now_ms();
         assert!(
-            second_ttl > 29 * 60_000 && second_ttl <= 31 * 60_000,
-            "second cooldown should be ~30m, ttl={second_ttl}"
+            second_ttl > (3 * 60 * 60_000 - 60_000) && second_ttl <= (3 * 60 * 60_000 + 60_000),
+            "second cooldown should be ~3h, ttl={second_ttl}"
         );
+    }
 
-        assert!(core
-            .health_manager
-            .is_available(provider_key, second_expiry + 1));
-        core.handle_provider_error(&mk("req-7"));
-        core.handle_provider_error(&mk("req-8"));
-        core.handle_provider_error(&mk("req-9"));
-        let third_cycle = provider_state(&core, provider_key);
-        assert_eq!(third_cycle.state, "tripped");
-        let third_expiry = third_cycle
-            .cooldown_expires_at
-            .expect("third cooldown expiry");
-        let third_ttl = third_expiry - now_ms();
+    #[test]
+    fn provider_failure_entrypoint_502_recoverable_uses_same_cooldown_chain() {
+        let provider_key = "test.key1.model-a";
+        let mut core = build_test_core_with_providers(&[
+            (provider_key, "gpt-test"),
+            ("test.key1.model-b", "gpt-test"),
+        ]);
+        let mk = |request_id: &str| {
+            json!({
+                "code": "HTTP_502",
+                "message": "upstream bad gateway",
+                "stage": "provider.send",
+                "status": 502,
+                "runtime": { "requestId": request_id, "providerKey": provider_key },
+                "details": { "errorClassification": "recoverable", "routePoolSize": 2 }
+            })
+        };
+
+        core.handle_provider_failure(&mk("req-1"));
+        core.handle_provider_failure(&mk("req-2"));
+        core.handle_provider_failure(&mk("req-3"));
+
+        let state = provider_state(&core, provider_key);
+        assert_eq!(state.state, "tripped");
+        let ttl = state.cooldown_expires_at.expect("cooldown expiry") - now_ms();
         assert!(
-            third_ttl > (5 * 60 * 60_000 - 60_000) && third_ttl <= (5 * 60 * 60_000 + 60_000),
-            "third cooldown should be ~5h, ttl={third_ttl}"
+            ttl > 29 * 60_000 && ttl <= 31 * 60_000,
+            "provider failure entrypoint should use recoverable 30m cooldown, ttl={ttl}"
         );
     }
 

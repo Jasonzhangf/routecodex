@@ -104,11 +104,23 @@ function isRetryableProviderResponseProcessingFailure(args: {
     code?: unknown;
     upstreamCode?: unknown;
     retryable?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
     requestExecutorProviderErrorStage?: unknown;
   };
   if (typeof record.requestExecutorProviderErrorStage !== 'string') {
     const message = args.error instanceof Error ? args.error.message : String(args.error ?? '');
     remapBridgeSseErrorToHttp(record as Record<string, unknown>, message);
+  }
+  const statusCode = typeof record.statusCode === 'number'
+    ? record.statusCode
+    : (typeof record.status === 'number' ? record.status : args.retryError.statusCode);
+  if (
+    record.requestExecutorProviderErrorStage === 'provider.http'
+    && typeof statusCode === 'number'
+    && (statusCode === 408 || statusCode === 425 || statusCode === 429 || statusCode >= 500)
+  ) {
+    return true;
   }
   return record.retryable === true
     && record.requestExecutorProviderErrorStage === 'provider.sse_decode'

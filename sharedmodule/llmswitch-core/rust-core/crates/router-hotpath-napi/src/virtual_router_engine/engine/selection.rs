@@ -114,6 +114,16 @@ fn classify_context_candidates(
     (safe, risky, overflow)
 }
 
+fn dedupe_candidate_order(candidates: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for candidate in candidates {
+        if !candidate.trim().is_empty() && !out.contains(&candidate) {
+            out.push(candidate);
+        }
+    }
+    out
+}
+
 impl VirtualRouterEngineCore {
     /// Apply standard candidate filters: routing state, excluded keys, and provider availability.
     /// This is the single filter chain used by all selection paths (forced, prefer, pool).
@@ -348,24 +358,29 @@ impl VirtualRouterEngineCore {
                 let (ordered_group_ids, grouped_candidates) =
                     build_primary_target_groups(&available, &self.provider_registry);
                 let strategy = tier_load_balancing.strategy.as_str();
-                let selected = match strategy {
-                    "priority" => available.first().cloned(),
+                let selected_candidates = match strategy {
+                    "priority" => available.clone(),
                     "weighted" if !ordered_group_ids.is_empty() => {
                         let group_weights = build_group_weights(
                             &grouped_candidates,
                             tier_load_balancing.weights.as_ref(),
                         );
-                        self.load_balancer.select_grouped(
-                            &route_key_for_lb,
-                            &ordered_group_ids,
-                            &grouped_candidates,
-                            group_weights.as_ref(),
-                            |_| true,
-                            Some("weighted"),
-                        )
+                        self.load_balancer
+                            .select_grouped(
+                                &route_key_for_lb,
+                                &ordered_group_ids,
+                                &grouped_candidates,
+                                group_weights.as_ref(),
+                                |_| true,
+                                Some("weighted"),
+                            )
+                            .into_iter()
+                            .chain(available.iter().cloned())
+                            .collect::<Vec<String>>()
                     }
-                    "round-robin" if !ordered_group_ids.is_empty() => {
-                        self.load_balancer.select_grouped(
+                    "round-robin" if !ordered_group_ids.is_empty() => self
+                        .load_balancer
+                        .select_grouped(
                             &route_key_for_lb,
                             &ordered_group_ids,
                             &grouped_candidates,
@@ -373,22 +388,26 @@ impl VirtualRouterEngineCore {
                             |_| true,
                             Some("round-robin"),
                         )
-                    }
-                    _ => self.load_balancer.select_grouped(
-                        &route_key_for_lb,
-                        &ordered_group_ids,
-                        &grouped_candidates,
-                        None,
-                        |_| true,
-                        Some("round-robin"),
-                    ),
+                        .into_iter()
+                        .chain(available.iter().cloned())
+                        .collect::<Vec<String>>(),
+                    _ => self
+                        .load_balancer
+                        .select_grouped(
+                            &route_key_for_lb,
+                            &ordered_group_ids,
+                            &grouped_candidates,
+                            None,
+                            |_| true,
+                            Some("round-robin"),
+                        )
+                        .into_iter()
+                        .chain(available.iter().cloned())
+                        .collect::<Vec<String>>(),
                 };
-                // ===== ProviderForwarder resolution =====
-                // If selected is a forwarder id, expand to a real provider_key.
-                // We pre-collect available real keys (so the closure doesn't borrow self
-                // while forwarder_registry.select() needs &mut self).
-                let resolved_key: Option<String> = if let Some(key) = selected.clone() {
-                    if crate::virtual_router_engine::forwarder::ForwarderRegistry::is_forwarder_id(
+
+                for key in dedupe_candidate_order(selected_candidates) {
+                    let resolved_key = if crate::virtual_router_engine::forwarder::ForwarderRegistry::is_forwarder_id(
                         &key,
                     ) {
                         // Pre-collect (clone out targets, then drop borrow) so we can call mutating self
@@ -417,32 +436,59 @@ impl VirtualRouterEngineCore {
                         ) {
                             Ok(real) => Some(real),
                             Err(e) if e == crate::virtual_router_engine::forwarder::ERR_FORWARDER_NO_AVAILABLE_TARGET => {
-                                return Err(format!(
-                                    "forwarder '{}' has no available target: {}",
-                                    key, e
-                                ));
+                                unavailable_route_pools.push(json!({
+                                    "routeName": route_name,
+                                    "poolId": pool.id,
+                                    "poolTargets": pool.targets,
+                                    "unavailableProviders": {
+                                        "candidateProviderKeys": [key.clone()],
+                                        "items": [{
+                                            "providerKey": key.clone(),
+                                            "reasons": [{
+                                                "type": "forwarder_no_available_target",
+                                                "code": e
+                                            }]
+                                        }]
+                                    }
+                                }));
+                                None
                             }
-                            Err(e) => return Err(e),
+                            Err(e) => {
+                                unavailable_route_pools.push(json!({
+                                    "routeName": route_name,
+                                    "poolId": pool.id,
+                                    "poolTargets": pool.targets,
+                                    "unavailableProviders": {
+                                        "candidateProviderKeys": [key.clone()],
+                                        "items": [{
+                                            "providerKey": key.clone(),
+                                            "reasons": [{
+                                                "type": "forwarder_selection_error",
+                                                "message": e
+                                            }]
+                                        }]
+                                    }
+                                }));
+                                None
+                            }
                         }
                     } else {
                         Some(key)
-                    }
-                } else {
-                    None
-                };
+                    };
 
-                if let Some(provider_key) = resolved_key {
-                    return Ok(SelectionResult::new(
-                        provider_key,
-                        route_name.to_string(),
-                        pool.targets.clone(),
-                        Some(pool.id.clone()),
-                    )
-                    .with_route_params(pool.route_params.clone())
-                    .with_unavailable_providers(
-                        (!unavailable_route_pools.is_empty())
-                            .then_some(Value::Array(unavailable_route_pools)),
-                    ));
+                    if let Some(provider_key) = resolved_key {
+                        return Ok(SelectionResult::new(
+                            provider_key,
+                            route_name.to_string(),
+                            pool.targets.clone(),
+                            Some(pool.id.clone()),
+                        )
+                        .with_route_params(pool.route_params.clone())
+                        .with_unavailable_providers(
+                            (!unavailable_route_pools.is_empty())
+                                .then_some(Value::Array(unavailable_route_pools)),
+                        ));
+                    }
                 }
             }
         }

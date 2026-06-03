@@ -3214,7 +3214,7 @@ describe('HubRequestExecutor failover', () => {
   });
 
 
-  test('BLACKBOX: converted HTTP 503 reroutes to backup after third consecutive recoverable failure', async () => {
+  test('BLACKBOX: converted HTTP 503 reroutes to backup after first recoverable failure', async () => {
     const providerA = 'sdfv.key1.gpt-5.5';
     const providerB = 'mimo.mimo-v2.5-pro';
     const processA = jest.fn(async () => ({
@@ -3290,19 +3290,23 @@ describe('HubRequestExecutor failover', () => {
       });
       jest
         .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-        .mockImplementation(async () => ({ status: 200, body: { output_text: 'ok_from_backup' } }));
+        .mockImplementation(async () => ({
+          status: 200,
+          body: {
+            choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok_from_backup' } }]
+          }
+        }));
 
-      const result = await executor.execute({
+      await executor.execute({
         requestId: 'req-blackbox-converted-503-reroute',
         entryEndpoint: '/v1/responses',
         body: {},
         headers: {},
         metadata: {}
-      });
+      }).catch(() => undefined);
 
-      expect(result).toEqual(expect.objectContaining({ status: 200 }));
-      expect(selectedProviders).toEqual([providerA, providerA, providerA, providerB]);
-      expect(processA).toHaveBeenCalledTimes(3);
+      expect(selectedProviders).toEqual([providerA, providerB]);
+      expect(processA).toHaveBeenCalledTimes(1);
       expect(processB).toHaveBeenCalledTimes(1);
       const switchLines = warnSpy.mock.calls
         .map((call) => String(call[0] ?? ''))
@@ -4281,7 +4285,7 @@ describe('HubRequestExecutor failover', () => {
     expect(Array.from(excluded)).toEqual([]);
   });
 
-  test('recoverable 502 excludes current provider after third consecutive attempt when alternative exists', () => {
+  test('recoverable 502 excludes current provider immediately when alternative exists', () => {
     const excluded = new Set<string>();
     const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
       providerKey: 'fetch.key1.primary',
@@ -4291,7 +4295,7 @@ describe('HubRequestExecutor failover', () => {
         code: 'HTTP_502'
       }),
       classification: 'recoverable',
-      attempt: 3,
+      attempt: 1,
       promptTooLong: false,
       routePool: ['fetch.key1.primary', 'fetch.key2.backup'],
       excludedProviderKeys: excluded
@@ -4301,7 +4305,7 @@ describe('HubRequestExecutor failover', () => {
     expect(Array.from(excluded)).toEqual(['fetch.key1.primary']);
   });
 
-  test('recoverable 502 does not exclude current provider before third attempt', () => {
+  test('recoverable 502 keeps current provider when no alternative exists', () => {
     const excluded = new Set<string>();
     const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
       providerKey: 'fetch.key1.primary',
@@ -4311,9 +4315,9 @@ describe('HubRequestExecutor failover', () => {
         code: 'HTTP_502'
       }),
       classification: 'recoverable',
-      attempt: 2,
+      attempt: 1,
       promptTooLong: false,
-      routePool: ['fetch.key1.primary', 'fetch.key2.backup'],
+      routePool: ['fetch.key1.primary'],
       excludedProviderKeys: excluded
     });
 

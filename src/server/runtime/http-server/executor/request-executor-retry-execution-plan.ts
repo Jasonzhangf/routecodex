@@ -166,16 +166,16 @@ export async function resolveProviderRetryExecutionPlan(args: {
       retryError: args.retryError,
       status: args.status
     });
-  const recoverableThresholdReroute =
+  const recoverableProviderReroute =
     hasTerminalAlternativeCandidate
     && classification === 'recoverable'
-    && (args.attempt ?? 0) >= 3;
+    && args.status !== 429;
   const terminalRecoverableReroute =
     !eligibilityPlan.shouldRetry
     && hasTerminalAlternativeCandidate
     && classification === 'recoverable';
 
-  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute && !terminalRecoverableReroute && !recoverableThresholdReroute) {
+  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute && !terminalRecoverableReroute && !recoverableProviderReroute) {
     const keepTerminalExclusion =
       exclusionPlan.excludedCurrentProvider
       && (args.status === 429 || args.forceExcludeCurrentProviderOnRetry === true);
@@ -189,8 +189,8 @@ export async function resolveProviderRetryExecutionPlan(args: {
     };
   }
 
-  if (terminalQuotaReroute || terminalRecoverableReroute || recoverableThresholdReroute) {
-    const retryBackoffPlan = (terminalRecoverableReroute || recoverableThresholdReroute)
+  if (terminalQuotaReroute || terminalRecoverableReroute || recoverableProviderReroute) {
+    const retryBackoffPlan = (terminalRecoverableReroute || recoverableProviderReroute)
       ? {
           blockingRecoverable: false,
           retryBackoffMs: 0,
