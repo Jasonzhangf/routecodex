@@ -553,6 +553,126 @@ mod tests {
     }
 
     #[test]
+    fn test_build_anthropic_messages_from_responses_serializes_parallel_tool_results() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "MiniMax-M3",
+                    "input": [
+                        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "start"}]},
+                        {"type": "function_call", "call_id": "call_a", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"},
+                        {"type": "function_call", "call_id": "call_b", "name": "exec_command", "arguments": "{\"cmd\":\"ls\"}"},
+                        {"type": "function_call_output", "call_id": "call_a", "output": "pwd output"},
+                        {"type": "function_call_output", "call_id": "call_b", "output": "ls output"}
+                    ],
+                    "tools": [{"type": "function", "name": "exec_command", "description": "run command", "parameters": {"type": "object"}}]
+                }
+            }),
+            protocol: "anthropic-messages".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        let messages = result.payload["messages"].as_array().unwrap();
+        let tool_turns = messages
+            .iter()
+            .filter(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        part["type"].as_str() == Some("tool_use")
+                            || part["type"].as_str() == Some("tool_result")
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tool_turns.len(), 4);
+        for pair in tool_turns.chunks(2) {
+            assert_eq!(pair[0]["role"].as_str(), Some("assistant"));
+            assert_eq!(pair[1]["role"].as_str(), Some("user"));
+            assert_eq!(pair[0]["content"].as_array().unwrap().len(), 1);
+            assert_eq!(pair[1]["content"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                pair[0]["content"][0]["id"].as_str(),
+                pair[1]["content"][0]["tool_use_id"].as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_anthropic_messages_preserves_tool_result_with_inline_image_placeholder() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "MiniMax-M3",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "start"}]
+                        },
+                        {
+                            "type": "function_call",
+                            "call_id": "call_inline_image_result",
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"tail -n 60 note.md\"}"
+                        },
+                        {
+                            "type": "function_call_output",
+                            "call_id": "call_inline_image_result",
+                            "output": "before data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB after"
+                        },
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "continue"}]
+                        }
+                    ],
+                    "tools": [{
+                        "type": "function",
+                        "name": "exec_command",
+                        "description": "run command",
+                        "parameters": {"type": "object"}
+                    }]
+                }
+            }),
+            protocol: "anthropic-messages".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        let messages = result.payload["messages"].as_array().unwrap();
+        let tool_use_index = messages
+            .iter()
+            .position(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        part["type"].as_str() == Some("tool_use")
+                            && part["id"].as_str() == Some("call_inline_image_result")
+                    })
+                })
+            })
+            .expect("assistant tool_use message");
+        let result_message = messages
+            .get(tool_use_index + 1)
+            .expect("tool_result must immediately follow tool_use");
+        assert_eq!(result_message["role"].as_str(), Some("user"));
+        assert_eq!(
+            result_message["content"][0]["type"].as_str(),
+            Some("tool_result")
+        );
+        assert_eq!(
+            result_message["content"][0]["tool_use_id"].as_str(),
+            Some("call_inline_image_result")
+        );
+        assert!(result_message["content"][0]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("[Image omitted]"));
+    }
+
+    #[test]
     fn test_strip_private_fields() {
         let input = FormatBuildInput {
             format_envelope: serde_json::json!({

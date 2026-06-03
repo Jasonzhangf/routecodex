@@ -995,6 +995,30 @@ mod tests {
     }
 
     #[test]
+    fn extract_assistant_followup_message_uses_last_provider_sentinel_as_visible_boundary() {
+        let response = json!({
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "Jason, 抱歉。我重新启 sing-box。]<]minimax[>[Jason, 抱歉输出疯了。重启思路。]<]minimax[>[Jason, 我重发。"
+                }]
+            }]
+        });
+
+        let message = extract_assistant_followup_message(&response).expect("message");
+        assert_eq!(
+            message["reasoning_content"],
+            "Jason, 抱歉。我重新启 sing-box。Jason, 抱歉输出疯了。重启思路。"
+        );
+        assert_eq!(message["content"], "Jason, 我重发。");
+        let serialized = serde_json::to_string(&message).unwrap();
+        assert!(!serialized.contains("]<]minimax[>["));
+        assert!(!message["content"].as_str().unwrap().contains("输出疯了"));
+    }
+
+    #[test]
     fn resolves_followup_model_precedence() {
         assert_eq!(
             resolve_followup_model(

@@ -439,8 +439,92 @@ fn merge_adjacent_anthropic_messages(messages: Vec<Value>) -> Vec<Value> {
     merged
 }
 
+fn block_type(block: &Value) -> Option<String> {
+    block
+        .as_object()
+        .and_then(|row| read_trimmed_string(row.get("type")))
+        .map(|value| value.to_ascii_lowercase())
+}
+
+fn block_id(block: &Value, keys: &[&str]) -> Option<String> {
+    let row = block.as_object()?;
+    keys.iter().find_map(|key| read_trimmed_string(row.get(*key)))
+}
+
+fn split_parallel_tool_use_result_turns(messages: Vec<Value>) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    let mut index = 0;
+    while index < messages.len() {
+        let current = &messages[index];
+        let next = messages.get(index + 1);
+        let current_role = current
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("role")))
+            .unwrap_or_else(|| "user".to_string());
+        let next_role = next
+            .and_then(Value::as_object)
+            .and_then(|row| read_trimmed_string(row.get("role")))
+            .unwrap_or_else(|| "user".to_string());
+        let current_content = current
+            .as_object()
+            .and_then(|row| row.get("content"))
+            .and_then(Value::as_array);
+        let next_content = next
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("content"))
+            .and_then(Value::as_array);
+
+        if current_role.eq_ignore_ascii_case("assistant")
+            && next_role.eq_ignore_ascii_case("user")
+            && current_content.is_some_and(|blocks| {
+                blocks.len() > 1
+                    && blocks
+                        .iter()
+                        .all(|block| block_type(block).as_deref() == Some("tool_use"))
+            })
+            && next_content.is_some_and(|blocks| {
+                blocks.len() > 1
+                    && blocks
+                        .iter()
+                        .all(|block| block_type(block).as_deref() == Some("tool_result"))
+            })
+        {
+            let tool_uses = current_content.unwrap();
+            let tool_results = next_content.unwrap();
+            if tool_uses.len() == tool_results.len() {
+                let mut matched = true;
+                for (tool_use, tool_result) in tool_uses.iter().zip(tool_results.iter()) {
+                    let use_id = block_id(tool_use, &["id"]);
+                    let result_id = block_id(tool_result, &["tool_use_id", "tool_call_id", "call_id", "id"]);
+                    if use_id.is_none() || use_id != result_id {
+                        matched = false;
+                        break;
+                    }
+                }
+                if matched {
+                    for (tool_use, tool_result) in tool_uses.iter().zip(tool_results.iter()) {
+                        out.push(Value::Object(Map::from_iter([
+                            ("role".to_string(), Value::String("assistant".to_string())),
+                            ("content".to_string(), Value::Array(vec![tool_use.clone()])),
+                        ])));
+                        out.push(Value::Object(Map::from_iter([
+                            ("role".to_string(), Value::String("user".to_string())),
+                            ("content".to_string(), Value::Array(vec![tool_result.clone()])),
+                        ])));
+                    }
+                    index += 2;
+                    continue;
+                }
+            }
+        }
+        out.push(current.clone());
+        index += 1;
+    }
+    out
+}
+
 fn normalize_anthropic_tool_history(messages: Vec<Value>) -> Vec<Value> {
-    merge_adjacent_anthropic_messages(messages)
+    split_parallel_tool_use_result_turns(merge_adjacent_anthropic_messages(messages))
 }
 
 fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value {
@@ -1421,6 +1505,86 @@ mod tests {
             messages[3]["content"][0]["tool_use_id"].as_str(),
             Some("call_x")
         );
+    }
+
+    #[test]
+    fn build_anthropic_from_openai_chat_keeps_tool_result_before_user_image_turn() {
+        let payload = json!({
+            "model": "MiniMax-M3",
+            "messages": [
+                { "role": "user", "content": "start" },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_inline_image_history",
+                            "tool_call_id": "call_inline_image_history",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"tail -n 60 note.md\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_inline_image_history",
+                    "id": "call_inline_image_history",
+                    "content": "Total output lines: 141\n[data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB]"
+                },
+                {
+                    "role": "user",
+                    "content": [{ "type": "text", "text": "[Image omitted]" }]
+                },
+                { "role": "assistant", "content": "continue" }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": { "type": "object" }
+                    }
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_anthropic_from_openai_chat_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        let messages = output["messages"].as_array().expect("messages array");
+        let tool_use_index = messages
+            .iter()
+            .position(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        part["type"].as_str() == Some("tool_use")
+                            && part["id"].as_str() == Some("call_inline_image_history")
+                    })
+                })
+            })
+            .expect("tool_use exists");
+        let tool_result_message = messages
+            .get(tool_use_index + 1)
+            .expect("tool_result follows tool_use");
+        assert_eq!(tool_result_message["role"].as_str(), Some("user"));
+        assert_eq!(
+            tool_result_message["content"][0]["type"].as_str(),
+            Some("tool_result")
+        );
+        assert_eq!(
+            tool_result_message["content"][0]["tool_use_id"].as_str(),
+            Some("call_inline_image_history")
+        );
+        assert!(tool_result_message["content"][0]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("[Image omitted]"));
     }
 }
 

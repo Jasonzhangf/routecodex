@@ -478,7 +478,7 @@ pub(crate) fn split_provider_tool_sentinel_text(raw: &str) -> Option<(String, St
         Regex::new(r"\]<\][A-Za-z][A-Za-z0-9_-]*\[>\[")
             .expect("valid provider bracket sentinel regex")
     });
-    let matched = re.find(raw)?;
+    let matched = re.find_iter(raw).last()?;
     let before = strip_provider_tool_sentinel_residue(&raw[..matched.start()])
         .trim()
         .to_string();
