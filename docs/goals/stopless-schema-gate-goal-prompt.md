@@ -1,5 +1,5 @@
 /goal
-目标：为 RouteCodex stopless / stop_message followup 增加 Rust-only stop schema gate，形成允许停止、继续执行、预算耗尽 fail-fast 的简单闭环。
+目标：为 RouteCodex stopless / stop_message followup 增加 Rust-only stop schema gate，形成允许停止、继续执行、预算耗尽返回聚合 summary 的简单闭环。
 
 实现文档：
 docs/goals/stopless-schema-gate-plan.md
@@ -10,7 +10,8 @@ docs/goals/stopless-schema-gate-plan.md
 - 只解析当前 assistant stop 文本；禁止扫历史、改历史、清工具列表、provider 特例、TS 语义判断。
 - 只校验数字字段 stopreason/has_evidence；文本字段只判空。
 - budget 只统计连续“带 schema 的无效 stop”；缺 schema 不计数，任何非 stop 响应或工具调用/正常进展必须 reset budget。
-- no fallback：预算耗尽必须返回最终 summary 并保留三轮续杯询问、模型返回与最后原始 summary；闭环失败必须显式暴露。
+- no fallback：预算耗尽必须返回最终 summary 并保留最近三轮续杯询问、三轮模型返回与最后原始 summary；闭环失败必须显式暴露。
+- followup prompt 必须围绕目标、过程、证据三项追问：目标是否逐项完成，过程是否覆盖用户要求，证据是否可核验；缺任一项必须调用工具继续执行。
 
 验证：
 - stop-message-core Rust 单元测试。

@@ -11,9 +11,9 @@
 - `stopreason=0|1` 且 `reason` 非空：允许 stop，并把 reason 加到 stop summary 开头。
 - `stopreason=0|1` 但 `reason` 空：不允许 stop，followup 要求补 reason。
 - `stopreason!=0|1` 且 `next_step` 非空：不允许 stop，followup 要求执行 next_step。
-- 缺 schema：不允许 stop，followup 要求继续目标或按 schema 停止，但不计入预算。
+- 缺 schema：不允许 stop，followup 必须质询目标、过程、证据三项并要求继续目标或按 schema 停止，但不计入预算。
 - `stopreason` 缺失或非数字 / `reason` 缺失 / `next_step` 空 / `next_step` 已给出但仍停止：属于“带 schema 的无效 stop”，计入预算。
-- 预算耗尽时返回最终 stop summary，不循环、不 fallback；最终 summary 必须保留三轮续杯询问、模型返回与最后原始 summary。
+- 预算耗尽时返回最终 stop summary，不循环、不 fallback；最终 summary 必须聚合最近三轮续杯询问、三轮模型返回与最后原始 summary，不得只保留最后一次。
 - budget 是连续“带 schema 的无效 stop”预算：缺 schema 不计数；任何非 stop 响应或工具调用/正常进展必须 reset 连续 stop budget；不得把非连续 stop 计入同一轮预算。
 
 ## ASCII 生命周期图
@@ -66,7 +66,8 @@ activated
   |                                                       |
   |                                                       v
   |                                      [Build followup prompt]
-  |                                      ask: provide schema OR continue goal
+  |                                      ask: goal + process + evidence
+  |                                      then provide schema OR continue goal
   |                                                       |
   |                                                       v
   |                                      [Budget unchanged]
@@ -76,13 +77,6 @@ activated
   |                                                   v
   |                                      [normal Hub Pipeline reenter]
 
-  |      [ServertoolReq04FollowupBuilt]
-  |                  |
-  |                  v
-  |      [normal Hub Pipeline reenter]
-  |                  |
-  |                  v
-  |             Provider response
   |
   v
 [Validate Numeric Fields Only]
@@ -195,7 +189,7 @@ Out of scope：
   - 从当前 stop response 提取 assistant text。
   - 在 stop followup handler 中调用 schema gate。
   - `allow_stop` 时 prefix current summary；`followup` 时覆盖 followup_text。
-  - 预算耗尽输出显式错误。
+- 预算耗尽输出最终 stop summary，聚合三轮追问、三轮回复与最后原始 summary。
 - `docs/agent-routing/30-servertool-lifecycle-routing.md`
   - 更新 stopless schema gate 生命周期。
 - `.agents/skills/rcc-dev-skills/SKILL.md`
@@ -206,7 +200,7 @@ Out of scope：
 - 风险：误改历史导致缓存命中下降。规避：只处理当前 response 文本，禁止修改 request history。
 - 风险：模型输出非 JSON schema。规避：闭环提示补 schema 或继续目标。
 - 风险：自定义 stopMessageText 被覆盖。规避：schema gate 只影响 stop 判定/followup，不改自定义提示原文语义。
-- 风险：预算循环。规避：预算耗尽 fail-fast。
+- 风险：预算循环。规避：预算耗尽返回最终 summary 并清理状态，不再自动续杯。
 
 ## 测试计划
 
@@ -215,7 +209,7 @@ Out of scope：
 - continue_needed + next_step：followup 要求执行 next_step。
 - continue_needed + next_step 空：followup 要求继续目标或补 schema。
 - schema missing / stopreason missing / non-numeric：followup 要求 numeric stopreason/schema。
-- budget exhausted：fail-fast，不产生 followup。
+- budget exhausted：返回最终 summary，不产生 followup；summary 包含三轮追问、三轮回复与最后原始 summary。
 - non-stop response after prior stop：reset continuous stop budget，下一次 stop 从 used=0 开始。
 - `/goal active` / plan mode：不激活 gate，原 stop passthrough。
 

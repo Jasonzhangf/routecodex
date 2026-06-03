@@ -1829,4 +1829,4 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### Stopless schema gate 精华（2026-06-03）
 - stopless schema gate 只在 `finish_reason=stop` 且非 `/goal active`、非 plan mode 时激活；只解析当前 assistant stop 文本，不扫历史、不改历史、不改工具列表。
-- stop schema 只校验数字字段 `stopreason` / `has_evidence`；`reason` / `next_step` / `evidence` 只判空。`stopreason=0|1` 且 reason 非空才允许 stop 并 prefix summary；缺 schema 只 followup 不计预算；带 schema 的无效 stop 才计入连续预算，非 stop/工具进展必须 reset。
+- stop schema 只校验数字字段 `stopreason` / `has_evidence`；`reason` / `next_step` / `evidence` 只判空。followup prompt 必须质询目标/过程/证据三项；`stopreason=0|1` 且 reason 非空才允许 stop 并 prefix summary；缺 schema 只 followup 不计预算；带 schema 的无效 stop 才计入连续预算，非 stop/工具进展必须 reset；预算耗尽 summary 必须聚合最近三轮追问、三轮回复与最后原始 summary。

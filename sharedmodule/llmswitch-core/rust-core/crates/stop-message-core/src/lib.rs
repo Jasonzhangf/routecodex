@@ -8,9 +8,9 @@ use serde_json::Value;
 
 const LEGACY_DEFAULT_TEXT: &str = "继续执行";
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
-    "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。",
-    "你刚才再次停止。当前用户目标是否已经完成？如果未完成，必须调用可用工具继续操作、检查或验证；如果已完成，必须给出明确完成证据，不要只总结、道歉、复述状态或输出计划。",
-    "最后一次续杯预算。必须严格判断目标是否完成：已完成则给出可核验证据；未完成则必须调用工具继续执行到有证据为止。禁止空泛总结、道歉、计划或再次无证据停止。",
+    "停止前先核对三件事：1) 目标：当前用户目标是什么，是否逐项完成；2) 过程：你实际做过哪些操作/检查/验证，哪些还没做；3) 证据：完成或阻塞的证据在哪里。若任一项缺证据，禁止总结或停下，必须调用可用工具继续执行到有证据。只有目标已完成或确实阻塞时，才输出最终结果并给出证据。",
+    "你刚才再次停止。请重新核对：目标是否真的完成？过程是否覆盖用户要求的每一项？证据是否能被日志、文件、命令结果或测试结果验证？如果答案不是全部明确，禁止继续总结，必须调用工具补齐缺口；如果确实完成/阻塞，必须说明目标、过程、证据。",
+    "最后一次续杯预算。停止必须同时满足：目标逐项完成或明确阻塞；过程已说明关键操作与验证；证据可核验且对应目标。缺任何一项都不允许停，必须立即调用工具继续执行最小下一步。禁止空泛总结、道歉、计划或无证据停止。",
 ];
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -285,7 +285,7 @@ pub fn evaluate_stop_schema_gate(
             return schema_followup(
                 "stop_schema_missing",
                 used,
-                "你刚才试图停止，但没有提供 stop schema。现在必须二选一：1) 如果目标已完成或阻塞，立即给出 stop schema：stopreason(数字：0=finished,1=blocked)、reason(具体原因)、has_evidence(数字0/1)、evidence(证据)、next_step(后续动作或空)；2) 如果目标未完成，不准总结，必须立刻调用工具继续执行当前目标。",
+                "你刚才试图停止，但没有提供 stop schema。先核对目标、过程、证据：目标是否逐项完成？过程是否覆盖要求？证据是否可核验？现在必须二选一：1) 若完成或阻塞，立即给出 stop schema：stopreason(数字：0=finished,1=blocked)、reason(具体原因)、has_evidence(数字0/1)、evidence(可核验证据)、next_step(后续动作或空)；2) 若任一项没有证据，不准总结，必须立刻调用工具继续执行当前目标。",
                 None,
                 false,
             );
@@ -299,7 +299,7 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_stopreason_missing_or_non_numeric",
                 used,
                 max_repeats,
-                "stop schema 缺少数字 stopreason。不要猜、不要总结。现在必须补齐数字 stopreason：0=finished、1=blocked、2=continue_needed。若选择 0/1，必须给 reason 和 evidence；若选择 2，必须给 next_step 并立即执行。",
+                "stop schema 缺少数字 stopreason。不要猜、不要总结。先回答：目标是什么、过程做到哪一步、证据是什么。现在必须补齐数字 stopreason：0=finished、1=blocked、2=continue_needed。若选择 0/1，必须给 reason 和 evidence；若目标/过程/证据任一项不足，选择 2，给 next_step 并立即执行。",
                 parsed,
             );
         }
@@ -312,7 +312,7 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_reason_missing",
                 used,
                 max_repeats,
-                "你声明 finished/blocked，但没有给 reason。停止不成立。请直接回答：目标真的完成/阻塞了吗？如果是，立即给出具体 reason 和证据；如果不是，禁止再停，必须调用工具继续执行。",
+                "你声明 finished/blocked，但没有给 reason。停止不成立。请具体说明：完成/阻塞对应哪个用户目标？过程里做过哪些验证？证据是什么？如果不能逐项回答，禁止再停，必须调用工具继续执行。",
                 parsed,
             );
         }
@@ -337,7 +337,7 @@ pub fn evaluate_stop_schema_gate(
             used,
             max_repeats,
             &format!(
-                "你已经提供 next_step，所以本轮不允许停止、不允许改写计划、不允许总结。立即执行这个下一步：{}",
+                "你已经提供 next_step，说明目标/过程/证据仍有缺口。本轮不允许停止、不允许改写计划、不允许总结。立即调用工具执行这个下一步，并用结果补齐证据：{}",
                 next_step
             ),
             parsed,
@@ -348,7 +348,7 @@ pub fn evaluate_stop_schema_gate(
         "stop_schema_next_step_missing",
         used,
         max_repeats,
-        "你没有证明 finished/blocked，也没有给 next_step。停止不成立。请直接回答：目标是否完成？完成/阻塞就给 stopreason=0/1、reason、has_evidence、evidence；未完成就必须给 next_step 并调用工具执行。",
+        "你没有证明 finished/blocked，也没有给 next_step。停止不成立。请按目标、过程、证据三项检查：目标是否完成？过程是否验证？证据是否可核验？完成/阻塞就给 stopreason=0/1、reason、has_evidence、evidence；否则必须给 next_step 并调用工具执行。",
         parsed,
     )
 }
@@ -689,7 +689,9 @@ mod tests {
         assert_eq!(result.action, Action::Trigger);
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("当前用户目标"));
-        assert!(text.contains("完成证据"));
+        assert!(text.contains("目标"));
+        assert!(text.contains("过程"));
+        assert!(text.contains("证据"));
     }
 
     #[test]
@@ -705,7 +707,9 @@ mod tests {
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("当前用户目标"));
-        assert!(text.contains("完成证据"));
+        assert!(text.contains("目标"));
+        assert!(text.contains("过程"));
+        assert!(text.contains("证据"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
@@ -717,8 +721,12 @@ mod tests {
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("再次停止"));
-        assert!(text.contains("是否已经完成"));
-        assert!(text.contains("明确完成证据"));
+        assert!(text.contains("目标"));
+        assert!(text.contains("过程"));
+        assert!(text.contains("证据"));
+        assert!(text.contains("目标"));
+        assert!(text.contains("过程"));
+        assert!(text.contains("证据"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
@@ -730,8 +738,12 @@ mod tests {
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("最后一次续杯预算"));
-        assert!(text.contains("可核验证据"));
-        assert!(text.contains("再次无证据停止"));
+        assert!(text.contains("目标"));
+        assert!(text.contains("过程"));
+        assert!(text.contains("证据"));
+        assert!(text.contains("目标"));
+        assert!(text.contains("过程"));
+        assert!(text.contains("证据"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行，不要中断总结".to_string(),
@@ -1068,7 +1080,8 @@ mod tests {
         assert_eq!(decision.reason_code, "stop_schema_continue_next_step");
         let text = decision.followup_text.unwrap();
         assert!(text.contains("运行 targeted tests"));
-        assert!(text.contains("立即执行这个下一步"));
+        assert!(text.contains("立即调用工具执行这个下一步"));
+        assert!(text.contains("目标/过程/证据"));
         assert!(!text.contains("质询"));
         assert!(decision.count_budget);
     }

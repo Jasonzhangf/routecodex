@@ -246,7 +246,14 @@ describe("stop_message_flow reentry", () => {
         stopMessageClientInjectSessionScope: `session:${sessionId}`,
         capturedChatRequest: {
           model: "gpt-test",
-          messages: [{ role: "user", content: "start" }],
+          messages: [
+            { role: "user", content: "start" },
+            { role: "user", content: "继续完成当前用户目标。Stop schema 校验未通过：缺 schema。" },
+            { role: "assistant", content: "第一次停止：未完成，只总结。" },
+            { role: "user", content: "你已经提供 next_step，所以本轮不允许停止。立即执行这个下一步：继续测试 A" },
+            { role: "assistant", content: "第二次停止：仍未执行 A。" },
+            { role: "user", content: "按当前目标继续执行；需要操作/验证时调用工具；不要只总结/复述" },
+          ],
         },
       } as unknown as AdapterContext,
       requestId: "req_stopless_default_4",
@@ -257,7 +264,16 @@ describe("stop_message_flow reentry", () => {
     });
 
     expect(exhausted.executed).toBe(true);
-    expect(JSON.stringify(exhausted.chat)).toContain("Stopless 校验结果");
+    const finalText = JSON.stringify(exhausted.chat);
+    expect(finalText).toContain("Stopless 校验结果");
+    expect(finalText).toContain("第 1 次续杯询问");
+    expect(finalText).toContain("第一次停止：未完成，只总结。");
+    expect(finalText).toContain("第 2 次续杯询问");
+    expect(finalText).toContain("第二次停止：仍未执行 A。");
+    expect(finalText).toContain("第 3 次续杯询问");
+    expect(finalText).toContain('\\"stopreason\\":2');
+    expect(finalText).toContain('\\"next_step\\":\\"继续测试\\"');
+    expect(finalText).toContain("最后原始 summary");
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).toHaveBeenCalledTimes(3);
   });

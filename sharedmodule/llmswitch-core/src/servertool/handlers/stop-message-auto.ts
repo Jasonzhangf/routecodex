@@ -135,7 +135,8 @@ function buildStopSchemaBudgetExhaustedSummary(args: {
   capturedRequest?: JsonObject | null;
   currentSummary?: string;
 } = {}): string {
-  const rounds = extractStoplessRounds(args.capturedRequest);
+  const current = typeof args.currentSummary === 'string' ? args.currentSummary.trim() : '';
+  const rounds = extractStoplessRounds(args.capturedRequest, current);
   const lines = [
     'Stopless 校验结果：连续 stop 预算已耗尽。',
     `校验状态：${args.reasonCode ?? 'stop_schema_budget_exhausted'}`,
@@ -145,12 +146,11 @@ function buildStopSchemaBudgetExhaustedSummary(args: {
     lines.push(`\n第 ${index + 1} 次续杯询问：\n${round.question}`);
     lines.push(`第 ${index + 1} 次模型返回：\n${round.answer || '(空)'}`);
   });
-  const current = typeof args.currentSummary === 'string' ? args.currentSummary.trim() : '';
   lines.push(`\n最后原始 summary：\n${current || '(空)'}`);
   return lines.join('\n');
 }
 
-function extractStoplessRounds(capturedRequest: JsonObject | null | undefined): Array<{ question: string; answer: string }> {
+function extractStoplessRounds(capturedRequest: JsonObject | null | undefined, currentSummary?: string): Array<{ question: string; answer: string }> {
   const messages = capturedRequest && Array.isArray((capturedRequest as { messages?: unknown }).messages)
     ? (capturedRequest as { messages: unknown[] }).messages
     : [];
@@ -175,6 +175,11 @@ function extractStoplessRounds(capturedRequest: JsonObject | null | undefined): 
     }
     rounds.push({ question, answer });
   }
+  const last = rounds[rounds.length - 1];
+  const current = typeof currentSummary === 'string' ? currentSummary.trim() : '';
+  if (last && !last.answer && current) {
+    last.answer = current;
+  }
   return rounds.slice(-3);
 }
 
@@ -188,7 +193,9 @@ function isStoplessFollowupQuestion(text: string): boolean {
   return text.includes('Stop schema 校验未通过') ||
     text.includes('继续完成当前用户目标') ||
     text.includes('你刚才再次停止') ||
-    text.includes('最后一次续杯预算');
+    text.includes('最后一次续杯预算') ||
+    text.includes('你已经提供 next_step') ||
+    text.includes('按当前目标继续执行');
 }
 
 function buildStopSchemaFinalPlan(chatResponse: JsonObject): ServerToolHandlerPlan {
