@@ -806,6 +806,49 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
+  test('historical goal context without current goal turn does not skip stopless', async () => {
+    const decisionContexts: StopMessageDecisionContext[] = [];
+    __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {
+      decisionContexts.push(ctx);
+      return testStopMessageDecision(ctx as any) as StopMessageDecision;
+    });
+    try {
+      const result = await runServerToolOrchestration({
+        chat: buildStopChatResponse('chatcmpl-stop-historical-goal-not-current'),
+        adapterContext: {
+          requestId: 'req-stopmessage-historical-goal-not-current',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          sessionId: 'stopmessage-spec-session-historical-goal-not-current',
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [
+              { role: 'user', content: '<goal_context>\nContinue working toward the active thread goal.\n<objective>旧目标</objective>\n</goal_context>' },
+              { role: 'assistant', content: '历史回复' },
+              { role: 'user', content: '继续执行' }
+            ]
+          }
+        } as any,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-historical-goal-not-current',
+        providerProtocol: 'openai-chat',
+        reenterPipeline: jest.fn(async (input: any) => ({
+          body: {
+            id: `${input.requestId}:done`,
+            object: 'chat.completion',
+            choices: [{ index: 0, message: { role: 'assistant', content: 'continued' }, finish_reason: 'stop' }]
+          }
+        }))
+      });
+
+      expect(decisionContexts[0]?.goal_status).toBe('idle');
+      expect(result.executed).toBe(true);
+      expect(result.flowId).toBe('stop_message_flow');
+    } finally {
+      __setDecideOverrideForTests(testStopMessageDecision as any);
+    }
+  });
+
   test('goal active repeated stop fails fast instead of passthrough looping', async () => {
     const assistantText = '立刻跑全测试 + 远端验证。';
     await expect(

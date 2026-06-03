@@ -4,7 +4,8 @@ use serde_json::Value;
 
 use crate::resp_process_stage1_tool_governance_blocks::canonical_chat_completion::coerce_to_canonical_chat_completion;
 use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::{
-    sanitize_payload_tool_markup_fields, strip_orphan_function_calls_tag,
+    sanitize_payload_tool_markup_fields, sanitize_provider_sentinel_text_values,
+    strip_orphan_function_calls_tag,
 };
 use crate::resp_process_stage1_tool_governance_blocks::message_content::normalize_thinking_only_reasoning_content;
 use crate::resp_process_stage1_tool_governance_blocks::napi_utilities::{
@@ -102,10 +103,12 @@ pub(crate) fn prepare_payload_for_governance_with_requested_tool_names(
     let thinking_reasoning_normalized =
         normalize_thinking_only_reasoning_content(&mut prepared_payload);
     let sanitized_tool_markup = sanitize_payload_tool_markup_fields(&mut prepared_payload);
+    let provider_sentinel_sanitized = sanitize_provider_sentinel_text_values(&mut prepared_payload);
     let before_strip = prepared_payload.clone();
     strip_orphan_function_calls_tag(&mut prepared_payload);
     let shape_sanitized = harvested_tool_calls > 0
         || converted
+        || provider_sentinel_sanitized > 0
         || thinking_reasoning_normalized > 0
         || sanitized_tool_markup > 0
         || prepared_payload != before_strip;
@@ -132,6 +135,7 @@ fn govern_prepared_payload(
     request_id: &str,
     preparation_summary: Option<&ToolGovernancePreparationSummary>,
 ) -> Result<ToolGovernanceOutput, String> {
+    let provider_sentinel_sanitized = sanitize_provider_sentinel_text_values(&mut payload);
     let tool_call_ids_assigned = ensure_payload_tool_call_ids(&mut payload, request_id)?;
 
     let apply_patch_repaired = normalize_apply_patch_tool_calls(&mut payload);
@@ -151,6 +155,7 @@ fn govern_prepared_payload(
         .unwrap_or(false);
     let applied = prepared_applied
         || tool_call_ids_assigned > 0
+        || provider_sentinel_sanitized > 0
         || tool_calls_normalized > 0
         || apply_patch_repaired > 0
         || disallowed_tool_calls_dropped > 0;

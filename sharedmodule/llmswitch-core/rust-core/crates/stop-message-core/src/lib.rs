@@ -396,13 +396,7 @@ pub fn evaluate_goal_active_stop_loop(
         );
     };
 
-    let goal_context_count = items
-        .iter()
-        .filter(|item| {
-            item_role(item) == Some("user")
-                && item_text(item).is_some_and(|text| is_active_goal_text(&text))
-        })
-        .count() as u32;
+    let goal_context_count = current_goal_context_count(items);
     if goal_context_count == 0 {
         return goal_active_loop_decision(
             false,
@@ -445,6 +439,27 @@ pub fn evaluate_goal_active_stop_loop(
             "goal_active_stop_not_repeated"
         },
     )
+}
+
+fn current_goal_context_count(items: &[Value]) -> u32 {
+    let mut count = 0u32;
+    for item in items.iter().rev() {
+        if item_has_tool_signal(item) {
+            break;
+        }
+        if item_role(item) != Some("user") {
+            continue;
+        }
+        let Some(text) = item_text(item) else {
+            continue;
+        };
+        if is_active_goal_text(&text) {
+            count = count.saturating_add(1);
+            continue;
+        }
+        break;
+    }
+    count
 }
 
 fn goal_active_loop_decision(
@@ -1401,6 +1416,30 @@ mod tests {
         let decision = evaluate_goal_active_stop_loop(&input);
 
         assert!(!decision.loop_detected);
-        assert_eq!(decision.repeat_count, 2);
+        assert_eq!(decision.repeat_count, 0);
+        assert_eq!(decision.goal_context_count, 0);
+        assert_eq!(decision.reason_code, "goal_active_stop_no_goal_context");
+    }
+
+    #[test]
+    fn historical_goal_context_does_not_mark_current_request_goal_active() {
+        let input = GoalActiveStopLoopInput {
+            assistant_text: "当前普通停止。".to_string(),
+            threshold: Some(3),
+            captured_request: serde_json::json!({
+                "input": [
+                    { "role": "user", "content": "<goal_context>\nContinue working toward the active thread goal.\n<objective>旧目标</objective>\n</goal_context>" },
+                    { "role": "assistant", "content": "历史回复" },
+                    { "role": "user", "content": "继续执行" },
+                    { "role": "assistant", "content": "当前普通停止。" }
+                ]
+            }),
+        };
+
+        let decision = evaluate_goal_active_stop_loop(&input);
+
+        assert!(!decision.loop_detected);
+        assert_eq!(decision.goal_context_count, 0);
+        assert_eq!(decision.reason_code, "goal_active_stop_no_goal_context");
     }
 }

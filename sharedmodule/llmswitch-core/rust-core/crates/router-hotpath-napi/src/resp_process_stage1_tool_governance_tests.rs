@@ -3791,6 +3791,31 @@ fn test_govern_response_strips_minimax_sentinel_from_native_tool_arguments() {
 }
 
 #[test]
+fn test_govern_response_strips_minimax_sentinel_from_raw_response_text() {
+    let input = ToolGovernanceInput {
+        payload: json!({
+            "body": {
+                "data": {
+                    "content": [{
+                        "type": "text",
+                        "text": "修 test 文件的语法错：]<]minimax[>[\n</title>"
+                    }],
+                    "stop_reason": "end_turn"
+                }
+            }
+        }),
+        client_protocol: "openai-responses".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_minimax_sentinel_raw_text".to_string(),
+    };
+
+    let result = govern_response(input).unwrap();
+    let serialized = serde_json::to_string(&result.governed_payload).unwrap();
+    assert!(!serialized.contains("]<]minimax[>["));
+    assert!(serialized.contains("修 test 文件的语法错"));
+}
+
+#[test]
 fn test_govern_response_cleans_explicit_wrapper_when_tool_calls_are_unharvested() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({

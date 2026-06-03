@@ -1134,6 +1134,29 @@ pub(crate) fn sanitize_payload_tool_markup_fields(payload: &mut Value) -> i64 {
     changed
 }
 
+pub(crate) fn sanitize_provider_sentinel_text_values(payload: &mut Value) -> i64 {
+    match payload {
+        Value::String(text) => {
+            let cleaned = strip_provider_tool_sentinel_residue(text.as_str());
+            if cleaned == *text {
+                0
+            } else {
+                *text = cleaned;
+                1
+            }
+        }
+        Value::Array(items) => items
+            .iter_mut()
+            .map(sanitize_provider_sentinel_text_values)
+            .sum(),
+        Value::Object(row) => row
+            .values_mut()
+            .map(sanitize_provider_sentinel_text_values)
+            .sum(),
+        _ => 0,
+    }
+}
+
 pub(crate) fn strip_orphan_function_calls_tag(payload: &mut Value) {
     if let Some(choices) = payload.get_mut("choices").and_then(|v| v.as_array_mut()) {
         for choice in choices {
