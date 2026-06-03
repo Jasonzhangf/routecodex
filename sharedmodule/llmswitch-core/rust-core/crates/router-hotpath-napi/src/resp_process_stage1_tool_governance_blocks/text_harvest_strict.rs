@@ -121,7 +121,11 @@ pub(crate) fn extract_tool_calls_from_text_candidate(
 
     let mut recovered: Vec<Value> = Vec::new();
 
-    recovered = extract_tool_call_entries_from_malformed_tool_calls_text(text, fallback_start_id);
+    recovered = extract_strict_wrapper_tool_calls_from_rcc(text, fallback_start_id);
+
+    if recovered.is_empty() {
+        recovered = extract_tool_call_entries_from_malformed_tool_calls_text(text, fallback_start_id);
+    }
 
     if recovered.is_empty() {
         if let Some(parsed) = maybe_parse_tool_call_text_value(text) {

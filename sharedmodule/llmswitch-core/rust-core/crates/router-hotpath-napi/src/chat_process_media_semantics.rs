@@ -348,6 +348,50 @@ fn replacement_text_part(text: &str) -> Value {
     Value::Object(replacement)
 }
 
+fn entry_type(entry: &Value) -> String {
+    entry
+        .as_object()
+        .and_then(|obj| obj.get("type"))
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn strip_function_call_output_media_entry(entry: &mut Value, placeholder: &str) -> bool {
+    if entry_type(entry) != "function_call_output" {
+        return false;
+    }
+    let Some(row) = entry.as_object_mut() else {
+        return false;
+    };
+    let Some(output) = row.get("output").cloned() else {
+        return false;
+    };
+    match output {
+        Value::String(text) => {
+            if !string_contains_inline_media(&text) {
+                return false;
+            }
+            if let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(&text) {
+                let text = tool_result_media_text_from_parts(&parts, placeholder)
+                    .unwrap_or_else(|| placeholder.to_string());
+                row.insert("output".to_string(), Value::String(text));
+                return true;
+            }
+            row.insert("output".to_string(), Value::String(placeholder.to_string()));
+            true
+        }
+        Value::Array(parts) => {
+            let Some(text) = tool_result_media_text_from_parts(&parts, placeholder) else {
+                return false;
+            };
+            row.insert("output".to_string(), Value::String(text));
+            true
+        }
+        _ => false,
+    }
+}
+
 pub fn strip_historical_visual_tool_uses_without_results(
     messages: Vec<Value>,
     placeholder_text: String,
@@ -543,6 +587,10 @@ pub fn strip_responses_context_input_historical_media(
     };
 
     for (idx, entry) in next_entries.iter_mut().enumerate() {
+        if strip_function_call_output_media_entry(entry, &placeholder) {
+            changed = true;
+            continue;
+        }
         let role = read_message_entry_role(entry);
         if role != "user" {
             continue;
@@ -609,6 +657,10 @@ pub fn strip_responses_stored_context_input_media(
     };
 
     for entry in next_entries.iter_mut() {
+        if strip_function_call_output_media_entry(entry, &placeholder) {
+            changed = true;
+            continue;
+        }
         if read_message_entry_role(entry) != "user" || !message_has_media_parts(entry) {
             continue;
         }
@@ -913,6 +965,70 @@ mod tests {
     }
 
     #[test]
+    fn preserves_responses_function_call_output_role_when_replacing_media_with_placeholder() {
+        let output = strip_responses_context_input_historical_media(
+            vec![
+                json!({
+                    "type": "function_call",
+                    "call_id": "call_uLjTinTpyajt4dRN9pvLwErd",
+                    "name": "exec_command",
+                    "arguments": "{}"
+                }),
+                json!({
+                    "type": "function_call_output",
+                    "call_id": "call_uLjTinTpyajt4dRN9pvLwErd",
+                    "output": "before data:image/png;base64,AAAA after"
+                }),
+                json!({
+                    "role": "user",
+                    "content": [{"type":"input_text","text":"[Image omitted]"}]
+                }),
+            ],
+            "[Image omitted]".to_string(),
+        );
+
+        assert!(output.changed);
+        assert_eq!(output.messages[1]["type"].as_str(), Some("function_call_output"));
+        assert_eq!(
+            output.messages[1]["call_id"].as_str(),
+            Some("call_uLjTinTpyajt4dRN9pvLwErd")
+        );
+        assert_eq!(
+            output.messages[1]["output"].as_str(),
+            Some("[Image omitted]")
+        );
+    }
+
+    #[test]
+    fn preserves_stored_responses_function_call_output_role_when_replacing_media() {
+        let output = strip_responses_stored_context_input_media(
+            vec![
+                json!({
+                    "type": "function_call_output",
+                    "call_id": "call_uLjTinTpyajt4dRN9pvLwErd",
+                    "output": "before data:image/png;base64,AAAA after"
+                }),
+                json!({
+                    "role": "user",
+                    "content": [{"type":"input_text","text":"continue"}]
+                }),
+            ],
+            "[Image omitted]".to_string(),
+        );
+
+        assert!(output.changed);
+        assert_eq!(output.messages[0]["type"].as_str(), Some("function_call_output"));
+        assert_eq!(
+            output.messages[0]["call_id"].as_str(),
+            Some("call_uLjTinTpyajt4dRN9pvLwErd")
+        );
+        assert_eq!(
+            output.messages[0]["output"].as_str(),
+            Some("[Image omitted]")
+        );
+    }
+
+    #[test]
     fn strips_visual_tool_use_when_result_was_materialized_as_image_omitted_text() {
         let output = strip_historical_visual_tool_uses_without_results(
             vec![
@@ -944,6 +1060,33 @@ mod tests {
         assert_eq!(
             output.messages[2]["content"][0]["type"].as_str(),
             Some("tool_use")
+        );
+    }
+
+    #[test]
+    fn strips_visual_tool_use_instead_of_materializing_image_placeholder_as_tool_result() {
+        let output = strip_historical_visual_tool_uses_without_results(
+            vec![
+                json!({
+                    "role": "assistant",
+                    "content": [{"type":"tool_use","id":"call_r3YBKvmg9rNgdbDXJhZVnwZN","name":"view_image","input":{"path":"/tmp/screenshot.png"}}]
+                }),
+                json!({
+                    "role": "user",
+                    "content": [{"type":"text","text":"[Image omitted]"}]
+                }),
+            ],
+            "[Image omitted]".to_string(),
+        );
+
+        assert!(output.changed);
+        assert_eq!(
+            output.messages[0]["content"],
+            json!([{"type":"text","text":"[Image omitted]"}])
+        );
+        assert_eq!(
+            output.messages[1]["content"],
+            json!([{"type":"text","text":"[Image omitted]"}])
         );
     }
 

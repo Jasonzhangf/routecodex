@@ -3375,7 +3375,7 @@ fn test_harvest_text_tool_calls_recovers_escaped_exec_command_transcript_with_tr
             "finish_reason": "stop"
         }]
     });
-    assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
+    assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
     let call = &payload["choices"][0]["message"]["tool_calls"][0];
     assert_eq!(call["function"]["name"], "exec_command");
     let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
@@ -3402,7 +3402,7 @@ fn test_harvest_text_tool_calls_recovers_trailing_exec_command_json_after_prose(
             "finish_reason": "stop"
         }]
     });
-    assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
+    assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
     let call = &payload["choices"][0]["message"]["tool_calls"][0];
     assert_eq!(call["function"]["name"], "exec_command");
     let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
@@ -3425,7 +3425,7 @@ fn test_harvest_text_tool_calls_recovers_exec_command_inside_chunked_transcript_
             "finish_reason": "stop"
         }]
     });
-    assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
+    assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
     let call = &payload["choices"][0]["message"]["tool_calls"][0];
     assert_eq!(call["function"]["name"], "exec_command");
     let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
@@ -3448,7 +3448,7 @@ fn test_harvest_text_tool_calls_strips_right_gutter_noise_before_exec_command_re
             "finish_reason": "stop"
         }]
     });
-    assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
+    assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
     let call = &payload["choices"][0]["message"]["tool_calls"][0];
     assert_eq!(call["function"]["name"], "exec_command");
     let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
@@ -3833,7 +3833,7 @@ fn test_sanitize_textual_marker_field_preserves_malformed_rcc_wrapper_multiline_
 }
 
 #[test]
-fn test_govern_response_fails_fast_for_malformed_rcc_wrapper_when_name_missing() {
+fn test_govern_response_preserves_malformed_rcc_wrapper_when_name_missing() {
     let raw = "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON";
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
@@ -3858,15 +3858,12 @@ fn test_govern_response_fails_fast_for_malformed_rcc_wrapper_when_name_missing()
         .as_array()
         .cloned()
         .unwrap_or_default();
-    assert_eq!(tool_calls.len(), 1);
-    assert_eq!(tool_calls[0]["function"]["name"], "exec_command");
-    let args: Value = serde_json::from_str(
-        tool_calls[0]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}"),
-    )
-    .unwrap_or(Value::Null);
-    assert_eq!(args["cmd"], "pwd");
+    assert!(tool_calls.is_empty());
+    assert_eq!(output.governed_payload["choices"][0]["finish_reason"], "stop");
+    assert_eq!(
+        output.governed_payload["choices"][0]["message"]["content"],
+        raw
+    );
 }
 
 #[test]
@@ -3962,8 +3959,7 @@ fn test_govern_response_removes_reasoning_content_after_inline_exec_command_harv
 }
 
 #[test]
-fn test_govern_response_fails_fast_for_malformed_rcc_wrapper_multiline_whitespace_when_name_missing(
-) {
+fn test_govern_response_preserves_malformed_rcc_wrapper_multiline_whitespace_when_name_missing() {
     let raw = "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"bash -lc 'cat << \\\"EOF\\\"\\n  line1\\n    line2\\nEOF\\n'\"}}]}\nRCC_TOOL_CALLS_JSON";
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
@@ -3989,17 +3985,11 @@ fn test_govern_response_fails_fast_for_malformed_rcc_wrapper_multiline_whitespac
         .as_array()
         .cloned()
         .unwrap_or_default();
-    assert_eq!(tool_calls.len(), 1);
-    assert_eq!(tool_calls[0]["function"]["name"], "exec_command");
-    let args: Value = serde_json::from_str(
-        tool_calls[0]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}"),
-    )
-    .unwrap_or(Value::Null);
+    assert!(tool_calls.is_empty());
+    assert_eq!(output.governed_payload["choices"][0]["finish_reason"], "stop");
     assert_eq!(
-        args["cmd"],
-        "bash -lc 'cat << \"EOF\"\\n  line1\\n    line2\\nEOF\\n'"
+        output.governed_payload["choices"][0]["message"]["content"],
+        raw
     );
 }
 
@@ -4085,17 +4075,17 @@ fn test_govern_response_sanitizes_marker_text_when_structured_tool_calls_already
         "tool_calls"
     );
     assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
-    assert_eq!(message["content"], "");
+    assert!(message["content"].is_null());
 }
 
 #[test]
-fn test_rcc_heredoc_tail_is_stripped_even_when_nonstandard_tool_call_is_recovered() {
+fn test_rcc_heredoc_tail_is_stripped_when_exec_command_runs_bd_cli() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
             "choices": [{
                 "message": {
                     "tool_calls": [],
-                    "content": "开始分析。\n<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"name\":\"多轨实现\",\"description\":\"为 Finger 项目增加 multi-track 支持\"},\"name\":\"bd\"}]}\nRCC_TOOL_CALLS_JSON\n› Implement {feature}\nMacstudio.0:zsh*"
+                    "content": "开始分析。\n<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"bd --no-db create '多轨实现' --description '为 Finger 项目增加 multi-track 支持'\"},\"name\":\"exec_command\"}]}\nRCC_TOOL_CALLS_JSON\n› Implement {feature}\nMacstudio.0:zsh*"
                 },
                 "finish_reason": "stop"
             }]
@@ -4113,7 +4103,17 @@ fn test_rcc_heredoc_tail_is_stripped_even_when_nonstandard_tool_call_is_recovere
         result.governed_payload["choices"][0]["finish_reason"],
         "tool_calls"
     );
-    assert_eq!(message["tool_calls"][0]["function"]["name"], "bd");
+    assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
+    let args: Value = serde_json::from_str(
+        message["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(
+        args["cmd"],
+        "bd --no-db create '多轨实现' --description '为 Finger 项目增加 multi-track 支持'"
+    );
     let content = message["content"].as_str().unwrap_or("");
     assert_eq!(content, "开始分析。");
     assert!(!content.contains("RCC_TOOL_CALLS_JSON"));
