@@ -32,12 +32,14 @@ type ProviderSample = {
   providerType?: string;
   model?: string;
   startTime: number;
+  entryPort?: number;
 };
 
 export interface ProviderStatsBucket {
   providerKey: string;
   providerType?: string;
   model?: string;
+  entryPort?: number;
   requestCount: number;
   errorCount: number;
   totalLatencyMs: number;
@@ -487,7 +489,7 @@ export class StatsManager {
     this.pruneInflight(nowMs);
   }
 
-  bindProvider(requestId: string, meta: { providerKey?: string; providerType?: string; model?: string }): void {
+  bindProvider(requestId: string, meta: { providerKey?: string; providerType?: string; model?: string; entryPort?: number }): void {
     if (!this.enabled || !requestId) {
       return;
     }
@@ -498,6 +500,7 @@ export class StatsManager {
       if (meta.providerKey) {sample.providerKey = meta.providerKey;}
       if (meta.providerType) {sample.providerType = meta.providerType;}
       if (meta.model) {sample.model = meta.model;}
+      if (typeof meta.entryPort === 'number') {sample.entryPort = meta.entryPort;}
       return;
     }
     this.inflight.set(requestId, { startTime: Date.now(), ...meta });
@@ -514,7 +517,7 @@ export class StatsManager {
     if (!sample?.providerKey) {
       return;
     }
-    const key = composeBucketKey(sample.providerKey, sample.model);
+    const key = composeBucketKey(sample.providerKey, sample.model, sample.entryPort);
     let bucket = this.buckets.get(key);
     if (!bucket) {
       const now = Date.now();
@@ -522,6 +525,7 @@ export class StatsManager {
         providerKey: sample.providerKey,
         providerType: sample.providerType,
         model: sample.model,
+        entryPort: sample.entryPort,
         requestCount: 0,
         errorCount: 0,
         totalLatencyMs: 0,

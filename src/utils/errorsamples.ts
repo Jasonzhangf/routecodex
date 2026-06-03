@@ -520,12 +520,22 @@ export async function writeErrorsampleJson(options: {
   group: string;
   kind: string;
   payload: unknown;
+  scopeId?: string;
+  entryPort?: number;
+  serverId?: string;
 }): Promise<string | null> {
   if (shouldSkipErrorsamplePayload(options.payload)) {
     return null;
   }
   const root = resolveErrorsamplesRoot();
-  const dir = path.join(root, safeName(options.group));
+  const safeScope = options.scopeId ? safeName(options.scopeId) : '';
+  const portSeg = typeof options.entryPort === 'number' && Number.isFinite(options.entryPort) && options.entryPort > 0
+    ? `port-${Math.floor(options.entryPort)}`
+    : '';
+  const dirSegments = [root, safeName(options.group)];
+  if (safeScope) dirSegments.push(safeScope);
+  if (portSeg) dirSegments.push(portSeg);
+  const dir = path.join(...dirSegments);
   const budget = resolveGroupBudget(options.group, options.kind);
   const file = path.join(
     dir,

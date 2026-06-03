@@ -463,11 +463,19 @@ async function writeUniqueFile(dir: string, baseName: string, contents: string):
   await fsp.writeFile(path.join(dir, fallback), contents, 'utf-8');
 }
 
-function resolveSnapshotDir(folder: string, groupRequestId: string, providerToken?: string): string {
+function resolveSnapshotDir(folder: string, groupRequestId: string, providerToken?: string, entryPort?: number): string {
+  const base = resolveSnapshotBase();
+  const portSegment = typeof entryPort === 'number' && Number.isFinite(entryPort) && entryPort > 0
+    ? path.join('ports', String(Math.floor(entryPort)))
+    : '';
   if (providerToken) {
-    return path.join(resolveSnapshotBase(), folder, providerToken, groupRequestId);
+    return portSegment
+      ? path.join(base, folder, portSegment, providerToken, groupRequestId)
+      : path.join(base, folder, providerToken, groupRequestId);
   }
-  return path.join(resolveSnapshotBase(), folder, groupRequestId);
+  return portSegment
+    ? path.join(base, folder, portSegment, groupRequestId)
+    : path.join(base, folder, groupRequestId);
 }
 
 async function writeCanonicalSnapshotFileIfMissing(dir: string, baseName: string, contents: string): Promise<void> {
@@ -485,7 +493,7 @@ async function mirrorSnapshotToLocalDisk(input: ProviderSnapshotPersistInput): P
   if (!canWriteSnapshotToLocalDisk(input.requestId, input.groupRequestId)) {
     return;
   }
-  const dir = resolveSnapshotDir(input.folder, input.groupRequestId, input.providerToken || undefined);
+  const dir = resolveSnapshotDir(input.folder, input.groupRequestId, input.providerToken || undefined, input.entryPort);
   await ensureDir(dir);
   await ensureSnapshotRuntimeMarker(dir, {
     endpoint: input.endpoint,
@@ -607,6 +615,7 @@ async function writeProviderErrorsample(snapshot: ProviderSnapshotPersistInput):
   await writeErrorsampleJson({
     group: 'provider-error',
     kind: snapshot.stage,
+    ...(typeof snapshot.entryPort === 'number' ? { entryPort: snapshot.entryPort } : {}),
     payload: {
       kind: 'provider_runtime_error',
       timestamp: new Date().toISOString(),

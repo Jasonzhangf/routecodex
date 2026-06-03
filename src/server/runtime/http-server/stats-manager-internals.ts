@@ -75,8 +75,11 @@ type HistoricalToolProviderBucket = {
   byToolName: Map<string, ToolStatsBucketLike>;
 };
 
-export function composeBucketKey(providerKey: string, model?: string): string {
-  return `${providerKey}|${model ?? '-'}`;
+export function composeBucketKey(providerKey: string, model?: string, entryPort?: number): string {
+  const portSegment = typeof entryPort === 'number' && Number.isFinite(entryPort) && entryPort > 0
+    ? `|port-${Math.floor(entryPort)}`
+    : '';
+  return `${providerKey}|${model ?? '-'}${portSegment}`;
 }
 
 export function computeProviderTotals(buckets: Map<string, ProviderStatsBucketLike>): ProviderStatsViewLike[] {

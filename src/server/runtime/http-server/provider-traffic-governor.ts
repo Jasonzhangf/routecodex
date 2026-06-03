@@ -45,6 +45,7 @@ export type ProviderTrafficPermit = {
   requestId: string;
   leaseId: string;
   stateKey: string;
+  scopeKey?: string;
   maxInFlight: number;
 };
 
@@ -90,10 +91,11 @@ export interface ProviderTrafficGovernorLike {
     requestId: string;
     runtime: ProviderRuntimeProfile;
     softWaitTimeoutMs?: number;
+    scopeKey?: string;
   }): Promise<ProviderTrafficAcquireResult>;
   release(permit: ProviderTrafficPermit): Promise<{ released: boolean; activeInFlight: number }>;
-  isProviderAtConcurrencyCapacity(runtimeKey: string, runtime: ProviderRuntimeProfile): Promise<boolean>;
-  isProviderAtConcurrencyCapacitySync(runtimeKey: string, runtime: ProviderRuntimeProfile): boolean;
+  isProviderAtConcurrencyCapacity(runtimeKey: string, runtime: ProviderRuntimeProfile, scopeKey?: string): Promise<boolean>;
+  isProviderAtConcurrencyCapacitySync(runtimeKey: string, runtime: ProviderRuntimeProfile, scopeKey?: string): boolean;
   setConcurrencyBusyCallback?(cb: ((scopeKey: string, busy: boolean) => void) | null): void;
   observeOutcome?(event: ProviderTrafficOutcomeEvent): Promise<void>;
 }
@@ -331,6 +333,15 @@ function createAdaptivePersistedConfig(): AdaptivePersistedConfig {
 
 function toStateKey(runtimeKey: string): string {
   return encodeURIComponent(runtimeKey.trim());
+}
+
+function composeScopedRuntimeKey(runtimeKey: string, scopeKey?: string): string {
+  const normalizedRuntimeKey = runtimeKey.trim();
+  const normalizedScopeKey = typeof scopeKey === 'string' ? scopeKey.trim() : '';
+  if (!normalizedScopeKey) {
+    return normalizedRuntimeKey;
+  }
+  return `${normalizedScopeKey}::${normalizedRuntimeKey}`;
 }
 
 function isProcessAlive(pid: number | undefined): boolean {
@@ -1125,8 +1136,10 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     requestId: string;
     runtime: ProviderRuntimeProfile;
     softWaitTimeoutMs?: number;
+    scopeKey?: string;
   }): Promise<ProviderTrafficAcquireResult> {
     const runtimeKey = options.runtimeKey.trim();
+    const scopeKey = typeof options.scopeKey === 'string' ? options.scopeKey.trim() : '';
     if (!runtimeKey) {
       throw new Error('[provider-traffic] acquire requires runtimeKey');
     }
@@ -1159,7 +1172,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     const startedAt = Date.now();
     const deadlineAt = startedAt + waitTimeoutMs;
     const softWaitTimeoutMs = clampPositiveInt(options.softWaitTimeoutMs) ?? 0;
-    const stateKey = toStateKey(runtimeKey);
+    const stateKey = toStateKey(composeScopedRuntimeKey(runtimeKey, scopeKey));
     const stateFile = this.getStateFile(stateKey);
     const lockFile = this.getLockFile(stateKey);
     let waitAttempt = 0;
@@ -1212,6 +1225,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
                 requestId,
                 leaseId,
                 stateKey,
+                ...(scopeKey ? { scopeKey } : {}),
                 maxInFlight: policy.concurrency.maxInFlight
               },
               policy,
@@ -1312,7 +1326,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     if (!runtimeKey) {
       throw new Error('[provider-traffic] release requires runtimeKey');
     }
-    const stateKey = permit.stateKey || toStateKey(runtimeKey);
+    const stateKey = permit.stateKey || toStateKey(composeScopedRuntimeKey(runtimeKey, permit.scopeKey));
     const stateFile = this.getStateFile(stateKey);
     const lockFile = this.getLockFile(stateKey);
     const lock = await this.acquireFileLock(lockFile, Date.now() + DEFAULT_CONCURRENCY_TIMEOUT_MS);
@@ -1353,19 +1367,21 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
 
   async isProviderAtConcurrencyCapacity(
     runtimeKey: string,
-    runtime: ProviderRuntimeProfile
+    runtime: ProviderRuntimeProfile,
+    scopeKey?: string
   ): Promise<boolean> {
-    return this.isProviderAtConcurrencyCapacitySync(runtimeKey, runtime);
+    return this.isProviderAtConcurrencyCapacitySync(runtimeKey, runtime, scopeKey);
   }
 
   isProviderAtConcurrencyCapacitySync(
     runtimeKey: string,
-    runtime: ProviderRuntimeProfile
+    runtime: ProviderRuntimeProfile,
+    scopeKey?: string
   ): boolean {
     const normalizedKey = runtimeKey.trim();
     if (!normalizedKey) return false;
     const policy = resolveProviderTrafficPolicy(runtime, undefined);
-    const stateKey = toStateKey(normalizedKey);
+    const stateKey = toStateKey(composeScopedRuntimeKey(normalizedKey, scopeKey));
     const stateFile = this.getStateFile(stateKey);
     try {
       const raw = fssync.readFileSync(stateFile, 'utf8');
@@ -1440,6 +1456,7 @@ export function createNoopProviderTrafficGovernor(): ProviderTrafficGovernorLike
   return {
     async acquire(options) {
       const policy = resolveProviderTrafficPolicy(options.runtime, options.providerKey);
+      const scopeKey = typeof options.scopeKey === 'string' ? options.scopeKey.trim() : '';
       return {
         permit: {
           runtimeKey: options.runtimeKey,
@@ -1447,6 +1464,7 @@ export function createNoopProviderTrafficGovernor(): ProviderTrafficGovernorLike
           requestId: options.requestId,
           leaseId: `noop-${randomUUID()}`,
           stateKey: 'noop',
+          ...(scopeKey ? { scopeKey } : {}),
           maxInFlight: policy.concurrency.maxInFlight
         },
         policy,
