@@ -29,6 +29,10 @@ export function resolveFollowupFlowDecision(flowId: unknown): FollowupFlowDecisi
     clearStateOnFollowupFailure: plan?.clearStateOnFollowupFailure === true,
     seedLoopPayload: plan?.seedLoopPayload === true,
     retryEmptyFollowupOnce: plan?.retryEmptyFollowupOnce === true,
+    stopMessageFollowupPolicy:
+      plan?.stopMessageFollowupPolicy === 'preserve_eligibility'
+        ? 'preserve_eligibility'
+        : 'disable',
     ...(plan?.clientInjectSource ? { clientInjectSource: plan.clientInjectSource } : {}),
     ...(plan?.transparentReplayRequestSuffix
       ? { transparentReplayRequestSuffix: plan.transparentReplayRequestSuffix }
@@ -36,6 +40,10 @@ export function resolveFollowupFlowDecision(flowId: unknown): FollowupFlowDecisi
     ignoreRequiresActionFollowup: plan?.ignoreRequiresActionFollowup === true,
     ...(plan?.contextDecorationMode ? { contextDecorationMode: plan.contextDecorationMode } : {})
   };
+}
+
+export function shouldPreserveStopMessageEligibilityForFollowup(flowId: unknown): boolean {
+  return resolveFollowupFlowDecision(flowId).stopMessageFollowupPolicy === 'preserve_eligibility';
 }
 
 export function isNoFollowupFlowId(flowId: unknown): boolean {

@@ -21,7 +21,8 @@ const skeletonDocument = {
           profilesByFlowId: {
             stop_message_flow: {
               seedLoopPayload: true,
-              retryEmptyFollowupOnce: true
+              retryEmptyFollowupOnce: true,
+              stopMessageFollowupPolicy: 'preserve_eligibility'
             }
           }
         }
@@ -91,7 +92,8 @@ describe('servertool skeleton config', () => {
     ]);
     expect(followup.flowPolicy.profilesByFlowId.stop_message_flow).toMatchObject({
       seedLoopPayload: true,
-      retryEmptyFollowupOnce: true
+      retryEmptyFollowupOnce: true,
+      stopMessageFollowupPolicy: 'preserve_eligibility'
     });
   });
 

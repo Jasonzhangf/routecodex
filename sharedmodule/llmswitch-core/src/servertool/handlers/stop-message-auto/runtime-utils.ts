@@ -113,7 +113,27 @@ export function resolveRuntimeStopMessageState(runtimeMetadata: unknown): {
 } | null {
   const runtime = asRecord(runtimeMetadata);
   const state = runtime ? asRecord(runtime.stopMessageState) : null;
-  return resolveStopMessageSnapshot(state);
+  const direct = resolveStopMessageSnapshot(state);
+  if (direct) {
+    return direct;
+  }
+  const loopState = runtime ? asRecord(runtime.serverToolLoopState) : null;
+  if (!loopState || toNonEmptyText(loopState.flowId) !== 'stop_message_flow') {
+    return null;
+  }
+  const maxRepeats = readPositiveInteger(loopState.maxRepeats);
+  if (maxRepeats === undefined) {
+    return null;
+  }
+  const used = readPositiveInteger(loopState.repeatCount) ?? 0;
+  const text = toNonEmptyText(state?.stopMessageText) || '继续执行';
+  return {
+    text,
+    maxRepeats,
+    used,
+    source: 'servertool.stop_message',
+    stageMode: 'on'
+  };
 }
 
 export function readRuntimeStopMessageStageMode(runtimeMetadata: unknown): 'on' | 'off' | 'auto' | undefined {
@@ -533,4 +553,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function toNonEmptyText(value: unknown): string {
   return typeof value === 'string' && value.trim().length ? value.trim() : '';
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  const floored = Math.floor(parsed);
+  return floored >= 0 ? floored : undefined;
 }

@@ -17,6 +17,7 @@ import {
   type StopMessageDecision
 } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.js';
 import { resolveStateKey } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
+import { resolveRuntimeStopMessageState } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 import { resetStopMessageRuntimeConfigCacheForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
@@ -2101,6 +2102,7 @@ describe('stop_message_auto servertool', () => {
       },
       __rt: {
         serverToolFollowup: true,
+        stopMessageFollowupPolicy: 'preserve_eligibility',
         serverToolLoopState: {
           flowId: 'stop_message_flow',
           repeatCount: 1,
@@ -2124,6 +2126,28 @@ describe('stop_message_auto servertool', () => {
       resolveStopStatePath(sessionId),
     );
     expect(persisted?.state?.stopMessageUsed).toBe(1);
+  });
+
+  test('maps stop_message_flow loop state into runtime stop snapshot on followup hops', () => {
+    const snapshot = resolveRuntimeStopMessageState({
+      serverToolFollowup: true,
+      serverToolFollowupSource: 'servertool.stop_message',
+      stopMessageEnabled: true,
+      serverToolLoopState: {
+        flowId: 'stop_message_flow',
+        repeatCount: 1,
+        maxRepeats: 3,
+        payloadHash: '__servertool_auto__'
+      }
+    });
+
+    expect(snapshot).toEqual({
+      text: '继续执行',
+      maxRepeats: 3,
+      used: 1,
+      source: 'servertool.stop_message',
+      stageMode: 'on'
+    });
   });
 
   test.skip('sanitizes mixed stopMessage pollution from snapshot, response excerpt, and ai followup text', async () => {

@@ -42,6 +42,13 @@ pub enum GoalStatus {
     Completed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum StopMessageFollowupPolicy {
+    Disable,
+    PreserveEligibility,
+}
+
 impl GoalStatus {
     pub fn is_active(&self) -> bool {
         matches!(self, GoalStatus::Active)
@@ -117,6 +124,7 @@ pub struct StopMessageDecisionContext {
 
     // Servertool followup context
     pub followup_flow_id: Option<String>,
+    pub stop_message_followup_policy: Option<StopMessageFollowupPolicy>,
     pub stop_eligible: bool,
     /// finish_reason sequence from current response choices, in original order.
     /// Decision must only consider the latest non-empty finish_reason.
@@ -228,11 +236,11 @@ fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReas
     if ctx.goal_status.is_active() {
         return Some(SkipReason::GoalActive);
     }
-    if ctx
-        .followup_flow_id
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|flow_id| !flow_id.is_empty() && flow_id != "stop_message_flow")
+    if ctx.followup_flow_id.as_deref().map(str::trim).is_some_and(|flow_id| !flow_id.is_empty())
+        && !matches!(
+            ctx.stop_message_followup_policy,
+            Some(StopMessageFollowupPolicy::PreserveEligibility)
+        )
     {
         return Some(SkipReason::ServertoolFollowupHop);
     }
@@ -337,6 +345,7 @@ mod tests {
         StopMessageDecisionContext {
             port_stop_message_disabled: false,
             followup_flow_id: None,
+            stop_message_followup_policy: None,
             stop_eligible: true,
             finish_reasons: Some(vec!["stop".to_string()]),
             has_responses_submit_tool_outputs_resume: false,
@@ -547,6 +556,7 @@ mod tests {
     fn stop_message_followup_flow_can_retrigger_until_counter_exhausts() {
         let mut ctx = base_ctx();
         ctx.followup_flow_id = Some("stop_message_flow".to_string());
+        ctx.stop_message_followup_policy = Some(StopMessageFollowupPolicy::PreserveEligibility);
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Trigger);
         assert_eq!(result.skip_reason, None);

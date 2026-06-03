@@ -25,6 +25,7 @@ function buildMinimalDecisionContext(args: {
   return {
     port_stop_message_disabled: false,
     followup_flow_id: undefined,
+    stop_message_followup_policy: undefined,
     stop_eligible: args.stopEligible,
     finish_reasons: args.finishReasons ?? [],
     has_responses_submit_tool_outputs_resume: false,
@@ -151,12 +152,23 @@ describe('stop-message native decision (blackbox)', () => {
     expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
   });
 
-  test('followup flow with not eligible → skip', () => {
+  test('stop_message followup flow with not eligible uses normal stop eligibility skip', () => {
     const ctx: StopMessageDecisionContext = {
       ...buildMinimalDecisionContext({ stopEligible: false, finishReasons: ['stop'] }),
       followup_flow_id: 'stop_message_flow',
+      stop_message_followup_policy: 'preserve_eligibility',
     };
-    // Followup flow + not eligible = servertool_followup_hop skip
+    const decision = decideStopMessageActionWithNative(ctx);
+    expect(decision.action).toBe('skip');
+    expect(decision.skip_reason).toBe('skip_not_stop_finish_reason');
+  });
+
+  test('non-stop_message followup flow skips as generic followup hop', () => {
+    const ctx: StopMessageDecisionContext = {
+      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      followup_flow_id: 'apply_patch_flow',
+      stop_message_followup_policy: 'disable',
+    };
     const decision = decideStopMessageActionWithNative(ctx);
     expect(decision.action).toBe('skip');
     expect(decision.skip_reason).toContain('servertool_followup');

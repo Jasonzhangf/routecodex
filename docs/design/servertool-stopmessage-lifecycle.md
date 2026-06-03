@@ -1,25 +1,25 @@
-# ServerTool / Stopless Lifecycle (tmux-only, simplified)
+# ServerTool / Stopless Lifecycle (servertool reenter, bounded)
 
 ## 1. Scope
 
 This document defines the only valid lifecycle for:
 
-- simplified stopless auto-continue
+- stop_message / stopless auto-continue
 - `clock` client injection
 - `continue_execution` client injection
 
 Design goals:
 
 1. Trigger logic stays in Chat Process response orchestration.
-2. Execution path is tmux stdin injection only.
-3. stopless does not use nested reenter model requests.
-4. State is scoped by `tmux:<sessionId>` only.
+2. `stop_message_flow` execution path is servertool reenter through the same Hub Pipeline entry, not tmux/client injection.
+3. `stop_message_flow` followup hops are normal tool-capable requests and may retrigger when their response ends with `finish_reason=stop`.
+4. Loop safety is enforced by stopMessage `used/max_repeats` counters plus normal tool availability, not by disabling stopMessage on followup metadata.
 
 ## 2. Current Code Entry Points
 
 - Request metadata resolution: `src/server/runtime/http-server/executor-metadata.ts`
 - Scope resolution: `src/server/runtime/http-server/clock-scope-resolution.ts`
-- Injection implementation: `src/server/runtime/http-server/executor/client-injection-flow.ts`
+- Followup dispatch: `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
 - ServerTool orchestration (response side): `sharedmodule/llmswitch-core/src/servertool/engine.ts`
 - StopMessage handler: `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
 - Routing state store (tmux scope selection): `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/store.ts`
@@ -36,16 +36,24 @@ Design goals:
    - `/goal active` => skip
    - `/goal non-active` => inject `继续执行`
    - non-`/goal` => inject `继续执行`
-8. Dispatch to client injection (tmux stdin) directly.
-9. Injection success: increment `used`, keep/update state.
-10. Injection failure: clear stopless state for that tmux scope, skip followup.
-11. Main request must still complete.
+8. Dispatch `stop_message_flow` through servertool reenter with original request tools/semantics preserved.
+9. Reenter success increments/persists `used`; if followup response again ends with `stop`, it may retrigger until `used >= max_repeats`.
+10. Reenter failure is explicit/fail-fast through servertool followup error handling; do not hide it as client-visible success.
+11. Main request response must include the materialized followup result on the same client stream/response chain.
 
 ## 4. Hard Rules
 
 1. Split dispatch:
-- Normal servertools (e.g. search/vision) may use `reenterPipeline`.
-- simplified stopless / `clock` / `continue_execution` must use client injection dispatcher only.
+- `stop_message_flow` must use servertool reenter and must not set `clientInjectOnly/clientInjectSource=servertool.stop_message`.
+- `clock` / explicit client-injection flows use client injection dispatcher.
+- Other servertools follow their skeleton/profile policy.
+
+1.1. Followup eligibility:
+- The structural contract is `stopMessageFollowupPolicy=preserve_eligibility` on the `stop_message_flow` skeleton/profile and runtime carrier; flow names or source strings are not semantic permission.
+- A followup hop may preserve stopMessage eligibility only when the runtime carrier exposes `stopMessageFollowupPolicy=preserve_eligibility`; missing policy defaults to `disable` and generic followups use `skip_servertool_followup_hop`.
+- Preserved stop-message followup metadata must not contain `stopMessageEnabled=false` or `routecodexPortStopMessageEnabled=false`, including inside `__rt`.
+- Rust `stop-message-core` must allow followup eligibility only from `stop_message_followup_policy=preserve_eligibility`, not from `followup_flow_id` string matching.
+- Do not change router-direct/provider selection to fix stopless continuation; stopless eligibility belongs to servertool dispatch + Rust stop-message decision only.
 
 2. Continue-execution stripping:
 - `continue_execution` 的 tool_call 对客户端必须透明；响应侧在 chat process 的

@@ -223,6 +223,7 @@ export function applyFollowupRuntimeMetadata(args: {
   if (args.loopState) {
     (rt as Record<string, unknown>).serverToolLoopState = args.loopState;
   }
+  (rt as Record<string, unknown>).stopMessageFollowupPolicy = decision.stopMessageFollowupPolicy;
   (args.metadata as any).__hubEntry = 'chat_process';
   if (followupMode === 'router' && routeHint) {
     (args.metadata as Record<string, unknown>).routeHint = routeHint;

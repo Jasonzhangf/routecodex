@@ -1623,4 +1623,30 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('codec.convertJsonToSse(hubRespOutbound04ClientSemantic');
     expect(findings).toEqual([]);
   });
+
+  it('stop_message followup budget must be restored from servertool loop state before native decision', () => {
+    const runtimeUtilsPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts',
+    );
+    const handlerPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
+    );
+    const runtimeUtilsSource = fs.readFileSync(runtimeUtilsPath, 'utf8');
+    const handlerSource = fs.readFileSync(handlerPath, 'utf8');
+
+    expect(runtimeUtilsSource).toContain('runtime.serverToolLoopState');
+    expect(runtimeUtilsSource).toContain("toNonEmptyText(loopState.flowId) !== 'stop_message_flow'");
+    expect(runtimeUtilsSource).toContain('readPositiveInteger(loopState.maxRepeats)');
+    expect(runtimeUtilsSource).toContain('readPositiveInteger(loopState.repeatCount)');
+    expect(handlerSource).toContain("followupFlowId === 'stop_message_flow'");
+    expect(handlerSource).toContain("? 'preserve_eligibility'");
+
+    const findings = collectMatches(`${runtimeUtilsSource}\n${handlerSource}`, [
+      { label: 'generic followup policy overrides stop_message_flow eligibility', pattern: /followupFlowId\s*\|\|\s*'__servertool_followup__'[\s\S]{0,500}stop_message_followup_policy:\s*undefined/ },
+      { label: 'runtime stop snapshot ignores servertool loop state', pattern: /return\s+resolveStopMessageSnapshot\(state\);/ },
+    ]);
+    expect(findings).toEqual([]);
+  });
 });

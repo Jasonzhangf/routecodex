@@ -364,9 +364,19 @@ const handler: ServerToolHandler = async (
   const explicitMode = (normalizeStopMessageStageMode(undefined) ?? readRuntimeStopMessageStageMode(rt));
   const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
 
+  const stopMessageFollowupPolicy =
+    rt.stopMessageFollowupPolicy === 'preserve_eligibility'
+      ? 'preserve_eligibility'
+      : rt.stopMessageFollowupPolicy === 'disable'
+        ? 'disable'
+        : followupFlowId === 'stop_message_flow'
+          ? 'preserve_eligibility'
+          : undefined;
+
   const decisionCtx: StopMessageDecisionContext = {
     port_stop_message_disabled: isStopMessageDisabledByPort(ctx.adapterContext),
     followup_flow_id: followupFlowId || undefined,
+    stop_message_followup_policy: stopMessageFollowupPolicy,
     stop_eligible: stopGateway.eligible,
     finish_reasons: collectFinishReasonsFromCurrentPayload(ctx.base),
     has_responses_submit_tool_outputs_resume: hasResponsesSubmitToolOutputsResume(ctx.adapterContext),

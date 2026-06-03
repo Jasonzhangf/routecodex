@@ -68,7 +68,7 @@ Rust `plan_servertool_followup_runtime_json(flow_id)` 已能输出：
 
 | flowId | trigger 来源 | 当前配置真源 | 期望 outcome 真相 | 当前是否仍被 TS 硬编码污染 |
 |---|---|---|---|---|
-| `stop_message_flow` | auto hook | Rust skeleton profile | plain stopless -> `client_inject_only`；goal continue 例外 | **是** |
+| `stop_message_flow` | auto hook | Rust skeleton profile | servertool `reenter`；bounded by `used/max_repeats` | 否（2026-06-03 修正） |
 | `continue_execution_flow` | tool call | Rust skeleton profile | `reenter` | 否 |
 | `web_search_flow` | tool call / auto inject | Rust skeleton profile | `reenter` + summary decorate | 否 |
 | `vision_flow` | tool/backend | Rust skeleton profile 缺显式 outcome，仅 context mode | 依实现而定 | 轻微 |
@@ -107,7 +107,7 @@ if (args.flowId === 'stop_message_flow') {
 ```
 
 问题：
-- `stop_message_flow -> client_inject_only` 不该在 TS block 里硬编码。
+- `stop_message_flow -> reenter` 不该在 TS block 里硬编码。
 - 这本质是 **flow profile 决策**，必须来自 skeleton config。
 - 当前相当于 profile 里一份，TS block 又写一份，形成**双真源**。
 
@@ -337,7 +337,7 @@ request_context
 - `metadataDecorationPolicy?: 'none' | 'sticky_provider' | 'route_hint' | 'both'`
 
 这样：
-- plain `stop_message_flow` 的 client inject
+- plain `stop_message_flow` 的 servertool reenter
 - goal continue 的 reenter
 - inject fail 时清 stopMessage state
 - requires_action 是否短路
@@ -355,9 +355,9 @@ request_context
 - TS `followup-runtime-block.ts`
 
 目标：
-1. 把 `stop_message_flow -> client_inject_only` 完全迁到 profile。
-2. 删除 TS 中基于 `flowId === 'stop_message_flow'` 的 outcome 判定。
-3. 保留现有测试，新增红测：**outcome 必须来自 profile，而不是 TS flow 名硬编码**。
+1. 确保 `stop_message_flow -> reenter` 的 outcome 只来自 Rust skeleton/profile。
+2. 删除/禁止 TS 中把 `stop_message_flow` 改成 client injection 或 metadata disable 的硬编码。
+3. 保留现有测试，新增红测：**只有 skeleton/profile/runtime carrier 的 `stopMessageFollowupPolicy=preserve_eligibility` 能保留 stopMessage eligibility；单靠 `flowId=stop_message_flow` 或 `servertool.stop_message` source 必须红**。
 
 这是第一刀的唯一性：
 - 因为现在最致命的问题不是 block 数量，而是 **outcome 双真源**。
@@ -408,7 +408,8 @@ request_context
 
 ### 必补红测
 1. **outcome 来源红测**
-   - `stop_message_flow` 的 `client_inject_only` 来自 skeleton profile，而不是 TS `flowId` 判断。
+   - `stop_message_flow` 的 `reenter` 来自 skeleton profile，而不是 TS `flowId` 判断。
+   - `stop_message_flow.stopMessageFollowupPolicy` 是 skeleton profile 必填契约，缺失时 TS config 层 fail-fast。
 2. **goal mode 红测**
    - goal active 时 outcome 行为由 profile/runtime policy 决定，而不是 mainline 特判。
 3. **state cleanup 红测**

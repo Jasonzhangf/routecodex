@@ -309,7 +309,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 6. stopless/stop_message 约束（复盘）
 - 默认开启不等于无条件触发；必须有 followup 上下文且 finish_reason 条件正确。
 - 禁止任何“把非 stop 改成 stop”的语义改写（仅允许既定例外：text harvest；stop -> tool_calls）。
-- 2026-05-31 更新：`stop_message_flow` 只能走 servertool reenter，禁止 `clientInjectOnly/clientInjectSource=servertool.stop_message` 与 tmux/client injection；`serverToolFollowup=true` 即使无 flowId 也必须进入 Rust skip，防止 followup hop 递归触发 stopless。
+- 2026-06-03 更新：`stop_message_flow` 只能走 servertool reenter，禁止 `clientInjectOnly/clientInjectSource=servertool.stop_message` 与 tmux/client injection；`stop_message_flow` followup hop 是正常带工具列表的 bounded continuation，必须保留 stopMessage eligible，并由 `used/max_repeats` 计数防循环。只有非 `stop_message_flow` 的 generic followup hop 才进入 Rust skip 防递归。
 
 
 ## Windsurf 对齐固定参考（2026-05-21，强制）
@@ -1464,7 +1464,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 - Responses SSE tool_calls 调试锚点（2026-05-23）：如果 `/v1/responses stream=true` 日志显示 `finish_reason=tool_calls` 但 mem-observer 仍 `responseIndex=0 scopeIndex=0 pendingNoResponseId>0`，先查 `src/server/handlers/handler-response-utils.ts::streamResponsesJsonAsSse()` 是否像 JSON path 一样调用 conversation store 记录。样本必须进 `tests/server/handlers/handler-response-utils.responses-conversation.spec.ts` 红测，断言 response id + router id + provider timing id 均入库。
 - apply_patch servertool 骨架事实（2026-05-23）：`[servertool.apply_patch].mode=servertool` 时，`apply_patch` 只在 Hub/servertool 层本地执行，并通过标准 servertool followup 骨架（captured origin + injection ops）把 `APPLY_PATCH_APPLIED/FAILED` 回给模型；不得走 tmux/client injection，不得在 provider/Windsurf 层处理。默认 `client` 模式必须保持 client 原生 tool_call 透传，runtime dispatch gate 不得消费。
-- stop_message_flow 路径修正（2026-05-23）：stopless/stopMessage 普通续杯不再走 tmux/client injection；Rust `servertool_skeleton_config.rs` 中 `stop_message_flow` 的 active fact 是 `stickyProvider + seedLoopPayload + retryEmptyFollowupOnce`，无 `clientInjectOnly/clientInjectSource`。测试或实现若看到 `servertool.stop_message -> client_inject_only`，这是旧事实污染。
+- stop_message_flow 路径修正（2026-06-03）：stopless/stopMessage 普通续杯不走 tmux/client injection；Rust `servertool_skeleton_config.rs` 中 `stop_message_flow` 的 active fact 是 servertool `reenter` + `stickyProvider` + `seedLoopPayload` + `retryEmptyFollowupOnce`，无 `clientInjectOnly/clientInjectSource`。测试或实现若看到 `servertool.stop_message -> client_inject_only` 或 followup metadata stopMessage false，这是旧事实污染。
 - Responses retention cleanup（2026-05-23）：`retainedInputItems` 与 `pendingNoResponseId` 同步增长时，唯一先查 `handler-response-utils.ts` 在拿到 client `resp_*` 后是否清掉 superseded router/provider requestId；释放 payload 只能保留工具定义与 pending tool-call ids 摘要，禁止保留完整 input prefix 伪装指标下降。
 - Windsurf RCC text-tool typed args（2026-05-23）：若 unsupported tool 经 RCC fence 后工具层报 `plan expected sequence` / 参数类型错，先查 `windsurf-chat-provider.ts` harvester 是否按 JSON schema 还原 array/object/boolean/number；禁止把所有 `<|RCC|parameter>` 都当 string。guidance 必须列出所有 required 参数，不能只示例第一个。
 - Windsurf managed-account 请求内账号固定（2026-05-28）：健康/extra quota 探测结果只在启动/首次缓存填充时进入 `windsurfHealthCache`；单次请求内 transient retry 必须复用第一次 `resolveCascadeApiKey()` 的账号，不得重新 health probe 或静默切账号。quota exhausted 只标记 alias 并显式抛给外层 provider/VR 策略处理。
@@ -1706,7 +1706,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Anthropic live SSE 修复不能只覆盖 `wantsStream=false`；`/v1/responses` + tool request 下即使用户侧非显式 stream，内部转换可能 `wantsStream=true`。红测必须覆盖 `providerResponse.__sse_responses` + `wantsStream=true`。
 - provider snapshot 的 marker-only `{mode:"sse", captureSse, transport}` 不是可转换 payload；遇到它必须 fail-fast 为“缺 materializable stream/bodyText”，禁止继续送 Rust 当 Anthropic message 解析。
 - router-direct 进入 response conversion 时必须传 `providerHandle.providerProtocol`，不能用 `providerType` 推断；`providerType:'openai' + providerProtocol:'openai-responses'` 若按 openai-chat 转换，会把 Responses payload 送进 Chat validator 并报 `missing choices`。红测必须走真实 HTTP `/v1/responses` router-direct。
-- stopMessage followup 再入必须在 nested metadata 和 RequestExecutor response conversion 两处禁用 stopMessage；只在 dispatch 层标记但 normal executor 不消费，会出现断客后 `:stop_followup` 无限递归且日志 `used=0 left=3` 每轮重置。
+- stopMessage followup 再入禁止写入 `stopMessageEnabled=false` / `routecodexPortStopMessageEnabled=false`（包括 `__rt` 内层）；`stop_message_flow` 的循环保护是真实工具列表 + Rust `used/max_repeats` 计数。若看到 `:stop_followup` 只续一轮，优先查 nested metadata false 标记与 Rust `followup_flow_id` skip，禁止改 router-direct/provider selection 语义。
 
 ## 2026-05-31 HTTP 黑盒红测与断连门禁
 - 黑盒红测必须启动真实 `RouteCodexHttpServer` listener，经真实 HubPipeline/provider runtime 到本地 fake upstream；只允许 mock 输入/上游响应/客户端 socket，不得 mock handler、executor、converter 或 provider 行为。

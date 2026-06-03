@@ -69,9 +69,18 @@ function normalizeInteger(value: unknown): number {
 }
 
 export function getDefaultServertoolSkeletonDocument(): ServertoolSkeletonDocument {
-  return JSON.parse(
+  const skeleton = JSON.parse(
     JSON.stringify(getDefaultServertoolSkeletonDocumentWithNative())
   ) as ServertoolSkeletonDocument;
+  assertServertoolSkeletonDesignContract(skeleton);
+  return skeleton;
+}
+
+function assertServertoolSkeletonDesignContract(skeleton: ServertoolSkeletonDocument): void {
+  const stopMessageFlowProfile = skeleton.servertool.skeleton.followup.flowPolicy.profilesByFlowId.stop_message_flow;
+  if (stopMessageFlowProfile?.stopMessageFollowupPolicy !== 'preserve_eligibility') {
+    throw new Error('servertool skeleton contract violation: stop_message_flow.stopMessageFollowupPolicy must be preserve_eligibility');
+  }
 }
 
 export function getServertoolToolSpec(name: string): ServertoolToolSpec | null {
@@ -210,6 +219,7 @@ export function buildServertoolFollowupConfig(): {
       transparentReplayRequestSuffix?: string;
       ignoreRequiresActionFollowup?: boolean;
       contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
+      stopMessageFollowupPolicy?: 'preserve_eligibility' | 'disable';
     }>;
     noFollowupFlowIds: string[];
     autoLimitFlowIds: string[];
@@ -257,6 +267,9 @@ export function buildServertoolFollowupConfig(): {
               ...(profile.ignoreRequiresActionFollowup === true ? { ignoreRequiresActionFollowup: true } : {}),
               ...(profile.contextDecorationMode === 'continue_execution_summary' || profile.contextDecorationMode === 'web_search_summary'
                 ? { contextDecorationMode: profile.contextDecorationMode }
+                : {}),
+              ...(profile.stopMessageFollowupPolicy === 'preserve_eligibility' || profile.stopMessageFollowupPolicy === 'disable'
+                ? { stopMessageFollowupPolicy: profile.stopMessageFollowupPolicy }
                 : {})
             };
             return [flowId, normalized];
@@ -274,6 +287,7 @@ export function buildServertoolFollowupConfig(): {
         transparentReplayRequestSuffix?: string;
         ignoreRequiresActionFollowup?: boolean;
         contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
+        stopMessageFollowupPolicy?: 'preserve_eligibility' | 'disable';
       }>,
       noFollowupFlowIds: [],
       autoLimitFlowIds: [],
