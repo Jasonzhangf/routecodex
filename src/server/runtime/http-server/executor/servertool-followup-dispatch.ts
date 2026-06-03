@@ -509,7 +509,6 @@ function stripResponsesOnlyRequestSettings(
   delete out.max_tokens;
   delete out.max_output_tokens;
   delete out.parallel_tool_calls;
-  delete out.tool_choice;
   delete out.reasoning;
 
   const semantics =
@@ -529,7 +528,6 @@ function stripResponsesOnlyRequestSettings(
     delete requestParameters.max_tokens;
     delete requestParameters.max_output_tokens;
     delete requestParameters.parallel_tool_calls;
-    delete requestParameters.tool_choice;
     delete requestParameters.reasoning;
     responses!.requestParameters = requestParameters;
     semantics!.responses = responses!;
@@ -717,7 +715,6 @@ async function buildServerToolNestedInput(args: {
       delete requestParameters.max_tokens;
       delete requestParameters.max_output_tokens;
       delete requestParameters.parallel_tool_calls;
-      delete requestParameters.tool_choice;
       delete requestParameters.reasoning;
       responses!.requestParameters = requestParameters;
       metadataRequestSemantics.responses = responses!;
