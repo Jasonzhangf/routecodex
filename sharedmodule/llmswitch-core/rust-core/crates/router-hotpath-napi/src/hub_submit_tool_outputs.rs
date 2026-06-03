@@ -419,6 +419,54 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_responses_followup_preserves_tool_controls_and_tools() {
+        let tools = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "description": "run command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "cmd": { "type": "string" }
+                        },
+                        "required": ["cmd"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "update_plan",
+                    "description": "update plan",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            }
+        ]);
+        let payload = json!({
+            "model": "gpt-5.5",
+            "tools": tools.clone(),
+            "tool_choice": { "type": "auto" },
+            "parallel_tool_calls": false,
+            "messages": [
+                { "role": "user", "content": "continue" }
+            ]
+        });
+
+        let normalized =
+            normalize_servertool_followup_payload_shape_value("/v1/responses", payload);
+        assert_eq!(normalized["tools"], tools);
+        assert_eq!(normalized["tool_choice"], json!({ "type": "auto" }));
+        assert_eq!(normalized["parallel_tool_calls"], false);
+        assert!(normalized.get("messages").is_none());
+        assert!(normalized.get("input").is_some());
+    }
+
+    #[test]
     fn leaves_non_responses_followup_payload_unchanged() {
         let payload = json!({ "messages": [{ "role": "user", "content": "hello" }] });
         let normalized = normalize_servertool_followup_payload_shape_value(

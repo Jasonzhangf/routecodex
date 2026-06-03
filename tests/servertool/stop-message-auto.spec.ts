@@ -2060,7 +2060,7 @@ describe('stop_message_auto servertool', () => {
     expect(followup?.metadata?.routecodexPortMode).toBe('router');
   });
 
-  test('skips stop_message retrigger on stop_message_flow followup hops', async () => {
+  test('allows stop_message retrigger on stop_message_flow followup hops until counter exhausts', async () => {
     const sessionId = 'stopmessage-spec-session-followup-allow';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2117,13 +2117,13 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.mode).toBe('passthrough');
-    expect(result.execution).toBeUndefined();
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+    expect(result.execution?.followup).toBeTruthy();
 
     const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number } }>(
       resolveStopStatePath(sessionId),
     );
-    expect(persisted?.state?.stopMessageUsed).toBe(0);
+    expect(persisted?.state?.stopMessageUsed).toBe(1);
   });
 
   test.skip('sanitizes mixed stopMessage pollution from snapshot, response excerpt, and ai followup text', async () => {

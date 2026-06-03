@@ -343,6 +343,55 @@ function isManagedStoplessGoalRequestSemantics(requestSemantics: Record<string, 
   return status === 'active' || status === 'paused' || status === 'stopped' || status === 'completed';
 }
 
+function isStopMessageFollowupSemantics(requestSemantics: Record<string, unknown> | undefined): boolean {
+  const routecodex = requestSemantics?.__routecodex && typeof requestSemantics.__routecodex === 'object' && !Array.isArray(requestSemantics.__routecodex)
+    ? (requestSemantics.__routecodex as Record<string, unknown>)
+    : undefined;
+  const source = typeof routecodex?.serverToolFollowupSource === 'string'
+    ? routecodex.serverToolFollowupSource.trim()
+    : '';
+  return source === 'servertool.stop_message';
+}
+
+function isStopMessageFollowupMetadata(metadata: Record<string, unknown>): boolean {
+  const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+    ? (metadata.__rt as Record<string, unknown>)
+    : undefined;
+  const source = typeof rt?.clientInjectSource === 'string'
+    ? rt.clientInjectSource.trim()
+    : typeof metadata.clientInjectSource === 'string'
+      ? metadata.clientInjectSource.trim()
+      : '';
+  const loopState = rt?.serverToolLoopState && typeof rt.serverToolLoopState === 'object' && !Array.isArray(rt.serverToolLoopState)
+    ? (rt.serverToolLoopState as Record<string, unknown>)
+    : undefined;
+  const flowId = typeof loopState?.flowId === 'string'
+    ? loopState.flowId.trim()
+    : '';
+  return source === 'servertool.stop_message' || flowId === 'stop_message_flow';
+}
+
+function removeNestedStopMessageDisableFlags(metadata: Record<string, unknown>): void {
+  if (metadata.stopMessageEnabled === false) {
+    delete metadata.stopMessageEnabled;
+  }
+  if (metadata.routecodexPortStopMessageEnabled === false) {
+    delete metadata.routecodexPortStopMessageEnabled;
+  }
+  const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+    ? (metadata.__rt as Record<string, unknown>)
+    : undefined;
+  if (!rt) {
+    return;
+  }
+  if (rt.stopMessageEnabled === false) {
+    delete rt.stopMessageEnabled;
+  }
+  if (rt.routecodexPortStopMessageEnabled === false) {
+    delete rt.routecodexPortStopMessageEnabled;
+  }
+}
+
 function readBooleanFlag(value: unknown): boolean {
   return value === true || (typeof value === 'string' && value.trim().toLowerCase() === 'true');
 }
@@ -673,17 +722,27 @@ async function buildServerToolNestedInput(args: {
   });
   preserveLiveClientAbortCarriers({ source: args.baseMetadata, target: nestedMetadata });
   preserveLiveClientAbortCarriers({ source: nestedExtra, target: nestedMetadata });
-  nestedMetadata.stopMessageEnabled = false;
-  nestedMetadata.routecodexPortStopMessageEnabled = false;
+  const keepStopMessageEnabled =
+    isStopMessageFollowupSemantics(materializedRequestSemantics)
+    || isStopMessageFollowupMetadata(nestedMetadata);
+  if (keepStopMessageEnabled) {
+    removeNestedStopMessageDisableFlags(nestedMetadata);
+  }
+  if (!keepStopMessageEnabled) {
+    nestedMetadata.stopMessageEnabled = false;
+    nestedMetadata.routecodexPortStopMessageEnabled = false;
+  }
   const nestedRuntime =
     nestedMetadata.__rt && typeof nestedMetadata.__rt === 'object' && !Array.isArray(nestedMetadata.__rt)
       ? (nestedMetadata.__rt as Record<string, unknown>)
       : {};
-  nestedMetadata.__rt = {
-    ...nestedRuntime,
-    stopMessageEnabled: false,
-    routecodexPortStopMessageEnabled: false
-  };
+  nestedMetadata.__rt = keepStopMessageEnabled
+    ? nestedRuntime
+    : {
+        ...nestedRuntime,
+        stopMessageEnabled: false,
+        routecodexPortStopMessageEnabled: false
+      };
   if (args.mode === 'reenter' && isServerToolFollowup(materializedRequestSemantics)) {
     delete nestedMetadata.clientInjectOnly;
     delete nestedMetadata.clientInjectText;

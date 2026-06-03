@@ -2064,3 +2064,7 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 ## 2026-06-03 Responses tool-call continuation contract
 - Verified on 5555 after deploying routecodex 0.90.2750: Responses `status:"requires_action"` tool-call SSE must emit `response.required_action` and `response.done`, but must not emit `response.completed`; emitting `response.completed` can make Codex UI stop without executing/submitting tool output.
 - Live evidence: `/Volumes/extension/.rcc/codex-samples/openai-responses/port-unknown/openai-responses-minimax.key1-MiniMax-M3-20260603T150245058-252518-355/client-response_server.json` has `completed=0 required_action=1 done=1`; followup provider requests after 15:02 contain `function_call_output`.
+
+## 2026-06-03 stop_message followup continuation contract
+- `stop_message_flow` followup hops are normal tool-capable reenter requests and must remain eligible for bounded stopless continuation; do not set `stopMessageEnabled=false` / `routecodexPortStopMessageEnabled=false` on them, including nested `__rt` flags.
+- Rust `stop-message-core` must not skip `followup_flow_id=stop_message_flow`; counters (`used/max_repeats`) are the loop guard. Non-stop-message followup flows may still use `skip_servertool_followup_hop` to prevent generic recursion.

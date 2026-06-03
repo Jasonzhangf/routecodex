@@ -953,6 +953,33 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('server response handler must not default missing SSE finish reason to stop', () => {
+    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'defaults finishTracker finishReason to stop', pattern: /finishTracker\.finishReason\s*(?:\|\|=|=\s*finishTracker\.finishReason\s*\?\?)\s*['"]stop['"]/ },
+      { label: 'defaults terminal event finish reason to stop', pattern: /effectiveTerminalEvent[\s\S]{0,160}['"]stop['"]/ },
+      { label: 'defaults contract probe finish reason to stop', pattern: /contractProbe\.probe[\s\S]{0,160}['"]stop['"]/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('server response handler must not inspect required_action to repair finish reason in TS', () => {
+    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const repairStart = source.indexOf('const repairedTerminalFrames = !finishTracker.seenTerminalEvent');
+    expect(repairStart).toBeGreaterThanOrEqual(0);
+    const repairEnd = source.indexOf('void persistNativeSseConversationState', repairStart);
+    expect(repairEnd).toBeGreaterThan(repairStart);
+    const repairBody = source.slice(repairStart, repairEnd);
+    const findings = collectMatches(repairBody, [
+      { label: 'checks required_action in TS finish repair', pattern: /required_action|response\.required_action|submit_tool_outputs|tool_calls/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('servertool followup response block must not classify tool-bearing client payloads in TS', () => {
     const filePath = path.join(
       process.cwd(),

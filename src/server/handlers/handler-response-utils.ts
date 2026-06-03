@@ -56,6 +56,8 @@ type SseFinishReasonTracker = {
 
 type SseTerminalWatch = {
   sawTerminalChunk: boolean;
+  sawDoneChunk?: boolean;
+  requiresResponsesTerminalEvent?: boolean;
   terminalSource?: string;
   pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.required_action' | 'response.error' | 'response.cancelled';
 };
@@ -738,10 +740,12 @@ function updateSseTerminalTrackerFromChunk(
   }
 
   if (text.includes('data: [DONE]')) {
-    finishTracker.seenTerminalEvent = true;
-    finishTracker.finishReason ||= 'stop';
-    terminalWatch.sawTerminalChunk = true;
-    terminalWatch.terminalSource = terminalWatch.terminalSource ?? '[DONE]';
+    terminalWatch.sawDoneChunk = true;
+    if (!terminalWatch.requiresResponsesTerminalEvent) {
+      finishTracker.seenTerminalEvent = true;
+      terminalWatch.sawTerminalChunk = true;
+      terminalWatch.terminalSource = terminalWatch.terminalSource ?? '[DONE]';
+    }
   }
 
   const blocks = text.split(/\n\n+/);
@@ -833,7 +837,7 @@ function updateSseTerminalTrackerFromChunk(
       finishTracker.seenTerminalEvent = true;
       terminalWatch.sawTerminalChunk = true;
     }
-    finishTracker.finishReason = derived ?? (effectiveTerminalEvent === 'response.required_action' ? 'tool_calls' : 'stop');
+    finishTracker.finishReason = derived ?? (effectiveTerminalEvent === 'response.required_action' ? 'tool_calls' : finishTracker.finishReason);
     terminalWatch.terminalSource = effectiveTerminalEvent;
     terminalWatch.pendingTerminalEvent = undefined;
   }
@@ -1301,6 +1305,7 @@ export async function sendPipelineResponse(
     let terminalAutoCloseTimer: NodeJS.Timeout | null = null;
     const terminalWatch: SseTerminalWatch = {
       sawTerminalChunk: false,
+      requiresResponsesTerminalEvent: false
     };
     const contractProbe: StreamContractProbeEnvelope = {
       probe: sseBody[STREAM_CONTRACT_PROBE_BODY_KEY] && typeof sseBody[STREAM_CONTRACT_PROBE_BODY_KEY] === 'object' && !Array.isArray(sseBody[STREAM_CONTRACT_PROBE_BODY_KEY])
@@ -1308,6 +1313,8 @@ export async function sendPipelineResponse(
         : undefined,
       emitted: false
     };
+    terminalWatch.requiresResponsesTerminalEvent = Boolean(contractProbe.probe)
+      && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs');
     const effectiveResponsesRequestContext =
       (result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined)
       ?? options?.responsesRequestContext;
@@ -1648,14 +1655,24 @@ export async function sendPipelineResponse(
         : [];
       if (repairedTerminalFrames.length > 0 && !res.writableEnded && !res.destroyed) {
         try {
-          for (const frame of repairedTerminalFrames) {
+          const framesToWrite = terminalWatch.sawDoneChunk
+            ? repairedTerminalFrames.filter((frame) => !frame.includes('data: [DONE]'))
+            : repairedTerminalFrames;
+          for (const frame of framesToWrite) {
             writeClientSseFrame(frame, 'response.sse.stream.end.write_terminal_probe');
           }
           finishTracker.seenTerminalEvent = true;
-          finishTracker.finishReason = finishTracker.finishReason ?? (contractProbe.probe?.required_action ? 'tool_calls' : 'stop');
           contractProbe.emitted = true;
         } catch (repairWriteError) {
           logResponseNonBlockingError(`response.sse.stream.end.write_terminal_probe:${requestLabel}`, repairWriteError);
+        }
+      }
+      if (finishTracker.seenTerminalEvent && !terminalWatch.sawDoneChunk && !res.writableEnded && !res.destroyed) {
+        try {
+          writeClientSseFrame('data: [DONE]\n\n', 'response.sse.stream.end.write_done_after_terminal');
+          terminalWatch.sawDoneChunk = true;
+        } catch (doneWriteError) {
+          logResponseNonBlockingError(`response.sse.stream.end.write_done_after_terminal:${requestLabel}`, doneWriteError);
         }
       }
       void persistNativeSseConversationState()

@@ -14665,3 +14665,19 @@ forwarder 引用的 provider profile（minimax/mini27/minimonth）加载失败 �
 - Built and installed routecodex 0.90.2750; managed restart on 5555 succeeded and `/health` returned `status:"ok", ready:true, version:"0.90.2750"`.
 - Live post-deploy client samples with required_action now show `completed=0 required_action=1 done=1`, e.g. `/Volumes/extension/.rcc/codex-samples/openai-responses/port-unknown/openai-responses-minimax.key1-MiniMax-M3-20260603T150245058-252518-355/client-response_server.json`.
 - Subsequent provider requests include `function_call_output` for the same tool call chain, proving client tool execution/resume is no longer stopped by the bogus `response.completed` event.
+
+## 2026-06-03 stopless followup recursive continuation fix
+- User correction: stop_message `:stop_followup` is a normal tool-capable request and cannot recurse forever through missing tools; continuation is bounded by stop-message repeat counters. Do not disable stopMessage on `stop_message_flow` followup hops.
+- Root causes confirmed from live samples: 0.90.2751 followup metadata had top-level `stopMessageEnabled=true` but `__rt.stopMessageEnabled=false`, and Rust `stop-message-core` skipped any `followup_flow_id`, so `:stop_followup` could return `finish_reason=stop` without triggering the next bounded continuation.
+- Fix: `servertool-followup-dispatch.ts` preserves/removes false stopMessage disable flags for stop_message followups identified by `serverToolFollowupSource=servertool.stop_message` or `serverToolLoopState.flowId=stop_message_flow`; Rust `stop-message-core` allows `stop_message_flow` followup to trigger until counters exhaust, while still skipping other followup flows.
+- Verification: `cargo test -p stop-message-core --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passed 23/23; Jest `stop-message-native-decision.spec.ts` + `servertool-followup-dispatch.spec.ts` passed 45/45; `build:min` passed; installed/restarted 5555 as 0.90.2753 and `/health` is ok/ready.
+
+## 2026-06-03 SSE terminal / finish_reason / tools preservation audit
+- Sample `openai-responses-minimax.key1-MiniMax-M3-20260603T151848564-252543-380`: main client response is original `response.completed`/`response.done` with message only; followup provider request preserves `tools` count=12 and `tool_choice={"type":"auto"}`.
+- Fixed SSE terminal tracking: `data: [DONE]` is stream sentinel, not a Responses terminal event when a Responses contract probe exists; handler now emits native terminal frames from probe before closing, without defaulting missing finish_reason to `stop`.
+- Added red tests for no default-to-stop, no TS required_action finish repair, and followup normalizer preserving root `tools` / `tool_choice` / `parallel_tool_calls`.
+
+## 2026-06-03 SSE DONE sentinel live fix
+- Live failure after 0.90.2754: client samples had `response.completed`/`response.done` but no `data: [DONE]`, so Codex client still reported `stream closed before response.completed`.
+- Fix in `handler-response-utils.ts`: when a Responses SSE stream has a terminal event but no DONE sentinel, append exactly one `data: [DONE]` before closing; keep existing repair path for probe-based completed/done synthesis.
+- Verification after build/install/restart 5555 as 0.90.2755: health ok; samples after 15:54:12 show `done=1` and `DONE=1`, e.g. `openai-responses-minimax.key1-MiniMax-M3-20260603T155402864-252636-473` and later.

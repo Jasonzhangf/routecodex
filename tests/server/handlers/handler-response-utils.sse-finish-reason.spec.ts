@@ -98,6 +98,31 @@ describe('sendPipelineResponse SSE completion logging', () => {
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_test_probe',
+          object: 'response',
+          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
+          ...(probe.output ? { output: probe.output } : {}),
+          ...(probe.output_text ? { output_text: probe.output_text } : {})
+        };
+        if (probe.required_action) {
+          return [
+            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+            'data: [DONE]\n\n'
+          ];
+        }
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
       importCoreDist: async () => ({}),
       requireCoreDist: () => ({})
     }));
@@ -151,14 +176,40 @@ describe('sendPipelineResponse SSE completion logging', () => {
   });
 
   it('logs client_close diagnostics when SSE closes before terminal event', async () => {
+    const clearResponsesConversationByRequestId = jest.fn(async () => undefined);
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
+      clearResponsesConversationByRequestId,
       finalizeResponsesConversationRequestRetention: async () => undefined,
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_test_probe',
+          object: 'response',
+          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
+          ...(probe.output ? { output: probe.output } : {}),
+          ...(probe.output_text ? { output_text: probe.output_text } : {})
+        };
+        if (probe.required_action) {
+          return [
+            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+            'data: [DONE]\n\n'
+          ];
+        }
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
       importCoreDist: async () => ({}),
       requireCoreDist: () => ({})
     }));
@@ -170,8 +221,6 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const res = new MockResponse();
     const stream = new PassThrough();
-    const clearRequest = jest.fn();
-    (globalThis as Record<string, unknown>).__rccResponsesConversationStore = { clearRequest };
 
     const closed = new Promise<void>((resolve) => {
       res.on('close', () => setTimeout(resolve, 0));
@@ -198,8 +247,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response.sse][req-stream-client-close] client_close'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"closeBeforeStreamEnd":true'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"sawTerminalEvent":false'));
-    expect(clearRequest).toHaveBeenCalledWith('req-stream-client-close');
-    delete (globalThis as Record<string, unknown>).__rccResponsesConversationStore;
+    expect(clearResponsesConversationByRequestId).toHaveBeenCalledWith('req-stream-client-close');
   });
 
   it('does not enforce stopless contract inside raw SSE handler path', async () => {
@@ -211,6 +259,31 @@ describe('sendPipelineResponse SSE completion logging', () => {
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_test_probe',
+          object: 'response',
+          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
+          ...(probe.output ? { output: probe.output } : {}),
+          ...(probe.output_text ? { output_text: probe.output_text } : {})
+        };
+        if (probe.required_action) {
+          return [
+            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+            'data: [DONE]\n\n'
+          ];
+        }
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
       importCoreDist: async () => ({}),
       requireCoreDist: () => ({})
     }));
@@ -268,6 +341,31 @@ describe('sendPipelineResponse SSE completion logging', () => {
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_test_probe',
+          object: 'response',
+          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
+          ...(probe.output ? { output: probe.output } : {}),
+          ...(probe.output_text ? { output_text: probe.output_text } : {})
+        };
+        if (probe.required_action) {
+          return [
+            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+            'data: [DONE]\n\n'
+          ];
+        }
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
       importCoreDist: async () => ({}),
       requireCoreDist: () => ({})
     }));
@@ -323,6 +421,31 @@ describe('sendPipelineResponse SSE completion logging', () => {
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_test_probe',
+          object: 'response',
+          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
+          ...(probe.output ? { output: probe.output } : {}),
+          ...(probe.output_text ? { output_text: probe.output_text } : {})
+        };
+        if (probe.required_action) {
+          return [
+            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+            'data: [DONE]\n\n'
+          ];
+        }
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
       importCoreDist: async () => ({}),
       requireCoreDist: () => ({})
     }));
@@ -375,6 +498,31 @@ describe('sendPipelineResponse SSE completion logging', () => {
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_test_probe',
+          object: 'response',
+          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
+          ...(probe.output ? { output: probe.output } : {}),
+          ...(probe.output_text ? { output_text: probe.output_text } : {})
+        };
+        if (probe.required_action) {
+          return [
+            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+            'data: [DONE]\n\n'
+          ];
+        }
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
       importCoreDist: async () => ({}),
       requireCoreDist: () => ({})
     }));
@@ -429,6 +577,31 @@ describe('sendPipelineResponse SSE completion logging', () => {
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_test_probe',
+          object: 'response',
+          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
+          ...(probe.output ? { output: probe.output } : {}),
+          ...(probe.output_text ? { output_text: probe.output_text } : {})
+        };
+        if (probe.required_action) {
+          return [
+            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+            'data: [DONE]\n\n'
+          ];
+        }
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
       importCoreDist: async () => ({}),
       requireCoreDist: () => ({})
     }));
@@ -488,6 +661,31 @@ describe('sendPipelineResponse SSE completion logging', () => {
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_test_probe',
+          object: 'response',
+          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
+          ...(probe.output ? { output: probe.output } : {}),
+          ...(probe.output_text ? { output_text: probe.output_text } : {})
+        };
+        if (probe.required_action) {
+          return [
+            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+            'data: [DONE]\n\n'
+          ];
+        }
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
       importCoreDist: async () => ({}),
       requireCoreDist: () => ({})
     }));
@@ -558,6 +756,158 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(output).not.toContain('event: error');
   });
 
+  it('RED: data DONE alone is not a Responses terminal event and completed probe is still emitted', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_test_probe',
+          object: 'response',
+          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
+          ...(probe.output ? { output: probe.output } : {}),
+          ...(probe.output_text ? { output_text: probe.output_text } : {})
+        };
+        if (probe.required_action) {
+          return [
+            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+            'data: [DONE]\n\n'
+          ];
+        }
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = new PassThrough();
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream,
+          __routecodex_stream_contract_probe_body: {
+            id: 'resp_done_only_probe_1',
+            object: 'response',
+            status: 'completed',
+            output: [
+              {
+                id: 'msg_done_only_probe_1',
+                type: 'message',
+                role: 'assistant',
+                status: 'completed',
+                content: [{ type: 'output_text', text: 'ok' }]
+              }
+            ],
+            output_text: 'ok'
+          }
+        }
+      } as any,
+      'req-stream-done-only-with-probe',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    stream.write('event: response.output_text.delta\n');
+    stream.write('data: {"type":"response.output_text.delta","delta":"ok"}\n\n');
+    stream.write('data: [DONE]\n\n');
+    stream.end();
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output).toContain('event: response.completed');
+    expect(output).toContain('event: response.done');
+    expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
+    expect(output).not.toContain('upstream_stream_incomplete');
+    expect(output).not.toContain('event: error');
+  });
+
+  it('RED: appends DONE when upstream emits response.completed and response.done without DONE sentinel', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = new PassThrough();
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream
+        }
+      } as any,
+      'req-stream-terminal-without-done',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    stream.write('event: response.completed\n');
+    stream.write('data: {"type":"response.completed","response":{"id":"resp_no_done","object":"response","status":"completed"}}\n\n');
+    stream.write('event: response.done\n');
+    stream.write('data: {"type":"response.done","response":{"id":"resp_no_done","object":"response","status":"completed"}}\n\n');
+    stream.end();
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output).toContain('event: response.completed');
+    expect(output).toContain('event: response.done');
+    expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
+    expect(output).not.toContain('event: error');
+  });
+
   it('RED: treats event: message with bare data.type=response.completed as terminal to avoid false upstream_stream_incomplete', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
@@ -567,6 +917,31 @@ describe('sendPipelineResponse SSE completion logging', () => {
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_test_probe',
+          object: 'response',
+          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
+          ...(probe.output ? { output: probe.output } : {}),
+          ...(probe.output_text ? { output_text: probe.output_text } : {})
+        };
+        if (probe.required_action) {
+          return [
+            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+            'data: [DONE]\n\n'
+          ];
+        }
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
       importCoreDist: async () => ({}),
       requireCoreDist: () => ({})
     }));

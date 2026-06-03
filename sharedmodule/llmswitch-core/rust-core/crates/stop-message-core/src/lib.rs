@@ -228,7 +228,12 @@ fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReas
     if ctx.goal_status.is_active() {
         return Some(SkipReason::GoalActive);
     }
-    if ctx.followup_flow_id.is_some() {
+    if ctx
+        .followup_flow_id
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|flow_id| !flow_id.is_empty() && flow_id != "stop_message_flow")
+    {
         return Some(SkipReason::ServertoolFollowupHop);
     }
     if ctx.persisted_snapshot.is_none() && ctx.runtime_snapshot.is_none() {
@@ -539,9 +544,18 @@ mod tests {
     }
 
     #[test]
-    fn skips_when_followup_flow_to_prevent_recursion() {
+    fn stop_message_followup_flow_can_retrigger_until_counter_exhausts() {
         let mut ctx = base_ctx();
         ctx.followup_flow_id = Some("stop_message_flow".to_string());
+        let result = decide(&ctx);
+        assert_eq!(result.action, Action::Trigger);
+        assert_eq!(result.skip_reason, None);
+    }
+
+    #[test]
+    fn skips_non_stop_message_followup_flow_to_prevent_generic_recursion() {
+        let mut ctx = base_ctx();
+        ctx.followup_flow_id = Some("apply_patch_flow".to_string());
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
         assert_eq!(result.skip_reason.unwrap(), "skip_servertool_followup_hop");
