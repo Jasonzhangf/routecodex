@@ -277,8 +277,6 @@ impl ProviderHealthManager {
         }
         if let Some(expiry) = state.cooldown_expires_at {
             if now_ms >= expiry {
-                // Cooldown expiry is time-based recovery, not a real upstream success.
-                // Keep 429 cooldown-cycle memory so repeated 3x 429 waves can escalate.
                 state.state = "healthy".to_string();
                 state.failure_count = 0;
                 state.cooldown_expires_at = None;
@@ -288,7 +286,9 @@ impl ProviderHealthManager {
                 state.consecutive_http_429_failures = 0;
                 state.consecutive_recoverable_failures = 0;
                 state.http_429_cooldown_cycles %= 3;
-                state.recoverable_cooldown_cycles %= 3;
+                if state.recoverable_cooldown_cycles >= 2 {
+                    state.recoverable_cooldown_cycles = 0;
+                }
                 state.persisted_503_reprobe_available = false;
                 return true;
             }
@@ -1117,6 +1117,70 @@ mod tests {
             .find(|s| s.provider_key == "test-p")
             .unwrap();
         assert_eq!(s.state, "tripped");
+    }
+
+    #[test]
+    fn health_recoverable_cooldown_reentry_first_failure_escalates_to_long_cooldown() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+        let now = 1_747_800_000_000i64;
+
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), now);
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), now + 1);
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), now + 2);
+        let first = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .expect("provider state");
+        let first_expiry = first.cooldown_expires_at.expect("first expiry");
+        assert_eq!(first_expiry - (now + 2), 30 * 60_000);
+        assert!(!manager.is_available("test-p", first_expiry - 1));
+        assert!(manager.is_available("test-p", first_expiry + 1));
+
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), first_expiry + 2);
+        let second = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .expect("provider state");
+        let second_expiry = second.cooldown_expires_at.expect("second expiry");
+        assert_eq!(second_expiry - (first_expiry + 2), 3 * 60 * 60_000);
+        assert!(!manager.is_available("test-p", second_expiry - 1));
+        assert!(manager.is_available("test-p", second_expiry + 1));
+
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), second_expiry + 2);
+        assert!(manager.is_available("test-p", second_expiry + 3));
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), second_expiry + 4);
+        assert!(manager.is_available("test-p", second_expiry + 5));
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), second_expiry + 6);
+        let third = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .expect("provider state");
+        let third_expiry = third.cooldown_expires_at.expect("third expiry");
+        assert_eq!(third_expiry - (second_expiry + 6), 30 * 60_000);
+    }
+
+    #[test]
+    fn health_recoverable_failure_during_active_cooldown_extends_to_three_hours() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-p".to_string()]);
+        let now = 1_747_800_000_000i64;
+
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), now);
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), now + 1);
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), now + 2);
+        manager.record_http_502_failure("test-p", Some("HTTP_502".to_string()), now + 3);
+
+        let state = manager
+            .snapshot()
+            .into_iter()
+            .find(|s| s.provider_key == "test-p")
+            .expect("provider state");
+        let expiry = state.cooldown_expires_at.expect("extended expiry");
+        assert_eq!(expiry - (now + 3), 3 * 60 * 60_000);
     }
 
     #[test]

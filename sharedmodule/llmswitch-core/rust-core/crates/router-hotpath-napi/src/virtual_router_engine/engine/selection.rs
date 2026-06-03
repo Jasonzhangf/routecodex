@@ -1344,6 +1344,68 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn select_provider_falls_to_next_priority_pool_when_current_pool_is_cooled_down() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        for key in ["primary.key1.model", "backup.key1.model"] {
+            providers.insert(
+                key.to_string(),
+                json!({
+                    "providerKey": key,
+                    "providerType": "openai",
+                    "modelId": "model",
+                    "enabled": true
+                }),
+            );
+        }
+        core.provider_registry.load(&providers);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+        core.health_manager
+            .cooldown_provider("primary.key1.model", Some("HTTP_502".to_string()), Some(30 * 60_000), now_ms());
+
+        let routing = Map::from_iter([(
+            "thinking".to_string(),
+            Value::Array(vec![
+                json!({
+                    "id": "thinking-primary",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": ["primary.key1.model"]
+                }),
+                json!({
+                    "id": "thinking-backup",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["backup.key1.model"]
+                }),
+            ]),
+        )]);
+        core.routing = parse_routing(&routing);
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({}),
+                &ClassificationResult {
+                    route_name: "thinking".to_string(),
+                    confidence: 1.0,
+                    reasoning: "thinking:user-input".to_string(),
+                    candidates: vec!["thinking".to_string(), "default".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("backup pool should be selected");
+
+        assert_eq!(selected.provider_key, "backup.key1.model");
+        assert_eq!(selected.pool_id.as_deref(), Some("thinking-backup"));
+    }
+
     // ============================================================
     // T4: Pool isolation by routePolicyGroup — based on real config.toml
     // ============================================================
