@@ -2389,6 +2389,23 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
             metadata_obj.insert("routeHint".to_string(), Value::String(hint.clone()));
         }
     }
+    metadata_obj.insert("serverToolFollowup".to_string(), Value::Bool(true));
+    metadata_obj.insert(
+        "serverToolFollowupSource".to_string(),
+        Value::String("servertool.stop_message".to_string()),
+    );
+    metadata_obj.insert(
+        "clientInjectSource".to_string(),
+        Value::String("servertool.stop_message".to_string()),
+    );
+    metadata_obj.insert(
+        "serverToolLoopState".to_string(),
+        serde_json::json!({
+            "flowId": "stop_message_flow",
+            "repeatCount": used + 1,
+            "maxRepeats": max_repeats
+        }),
+    );
     // 7. Build followup plan
     let followup = serde_json::json!({
         "requestIdSuffix": ":stop_followup",
@@ -2877,6 +2894,27 @@ mod tests {
         let metadata = &output["followup"]["metadata"];
         assert_eq!(metadata["modelId"].as_str(), Some("MiniMax-M3"));
         assert_eq!(metadata["routeHint"].as_str(), Some("search"));
+        assert_eq!(metadata["serverToolFollowup"].as_bool(), Some(true));
+        assert_eq!(
+            metadata["serverToolFollowupSource"].as_str(),
+            Some("servertool.stop_message")
+        );
+        assert_eq!(
+            metadata["clientInjectSource"].as_str(),
+            Some("servertool.stop_message")
+        );
+        assert_eq!(
+            metadata["serverToolLoopState"]["flowId"].as_str(),
+            Some("stop_message_flow")
+        );
+        assert_eq!(
+            metadata["serverToolLoopState"]["repeatCount"].as_u64(),
+            Some(1)
+        );
+        assert_eq!(
+            metadata["serverToolLoopState"]["maxRepeats"].as_u64(),
+            Some(3)
+        );
         assert!(metadata.get("providerKey").is_none());
         assert!(metadata.get("targetProviderKey").is_none());
         assert!(metadata.get("__shadowCompareForcedProviderKey").is_none());

@@ -321,9 +321,7 @@ export async function* sequenceResponse(
     }
 
     // 5. 发送response.completed + response.done事件
-    if (response.status !== 'requires_action') {
-      yield buildResponseCompletedEvent(response, context, config);
-    }
+    yield buildResponseCompletedEvent(response, context, config);
     yield buildResponseDoneEvent(response, context, config);
 
   } catch (error) {
