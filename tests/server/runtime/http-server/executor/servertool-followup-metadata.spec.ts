@@ -100,4 +100,52 @@ describe('servertool followup nested request metadata', () => {
     expect(metadata.__rt).not.toHaveProperty('extraFields');
     expect(metadata.__rt).not.toHaveProperty('extra_fields');
   });
+
+  it('does not inherit provider selection metadata for followup reentry', () => {
+    const metadata = buildServerToolNestedRequestMetadata({
+      baseMetadata: {
+        routeName: 'thinking',
+        routeHint: 'thinking',
+        providerKey: 'crs1.key1.gpt-5.3-codex',
+        runtimeKey: 'crs1.key1',
+        targetProviderKey: 'crs1.key1.gpt-5.3-codex',
+        __routecodexPreselectedRoute: {
+          providerKey: 'crs1.key1.gpt-5.3-codex',
+          runtimeKey: 'crs1.key1'
+        },
+        target: { providerKey: 'crs1.key1.gpt-5.3-codex' },
+        __rt: {
+          serverToolFollowup: true,
+          routeName: 'thinking',
+          providerKey: 'crs1.key1.gpt-5.3-codex',
+          runtimeKey: 'crs1.key1',
+          targetProviderKey: 'crs1.key1.gpt-5.3-codex',
+          __routecodexPreselectedRoute: {
+            providerKey: 'crs1.key1.gpt-5.3-codex',
+            runtimeKey: 'crs1.key1'
+          },
+          target: { providerKey: 'crs1.key1.gpt-5.3-codex' }
+        }
+      },
+      extraMetadata: {
+        __rt: { serverToolFollowup: true }
+      },
+      entryEndpoint: '/v1/responses'
+    });
+
+    expect(metadata.routeName).toBe('thinking');
+    expect(metadata.routeHint).toBe('thinking');
+    expect(metadata).not.toHaveProperty('providerKey');
+    expect(metadata).not.toHaveProperty('runtimeKey');
+    expect(metadata).not.toHaveProperty('targetProviderKey');
+    expect(metadata).not.toHaveProperty('__routecodexPreselectedRoute');
+    expect(metadata).not.toHaveProperty('target');
+    expect(metadata.__rt).toHaveProperty('serverToolFollowup', true);
+    expect(metadata.__rt).toHaveProperty('routeName', 'thinking');
+    expect(metadata.__rt).not.toHaveProperty('providerKey');
+    expect(metadata.__rt).not.toHaveProperty('runtimeKey');
+    expect(metadata.__rt).not.toHaveProperty('targetProviderKey');
+    expect(metadata.__rt).not.toHaveProperty('__routecodexPreselectedRoute');
+    expect(metadata.__rt).not.toHaveProperty('target');
+  });
 });

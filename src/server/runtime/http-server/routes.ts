@@ -41,6 +41,8 @@ interface RouteOptions {
   getHubPipeline?: () => unknown | null;
   getVirtualRouterArtifacts?: () => unknown | null;
   getServerId?: () => string;
+  getServerHost?: () => string;
+  getServerPort?: () => number | undefined;
   getStatsSnapshot?: () => {
     session: StatsSnapshot;
     historical: HistoricalStatsSnapshot;
@@ -437,7 +439,8 @@ export function registerHttpRoutes(options: RouteOptions): void {
       (typeof options.getServerId === 'function'
         ? options.getServerId()
         : `${config.server.host}:${config.server.port}`),
-    getServerHost: () => String(config.server.host || '')
+    getServerHost: () => String(config.server.host || ''),
+    getServerPort: () => (typeof config?.server?.port === 'number' ? config.server.port : undefined)
   });
 
   // Session client daemon endpoints:
@@ -604,37 +607,83 @@ export function registerHttpRoutes(options: RouteOptions): void {
     }
   };
 
-  app.post('/v1/chat/completions', async (req, res) => {
+  // Wrap an async handler so any thrown error is converted to a JSON HTTP response.
+  // Without this, an unhandled rejection inside an async route causes Express
+  // to reset the connection (Empty reply from server) instead of returning a
+  // proper JSON error body. Hard guard: every route handler must use this wrapper.
+  const wrap = (label: string, handler: (req: Request, res: Response) => Promise<unknown>) => {
+    return async (req: Request, res: Response): Promise<void> => {
+      try {
+        await handler(req, res);
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error(String(error));
+        const errorRecord = normalized as unknown as Record<string, unknown>;
+        const explicitStatus =
+          typeof errorRecord.status === 'number' ? errorRecord.status :
+          typeof errorRecord.statusCode === 'number' ? errorRecord.statusCode :
+          500;
+        const code =
+          typeof errorRecord.code === 'string' && errorRecord.code.trim()
+            ? String(errorRecord.code)
+            : 'internal_error';
+        const portTag = (() => {
+          const port = errorRecord.port;
+          if (typeof port === 'number') return String(port);
+          return '-';
+        })();
+        logRoutesNonBlockingError(`route.${label}.unhandled`, error, {
+          port: portTag,
+          method: req.method,
+          path: req.path
+        });
+        if (res.headersSent) {
+          try { res.end(); } catch { /* ignore */ }
+          return;
+        }
+        res.status(explicitStatus).json({
+          error: {
+            message: normalized.message,
+            type: 'route_handler_error',
+            code,
+            port: portTag,
+            entryEndpoint: label
+          }
+        });
+      }
+    };
+  };
+
+  app.post('/v1/chat/completions', wrap('/v1/chat/completions', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
     const ctx = buildHandlerContext(req);
     await runWithPortRequestContext(ctx.portContext, () => handleChatCompletions(req, res, ctx));
-  });
-  app.post('/v1/images/generations', async (req, res) => {
+  }));
+  app.post('/v1/images/generations', wrap('/v1/images/generations', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
     await handleImageGenerations(req, res, buildHandlerContext(req));
-  });
-  app.post('/v1/images/edits', async (req, res) => {
+  }));
+  app.post('/v1/images/edits', wrap('/v1/images/edits', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
     await handleImageEdits(req, res, buildHandlerContext(req));
-  });
-  app.post('/v1/messages', async (req, res) => {
+  }));
+  app.post('/v1/messages', wrap('/v1/messages', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
     const ctx = buildHandlerContext(req);
     await runWithPortRequestContext(ctx.portContext, () => handleMessages(req, res, ctx));
-  });
-  app.post('/v1/responses', async (req, res) => {
+  }));
+  app.post('/v1/responses', wrap('/v1/responses', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
     const ctx = buildHandlerContext(req);
     await runWithPortRequestContext(ctx.portContext, () => handleResponses(req, res, ctx));
-  });
-  app.post('/v1/responses/:id/submit_tool_outputs', async (req, res) => {
+  }));
+  app.post('/v1/responses/:id/submit_tool_outputs', wrap('/v1/responses.submit_tool_outputs', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
     const ctx = buildHandlerContext(req);
     await runWithPortRequestContext(ctx.portContext, () => handleResponses(req, res, ctx, {
       entryEndpoint: '/v1/responses.submit_tool_outputs',
       responseIdFromPath: req.params?.id
     }));
-  });
+  }));
 
   app.use('*', (_req: Request, res: Response) => {
     res.status(404).json({

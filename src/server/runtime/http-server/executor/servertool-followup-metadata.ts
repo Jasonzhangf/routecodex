@@ -46,6 +46,21 @@ const MAPPABLE_SEMANTICS_METADATA_KEYS = [
   'extra_fields'
 ] as const;
 
+const PROVIDER_SELECTION_METADATA_KEYS = [
+  '__routecodexPreselectedRoute',
+  'preselectedRoute',
+  'selectedRoute',
+  'routeTarget',
+  'target',
+  'providerKey',
+  'runtimeKey',
+  'targetProviderKey',
+  'selectedProviderKey',
+  'assignedProviderKey',
+  'assignedRuntimeKey',
+  'assignedModelId'
+] as const;
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -83,6 +98,12 @@ function canonicalizeHeaderName(headerName: string): string {
 
 function stripMappableSemanticsMetadataFields(metadata: Record<string, unknown>): void {
   for (const key of MAPPABLE_SEMANTICS_METADATA_KEYS) {
+    delete metadata[key];
+  }
+}
+
+function stripProviderSelectionMetadataFields(metadata: Record<string, unknown>): void {
+  for (const key of PROVIDER_SELECTION_METADATA_KEYS) {
     delete metadata[key];
   }
 }
@@ -166,6 +187,7 @@ export function buildServerToolNestedRequestMetadata(args: {
     stage: 'inbound'
   };
   stripMappableSemanticsMetadataFields(out);
+  stripProviderSelectionMetadataFields(out);
 
   if (
     args.requestSemantics &&
@@ -189,6 +211,7 @@ export function buildServerToolNestedRequestMetadata(args: {
     if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
       (out as Record<string, unknown>).__rt = { ...baseRt, ...extraRt };
       stripMappableSemanticsMetadataFields((out as Record<string, unknown>).__rt as Record<string, unknown>);
+      stripProviderSelectionMetadataFields((out as Record<string, unknown>).__rt as Record<string, unknown>);
     }
   } catch (error) {
     args.onMergeRuntimeMetaError?.(error);

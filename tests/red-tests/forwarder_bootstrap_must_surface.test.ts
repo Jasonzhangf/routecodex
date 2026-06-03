@@ -21,6 +21,8 @@
  */
 import { describe, it, expect } from '@jest/globals';
 import { readFileSync } from 'node:fs';
+import { Socket } from 'node:net';
+import { networkInterfaces } from 'node:os';
 import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-builder.js';
 import { parseTomlRecord } from '../../src/config/toml-basic.js';
 
@@ -121,13 +123,14 @@ describe('RED: live 10000 server must respond (not empty reply)', () => {
    * 若 10000 server 未在运行则 skip；若运行则必须通过。
    */
   it('10000 server, if running, must return HTTP response on basic chat request', async () => {
-    const probe = await probePort('127.0.0.1', 10000);
+    const probeHost = resolveProbeHost();
+    const probe = await probePort(probeHost, 10000);
     if (!probe.listening) {
       // Server not running — skip rather than fail (CI may not have a live server)
       return;
     }
     // Listener exists. Send minimal request and require non-empty HTTP response.
-    const res = await fetch('http://127.0.0.1:10000/v1/chat/completions', {
+    const res = await fetch(`http://${probeHost}:10000/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -145,10 +148,18 @@ describe('RED: live 10000 server must respond (not empty reply)', () => {
   }, 30000);
 });
 
+function resolveProbeHost(): string {
+  const explicit = process.env.ROUTECODEX_PROBE_HOST?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const iface = networkInterfaces().en0?.find((entry) => entry.family === 'IPv4' && !entry.internal)?.address;
+  return iface ?? '127.0.0.1';
+}
+
 async function probePort(host: string, port: number): Promise<{ listening: boolean }> {
   return await new Promise((resolve) => {
-    const net = require('node:net');
-    const sock = new net.Socket();
+    const sock = new Socket();
     const done = (listening: boolean) => {
       sock.destroy();
       resolve({ listening });

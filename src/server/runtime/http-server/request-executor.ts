@@ -277,6 +277,43 @@ function resetRequestExecutorInternalStateForTests(): void {
   providerSwitchLogState.clear();
 }
 
+function readEntryServerId(metadataRecord: Record<string, unknown> | undefined): string | undefined {
+  if (!metadataRecord) return undefined;
+  const candidates = [
+    metadataRecord.routecodexServerId,
+    metadataRecord.serverId,
+    metadataRecord.canonicalServerId
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+  return undefined;
+}
+
+function readEntryPort(metadataRecord: Record<string, unknown> | undefined): number | undefined {
+  if (!metadataRecord) return undefined;
+  const candidates = [
+    metadataRecord.entryPort,
+    metadataRecord.matchedPort,
+    metadataRecord.routecodexLocalPort
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return Math.floor(value);
+    }
+    if (typeof value === 'string') {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+  }
+  return undefined;
+}
+
 export class HubRequestExecutor implements RequestExecutor {
   private readonly trafficGovernor: ProviderTrafficGovernorLike;
 
@@ -805,10 +842,12 @@ export class HubRequestExecutor implements RequestExecutor {
         if (clientHeadersForAttempt) {
           ensureClientHeadersOnPayload(providerPayload, clientHeadersForAttempt);
         }
+        const entryPortFromMetadata = readEntryPort(metadataRecord);
         this.deps.stats.bindProvider(statsRequestId, {
           providerKey: target.providerKey,
           providerType: handle.providerType,
-          model: providerModel
+          model: providerModel,
+          ...(typeof entryPortFromMetadata === 'number' ? { entryPort: entryPortFromMetadata } : {})
         });
 
         logStageLazy('provider.prepare', input.requestId, () => ({
@@ -930,6 +969,12 @@ export class HubRequestExecutor implements RequestExecutor {
               attempt
             });
             const trafficRuntimeProfile = resolveRequestExecutorTrafficRuntimeProfile(runtimeKey, handle, target.providerKey);
+            const trafficScopeKey = (() => {
+              const serverId = readEntryServerId(metadataRecord);
+              if (serverId) return `server:${serverId}`;
+              const port = readEntryPort(metadataRecord);
+              return port ? `port:${port}` : undefined;
+            })();
             const trafficAcquired = await this.trafficGovernor.acquire({
               runtimeKey,
               providerKey: target.providerKey,
@@ -940,7 +985,8 @@ export class HubRequestExecutor implements RequestExecutor {
                 handle,
                 providerKey: target.providerKey,
                 compatibilityProfile: target.compatibilityProfile
-              })
+              }),
+              ...(trafficScopeKey ? { scopeKey: trafficScopeKey } : {})
             });
             trafficPermit = trafficAcquired.permit;
             trafficPolicyMaxInFlight = trafficAcquired.policy.concurrency.maxInFlight;
