@@ -63,6 +63,11 @@ type NativeChatProcessNodeResultSemantics = {
     requestSemanticsJson: string,
     forceReplace: boolean
   ) => string;
+  resolveProviderResponseRequestSemanticsJson?: (
+    processedJson: string,
+    standardizedJson: string,
+    requestMetadataJson: string
+  ) => string;
 };
 
 type NativeHubPipelineRespSemantics = {
@@ -446,6 +451,30 @@ export function backfillServertoolAdapterContextToolsNative(
     throw new Error('[llmswitch-bridge] backfillServertoolAdapterContextToolsJson returned invalid payload');
   }
   return { changed: row.changed, context: context as Record<string, unknown> };
+}
+
+export function resolveProviderResponseRequestSemanticsNative(
+  processed: Record<string, unknown> | undefined,
+  standardized: Record<string, unknown> | undefined,
+  requestMetadata: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const fn = getChatProcessNodeResultSemantics().resolveProviderResponseRequestSemanticsJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resolveProviderResponseRequestSemanticsJson not available');
+  }
+  const raw = fn(
+    JSON.stringify(processed ?? null),
+    JSON.stringify(standardized ?? null),
+    JSON.stringify(requestMetadata ?? null)
+  );
+  const parsed = JSON.parse(raw) as unknown;
+  if (parsed === null) {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] resolveProviderResponseRequestSemanticsJson returned invalid payload');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function updateResponsesContractProbeFromSseChunkNative(

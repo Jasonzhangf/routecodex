@@ -1037,6 +1037,19 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('provider response utils must not merge request tools with TS semantics', () => {
+    const filePath = path.join(process.cwd(), 'src/server/runtime/http-server/executor/provider-response-utils.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'ts-merge-unique-tools', pattern: /mergeUniqueTools/ },
+      { label: 'ts-tool-name-dedupe-set', pattern: /new\s+Set<string>\s*\(\)/ },
+      { label: 'ts-read-tool-function-name', pattern: /record\.function[\s\S]{0,240}fn\?\.name/ },
+      { label: 'ts-client-tools-raw-merge', pattern: /clientToolsRaw\s*:\s*mergedFollowupClientToolsRaw/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('responses openai pipeline must not capture tool results in TS', () => {
     const filePath = path.join(
       process.cwd(),

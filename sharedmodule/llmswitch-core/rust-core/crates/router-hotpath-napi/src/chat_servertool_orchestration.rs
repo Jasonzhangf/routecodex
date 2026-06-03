@@ -490,6 +490,252 @@ fn backfill_servertool_adapter_context_tools_value(
     serde_json::json!({ "changed": true, "context": Value::Object(base_context) })
 }
 
+fn as_json_object(value: Option<&Value>) -> Option<&Map<String, Value>> {
+    value.and_then(Value::as_object)
+}
+
+fn read_provider_response_metadata(value: Option<&Value>) -> Option<&Map<String, Value>> {
+    as_json_object(value).and_then(|row| row.get("metadata")).and_then(Value::as_object)
+}
+
+fn read_provider_response_rt(metadata: Option<&Map<String, Value>>) -> Option<&Map<String, Value>> {
+    metadata.and_then(|row| row.get("__rt")).and_then(Value::as_object)
+}
+
+fn read_provider_response_root_tools(value: Option<&Value>) -> Option<Vec<Value>> {
+    as_json_object(value)
+        .and_then(|row| row.get("tools"))
+        .and_then(Value::as_array)
+        .cloned()
+}
+
+fn read_provider_response_request_semantics<'a>(
+    processed_metadata: Option<&'a Map<String, Value>>,
+    standardized_metadata: Option<&'a Map<String, Value>>,
+    request_metadata: Option<&'a Map<String, Value>>,
+) -> Option<&'a Value> {
+    processed_metadata
+        .and_then(|row| row.get("requestSemantics"))
+        .filter(|value| value.is_object())
+        .or_else(|| {
+            standardized_metadata
+                .and_then(|row| row.get("requestSemantics"))
+                .filter(|value| value.is_object())
+        })
+        .or_else(|| {
+            request_metadata
+                .and_then(|row| row.get("requestSemantics"))
+                .filter(|value| value.is_object())
+        })
+}
+
+fn read_provider_response_base_semantics<'a>(
+    processed: Option<&'a Value>,
+    standardized: Option<&'a Value>,
+    metadata_semantics: Option<&'a Value>,
+) -> Option<&'a Value> {
+    metadata_semantics.or_else(|| {
+        as_json_object(processed)
+            .and_then(|row| row.get("semantics"))
+            .filter(|value| value.is_object())
+    }).or_else(|| {
+        as_json_object(standardized)
+            .and_then(|row| row.get("semantics"))
+            .filter(|value| value.is_object())
+    })
+}
+
+fn read_provider_response_client_tools_raw(base: Option<&Map<String, Value>>) -> Option<Vec<Value>> {
+    let tools = base.and_then(|row| row.get("tools"));
+    tools
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("clientToolsRaw"))
+        .and_then(Value::as_array)
+        .cloned()
+        .or_else(|| tools.and_then(Value::as_array).cloned())
+}
+
+fn merge_provider_response_unique_tools(
+    primary: Option<Vec<Value>>,
+    secondary: Option<Vec<Value>>,
+) -> Option<Vec<Value>> {
+    let mut out: Vec<Value> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    for tool in primary.into_iter().flatten().chain(secondary.into_iter().flatten()) {
+        if !tool.is_object() {
+            continue;
+        }
+        let name = read_servertool_adapter_tool_name(&tool);
+        if name.is_empty() || seen.contains(&name) {
+            continue;
+        }
+        seen.insert(name);
+        out.push(tool);
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+fn read_followup_raw<'a>(
+    processed_rt: Option<&'a Map<String, Value>>,
+    standardized_rt: Option<&'a Map<String, Value>>,
+    request_metadata_rt: Option<&'a Map<String, Value>>,
+    processed_metadata: Option<&'a Map<String, Value>>,
+    standardized_metadata: Option<&'a Map<String, Value>>,
+    request_metadata: Option<&'a Map<String, Value>>,
+) -> Option<&'a Value> {
+    processed_rt
+        .and_then(|row| row.get("serverToolFollowup"))
+        .or_else(|| standardized_rt.and_then(|row| row.get("serverToolFollowup")))
+        .or_else(|| request_metadata_rt.and_then(|row| row.get("serverToolFollowup")))
+        .or_else(|| processed_metadata.and_then(|row| row.get("serverToolFollowup")))
+        .or_else(|| standardized_metadata.and_then(|row| row.get("serverToolFollowup")))
+        .or_else(|| request_metadata.and_then(|row| row.get("serverToolFollowup")))
+}
+
+fn read_followup_source<'a>(
+    processed_rt: Option<&'a Map<String, Value>>,
+    standardized_rt: Option<&'a Map<String, Value>>,
+    request_metadata_rt: Option<&'a Map<String, Value>>,
+    processed_metadata: Option<&'a Map<String, Value>>,
+    standardized_metadata: Option<&'a Map<String, Value>>,
+    request_metadata: Option<&'a Map<String, Value>>,
+) -> Option<String> {
+    processed_rt
+        .and_then(|row| row.get("clientInjectSource"))
+        .or_else(|| standardized_rt.and_then(|row| row.get("clientInjectSource")))
+        .or_else(|| request_metadata_rt.and_then(|row| row.get("clientInjectSource")))
+        .or_else(|| processed_metadata.and_then(|row| row.get("clientInjectSource")))
+        .or_else(|| standardized_metadata.and_then(|row| row.get("clientInjectSource")))
+        .or_else(|| request_metadata.and_then(|row| row.get("clientInjectSource")))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn boolish_true(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(true)) => true,
+        Some(Value::String(text)) => text.trim().eq_ignore_ascii_case("true"),
+        _ => false,
+    }
+}
+
+fn resolve_provider_response_request_semantics_value(
+    processed: Value,
+    standardized: Value,
+    request_metadata: Value,
+) -> Value {
+    let processed_ref = if processed.is_null() { None } else { Some(&processed) };
+    let standardized_ref = if standardized.is_null() { None } else { Some(&standardized) };
+    let request_metadata_ref = if request_metadata.is_null() { None } else { Some(&request_metadata) };
+    let processed_metadata = read_provider_response_metadata(processed_ref);
+    let standardized_metadata = read_provider_response_metadata(standardized_ref);
+    let request_metadata_record = request_metadata_ref.and_then(Value::as_object);
+    let metadata_semantics = read_provider_response_request_semantics(
+        processed_metadata,
+        standardized_metadata,
+        request_metadata_record,
+    );
+    let fallback_tools = read_provider_response_root_tools(processed_ref)
+        .or_else(|| read_provider_response_root_tools(standardized_ref));
+    let base_value = read_provider_response_base_semantics(
+        processed_ref,
+        standardized_ref,
+        metadata_semantics,
+    );
+    if base_value.is_none() && fallback_tools.as_ref().is_none_or(Vec::is_empty) {
+        return Value::Null;
+    }
+
+    let base_object = base_value.and_then(Value::as_object);
+    let existing_client_tools_raw = read_provider_response_client_tools_raw(base_object);
+    let mut normalized_base = match base_value.cloned() {
+        Some(Value::Object(row)) => row,
+        _ => Map::new(),
+    };
+    if base_value.is_none() {
+        normalized_base.insert(
+            "tools".to_string(),
+            serde_json::json!({ "clientToolsRaw": fallback_tools.clone().unwrap_or_default() }),
+        );
+    } else if existing_client_tools_raw.as_ref().is_none_or(Vec::is_empty)
+        && fallback_tools.as_ref().is_some_and(|tools| !tools.is_empty())
+    {
+        let mut tools = normalized_base
+            .get("tools")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        tools.insert(
+            "clientToolsRaw".to_string(),
+            Value::Array(fallback_tools.clone().unwrap_or_default()),
+        );
+        normalized_base.insert("tools".to_string(), Value::Object(tools));
+    }
+
+    let processed_rt = read_provider_response_rt(processed_metadata);
+    let standardized_rt = read_provider_response_rt(standardized_metadata);
+    let request_metadata_rt = read_provider_response_rt(request_metadata_record);
+    let servertool_followup = boolish_true(read_followup_raw(
+        processed_rt,
+        standardized_rt,
+        request_metadata_rt,
+        processed_metadata,
+        standardized_metadata,
+        request_metadata_record,
+    ));
+    let followup_source = read_followup_source(
+        processed_rt,
+        standardized_rt,
+        request_metadata_rt,
+        processed_metadata,
+        standardized_metadata,
+        request_metadata_record,
+    );
+    if !servertool_followup && followup_source.is_none() {
+        return Value::Object(normalized_base);
+    }
+
+    let normalized_client_tools = normalized_base
+        .get("tools")
+        .and_then(Value::as_object)
+        .and_then(|tools| tools.get("clientToolsRaw"))
+        .and_then(Value::as_array)
+        .cloned();
+    let merged = merge_provider_response_unique_tools(normalized_client_tools, fallback_tools);
+    if let Some(merged) = merged {
+        let mut tools = normalized_base
+            .get("tools")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        tools.insert("clientToolsRaw".to_string(), Value::Array(merged));
+        normalized_base.insert("tools".to_string(), Value::Object(tools));
+    }
+    Value::Object(normalized_base)
+}
+
+#[napi(js_name = "resolveProviderResponseRequestSemanticsJson")]
+pub fn resolve_provider_response_request_semantics_json(
+    processed_json: String,
+    standardized_json: String,
+    request_metadata_json: String,
+) -> NapiResult<String> {
+    let processed: Value = serde_json::from_str(&processed_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let standardized: Value = serde_json::from_str(&standardized_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let request_metadata: Value = serde_json::from_str(&request_metadata_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let output = resolve_provider_response_request_semantics_value(
+        processed,
+        standardized,
+        request_metadata,
+    );
+    serde_json::to_string(&output).map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
 #[napi(js_name = "backfillServertoolAdapterContextToolsJson")]
 pub fn backfill_servertool_adapter_context_tools_json(
     base_context_json: String,
@@ -2564,6 +2810,57 @@ mod tests {
         });
         let output = backfill_servertool_adapter_context_tools_value(context, json!({}), false);
         assert_eq!(output["changed"], false);
+    }
+
+    #[test]
+    fn test_resolve_provider_response_request_semantics_merges_followup_tools() {
+        let processed = json!({
+            "tools": [
+                { "type": "function", "function": { "name": "reasoning.stop" } }
+            ]
+        });
+        let request_metadata = json!({
+            "requestSemantics": {
+                "tools": {
+                    "clientToolsRaw": [
+                        { "type": "function", "function": { "name": "exec_command" } },
+                        { "type": "function", "function": { "name": "apply_patch" } }
+                    ]
+                }
+            },
+            "__rt": {
+                "serverToolFollowup": true,
+                "clientInjectSource": "servertool.reasoning_stop_guard"
+            }
+        });
+
+        let output = resolve_provider_response_request_semantics_value(
+            processed,
+            Value::Null,
+            request_metadata,
+        );
+        let tools = output["tools"]["clientToolsRaw"].as_array().unwrap();
+        assert_eq!(tools.len(), 3);
+        assert_eq!(tools[0]["function"]["name"], "exec_command");
+        assert_eq!(tools[1]["function"]["name"], "apply_patch");
+        assert_eq!(tools[2]["function"]["name"], "reasoning.stop");
+    }
+
+    #[test]
+    fn test_resolve_provider_response_request_semantics_falls_back_to_root_tools() {
+        let processed = json!({
+            "tools": [
+                { "type": "function", "function": { "name": "exec_command" } }
+            ]
+        });
+        let output = resolve_provider_response_request_semantics_value(
+            processed,
+            Value::Null,
+            Value::Null,
+        );
+        let tools = output["tools"]["clientToolsRaw"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["function"]["name"], "exec_command");
     }
 
     #[test]
