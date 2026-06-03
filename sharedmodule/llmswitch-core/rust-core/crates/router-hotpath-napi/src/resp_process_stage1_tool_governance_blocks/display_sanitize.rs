@@ -1,7 +1,9 @@
 use regex::Regex;
 use serde_json::{Map, Value};
 
-use crate::shared_tooling::strip_provider_tool_sentinel_residue;
+use crate::shared_tooling::{
+    split_provider_tool_sentinel_text, strip_provider_tool_sentinel_residue,
+};
 
 pub(crate) fn text_contains_explicit_tool_markup(text: &str) -> bool {
     contains_explicit_tool_wrapper_marker(text)
@@ -390,7 +392,10 @@ pub(crate) fn strip_text_tool_wrapper_noise(raw: &str) -> String {
 }
 
 fn is_chunking_error_visible_text(raw: &str) -> bool {
-    raw.contains("<|ChunkingError|>") || raw.contains("<｜end▁of▁thinking｜>") || raw.contains("<|end▁of▁thinking|>") || raw.contains("<|end▁of▁thinking|>")
+    raw.contains("<|ChunkingError|>")
+        || raw.contains("<｜end▁of▁thinking｜>")
+        || raw.contains("<|end▁of▁thinking|>")
+        || raw.contains("<|end▁of▁thinking|>")
 }
 
 fn fallback_preserve_inner_text_when_cleaned_empty(raw: &str, cleaned: &str) -> Option<String> {
@@ -639,9 +644,11 @@ pub(crate) fn sanitize_textual_marker_field_in_message(
         return false;
     }
     if cleaned.is_empty() {
-        if let Some(preserved) =
-            resolve_cleaned_empty_marker_preservation(normalized_raw.as_str(), cleaned.as_str(), false)
-        {
+        if let Some(preserved) = resolve_cleaned_empty_marker_preservation(
+            normalized_raw.as_str(),
+            cleaned.as_str(),
+            false,
+        ) {
             message.insert(key.to_string(), Value::String(preserved));
         } else {
             message.remove(key);
@@ -713,12 +720,123 @@ pub(crate) fn sanitize_textual_marker_field_in_message_with_policy(
 
 pub(crate) fn strip_tool_markup_for_display_text(raw: &str) -> String {
     let normalized_raw = strip_provider_tool_sentinel_residue(raw);
-    let cleaned = strip_orphan_tool_markup_lines(strip_tool_call_marker_payload(normalized_raw.as_str()).as_str());
+    let cleaned = strip_orphan_tool_markup_lines(
+        strip_tool_call_marker_payload(normalized_raw.as_str()).as_str(),
+    );
     if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(raw, cleaned.as_str())
     {
         return preserved;
     }
     cleaned
+}
+
+fn build_reasoning_text_value(text: &str) -> Value {
+    Value::Object(Map::from_iter([(
+        "content".to_string(),
+        Value::Array(vec![Value::Object(Map::from_iter([
+            (
+                "type".to_string(),
+                Value::String("reasoning_text".to_string()),
+            ),
+            ("text".to_string(), Value::String(text.to_string())),
+        ]))]),
+    )]))
+}
+
+fn append_reasoning_text(message: &mut Map<String, Value>, text: &str) -> bool {
+    let text = text.trim();
+    if text.is_empty() {
+        return false;
+    }
+
+    match message.get_mut("reasoning") {
+        Some(Value::Object(row)) => {
+            let content = row
+                .entry("content".to_string())
+                .or_insert_with(|| Value::Array(Vec::new()));
+            if let Some(items) = content.as_array_mut() {
+                items.push(Value::Object(Map::from_iter([
+                    (
+                        "type".to_string(),
+                        Value::String("reasoning_text".to_string()),
+                    ),
+                    ("text".to_string(), Value::String(text.to_string())),
+                ])));
+                true
+            } else {
+                false
+            }
+        }
+        Some(Value::String(existing)) => {
+            let existing = existing.trim().to_string();
+            let mut items = Vec::new();
+            if !existing.is_empty() {
+                items.push(Value::Object(Map::from_iter([
+                    (
+                        "type".to_string(),
+                        Value::String("reasoning_text".to_string()),
+                    ),
+                    ("text".to_string(), Value::String(existing)),
+                ])));
+            }
+            items.push(Value::Object(Map::from_iter([
+                (
+                    "type".to_string(),
+                    Value::String("reasoning_text".to_string()),
+                ),
+                ("text".to_string(), Value::String(text.to_string())),
+            ])));
+            message.insert(
+                "reasoning".to_string(),
+                Value::Object(Map::from_iter([(
+                    "content".to_string(),
+                    Value::Array(items),
+                )])),
+            );
+            true
+        }
+        Some(_) => false,
+        None => {
+            message.insert("reasoning".to_string(), build_reasoning_text_value(text));
+            true
+        }
+    }
+}
+
+pub(crate) fn move_tool_sentinel_visible_content_to_reasoning(
+    message: &mut Map<String, Value>,
+) -> i64 {
+    let has_tool_calls = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .map(|rows| !rows.is_empty())
+        .unwrap_or(false);
+    if !has_tool_calls {
+        return 0;
+    }
+    let Some(raw) = message
+        .get("content")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return 0;
+    };
+    if !raw.contains("]<]") || !contains_explicit_tool_wrapper_marker(raw.as_str()) {
+        return 0;
+    }
+    let Some((prefix, _suffix)) = split_provider_tool_sentinel_text(raw.as_str()) else {
+        return 0;
+    };
+    let cleaned =
+        strip_orphan_tool_markup_lines(strip_tool_call_marker_payload(prefix.as_str()).as_str());
+    if cleaned.trim().is_empty() {
+        return 0;
+    }
+    if append_reasoning_text(message, cleaned.as_str()) {
+        message.insert("content".to_string(), Value::Null);
+        return 1;
+    }
+    0
 }
 
 fn sanitize_content_field_after_tool_markup(
@@ -884,6 +1002,7 @@ pub(crate) fn sanitize_reasoning_fields_after_tool_harvest(
         .and_then(Value::as_array)
         .map(|rows| !rows.is_empty())
         .unwrap_or(false);
+    changed += move_tool_sentinel_visible_content_to_reasoning(message);
     changed += sanitize_content_field_after_tool_markup(message, has_tool_calls);
     if sanitize_textual_marker_field_in_message_with_policy(
         message,

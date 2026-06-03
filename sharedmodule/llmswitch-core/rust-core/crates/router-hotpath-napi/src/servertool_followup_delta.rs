@@ -2,6 +2,8 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 
+use crate::shared_tooling::split_provider_tool_sentinel_text;
+
 fn as_object(value: &Value) -> Option<&Map<String, Value>> {
     value.as_object()
 }
@@ -142,10 +144,18 @@ fn extract_chat_messages_from_responses_input(input: &[Value]) -> Vec<Value> {
                 .map(extract_responses_message_text)
                 .unwrap_or_default();
             if !text.trim().is_empty() {
-                messages.push(Value::Object(Map::from_iter([
-                    ("role".to_string(), Value::String(role.to_string())),
-                    ("content".to_string(), Value::String(text)),
-                ])));
+                if role == "assistant" {
+                    if let Some(Value::Object(message)) =
+                        build_assistant_message_from_text(text.as_str())
+                    {
+                        messages.push(Value::Object(message));
+                    }
+                } else {
+                    messages.push(Value::Object(Map::from_iter([
+                        ("role".to_string(), Value::String(role.to_string())),
+                        ("content".to_string(), Value::String(text)),
+                    ])));
+                }
             }
         }
     }
@@ -244,6 +254,28 @@ fn read_text_part(entry: &Value) -> String {
         .to_string()
 }
 
+fn build_assistant_message_from_text(text: &str) -> Option<Value> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let mut message = Map::new();
+    message.insert("role".to_string(), Value::String("assistant".to_string()));
+    if let Some((reasoning, visible)) = split_provider_tool_sentinel_text(text) {
+        if !reasoning.trim().is_empty() {
+            message.insert("reasoning_content".to_string(), Value::String(reasoning));
+        }
+        if visible.trim().is_empty() {
+            message.insert("content".to_string(), Value::String(String::new()));
+        } else {
+            message.insert("content".to_string(), Value::String(visible));
+        }
+    } else {
+        message.insert("content".to_string(), Value::String(text.to_string()));
+    }
+    Some(Value::Object(message))
+}
+
 pub(crate) fn extract_assistant_followup_message(final_chat_response: &Value) -> Option<Value> {
     let record = final_chat_response.as_object()?;
     if let Some(choice_message) = record
@@ -277,13 +309,7 @@ pub(crate) fn extract_assistant_followup_message(final_chat_response: &Value) ->
         .filter(|part| !part.trim().is_empty())
         .collect::<Vec<_>>()
         .join("");
-    if text.is_empty() {
-        return None;
-    }
-    Some(Value::Object(Map::from_iter([
-        ("role".to_string(), Value::String("assistant".to_string())),
-        ("content".to_string(), Value::String(text)),
-    ])))
+    build_assistant_message_from_text(text.as_str())
 }
 
 fn extract_chat_tool_outputs(final_chat_response: &Value) -> Vec<Value> {
@@ -901,6 +927,31 @@ mod tests {
     }
 
     #[test]
+    fn extracts_followup_seed_maps_responses_history_sentinel_prefix_to_reasoning() {
+        let responses = json!({
+            "model": "gpt-resp",
+            "input": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "DNS 已切回 coder2。]<]minimax[>[Jason，继续执行。"
+                }]
+            }]
+        });
+
+        let seed = extract_captured_chat_seed(&responses).expect("seed");
+        assert_eq!(seed["messages"][0]["role"], "assistant");
+        assert_eq!(
+            seed["messages"][0]["reasoning_content"],
+            "DNS 已切回 coder2。"
+        );
+        assert_eq!(seed["messages"][0]["content"], "Jason，继续执行。");
+        let serialized = serde_json::to_string(&seed).unwrap();
+        assert!(!serialized.contains("]<]minimax[>["));
+    }
+
+    #[test]
     fn apply_followup_delta_preserves_seed_tool_choice() {
         let input = json!({
             "adapterContext": {},
@@ -915,8 +966,32 @@ mod tests {
         });
 
         let payload = apply_followup_delta_plan(&input).expect("payload");
-        assert_eq!(payload["parameters"]["tool_choice"], json!({"type": "auto"}));
+        assert_eq!(
+            payload["parameters"]["tool_choice"],
+            json!({"type": "auto"})
+        );
         assert!(payload["parameters"].get("stream").is_none());
+    }
+
+    #[test]
+    fn extract_assistant_followup_message_maps_provider_sentinel_prefix_to_reasoning() {
+        let response = json!({
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "DNS 已切回 coder2。]<]minimax[>[Jason，继续执行。"
+                }]
+            }]
+        });
+
+        let message = extract_assistant_followup_message(&response).expect("message");
+        assert_eq!(message["role"], "assistant");
+        assert_eq!(message["reasoning_content"], "DNS 已切回 coder2。");
+        assert_eq!(message["content"], "Jason，继续执行。");
+        let serialized = serde_json::to_string(&message).unwrap();
+        assert!(!serialized.contains("]<]minimax[>["));
     }
 
     #[test]

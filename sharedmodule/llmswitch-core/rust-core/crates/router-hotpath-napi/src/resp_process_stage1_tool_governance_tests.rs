@@ -3687,12 +3687,15 @@ fn test_govern_response_harvests_sentinel_split_provider_tool_call_text() {
         result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
         "exec_command"
     );
-    let content = result.governed_payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
-    assert_eq!(content, "让我看 req_process_stage2_route_select：");
-    assert!(!content.contains("invoke"));
-    assert!(!content.contains("tool_call"));
+    assert!(result.governed_payload["choices"][0]["message"]["content"].is_null());
+    assert_eq!(
+        result.governed_payload["choices"][0]["message"]["reasoning"]["content"][0]["type"],
+        "reasoning_text"
+    );
+    assert_eq!(
+        result.governed_payload["choices"][0]["message"]["reasoning"]["content"][0]["text"],
+        "让我看 req_process_stage2_route_select："
+    );
     let args: Value = serde_json::from_str(
         result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
             .as_str()
@@ -3703,6 +3706,48 @@ fn test_govern_response_harvests_sentinel_split_provider_tool_call_text() {
         args["cmd"],
         "find sharedmodule/llmswitch-core -name 'route_select*.rs' 2>/dev/null"
     );
+}
+
+#[test]
+fn test_govern_response_moves_minimax_sentinel_prefix_to_reasoning() {
+    let input = ToolGovernanceInput {
+        payload: json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "DNS 已切回 coder2。Step 2：恢复 coder2 sub2api。]<]minimax[>[
+
+• minimax:tool_call (minimax:tool_call)
+
+  </minimax:tool_call>",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"pwd\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }),
+        client_protocol: "openai-responses".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_minimax_sentinel_reasoning".to_string(),
+    };
+
+    let result = govern_response(input).unwrap();
+    let message = &result.governed_payload["choices"][0]["message"];
+    assert!(message["content"].is_null());
+    assert_eq!(message["reasoning"]["content"][0]["type"], "reasoning_text");
+    assert_eq!(
+        message["reasoning"]["content"][0]["text"],
+        "DNS 已切回 coder2。Step 2：恢复 coder2 sub2api。"
+    );
+    let serialized = serde_json::to_string(&result.governed_payload).unwrap();
+    assert!(!serialized.contains("]<]minimax[>["));
+    assert!(!serialized.contains("minimax:tool_call"));
 }
 
 #[test]
@@ -3859,7 +3904,10 @@ fn test_govern_response_preserves_malformed_rcc_wrapper_when_name_missing() {
         .cloned()
         .unwrap_or_default();
     assert!(tool_calls.is_empty());
-    assert_eq!(output.governed_payload["choices"][0]["finish_reason"], "stop");
+    assert_eq!(
+        output.governed_payload["choices"][0]["finish_reason"],
+        "stop"
+    );
     assert_eq!(
         output.governed_payload["choices"][0]["message"]["content"],
         raw
@@ -3986,7 +4034,10 @@ fn test_govern_response_preserves_malformed_rcc_wrapper_multiline_whitespace_whe
         .cloned()
         .unwrap_or_default();
     assert!(tool_calls.is_empty());
-    assert_eq!(output.governed_payload["choices"][0]["finish_reason"], "stop");
+    assert_eq!(
+        output.governed_payload["choices"][0]["finish_reason"],
+        "stop"
+    );
     assert_eq!(
         output.governed_payload["choices"][0]["message"]["content"],
         raw

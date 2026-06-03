@@ -2,7 +2,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::{
-    sanitize_reasoning_fields_after_tool_harvest,
+    move_tool_sentinel_visible_content_to_reasoning, sanitize_reasoning_fields_after_tool_harvest,
     sanitize_textual_marker_field_in_message_with_policy,
 };
 use crate::resp_process_stage1_tool_governance_blocks::json_args::try_parse_json_value_lenient;
@@ -124,7 +124,8 @@ pub(crate) fn extract_tool_calls_from_text_candidate(
     recovered = extract_strict_wrapper_tool_calls_from_rcc(text, fallback_start_id);
 
     if recovered.is_empty() {
-        recovered = extract_tool_call_entries_from_malformed_tool_calls_text(text, fallback_start_id);
+        recovered =
+            extract_tool_call_entries_from_malformed_tool_calls_text(text, fallback_start_id);
     }
 
     if recovered.is_empty() {
@@ -265,6 +266,7 @@ pub(crate) fn harvest_explicit_wrapper_only_tool_calls_from_payload(payload: &mu
 
         harvested += recovered.len() as i64;
         message.insert("tool_calls".to_string(), Value::Array(recovered));
+        move_tool_sentinel_visible_content_to_reasoning(message);
         sanitize_textual_marker_field_in_message_with_policy(message, "content", true);
         sanitize_reasoning_fields_after_tool_harvest(message);
 

@@ -472,6 +472,22 @@ pub(crate) fn strip_provider_tool_sentinel_residue(raw: &str) -> String {
         .join("\n")
 }
 
+pub(crate) fn split_provider_tool_sentinel_text(raw: &str) -> Option<(String, String)> {
+    static BRACKET_SENTINEL_RE: OnceLock<Regex> = OnceLock::new();
+    let re = BRACKET_SENTINEL_RE.get_or_init(|| {
+        Regex::new(r"\]<\][A-Za-z][A-Za-z0-9_-]*\[>\[")
+            .expect("valid provider bracket sentinel regex")
+    });
+    let matched = re.find(raw)?;
+    let before = strip_provider_tool_sentinel_residue(&raw[..matched.start()])
+        .trim()
+        .to_string();
+    let after = strip_provider_tool_sentinel_residue(&raw[matched.end()..])
+        .trim()
+        .to_string();
+    Some((before, after))
+}
+
 fn replace_inline_data_images_with_placeholder(raw: &str) -> String {
     static DATA_IMAGE_RE: OnceLock<Regex> = OnceLock::new();
     let re = DATA_IMAGE_RE.get_or_init(|| {
