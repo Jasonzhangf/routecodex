@@ -462,3 +462,33 @@ describe('client connection timeout hint', () => {
     expect(signal?.aborted).toBe(true);
   });
 });
+
+describe('executor metadata route hint extraction', () => {
+  it('uses input metadata routeHint when no route hint header is present', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-route-hint-meta',
+      headers: {},
+      query: {},
+      body: { input: [] },
+      metadata: { routeHint: 'search' }
+    } as any);
+
+    expect(metadata.routeHint).toBe('search');
+  });
+
+  it('uses body metadata routeHint when no header or input metadata routeHint is present', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-route-hint-body',
+      headers: {},
+      query: {},
+      body: { input: [], metadata: { routeHint: 'tools' } },
+      metadata: {}
+    } as any);
+
+    expect(metadata.routeHint).toBe('tools');
+  });
+});

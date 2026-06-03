@@ -96,6 +96,19 @@ function canonicalizeHeaderName(headerName: string): string {
   return headerName.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+function extractRouteHintHeader(headers: unknown): string | undefined {
+  const cloned = cloneStringHeaders(headers);
+  if (!cloned) {
+    return undefined;
+  }
+  for (const [headerName, headerValue] of Object.entries(cloned)) {
+    if (canonicalizeHeaderName(headerName) === 'xroutehint') {
+      return readNonEmptyString(headerValue);
+    }
+  }
+  return undefined;
+}
+
 function stripMappableSemanticsMetadataFields(metadata: Record<string, unknown>): void {
   for (const key of MAPPABLE_SEMANTICS_METADATA_KEYS) {
     delete metadata[key];
@@ -203,6 +216,11 @@ export function buildServerToolNestedRequestMetadata(args: {
   };
   if (Object.keys(mergedClientHeaders).length > 0) {
     out.clientHeaders = mergedClientHeaders;
+  }
+
+  const routeHintFromHeader = extractRouteHintHeader(out.clientHeaders);
+  if (routeHintFromHeader && !readNonEmptyString(out.routeHint)) {
+    out.routeHint = routeHintFromHeader;
   }
 
   try {

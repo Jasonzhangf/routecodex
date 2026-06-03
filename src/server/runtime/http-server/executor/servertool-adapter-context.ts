@@ -126,7 +126,7 @@ export function buildServerToolAdapterContext(args: {
       : undefined
   );
 
-  const routeName = readNonEmptyString(metadataBag.routeName);
+  const routeName = readNonEmptyString(metadataBag.routeName) ?? readNonEmptyString(metadataBag.routeHint);
   if (routeName) {
     baseContext.routeId = routeName;
   }

@@ -527,9 +527,7 @@ impl VirtualRouterEngineCore {
         // RELAY: single shared path
         let mut classification = self.classifier.classify(&features);
         if let Some(route_hint) = resolve_route_hint(metadata) {
-            if route_has_any_pool(&self.routing, &route_hint)
-                && !is_server_tool_followup_request(metadata)
-            {
+            if route_has_any_pool(&self.routing, &route_hint) {
                 classification.route_name = route_hint.clone();
                 classification.reasoning = append_reasoning_tag(
                     &classification.reasoning,
@@ -779,6 +777,11 @@ mod tests {
                     "id": "thinking-pool",
                     "priority": 100,
                     "targets": ["anthropic.key1.claude-sonnet"]
+                }],
+                "search": [{
+                    "id": "search-pool",
+                    "priority": 100,
+                    "targets": ["search.key1.model"]
                 }]
             },
             "providers": {
@@ -792,6 +795,12 @@ mod tests {
                     "providerKey": "anthropic.key1.claude-sonnet",
                     "providerType": "anthropic",
                     "modelId": "claude-sonnet",
+                    "enabled": true
+                },
+                "search.key1.model": {
+                    "providerKey": "search.key1.model",
+                    "providerType": "openai",
+                    "modelId": "search-model",
                     "enabled": true
                 }
             }
@@ -834,6 +843,38 @@ mod tests {
             "providerKey should be a configured provider, got: {}",
             provider_key.unwrap()
         );
+    }
+
+    #[test]
+    fn route_hint_applies_to_servertool_followup_requests() {
+        let mut core = build_route_test_core();
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "继续执行" }
+            ]
+        });
+        let metadata = json!({
+            "endpoint": "/v1/chat/completions",
+            "requestId": "test-followup-route-hint:stop_followup",
+            "routeHint": "search",
+            "serverToolFollowup": true,
+            "__rt": { "serverToolFollowup": true }
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect("route should succeed");
+        let decision = result.get("decision").expect("should have decision");
+        assert_eq!(decision["routeName"].as_str(), Some("search"));
+        assert_eq!(decision["providerKey"].as_str(), Some("search.key1.model"));
+        assert!(decision["reasoning"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("route_hint:search"));
     }
 
     #[test]

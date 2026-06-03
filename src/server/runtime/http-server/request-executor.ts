@@ -112,6 +112,30 @@ import {
   logNonBlockingError as logRequestExecutorNonBlockingError,
   resetErrorReportStateForTests
 } from './executor/request-executor-error-report.js';
+
+function resolvePipelineRouteName(pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>): string | undefined {
+  const routingDecision =
+    pipelineResult.routingDecision && typeof pipelineResult.routingDecision === 'object'
+      ? (pipelineResult.routingDecision as Record<string, unknown>)
+      : undefined;
+  const metadata =
+    pipelineResult.metadata && typeof pipelineResult.metadata === 'object'
+      ? (pipelineResult.metadata as Record<string, unknown>)
+      : undefined;
+  const target =
+    pipelineResult.target && typeof pipelineResult.target === 'object'
+      ? (pipelineResult.target as Record<string, unknown>)
+      : undefined;
+  return readString(routingDecision?.routeName)
+    || readString(routingDecision?.route)
+    || readString(routingDecision?.routeId)
+    || readString(metadata?.routeName)
+    || readString(metadata?.route)
+    || readString(metadata?.routeId)
+    || readString(target?.routeName)
+    || readString(target?.route)
+    || readString(target?.routeId);
+}
 import {
   throwIfClientAbortSignalAborted,
   waitWithClientAbortSignal
@@ -1015,6 +1039,7 @@ export class HubRequestExecutor implements RequestExecutor {
             pipelineResult.routingDecision && typeof pipelineResult.routingDecision === 'object'
               ? (pipelineResult.routingDecision as Record<string, unknown>)
               : undefined;
+          const pipelineRouteName = resolvePipelineRouteName(pipelineResult);
           providerSendStartedAtMs = Date.now();
           logStageLazy('provider.send.start', input.requestId, () => ({
             providerKey: target.providerKey,
@@ -1148,9 +1173,13 @@ export class HubRequestExecutor implements RequestExecutor {
           const conversionPipelineMetadata = responseSemantics
             ? {
                 ...mergedMetadata,
+                routeName: pipelineRouteName,
                 responseSemantics,
               }
-            : mergedMetadata;
+            : {
+                ...mergedMetadata,
+                routeName: pipelineRouteName,
+              };
           const converted = shouldBypassProviderResponseConversion(normalized, {
             entryEndpoint: input.entryEndpoint,
             providerProtocol: handle.providerProtocol || providerProtocol,

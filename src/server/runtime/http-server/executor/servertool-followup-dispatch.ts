@@ -729,6 +729,10 @@ async function buildServerToolNestedInput(args: {
   const routeNameCandidate =
     typeof (args.baseMetadata as Record<string, unknown> | undefined)?.routeName === 'string'
       ? String((args.baseMetadata as Record<string, unknown>).routeName).trim()
+      : typeof (args.baseMetadata as Record<string, unknown> | undefined)?.routeHint === 'string'
+        ? String((args.baseMetadata as Record<string, unknown>).routeHint).trim()
+        : typeof nestedMetadata.routeHint === 'string'
+          ? String(nestedMetadata.routeHint).trim()
       : '';
   if (portModeCandidate === 'router' && routeNameCandidate && typeof nestedMetadata.routeHint !== 'string') {
     nestedMetadata.routeHint = routeNameCandidate;

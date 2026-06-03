@@ -613,6 +613,14 @@ function extractRouteHint(input: PipelineExecutionInput): string | undefined {
   if (Array.isArray(header) && header[0]) {
     return String(header[0]);
   }
+  const metadataRouteHint = normalizeToken(asRecord(input.metadata)?.routeHint);
+  if (metadataRouteHint) {
+    return metadataRouteHint;
+  }
+  const bodyRouteHint = normalizeToken(asRecord(asRecord(input.body).metadata)?.routeHint);
+  if (bodyRouteHint) {
+    return bodyRouteHint;
+  }
   return undefined;
 }
 

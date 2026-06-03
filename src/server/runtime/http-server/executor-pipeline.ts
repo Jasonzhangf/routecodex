@@ -91,6 +91,8 @@ export async function runHubPipeline(
       requestId: input.requestId,
       entryEndpoint: input.entryEndpoint,
       bodyModel: typeof payload?.model === 'string' ? payload.model : undefined,
+      routeHint: typeof metadata.routeHint === 'string' ? metadata.routeHint : undefined,
+      routeName: typeof metadata.routeName === 'string' ? metadata.routeName : undefined,
       followupText:
         typeof metadata.clientInjectText === 'string' && metadata.clientInjectText.trim().length > 0
           ? metadata.clientInjectText.trim()

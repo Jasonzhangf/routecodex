@@ -2324,38 +2324,9 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .filter(|text| !text.is_empty())
         .unwrap_or("继续执行")
         .to_string();
-    let provider_pin = input.decision.get("provider_pin").cloned();
-
     // 3. Extract runtime metadata and metadata for field lookups
     let runtime = extract_runtime(&input.adapter_context);
     let metadata = extract_metadata(&input.adapter_context);
-
-    // 4. Extract pinnedTarget (priority-based lookup matching TS readPinnedTargetFromAdapterContext)
-    let provider_key =
-        extract_target_field(&input.adapter_context, &runtime, &metadata, "providerKey")
-            .or_else(|| {
-                extract_target_field(&input.adapter_context, &runtime, &metadata, "providerId")
-            })
-            .or_else(|| {
-                extract_priority_string(
-                    &input.adapter_context,
-                    &runtime,
-                    &metadata,
-                    &[
-                        "__shadowCompareForcedProviderKey",
-                        "targetProviderKey",
-                        "providerKey",
-                    ],
-                )
-            })
-            .or_else(|| {
-                // Fallback: provider_pin from decision
-                provider_pin
-                    .as_ref()
-                    .and_then(|p| p.get("provider_key"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-            });
 
     let model_id = extract_target_field(&input.adapter_context, &runtime, &metadata, "modelId")
         .or_else(|| {
@@ -2363,12 +2334,13 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
                 &input.adapter_context,
                 &runtime,
                 &metadata,
-                &["assignedModelId", "modelId", "originalModelId"],
-            )
+                    &["assignedModelId", "modelId", "originalModelId"],
+                )
         })
         .or_else(|| {
-            provider_pin
-                .as_ref()
+            input
+                .decision
+                .get("provider_pin")
                 .and_then(|p| p.get("model_id"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
@@ -2380,6 +2352,12 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let route_hint = extract_priority_string(
+        &input.adapter_context,
+        &runtime,
+        &metadata,
+        &["routeHint", "routeName", "routeId"],
+    );
 
     // 5. Extract connection state
     let connection_state = (|| -> Option<Value> {
@@ -2396,26 +2374,20 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
     if let Some(cs) = connection_state {
         metadata_obj.insert("clientConnectionState".to_string(), cs);
     }
-    if let Some(ref pk) = provider_key {
-        metadata_obj.insert(
-            "__shadowCompareForcedProviderKey".to_string(),
-            Value::String(pk.clone()),
-        );
-        metadata_obj.insert("providerKey".to_string(), Value::String(pk.clone()));
-        metadata_obj.insert("targetProviderKey".to_string(), Value::String(pk.clone()));
-    }
     if let Some(ref mid) = model_id {
         metadata_obj.insert("assignedModelId".to_string(), Value::String(mid.clone()));
         metadata_obj.insert("modelId".to_string(), Value::String(mid.clone()));
         let mut target_obj = Map::new();
-        if let Some(ref pk) = provider_key {
-            target_obj.insert("providerKey".to_string(), Value::String(pk.clone()));
-        }
         target_obj.insert("modelId".to_string(), Value::String(mid.clone()));
         metadata_obj.insert("target".to_string(), Value::Object(target_obj));
     }
     if let Some(ref rpm) = routecodex_port_mode {
         metadata_obj.insert("routecodexPortMode".to_string(), Value::String(rpm.clone()));
+    }
+    if routecodex_port_mode.as_deref() == Some("router") {
+        if let Some(ref hint) = route_hint {
+            metadata_obj.insert("routeHint".to_string(), Value::String(hint.clone()));
+        }
     }
     // 7. Build followup plan
     let followup = serde_json::json!({
@@ -2861,6 +2833,54 @@ mod tests {
         let tools = output["tools"]["clientToolsRaw"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["function"]["name"], "exec_command");
+    }
+
+    #[test]
+    fn test_stop_message_auto_followup_does_not_pin_provider() {
+        let input = json!({
+            "base": {
+                "choices": [{"message": {"role": "assistant", "content": "阶段完成"}, "finish_reason": "stop"}]
+            },
+            "decision": {
+                "action": "trigger",
+                "used": 0,
+                "maxRepeats": 3,
+                "followupText": "继续执行",
+                "provider_pin": {
+                    "provider_key": "minimax.key1.MiniMax-M3",
+                    "model_id": "MiniMax-M3"
+                }
+            },
+            "adapterContext": {
+                "target": {
+                    "providerKey": "minimax.key1.MiniMax-M3",
+                    "modelId": "MiniMax-M3"
+                },
+                "targetProviderKey": "minimax.key1.MiniMax-M3",
+                "providerKey": "minimax.key1.MiniMax-M3",
+                "routeId": "search",
+                "__rt": {
+                    "targetProviderKey": "minimax.key1.MiniMax-M3",
+                    "providerKey": "minimax.key1.MiniMax-M3"
+                },
+                "routecodexPortMode": "router"
+            },
+            "candidateKeys": [],
+            "stickyKey": null,
+            "strictSessionScope": null
+        });
+
+        let output: Value = serde_json::from_str(
+            &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
+        )
+        .expect("json output");
+        let metadata = &output["followup"]["metadata"];
+        assert_eq!(metadata["modelId"].as_str(), Some("MiniMax-M3"));
+        assert_eq!(metadata["routeHint"].as_str(), Some("search"));
+        assert!(metadata.get("providerKey").is_none());
+        assert!(metadata.get("targetProviderKey").is_none());
+        assert!(metadata.get("__shadowCompareForcedProviderKey").is_none());
+        assert!(metadata["target"].get("providerKey").is_none());
     }
 
     #[test]

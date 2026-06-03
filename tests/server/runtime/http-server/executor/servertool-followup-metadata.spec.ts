@@ -148,4 +148,33 @@ describe('servertool followup nested request metadata', () => {
     expect(metadata.__rt).not.toHaveProperty('__routecodexPreselectedRoute');
     expect(metadata.__rt).not.toHaveProperty('target');
   });
+
+  it('preserves client route hint header for followup reentry without provider pinning', () => {
+    const metadata = buildServerToolNestedRequestMetadata({
+      baseMetadata: {
+        clientHeaders: {
+          'x-route-hint': 'search'
+        },
+        providerKey: 'minimax.key1.MiniMax-M3',
+        targetProviderKey: 'minimax.key1.MiniMax-M3',
+        target: { providerKey: 'minimax.key1.MiniMax-M3' },
+        __rt: {
+          serverToolFollowup: true,
+          providerKey: 'minimax.key1.MiniMax-M3',
+          targetProviderKey: 'minimax.key1.MiniMax-M3'
+        }
+      },
+      extraMetadata: {
+        __rt: { serverToolFollowup: true }
+      },
+      entryEndpoint: '/v1/responses'
+    });
+
+    expect(metadata.routeHint).toBe('search');
+    expect(metadata).not.toHaveProperty('providerKey');
+    expect(metadata).not.toHaveProperty('targetProviderKey');
+    expect(metadata).not.toHaveProperty('target');
+    expect(metadata.__rt).not.toHaveProperty('providerKey');
+    expect(metadata.__rt).not.toHaveProperty('targetProviderKey');
+  });
 });

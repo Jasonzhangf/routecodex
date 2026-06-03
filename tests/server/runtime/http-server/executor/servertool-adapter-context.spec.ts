@@ -78,6 +78,30 @@ describe('servertool adapter context builder', () => {
     expect(mockSyncStoplessGoalStateFromRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('maps routeHint into routeId for stop followup planning', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        routeHint: 'search',
+        routecodexPortMode: 'router'
+      },
+      originalRequest: { model: 'gpt-5.5', input: 'continue' },
+      requestSemantics: {},
+      requestId: 'req-route-hint',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      serverToolsEnabled: true
+    });
+
+    expect(context.routeId).toBe('search');
+  });
+
   it('replaces followup-collapsed reasoning.stop-only captured tools with original clientToolsRaw', async () => {
     jest.resetModules();
     mockSyncStoplessGoalStateFromRequest.mockClear();
