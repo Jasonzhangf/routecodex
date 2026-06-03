@@ -6,7 +6,11 @@
 use serde::{Deserialize, Serialize};
 
 const LEGACY_DEFAULT_TEXT: &str = "继续执行";
-const DEFAULT_EXECUTION_PROMPT: &str = "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。";
+const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
+    "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。",
+    "你刚才再次停止。请先质询：当前用户目标是否已经完成？如果未完成，必须调用可用工具继续操作、检查或验证；如果已完成，必须给出明确完成证据，不要只总结、道歉、复述状态或输出计划。",
+    "最后一次续杯预算。必须严格判断目标是否完成：已完成则给出可核验证据；未完成则必须调用工具继续执行到有证据为止。禁止空泛总结、道歉、计划或再次无证据停止。",
+];
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -221,14 +225,22 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
         skip_reason: None,
         used: snapshot.used,
         max_repeats: effective_max_repeats,
-        followup_text: Some(normalize_followup_text(snapshot.text)),
+        followup_text: Some(normalize_followup_text(snapshot.text, snapshot.used)),
         provider_pin: ctx.provider_pin.clone(),
     }
 }
 
-fn normalize_followup_text(text: String) -> String {
+fn default_execution_prompt(used: u32) -> String {
+    DEFAULT_EXECUTION_PROMPTS
+        .get(used as usize)
+        .or_else(|| DEFAULT_EXECUTION_PROMPTS.last())
+        .unwrap_or(&DEFAULT_EXECUTION_PROMPTS[0])
+        .to_string()
+}
+
+fn normalize_followup_text(text: String, used: u32) -> String {
     if text.trim() == LEGACY_DEFAULT_TEXT {
-        DEFAULT_EXECUTION_PROMPT.to_string()
+        default_execution_prompt(used)
     } else {
         text
     }
@@ -431,7 +443,9 @@ mod tests {
         let result = decide(&ctx);
         // Default now applies even without followup flow context.
         assert_eq!(result.action, Action::Trigger);
-        assert_eq!(result.followup_text, Some(DEFAULT_EXECUTION_PROMPT.to_string()));
+        let text = result.followup_text.expect("followup text");
+        assert!(text.contains("当前用户目标"));
+        assert!(text.contains("完成证据"));
     }
 
     #[test]
@@ -445,7 +459,35 @@ mod tests {
             stage_mode: StageMode::On,
         });
         let result = decide(&ctx);
-        assert_eq!(result.followup_text, Some(DEFAULT_EXECUTION_PROMPT.to_string()));
+        let text = result.followup_text.expect("followup text");
+        assert!(text.contains("当前用户目标"));
+        assert!(text.contains("完成证据"));
+
+        ctx.persisted_snapshot = Some(StopMessageSnapshot {
+            text: "继续执行".to_string(),
+            max_repeats: 3,
+            used: 1,
+            source: SnapshotSource::Persisted,
+            stage_mode: StageMode::On,
+        });
+        let result = decide(&ctx);
+        let text = result.followup_text.expect("followup text");
+        assert!(text.contains("再次停止"));
+        assert!(text.contains("是否已经完成"));
+        assert!(text.contains("明确完成证据"));
+
+        ctx.persisted_snapshot = Some(StopMessageSnapshot {
+            text: "继续执行".to_string(),
+            max_repeats: 3,
+            used: 2,
+            source: SnapshotSource::Persisted,
+            stage_mode: StageMode::On,
+        });
+        let result = decide(&ctx);
+        let text = result.followup_text.expect("followup text");
+        assert!(text.contains("最后一次续杯预算"));
+        assert!(text.contains("可核验证据"));
+        assert!(text.contains("再次无证据停止"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行，不要中断总结".to_string(),

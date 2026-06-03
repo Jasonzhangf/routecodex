@@ -20,11 +20,23 @@ use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecuti
 /// Outcome is a standard delta: tool_outputs entry + clientInjectOnly followup.
 const NOOP_SERVERTOOL_NAMES: [&str; 1] = ["continue_execution"];
 const LEGACY_STOP_MESSAGE_FOLLOWUP_TEXT: &str = "继续执行";
-const DEFAULT_STOP_MESSAGE_EXECUTION_PROMPT: &str = "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。";
+const DEFAULT_STOP_MESSAGE_EXECUTION_PROMPTS: [&str; 3] = [
+    "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。",
+    "你刚才再次停止。请先质询：当前用户目标是否已经完成？如果未完成，必须调用可用工具继续操作、检查或验证；如果已完成，必须给出明确完成证据，不要只总结、道歉、复述状态或输出计划。",
+    "最后一次续杯预算。必须严格判断目标是否完成：已完成则给出可核验证据；未完成则必须调用工具继续执行到有证据为止。禁止空泛总结、道歉、计划或再次无证据停止。",
+];
 
-fn normalize_stop_message_followup_text(text: &str) -> String {
+fn default_stop_message_execution_prompt(used: u32) -> String {
+    DEFAULT_STOP_MESSAGE_EXECUTION_PROMPTS
+        .get(used as usize)
+        .or_else(|| DEFAULT_STOP_MESSAGE_EXECUTION_PROMPTS.last())
+        .unwrap_or(&DEFAULT_STOP_MESSAGE_EXECUTION_PROMPTS[0])
+        .to_string()
+}
+
+fn normalize_stop_message_followup_text(text: &str, used: u32) -> String {
     if text.trim() == LEGACY_STOP_MESSAGE_FOLLOWUP_TEXT {
-        DEFAULT_STOP_MESSAGE_EXECUTION_PROMPT.to_string()
+        default_stop_message_execution_prompt(used)
     } else {
         text.to_string()
     }
@@ -2380,9 +2392,9 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .or_else(|| input.decision.get("followup_text").and_then(|v| v.as_str()))
         .map(str::trim)
         .filter(|text| !text.is_empty())
-        .unwrap_or(DEFAULT_STOP_MESSAGE_EXECUTION_PROMPT)
+        .unwrap_or(&DEFAULT_STOP_MESSAGE_EXECUTION_PROMPTS[0])
         .to_string();
-    let followup_text = normalize_stop_message_followup_text(&followup_text);
+    let followup_text = normalize_stop_message_followup_text(&followup_text, used);
     // 3. Extract runtime metadata and metadata for field lookups
     let runtime = extract_runtime(&input.adapter_context);
     let metadata = extract_metadata(&input.adapter_context);
@@ -3079,6 +3091,45 @@ mod tests {
         assert!(text.contains("当前用户目标"));
         assert!(text.contains("必须调用可用工具"));
         assert_ne!(text, "继续执行");
+    }
+
+    #[test]
+    fn test_stop_message_auto_legacy_followup_text_escalates_by_used_count() {
+        for (used, expected) in [
+            (0, "完成证据"),
+            (1, "是否已经完成"),
+            (2, "最后一次续杯预算"),
+            (3, "最后一次续杯预算"),
+        ] {
+            let input = json!({
+                "base": {
+                    "choices": [{"message": {"role": "assistant", "content": "阶段完成"}, "finish_reason": "stop"}]
+                },
+                "decision": {
+                    "action": "trigger",
+                    "used": used,
+                    "maxRepeats": 3,
+                    "followupText": "继续执行"
+                },
+                "adapterContext": {
+                    "routeId": "tools",
+                    "routecodexPortMode": "router"
+                },
+                "candidateKeys": [],
+                "stickyKey": null,
+                "strictSessionScope": null
+            });
+
+            let output: Value = serde_json::from_str(
+                &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
+            )
+            .expect("json output");
+            let text = output["followup"]["injection"]["ops"][1]["text"]
+                .as_str()
+                .expect("followup text");
+            assert!(text.contains(expected), "used={used} text={text}");
+            assert_ne!(text, "继续执行");
+        }
     }
 
     #[test]

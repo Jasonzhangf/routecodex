@@ -11,10 +11,10 @@
 适用于：servertool stopless 自动续轮、stop followup 重建、tmux 注入边界。
 
 ## stopless 生命周期
-1. 当前 stopless 默认开启，默认注入 `继续执行`，默认次数 2。
+1. 当前 stopless 默认开启，默认注入三轮递进执行质询提示，默认次数 3；旧默认 `继续执行` 只作为 legacy exact-match 输入并在 Rust 中升级。
 2. `/goal active` 时收到 `finish_reason=stop`：不自动续轮。
-3. `/goal non-active` 时收到 `finish_reason=stop`：自动注入一次 `继续执行`。
-4. 非 `/goal` 时收到 `finish_reason=stop`：自动注入一次 `继续执行`。
+3. `/goal non-active` 时收到 `finish_reason=stop`：自动注入执行质询提示，要求判断目标是否完成；未完成必须调用工具，已完成必须给证据。
+4. 非 `/goal` 时收到 `finish_reason=stop`：自动注入执行质询提示，要求判断目标是否完成；未完成必须调用工具，已完成必须给证据。
 5. 注入失败必须清理状态，防止循环。
 
 ## followup 边界
