@@ -222,16 +222,17 @@ ProviderRespInbound01Raw
 
 | 节点 | 输入 | 输出 | 唯一职责 | 禁止连接 |
 |---|---|---|---|---|
-| `ServertoolResp03RuntimeAction` | `HubRespChatProcess03Governed` | runtime action/effect | 判断是否需要 servertool runtime/followup；只产出动作 | 直接构造 client frame；provider 特例 |
+| `ServertoolResp03RuntimeAction` | `HubRespChatProcess03Governed` | runtime action/effect + chat-process payload carrier | 在 chat-process 标准态判断是否需要 servertool runtime/followup；只产出动作与 governed payload | 用 provider raw / client outbound / SSE payload 判定；直接构造 client frame；provider 特例 |
 | `ServertoolReq04FollowupBuilt` | origin snapshot + runtime action | followup request | 基于 origin snapshot 构造正常 followup 请求 | 从当前污染 payload 猜测补齐；清洗工具列表 |
 | `ServertoolResp03FollowupResult` | nested `HubRespChatProcess03Governed` | governed followup response | 选择 followup 结果作为后续响应真相 | 用 pre-followup 响应覆盖 requires_action/tool_use |
 
 约束：
 
-1. `servertoolRuntimeAction` 只允许作为 Rust effect plan 的 runtime action carrier；TS shell 只能执行 IO/reenter，不能判断工具语义。
+1. `servertoolRuntimeAction` 只允许作为 Rust effect plan 的 runtime action carrier；判定输入必须是 `HubRespChatProcess03Governed` chat 标准态。TS shell 只能执行 IO/reenter，不能判断工具语义。
 2. followup 返回后，`HubRespOutbound04ClientSemantic` 的唯一输入是 post-servertool governed payload；禁止继续使用原始 native `streamPipe.payload` 或 pre-followup `clientPayload` 投影 SSE。
 3. `finalChatResponse` 只表示 pre-followup governed response；`followupBody` / `ServertoolResp03FollowupResult` 一旦存在且非空，就是响应链进入 `HubRespOutbound04ClientSemantic` 的真相。
 4. direct/provider passthrough 不得进入 servertool followup orchestration；followup 只能 relay 复入完整 Hub Pipeline。
+5. `servertoolRuntimeAction.payload` 是 Rust 提供给 TS shell 的 chat-process payload；缺失必须 fail-fast，禁止回退到 client payload。
 
 ### 4.2 ProviderRespInbound01Raw
 

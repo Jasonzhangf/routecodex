@@ -17,10 +17,11 @@ HubRespChatProcess03Governed
   -> HubRespOutbound04ClientSemantic
 ```
 
-- `ServertoolResp03RuntimeAction`：Rust effect plan 中的动作 carrier；只决定是否需要 runtime/followup。
+- `ServertoolResp03RuntimeAction`：Rust effect plan 中的动作 carrier；只在 `HubRespChatProcess03Governed` chat 标准态决定是否需要 runtime/followup，并携带 chat-process payload 给 TS IO/reenter shell。
 - `ServertoolReq04FollowupBuilt`：只从 origin snapshot 构造正常 followup 请求；不得从当前污染 payload 猜测补齐。
 - `ServertoolResp03FollowupResult`：followup 回来的 governed response；若存在且非空，必须成为 `HubRespOutbound04ClientSemantic` 的唯一输入。
 - TS 只允许作为 runtime IO/reenter 薄壳；不得做工具语义判断、工具列表清洗、requires_action 修补或旧 payload 回填。
+- TS shell 收到 `servertoolRuntimeAction` 时只能消费 Rust effect 携带的 chat-process payload；payload 缺失必须 fail-fast，禁止回退到 provider raw、client outbound 或 SSE payload。
 - SSE/JSON client projection 必须使用 post-servertool governed payload；禁止使用 pre-followup native `streamPipe.payload` 覆盖 followup truth。
 
 目标不是“把 TS 文件搬成 Rust”这么简单，而是一次性解决四个根问题：
