@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.2749",
+  "version": "0.90.2750",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",

@@ -2060,3 +2060,7 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 - Verified closeout on global `routecodex 0.90.2704`: 10000 via LAN IP returns HTTP JSON (502 upstream JSON, not Empty reply), 10000/5555 `/admin/ports` return 404 JSON with port tag, 5520 admin returns 401 JSON, and per-port log path `/Volumes/extension/.rcc/log/config.toml/ports/10000/server-10000.log` exists.
 - Traffic governor scope truth: provider traffic files must include `server:<serverId>::<runtimeKey>` in encoded state keys, e.g. `server%3A127.0.0.1%3A10000%3A%3A...json`; bare runtimeKey files are legacy/shared and cannot prove per-port isolation.
 - Red-test gate: `tests/red-tests/multi_port_server_isolation.test.ts` locks PortRegistry serverId/session dirs, async error JSON wrapping, admin guard, errorsample/snapshot/stats port paths, and ProviderTrafficGovernor per-server concurrency scope.
+
+## 2026-06-03 Responses tool-call continuation contract
+- Verified on 5555 after deploying routecodex 0.90.2750: Responses `status:"requires_action"` tool-call SSE must emit `response.required_action` and `response.done`, but must not emit `response.completed`; emitting `response.completed` can make Codex UI stop without executing/submitting tool output.
+- Live evidence: `/Volumes/extension/.rcc/codex-samples/openai-responses/port-unknown/openai-responses-minimax.key1-MiniMax-M3-20260603T150245058-252518-355/client-response_server.json` has `completed=0 required_action=1 done=1`; followup provider requests after 15:02 contain `function_call_output`.

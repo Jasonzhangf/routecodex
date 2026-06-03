@@ -544,6 +544,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 2. **看到客户端 SSE 反馈，不得误判为断流根因**
    - Codex/TUI/调试客户端在流式阶段显示 SSE 反馈是正常现象。
    - 只有在缺失 `response.done`、过早 close、或 JSON/SSE 收口契约错误时，才算真 bug。
+   - Responses `requires_action` 工具调用态必须只有 `response.required_action` + `response.done`，禁止同时发 `response.completed`；否则 Codex UI 可能把工具调用回合判成完成而不执行/提交 tool output。
 
 3. **5555/5520 断流排查优先级**
    - 先查公共层的 response contract / handler dispatch / SSE->JSON 或 JSON->SSE 收口。
