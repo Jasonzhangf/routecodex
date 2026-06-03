@@ -10,6 +10,8 @@ import type { Application } from 'express';
 import type { Server } from 'http';
 import type { Socket } from 'node:net';
 import type { PortConfig, PortRuntimeState, PortStatus } from './port-config-types.js';
+import { canonicalizeServerId } from './server-id.js';
+import { ensureServerScopedSessionDir } from './session-dir.js';
 
 export interface PortInstance {
   config: PortConfig;
@@ -19,6 +21,8 @@ export interface PortInstance {
   status: PortStatus;
   activeConnections: number;
   error?: string;
+  serverId: string;
+  sessionDir?: string;
 }
 
 export class PortRegistry {
@@ -38,6 +42,8 @@ export class PortRegistry {
 
   attachServer(port: number, config: PortConfig, server: Server, app: Application): PortInstance {
     const sockets = new Set<Socket>();
+    const serverId = canonicalizeServerId(config.host, port);
+    const sessionDir = ensureServerScopedSessionDir(serverId) ?? undefined;
     const inst: PortInstance = {
       config,
       app,
@@ -45,6 +51,8 @@ export class PortRegistry {
       sockets,
       status: 'running',
       activeConnections: 0,
+      serverId,
+      sessionDir,
     };
     this.instances.set(port, inst);
 
@@ -63,7 +71,7 @@ export class PortRegistry {
       console.error(`[PortRegistry] Port ${port} error: ${error.message}`);
     });
 
-    console.log(`[PortRegistry] Port ${port} (${config.mode}) registered`);
+    console.log(`[PortRegistry] Port ${port} (${config.mode}) registered serverId=${serverId}`);
     return inst;
   }
 
@@ -123,6 +131,7 @@ export class PortRegistry {
         status: inst.status,
         activeConnections: inst.activeConnections,
         error: inst.error,
+        serverId: inst.serverId,
       });
     }
     return result;
