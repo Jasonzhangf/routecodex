@@ -120,7 +120,12 @@ pub(crate) fn build_node_result(
           "node": "hub-chat-process",
           "executionTime": duration_ms,
           "startTime": start_time_ms,
-          "endTime": end_time_ms,
+          "endTime": end_time_ms
+        }),
+    );
+    result.insert(
+        "observation".to_string(),
+        json!({
           "dataProcessed": {
             "messages": messages,
             "tools": tools

@@ -24,6 +24,8 @@ export interface HubNodeResult {
     executionTime: number;
     startTime: number;
     endTime: number;
+  };
+  observation?: {
     dataProcessed?: {
       messages?: number;
       tools?: number;

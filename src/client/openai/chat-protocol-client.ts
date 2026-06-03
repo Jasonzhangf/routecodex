@@ -40,7 +40,7 @@ export class OpenAIChatProtocolClient implements HttpProtocolClient<ProtocolRequ
       delete body.maxTokens;
     }
     if ('metadata' in body) {
-      delete body.metadata;
+      throw new Error('provider-runtime-error: metadata is not allowed in OpenAI chat provider body');
     }
     if (body.stream === true) {
       delete body.stream;

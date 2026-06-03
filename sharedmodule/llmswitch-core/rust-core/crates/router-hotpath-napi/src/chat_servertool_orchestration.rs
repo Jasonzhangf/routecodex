@@ -10,6 +10,7 @@ use crate::hub_bridge_actions::utils::{
     is_synthetic_routecodex_tool_call_id,
 };
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
+use crate::shared_json_utils::read_trimmed_string as read_optional_trimmed_string;
 use crate::virtual_router_engine::routing::{
     resolve_routing_state_key, resolve_session_scope, resolve_stop_message_scope,
 };
@@ -20,12 +21,17 @@ use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecuti
 const NOOP_SERVERTOOL_NAMES: [&str; 1] = ["continue_execution"];
 
 fn is_visible_text_field(key: Option<&str>) -> bool {
-    matches!(key, None | Some("content" | "text" | "input_text" | "output_text" | "output"))
+    matches!(
+        key,
+        None | Some("content" | "text" | "input_text" | "output_text" | "output")
+    )
 }
 
 fn contains_synthetic_routecodex_control_text_value(value: &Value, key: Option<&str>) -> bool {
     match value {
-        Value::String(text) => is_visible_text_field(key) && is_synthetic_routecodex_control_text(text),
+        Value::String(text) => {
+            is_visible_text_field(key) && is_synthetic_routecodex_control_text(text)
+        }
         Value::Array(items) => items
             .iter()
             .any(|item| contains_synthetic_routecodex_control_text_value(item, key)),
@@ -40,8 +46,10 @@ fn contains_synthetic_routecodex_control_text_value(value: &Value, key: Option<&
 pub fn contains_synthetic_routecodex_control_text_json(input_json: String) -> NapiResult<String> {
     let value: Value = serde_json::from_str(&input_json)
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
-    serde_json::to_string(&contains_synthetic_routecodex_control_text_value(&value, None))
-        .map_err(|error| napi::Error::from_reason(error.to_string()))
+    serde_json::to_string(&contains_synthetic_routecodex_control_text_value(
+        &value, None,
+    ))
+    .map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
 #[derive(Debug, Serialize)]
@@ -374,24 +382,21 @@ fn detect_provider_response_shape(payload: &Value) -> &'static str {
     "unknown"
 }
 
-fn read_trimmed_string(value: Option<&Value>) -> String {
-    value
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .unwrap_or_default()
-}
-
 fn read_servertool_adapter_tool_name(tool: &Value) -> String {
     let Some(row) = tool.as_object() else {
         return String::new();
     };
-    let direct = read_trimmed_string(row.get("name"));
+    let direct = read_optional_trimmed_string(row.get("name")).unwrap_or_default();
     if !direct.is_empty() {
         return direct.to_ascii_lowercase();
     }
     row.get("function")
         .and_then(Value::as_object)
-        .map(|function| read_trimmed_string(function.get("name")).to_ascii_lowercase())
+        .map(|function| {
+            read_optional_trimmed_string(function.get("name"))
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+        })
         .unwrap_or_default()
 }
 
@@ -443,7 +448,9 @@ fn should_replace_servertool_adapter_captured_tools(
         return false;
     }
     existing_names.len() < client_names.len()
-        && existing_names.iter().all(|name| client_names.contains(name))
+        && existing_names
+            .iter()
+            .all(|name| client_names.contains(name))
 }
 
 fn backfill_servertool_adapter_context_tools_value(
@@ -495,11 +502,15 @@ fn as_json_object(value: Option<&Value>) -> Option<&Map<String, Value>> {
 }
 
 fn read_provider_response_metadata(value: Option<&Value>) -> Option<&Map<String, Value>> {
-    as_json_object(value).and_then(|row| row.get("metadata")).and_then(Value::as_object)
+    as_json_object(value)
+        .and_then(|row| row.get("metadata"))
+        .and_then(Value::as_object)
 }
 
 fn read_provider_response_rt(metadata: Option<&Map<String, Value>>) -> Option<&Map<String, Value>> {
-    metadata.and_then(|row| row.get("__rt")).and_then(Value::as_object)
+    metadata
+        .and_then(|row| row.get("__rt"))
+        .and_then(Value::as_object)
 }
 
 fn read_provider_response_root_tools(value: Option<&Value>) -> Option<Vec<Value>> {
@@ -534,18 +545,22 @@ fn read_provider_response_base_semantics<'a>(
     standardized: Option<&'a Value>,
     metadata_semantics: Option<&'a Value>,
 ) -> Option<&'a Value> {
-    metadata_semantics.or_else(|| {
-        as_json_object(processed)
-            .and_then(|row| row.get("semantics"))
-            .filter(|value| value.is_object())
-    }).or_else(|| {
-        as_json_object(standardized)
-            .and_then(|row| row.get("semantics"))
-            .filter(|value| value.is_object())
-    })
+    metadata_semantics
+        .or_else(|| {
+            as_json_object(processed)
+                .and_then(|row| row.get("semantics"))
+                .filter(|value| value.is_object())
+        })
+        .or_else(|| {
+            as_json_object(standardized)
+                .and_then(|row| row.get("semantics"))
+                .filter(|value| value.is_object())
+        })
 }
 
-fn read_provider_response_client_tools_raw(base: Option<&Map<String, Value>>) -> Option<Vec<Value>> {
+fn read_provider_response_client_tools_raw(
+    base: Option<&Map<String, Value>>,
+) -> Option<Vec<Value>> {
     let tools = base.and_then(|row| row.get("tools"));
     tools
         .and_then(Value::as_object)
@@ -561,7 +576,11 @@ fn merge_provider_response_unique_tools(
 ) -> Option<Vec<Value>> {
     let mut out: Vec<Value> = Vec::new();
     let mut seen = std::collections::HashSet::<String>::new();
-    for tool in primary.into_iter().flatten().chain(secondary.into_iter().flatten()) {
+    for tool in primary
+        .into_iter()
+        .flatten()
+        .chain(secondary.into_iter().flatten())
+    {
         if !tool.is_object() {
             continue;
         }
@@ -572,7 +591,11 @@ fn merge_provider_response_unique_tools(
         seen.insert(name);
         out.push(tool);
     }
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }
 
 fn read_followup_raw<'a>(
@@ -626,9 +649,21 @@ fn resolve_provider_response_request_semantics_value(
     standardized: Value,
     request_metadata: Value,
 ) -> Value {
-    let processed_ref = if processed.is_null() { None } else { Some(&processed) };
-    let standardized_ref = if standardized.is_null() { None } else { Some(&standardized) };
-    let request_metadata_ref = if request_metadata.is_null() { None } else { Some(&request_metadata) };
+    let processed_ref = if processed.is_null() {
+        None
+    } else {
+        Some(&processed)
+    };
+    let standardized_ref = if standardized.is_null() {
+        None
+    } else {
+        Some(&standardized)
+    };
+    let request_metadata_ref = if request_metadata.is_null() {
+        None
+    } else {
+        Some(&request_metadata)
+    };
     let processed_metadata = read_provider_response_metadata(processed_ref);
     let standardized_metadata = read_provider_response_metadata(standardized_ref);
     let request_metadata_record = request_metadata_ref.and_then(Value::as_object);
@@ -639,11 +674,8 @@ fn resolve_provider_response_request_semantics_value(
     );
     let fallback_tools = read_provider_response_root_tools(processed_ref)
         .or_else(|| read_provider_response_root_tools(standardized_ref));
-    let base_value = read_provider_response_base_semantics(
-        processed_ref,
-        standardized_ref,
-        metadata_semantics,
-    );
+    let base_value =
+        read_provider_response_base_semantics(processed_ref, standardized_ref, metadata_semantics);
     if base_value.is_none() && fallback_tools.as_ref().is_none_or(Vec::is_empty) {
         return Value::Null;
     }
@@ -660,7 +692,9 @@ fn resolve_provider_response_request_semantics_value(
             serde_json::json!({ "clientToolsRaw": fallback_tools.clone().unwrap_or_default() }),
         );
     } else if existing_client_tools_raw.as_ref().is_none_or(Vec::is_empty)
-        && fallback_tools.as_ref().is_some_and(|tools| !tools.is_empty())
+        && fallback_tools
+            .as_ref()
+            .is_some_and(|tools| !tools.is_empty())
     {
         let mut tools = normalized_base
             .get("tools")
@@ -853,7 +887,7 @@ fn resolve_tool_call_id(
     request_id: &str,
     sequence: &mut usize,
 ) -> Result<String, String> {
-    let existing = read_trimmed_string(tool_call_obj.get("id"));
+    let existing = read_optional_trimmed_string(tool_call_obj.get("id")).unwrap_or_default();
     if !existing.is_empty() {
         if is_synthetic_routecodex_tool_call_id(existing.as_str()) {
             return Err(format!(
@@ -902,8 +936,9 @@ fn extract_tool_calls_from_message_mut(
                     .and_then(|v| v.as_object())
             });
         let raw_name = function_obj
-            .map(|row| read_trimmed_string(row.get("name")))
+            .map(|row| read_optional_trimmed_string(row.get("name")))
             .unwrap_or_default();
+        let raw_name = raw_name.unwrap_or_default();
         if raw_name.is_empty() {
             continue;
         }
@@ -973,7 +1008,7 @@ fn value_has_visible_assistant_text(value: &Value) -> bool {
         Value::String(text) => !text.trim().is_empty(),
         Value::Array(items) => items.iter().any(value_has_visible_assistant_text),
         Value::Object(row) => {
-            let entry_type = read_trimmed_string(row.get("type")).to_ascii_lowercase();
+            let entry_type = read_optional_trimmed_string(row.get("type")).unwrap_or_default().to_ascii_lowercase();
             if entry_type == "thinking" || entry_type == "reasoning" {
                 return false;
             }
@@ -1002,7 +1037,7 @@ fn has_output_function_calls(value: Option<&Value>) -> bool {
             Some(v) => v,
             None => return false,
         };
-        let item_type = read_trimmed_string(row.get("type")).to_ascii_lowercase();
+        let item_type = read_optional_trimmed_string(row.get("type")).unwrap_or_default().to_ascii_lowercase();
         item_type == "function_call"
             || item_type == "function"
             || has_non_empty_tool_calls(row.get("tool_calls"))
@@ -1020,7 +1055,7 @@ fn detect_empty_assistant_payload_contract_signal(
     if let Some(choices) = row.get("choices").and_then(|v| v.as_array()) {
         if let Some(first_choice) = choices.first().and_then(|v| v.as_object()) {
             let finish_reason =
-                read_trimmed_string(first_choice.get("finish_reason")).to_ascii_lowercase();
+                read_optional_trimmed_string(first_choice.get("finish_reason")).unwrap_or_default().to_ascii_lowercase();
             let message = first_choice.get("message").and_then(|v| v.as_object());
             let has_tool_calls =
                 has_non_empty_tool_calls(message.and_then(|msg| msg.get("tool_calls")));
@@ -1050,7 +1085,7 @@ fn detect_empty_assistant_payload_contract_signal(
         }
     }
 
-    let status = read_trimmed_string(row.get("status")).to_ascii_lowercase();
+    let status = read_optional_trimmed_string(row.get("status")).unwrap_or_default().to_ascii_lowercase();
     if status == "completed" || status == "stop" {
         let required_action = row.get("required_action").and_then(|v| v.as_object());
         let submit_tool_outputs = required_action
@@ -1470,7 +1505,7 @@ fn resolve_chat_web_search_plan(
     let runnable_engine_indexes: Vec<i64> = indexed_engines
         .iter()
         .filter_map(|(origin_index, engine)| {
-            let id = read_trimmed_string(engine.get("id"));
+            let id = read_optional_trimmed_string(engine.get("id")).unwrap_or_default();
             if id.is_empty() {
                 return None;
             }
@@ -1521,9 +1556,11 @@ fn resolve_chat_web_search_plan(
                 let (_, engine) = indexed_engines
                     .iter()
                     .find(|(origin_index, _)| *origin_index == *idx)?;
-                let id = read_trimmed_string(engine.get("id")).to_ascii_lowercase();
+                let id = read_optional_trimmed_string(engine.get("id"))
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
                 let provider_key =
-                    read_trimmed_string(engine.get("providerKey")).to_ascii_lowercase();
+                    read_optional_trimmed_string(engine.get("providerKey")).unwrap_or_default().to_ascii_lowercase();
                 if id.contains("google") {
                     return Some(*idx);
                 }
@@ -2345,8 +2382,8 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
                 &input.adapter_context,
                 &runtime,
                 &metadata,
-                    &["assignedModelId", "modelId", "originalModelId"],
-                )
+                &["assignedModelId", "modelId", "originalModelId"],
+            )
         })
         .or_else(|| {
             input
@@ -2761,7 +2798,9 @@ mod tests {
                 }
             }]
         });
-        assert!(!contains_synthetic_routecodex_control_text_value(&payload, None));
+        assert!(!contains_synthetic_routecodex_control_text_value(
+            &payload, None
+        ));
     }
 
     #[test]
@@ -2774,7 +2813,9 @@ mod tests {
                 }
             }]
         });
-        assert!(contains_synthetic_routecodex_control_text_value(&payload, None));
+        assert!(contains_synthetic_routecodex_control_text_value(
+            &payload, None
+        ));
     }
 
     #[test]
@@ -2887,11 +2928,8 @@ mod tests {
                 { "type": "function", "function": { "name": "exec_command" } }
             ]
         });
-        let output = resolve_provider_response_request_semantics_value(
-            processed,
-            Value::Null,
-            Value::Null,
-        );
+        let output =
+            resolve_provider_response_request_semantics_value(processed, Value::Null, Value::Null);
         let tools = output["tools"]["clientToolsRaw"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["function"]["name"], "exec_command");

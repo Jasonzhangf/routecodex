@@ -28,6 +28,7 @@ use crate::virtual_router_engine::routing::{
 use crate::virtual_router_engine::routing_state_store::{
     is_state_empty, load_routing_instruction_state, persist_routing_instruction_state,
 };
+use crate::hub_pipeline_types::{build_meta_route_03_from_metadata, MetaRoute03RouteCarrier};
 
 fn parse_retry_provider_key_target(raw: &str) -> Option<InstructionTarget> {
     let trimmed = raw.trim();
@@ -112,12 +113,8 @@ fn normalize_parsed_instructions_against_registry(
         .collect()
 }
 
-fn resolve_route_hint(metadata: &Value) -> Option<String> {
-    metadata
-        .get("routeHint")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
+fn resolve_route_hint(meta_route_03: &MetaRoute03RouteCarrier) -> Option<String> {
+    meta_route_03.get_string("routeHint")
 }
 
 fn route_has_any_pool(
@@ -247,6 +244,7 @@ impl VirtualRouterEngineCore {
         let request_routing_state_key = resolve_routing_state_key(metadata);
         let session_scope = resolve_session_scope(metadata);
         let stop_message_scope = resolve_stop_message_scope(metadata);
+        let meta_route_03 = build_meta_route_03_from_metadata(metadata);
         let routing_state_key = if is_continuation {
             session_scope
                 .clone()
@@ -257,16 +255,16 @@ impl VirtualRouterEngineCore {
         let base_state = self.load_routing_state_for_scope(&routing_state_key);
         let mut persisted_routing_state = strip_stop_message_fields(&base_state);
         let mut selection_routing_state = strip_stop_message_fields(&base_state);
-        let metadata_instructions = build_metadata_instructions(metadata);
+        let metadata_instructions = build_metadata_instructions(&meta_route_03);
         if !metadata_instructions.is_empty() {
             apply_routing_instructions(&metadata_instructions, &mut selection_routing_state)?;
         }
         if !is_continuation {
             selection_routing_state.forced_target = None;
         }
-        if let Some(target) = metadata
-            .get("__routecodexRetryProviderKey")
-            .and_then(|v| v.as_str())
+        if let Some(target) = meta_route_03
+            .get_string("__routecodexRetryProviderKey")
+            .as_deref()
             .and_then(parse_retry_provider_key_target)
         {
             selection_routing_state.forced_target = Some(target);
@@ -352,7 +350,7 @@ impl VirtualRouterEngineCore {
         let routing_instruction_mutation_only =
             has_only_routing_state_mutation_instructions(&core_instructions)
                 && features.user_text_sample.trim().is_empty();
-        let mut metadata_for_selection = features.metadata.clone();
+        let mut metadata_for_selection = meta_route_03.to_metadata_value();
         if routing_instruction_mutation_only {
             if let Some(map) = metadata_for_selection.as_object_mut() {
                 map.insert(
@@ -526,7 +524,7 @@ impl VirtualRouterEngineCore {
 
         // RELAY: single shared path
         let mut classification = self.classifier.classify(&features);
-        if let Some(route_hint) = resolve_route_hint(metadata) {
+        if let Some(route_hint) = resolve_route_hint(&meta_route_03) {
             if route_has_any_pool(&self.routing, &route_hint) {
                 classification.route_name = route_hint.clone();
                 classification.reasoning = append_reasoning_tag(

@@ -32,6 +32,7 @@ mod hub_bridge_policies;
 mod hub_chat_envelope_validator;
 mod hub_pipeline;
 mod hub_pipeline_blocks;
+mod hub_pipeline_contracts;
 mod hub_pipeline_lib;
 mod hub_pipeline_session_identifiers;
 mod hub_pipeline_target_utils;

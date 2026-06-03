@@ -89,11 +89,24 @@ type NativeHubBridgePolicySemantics = {
   }) => Record<string, unknown>;
 };
 
+type NativeHubVrNodeContracts = {
+  describeHubPipelineContractsWithNative?: () => AnyRecord;
+  describeVirtualRouterContractsWithNative?: () => AnyRecord;
+  describeMetaCarrierContractsWithNative?: () => AnyRecord;
+  describePipelineContractWithNative?: (nodeId: string) => AnyRecord;
+  validatePipelineNodeContractBoundaryWithNative?: (
+    nodeId: string,
+    before: unknown,
+    after: unknown
+  ) => AnyRecord;
+};
+
 let cachedSharedSemantics: NativeSharedConversionSemantics | null | undefined;
 let cachedRespSemantics: NativeHubPipelineRespSemantics | null | undefined;
 let cachedFollowupSanitize: FollowupSanitizeModule | null | undefined;
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
 let cachedHubBridgePolicySemantics: NativeHubBridgePolicySemantics | null | undefined;
+let cachedHubVrNodeContracts: NativeHubVrNodeContracts | null | undefined;
 let cachedChatProcessNodeResultSemantics: NativeChatProcessNodeResultSemantics | null | undefined;
 let sharedBindingsChecked: boolean | undefined;
 let respBindingsChecked: boolean | undefined;
@@ -116,6 +129,26 @@ function getFailurePolicyModule(): NativeFailurePolicyModule {
     throw new Error('[llmswitch-bridge] native-failure-policy not available');
   }
   return cachedFailurePolicyModule;
+}
+
+function getHubVrNodeContracts(): NativeHubVrNodeContracts {
+  if (cachedHubVrNodeContracts !== undefined) {
+    if (!cachedHubVrNodeContracts) {
+      throw new Error('[llmswitch-bridge] native-hub-vr-node-contracts not available');
+    }
+    return cachedHubVrNodeContracts;
+  }
+  try {
+    cachedHubVrNodeContracts = requireCoreDist<NativeHubVrNodeContracts>(
+      'router/virtual-router/engine-selection/native-hub-vr-node-contracts'
+    );
+  } catch {
+    cachedHubVrNodeContracts = null;
+  }
+  if (!cachedHubVrNodeContracts) {
+    throw new Error('[llmswitch-bridge] native-hub-vr-node-contracts not available');
+  }
+  return cachedHubVrNodeContracts;
 }
 
 async function assertSharedBindings(): Promise<void> {
@@ -358,6 +391,50 @@ export async function sanitizeProviderOutboundPayload(input: {
     throw new Error('[llmswitch-bridge] sanitizeProviderOutboundPayloadWithNative not available');
   }
   return fn(input) as AnyRecord;
+}
+
+export function describeHubPipelineContractsNative(): AnyRecord {
+  const fn = getHubVrNodeContracts().describeHubPipelineContractsWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] describeHubPipelineContractsWithNative not available');
+  }
+  return fn();
+}
+
+export function describeVirtualRouterContractsNative(): AnyRecord {
+  const fn = getHubVrNodeContracts().describeVirtualRouterContractsWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] describeVirtualRouterContractsWithNative not available');
+  }
+  return fn();
+}
+
+export function describeMetaCarrierContractsNative(): AnyRecord {
+  const fn = getHubVrNodeContracts().describeMetaCarrierContractsWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] describeMetaCarrierContractsWithNative not available');
+  }
+  return fn();
+}
+
+export function describePipelineContractNative(nodeId: string): AnyRecord {
+  const fn = getHubVrNodeContracts().describePipelineContractWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] describePipelineContractWithNative not available');
+  }
+  return fn(nodeId);
+}
+
+export function validatePipelineNodeContractBoundaryNative(
+  nodeId: string,
+  before: unknown,
+  after: unknown
+): AnyRecord {
+  const fn = getHubVrNodeContracts().validatePipelineNodeContractBoundaryWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] validatePipelineNodeContractBoundaryWithNative not available');
+  }
+  return fn(nodeId, before, after);
 }
 
 export function classifyProviderFailure(

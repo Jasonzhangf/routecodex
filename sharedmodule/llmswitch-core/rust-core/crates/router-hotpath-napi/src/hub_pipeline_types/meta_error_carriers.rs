@@ -43,6 +43,84 @@ pub(crate) fn build_meta_req_02_runtime_carrier(
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct MetaRoute03RouteCarrier {
+    control: Map<String, Value>,
+}
+
+impl MetaRoute03RouteCarrier {
+    pub(crate) fn control(&self) -> &Map<String, Value> {
+        &self.control
+    }
+
+    pub(crate) fn get_string(&self, field: &str) -> Option<String> {
+        self.control
+            .get(field)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    }
+
+    pub(crate) fn to_metadata_value(&self) -> Value {
+        Value::Object(self.control.clone())
+    }
+}
+
+pub(crate) fn build_meta_route_03_from_metadata(metadata: &Value) -> MetaRoute03RouteCarrier {
+    let mut control = Map::new();
+    let Some(source) = metadata.as_object() else {
+        return MetaRoute03RouteCarrier { control };
+    };
+
+    copy_normalized_string_array(source, &mut control, "allowedProviders");
+    copy_normalized_string_array(source, &mut control, "excludedProviderKeys");
+    copy_normalized_string_array(source, &mut control, "disabledProviderKeyAliases");
+    copy_non_empty_string(source, &mut control, "__shadowCompareForcedProviderKey");
+    copy_non_empty_string(source, &mut control, "__routecodexRetryProviderKey");
+    copy_non_empty_string(source, &mut control, "routeHint");
+    copy_non_empty_string(source, &mut control, "routecodexRoutingPolicyGroup");
+    copy_non_empty_string(source, &mut control, "routecodexPortMode");
+    copy_non_empty_string(source, &mut control, "routecodexPortBinding");
+    if let Some(port) = source.get("routecodexLocalPort").and_then(|value| value.as_i64()) {
+        control.insert("routecodexLocalPort".to_string(), Value::Number(port.into()));
+    }
+
+    MetaRoute03RouteCarrier { control }
+}
+
+fn copy_non_empty_string(source: &Map<String, Value>, target: &mut Map<String, Value>, field: &str) {
+    if let Some(value) = source
+        .get(field)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        target.insert(field.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn copy_normalized_string_array(
+    source: &Map<String, Value>,
+    target: &mut Map<String, Value>,
+    field: &str,
+) {
+    let Some(items) = source.get(field).and_then(|value| value.as_array()) else {
+        return;
+    };
+    let normalized: Vec<Value> = items
+        .iter()
+        .filter_map(|entry| entry.as_str())
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| Value::String(entry.to_string()))
+        .collect();
+    if !normalized.is_empty() {
+        target.insert(field.to_string(), Value::Array(normalized));
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ErrorErr03RuntimeClassified {
     code: String,
     stage: String,
@@ -135,6 +213,27 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("requestId"));
+    }
+
+    #[test]
+    fn builds_meta_route_03_from_legacy_metadata_only_with_route_controls() {
+        let carrier = build_meta_route_03_from_metadata(&json!({
+            "allowedProviders": [" p1.key1 ", "", 7],
+            "disabledProviderKeyAliases": ["p1.key2"],
+            "__shadowCompareForcedProviderKey": " p2.key3.model ",
+            "__routecodexRetryProviderKey": " p3.key4.model ",
+            "routeHint": " tools ",
+            "routecodexRoutingPolicyGroup": " coding ",
+            "providerProtocol": "openai-chat",
+            "metadata": {"mustNotNest": true}
+        }));
+        assert_eq!(carrier.get_string("routeHint").as_deref(), Some("tools"));
+        assert_eq!(
+            carrier.control().get("allowedProviders"),
+            Some(&json!(["p1.key1"]))
+        );
+        assert!(carrier.control().get("providerProtocol").is_none());
+        assert!(carrier.control().get("metadata").is_none());
     }
 
     #[test]

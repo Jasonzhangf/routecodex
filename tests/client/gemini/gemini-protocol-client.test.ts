@@ -1,20 +1,18 @@
 import { GeminiProtocolClient } from '../../../src/client/gemini/gemini-protocol-client.js';
 
 describe('GeminiProtocolClient', () => {
-  test('drops metadata from upstream body', () => {
+  test('fails fast on metadata instead of stripping it from Gemini provider body', () => {
     const client = new GeminiProtocolClient();
-    const body = client.buildRequestBody({
-      model: 'gemini-1.5-pro',
-      contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
-      metadata: {
-        __raw_request_body: { big: 'blob' },
-        clientHeaders: { accept: 'application/json' }
-      }
-    } as any);
-
-    expect(body).not.toHaveProperty('metadata');
-    expect(body).not.toHaveProperty('model');
-    expect(body).toHaveProperty('contents');
+    expect(() =>
+      client.buildRequestBody({
+        model: 'gemini-1.5-pro',
+        contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+        metadata: {
+          __raw_request_body: { big: 'blob' },
+          clientHeaders: { accept: 'application/json' }
+        }
+      } as any)
+    ).toThrow(/metadata is not allowed/);
   });
 
   test('converts OpenAI chat messages to Gemini contents and systemInstruction', () => {

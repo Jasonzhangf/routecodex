@@ -70,4 +70,24 @@ describe('Hub Pipeline VR/provider boundary contract', () => {
     }
     expect(violations).toEqual([]);
   });
+
+  it('routes VR metadata controls only through MetaRoute03RouteCarrier', () => {
+    const routeSource = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs');
+    const stateSource = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/state.rs');
+    expect(routeSource).toContain('build_meta_route_03_from_metadata(metadata)');
+    expect(routeSource).toContain('build_metadata_instructions(&meta_route_03)');
+    expect(routeSource).toContain('meta_route_03.to_metadata_value()');
+    expect(stateSource).toContain('MetaRoute03RouteCarrier');
+
+    const combined = `${routeSource}\n${stateSource}`;
+    for (const forbidden of [
+      'metadata.get("allowedProviders")',
+      'metadata.get("disabledProviderKeyAliases")',
+      'metadata.get("__shadowCompareForcedProviderKey")',
+      'metadata.get("__routecodexRetryProviderKey")',
+      'resolve_route_hint(metadata)',
+    ]) {
+      expect(combined).not.toContain(forbidden);
+    }
+  });
 });

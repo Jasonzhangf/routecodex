@@ -93,7 +93,7 @@ export class GeminiProtocolClient implements HttpProtocolClient<ProtocolRequestP
     }
 
     if ('metadata' in body) {
-      delete (body as unknown as { metadata?: unknown }).metadata;
+      throw new Error('provider-runtime-error: metadata is not allowed in Gemini provider body');
     }
 
     const generationConfig = this.extractGenerationConfig(body);

@@ -86,6 +86,13 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
 - 修复原则：在唯一真源出站构造点移除违规语义并加 fail-fast invariant；禁止 fallback sanitizer、静默 delete、provider-specific 旁路、双路径兼容。
 - 验证要求：红测至少覆盖 protocol client、SDK transport、Rust outbound format build、provider-request snapshot、连续请求/端口/session 隔离。
 
+## Hub/VR 节点 runtime contract help（2026-06-03，强制）
+
+- 修改 Hub Pipeline / Virtual Router 节点前，先查 Rust runtime 在线 contract help；入口为 native `describeHubPipelineContractsJson`、`describeVirtualRouterContractsJson`、`describeMetaCarrierContractsJson`、`describePipelineContractJson(nodeId)`，TS 薄壳为 `describeHubPipelineContractsNative` 等。
+- 每个节点修改必须对齐 contract 中的 `dataIn` / `dataOut` / `metaRead` / `metaWrite` / `effects` / `forbiddenPaths` / `ownerBuilder`；只改唯一 owner builder/parser。
+- 控制语义只能进入 `Meta*` carrier；观测/计时/dataProcessed 只能进入 `Snapshot*` / NodeObservation；错误只能进入 `Error*` chain；禁止把这些写回 data payload。
+- 修改后至少跑 Rust contract 定向测试和对应 node boundary/red test；新增 contract violation 必须 fail-fast，不允许 fallback/silent sanitizer。
+
 ## 索引概要
 - L1-L20 `purpose`: RouteCodex/llmswitch-core 开发技能索引
 - L21-L55 `closed-loop-refactor`: 标准重构/修复闭环（分步→修改→编译→构建→验证→下一步）
@@ -1816,3 +1823,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-06-03 servertool followup 唯一路径精华
 - stop_message followup 预算/eligibility 的唯一 live carrier 是 `__rt.serverToolLoopState` + `__rt.stopMessageFollowupPolicy`；Rust handler 产出 plan，TS `applyFollowupRuntimeMetadata` 只做一次 materialize，nested metadata builder / request metadata merge 禁止再补偿重建预算。
 - 验证必须看在线 `:stop_followup` 样本：`meta.requestMetadata.__rt.serverToolLoopState.maxRepeats=3` 且 repeatCount 逐轮增长；不要用 `root serverToolLoopState` 或 persisted snapshot 证明 live path 正确。
+
+### 2026-06-03 servertool followup 单次复入精华
+- `servertool` followup 禁止同一 `followupRequestId` provider 重试；空 followup 响应只能 fail-fast + 落 empty sample，不能 `retryEmptyFollowupOnce` 二次复入，否则会消耗 provider 次数并造成重复 VR hit。

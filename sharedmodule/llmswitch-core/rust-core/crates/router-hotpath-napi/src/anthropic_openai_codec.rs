@@ -423,7 +423,8 @@ fn block_type(block: &Value) -> Option<String> {
 
 fn block_id(block: &Value, keys: &[&str]) -> Option<String> {
     let row = block.as_object()?;
-    keys.iter().find_map(|key| read_trimmed_string(row.get(*key)))
+    keys.iter()
+        .find_map(|key| read_trimmed_string(row.get(*key)))
 }
 
 fn split_parallel_tool_use_result_turns(messages: Vec<Value>) -> Vec<Value> {
@@ -470,7 +471,10 @@ fn split_parallel_tool_use_result_turns(messages: Vec<Value>) -> Vec<Value> {
                 let mut matched = true;
                 for (tool_use, tool_result) in tool_uses.iter().zip(tool_results.iter()) {
                     let use_id = block_id(tool_use, &["id"]);
-                    let result_id = block_id(tool_result, &["tool_use_id", "tool_call_id", "call_id", "id"]);
+                    let result_id = block_id(
+                        tool_result,
+                        &["tool_use_id", "tool_call_id", "call_id", "id"],
+                    );
                     if use_id.is_none() || use_id != result_id {
                         matched = false;
                         break;
@@ -484,7 +488,10 @@ fn split_parallel_tool_use_result_turns(messages: Vec<Value>) -> Vec<Value> {
                         ])));
                         out.push(Value::Object(Map::from_iter([
                             ("role".to_string(), Value::String("user".to_string())),
-                            ("content".to_string(), Value::Array(vec![tool_result.clone()])),
+                            (
+                                "content".to_string(),
+                                Value::Array(vec![tool_result.clone()]),
+                            ),
                         ])));
                     }
                     index += 2;
@@ -1374,7 +1381,10 @@ mod tests {
         assert_eq!(messages.len(), 3);
         assert_eq!(messages[1]["role"].as_str(), Some("user"));
         assert_eq!(messages[1]["content"].as_array().unwrap().len(), 1);
-        assert_eq!(messages[1]["content"][0]["type"].as_str(), Some("tool_result"));
+        assert_eq!(
+            messages[1]["content"][0]["type"].as_str(),
+            Some("tool_result")
+        );
         assert_eq!(messages[2]["role"].as_str(), Some("user"));
         assert_eq!(messages[2]["content"].as_array().unwrap().len(), 1);
         assert_eq!(messages[2]["content"][0]["type"].as_str(), Some("text"));

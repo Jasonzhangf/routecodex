@@ -1356,8 +1356,12 @@ mod tests {
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
         core.quota_manager.register_providers(&keys);
-        core.health_manager
-            .cooldown_provider("primary.key1.model", Some("HTTP_502".to_string()), Some(30 * 60_000), now_ms());
+        core.health_manager.cooldown_provider(
+            "primary.key1.model",
+            Some("HTTP_502".to_string()),
+            Some(30 * 60_000),
+            now_ms(),
+        );
 
         let routing = Map::from_iter([(
             "thinking".to_string(),

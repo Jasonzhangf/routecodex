@@ -48,8 +48,8 @@ pub(crate) fn build_hub_resp_outbound_04_client_payload_for_protocol(
             });
             build_responses_payload_from_chat_core(&finalized_payload, Some(request_id), &context)
                 .map_err(|message| {
-                    HubPipelineError::new("hub_pipeline_resp_client_remap_failed", message)
-                })?
+                HubPipelineError::new("hub_pipeline_resp_client_remap_failed", message)
+            })?
         }
         _ => {
             return Err(HubPipelineError::new(

@@ -988,7 +988,10 @@ mod tests {
         );
 
         assert!(output.changed);
-        assert_eq!(output.messages[1]["type"].as_str(), Some("function_call_output"));
+        assert_eq!(
+            output.messages[1]["type"].as_str(),
+            Some("function_call_output")
+        );
         assert_eq!(
             output.messages[1]["call_id"].as_str(),
             Some("call_uLjTinTpyajt4dRN9pvLwErd")
@@ -1017,7 +1020,10 @@ mod tests {
         );
 
         assert!(output.changed);
-        assert_eq!(output.messages[0]["type"].as_str(), Some("function_call_output"));
+        assert_eq!(
+            output.messages[0]["type"].as_str(),
+            Some("function_call_output")
+        );
         assert_eq!(
             output.messages[0]["call_id"].as_str(),
             Some("call_uLjTinTpyajt4dRN9pvLwErd")

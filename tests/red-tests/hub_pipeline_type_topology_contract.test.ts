@@ -92,4 +92,47 @@ describe('Hub Pipeline request type topology contract', () => {
     expect(topology).toContain('HubReqChatProcess03Governed');
     expect(topology).toContain('HubReqOutbound05ProviderSemantic');
   });
+
+  it('exposes Rust runtime contract help as the online topology entry', () => {
+    const registry = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs');
+    const bindings = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
+    const requiredExports = read('sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts');
+    const tsBridge = read('sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-vr-node-contracts.ts');
+    for (const token of [
+      'describe_hub_pipeline_contracts',
+      'describe_virtual_router_contracts',
+      'describe_meta_carrier_contracts',
+      'describe_pipeline_contract',
+      'validate_pipeline_node_contract_boundary',
+    ]) {
+      expect(registry).toContain(token);
+    }
+    for (const token of [
+      'describe_hub_pipeline_contracts_json',
+      'describe_virtual_router_contracts_json',
+      'describe_meta_carrier_contracts_json',
+      'describe_pipeline_contract_json',
+      'validate_pipeline_node_contract_boundary_json',
+    ]) {
+      expect(bindings).toContain(token);
+    }
+    for (const token of [
+      'describeHubPipelineContractsJson',
+      'describeVirtualRouterContractsJson',
+      'describeMetaCarrierContractsJson',
+      'describePipelineContractJson',
+      'validatePipelineNodeContractBoundaryJson',
+    ]) {
+      expect(requiredExports).toContain(token);
+    }
+    for (const token of [
+      'describeHubPipelineContractsWithNative',
+      'describeVirtualRouterContractsWithNative',
+      'describeMetaCarrierContractsWithNative',
+      'describePipelineContractWithNative',
+      'validatePipelineNodeContractBoundaryWithNative',
+    ]) {
+      expect(tsBridge).toContain(token);
+    }
+  });
 });

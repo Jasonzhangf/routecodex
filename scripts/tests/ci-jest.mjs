@@ -37,6 +37,8 @@ const routingInstructionTests = [
   'tests/server/http-server/execute-pipeline-failover.spec.ts',
   'tests/server/runtime/http-server/executor-provider.spec.ts',
   'tests/server/runtime/http-server/request-executor.spec.ts',
+  'tests/red-tests/error_chain_singleton_truth.test.ts',
+  'tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts',
   'tests/server/runtime/http-server/provider-direct-pipeline.spec.ts',
   'tests/server/runtime/http-server/router-direct-pipeline.spec.ts',
   'tests/server/runtime/http-server/port-config-validator-sameprotocol.spec.ts',

@@ -402,7 +402,11 @@ fn normalize_whitespace(text: &str) -> String {
 fn extract_plain_text_from_content(content: &Value) -> Option<String> {
     if let Some(text) = content.as_str() {
         let normalized = normalize_whitespace(text);
-        return if normalized.is_empty() { None } else { Some(normalized) };
+        return if normalized.is_empty() {
+            None
+        } else {
+            Some(normalized)
+        };
     }
     let parts = content.as_array()?;
     let mut fragments: Vec<String> = Vec::new();
@@ -431,8 +435,10 @@ fn is_synthetic_routecodex_control_text(text: &str) -> bool {
     let lowered = normalized.to_ascii_lowercase();
     lowered.starts_with("[routecodex]")
         && (lowered.starts_with("[routecodex] request timed out before a response was received")
-            || lowered == "[routecodex] assistant response became empty after response sanitization."
-            || lowered == "[routecodex] assistant response became empty after response sanitization"
+            || lowered
+                == "[routecodex] assistant response became empty after response sanitization."
+            || lowered
+                == "[routecodex] assistant response became empty after response sanitization"
             || lowered == "[routecodex] tool output was empty; execution status unknown."
             || lowered == "[routecodex] tool output was empty; execution status unknown"
             || lowered.starts_with("[routecodex] tool call result unknown"))
@@ -528,7 +534,9 @@ fn validate_openai_chat_tool_history(messages: &[Value]) -> Result<(), String> {
                 index, call_id
             ));
         }
-        if !seen_tool_calls.contains(call_id.as_str()) || !pending_tool_calls.contains_key(call_id.as_str()) {
+        if !seen_tool_calls.contains(call_id.as_str())
+            || !pending_tool_calls.contains_key(call_id.as_str())
+        {
             return Err(format!(
                 "orphan_tool_result: tool message references unknown or already-consumed tool_call_id at index {}: {}",
                 index, call_id

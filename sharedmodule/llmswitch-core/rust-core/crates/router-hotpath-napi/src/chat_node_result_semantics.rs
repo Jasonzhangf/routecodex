@@ -55,9 +55,9 @@ fn build_processed_descriptor(timestamp_ms: f64, streaming_enabled: bool) -> Val
 fn build_node_result_metadata(
     start_time_ms: f64,
     end_time_ms: f64,
-    messages_count: i64,
-    tools_count: i64,
-    include_data_processed: bool,
+    _messages_count: i64,
+    _tools_count: i64,
+    _include_data_processed: bool,
 ) -> Value {
     let start_time = read_i64(start_time_ms);
     let end_time = read_i64(end_time_ms);
@@ -72,14 +72,17 @@ fn build_node_result_metadata(
     metadata.insert("startTime".to_string(), Value::from(start_time));
     metadata.insert("endTime".to_string(), Value::from(end_time));
 
-    if include_data_processed {
-        let mut data_processed = Map::new();
-        data_processed.insert("messages".to_string(), Value::from(messages_count.max(0)));
-        data_processed.insert("tools".to_string(), Value::from(tools_count.max(0)));
-        metadata.insert("dataProcessed".to_string(), Value::Object(data_processed));
-    }
-
     Value::Object(metadata)
+}
+
+fn build_node_result_observation(messages_count: i64, tools_count: i64) -> Value {
+    let mut data_processed = Map::new();
+    data_processed.insert("messages".to_string(), Value::from(messages_count.max(0)));
+    data_processed.insert("tools".to_string(), Value::from(tools_count.max(0)));
+
+    let mut observation = Map::new();
+    observation.insert("dataProcessed".to_string(), Value::Object(data_processed));
+    Value::Object(observation)
 }
 
 fn read_string(value: Option<&Value>) -> Option<String> {
@@ -283,9 +286,11 @@ fn value_has_non_empty_text(value: Option<&Value>) -> bool {
         Some(Value::Array(items)) => items
             .iter()
             .any(|entry| value_has_non_empty_text(Some(entry))),
-        Some(Value::Object(row)) => value_has_non_empty_text(row.get("text"))
-            || value_has_non_empty_text(row.get("output_text"))
-            || value_has_non_empty_text(row.get("content")),
+        Some(Value::Object(row)) => {
+            value_has_non_empty_text(row.get("text"))
+                || value_has_non_empty_text(row.get("output_text"))
+                || value_has_non_empty_text(row.get("content"))
+        }
         _ => false,
     }
 }
@@ -511,8 +516,10 @@ fn has_servertool_followup_tool_bearing_payload(record: &Map<String, Value>) -> 
                     .and_then(|row| read_string(row.get("type")))
                     .map(|value| value.to_ascii_lowercase())
                     .unwrap_or_default();
-                matches!(item_type.as_str(), "function_call" | "tool_call" | "tool_use")
-                    || item_type.contains("tool")
+                matches!(
+                    item_type.as_str(),
+                    "function_call" | "tool_call" | "tool_use"
+                ) || item_type.contains("tool")
             })
         })
     {
@@ -601,10 +608,15 @@ fn classify_empty_response_signal_value(stage: &str, payload: &Value) -> Option<
             || value_has_non_empty_text(first.get("content"));
         if finish_reason == "stop" && !has_text {
             return Some(json_object(vec![
-                ("errorType", Value::String("empty_response_no_text_or_tool_calls".to_string())),
+                (
+                    "errorType",
+                    Value::String("empty_response_no_text_or_tool_calls".to_string()),
+                ),
                 (
                     "matchedText",
-                    Value::String("finish_reason=stop but assistant text/tool_calls are empty".to_string()),
+                    Value::String(
+                        "finish_reason=stop but assistant text/tool_calls are empty".to_string(),
+                    ),
                 ),
                 (
                     "responseSummary",
@@ -641,10 +653,16 @@ fn classify_empty_response_signal_value(stage: &str, payload: &Value) -> Option<
     });
     if output_text.is_empty() && !has_output_text {
         return Some(json_object(vec![
-            ("errorType", Value::String("empty_response_no_text_or_tool_calls".to_string())),
+            (
+                "errorType",
+                Value::String("empty_response_no_text_or_tool_calls".to_string()),
+            ),
             (
                 "matchedText",
-                Value::String("responses status completed but output_text/output content are empty".to_string()),
+                Value::String(
+                    "responses status completed but output_text/output content are empty"
+                        .to_string(),
+                ),
             ),
             (
                 "responseSummary",
@@ -1157,6 +1175,15 @@ pub fn build_chat_node_result_metadata_json(
 }
 
 #[napi]
+pub fn build_chat_node_result_observation_json(
+    messages_count: i64,
+    tools_count: i64,
+) -> NapiResult<String> {
+    let output = build_node_result_observation(messages_count, tools_count);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn apply_chat_processed_request_json(
     request_json: String,
     timestamp_ms: f64,
@@ -1356,15 +1383,23 @@ mod request_semantics_tests {
             "required_action": { "submit_tool_outputs": {} },
             "output": []
         });
-        assert!(!is_tool_call_continuation_response_value(&empty_required_action));
+        assert!(!is_tool_call_continuation_response_value(
+            &empty_required_action
+        ));
     }
 
     #[test]
     fn classifies_empty_client_response_payload_in_rust() {
-        assert!(is_empty_client_response_payload_value(&json!({}))); 
-        assert!(!is_empty_client_response_payload_value(&json!({"error":{"message":"bad"}})));
-        assert!(!is_empty_client_response_payload_value(&json!({"choices":[{"message":{"content":"ok"}}]})));
-        assert!(is_empty_client_response_payload_value(&json!({"choices":[{"message":{"content":""}}]})));
+        assert!(is_empty_client_response_payload_value(&json!({})));
+        assert!(!is_empty_client_response_payload_value(
+            &json!({"error":{"message":"bad"}})
+        ));
+        assert!(!is_empty_client_response_payload_value(
+            &json!({"choices":[{"message":{"content":"ok"}}]})
+        ));
+        assert!(is_empty_client_response_payload_value(
+            &json!({"choices":[{"message":{"content":""}}]})
+        ));
         assert!(!is_empty_client_response_payload_value(&json!({
             "choices":[{"message":{"tool_calls":[{"id":"call_1"}]}}]
         })));
@@ -1377,19 +1412,39 @@ mod request_semantics_tests {
     }
 
     #[test]
+    fn separates_node_metadata_from_observation_in_rust() {
+        let metadata = build_node_result_metadata(10.0, 18.0, 3, 2, true);
+        assert_eq!(metadata["node"], "hub-chat-process");
+        assert_eq!(metadata["executionTime"], 8);
+        assert!(metadata.get("dataProcessed").is_none());
+
+        let observation = build_node_result_observation(3, 2);
+        assert_eq!(observation["dataProcessed"]["messages"], 3);
+        assert_eq!(observation["dataProcessed"]["tools"], 2);
+    }
+
+    #[test]
     fn classifies_snapshot_empty_response_signal_in_rust() {
-        let chat = json!({ "choices": [{ "finish_reason": "stop", "message": { "content": "" } }] });
-        let signal = classify_empty_response_signal_value("chat_process.resp.final", &chat).unwrap();
+        let chat =
+            json!({ "choices": [{ "finish_reason": "stop", "message": { "content": "" } }] });
+        let signal =
+            classify_empty_response_signal_value("chat_process.resp.final", &chat).unwrap();
         assert_eq!(signal["responseSummary"]["protocol"], "chat");
 
         let tool_chat = json!({ "choices": [{ "finish_reason": "stop", "message": { "tool_calls": [{ "id": "call_1" }] } }] });
-        assert!(classify_empty_response_signal_value("chat_process.resp.final", &tool_chat).is_none());
+        assert!(
+            classify_empty_response_signal_value("chat_process.resp.final", &tool_chat).is_none()
+        );
 
         let responses = json!({ "status": "completed", "output": [] });
-        let signal = classify_empty_response_signal_value("chat_process.resp.final", &responses).unwrap();
+        let signal =
+            classify_empty_response_signal_value("chat_process.resp.final", &responses).unwrap();
         assert_eq!(signal["responseSummary"]["protocol"], "responses");
 
         let text_responses = json!({ "status": "completed", "output_text": "ok" });
-        assert!(classify_empty_response_signal_value("chat_process.resp.final", &text_responses).is_none());
+        assert!(
+            classify_empty_response_signal_value("chat_process.resp.final", &text_responses)
+                .is_none()
+        );
     }
 }

@@ -570,7 +570,10 @@ fn is_responses_terminal_probe_status(status: Option<&Value>) -> bool {
     let Some(status) = status.and_then(Value::as_str) else {
         return false;
     };
-    matches!(status.trim().to_ascii_lowercase().as_str(), "completed" | "requires_action")
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "completed" | "requires_action"
+    )
 }
 
 fn parse_sse_block(block: &str) -> Option<(String, Value)> {
@@ -608,7 +611,10 @@ fn merge_response_probe_fields(probe: &mut Map<String, Value>, response: &Map<St
     }
     if let Some(next_status) = read_trimmed_string(response.get("status")) {
         if !is_responses_terminal_probe_status(probe.get("status"))
-            || matches!(next_status.to_ascii_lowercase().as_str(), "completed" | "requires_action")
+            || matches!(
+                next_status.to_ascii_lowercase().as_str(),
+                "completed" | "requires_action"
+            )
         {
             probe.insert("status".to_string(), Value::String(next_status));
         }
@@ -653,8 +659,8 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
     chunk_json: String,
     probe_json: String,
 ) -> NapiResult<String> {
-    let chunk: Value = serde_json::from_str(&chunk_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let chunk: Value =
+        serde_json::from_str(&chunk_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let text = match chunk {
         Value::String(text) => text,
         other => other.as_str().unwrap_or_default().to_string(),
@@ -710,13 +716,20 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
             }
         }
     }
-    serde_json::to_string(&Value::Object(probe)).map_err(|e| napi::Error::from_reason(e.to_string()))
+    serde_json::to_string(&Value::Object(probe))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 fn safe_response_id_from_request_label(request_label: &str) -> String {
     let safe: String = request_label
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' { ch } else { '_' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                ch
+            } else {
+                '_'
+            }
+        })
         .collect();
     format!("resp_{}", safe)
 }
@@ -725,8 +738,8 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
     probe_json: String,
     request_label: String,
 ) -> NapiResult<String> {
-    let probe_value: Value = serde_json::from_str(&probe_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let probe_value: Value =
+        serde_json::from_str(&probe_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let Some(probe) = probe_value.as_object() else {
         return Ok("[]".to_string());
     };
@@ -749,13 +762,23 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
     response_payload.insert("object".to_string(), Value::String("response".to_string()));
     response_payload.insert(
         "status".to_string(),
-        Value::String(if required_action.is_some() { "requires_action" } else { status.as_str() }.to_string()),
+        Value::String(
+            if required_action.is_some() {
+                "requires_action"
+            } else {
+                status.as_str()
+            }
+            .to_string(),
+        ),
     );
     if let Some(output) = probe.get("output").and_then(Value::as_array) {
         response_payload.insert("output".to_string(), Value::Array(output.clone()));
     }
     if let Some(output_text) = probe.get("output_text").and_then(Value::as_str) {
-        response_payload.insert("output_text".to_string(), Value::String(output_text.to_string()));
+        response_payload.insert(
+            "output_text".to_string(),
+            Value::String(output_text.to_string()),
+        );
     }
     if let Some(reasoning) = probe.get("reasoning").and_then(Value::as_object) {
         response_payload.insert("reasoning".to_string(), Value::Object(reasoning.clone()));
@@ -773,8 +796,14 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
             "type":"response.completed",
             "response": Value::Object(response_payload.clone())
         });
-        frames.push(format!("event: response.required_action\ndata: {}\n\n", required_payload));
-        frames.push(format!("event: response.completed\ndata: {}\n\n", completed_payload));
+        frames.push(format!(
+            "event: response.required_action\ndata: {}\n\n",
+            required_payload
+        ));
+        frames.push(format!(
+            "event: response.completed\ndata: {}\n\n",
+            completed_payload
+        ));
         frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
         frames.push("data: [DONE]\n\n".to_string());
         return serde_json::to_string(&frames).map_err(|e| napi::Error::from_reason(e.to_string()));
@@ -784,7 +813,10 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
             "type":"response.completed",
             "response": Value::Object(response_payload)
         });
-        frames.push(format!("event: response.completed\ndata: {}\n\n", completed_payload));
+        frames.push(format!(
+            "event: response.completed\ndata: {}\n\n",
+            completed_payload
+        ));
         frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
         frames.push("data: [DONE]\n\n".to_string());
     }
@@ -823,10 +855,14 @@ mod tests {
         assert!(wire.contains("event: response.completed"));
         assert!(wire.contains("event: response.done"));
         assert!(wire.contains("data: [DONE]"));
-        assert!(wire.find("event: response.required_action").unwrap()
-            < wire.find("event: response.completed").unwrap());
-        assert!(wire.find("event: response.completed").unwrap()
-            < wire.find("event: response.done").unwrap());
+        assert!(
+            wire.find("event: response.required_action").unwrap()
+                < wire.find("event: response.completed").unwrap()
+        );
+        assert!(
+            wire.find("event: response.completed").unwrap()
+                < wire.find("event: response.done").unwrap()
+        );
     }
 
     #[test]

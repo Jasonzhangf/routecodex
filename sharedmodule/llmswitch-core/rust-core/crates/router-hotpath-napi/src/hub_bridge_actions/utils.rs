@@ -26,8 +26,10 @@ pub(crate) fn is_synthetic_routecodex_control_text(text: &str) -> bool {
     let lowered = normalized.to_ascii_lowercase();
     lowered.starts_with("[routecodex]")
         && (lowered.starts_with("[routecodex] request timed out before a response was received")
-            || lowered == "[routecodex] assistant response became empty after response sanitization."
-            || lowered == "[routecodex] assistant response became empty after response sanitization"
+            || lowered
+                == "[routecodex] assistant response became empty after response sanitization."
+            || lowered
+                == "[routecodex] assistant response became empty after response sanitization"
             || lowered == "[routecodex] tool output was empty; execution status unknown."
             || lowered == "[routecodex] tool output was empty; execution status unknown"
             || lowered.starts_with("[routecodex] tool call result unknown"))
@@ -37,7 +39,11 @@ fn extract_plain_text_from_control_content(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => {
             let normalized = normalize_control_text_whitespace(text);
-            if normalized.is_empty() { None } else { Some(normalized) }
+            if normalized.is_empty() {
+                None
+            } else {
+                Some(normalized)
+            }
         }
         Value::Array(items) => {
             let mut fragments: Vec<String> = Vec::new();
@@ -54,7 +60,11 @@ fn extract_plain_text_from_control_content(value: &Value) -> Option<String> {
                     fragments.push(normalized);
                 }
             }
-            if fragments.is_empty() { None } else { Some(fragments.join("\n")) }
+            if fragments.is_empty() {
+                None
+            } else {
+                Some(fragments.join("\n"))
+            }
         }
         Value::Object(row) => {
             if let Some(text) = row.get("text").and_then(Value::as_str) {
@@ -66,7 +76,8 @@ fn extract_plain_text_from_control_content(value: &Value) -> Option<String> {
             if let Some(text) = row.get("output").and_then(Value::as_str) {
                 return extract_plain_text_from_control_content(&Value::String(text.to_string()));
             }
-            row.get("content").and_then(extract_plain_text_from_control_content)
+            row.get("content")
+                .and_then(extract_plain_text_from_control_content)
         }
         _ => None,
     }

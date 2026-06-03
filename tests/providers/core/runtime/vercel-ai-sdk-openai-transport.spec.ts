@@ -90,17 +90,17 @@ describe('applyOpenCodeZenThinkingDefaults', () => {
 });
 
 describe('buildOpenAiSdkChatCallOptions', () => {
-  it('does not map request metadata into OpenAI SDK provider options', () => {
-    const options = buildOpenAiSdkChatCallOptions(
-      {
-        model: 'gpt-5.4',
-        messages: [{ role: 'user', content: 'hi' }],
-        metadata: { user_id: 'must-not-leak', routeHint: 'internal' }
-      },
-      { authorization: 'Bearer test' }
-    );
-
-    expect((options.providerOptions as any)?.openai?.metadata).toBeUndefined();
+  it('fails fast when request metadata reaches OpenAI SDK provider options builder', () => {
+    expect(() =>
+      buildOpenAiSdkChatCallOptions(
+        {
+          model: 'gpt-5.4',
+          messages: [{ role: 'user', content: 'hi' }],
+          metadata: { user_id: 'must-not-leak', routeHint: 'internal' }
+        },
+        { authorization: 'Bearer test' }
+      )
+    ).toThrow(/metadata is not allowed in OpenAI SDK provider options/);
   });
 
   it('maps openai chat payload into AI SDK call options and preserves reasoning/tool config', () => {
@@ -328,7 +328,6 @@ describe('VercelAiSdkOpenAiTransport', () => {
             model: 'qwen3.5-plus',
             messages: [{ role: 'user', content: 'hello' }],
             reasoning_effort: 'high',
-            metadata: { user_id: 'must-not-leak' },
             parameters: { reasoning: true }
           },
           wantsSse: false

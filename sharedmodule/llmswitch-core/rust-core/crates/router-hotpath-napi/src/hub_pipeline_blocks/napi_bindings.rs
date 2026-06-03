@@ -48,6 +48,10 @@ use crate::hub_pipeline_blocks::web_search::{
     apply_direct_builtin_web_search_tool, is_canonical_web_search_tool_definition,
     is_search_route_id,
 };
+use crate::hub_pipeline_contracts::{
+    describe_hub_pipeline_contracts, describe_meta_carrier_contracts, describe_pipeline_contract,
+    describe_virtual_router_contracts, validate_pipeline_node_contract_boundary,
+};
 
 #[napi_derive::napi]
 pub fn normalize_hub_endpoint_json(endpoint: String) -> napi::Result<String> {
@@ -117,6 +121,59 @@ pub fn resolve_sse_protocol_from_metadata_json(metadata_json: String) -> napi::R
     let output = resolve_sse_protocol_from_metadata(&metadata);
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize sse protocol: {}", e)))
+}
+
+#[napi_derive::napi]
+pub fn describe_hub_pipeline_contracts_json() -> napi::Result<String> {
+    serde_json::to_string(&describe_hub_pipeline_contracts()).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to serialize hub pipeline contracts: {}", e))
+    })
+}
+
+#[napi_derive::napi]
+pub fn describe_virtual_router_contracts_json() -> napi::Result<String> {
+    serde_json::to_string(&describe_virtual_router_contracts()).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize virtual router contracts: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn describe_meta_carrier_contracts_json() -> napi::Result<String> {
+    serde_json::to_string(&describe_meta_carrier_contracts()).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to serialize meta carrier contracts: {}", e))
+    })
+}
+
+#[napi_derive::napi]
+pub fn describe_pipeline_contract_json(node_id: String) -> napi::Result<String> {
+    let output = describe_pipeline_contract(&node_id).ok_or_else(|| {
+        napi::Error::from_reason(format!("unknown pipeline node contract: {node_id}"))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to serialize pipeline contract: {}", e))
+    })
+}
+
+#[napi_derive::napi]
+pub fn validate_pipeline_node_contract_boundary_json(
+    node_id: String,
+    before_json: String,
+    after_json: String,
+) -> napi::Result<String> {
+    let before: Value = serde_json::from_str(&before_json).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to parse boundary before JSON: {}", e))
+    })?;
+    let after: Value = serde_json::from_str(&after_json).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to parse boundary after JSON: {}", e))
+    })?;
+    let output = validate_pipeline_node_contract_boundary(&node_id, &before, &after)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to serialize boundary validation: {}", e))
+    })
 }
 
 #[napi_derive::napi]

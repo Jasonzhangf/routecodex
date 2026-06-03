@@ -2,6 +2,25 @@ import { describe, expect, test } from '@jest/globals';
 import { qwenFamilyProfile } from '../../../src/providers/profile/families/qwen-profile.js';
 
 describe('qwen profile request sanitization', () => {
+  test('fails fast on metadata in qwen web_search provider body', () => {
+    expect(() =>
+      qwenFamilyProfile.buildRequestBody?.({
+        request: {
+          data: {
+            model: 'qwen-web-search',
+            query: 'routecodex',
+            metadata: { routeHint: 'internal' }
+          }
+        } as any,
+        runtimeMetadata: {
+          qwenWebSearch: true,
+          metadata: { qwenWebSearch: true }
+        } as any,
+        defaultBody: undefined
+      } as any)
+    ).toThrow(/metadata is not allowed/);
+  });
+
   test('preserves non-system history shape and only injects qwen system envelope', () => {
     const body = qwenFamilyProfile.buildRequestBody?.({
       request: {

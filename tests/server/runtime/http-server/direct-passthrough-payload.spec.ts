@@ -29,29 +29,25 @@ describe('direct-passthrough-payload', () => {
     });
   });
 
-  it('does not restore metadata from replay raw payload into direct provider wire body', () => {
-    const resolved = resolveRawPayloadForDirect(
-      {
-        model: 'gpt-5.3-codex',
-        input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
-      },
-      {
-        __raw_request_body: {
-          model: 'gpt-5.4',
-          metadata: {
-            session_id: 'replay-session-must-not-leak',
-            routeHint: 'internal'
-          },
-          input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+  it('fails fast instead of stripping metadata from replay raw payload', () => {
+    expect(() =>
+      resolveRawPayloadForDirect(
+        {
+          model: 'gpt-5.3-codex',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
         },
-      },
-    ) as Record<string, unknown>;
-
-    expect(resolved).toEqual({
-      model: 'gpt-5.4',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
-    });
-    expect(JSON.stringify(resolved)).not.toContain('replay-session-must-not-leak');
+        {
+          __raw_request_body: {
+            model: 'gpt-5.4',
+            metadata: {
+              session_id: 'replay-session-must-not-leak',
+              routeHint: 'internal'
+            },
+            input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+          },
+        },
+      )
+    ).toThrow(/metadata is not allowed in direct passthrough provider body/);
   });
 
   it('uses providerPayload as router-direct outbound truth when provided', () => {

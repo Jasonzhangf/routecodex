@@ -1,6 +1,7 @@
 use serde_json::{Map, Value};
 
 use crate::{
+    hub_pipeline_types::MetaRoute03RouteCarrier,
     shared_json_utils::{normalize_on_off_auto_string, normalize_on_off_string},
     virtual_router_engine::time_utils::now_ms,
 };
@@ -11,9 +12,15 @@ use super::types::{
     DEFAULT_STOP_MESSAGE_MAX_REPEATS,
 };
 
-pub(crate) fn build_metadata_instructions(metadata: &Value) -> Vec<RoutingInstruction> {
+pub(crate) fn build_metadata_instructions(
+    meta_route_03: &MetaRoute03RouteCarrier,
+) -> Vec<RoutingInstruction> {
     let mut instructions = Vec::new();
-    if let Some(allowed) = metadata.get("allowedProviders").and_then(|v| v.as_array()) {
+    if let Some(allowed) = meta_route_03
+        .control()
+        .get("allowedProviders")
+        .and_then(|v| v.as_array())
+    {
         for entry in allowed {
             let Some(raw) = entry.as_str() else {
                 continue;
@@ -38,7 +45,7 @@ pub(crate) fn build_metadata_instructions(metadata: &Value) -> Vec<RoutingInstru
         }
     }
     let forced_field = "__shadowCompareForcedProviderKey";
-    if let Some(raw) = metadata.get(forced_field).and_then(|v| v.as_str()) {
+    if let Some(raw) = meta_route_03.control().get(forced_field).and_then(|v| v.as_str()) {
         let trimmed = raw.trim();
         if let Some(target) = super::parse::parse_target(trimmed) {
             instructions.push(RoutingInstruction {
@@ -50,7 +57,8 @@ pub(crate) fn build_metadata_instructions(metadata: &Value) -> Vec<RoutingInstru
             });
         }
     }
-    if let Some(disabled) = metadata
+    if let Some(disabled) = meta_route_03
+        .control()
         .get("disabledProviderKeyAliases")
         .and_then(|v| v.as_array())
     {
@@ -572,4 +580,39 @@ pub(crate) fn pre_command_state_snapshot(state: &PreCommandState) -> Option<Valu
         );
     }
     Some(Value::Object(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hub_pipeline_types::build_meta_route_03_from_metadata;
+    use serde_json::json;
+
+    #[test]
+    fn builds_routing_instructions_from_meta_route_03_carrier() {
+        let carrier = build_meta_route_03_from_metadata(&json!({
+            "allowedProviders": [" p1.key1 ", "p2"],
+            "__shadowCompareForcedProviderKey": " p3.key3.model ",
+            "disabledProviderKeyAliases": ["p4.key4", "p5.6"],
+            "providerProtocol": "openai-chat"
+        }));
+        let instructions = build_metadata_instructions(&carrier);
+        assert_eq!(instructions.len(), 5);
+        assert_eq!(instructions[0].kind, "allow");
+        assert_eq!(instructions[0].provider.as_deref(), Some("p1"));
+        assert_eq!(instructions[2].kind, "force");
+        assert_eq!(
+            instructions[2].target.as_ref().and_then(|target| target.provider.as_deref()),
+            Some("p3")
+        );
+        assert_eq!(instructions[3].kind, "disable");
+        assert_eq!(
+            instructions[3].target.as_ref().and_then(|target| target.key_alias.as_deref()),
+            Some("key4")
+        );
+        assert_eq!(
+            instructions[4].target.as_ref().and_then(|target| target.key_index),
+            Some(6)
+        );
+    }
 }

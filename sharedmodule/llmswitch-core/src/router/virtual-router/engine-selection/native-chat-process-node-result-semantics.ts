@@ -157,6 +157,38 @@ export function buildChatNodeResultMetadataWithNative(
   }
 }
 
+export function buildChatNodeResultObservationWithNative(
+  messagesCount: number,
+  toolsCount: number
+): Record<string, unknown> {
+  const capability = 'buildChatNodeResultObservationJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  try {
+    const raw = fn(
+      Math.floor(Number.isFinite(messagesCount) ? messagesCount : 0),
+      Math.floor(Number.isFinite(toolsCount) ? toolsCount : 0)
+    );
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseJson(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function buildProcessedRequestFromChatResponseWithNative(
   chatResponse: Record<string, unknown>,
   streamEnabled: boolean

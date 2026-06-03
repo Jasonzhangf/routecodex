@@ -9,8 +9,10 @@ function cloneRecord<T extends Record<string, unknown>>(value: T): T {
 }
 
 function cloneWirePayload(value: Record<string, unknown>): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(value, 'metadata')) {
+    throw new Error('provider-runtime-error: metadata is not allowed in direct passthrough provider body');
+  }
   const next = cloneRecord(value);
-  delete next.metadata;
   return next;
 }
 

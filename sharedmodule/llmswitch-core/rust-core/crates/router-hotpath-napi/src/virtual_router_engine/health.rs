@@ -243,7 +243,7 @@ impl ProviderHealthManager {
             state.http_429_cooldown_cycles = 0;
             state.consecutive_recoverable_failures = 0;
             state.recoverable_cooldown_cycles = 0;
-                state.persisted_503_reprobe_available = false;
+            state.persisted_503_reprobe_available = false;
         }
     }
 
@@ -285,7 +285,7 @@ impl ProviderHealthManager {
                 state.consecutive_http_502_failures = 0;
                 state.consecutive_http_429_failures = 0;
                 state.consecutive_recoverable_failures = 0;
-                        state.http_429_cooldown_cycles %= 3;
+                state.http_429_cooldown_cycles %= 3;
                 if state.recoverable_cooldown_cycles >= 2 {
                     state.recoverable_cooldown_cycles = 0;
                 }
@@ -407,7 +407,7 @@ impl ProviderHealthManager {
             state.http_429_cooldown_cycles = 0;
             state.consecutive_recoverable_failures = 0;
             state.recoverable_cooldown_cycles = 0;
-                state.persisted_503_reprobe_available = false;
+            state.persisted_503_reprobe_available = false;
         }
     }
 
@@ -520,8 +520,9 @@ impl ProviderHealthManager {
         }
         if state.consecutive_recoverable_failures >= threshold {
             state.consecutive_recoverable_failures = 0;
-                state.state = "tripped".to_string();
-            state.cooldown_expires_at = Some(now_ms + next_recoverable_cooldown_ms(state.recoverable_cooldown_cycles));
+            state.state = "tripped".to_string();
+            state.cooldown_expires_at =
+                Some(now_ms + next_recoverable_cooldown_ms(state.recoverable_cooldown_cycles));
             state.recoverable_cooldown_cycles += 1;
         }
     }
@@ -662,7 +663,6 @@ fn next_recoverable_cooldown_ms(cycles: i64) -> i64 {
         _ => LADDER_COOLDOWN_3H_MS,
     }
 }
-
 
 #[cfg(test)]
 mod tests {

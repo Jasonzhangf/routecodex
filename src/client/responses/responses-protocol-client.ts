@@ -43,7 +43,7 @@ export class ResponsesProtocolClient implements HttpProtocolClient<ProtocolReque
     }
     body.model = inboundModel;
     if ('metadata' in body) {
-      delete body.metadata;
+      throw new Error('provider-runtime-error: metadata is not allowed in OpenAI Responses provider body');
     }
     return stripInternalKeysDeep(body);
   }

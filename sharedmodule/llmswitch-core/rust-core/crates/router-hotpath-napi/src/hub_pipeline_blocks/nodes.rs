@@ -12,15 +12,7 @@ pub(crate) fn build_req_outbound_node_result(input: &Value) -> Result<Value, Str
     let messages = read_i64_from_input(row, "messages").unwrap_or(0);
     let tools = read_i64_from_input(row, "tools").unwrap_or(0);
 
-    let mut data_processed = Map::<String, Value>::new();
-    data_processed.insert(
-        "messages".to_string(),
-        Value::Number(serde_json::Number::from(messages)),
-    );
-    data_processed.insert(
-        "tools".to_string(),
-        Value::Number(serde_json::Number::from(tools)),
-    );
+    let observation = build_node_observation(messages, tools);
 
     let mut metadata = Map::<String, Value>::new();
     metadata.insert(
@@ -39,12 +31,12 @@ pub(crate) fn build_req_outbound_node_result(input: &Value) -> Result<Value, Str
         "endTime".to_string(),
         Value::Number(serde_json::Number::from(outbound_end)),
     );
-    metadata.insert("dataProcessed".to_string(), Value::Object(data_processed));
 
     let mut out = Map::<String, Value>::new();
     out.insert("id".to_string(), Value::String("req_outbound".to_string()));
     out.insert("success".to_string(), Value::Bool(true));
     out.insert("metadata".to_string(), Value::Object(metadata));
+    out.insert("observation".to_string(), observation);
 
     Ok(Value::Object(out))
 }
@@ -61,15 +53,7 @@ pub(crate) fn build_req_inbound_node_result(input: &Value) -> Result<Value, Stri
     let messages = read_i64_from_input(row, "messages").unwrap_or(0);
     let tools = read_i64_from_input(row, "tools").unwrap_or(0);
 
-    let mut data_processed = Map::<String, Value>::new();
-    data_processed.insert(
-        "messages".to_string(),
-        Value::Number(serde_json::Number::from(messages)),
-    );
-    data_processed.insert(
-        "tools".to_string(),
-        Value::Number(serde_json::Number::from(tools)),
-    );
+    let observation = build_node_observation(messages, tools);
 
     let mut metadata = Map::<String, Value>::new();
     metadata.insert("node".to_string(), Value::String("req_inbound".to_string()));
@@ -85,12 +69,12 @@ pub(crate) fn build_req_inbound_node_result(input: &Value) -> Result<Value, Stri
         "endTime".to_string(),
         Value::Number(serde_json::Number::from(inbound_end)),
     );
-    metadata.insert("dataProcessed".to_string(), Value::Object(data_processed));
 
     let mut out = Map::<String, Value>::new();
     out.insert("id".to_string(), Value::String("req_inbound".to_string()));
     out.insert("success".to_string(), Value::Bool(true));
     out.insert("metadata".to_string(), Value::Object(metadata));
+    out.insert("observation".to_string(), observation);
     Ok(Value::Object(out))
 }
 
@@ -110,12 +94,12 @@ pub(crate) fn build_req_inbound_skipped_node(input: &Value) -> Result<Value, Str
     metadata.insert("node".to_string(), Value::String("req_inbound".to_string()));
     metadata.insert("skipped".to_string(), Value::Bool(true));
     metadata.insert("reason".to_string(), Value::String(reason));
-    metadata.insert("dataProcessed".to_string(), Value::Object(Map::new()));
 
     let mut out = Map::<String, Value>::new();
     out.insert("id".to_string(), Value::String("req_inbound".to_string()));
     out.insert("success".to_string(), Value::Bool(true));
     out.insert("metadata".to_string(), Value::Object(metadata));
+    out.insert("observation".to_string(), build_node_observation(0, 0));
     Ok(Value::Object(out))
 }
 
@@ -242,4 +226,20 @@ fn read_i64_from_input(row: &Map<String, Value>, key: &str) -> Option<i64> {
         }
         _ => None,
     })
+}
+
+fn build_node_observation(messages: i64, tools: i64) -> Value {
+    let mut data_processed = Map::<String, Value>::new();
+    data_processed.insert(
+        "messages".to_string(),
+        Value::Number(serde_json::Number::from(messages.max(0))),
+    );
+    data_processed.insert(
+        "tools".to_string(),
+        Value::Number(serde_json::Number::from(tools.max(0))),
+    );
+
+    let mut observation = Map::<String, Value>::new();
+    observation.insert("dataProcessed".to_string(), Value::Object(data_processed));
+    Value::Object(observation)
 }

@@ -57,8 +57,13 @@ export {
 
 export {
   classifyProviderFailure,
+  describeHubPipelineContractsNative,
+  describeMetaCarrierContractsNative,
+  describePipelineContractNative,
+  describeVirtualRouterContractsNative,
   deriveFinishReasonNative,
   isToolCallContinuationResponseNative,
+  validatePipelineNodeContractBoundaryNative,
   updateResponsesContractProbeFromSseChunkNative,
   buildResponsesTerminalSseFramesFromProbeNative,
   getNetworkErrorCodes

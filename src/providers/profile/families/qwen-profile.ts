@@ -320,9 +320,11 @@ function buildQwenWebSearchBody(input: BuildRequestBodyInput): UnknownRecord {
   body.uq = queryRaw;
   body.page = toPositiveInt(body.page, 1);
   body.rows = toPositiveInt(body.rows ?? body.count, 10);
+  if (Object.prototype.hasOwnProperty.call(body, 'metadata')) {
+    throw new Error('provider-runtime-error: metadata is not allowed in Qwen web_search provider body');
+  }
   delete body.query;
   delete body.count;
-  delete body.metadata;
   delete body.qwenWebSearch;
   delete body.entryEndpoint;
   delete body.model;

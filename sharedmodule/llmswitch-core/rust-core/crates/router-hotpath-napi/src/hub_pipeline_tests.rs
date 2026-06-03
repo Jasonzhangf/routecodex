@@ -868,8 +868,13 @@ fn test_build_req_outbound_node_result_builds_expected_shape() {
         Some(1000)
     );
     assert_eq!(metadata.get("endTime").and_then(|v| v.as_i64()), Some(1255));
+    assert!(metadata.get("dataProcessed").is_none());
+    let observation = row
+        .get("observation")
+        .and_then(|v| v.as_object())
+        .expect("observation object");
     assert_eq!(
-        metadata
+        observation
             .get("dataProcessed")
             .and_then(|v| v.as_object())
             .and_then(|obj| obj.get("messages"))
@@ -877,7 +882,7 @@ fn test_build_req_outbound_node_result_builds_expected_shape() {
         Some(7)
     );
     assert_eq!(
-        metadata
+        observation
             .get("dataProcessed")
             .and_then(|v| v.as_object())
             .and_then(|obj| obj.get("tools"))
@@ -893,13 +898,13 @@ fn test_build_req_outbound_node_result_defaults_counts_to_zero() {
         "outboundEnd": 12
     });
     let output = build_req_outbound_node_result(&input).expect("req outbound node result");
-    let metadata = output
+    let observation = output
         .as_object()
-        .and_then(|v| v.get("metadata"))
+        .and_then(|v| v.get("observation"))
         .and_then(|v| v.as_object())
-        .expect("metadata object");
+        .expect("observation object");
     assert_eq!(
-        metadata
+        observation
             .get("dataProcessed")
             .and_then(|v| v.as_object())
             .and_then(|obj| obj.get("messages"))
@@ -907,7 +912,7 @@ fn test_build_req_outbound_node_result_defaults_counts_to_zero() {
         Some(0)
     );
     assert_eq!(
-        metadata
+        observation
             .get("dataProcessed")
             .and_then(|v| v.as_object())
             .and_then(|obj| obj.get("tools"))
@@ -935,8 +940,13 @@ fn test_build_req_inbound_node_result_builds_expected_shape() {
             .and_then(|v| v.as_i64()),
         Some(80)
     );
+    assert!(row
+        .get("metadata")
+        .and_then(|v| v.as_object())
+        .and_then(|v| v.get("dataProcessed"))
+        .is_none());
     assert_eq!(
-        row.get("metadata")
+        row.get("observation")
             .and_then(|v| v.as_object())
             .and_then(|v| v.get("dataProcessed"))
             .and_then(|v| v.as_object())
@@ -945,7 +955,7 @@ fn test_build_req_inbound_node_result_builds_expected_shape() {
         Some(3)
     );
     assert_eq!(
-        row.get("metadata")
+        row.get("observation")
             .and_then(|v| v.as_object())
             .and_then(|v| v.get("dataProcessed"))
             .and_then(|v| v.as_object())
@@ -976,14 +986,14 @@ fn test_build_req_inbound_skipped_node_defaults_reason() {
             .and_then(|v| v.as_str()),
         Some("stage=outbound")
     );
-    assert_eq!(
-        row.get("metadata")
-            .and_then(|v| v.as_object())
-            .and_then(|v| v.get("dataProcessed"))
-            .and_then(|v| v.as_object())
-            .map(|v| v.len()),
-        Some(0)
-    );
+    let data_processed = row
+        .get("observation")
+        .and_then(|v| v.as_object())
+        .and_then(|v| v.get("dataProcessed"))
+        .and_then(|v| v.as_object())
+        .expect("observation dataProcessed");
+    assert_eq!(data_processed.get("messages").and_then(|v| v.as_i64()), Some(0));
+    assert_eq!(data_processed.get("tools").and_then(|v| v.as_i64()), Some(0));
 }
 
 #[test]

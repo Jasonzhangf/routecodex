@@ -4,6 +4,8 @@
 
 Phase 6C is a boundary-locking phase only. It adds red-test coverage and deletion criteria; it does not delete live stages and does not change runtime behavior, provider wire payload, or client response body.
 
+No safe live-path deletion in this phase.
+
 Request typed wrappers from Phase 6A and response typed wrappers from Phase 6B-2 are live entry boundaries, but the historical Rust stage implementations still carry live business semantics. They remain until a later deletion phase proves the call graph has fully moved behind typed nodes.
 
 ## Current Live Implementation — Do Not Delete

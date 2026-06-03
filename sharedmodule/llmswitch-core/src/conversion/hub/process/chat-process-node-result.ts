@@ -1,6 +1,7 @@
 import type { ProcessedRequest, StandardizedRequest } from '../types/standardized.js';
 import type { JsonObject } from '../types/json.js';
 import {
+  buildChatNodeResultObservationWithNative,
   applyChatProcessedRequestWithNative,
   buildChatNodeResultMetadataWithNative
 } from '../../../router/virtual-router/engine-selection/native-chat-process-node-result-semantics.js';
@@ -12,6 +13,8 @@ export interface HubProcessNodeResult {
     executionTime: number;
     startTime: number;
     endTime: number;
+  };
+  observation?: {
     dataProcessed?: {
       messages: number;
       tools: number;
@@ -43,7 +46,11 @@ export function buildSuccessResult(startTime: number, processedRequest: Processe
   );
   return {
     success: true,
-    metadata: metadata as HubProcessNodeResult['metadata']
+    metadata: metadata as HubProcessNodeResult['metadata'],
+    observation: buildChatNodeResultObservationWithNative(
+      processedRequest.messages.length,
+      processedRequest.tools?.length ?? 0
+    ) as HubProcessNodeResult['observation']
   };
 }
 
@@ -59,6 +66,7 @@ export function buildErrorResult(startTime: number, error: unknown): HubProcessN
   return {
     success: false,
     metadata: metadata as HubProcessNodeResult['metadata'],
+    observation: buildChatNodeResultObservationWithNative(0, 0) as HubProcessNodeResult['observation'],
     error: {
       message: error instanceof Error ? error.message : String(error)
     }

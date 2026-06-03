@@ -16,13 +16,32 @@ describe('Hub Pipeline Meta/Error carrier contract', () => {
     const source = readType('meta_error_carriers.rs');
     for (const token of [
       'MetaReq02RuntimeCarrier',
+      'MetaRoute03RouteCarrier',
       'ErrorErr03RuntimeClassified',
       'build_meta_req_02_runtime_carrier',
+      'build_meta_route_03_from_metadata',
       'build_error_err_03_runtime_classified',
       'assert_payload_has_no_meta_or_error_carrier',
     ]) {
       expect(source).toContain(token);
     }
+  });
+
+  it('defines MetaRoute03 as the only VR routing-control carrier builder', () => {
+    const source = readType('meta_error_carriers.rs');
+    for (const token of [
+      'allowedProviders',
+      'excludedProviderKeys',
+      'disabledProviderKeyAliases',
+      '__shadowCompareForcedProviderKey',
+      '__routecodexRetryProviderKey',
+      'routeHint',
+      'routecodexRoutingPolicyGroup',
+    ]) {
+      expect(source).toContain(token);
+    }
+    expect(source).toContain('copy_normalized_string_array');
+    expect(source).toContain('copy_non_empty_string');
   });
 
   it('requires request and pipeline identity for Meta carrier', () => {
