@@ -1812,3 +1812,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-06-02 multi-port / 10000 smoke 精华
 - 10000 Empty reply 排障先查 `lsof -nP -iTCP:10000 -sTCP:LISTEN`：若 `127.0.0.1:10000` 被其他进程占用，而 RouteCodex 监听 `*:10000`，必须用 LAN IP/实际绑定地址打 smoke，禁止把 loopback Empty reply 直接归因给 RouteCodex。
 - 多端口隔离验收必须同时看：`ports/<port>/server-<port>.log`、`codex-samples/<entry>/ports/<port>/...`、`provider-stats.jsonl` 的 `entryPort`、非主端口 `/admin/ports` 404 JSON、以及真实 `/v1/chat/completions` HTTP JSON。
+
+### 2026-06-03 servertool followup 唯一路径精华
+- stop_message followup 预算/eligibility 的唯一 live carrier 是 `__rt.serverToolLoopState` + `__rt.stopMessageFollowupPolicy`；Rust handler 产出 plan，TS `applyFollowupRuntimeMetadata` 只做一次 materialize，nested metadata builder / request metadata merge 禁止再补偿重建预算。
+- 验证必须看在线 `:stop_followup` 样本：`meta.requestMetadata.__rt.serverToolLoopState.maxRepeats=3` 且 repeatCount 逐轮增长；不要用 `root serverToolLoopState` 或 persisted snapshot 证明 live path 正确。

@@ -276,6 +276,17 @@ fn normalize_trigger_max_repeats(snapshot: &StopMessageSnapshot, default_max_rep
 // ── Snapshot resolution ────────────────────────────────────────────────────
 
 fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnapshot> {
+    if ctx.followup_flow_id.as_deref() == Some("stop_message_flow")
+        && matches!(
+            ctx.stop_message_followup_policy,
+            Some(StopMessageFollowupPolicy::PreserveEligibility)
+        )
+    {
+        if let Some(snapshot) = &ctx.runtime_snapshot {
+            return Some(snapshot.clone());
+        }
+    }
+
     // 1. Try persisted snapshot first
     if let Some(snapshot) = &ctx.persisted_snapshot {
         return Some(snapshot.clone());
@@ -662,5 +673,32 @@ mod tests {
         assert_eq!(result.followup_text.unwrap(), "persisted");
         assert_eq!(result.max_repeats, 5);
         assert_eq!(result.used, 2);
+    }
+
+    #[test]
+    fn stop_message_followup_runtime_snapshot_overrides_exhausted_persisted_snapshot() {
+        let mut ctx = base_ctx();
+        ctx.followup_flow_id = Some("stop_message_flow".to_string());
+        ctx.stop_message_followup_policy = Some(StopMessageFollowupPolicy::PreserveEligibility);
+        ctx.persisted_snapshot = Some(StopMessageSnapshot {
+            text: "persisted".to_string(),
+            max_repeats: 1,
+            used: 1,
+            source: SnapshotSource::Persisted,
+            stage_mode: StageMode::On,
+        });
+        ctx.runtime_snapshot = Some(StopMessageSnapshot {
+            text: "runtime".to_string(),
+            max_repeats: 3,
+            used: 1,
+            source: SnapshotSource::Default,
+            stage_mode: StageMode::On,
+        });
+
+        let result = decide(&ctx);
+        assert_eq!(result.action, Action::Trigger);
+        assert_eq!(result.followup_text.unwrap(), "runtime");
+        assert_eq!(result.max_repeats, 3);
+        assert_eq!(result.used, 1);
     }
 }

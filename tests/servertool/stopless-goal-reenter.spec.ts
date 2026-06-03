@@ -1,6 +1,7 @@
 import { describe, expect, jest, test } from '@jest/globals';
 import {
   applyClientInjectOnlyMetadata,
+  applyFollowupRuntimeMetadata,
   resolveFollowupExecutionMode
 } from '../../sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.js';
 import { resolveFollowupFlowDecision } from '../../sharedmodule/llmswitch-core/src/servertool/followup-flow-policy.js';
@@ -30,6 +31,39 @@ describe('stopless re-enter path (no tmux inject)', () => {
       readClientInjectOnly: () => false,
     });
     expect(mode).toBe('reenter');
+  });
+
+  test('stop_message_flow followup budget is materialized once into runtime carrier', () => {
+    const metadata = {
+      serverToolLoopState: {
+        flowId: 'stop_message_flow',
+        maxRepeats: 3,
+        repeatCount: 1
+      }
+    } as any;
+
+    applyFollowupRuntimeMetadata({
+      metadata,
+      loopState: {
+        flowId: 'stop_message_flow',
+        repeatCount: 1,
+        payloadHash: '__servertool_auto__'
+      },
+      originalEntryEndpoint: '/v1/responses',
+      followupEntryEndpoint: '/v1/responses',
+      flowId: 'stop_message_flow',
+      decision: resolveFollowupFlowDecision('stop_message_flow'),
+      adapterContext: { routecodexPortMode: 'router', routeHint: 'tools' } as any,
+      resolveProviderKey: () => 'minimax.key1'
+    });
+
+    expect(metadata.__rt?.serverToolLoopState).toEqual({
+      flowId: 'stop_message_flow',
+      maxRepeats: 3,
+      repeatCount: 1,
+      payloadHash: '__servertool_auto__'
+    });
+    expect(metadata.__rt?.stopMessageFollowupPolicy).toBe('preserve_eligibility');
   });
 
   test('stop_message_flow execution mode remains reenter with explicit reenter decision', () => {

@@ -478,6 +478,43 @@ describe('servertool followup dispatch helper', () => {
     });
   });
 
+  it('does not rebuild stopMessage followup budget from root loop state in nested metadata builder', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: {
+        loopState: input.metadata?.__rt?.serverToolLoopState,
+        policy: input.metadata?.__rt?.stopMessageFollowupPolicy
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    const result = await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_stopmessage_root_budget_nested',
+      body: { input: 'continue' },
+      metadata: {
+        serverToolLoopState: { flowId: 'stop_message_flow', maxRepeats: 3, repeatCount: 1 },
+        __rt: {
+          serverToolFollowup: true,
+          serverToolLoopState: { flowId: 'stop_message_flow', repeatCount: 1 },
+          stopMessageFollowupPolicy: 'preserve_eligibility'
+        }
+      },
+      baseMetadata: { stopMessageEnabled: true, routecodexPortStopMessageEnabled: true },
+      executeNested
+    });
+
+    expect(result.body).toEqual({
+      loopState: { flowId: 'stop_message_flow', repeatCount: 1 },
+      policy: 'preserve_eligibility'
+    });
+  });
+
   it('disables non-stop_message nested followup metadata to prevent generic servertool recursion', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
     const executeNested = jest.fn(async (input: any) => ({

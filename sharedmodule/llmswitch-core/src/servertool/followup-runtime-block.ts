@@ -8,8 +8,12 @@ import {
 } from './followup-flow-policy.js';
 
 export type ServerToolLoopStateLike = {
+  flowId?: string;
+  maxRepeats?: number;
   repeatCount?: number;
   startedAtMs?: number;
+  payloadHash?: string;
+  stopPairHash?: string;
   stopPairRepeatCount?: number;
   stopPairWarned?: boolean;
 };
@@ -221,7 +225,18 @@ export function applyFollowupRuntimeMetadata(args: {
   const rt = ensureRuntimeMetadata(args.metadata as unknown as Record<string, unknown>);
   (rt as Record<string, unknown>).serverToolFollowup = true;
   if (args.loopState) {
-    (rt as Record<string, unknown>).serverToolLoopState = args.loopState;
+    const rootLoopState = (args.metadata as Record<string, unknown>).serverToolLoopState;
+    const currentLoopState = (rt as Record<string, unknown>).serverToolLoopState;
+    const mergedLoopState = {
+      ...(rootLoopState && typeof rootLoopState === 'object' && !Array.isArray(rootLoopState)
+        ? (rootLoopState as Record<string, unknown>)
+        : {}),
+      ...(currentLoopState && typeof currentLoopState === 'object' && !Array.isArray(currentLoopState)
+        ? (currentLoopState as Record<string, unknown>)
+        : {}),
+      ...args.loopState
+    };
+    (rt as Record<string, unknown>).serverToolLoopState = mergedLoopState;
   }
   (rt as Record<string, unknown>).stopMessageFollowupPolicy = decision.stopMessageFollowupPolicy;
   (args.metadata as any).__hubEntry = 'chat_process';

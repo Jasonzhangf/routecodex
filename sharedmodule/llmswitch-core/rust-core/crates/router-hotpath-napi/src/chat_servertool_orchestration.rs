@@ -2213,17 +2213,28 @@ fn extract_target_field(
     None
 }
 
-/// Extract runtime metadata from adapter context (reads `runtime` then `metadata.runtime`).
+/// Extract runtime metadata from adapter context.
 fn extract_runtime(adapter_context: &Value) -> Value {
-    // Try adapter.runtime first, then adapter.metadata.runtime
+    if let Some(r) = adapter_context.get("__rt") {
+        if r.is_object() {
+            return r.clone();
+        }
+    }
     if let Some(r) = adapter_context.get("runtime") {
         if r.is_object() {
             return r.clone();
         }
     }
     if let Some(m) = adapter_context.get("metadata") {
+        if let Some(r) = m.get("__rt") {
+            if r.is_object() {
+                return r.clone();
+            }
+        }
         if let Some(r) = m.get("runtime") {
-            return r.clone();
+            if r.is_object() {
+                return r.clone();
+            }
         }
     }
     Value::Null
@@ -2790,6 +2801,40 @@ mod tests {
             .unwrap();
         assert_eq!(tools[0]["function"]["name"], "exec_command");
         assert_eq!(tools[1]["function"]["name"], "apply_patch");
+    }
+
+    #[test]
+    fn test_extract_runtime_reads_runtime_carrier() {
+        let context = json!({
+            "__rt": {
+                "serverToolFollowup": true,
+                "stopMessageFollowupPolicy": "preserve_eligibility",
+                "serverToolLoopState": {
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 1,
+                    "maxRepeats": 3
+                }
+            },
+            "runtime": {
+                "serverToolLoopState": {
+                    "maxRepeats": 1
+                }
+            }
+        });
+
+        let runtime = extract_runtime(&context);
+        assert_eq!(
+            runtime["serverToolLoopState"]["flowId"].as_str(),
+            Some("stop_message_flow")
+        );
+        assert_eq!(
+            runtime["serverToolLoopState"]["repeatCount"].as_u64(),
+            Some(1)
+        );
+        assert_eq!(
+            runtime["serverToolLoopState"]["maxRepeats"].as_u64(),
+            Some(3)
+        );
     }
 
     #[test]
