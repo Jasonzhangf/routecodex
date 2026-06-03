@@ -69,6 +69,7 @@ import { isPoolExhaustedPipelineError } from './executor/request-executor-core-u
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
 import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
+import { report_error_err_02_host_to_router_policy_from_error_err_01_source } from '../../../providers/core/utils/provider-error-reporter.js';
 import {
   resolveVirtualRouterInput,
   getModuleDependencies,
@@ -134,6 +135,35 @@ function readTrimmedString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function readRuntimeScopeFromMetadata(metadata: Record<string, unknown>): { sessionDir?: string; rccUserDir?: string } {
+  const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+    ? (metadata.__rt as Record<string, unknown>)
+    : undefined;
+  return {
+    sessionDir: readTrimmedString(rt?.sessionDir),
+    rccUserDir: readTrimmedString(rt?.rccUserDir),
+  };
+}
+
+function readRouterDirectFailedProviderKey(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  return readTrimmedString((error as Record<string, unknown>).__routerDirectFailedProviderKey);
+}
+
+function isRecoverableRouterDirectFailure(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  if (record.__routerDirectRecoverable === true || record.retryable === true) return true;
+  const status = extractStatusCodeFromError(error);
+  if (typeof status === 'number') {
+    return status === 408 || status === 425 || status === 429 || status >= 500;
+  }
+  const code = readTrimmedString(record.code)?.toUpperCase();
+  if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'EPIPE') return true;
+  const message = readTrimmedString(record.message)?.toLowerCase() ?? '';
+  return message.includes('fetch failed') || message.includes('timeout') || message.includes('temporarily unavailable');
 }
 
 function isServerToolFollowupInput(input: PipelineExecutionInput): boolean {
@@ -1144,7 +1174,41 @@ export class RouteCodexHttpServer {
             ? (input.body as Record<string, unknown>).model
             : undefined,
         });
-        const directResult = await this.executeRouterDirectPipelineForPort(portConfig, nextInput);
+        let directResult: RouterDirectOutcome | undefined;
+        let directInput = nextInput;
+        const directExcludedProviderKeys = new Set<string>(
+          Array.isArray(nextInput.metadata?.excludedProviderKeys)
+            ? nextInput.metadata.excludedProviderKeys.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+            : [],
+        );
+        const maxDirectAttempts = 6;
+        for (let directAttempt = 1; directAttempt <= maxDirectAttempts; directAttempt += 1) {
+          try {
+            directResult = await this.executeRouterDirectPipelineForPort(portConfig, directInput, directAttempt);
+            break;
+          } catch (error) {
+            const failedProviderKey = readRouterDirectFailedProviderKey(error);
+            if (!failedProviderKey || !isRecoverableRouterDirectFailure(error) || directAttempt >= maxDirectAttempts) {
+              throw error;
+            }
+            directExcludedProviderKeys.add(failedProviderKey);
+            this.logStage('router-direct.retry.exclude_and_reroute', input.requestId, {
+              failedProviderKey,
+              directAttempt,
+              excludedProviderKeys: Array.from(directExcludedProviderKeys),
+            });
+            directInput = {
+              ...directInput,
+              metadata: {
+                ...(directInput.metadata ?? {}),
+                excludedProviderKeys: Array.from(directExcludedProviderKeys),
+              },
+            };
+          }
+        }
+        if (!directResult) {
+          throw new Error('router-direct retry exhausted without result');
+        }
         if (directResult.used) {
           return this.buildRouterDirectResult(directResult, input);
         }
@@ -1197,6 +1261,7 @@ export class RouteCodexHttpServer {
   private async executeRouterDirectPipelineForPort(
     portConfig: PortConfig,
     input: PipelineExecutionInput,
+    directAttempt = 1,
   ): Promise<RouterDirectOutcome> {
     const hubPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
     if (!hubPipeline) {
@@ -1274,11 +1339,13 @@ export class RouteCodexHttpServer {
       },
     );
     let capturedUsage: Record<string, unknown> | undefined;
-    const directAttempt = 1;
-    const directOutcome = await executeRouterDirectPipeline({
+    let directOutcome: RouterDirectOutcome;
+    try {
+      directOutcome = await executeRouterDirectPipeline({
       portConfig,
       providerPayload,
       requestPayload,
+      requestId: input.requestId,
       target: {
         providerKey: target.providerKey,
         providerType: target.providerType,
@@ -1336,7 +1403,31 @@ export class RouteCodexHttpServer {
           directAttempt,
         });
       },
-    });
+      onProviderError: async (source, ctx) => {
+        const runtimeScope = readRuntimeScopeFromMetadata(metadataForHub);
+        this.logStage('router-direct.send.error', input.requestId, {
+          port: portConfig.port,
+          providerKey: ctx.providerKey,
+          routeName: ctx.routingDecision?.routeName,
+          statusCode: source.statusCode,
+          directAttempt,
+        });
+        await report_error_err_02_host_to_router_policy_from_error_err_01_source({
+          ...source,
+          runtime: {
+            ...source.runtime,
+            ...runtimeScope,
+          },
+        });
+      },
+      });
+    } catch (error) {
+      if (error && typeof error === 'object') {
+        (error as Record<string, unknown>).__routerDirectFailedProviderKey = target.providerKey;
+        (error as Record<string, unknown>).__routerDirectRecoverable = isRecoverableRouterDirectFailure(error);
+      }
+      throw error;
+    }
 
     if (!directOutcome.used) {
       this.logStage('router-direct.skipped', input.requestId, { reason: directOutcome.reason });

@@ -141,14 +141,7 @@ impl VirtualRouterEngineCore {
             .cloned()
             .filter(|key| !excluded_keys.contains(key))
             .collect();
-        let mut available = self.collect_available_candidates(env, &route_candidates);
-        if available.is_empty()
-            && !excluded_keys.is_empty()
-            && route_candidates.len() < filtered.len()
-        {
-            available = self.collect_available_candidates(env, &filtered);
-        }
-        available
+        self.collect_available_candidates(env, &route_candidates)
     }
 
     fn collect_available_candidates(&mut self, env: Env, candidates: &[String]) -> Vec<String> {
@@ -1076,7 +1069,7 @@ mod tests {
     }
 
     #[test]
-    fn routing_exclusions_do_not_empty_pool_when_all_targets_excluded() {
+    fn routing_exclusions_return_provider_not_available_when_all_targets_excluded() {
         let mut core = build_priority_test_core();
         let classification = ClassificationResult {
             route_name: "thinking".to_string(),
@@ -1087,7 +1080,7 @@ mod tests {
         let features = RoutingFeatures::default();
         let routing_state = RoutingInstructionState::default();
 
-        let selected = core
+        let error = core
             .select_provider(
                 "thinking",
                 &json!({
@@ -1102,9 +1095,9 @@ mod tests {
                 None,
                 unsafe { Env::from_raw(std::ptr::null_mut()) },
             )
-            .expect("selection must keep a non-empty route pool");
+            .expect_err("all excluded targets must not be selected again");
 
-        assert_eq!(selected.provider_key, "sdfv.key1.gpt-5.4");
+        assert!(error.contains("PROVIDER_NOT_AVAILABLE"));
     }
 
     #[test]
@@ -1404,6 +1397,136 @@ mod tests {
 
         assert_eq!(selected.provider_key, "backup.key1.model");
         assert_eq!(selected.pool_id.as_deref(), Some("thinking-backup"));
+    }
+
+    #[test]
+    fn select_provider_falls_to_next_priority_pool_when_current_pool_is_excluded() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        for key in ["primary.key1.model", "backup.key1.model"] {
+            providers.insert(
+                key.to_string(),
+                json!({
+                    "providerKey": key,
+                    "providerType": "openai",
+                    "modelId": "model",
+                    "enabled": true
+                }),
+            );
+        }
+        core.provider_registry.load(&providers);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let routing = Map::from_iter([(
+            "thinking".to_string(),
+            Value::Array(vec![
+                json!({
+                    "id": "thinking-primary",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": ["primary.key1.model"]
+                }),
+                json!({
+                    "id": "thinking-backup",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["backup.key1.model"]
+                }),
+            ]),
+        )]);
+        core.routing = parse_routing(&routing);
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({ "excludedProviderKeys": ["primary.key1.model"] }),
+                &ClassificationResult {
+                    route_name: "thinking".to_string(),
+                    confidence: 1.0,
+                    reasoning: "thinking:user-input".to_string(),
+                    candidates: vec!["thinking".to_string(), "default".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("excluded primary pool should fall to backup pool");
+
+        assert_eq!(selected.provider_key, "backup.key1.model");
+        assert_eq!(selected.pool_id.as_deref(), Some("thinking-backup"));
+    }
+
+    #[test]
+    fn select_provider_falls_to_default_route_when_requested_route_is_exhausted() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        for key in ["thinking.key1.model", "default.key1.model"] {
+            providers.insert(
+                key.to_string(),
+                json!({
+                    "providerKey": key,
+                    "providerType": "openai",
+                    "modelId": "model",
+                    "enabled": true
+                }),
+            );
+        }
+        core.provider_registry.load(&providers);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+        core.health_manager.cooldown_provider(
+            "thinking.key1.model",
+            Some("HTTP_502".to_string()),
+            Some(30 * 60_000),
+            now_ms(),
+        );
+
+        let routing = Map::from_iter([
+            (
+                "thinking".to_string(),
+                Value::Array(vec![json!({
+                    "id": "thinking-primary",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": ["thinking.key1.model"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "default-backstop",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["default.key1.model"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({}),
+                &ClassificationResult {
+                    route_name: "thinking".to_string(),
+                    confidence: 1.0,
+                    reasoning: "thinking:user-input".to_string(),
+                    candidates: vec!["thinking".to_string(), "default".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("default route should be selected when requested route is exhausted");
+
+        assert_eq!(selected.provider_key, "default.key1.model");
+        assert_eq!(selected.route_used, "default");
+        assert_eq!(selected.pool_id.as_deref(), Some("default-backstop"));
     }
 
     // ============================================================

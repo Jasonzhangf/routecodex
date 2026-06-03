@@ -273,6 +273,45 @@ describe('router-direct-pipeline', () => {
       expect(beforeSnapshots[0].ctx.originalPayload).toEqual(input.requestPayload);
       expect(beforeSnapshots[0].ctx).toBe(afterSnapshots[0].ctx);
     });
+
+    it('reports direct provider errors through ErrorErr02 capture hook and rethrows original error', async () => {
+      const error = Object.assign(new Error('HTTP 502: upstream unavailable'), {
+        statusCode: 502,
+        code: 'HTTP_502',
+      });
+      const handle = createMockProviderHandle('openai-chat');
+      (handle.instance.processIncomingDirect as jest.Mock).mockRejectedValueOnce(error);
+      const onProviderError = jest.fn(async () => undefined);
+      const requestPayload = { model: 'gpt-4', messages: [{ role: 'user', content: 'raw' }] };
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'gpt-4' },
+        requestPayload,
+        requestId: 'req-router-direct-502',
+        target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: handle.runtimeKey },
+        routingDecision: { routeName: 'thinking', pool: ['openai.gpt-4', 'backup.gpt-4'] },
+        processMode: 'chat',
+        requestInfo: { path: '/v1/chat/completions', headers: {} },
+        resolveProviderByRuntimeKey: () => handle,
+        onProviderError,
+      };
+
+      await expect(executeRouterDirectPipeline(input)).rejects.toBe(error);
+
+      expect(onProviderError).toHaveBeenCalledTimes(1);
+      const [source, ctx] = onProviderError.mock.calls[0] as any[];
+      expect(source.error).toBe(error);
+      expect(source.stage).toBe('provider.send');
+      expect(source.statusCode).toBe(502);
+      expect(source.recoverable).toBe(true);
+      expect(source.affectsHealth).toBe(true);
+      expect(source.runtime.requestId).toBe('req-router-direct-502');
+      expect(source.runtime.providerKey).toBe('openai.gpt-4');
+      expect(source.details.errorClassification).toBe('recoverable');
+      expect(source.details.routePoolSize).toBe(2);
+      expect(ctx.providerKey).toBe('openai.gpt-4');
+      expect(handle.instance.processIncomingDirect).toHaveBeenCalledWith(requestPayload);
+    });
   });
 
   describe('openai-responses protocol', () => {

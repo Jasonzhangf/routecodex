@@ -65,6 +65,9 @@ interface EmitOptions {
   details?: Record<string, unknown>;
 }
 
+export type ErrorErr01SourceRaised = EmitOptions;
+export type ErrorErr02HostCaptured = ProviderErrorEventExtended;
+
 const PROVIDER_ERROR_REPORTED_MARKER = '__routecodexProviderErrorReported';
 
 function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtended {
@@ -183,24 +186,39 @@ function markProviderErrorReported(error: unknown): void {
   (error as Record<string, unknown>)[PROVIDER_ERROR_REPORTED_MARKER] = true;
 }
 
-export function emitProviderError(options: EmitOptions): void {
-  if (hasProviderErrorReportedMarker(options.error)) {
+export function capture_error_err_02_host_from_error_err_01_source(
+  source: ErrorErr01SourceRaised
+): ErrorErr02HostCaptured | null {
+  if (hasProviderErrorReportedMarker(source.error)) {
+    return null;
+  }
+  const event = buildProviderErrorEvent(source);
+  markProviderErrorReported(source.error);
+  return event;
+}
+
+export async function report_error_err_02_host_to_router_policy_from_error_err_01_source(
+  source: ErrorErr01SourceRaised
+): Promise<void> {
+  const event = capture_error_err_02_host_from_error_err_01_source(source);
+  if (!event) {
     return;
   }
-  const event = buildProviderErrorEvent(options);
-  markProviderErrorReported(options.error);
+  await reportProviderErrorToRouterPolicy(event);
+}
+
+export function emitProviderError(options: EmitOptions): void {
+  const event = capture_error_err_02_host_from_error_err_01_source(options);
+  if (!event) {
+    return;
+  }
   void reportProviderErrorToRouterPolicy(event).catch((emitError) => {
     console.error('[provider-error-reporter] failed to report provider error to router policy', emitError);
   });
 }
 
 export async function emitProviderErrorAndWait(options: EmitOptions): Promise<void> {
-  if (hasProviderErrorReportedMarker(options.error)) {
-    return;
-  }
-  const event = buildProviderErrorEvent(options);
-  markProviderErrorReported(options.error);
-  await reportProviderErrorToRouterPolicy(event);
+  await report_error_err_02_host_to_router_policy_from_error_err_01_source(options);
 }
 
 export function buildRuntimeFromProviderContext(ctx: ProviderContext): ExtendedRuntimeMetadata {
