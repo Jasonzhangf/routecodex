@@ -4,7 +4,6 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 const PERSIST_REASON_HTTP_503_DAILY: &str = "__http_503_daily_cooldown__";
-const RECOVERABLE_FAILURE_WINDOW_MS: i64 = 60_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,7 +36,6 @@ struct ProviderInternalState {
     http_429_cooldown_cycles: i64,
     consecutive_recoverable_failures: i64,
     recoverable_cooldown_cycles: i64,
-    recoverable_window_started_at: Option<i64>,
     persisted_503_reprobe_available: bool,
 }
 
@@ -126,7 +124,6 @@ impl ProviderHealthManager {
                         http_429_cooldown_cycles: 0,
                         consecutive_recoverable_failures: 0,
                         recoverable_cooldown_cycles: 0,
-                        recoverable_window_started_at: None,
                         persisted_503_reprobe_available: false,
                     },
                 );
@@ -151,7 +148,6 @@ impl ProviderHealthManager {
         state.http_429_cooldown_cycles = 0;
         state.consecutive_recoverable_failures = 0;
         state.recoverable_cooldown_cycles = 0;
-        state.recoverable_window_started_at = None;
         state.persisted_503_reprobe_available = false;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
@@ -180,7 +176,6 @@ impl ProviderHealthManager {
         state.http_429_cooldown_cycles = 0;
         state.consecutive_recoverable_failures = 0;
         state.recoverable_cooldown_cycles = 0;
-        state.recoverable_window_started_at = None;
         state.persisted_503_reprobe_available = false;
         state.state = "tripped".to_string();
         state.reason = reason;
@@ -202,7 +197,6 @@ impl ProviderHealthManager {
         state.http_429_cooldown_cycles = 0;
         state.consecutive_recoverable_failures = 0;
         state.recoverable_cooldown_cycles = 0;
-        state.recoverable_window_started_at = None;
         state.persisted_503_reprobe_available = false;
         state.state = "tripped".to_string();
         state.reason = Some(PERSIST_REASON_HTTP_503_DAILY.to_string());
@@ -249,8 +243,7 @@ impl ProviderHealthManager {
             state.http_429_cooldown_cycles = 0;
             state.consecutive_recoverable_failures = 0;
             state.recoverable_cooldown_cycles = 0;
-            state.recoverable_window_started_at = None;
-            state.persisted_503_reprobe_available = false;
+                state.persisted_503_reprobe_available = false;
         }
     }
 
@@ -270,7 +263,6 @@ impl ProviderHealthManager {
         state.http_429_cooldown_cycles = 0;
         state.consecutive_recoverable_failures = 0;
         state.recoverable_cooldown_cycles = 0;
-        state.recoverable_window_started_at = None;
         state.persisted_503_reprobe_available = false;
         state.state = "tripped".to_string();
         state.reason = reason;
@@ -293,8 +285,7 @@ impl ProviderHealthManager {
                 state.consecutive_http_502_failures = 0;
                 state.consecutive_http_429_failures = 0;
                 state.consecutive_recoverable_failures = 0;
-                state.recoverable_window_started_at = None;
-                state.http_429_cooldown_cycles %= 3;
+                        state.http_429_cooldown_cycles %= 3;
                 if state.recoverable_cooldown_cycles >= 2 {
                     state.recoverable_cooldown_cycles = 0;
                 }
@@ -381,7 +372,6 @@ impl ProviderHealthManager {
         // provider-failure event must immediately return this provider to the
         // recoverable cooldown ladder so the executor can reroute to backup.
         state.consecutive_recoverable_failures = 0;
-        state.recoverable_window_started_at = None;
         true
     }
 
@@ -417,8 +407,7 @@ impl ProviderHealthManager {
             state.http_429_cooldown_cycles = 0;
             state.consecutive_recoverable_failures = 0;
             state.recoverable_cooldown_cycles = 0;
-            state.recoverable_window_started_at = None;
-            state.persisted_503_reprobe_available = false;
+                state.persisted_503_reprobe_available = false;
         }
     }
 
@@ -523,7 +512,7 @@ impl ProviderHealthManager {
         let threshold = base_threshold;
         state.failure_count += 1;
         state.consecutive_http_502_failures += 1;
-        record_recoverable_window_strike(state, now_ms);
+        state.consecutive_recoverable_failures += 1;
         state.persisted_503_reprobe_available = false;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
@@ -531,8 +520,7 @@ impl ProviderHealthManager {
         }
         if state.consecutive_recoverable_failures >= threshold {
             state.consecutive_recoverable_failures = 0;
-            state.recoverable_window_started_at = None;
-            state.state = "tripped".to_string();
+                state.state = "tripped".to_string();
             state.cooldown_expires_at = Some(now_ms + next_recoverable_cooldown_ms(state.recoverable_cooldown_cycles));
             state.recoverable_cooldown_cycles += 1;
         }
@@ -584,7 +572,6 @@ impl ProviderHealthManager {
                     http_429_cooldown_cycles: 0,
                     consecutive_recoverable_failures: 0,
                     recoverable_cooldown_cycles: 0,
-                    recoverable_window_started_at: None,
                     persisted_503_reprobe_available: false,
                 },
             );
@@ -603,7 +590,7 @@ impl ProviderHealthManager {
         state.failure_count += 1;
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures = 0;
-        record_recoverable_window_strike(state, now_ms);
+        state.consecutive_recoverable_failures += 1;
         state.persisted_503_reprobe_available = false;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
@@ -613,7 +600,6 @@ impl ProviderHealthManager {
             return Http429ControlOutcome::None;
         }
         state.consecutive_recoverable_failures = 0;
-        state.recoverable_window_started_at = None;
         state.state = "tripped".to_string();
         state.cooldown_expires_at =
             Some(now_ms + next_recoverable_cooldown_ms(state.recoverable_cooldown_cycles));
@@ -677,16 +663,6 @@ fn next_recoverable_cooldown_ms(cycles: i64) -> i64 {
     }
 }
 
-fn record_recoverable_window_strike(state: &mut ProviderInternalState, now_ms: i64) {
-    let window_start = state.recoverable_window_started_at.unwrap_or(now_ms);
-    if now_ms.saturating_sub(window_start) > RECOVERABLE_FAILURE_WINDOW_MS {
-        state.recoverable_window_started_at = Some(now_ms);
-        state.consecutive_recoverable_failures = 1;
-        return;
-    }
-    state.recoverable_window_started_at = Some(window_start);
-    state.consecutive_recoverable_failures += 1;
-}
 
 #[cfg(test)]
 mod tests {

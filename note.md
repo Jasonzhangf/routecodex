@@ -14648,4 +14648,15 @@ forwarder 引用的 provider profile（minimax/mini27/minimonth）加载失败 �
 - Live smoke caveat: simple curl to 5555 returned `openai-responses-provider...` 502 because the request hit same-protocol direct behavior, not the user-observed router request-id shape; do not use that smoke as router failover acceptance.
 2026-06-03 direct retry root cause: Rust VR apply_standard_filters re-added excluded providers when exclusion emptied a pool, causing router-direct recoverable retries to hit the same provider instead of falling to next priority pool. Removed re-add path and added selection red test.
 2026-06-03 5555 priority config: coding/thinking/default append mimo.mimo-v2.5 as final priority target; route-level fallback to default covered by Rust selection test.
-2026-06-03 health recoverable policy corrected: single request still reroutes immediately; cross-request recoverable cooldown now requires 3 failures inside 60s window; provider success clears window; post-cooldown first failure no longer jumps to 3h.
+2026-06-03 health recoverable policy corrected: single request still reroutes immediately; cross-request recoverable cooldown now requires 3 consecutive failures; provider success clears strikes; post-cooldown first failure no longer jumps to 3h.
+
+## 2026-06-03 stopless/followup sample audit
+- Evidence path: `/Volumes/extension/.rcc/codex-samples/openai-responses/ports/5555/mimo.key2.mimo-v2.5/req_1780469464019_3622edd0` and `req_1780469470763_4537b590`.
+- Latest 14:51 provider response body is Anthropic-like `{ data: { stop_reason: "tool_use", content: [{type:"thinking"},{type:"tool_use", name:"exec_command"}] } }`, then client projection becomes OpenAI Responses SSE `status:"requires_action"` with `required_action.submit_tool_outputs.tool_calls`.
+- Latest `*_stop_followup` samples stop at 2026-06-03T14:50:39; no newer stop_followup is expected for the 14:51 samples because stopless gate excludes tool-use/tool-like outputs.
+- Relevant gate: `sharedmodule/llmswitch-core/src/servertool/stop-gateway-context.ts` marks chat `finish_reason=tool_calls` and responses `responses_tool_like_output` as `eligible:false`; `stop-message-auto.ts` only triggers when stop gateway eligible / latest finish reason is stop.
+
+## 2026-06-03 correction: tool-call stop is SSE terminal-contract bug
+- User correction: the visible Codex UI stopped on a tool call; root issue is not stopless eligibility but tool-call continuation.
+- Evidence: latest client SSE includes `response.required_action` and final `response.done`, but also emitted `response.completed` for `status:"requires_action"` before done. This can make Codex treat the tool-call turn as complete and not execute/submit tool outputs.
+- Fix target: `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts` must not emit `response.completed` when `response.status === "requires_action"`; red lock in `sharedmodule/llmswitch-core/src/sse/test/responses-converter.test.ts`.
