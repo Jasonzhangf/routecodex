@@ -120,7 +120,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
 
                             "stop_message_flow": {
                                 "seedLoopPayload": true,
-                                "retryEmptyFollowupOnce": true,
                                 "stopMessageFollowupPolicy": "preserve_eligibility"
                             },
                             "reasoning_stop_guard_flow": {},
@@ -195,7 +194,6 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
         "clientInjectOnly": profile_obj.and_then(|v| v.get("clientInjectOnly")).and_then(|v| v.as_bool()).unwrap_or(false),
         "clearStateOnFollowupFailure": profile_obj.and_then(|v| v.get("clearStateOnFollowupFailure")).and_then(|v| v.as_bool()).unwrap_or(false),
         "seedLoopPayload": profile_obj.and_then(|v| v.get("seedLoopPayload")).and_then(|v| v.as_bool()).unwrap_or(false),
-        "retryEmptyFollowupOnce": profile_obj.and_then(|v| v.get("retryEmptyFollowupOnce")).and_then(|v| v.as_bool()).unwrap_or(false),
         "stopMessageFollowupPolicy": profile_obj
             .and_then(|v| v.get("stopMessageFollowupPolicy"))
             .and_then(|v| v.as_str())
@@ -285,7 +283,9 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            parsed.get("stopMessageFollowupPolicy").and_then(|v| v.as_str()),
+            parsed
+                .get("stopMessageFollowupPolicy")
+                .and_then(|v| v.as_str()),
             Some("preserve_eligibility")
         );
     }

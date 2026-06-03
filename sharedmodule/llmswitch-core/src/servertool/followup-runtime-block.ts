@@ -251,8 +251,3 @@ export function applyFollowupRuntimeMetadata(args: {
       ? args.originalEntryEndpoint
       : args.followupEntryEndpoint) as any;
 }
-
-export function resolveFollowupAttemptCount(flowId: string | undefined, decision?: FollowupFlowDecision): number {
-  const resolved = decision ?? resolveFollowupFlowDecision(flowId);
-  return resolved.retryEmptyFollowupOnce ? 2 : 1;
-}

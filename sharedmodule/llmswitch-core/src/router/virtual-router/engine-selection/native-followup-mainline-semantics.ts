@@ -25,7 +25,6 @@ export interface FollowupFlowDecision {
   clientInjectOnly: boolean;
   clearStateOnFollowupFailure: boolean;
   seedLoopPayload: boolean;
-  retryEmptyFollowupOnce: boolean;
   stopMessageFollowupPolicy: 'preserve_eligibility' | 'disable';
   clientInjectSource?: string;
   transparentReplayRequestSuffix?: string;
@@ -140,7 +139,6 @@ export interface ServertoolSkeletonConfig {
         clientInjectOnly?: boolean;
         clearStateOnFollowupFailure?: boolean;
         seedLoopPayload?: boolean;
-        retryEmptyFollowupOnce?: boolean;
         clientInjectSource?: string;
         transparentReplayRequestSuffix?: string;
         ignoreRequiresActionFollowup?: boolean;

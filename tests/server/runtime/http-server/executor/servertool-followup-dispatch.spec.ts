@@ -145,7 +145,6 @@ describe('servertool followup dispatch helper', () => {
               profilesByFlowId: {
                 stop_message_flow: {
                   seedLoopPayload: true,
-                  retryEmptyFollowupOnce: true,
                   stopMessageFollowupPolicy: 'preserve_eligibility'
                 }
               }

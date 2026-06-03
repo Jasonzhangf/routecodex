@@ -169,8 +169,6 @@ export async function runReenterFollowup(args: {
   followupPayloadRaw: JsonObject | null;
   metadata: JsonObject;
   followupTimeoutMs: number;
-  maxAttempts: number;
-  retryEmptyFollowupOnce: boolean;
   isStopMessageFlow: boolean;
   clearStateOnFollowupFailure: boolean;
   shouldInjectStopLoopWarning: boolean;
@@ -373,199 +371,178 @@ export async function runReenterFollowup(args: {
     | { body?: JsonObject; __sse_responses?: unknown; format?: string }
     | undefined;
   let lastError: unknown;
-  let lastEmptyFollowupBody: JsonObject | undefined;
-  let emptySamplePersisted = false;
-
-  for (let attempt = 1; attempt <= args.maxAttempts; attempt += 1) {
-    lifecycle('attempt_start', { attempt, maxAttempts: args.maxAttempts });
-    const disconnectWatcher = args.createClientDisconnectWatcher({
-      adapterContext: args.adapterContext,
-      requestId: args.requestId,
-      flowId: args.flowId
+  const attempt = 1;
+  lifecycle('attempt_start', { attempt, maxAttempts: 1 });
+  const disconnectWatcher = args.createClientDisconnectWatcher({
+    adapterContext: args.adapterContext,
+    requestId: args.requestId,
+    flowId: args.flowId
+  });
+  try {
+    if (args.isAdapterClientDisconnected(args.adapterContext)) {
+      args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
+      return {
+        kind: 'completed',
+        result: {
+          chat: args.finalChatResponse,
+          executed: true,
+          flowId: args.flowId
+        }
+      };
+    }
+    const followupPromise = args.reenterPipeline({
+      entryEndpoint: args.followupEntryEndpoint,
+      requestId: args.followupRequestId,
+      ...(followupPayload ? { body: followupPayload } : {}),
+      metadata: args.metadata
     });
-    try {
-      if (args.isAdapterClientDisconnected(args.adapterContext)) {
-        args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
-        return {
-          kind: 'completed',
-          result: {
-            chat: args.finalChatResponse,
-            executed: true,
-            flowId: args.flowId
-          }
-        };
-      }
-      const followupPromise = args.reenterPipeline({
-        entryEndpoint: args.followupEntryEndpoint,
-        requestId: args.followupRequestId,
-        ...(followupPayload ? { body: followupPayload } : {}),
-        metadata: args.metadata
-      });
-      followup = await args.withTimeout(
-        Promise.race([followupPromise, disconnectWatcher.promise]),
-        args.followupTimeoutMs,
-        () =>
-          args.createServerToolTimeoutError({
-            requestId: args.requestId,
-            phase: 'followup',
-            timeoutMs: args.followupTimeoutMs,
-            flowId: args.flowId,
-            attempt,
-            maxAttempts: args.maxAttempts
-          })
-      );
-      disconnectWatcher.cancel();
-      if (args.isAdapterClientDisconnected(args.adapterContext)) {
-        args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
-        return {
-          kind: 'completed',
-          result: {
-            chat: args.finalChatResponse,
-            executed: true,
-            flowId: args.flowId
-          }
-        };
-      }
-      const attemptBodyCandidate = resolveFollowupBodyCandidate(followup);
-      lifecycle('attempt_result', {
+    followup = await args.withTimeout(
+      Promise.race([followupPromise, disconnectWatcher.promise]),
+      args.followupTimeoutMs,
+      () =>
+        args.createServerToolTimeoutError({
+          requestId: args.requestId,
+          phase: 'followup',
+          timeoutMs: args.followupTimeoutMs,
+          flowId: args.flowId,
+          attempt,
+          maxAttempts: 1
+        })
+    );
+    disconnectWatcher.cancel();
+    if (args.isAdapterClientDisconnected(args.adapterContext)) {
+      args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
+      return {
+        kind: 'completed',
+        result: {
+          chat: args.finalChatResponse,
+          executed: true,
+          flowId: args.flowId
+        }
+      };
+    }
+    const attemptBodyCandidate = resolveFollowupBodyCandidate(followup);
+    lifecycle('attempt_result', {
+      attempt,
+      hasBody: Boolean(attemptBodyCandidate),
+      hasSse: Boolean(followup && (followup as Record<string, unknown>).__sse_responses)
+    });
+    if (attemptBodyCandidate && args.isEmptyClientResponsePayload(attemptBodyCandidate)) {
+      void persistEmptyFollowupSample({
+        requestId: args.requestId,
+        followupRequestId: args.followupRequestId,
+        flowId: args.flowId,
         attempt,
-        hasBody: Boolean(attemptBodyCandidate),
-        hasSse: Boolean(followup && (followup as Record<string, unknown>).__sse_responses)
+        body: attemptBodyCandidate,
+        payload: followupPayload
       });
-      if (args.retryEmptyFollowupOnce) {
-        const body = attemptBodyCandidate;
-        if (body && args.isEmptyClientResponsePayload(body)) {
-          lastEmptyFollowupBody = body;
-          void persistEmptyFollowupSample({
-            requestId: args.requestId,
-            followupRequestId: args.followupRequestId,
-            flowId: args.flowId,
-            attempt,
-            body,
-            payload: followupPayload
-          });
-          emptySamplePersisted = true;
-          followup = undefined;
-          lastError = new Error('SERVERTOOL_EMPTY_FOLLOWUP');
-          if (attempt < args.maxAttempts) {
-            lifecycle('attempt_retry_empty_followup', { attempt });
-            continue;
-          }
-        }
-      }
-      lastError = undefined;
-      break;
-    } catch (error) {
-      disconnectWatcher.cancel();
-      if (
-        error &&
-        typeof error === 'object' &&
-        !Array.isArray(error) &&
-        (error as { message?: unknown }).message &&
-        followupPayload
-      ) {
-        const msg = String((error as { message?: unknown }).message || '');
-        if (msg.includes('orphan_tool_result')) {
-          void persistFollowupFailureSample({
-            requestId: args.requestId,
-            followupRequestId: args.followupRequestId,
-            flowId: args.flowId,
-            attempt,
-            errorMessage: msg,
-            payload: followupPayload
-          });
-          try {
-            console.error(
-              '[servertool.followup.orphan.debug]',
-              JSON.stringify({
-                requestId: args.requestId,
-                followupRequestId: args.followupRequestId,
-                flowId: args.flowId,
-                attempt,
-                payloadModel: (followupPayload as Record<string, unknown>).model,
-                hasInput: Array.isArray((followupPayload as Record<string, unknown>).input),
-                hasMessages: Array.isArray((followupPayload as Record<string, unknown>).messages),
-                inputSize: Array.isArray((followupPayload as Record<string, unknown>).input)
-                  ? ((followupPayload as Record<string, unknown>).input as unknown[]).length
-                  : 0,
-                preview: JSON.stringify(followupPayload).slice(0, 4000)
-              })
-            );
-          } catch {
-            // best effort diagnostic only
-          }
-        }
-      }
-      lifecycle('attempt_error', {
-        attempt,
-        message: error instanceof Error ? error.message : String(error ?? 'unknown')
-      });
-      if (args.isServerToolClientDisconnectedError(error) || args.isAdapterClientDisconnected(args.adapterContext)) {
-        args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
-        return {
-          kind: 'completed',
-          result: {
-            chat: args.finalChatResponse,
-            executed: true,
-            flowId: args.flowId
-          }
-        };
-      }
-      if (isTerminalFollowupError(error)) {
-        lastError = error;
-        break;
-      }
-      if (
-        error &&
-        typeof error === 'object' &&
-        !Array.isArray(error) &&
-        (error as { code?: unknown }).code === 'SERVERTOOL_TIMEOUT'
-      ) {
-        throw error;
-      }
-      lastError = error;
-      if (attempt >= args.maxAttempts) {
-        if (args.clearStateOnFollowupFailure) {
-          args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
-          args.onLogProgress(5, 5, 'failed (stopMessage followup failed; state cleared)', {
-            flowId: args.flowId,
-            attempt
-          });
-          throw error;
-        }
-        const { upstreamCode, upstreamStatus, reason } = extractFollowupErrorEnvelope(error);
-        const compactReason = args.compactFollowupErrorReason(reason);
-        const compactErrorMessage = args.compactFollowupErrorReason(
-          error instanceof Error ? error.message : String(error ?? 'unknown')
-        );
-        const wrapped = new ProviderProtocolError(
-          `[servertool] Followup failed for flow ${args.flowId ?? 'unknown'} (attempt ${attempt}/${args.maxAttempts})`,
-          {
-            code: 'SERVERTOOL_FOLLOWUP_FAILED',
-            details: {
-              flowId: args.flowId,
+      followup = undefined;
+      lastError = new Error('SERVERTOOL_EMPTY_FOLLOWUP');
+    }
+  } catch (error) {
+    disconnectWatcher.cancel();
+    if (
+      error &&
+      typeof error === 'object' &&
+      !Array.isArray(error) &&
+      (error as { message?: unknown }).message &&
+      followupPayload
+    ) {
+      const msg = String((error as { message?: unknown }).message || '');
+      if (msg.includes('orphan_tool_result')) {
+        void persistFollowupFailureSample({
+          requestId: args.requestId,
+          followupRequestId: args.followupRequestId,
+          flowId: args.flowId,
+          attempt,
+          errorMessage: msg,
+          payload: followupPayload
+        });
+        try {
+          console.error(
+            '[servertool.followup.orphan.debug]',
+            JSON.stringify({
               requestId: args.requestId,
+              followupRequestId: args.followupRequestId,
+              flowId: args.flowId,
               attempt,
-              maxAttempts: args.maxAttempts,
-              error: compactErrorMessage ?? 'unknown',
-              ...(compactReason ? { reason: compactReason } : {}),
-              ...(upstreamCode ? { upstreamCode } : {})
-            }
-          }
-        );
-        if (compactReason) {
-          (wrapped as ProviderProtocolError & { reason?: string }).reason = compactReason;
+              payloadModel: (followupPayload as Record<string, unknown>).model,
+              hasInput: Array.isArray((followupPayload as Record<string, unknown>).input),
+              hasMessages: Array.isArray((followupPayload as Record<string, unknown>).messages),
+              inputSize: Array.isArray((followupPayload as Record<string, unknown>).input)
+                ? ((followupPayload as Record<string, unknown>).input as unknown[]).length
+                : 0,
+              preview: JSON.stringify(followupPayload).slice(0, 4000)
+            })
+          );
+        } catch {
+          // best effort diagnostic only
         }
-        if (upstreamCode) {
-          (wrapped as ProviderProtocolError & { upstreamCode?: string }).upstreamCode = upstreamCode;
-        }
-        if (typeof upstreamStatus === 'number' && upstreamStatus > 0) {
-          (wrapped as ProviderProtocolError & { status?: number }).status = upstreamStatus;
-        }
-        (wrapped as { cause?: unknown }).cause = error;
-        throw wrapped;
       }
     }
+    lifecycle('attempt_error', {
+      attempt,
+      message: error instanceof Error ? error.message : String(error ?? 'unknown')
+    });
+    if (args.isServerToolClientDisconnectedError(error) || args.isAdapterClientDisconnected(args.adapterContext)) {
+      args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
+      return {
+        kind: 'completed',
+        result: {
+          chat: args.finalChatResponse,
+          executed: true,
+          flowId: args.flowId
+        }
+      };
+    }
+    if (isTerminalFollowupError(error) || (
+      error &&
+      typeof error === 'object' &&
+      !Array.isArray(error) &&
+      (error as { code?: unknown }).code === 'SERVERTOOL_TIMEOUT'
+    )) {
+      throw error;
+    }
+    lastError = error;
+    if (args.clearStateOnFollowupFailure) {
+      args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
+      args.onLogProgress(5, 5, 'failed (stopMessage followup failed; state cleared)', {
+        flowId: args.flowId,
+        attempt
+      });
+      throw error;
+    }
+    const { upstreamCode, upstreamStatus, reason } = extractFollowupErrorEnvelope(error);
+    const compactReason = args.compactFollowupErrorReason(reason);
+    const compactErrorMessage = args.compactFollowupErrorReason(
+      error instanceof Error ? error.message : String(error ?? 'unknown')
+    );
+    const wrapped = new ProviderProtocolError(
+      `[servertool] Followup failed for flow ${args.flowId ?? 'unknown'} (attempt ${attempt}/1)`,
+      {
+        code: 'SERVERTOOL_FOLLOWUP_FAILED',
+        details: {
+          flowId: args.flowId,
+          requestId: args.requestId,
+          attempt,
+          maxAttempts: 1,
+          error: compactErrorMessage ?? 'unknown',
+          ...(compactReason ? { reason: compactReason } : {}),
+          ...(upstreamCode ? { upstreamCode } : {})
+        }
+      }
+    );
+    if (compactReason) {
+      (wrapped as ProviderProtocolError & { reason?: string }).reason = compactReason;
+    }
+    if (upstreamCode) {
+      (wrapped as ProviderProtocolError & { upstreamCode?: string }).upstreamCode = upstreamCode;
+    }
+    if (typeof upstreamStatus === 'number' && upstreamStatus > 0) {
+      (wrapped as ProviderProtocolError & { status?: number }).status = upstreamStatus;
+    }
+    (wrapped as { cause?: unknown }).cause = error;
+    throw wrapped;
   }
 
   const followupBody = resolveFollowupBodyCandidate(followup);
@@ -579,26 +556,7 @@ export async function runReenterFollowup(args: {
     }
     throw terminalLastError;
   }
-  if (args.retryEmptyFollowupOnce && (!followupBody || args.isEmptyClientResponsePayload(followupBody))) {
-    if (terminalLastError) {
-      if (args.clearStateOnFollowupFailure) {
-        args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
-        args.onLogProgress(5, 5, 'failed (stopMessage followup terminal error; state cleared)', {
-          flowId: args.flowId
-        });
-      }
-      throw terminalLastError;
-    }
-    if (followupPayload && !emptySamplePersisted) {
-      void persistEmptyFollowupSample({
-        requestId: args.requestId,
-        followupRequestId: args.followupRequestId,
-        flowId: args.flowId,
-        attempt: args.maxAttempts,
-        body: followupBody ?? lastEmptyFollowupBody,
-        payload: followupPayload
-      });
-    }
+  if (!followupBody || args.isEmptyClientResponsePayload(followupBody)) {
     if (args.clearStateOnFollowupFailure) {
       args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
       args.onLogProgress(5, 5, 'failed (stopMessage followup empty; state cleared)', { flowId: args.flowId });

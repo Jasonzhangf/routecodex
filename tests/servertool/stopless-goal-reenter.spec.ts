@@ -6,6 +6,7 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.js';
 import { resolveFollowupFlowDecision } from '../../sharedmodule/llmswitch-core/src/servertool/followup-flow-policy.js';
 import { shouldShortCircuitRequiresActionFollowup } from '../../sharedmodule/llmswitch-core/src/servertool/finalize-followup-block.js';
+import { runReenterFollowup } from '../../sharedmodule/llmswitch-core/src/servertool/reenter-followup-block.js';
 import { runClientInjectOnlyFollowup } from '../../sharedmodule/llmswitch-core/src/servertool/client-inject-followup-block.js';
 
 describe('stopless re-enter path (no tmux inject)', () => {
@@ -66,6 +67,59 @@ describe('stopless re-enter path (no tmux inject)', () => {
     expect(metadata.__rt?.stopMessageFollowupPolicy).toBe('preserve_eligibility');
   });
 
+  test('reenter followup does not retry empty response with the same followup request id', async () => {
+    const reenterPipeline = jest.fn(async () => ({
+      body: {
+        id: 'chatcmpl-empty-followup',
+        object: 'chat.completion',
+        choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }]
+      } as any
+    }));
+
+    await expect(
+      runReenterFollowup({
+        adapterContext: {} as any,
+        requestId: 'req-single-followup-empty',
+        flowId: 'stop_message_flow',
+        followupEntryEndpoint: '/v1/chat/completions',
+        followupRequestId: 'req-single-followup-empty:stop_followup',
+        followupPayloadRaw: { messages: [{ role: 'user', content: '继续执行' }] } as any,
+        metadata: {} as any,
+        followupTimeoutMs: 1_000,
+        isStopMessageFlow: true,
+        clearStateOnFollowupFailure: false,
+        shouldInjectStopLoopWarning: false,
+        stopLoopWarnThreshold: 5,
+        loopState: null,
+        finalChatResponse: { id: 'chat', object: 'chat.completion', choices: [] } as any,
+        execution: { flowId: 'stop_message_flow' },
+        reenterPipeline,
+        coerceFollowupPayloadStream: (payload) => payload,
+        appendStopMessageLoopWarning: () => {},
+        applyHubFollowupPolicyShadow: ({ payload }) => payload,
+        createClientDisconnectWatcher: () => ({ promise: new Promise<never>(() => {}), cancel: () => {} }),
+        withTimeout: async (promise) => promise,
+        createServerToolTimeoutError: () => new Error('timeout'),
+        createStopMessageFetchFailedError: () => new Error('loop limit'),
+        isServerToolClientDisconnectedError: () => false,
+        isAdapterClientDisconnected: () => false,
+        disableStopMessageAfterFailedFollowup: () => {},
+        stopMessageReservation: null,
+        compactFollowupErrorReason: (value) => (typeof value === 'string' ? value : undefined),
+        isEmptyClientResponsePayload: (payload) => {
+          const choices = Array.isArray((payload as any).choices) ? (payload as any).choices : [];
+          return choices.some((choice: any) => choice?.message?.content === '');
+        },
+        createEmptyFollowupError: () => Object.assign(new Error('empty followup'), { code: 'SERVERTOOL_EMPTY_FOLLOWUP' }),
+        onLogProgress: () => {}
+      })
+    ).rejects.toMatchObject({ code: 'SERVERTOOL_EMPTY_FOLLOWUP' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    expect(reenterPipeline.mock.calls[0]?.[0]?.requestId).toBe('req-single-followup-empty:stop_followup');
+  });
+
   test('stop_message_flow execution mode remains reenter with explicit reenter decision', () => {
     const metadata = {} as any;
     const mode = resolveFollowupExecutionMode({
@@ -79,7 +133,6 @@ describe('stopless re-enter path (no tmux inject)', () => {
         clientInjectOnly: false,
         clearStateOnFollowupFailure: false,
         seedLoopPayload: false,
-        retryEmptyFollowupOnce: false,
         ignoreRequiresActionFollowup: false
       },
       metadata,
@@ -101,7 +154,6 @@ describe('stopless re-enter path (no tmux inject)', () => {
         clientInjectOnly: false,
         clearStateOnFollowupFailure: false,
         seedLoopPayload: false,
-        retryEmptyFollowupOnce: false,
         ignoreRequiresActionFollowup: false
       },
       metadata,

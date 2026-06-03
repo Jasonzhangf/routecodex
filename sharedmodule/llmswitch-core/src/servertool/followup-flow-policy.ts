@@ -28,7 +28,6 @@ export function resolveFollowupFlowDecision(flowId: unknown): FollowupFlowDecisi
     clientInjectOnly: plan?.clientInjectOnly === true,
     clearStateOnFollowupFailure: plan?.clearStateOnFollowupFailure === true,
     seedLoopPayload: plan?.seedLoopPayload === true,
-    retryEmptyFollowupOnce: plan?.retryEmptyFollowupOnce === true,
     stopMessageFollowupPolicy:
       plan?.stopMessageFollowupPolicy === 'preserve_eligibility'
         ? 'preserve_eligibility'
@@ -65,10 +64,6 @@ export function isClientInjectOnlyFollowupFlowId(flowId: unknown): boolean {
 
 export function isSeedLoopPayloadFollowupFlowId(flowId: unknown): boolean {
   return resolveFollowupFlowDecision(flowId).seedLoopPayload;
-}
-
-export function shouldRetryEmptyFollowupOnce(flowId: unknown): boolean {
-  return resolveFollowupFlowDecision(flowId).retryEmptyFollowupOnce;
 }
 
 export function resolveClientInjectSourceForFlowId(flowId: unknown): string | undefined {

@@ -128,7 +128,6 @@ export type ServertoolFollowupFlowProfilePayload = {
   clientInjectOnly?: boolean;
   clearStateOnFollowupFailure?: boolean;
   seedLoopPayload?: boolean;
-  retryEmptyFollowupOnce?: boolean;
   clientInjectSource?: string;
   transparentReplayRequestSuffix?: string;
   ignoreRequiresActionFollowup?: boolean;
@@ -144,7 +143,6 @@ export type ServertoolFollowupRuntimePlanPayload = {
   clientInjectOnly: boolean;
   clearStateOnFollowupFailure: boolean;
   seedLoopPayload: boolean;
-  retryEmptyFollowupOnce: boolean;
   ignoreRequiresActionFollowup: boolean;
   stopMessageFollowupPolicy: 'preserve_eligibility' | 'disable';
   clientInjectSource?: string;
@@ -569,7 +567,6 @@ export function parseServertoolFollowupFlowProfilePayload(raw: string): Serverto
     ...(profile.clientInjectOnly === true ? { clientInjectOnly: true } : {}),
     ...(profile.clearStateOnFollowupFailure === true ? { clearStateOnFollowupFailure: true } : {}),
     ...(profile.seedLoopPayload === true ? { seedLoopPayload: true } : {}),
-    ...(profile.retryEmptyFollowupOnce === true ? { retryEmptyFollowupOnce: true } : {}),
     ...(typeof profile.clientInjectSource === 'string' && profile.clientInjectSource.trim()
       ? { clientInjectSource: profile.clientInjectSource.trim() }
       : {}),
@@ -607,7 +604,6 @@ export function parseServertoolFollowupRuntimePlanPayload(raw: string): Serverto
     clientInjectOnly: plan.clientInjectOnly === true,
     clearStateOnFollowupFailure: plan.clearStateOnFollowupFailure === true,
     seedLoopPayload: plan.seedLoopPayload === true,
-    retryEmptyFollowupOnce: plan.retryEmptyFollowupOnce === true,
     ignoreRequiresActionFollowup: plan.ignoreRequiresActionFollowup === true,
     stopMessageFollowupPolicy:
       plan.stopMessageFollowupPolicy === 'preserve_eligibility'

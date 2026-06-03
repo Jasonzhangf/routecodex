@@ -9,7 +9,6 @@ import {
   assertAutoLimitNotExceeded,
   materializeFollowupPayload,
   resolveFollowupExecutionMode,
-  resolveFollowupAttemptCount,
   resolveFollowupEntryEndpoint,
   resolveLoopPayload
 } from './followup-runtime-block.js';
@@ -279,8 +278,6 @@ export async function runFollowupMainline(args: {
     adapterContext: args.adapterContext,
     resolveProviderKey: resolveAdapterContextProviderKey
   });
-  const maxAttempts = resolveFollowupAttemptCount(args.execution.flowId, decision);
-  const retryEmptyFollowupOnce = maxAttempts > 1;
   const followupRequestId = buildFollowupRequestId(args.requestId, args.execution.followup.requestIdSuffix);
   const executionMode = resolveFollowupExecutionMode({
     flowId: args.execution.flowId,
@@ -390,8 +387,6 @@ export async function runFollowupMainline(args: {
     followupPayloadRaw,
     metadata,
     followupTimeoutMs: args.followupTimeoutMs,
-    maxAttempts,
-    retryEmptyFollowupOnce,
     isStopMessageFlow,
     clearStateOnFollowupFailure: decision.clearStateOnFollowupFailure,
     shouldInjectStopLoopWarning,

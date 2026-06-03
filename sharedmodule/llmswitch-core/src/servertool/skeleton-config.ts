@@ -214,7 +214,6 @@ export function buildServertoolFollowupConfig(): {
       clientInjectOnly?: boolean;
       clearStateOnFollowupFailure?: boolean;
       seedLoopPayload?: boolean;
-      retryEmptyFollowupOnce?: boolean;
       clientInjectSource?: string;
       transparentReplayRequestSuffix?: string;
       ignoreRequiresActionFollowup?: boolean;
@@ -226,7 +225,6 @@ export function buildServertoolFollowupConfig(): {
     flowOnlyLoopLimitFlowIds: string[];
     clientInjectOnlyFlowIds: string[];
     seedLoopPayloadFlowIds: string[];
-    retryEmptyFollowupOnceFlowIds: string[];
     clientInjectSourceByFlowId: Record<string, string>;
     transparentReplayRequestSuffixByFlowId: Record<string, string>;
     ignoreRequiresActionFollowupFlowIds: string[];
@@ -257,7 +255,6 @@ export function buildServertoolFollowupConfig(): {
               ...(profile.clientInjectOnly === true ? { clientInjectOnly: true } : {}),
               ...(profile.clearStateOnFollowupFailure === true ? { clearStateOnFollowupFailure: true } : {}),
               ...(profile.seedLoopPayload === true ? { seedLoopPayload: true } : {}),
-              ...(profile.retryEmptyFollowupOnce === true ? { retryEmptyFollowupOnce: true } : {}),
               ...(typeof profile.clientInjectSource === 'string' && profile.clientInjectSource.trim()
                 ? { clientInjectSource: profile.clientInjectSource.trim() }
                 : {}),
@@ -282,7 +279,6 @@ export function buildServertoolFollowupConfig(): {
         clientInjectOnly?: boolean;
         clearStateOnFollowupFailure?: boolean;
         seedLoopPayload?: boolean;
-        retryEmptyFollowupOnce?: boolean;
         clientInjectSource?: string;
         transparentReplayRequestSuffix?: string;
         ignoreRequiresActionFollowup?: boolean;
@@ -294,7 +290,6 @@ export function buildServertoolFollowupConfig(): {
       flowOnlyLoopLimitFlowIds: [],
       clientInjectOnlyFlowIds: [],
       seedLoopPayloadFlowIds: [],
-      retryEmptyFollowupOnceFlowIds: [],
       clientInjectSourceByFlowId: {},
       transparentReplayRequestSuffixByFlowId: {},
       ignoreRequiresActionFollowupFlowIds: [],
