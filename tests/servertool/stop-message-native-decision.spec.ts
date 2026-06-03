@@ -10,6 +10,7 @@
 import { describe, test, expect } from '@jest/globals';
 import {
   decideStopMessageActionWithNative,
+  evaluateStopSchemaGateWithNative,
   type StopMessageDecisionContext,
   type StopMessageDecision
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
@@ -172,5 +173,37 @@ describe('stop-message native decision (blackbox)', () => {
     const decision = decideStopMessageActionWithNative(ctx);
     expect(decision.action).toBe('skip');
     expect(decision.skip_reason).toContain('servertool_followup');
+  });
+
+  test('stop schema gate does not count missing schema budget', () => {
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText: '未完成。继续处理 DNS。',
+      used: 99,
+      maxRepeats: 3,
+    });
+    expect(gate.action).toBe('followup');
+    expect(gate.reason_code).toBe('stop_schema_missing');
+    expect(gate.count_budget).toBe(false);
+    expect(gate.followup_text).not.toContain('质询');
+  });
+
+  test('stop schema gate exhausts only invalid schema budget', () => {
+    const invalid = evaluateStopSchemaGateWithNative({
+      assistantText: '{"stopreason":2,"reason":"未完成","has_evidence":0,"next_step":"运行测试"}',
+      used: 3,
+      maxRepeats: 3,
+    });
+    expect(invalid.action).toBe('fail_fast');
+    expect(invalid.reason_code).toBe('stop_schema_budget_exhausted');
+    expect(invalid.count_budget).toBe(true);
+
+    const valid = evaluateStopSchemaGateWithNative({
+      assistantText: '{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","next_step":""}',
+      used: 3,
+      maxRepeats: 3,
+    });
+    expect(valid.action).toBe('allow_stop');
+    expect(valid.reason_code).toBe('stop_schema_finished');
+    expect(valid.count_budget).toBe(false);
   });
 });

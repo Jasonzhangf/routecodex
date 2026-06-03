@@ -9,7 +9,7 @@ use serde_json::Value;
 const LEGACY_DEFAULT_TEXT: &str = "继续执行";
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
     "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。",
-    "你刚才再次停止。请先质询：当前用户目标是否已经完成？如果未完成，必须调用可用工具继续操作、检查或验证；如果已完成，必须给出明确完成证据，不要只总结、道歉、复述状态或输出计划。",
+    "你刚才再次停止。当前用户目标是否已经完成？如果未完成，必须调用可用工具继续操作、检查或验证；如果已完成，必须给出明确完成证据，不要只总结、道歉、复述状态或输出计划。",
     "最后一次续杯预算。必须严格判断目标是否完成：已完成则给出可核验证据；未完成则必须调用工具继续执行到有证据为止。禁止空泛总结、道歉、计划或再次无证据停止。",
 ];
 
@@ -207,6 +207,7 @@ pub struct StopSchemaGateDecision {
     pub reason_code: String,
     pub summary_prefix: Option<String>,
     pub followup_text: Option<String>,
+    pub count_budget: bool,
     pub parsed: Option<StopSchemaParsed>,
 }
 
@@ -278,24 +279,15 @@ pub fn evaluate_stop_schema_gate(
     used: u32,
     max_repeats: u32,
 ) -> StopSchemaGateDecision {
-    if max_repeats > 0 && used >= max_repeats {
-        return StopSchemaGateDecision {
-            action: StopSchemaGateAction::FailFast,
-            reason_code: "stop_schema_budget_exhausted".to_string(),
-            summary_prefix: None,
-            followup_text: None,
-            parsed: parse_stop_schema(assistant_text),
-        };
-    }
-
     let parsed = match parse_stop_schema(assistant_text) {
         Some(parsed) => parsed,
         None => {
             return schema_followup(
                 "stop_schema_missing",
                 used,
-                "你停止了，但没有提供 stop schema。请继续当前用户目标；如果确实要停止，必须提供字段：stopreason(数字：0=finished,1=blocked,2=continue_needed)、reason、has_evidence(数字：0/1)、next_step。",
+                "你刚才试图停止，但没有提供 stop schema。现在必须二选一：1) 如果目标已完成或阻塞，立即给出 stop schema：stopreason(数字：0=finished,1=blocked)、reason(具体原因)、has_evidence(数字0/1)、evidence(证据)、next_step(后续动作或空)；2) 如果目标未完成，不准总结，必须立刻调用工具继续执行当前目标。",
                 None,
+                false,
             );
         }
     };
@@ -303,11 +295,12 @@ pub fn evaluate_stop_schema_gate(
     let stopreason = match parsed.stopreason {
         Some(v) => v,
         None => {
-            return schema_followup(
+            return schema_invalid_followup(
                 "stop_schema_stopreason_missing_or_non_numeric",
                 used,
-                "stop schema 缺少数字 stopreason。请补充 stopreason(数字：0=finished,1=blocked,2=continue_needed)；如果目标未完成，必须继续执行下一步。",
-                Some(parsed),
+                max_repeats,
+                "stop schema 缺少数字 stopreason。不要猜、不要总结。现在必须补齐数字 stopreason：0=finished、1=blocked、2=continue_needed。若选择 0/1，必须给 reason 和 evidence；若选择 2，必须给 next_step 并立即执行。",
+                parsed,
             );
         }
     };
@@ -315,11 +308,12 @@ pub fn evaluate_stop_schema_gate(
     if stopreason == 0 || stopreason == 1 {
         let reason = parsed.reason.as_deref().map(str::trim).unwrap_or("");
         if reason.is_empty() {
-            return schema_followup(
+            return schema_invalid_followup(
                 "stop_schema_reason_missing",
                 used,
-                "stopreason 表示 finished/blocked，但 reason 为空。请补充停止原因；如果其实未完成或未阻塞，必须继续调用工具执行。",
-                Some(parsed),
+                max_repeats,
+                "你声明 finished/blocked，但没有给 reason。停止不成立。请直接回答：目标真的完成/阻塞了吗？如果是，立即给出具体 reason 和证据；如果不是，禁止再停，必须调用工具继续执行。",
+                parsed,
             );
         }
         return StopSchemaGateDecision {
@@ -331,29 +325,52 @@ pub fn evaluate_stop_schema_gate(
             },
             summary_prefix: Some(format!("停止原因：{}\n\n", reason)),
             followup_text: None,
+            count_budget: false,
             parsed: Some(parsed),
         };
     }
 
     let next_step = parsed.next_step.as_deref().map(str::trim).unwrap_or("");
     if !next_step.is_empty() {
-        return schema_followup(
+        return schema_invalid_followup(
             "stop_schema_continue_next_step",
             used,
+            max_repeats,
             &format!(
-                "stopreason 不是 finished/blocked，且 next_step 已给出。不要停止，立即继续执行下一步：{}",
+                "你已经提供 next_step，所以本轮不允许停止、不允许改写计划、不允许总结。立即执行这个下一步：{}",
                 next_step
             ),
-            Some(parsed),
+            parsed,
         );
     }
 
-    schema_followup(
+    schema_invalid_followup(
         "stop_schema_next_step_missing",
         used,
-        "stopreason 不是 finished/blocked，但 next_step 为空。请继续当前用户目标；如果要停止，必须提供 stopreason、reason、has_evidence、next_step，并给出完成/阻塞证据。",
-        Some(parsed),
+        max_repeats,
+        "你没有证明 finished/blocked，也没有给 next_step。停止不成立。请直接回答：目标是否完成？完成/阻塞就给 stopreason=0/1、reason、has_evidence、evidence；未完成就必须给 next_step 并调用工具执行。",
+        parsed,
     )
+}
+
+fn schema_invalid_followup(
+    reason_code: &str,
+    used: u32,
+    max_repeats: u32,
+    message: &str,
+    parsed: StopSchemaParsed,
+) -> StopSchemaGateDecision {
+    if max_repeats > 0 && used >= max_repeats {
+        return StopSchemaGateDecision {
+            action: StopSchemaGateAction::FailFast,
+            reason_code: "stop_schema_budget_exhausted".to_string(),
+            summary_prefix: None,
+            followup_text: None,
+            count_budget: true,
+            parsed: Some(parsed),
+        };
+    }
+    schema_followup(reason_code, used, message, Some(parsed), true)
 }
 
 fn schema_followup(
@@ -361,15 +378,22 @@ fn schema_followup(
     used: u32,
     message: &str,
     parsed: Option<StopSchemaParsed>,
+    count_budget: bool,
 ) -> StopSchemaGateDecision {
-    let mut text = default_execution_prompt(used);
-    text.push_str("\n\nStop schema 校验未通过：");
-    text.push_str(message);
+    let mut text = String::new();
+    if reason_code == "stop_schema_continue_next_step" {
+        text.push_str(message);
+    } else {
+        text.push_str(default_execution_prompt(used).as_str());
+        text.push_str("\n\nStop schema 校验未通过：");
+        text.push_str(message);
+    }
     StopSchemaGateDecision {
         action: StopSchemaGateAction::Followup,
         reason_code: reason_code.to_string(),
         summary_prefix: None,
         followup_text: Some(text),
+        count_budget,
         parsed,
     }
 }
@@ -1027,7 +1051,8 @@ mod tests {
         );
         assert_eq!(decision.action, StopSchemaGateAction::Followup);
         assert_eq!(decision.reason_code, "stop_schema_reason_missing");
-        assert!(decision.followup_text.unwrap().contains("reason 为空"));
+        assert!(decision.count_budget);
+        assert!(decision.followup_text.unwrap().contains("没有给 reason"));
     }
 
     #[test]
@@ -1043,7 +1068,9 @@ mod tests {
         assert_eq!(decision.reason_code, "stop_schema_continue_next_step");
         let text = decision.followup_text.unwrap();
         assert!(text.contains("运行 targeted tests"));
-        assert!(text.contains("再次停止"));
+        assert!(text.contains("立即执行这个下一步"));
+        assert!(!text.contains("质询"));
+        assert!(decision.count_budget);
     }
 
     #[test]
@@ -1051,6 +1078,8 @@ mod tests {
         let missing = evaluate_stop_schema_gate("普通停止文本", 0, 3);
         assert_eq!(missing.action, StopSchemaGateAction::Followup);
         assert_eq!(missing.reason_code, "stop_schema_missing");
+        assert!(!missing.count_budget);
+        assert!(!missing.followup_text.unwrap().contains("质询"));
 
         let invalid = evaluate_stop_schema_gate(
             r#"{"stopreason":"finished","reason":"done","has_evidence":1,"next_step":""}"#,
@@ -1062,6 +1091,7 @@ mod tests {
             invalid.reason_code,
             "stop_schema_stopreason_missing_or_non_numeric"
         );
+        assert!(invalid.count_budget);
 
         let no_next = evaluate_stop_schema_gate(
             r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":""}"#,
@@ -1070,13 +1100,36 @@ mod tests {
         );
         assert_eq!(no_next.action, StopSchemaGateAction::Followup);
         assert_eq!(no_next.reason_code, "stop_schema_next_step_missing");
+        assert!(no_next.count_budget);
     }
 
     #[test]
-    fn stop_schema_budget_exhausted_fail_fast() {
-        let decision = evaluate_stop_schema_gate("普通停止文本", 3, 3);
-        assert_eq!(decision.action, StopSchemaGateAction::FailFast);
-        assert_eq!(decision.reason_code, "stop_schema_budget_exhausted");
-        assert!(decision.followup_text.is_none());
+    fn stop_schema_missing_never_exhausts_budget() {
+        let decision = evaluate_stop_schema_gate("普通停止文本", 99, 3);
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(decision.reason_code, "stop_schema_missing");
+        assert!(!decision.count_budget);
+    }
+
+    #[test]
+    fn stop_schema_invalid_exhausts_budget_but_valid_stop_does_not() {
+        let invalid = evaluate_stop_schema_gate(
+            r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
+            3,
+            3,
+        );
+        assert_eq!(invalid.action, StopSchemaGateAction::FailFast);
+        assert_eq!(invalid.reason_code, "stop_schema_budget_exhausted");
+        assert!(invalid.count_budget);
+        assert!(invalid.followup_text.is_none());
+
+        let valid = evaluate_stop_schema_gate(
+            r#"{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","next_step":""}"#,
+            3,
+            3,
+        );
+        assert_eq!(valid.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(valid.reason_code, "stop_schema_finished");
+        assert!(!valid.count_budget);
     }
 }

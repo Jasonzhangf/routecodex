@@ -75,6 +75,7 @@ export type StopSchemaGateDecision = {
   reason_code: string;
   summary_prefix?: string;
   followup_text?: string;
+  count_budget?: boolean;
   parsed?: Record<string, unknown>;
 };
 

@@ -20,7 +20,6 @@ import {
 } from './engine-selection-block.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
 import { runFollowupMainline } from './followup-mainline-block.js';
-import { applyStopMessageFinishReasonBudget } from './stop-message-counter.js';
 
 // native-router-hotpath contract:
 // servertool followup metadata/injection shape is consumed by Rust hub pipeline
@@ -140,10 +139,6 @@ export async function runServerToolOrchestration(
 
   const stopSignal = inspectStopGatewaySignal(options.chat);
   attachStopGatewayContext(options.adapterContext, stopSignal);
-  applyStopMessageFinishReasonBudget({
-    payload: options.chat,
-    adapterContext: options.adapterContext
-  });
   if (stopSignal.observed) {
     logStopEntry('entry', 'observed', {
       reason: stopSignal.reason,

@@ -11,10 +11,10 @@
 适用于：servertool stopless 自动续轮、stop followup 重建、tmux 注入边界。
 
 ## stopless 生命周期
-1. 当前 stopless 默认开启，默认注入三轮递进执行质询提示，默认次数 3；旧默认 `继续执行` 只作为 legacy exact-match 输入并在 Rust 中升级。
+1. 当前 stopless 默认开启，默认注入三轮递进执行检查/执行提示，默认次数 3；旧默认 `继续执行` 只作为 legacy exact-match 输入并在 Rust 中升级。
 2. `/goal active` 时收到 `finish_reason=stop`：不自动续轮。
-3. `/goal non-active` 时收到 `finish_reason=stop`：自动注入执行质询提示，要求判断目标是否完成；未完成必须调用工具，已完成必须给证据。
-4. 非 `/goal` 时收到 `finish_reason=stop`：自动注入执行质询提示，要求判断目标是否完成；未完成必须调用工具，已完成必须给证据。
+3. `/goal non-active` 时收到 `finish_reason=stop`：自动注入检查/执行提示，要求判断目标是否完成；未完成必须调用工具，已完成必须给证据。
+4. 非 `/goal` 时收到 `finish_reason=stop`：自动注入检查/执行提示，要求判断目标是否完成；未完成必须调用工具，已完成必须给证据。
 5. stopless 激活时校验当前 assistant stop schema：`stopreason` 数字 `0=finished/1=blocked/2=continue_needed`、`has_evidence` 数字 `0/1`；文本字段只判空。
 6. `stopreason=0|1` 且 `reason` 非空才允许 stop，并把 reason 加到 stop summary 开头；否则按缺失字段生成 followup。
 7. `stopreason!=0|1` 且 `next_step` 非空时不允许 stop，followup 要求执行下一步；缺 next_step 时要求继续目标或补完整 schema。

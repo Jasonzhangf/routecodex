@@ -11,9 +11,10 @@
 - `stopreason=0|1` 且 `reason` 非空：允许 stop，并把 reason 加到 stop summary 开头。
 - `stopreason=0|1` 但 `reason` 空：不允许 stop，followup 要求补 reason。
 - `stopreason!=0|1` 且 `next_step` 非空：不允许 stop，followup 要求执行 next_step。
-- 缺 schema / `stopreason` 缺失或非数字 / `next_step` 空：不允许 stop，followup 要求继续目标或按 schema 停止。
-- 预算耗尽时显式 fail-fast，不循环、不 fallback。
-- budget 是连续 `finish_reason=stop` 的预算：只要本链路出现非 stop 响应或工具调用/正常进展，必须 reset 连续 stop budget；不得把非连续 stop 计入同一轮预算。
+- 缺 schema：不允许 stop，followup 要求继续目标或按 schema 停止，但不计入预算。
+- `stopreason` 缺失或非数字 / `reason` 缺失 / `next_step` 空 / `next_step` 已给出但仍停止：属于“带 schema 的无效 stop”，计入预算。
+- 预算耗尽时返回最终 stop summary，不循环、不 fallback；最终 summary 必须保留三轮续杯询问、模型返回与最后原始 summary。
+- budget 是连续“带 schema 的无效 stop”预算：缺 schema 不计数；任何非 stop 响应或工具调用/正常进展必须 reset 连续 stop budget；不得把非连续 stop 计入同一轮预算。
 
 ## ASCII 生命周期图
 
@@ -68,16 +69,13 @@ activated
   |                                      ask: provide schema OR continue goal
   |                                                       |
   |                                                       v
-  |                                      [Budget used + 1]
+  |                                      [Budget unchanged]
   |                                                       |
-  |                         +-----------------------------+
-  |                         |
-  |                         v
-  |              budget left? ---- no ----> [Fail-fast explicit error]
-  |                  |
-  |                 yes
-  |                  |
-  |                  v
+  |                                      [ServertoolReq04FollowupBuilt]
+  |                                                   |
+  |                                                   v
+  |                                      [normal Hub Pipeline reenter]
+
   |      [ServertoolReq04FollowupBuilt]
   |                  |
   |                  v
@@ -97,7 +95,7 @@ activated
   |                                      0=finished, 1=blocked, 2=continue_needed
   |                                                       |
   |                                                       v
-  |                                      [Budget -> reenter or fail-fast]
+  |                                      [Budget +1 -> reenter or final summary]
   |
   v
 stopreason == 0 finished OR stopreason == 1 blocked

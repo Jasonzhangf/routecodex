@@ -180,8 +180,8 @@ describe("stop_message_flow reentry", () => {
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(0);
   });
 
-  test("non-goal stopless default uses reenter for three consecutive stop turns then stops", async () => {
-    const sessionId = "stopless-default-three-turns";
+  test("non-goal stopless default does not count missing schema stops", async () => {
+    const sessionId = "stopless-default-missing-schema";
     const stateKey = `session:${sessionId}`;
     const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
     const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
@@ -205,13 +205,42 @@ describe("stop_message_flow reentry", () => {
 
       expect(result.executed).toBe(true);
       expect(result.flowId).toBe("stop_message_flow");
-      expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(
-        index + 1,
-      );
+      expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(0);
+    }
+    expect(reenterPipeline).toHaveBeenCalledTimes(3);
+  });
+
+  test("non-goal stopless default counts invalid schema stops then returns final summary", async () => {
+    const sessionId = "stopless-default-invalid-schema-three-turns";
+    const stateKey = `session:${sessionId}`;
+    const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
+    const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
+    const invalidSchema = '{"stopreason":2,"reason":"未完成","has_evidence":0,"next_step":"继续测试"}';
+
+    for (let index = 0; index < 3; index += 1) {
+      const result = await runServerToolOrchestration({
+        chat: buildStopResponse(invalidSchema),
+        adapterContext: {
+          sessionId,
+          capturedChatRequest: {
+            model: "gpt-test",
+            messages: [{ role: "user", content: "start" }],
+          },
+        } as unknown as AdapterContext,
+        requestId: `req_stopless_invalid_schema_${index + 1}`,
+        entryEndpoint: "/v1/chat/completions",
+        providerProtocol: "openai-chat",
+        clientInjectDispatch,
+        reenterPipeline,
+      });
+
+      expect(result.executed).toBe(true);
+      expect(result.flowId).toBe("stop_message_flow");
+      expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(index + 1);
     }
 
     const exhausted = await runServerToolOrchestration({
-      chat: buildStopResponse("stop-4"),
+      chat: buildStopResponse(invalidSchema),
       adapterContext: {
         sessionId,
         stopMessageClientInjectSessionScope: `session:${sessionId}`,
@@ -227,7 +256,8 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expect(exhausted.executed).toBe(false);
+    expect(exhausted.executed).toBe(true);
+    expect(JSON.stringify(exhausted.chat)).toContain("Stopless 校验结果");
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).toHaveBeenCalledTimes(3);
   });

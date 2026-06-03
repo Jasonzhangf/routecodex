@@ -112,7 +112,7 @@ describe('resp_process stage3 servertool followup reentry', () => {
     expect(result.executed).toBe(false);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterCalls).toBe(0);
-    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.stopMessageUsed).toBe(1);
+    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.stopMessageUsed).toBeUndefined();
   });
 
   test('non-reasoning followup still bypasses orchestration', async () => {

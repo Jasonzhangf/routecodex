@@ -130,12 +130,65 @@ function applyStopSummaryPrefix(payload: JsonObject, prefix: unknown): JsonObjec
   return cloned;
 }
 
-function buildStopSchemaBudgetExhaustedSummary(reasonCode = 'stop_schema_budget_exhausted'): string {
-  return [
+function buildStopSchemaBudgetExhaustedSummary(args: {
+  reasonCode?: string;
+  capturedRequest?: JsonObject | null;
+  currentSummary?: string;
+} = {}): string {
+  const rounds = extractStoplessRounds(args.capturedRequest);
+  const lines = [
     'Stopless 校验结果：连续 stop 预算已耗尽。',
-    `校验状态：${reasonCode}`,
-    '处理结果：不再继续自动续杯，返回当前模型停止内容。'
-  ].join('\n');
+    `校验状态：${args.reasonCode ?? 'stop_schema_budget_exhausted'}`,
+    '处理结果：不再继续自动续杯；以下保留三次续杯询问、模型返回内容与最后原始 summary，请完整呈现当前问题、已做事项、未完成事项与阻塞点。'
+  ];
+  rounds.forEach((round, index) => {
+    lines.push(`\n第 ${index + 1} 次续杯询问：\n${round.question}`);
+    lines.push(`第 ${index + 1} 次模型返回：\n${round.answer || '(空)'}`);
+  });
+  const current = typeof args.currentSummary === 'string' ? args.currentSummary.trim() : '';
+  lines.push(`\n最后原始 summary：\n${current || '(空)'}`);
+  return lines.join('\n');
+}
+
+function extractStoplessRounds(capturedRequest: JsonObject | null | undefined): Array<{ question: string; answer: string }> {
+  const messages = capturedRequest && Array.isArray((capturedRequest as { messages?: unknown }).messages)
+    ? (capturedRequest as { messages: unknown[] }).messages
+    : [];
+  const rounds: Array<{ question: string; answer: string }> = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const row = messages[index] && typeof messages[index] === 'object' && !Array.isArray(messages[index])
+      ? messages[index] as Record<string, unknown>
+      : null;
+    if (row?.role !== 'user') continue;
+    const question = flattenMessageContent(row.content).trim();
+    if (!isStoplessFollowupQuestion(question)) continue;
+    let answer = '';
+    for (let next = index + 1; next < messages.length; next += 1) {
+      const nextRow = messages[next] && typeof messages[next] === 'object' && !Array.isArray(messages[next])
+        ? messages[next] as Record<string, unknown>
+        : null;
+      if (nextRow?.role === 'assistant') {
+        answer = flattenMessageContent(nextRow.content).trim();
+        break;
+      }
+      if (nextRow?.role === 'user') break;
+    }
+    rounds.push({ question, answer });
+  }
+  return rounds.slice(-3);
+}
+
+function flattenMessageContent(content: unknown): string {
+  const texts: string[] = [];
+  collectTextBlocks(content, texts);
+  return texts.join('\n');
+}
+
+function isStoplessFollowupQuestion(text: string): boolean {
+  return text.includes('Stop schema 校验未通过') ||
+    text.includes('继续完成当前用户目标') ||
+    text.includes('你刚才再次停止') ||
+    text.includes('最后一次续杯预算');
 }
 
 function buildStopSchemaFinalPlan(chatResponse: JsonObject): ServerToolHandlerPlan {
@@ -531,7 +584,11 @@ const handler: ServerToolHandler = async (
     if (decision.action !== 'trigger' && decision.skip_reason === 'skip_reached_max_repeats') {
       const prefixed = applyStopSummaryPrefix(
         ctx.base,
-        buildStopSchemaBudgetExhaustedSummary('stop_schema_budget_exhausted')
+        buildStopSchemaBudgetExhaustedSummary({
+          reasonCode: 'stop_schema_budget_exhausted',
+          capturedRequest: captured,
+          currentSummary: extractCurrentAssistantStopText(ctx.base)
+        })
       );
       clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
       compare.reason = 'stop_schema_budget_exhausted';
@@ -550,7 +607,11 @@ const handler: ServerToolHandler = async (
     if (schemaGate.action === 'fail_fast') {
       const prefixed = applyStopSummaryPrefix(
         ctx.base,
-        buildStopSchemaBudgetExhaustedSummary(schemaGate.reason_code)
+        buildStopSchemaBudgetExhaustedSummary({
+          reasonCode: schemaGate.reason_code,
+          capturedRequest: captured,
+          currentSummary: extractCurrentAssistantStopText(ctx.base)
+        })
       );
       clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
       return buildStopSchemaFinalPlan(prefixed);
@@ -582,10 +643,14 @@ const handler: ServerToolHandler = async (
     // ── Execute persist I/O (TS writes state files) ──
     const usedAt = Date.now();
     const stateUpdate = handlerResult.stateUpdate || {};
+    const shouldCountBudget = schemaGate.count_budget !== false;
+    const nextUsed = shouldCountBudget
+      ? (typeof stateUpdate.used === 'number' ? stateUpdate.used : decision.used + 1)
+      : decision.used;
     const snapInput = {
       text: String(stateUpdate.text ?? STOP_MESSAGE_EXECUTION_APPEND),
       maxRepeats: typeof stateUpdate.maxRepeats === 'number' ? stateUpdate.maxRepeats : decision.max_repeats,
-      used: typeof stateUpdate.used === 'number' ? stateUpdate.used : decision.used + 1,
+      used: nextUsed,
       source: typeof stateUpdate.source === 'string' ? stateUpdate.source : 'default',
       stageMode: typeof stateUpdate.stageMode === 'string' ? stateUpdate.stageMode as any : 'on' as any,
       aiMode: 'off' as any,
