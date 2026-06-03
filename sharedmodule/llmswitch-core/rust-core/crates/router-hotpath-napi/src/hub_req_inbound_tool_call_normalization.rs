@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::shared_tooling::value_to_string;
+use crate::shared_tooling::{strip_provider_tool_sentinel_residue, value_to_string};
 
 fn normalize_shell_like_output_text(raw: &str) -> String {
     raw.to_string()
@@ -328,6 +328,28 @@ fn read_workdir_from_args(args: &Map<String, Value>) -> Option<String> {
         .or_else(|| input.and_then(|row| read_trimmed_string(row.get("cwd"))))
 }
 
+fn strip_provider_tool_sentinel_from_value(value: &mut Value) {
+    match value {
+        Value::String(text) => {
+            let cleaned = strip_provider_tool_sentinel_residue(text.as_str());
+            if cleaned != *text {
+                *text = cleaned;
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                strip_provider_tool_sentinel_from_value(item);
+            }
+        }
+        Value::Object(row) => {
+            for item in row.values_mut() {
+                strip_provider_tool_sentinel_from_value(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn is_invalid_shell_like_call(name: &str, arguments: Option<&Value>) -> bool {
     if !is_shell_like_tool_name(name) {
         return false;
@@ -474,8 +496,16 @@ fn normalize_shell_like_function_call_arguments(
 
     let resolved_name = resolve_shell_like_tool_name(raw_name, requested_tool_names);
     let args = parse_json_record(raw_arguments)?;
-    let cmd = read_command_from_args(&args)?;
+    let cmd = strip_provider_tool_sentinel_residue(read_command_from_args(&args)?.as_str())
+        .trim()
+        .to_string();
+    if cmd.is_empty() {
+        return None;
+    }
     let mut next_args = args;
+    for item in next_args.values_mut() {
+        strip_provider_tool_sentinel_from_value(item);
+    }
     let source_is_shell_alias = matches!(
         resolved_name.trim().to_ascii_lowercase().as_str(),
         "shell_command" | "shell" | "bash" | "terminal"
@@ -841,6 +871,50 @@ mod tests {
         assert_eq!(args["cmd"], "npm test");
         assert!(args.get("command").is_none());
         assert_eq!(args["workdir"], "/workspace");
+    }
+
+    #[test]
+    fn strips_provider_tool_sentinel_from_shell_tool_arguments() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_marker_msg",
+                  "type": "function",
+                  "function": {
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"git status --short && echo ok]<]minimax[>[\"}"
+                  }
+                }
+              ]
+            }
+          ],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_marker_input",
+              "name": "exec_command",
+              "arguments": "{\"args\":{\"command\":\"git log --oneline -5]<]minimax[>[\"}}"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let message_args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("message arguments");
+        let input_args_text = payload["input"][0]["arguments"]
+            .as_str()
+            .expect("input arguments");
+        let message_args: Value = serde_json::from_str(message_args_text).expect("message args");
+        let input_args: Value = serde_json::from_str(input_args_text).expect("input args");
+        assert_eq!(message_args["cmd"], "git status --short && echo ok");
+        assert_eq!(input_args["cmd"], "git log --oneline -5");
+        let serialized = serde_json::to_string(&payload).expect("payload json");
+        assert!(!serialized.contains("]<]minimax[>["));
     }
 
     #[test]
