@@ -212,6 +212,26 @@ pub struct StopSchemaGateDecision {
     pub parsed: Option<StopSchemaParsed>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalActiveStopLoopInput {
+    pub captured_request: Value,
+    pub assistant_text: String,
+    pub threshold: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalActiveStopLoopDecision {
+    pub loop_detected: bool,
+    pub repeat_count: u32,
+    pub threshold: u32,
+    pub goal_context_count: u32,
+    pub reason_code: String,
+}
+
+const DEFAULT_GOAL_ACTIVE_STOP_LOOP_THRESHOLD: u32 = 3;
+
 // ── Core decision function ──────────────────────────────────────────────────
 
 /// Decide whether `stop_message_auto` should trigger a followup.
@@ -354,6 +374,176 @@ pub fn evaluate_stop_schema_gate(
     )
 }
 
+pub fn evaluate_goal_active_stop_loop(
+    input: &GoalActiveStopLoopInput,
+) -> GoalActiveStopLoopDecision {
+    let threshold = input
+        .threshold
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_GOAL_ACTIVE_STOP_LOOP_THRESHOLD);
+    let assistant_text = normalize_loop_text(&input.assistant_text);
+    if assistant_text.is_empty() {
+        return goal_active_loop_decision(false, 0, threshold, 0, "goal_active_stop_empty_text");
+    }
+
+    let Some(items) = request_items(&input.captured_request) else {
+        return goal_active_loop_decision(
+            false,
+            0,
+            threshold,
+            0,
+            "goal_active_stop_no_request_items",
+        );
+    };
+
+    let goal_context_count = items
+        .iter()
+        .filter(|item| {
+            item_role(item) == Some("user")
+                && item_text(item).is_some_and(|text| is_active_goal_text(&text))
+        })
+        .count() as u32;
+    if goal_context_count == 0 {
+        return goal_active_loop_decision(
+            false,
+            0,
+            threshold,
+            0,
+            "goal_active_stop_no_goal_context",
+        );
+    }
+
+    let mut repeat_count = 1u32;
+    for item in items.iter().rev() {
+        if item_has_tool_signal(item) {
+            break;
+        }
+        if item_role(item) != Some("assistant") {
+            continue;
+        }
+        let Some(text) = item_text(item).map(|text| normalize_loop_text(&text)) else {
+            continue;
+        };
+        if text.is_empty() {
+            continue;
+        }
+        if text == assistant_text {
+            repeat_count = repeat_count.saturating_add(1);
+            continue;
+        }
+        break;
+    }
+
+    goal_active_loop_decision(
+        repeat_count >= threshold,
+        repeat_count,
+        threshold,
+        goal_context_count,
+        if repeat_count >= threshold {
+            "goal_active_repeated_stop"
+        } else {
+            "goal_active_stop_not_repeated"
+        },
+    )
+}
+
+fn goal_active_loop_decision(
+    loop_detected: bool,
+    repeat_count: u32,
+    threshold: u32,
+    goal_context_count: u32,
+    reason_code: &str,
+) -> GoalActiveStopLoopDecision {
+    GoalActiveStopLoopDecision {
+        loop_detected,
+        repeat_count,
+        threshold,
+        goal_context_count,
+        reason_code: reason_code.to_string(),
+    }
+}
+
+fn request_items(value: &Value) -> Option<&Vec<Value>> {
+    value
+        .get("input")
+        .and_then(Value::as_array)
+        .or_else(|| value.get("messages").and_then(Value::as_array))
+}
+
+fn item_role(item: &Value) -> Option<&str> {
+    item.get("role").and_then(Value::as_str).map(str::trim)
+}
+
+fn item_text(item: &Value) -> Option<String> {
+    collect_value_text(item.get("content")?)
+}
+
+fn collect_value_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(items) => {
+            let parts: Vec<String> = items
+                .iter()
+                .filter_map(|item| match item {
+                    Value::String(text) => Some(text.clone()),
+                    Value::Object(obj) => obj
+                        .get("text")
+                        .or_else(|| obj.get("output_text"))
+                        .or_else(|| obj.get("content"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    _ => None,
+                })
+                .collect();
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join("\n"))
+            }
+        }
+        Value::Object(obj) => obj
+            .get("text")
+            .or_else(|| obj.get("output_text"))
+            .or_else(|| obj.get("content"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        _ => None,
+    }
+}
+
+fn item_has_tool_signal(item: &Value) -> bool {
+    item_role(item).is_some_and(|role| {
+        matches!(
+            role,
+            "tool" | "function" | "tool_result" | "function_call_output"
+        )
+    }) || item
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty())
+        || item.get("function_call").is_some()
+        || item.get("tool_call_id").is_some()
+        || item.get("call_id").is_some()
+        || item
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.contains("tool") || text.contains("function_call"))
+}
+
+fn is_active_goal_text(text: &str) -> bool {
+    text.contains("Continue working toward the active thread goal.")
+        || text.contains("<codex_internal_context source=\"goal\">")
+        || text.contains("<goal_context>")
+}
+
+fn normalize_loop_text(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
+
 fn schema_invalid_followup(
     reason_code: &str,
     used: u32,
@@ -413,9 +603,13 @@ fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
 }
 
 fn read_u8(value: Option<&Value>) -> Option<u8> {
-    value
-        .and_then(|v| v.as_u64())
-        .and_then(|v| if v <= u8::MAX as u64 { Some(v as u8) } else { None })
+    value.and_then(|v| v.as_u64()).and_then(|v| {
+        if v <= u8::MAX as u64 {
+            Some(v as u8)
+        } else {
+            None
+        }
+    })
 }
 
 fn read_string(value: Option<&Value>) -> Option<String> {
@@ -505,7 +699,11 @@ fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReas
     if ctx.goal_status.is_active() {
         return Some(SkipReason::GoalActive);
     }
-    if ctx.followup_flow_id.as_deref().map(str::trim).is_some_and(|flow_id| !flow_id.is_empty())
+    if ctx
+        .followup_flow_id
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|flow_id| !flow_id.is_empty())
         && !matches!(
             ctx.stop_message_followup_policy,
             Some(StopMessageFollowupPolicy::PreserveEligibility)
@@ -755,7 +953,10 @@ mod tests {
             stage_mode: StageMode::On,
         });
         let result = decide(&ctx);
-        assert_eq!(result.followup_text, Some("继续执行，不要中断总结".to_string()));
+        assert_eq!(
+            result.followup_text,
+            Some("继续执行，不要中断总结".to_string())
+        );
     }
 
     #[test]
@@ -1046,7 +1247,13 @@ mod tests {
         );
         assert_eq!(finished.action, StopSchemaGateAction::AllowStop);
         assert!(finished.summary_prefix.unwrap().contains("已完成并验证"));
-        assert_eq!(finished.parsed.as_ref().and_then(|row| row.learned.as_deref()), Some("缺 schema 不计预算"));
+        assert_eq!(
+            finished
+                .parsed
+                .as_ref()
+                .and_then(|row| row.learned.as_deref()),
+            Some("缺 schema 不计预算")
+        );
 
         let blocked = evaluate_stop_schema_gate(
             r#"{"stopreason":1,"reason":"缺少上游权限","has_evidence":1,"next_step":"等待授权"}"#,
@@ -1147,5 +1354,53 @@ mod tests {
         assert_eq!(valid.action, StopSchemaGateAction::AllowStop);
         assert_eq!(valid.reason_code, "stop_schema_finished");
         assert!(!valid.count_budget);
+    }
+
+    #[test]
+    fn detects_goal_active_repeated_stop_text() {
+        let input = GoalActiveStopLoopInput {
+            assistant_text: "立刻跑全测试 + 远端验证。".to_string(),
+            threshold: Some(3),
+            captured_request: serde_json::json!({
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [{
+                            "type": "input_text",
+                            "text": "<codex_internal_context source=\"goal\">\nContinue working toward the active thread goal.\n<objective>完成验证</objective>"
+                        }]
+                    },
+                    { "role": "assistant", "content": [{ "type": "output_text", "text": "立刻跑全测试 + 远端验证。" }] },
+                    { "role": "user", "content": [{ "type": "input_text", "text": "Continue working toward the active thread goal." }] },
+                    { "role": "assistant", "content": [{ "type": "output_text", "text": "立刻跑全测试 + 远端验证。" }] }
+                ]
+            }),
+        };
+
+        let decision = evaluate_goal_active_stop_loop(&input);
+
+        assert!(decision.loop_detected);
+        assert_eq!(decision.repeat_count, 3);
+        assert_eq!(decision.reason_code, "goal_active_repeated_stop");
+    }
+
+    #[test]
+    fn goal_active_loop_guard_resets_on_tool_signal() {
+        let input = GoalActiveStopLoopInput {
+            assistant_text: "立刻跑全测试 + 远端验证。".to_string(),
+            threshold: Some(3),
+            captured_request: serde_json::json!({
+                "input": [
+                    { "role": "user", "content": "Continue working toward the active thread goal." },
+                    { "role": "assistant", "tool_calls": [{ "id": "call_1" }], "content": "" },
+                    { "role": "assistant", "content": "立刻跑全测试 + 远端验证。" }
+                ]
+            }),
+        };
+
+        let decision = evaluate_goal_active_stop_loop(&input);
+
+        assert!(!decision.loop_detected);
+        assert_eq!(decision.repeat_count, 2);
     }
 }

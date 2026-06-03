@@ -2,7 +2,8 @@
 //! This module does NOT expose NAPI directly. The NAPI entry point is in `lib.rs`.
 
 use stop_message_core::{
-    decide, evaluate_stop_schema_gate, StopMessageDecision, StopMessageDecisionContext,
+    decide, evaluate_goal_active_stop_loop, evaluate_stop_schema_gate, GoalActiveStopLoopDecision,
+    GoalActiveStopLoopInput, StopMessageDecision, StopMessageDecisionContext,
     StopSchemaGateDecision,
 };
 
@@ -16,4 +17,10 @@ pub fn evaluate_stop_schema(
     max_repeats: u32,
 ) -> StopSchemaGateDecision {
     evaluate_stop_schema_gate(assistant_text, used, max_repeats)
+}
+
+pub fn evaluate_goal_active_stop_loop_guard(
+    input: &GoalActiveStopLoopInput,
+) -> GoalActiveStopLoopDecision {
+    evaluate_goal_active_stop_loop(input)
 }

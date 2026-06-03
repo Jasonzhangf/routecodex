@@ -79,6 +79,14 @@ export type StopSchemaGateDecision = {
   parsed?: Record<string, unknown>;
 };
 
+export type GoalActiveStopLoopDecision = {
+  loopDetected: boolean;
+  repeatCount: number;
+  threshold: number;
+  goalContextCount: number;
+  reasonCode: string;
+};
+
 export function runStopMessageAutoHandlerWithNative(input: {
   decision: StopMessageDecision;
   adapterContext: Record<string, unknown>;
@@ -143,6 +151,29 @@ export function evaluateStopSchemaGateWithNative(args: {
       return fail(`native_returned_non_string: ${typeof raw}`);
     }
     return JSON.parse(raw) as StopSchemaGateDecision;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function evaluateGoalActiveStopLoopGuardWithNative(args: {
+  capturedRequest: Record<string, unknown>;
+  assistantText: string;
+  threshold?: number;
+}): GoalActiveStopLoopDecision {
+  const capability = 'evaluateGoalActiveStopLoopGuardJson';
+  const fail = (reason?: string) => failNativeRequired<GoalActiveStopLoopDecision>(capability, reason);
+  try {
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+      return fail('native_unavailable');
+    }
+    const raw = fn(JSON.stringify(args));
+    if (typeof raw !== 'string') {
+      return fail(`native_returned_non_string: ${typeof raw}`);
+    }
+    return JSON.parse(raw) as GoalActiveStopLoopDecision;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

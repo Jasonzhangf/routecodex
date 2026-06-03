@@ -758,6 +758,49 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
+  test('goal active repeated stop fails fast instead of passthrough looping', async () => {
+    const assistantText = '立刻跑全测试 + 远端验证。';
+    await expect(
+      runServerToolOrchestration({
+        chat: {
+          id: 'chatcmpl-goal-loop-stop',
+          object: 'chat.completion',
+          model: 'gpt-test',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: assistantText },
+              finish_reason: 'stop'
+            }
+          ]
+        } as JsonObject,
+        adapterContext: {
+          requestId: 'req-goal-active-stop-loop',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          sessionId: 'stopmessage-spec-session-goal-loop',
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [
+              {
+                role: 'user',
+                content: '<codex_internal_context source="goal">\nContinue working toward the active thread goal.\n<objective>完成验证</objective>'
+              },
+              { role: 'assistant', content: assistantText },
+              { role: 'user', content: 'Continue working toward the active thread goal.' },
+              { role: 'assistant', content: assistantText }
+            ]
+          }
+        } as any,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-goal-active-stop-loop',
+        providerProtocol: 'openai-chat'
+      })
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_HANDLER_FAILED'
+    });
+  });
+
   test.skip('codex backend uses session workdir as spawn cwd', async () => {
     const previousAiBackend = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
     const previousAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;

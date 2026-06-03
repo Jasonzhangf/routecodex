@@ -37,6 +37,7 @@ import type {
   StopMessageDecision
 } from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
 import {
+  evaluateGoalActiveStopLoopGuardWithNative,
   evaluateStopSchemaGateWithNative,
   runStopMessageAutoHandlerWithNative
 } from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
@@ -72,6 +73,14 @@ async function decideStopMessageAction(
     '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js'
   );
   return nativeFn(ctx);
+}
+
+async function evaluateGoalActiveStopLoopGuard(args: {
+  capturedRequest: Record<string, unknown>;
+  assistantText: string;
+  threshold?: number;
+}) {
+  return evaluateGoalActiveStopLoopGuardWithNative(args);
 }
 
 const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTECODEX_STOPMESSAGE_DEBUG || '').trim() === '1';
@@ -553,6 +562,15 @@ const handler: ServerToolHandler = async (
     : { exhaustedDefault: false };
   const explicitMode = (normalizeStopMessageStageMode(undefined) ?? readRuntimeStopMessageStageMode(rt));
   const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
+  const captured = getCapturedRequest(ctx.adapterContext);
+  const assistantStopText = extractCurrentAssistantStopText(ctx.base);
+  const goalLoopContext = captured
+    ? await evaluateGoalActiveStopLoopGuard({
+        capturedRequest: captured as Record<string, unknown>,
+        assistantText: assistantStopText,
+        threshold: 3
+      })
+    : undefined;
 
   const stopMessageFollowupPolicy =
     rt.stopMessageFollowupPolicy === 'preserve_eligibility'
@@ -586,7 +604,9 @@ const handler: ServerToolHandler = async (
     } : undefined,
     persisted_default_exhausted: tombstone.exhaustedDefault,
     explicit_mode: explicitMode === 'on' ? 'on' as any : explicitMode === 'auto' ? 'auto' as any : undefined,
-    goal_status: !effectiveGoal || effectiveGoal.status === 'idle' ? 'idle' as any : effectiveGoal.status as any,
+    goal_status: goalLoopContext && goalLoopContext.goalContextCount > 0
+      ? 'active' as any
+      : (!effectiveGoal || effectiveGoal.status === 'idle' ? 'idle' as any : effectiveGoal.status as any),
     plan_mode_active: isPlanModeActiveFromCapturedRequest(ctx.adapterContext),
     default_enabled: resolveStopMessageDefaultEnabledLive(),
     default_max_repeats: resolveStopMessageDefaultMaxRepeatsLive(),
@@ -601,7 +621,6 @@ const handler: ServerToolHandler = async (
   const decision = await decideStopMessageAction(decisionCtx);
 
   // ── Build compare context ──
-  const captured = getCapturedRequest(ctx.adapterContext);
   const compare: StopMessageCompareContext = {
     armed: decision.action === 'trigger',
     mode: decision.action === 'trigger' ? 'on' : 'off',
@@ -634,6 +653,32 @@ const handler: ServerToolHandler = async (
       return buildStopSchemaFinalPlan(prefixed);
     }
     if (decision.action !== 'trigger') {
+      if (decision.skip_reason === 'skip_no_stopmessage_snapshot' || decision.skip_reason === 'skip_goal_active') {
+        const assistantText = assistantStopText;
+        if (assistantText && captured) {
+          const goalLoop = goalLoopContext ?? await evaluateGoalActiveStopLoopGuard({
+            capturedRequest: captured as Record<string, unknown>,
+            assistantText,
+            threshold: 3
+          });
+          if (goalLoop.loopDetected) {
+            compare.reason = goalLoop.reasonCode || 'goal_active_repeated_stop';
+            throw Object.assign(
+              new Error(
+                `[servertool] goal active stop loop detected: repeat=${goalLoop.repeatCount}/${goalLoop.threshold}; ` +
+                `assistant repeatedly stopped without tool progress: ${assistantText.slice(0, 160)}`
+              ),
+              {
+                code: 'GOAL_ACTIVE_STOP_LOOP_DETECTED',
+                status: 500,
+                repeatCount: goalLoop.repeatCount,
+                threshold: goalLoop.threshold,
+                goalContextCount: goalLoop.goalContextCount
+              }
+            );
+          }
+        }
+      }
       return null;
     }
 

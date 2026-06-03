@@ -10,6 +10,7 @@
 import { describe, test, expect } from '@jest/globals';
 import {
   decideStopMessageActionWithNative,
+  evaluateGoalActiveStopLoopGuardWithNative,
   evaluateStopSchemaGateWithNative,
   type StopMessageDecisionContext,
   type StopMessageDecision
@@ -205,5 +206,31 @@ describe('stop-message native decision (blackbox)', () => {
     expect(valid.action).toBe('allow_stop');
     expect(valid.reason_code).toBe('stop_schema_finished');
     expect(valid.count_budget).toBe(false);
+  });
+
+  test('goal active repeated text stop loop is detected without enabling stopless', () => {
+    const decision = evaluateGoalActiveStopLoopGuardWithNative({
+      threshold: 3,
+      assistantText: '立刻跑全测试 + 远端验证。',
+      capturedRequest: {
+        input: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: '<codex_internal_context source="goal">\nContinue working toward the active thread goal.\n<objective>完成测试验证</objective>'
+              }
+            ]
+          },
+          { role: 'assistant', content: [{ type: 'output_text', text: '立刻跑全测试 + 远端验证。' }] },
+          { role: 'assistant', content: [{ type: 'output_text', text: '立刻跑全测试 + 远端验证。' }] }
+        ]
+      }
+    });
+
+    expect(decision.loopDetected).toBe(true);
+    expect(decision.repeatCount).toBe(3);
+    expect(decision.reasonCode).toBe('goal_active_repeated_stop');
   });
 });

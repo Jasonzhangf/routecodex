@@ -1000,6 +1000,17 @@ pub fn evaluate_stop_schema_gate_json(
         .map_err(|e| napi::Error::from_reason(format!("serialize StopSchemaGateDecision: {e}")))
 }
 
+#[napi(js_name = "evaluateGoalActiveStopLoopGuardJson")]
+pub fn evaluate_goal_active_stop_loop_guard_json(input_json: String) -> NapiResult<String> {
+    let input: stop_message_core::GoalActiveStopLoopInput = serde_json::from_str(&input_json)
+        .map_err(|e| {
+            napi::Error::from_reason(format!("deserialize GoalActiveStopLoopInput: {e}"))
+        })?;
+    let decision = stop_message_auto_blocks::evaluate_goal_active_stop_loop_guard(&input);
+    serde_json::to_string(&decision)
+        .map_err(|e| napi::Error::from_reason(format!("serialize GoalActiveStopLoopDecision: {e}")))
+}
+
 #[napi]
 pub fn build_followup_request_id(base: String, suffix: Option<String>) -> String {
     followup_mainline_blocks::build_request_id(&base, suffix.as_deref())
