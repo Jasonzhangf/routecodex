@@ -97,6 +97,14 @@ fn coerce_assistant_tool_calls_to_responses_input(
 }
 
 fn coerce_chat_message_to_responses_input(message: &serde_json::Map<String, Value>) -> Vec<Value> {
+    if let Some(item_type) = message.get("type").and_then(|value| value.as_str()) {
+        if item_type == "message" || message.contains_key("role") {
+            return vec![Value::Object(message.clone())];
+        }
+        if !item_type.trim().is_empty() {
+            return vec![Value::Object(message.clone())];
+        }
+    }
     let role = read_trimmed_string(message.get("role"))
         .unwrap_or_default()
         .to_ascii_lowercase();
@@ -416,6 +424,28 @@ mod tests {
         let normalized =
             normalize_servertool_followup_payload_shape_value("/v1/responses", payload);
         assert_eq!(normalized["tool_choice"], "required");
+    }
+
+    #[test]
+    fn normalizes_responses_followup_preserves_responses_role_items() {
+        let payload = json!({
+            "model": "gpt-5.5",
+            "messages": [
+                {"role":"user", "content":[{"type":"input_text", "text":"hi"}]}
+            ]
+        });
+
+        let normalized =
+            normalize_servertool_followup_payload_shape_value("/v1/responses", payload);
+        assert!(normalized.get("messages").is_none());
+        let input = normalized
+            .get("input")
+            .and_then(|value| value.as_array())
+            .unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[0]["content"][0]["type"], "input_text");
+        assert_eq!(input[0]["content"][0]["text"], "hi");
     }
 
     #[test]

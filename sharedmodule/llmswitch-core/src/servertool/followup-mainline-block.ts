@@ -187,6 +187,9 @@ export async function runFollowupMainline(args: {
     followupPayloadRaw,
     buildSeedLoopPayload: () => buildStopMessageLoopPayload(args.adapterContext)
   });
+  if (!followupPayloadRaw && loopPayload && decision.seedLoopPayload) {
+    followupPayloadRaw = loopPayload;
+  }
   const loopState = loopPayload
     ? buildServerToolLoopState({
         adapterContext: args.adapterContext,
@@ -302,8 +305,23 @@ export async function runFollowupMainline(args: {
       }
     }).payload;
   }
-  if (followupInjectionPlan && executionMode === 'reenter' && !followupPayloadRaw) {
-    const seed = loadFollowupOriginSeed(args.adapterContext);
+  if (followupInjectionPlan && executionMode === 'reenter') {
+    const seed = followupPayloadRaw && decision.seedLoopPayload
+      ? {
+          ...(typeof (followupPayloadRaw as Record<string, unknown>).model === 'string'
+            ? { model: (followupPayloadRaw as Record<string, unknown>).model as string }
+            : {}),
+          messages: Array.isArray((followupPayloadRaw as Record<string, unknown>).messages)
+            ? ((followupPayloadRaw as Record<string, unknown>).messages as JsonObject[])
+            : [],
+          ...(Array.isArray((followupPayloadRaw as Record<string, unknown>).tools)
+            ? { tools: (followupPayloadRaw as Record<string, unknown>).tools as JsonObject[] }
+            : {}),
+          ...((followupPayloadRaw as Record<string, unknown>).parameters && typeof (followupPayloadRaw as Record<string, unknown>).parameters === 'object' && !Array.isArray((followupPayloadRaw as Record<string, unknown>).parameters)
+            ? { parameters: (followupPayloadRaw as Record<string, unknown>).parameters as Record<string, unknown> }
+            : {})
+        }
+      : loadFollowupOriginSeed(args.adapterContext);
     const injection = JSON.parse(JSON.stringify(followupInjectionPlan)) as Record<string, unknown>;
     if (seed && shouldInjectStopLoopWarning) {
       const ops = Array.isArray(injection.ops) ? (injection.ops as Array<Record<string, unknown>>) : [];

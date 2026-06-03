@@ -849,6 +849,71 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
+  test('raw responses request body is captured for default stopless', async () => {
+    const decisionContexts: StopMessageDecisionContext[] = [];
+    const reenterPipeline = jest.fn(async (input: any) => ({
+      body: {
+        id: `${input.requestId}:done`,
+        object: 'chat.completion',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'continued' }, finish_reason: 'stop' }]
+      }
+    }));
+    __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {
+      decisionContexts.push(ctx);
+      return testStopMessageDecision(ctx as any) as StopMessageDecision;
+    });
+    try {
+      const result = await runServerToolOrchestration({
+        chat: buildStopChatResponse('chatcmpl-stop-raw-responses-captured'),
+        adapterContext: {
+          requestId: 'req-stopmessage-raw-responses-captured',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          sessionId: undefined,
+          routecodexPortStopMessageEnabled: true,
+          stopMessageEnabled: true,
+          __raw_request_body: {
+            model: 'gpt-test',
+            input: [
+              { role: 'user', content: [{ type: 'input_text', text: 'hi' }] }
+            ]
+          },
+          responsesRequestContext: {
+            payload: {
+              model: 'gpt-test',
+              input: [
+                { role: 'user', content: [{ type: 'input_text', text: 'hi' }] }
+              ]
+            }
+          },
+          __rt: {
+            sessionDir: '/tmp/rcc-test-session-5555'
+          }
+        } as any,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-stopmessage-raw-responses-captured',
+        providerProtocol: 'openai-chat',
+        reenterPipeline
+      });
+
+      expect(decisionContexts[0]?.goal_status).toBe('idle');
+      expect(result.executed).toBe(true);
+      expect(result.flowId).toBe('stop_message_flow');
+      expect(reenterPipeline).toHaveBeenCalledTimes(1);
+      expect(reenterPipeline.mock.calls[0]?.[0]?.entryEndpoint).toBe('/v1/responses');
+      const followupBody = reenterPipeline.mock.calls[0]?.[0]?.body as any;
+      expect(followupBody.model).toBe('gpt-test');
+      expect(followupBody.messages).toBeUndefined();
+      expect(followupBody.input?.[0]).toMatchObject({ role: 'user', content: [{ type: 'input_text', text: 'hi' }] });
+      expect(followupBody.input?.[1]).toMatchObject({ role: 'assistant', content: [{ type: 'input_text', text: 'ok' }] });
+      const followupText = JSON.stringify(followupBody);
+      expect(followupText).toContain('Stop schema 校验未通过');
+      expect(followupText).toContain('目标是否逐项完成');
+    } finally {
+      __setDecideOverrideForTests(testStopMessageDecision as any);
+    }
+  });
+
   test('goal active repeated stop fails fast instead of passthrough looping', async () => {
     const assistantText = '立刻跑全测试 + 远端验证。';
     await expect(

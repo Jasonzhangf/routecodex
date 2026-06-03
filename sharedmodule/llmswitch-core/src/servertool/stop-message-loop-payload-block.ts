@@ -1,17 +1,10 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
+import { getCapturedRequest } from './handlers/stop-message-auto/runtime-utils.js';
 import { extractCapturedChatSeed } from './followup-seed.js';
 
 function resolveCapturedChatRequest(adapterContext: AdapterContext): JsonObject | null {
-  if (!adapterContext || typeof adapterContext !== 'object') {
-    return null;
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const direct = record.capturedChatRequest;
-  if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
-    return direct as JsonObject;
-  }
-  return null;
+  return getCapturedRequest(adapterContext);
 }
 
 export function buildStopMessageLoopPayload(adapterContext: AdapterContext): JsonObject | null {
