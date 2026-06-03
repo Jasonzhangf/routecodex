@@ -1,7 +1,7 @@
 import type { RouterMetadataInput } from '../../types.js';
 import type { RoutingInstructionState } from '../../routing-instructions.js';
 import { mergeStopMessageFromPersisted } from '../../stop-message-state-sync.js';
-import { reportProviderErrorToRouterPolicy } from '../../provider-runtime-ingress.js';
+import { report_internal_error_err_02_host_to_router_policy } from '../../provider-runtime-ingress.js';
 
 export type RoutingInstructionStateStoreLike = {
   loadSync: (key: string) => RoutingInstructionState | null;
@@ -18,11 +18,10 @@ function formatError(error: unknown): string {
 
 function emitRoutingStateRefreshError(key: string, error: unknown): void {
   const errorMessage = formatError(error);
-  reportProviderErrorToRouterPolicy({
+  report_internal_error_err_02_host_to_router_policy({
     code: 'ROUTING_STATE_REFRESH_FAILED',
     message: 'failed to refresh in-memory routing state from persisted routing store',
     stage: 'routing_state.refresh',
-    timestamp: Date.now(),
     runtime: {
       requestId: 'routing-state-store',
       providerProtocol: 'routing-state-store',

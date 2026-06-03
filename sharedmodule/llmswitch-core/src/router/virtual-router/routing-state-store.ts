@@ -5,7 +5,7 @@ import {
   serializeRoutingInstructionState,
   deserializeRoutingInstructionState
 } from './routing-instructions.js';
-import { reportProviderErrorToRouterPolicy } from './provider-runtime-ingress.js';
+import { report_internal_error_err_02_host_to_router_policy } from './provider-runtime-ingress.js';
 import {
   resolveRccPath
 } from '../../runtime/user-data-paths.js';
@@ -52,11 +52,10 @@ function emitRoutingStateStoreError(
   message: string,
   details: Record<string, unknown>
 ): void {
-  reportProviderErrorToRouterPolicy({
+  report_internal_error_err_02_host_to_router_policy({
     code,
     message,
     stage,
-    timestamp: Date.now(),
     runtime: {
       requestId: ROUTING_STATE_RUNTIME_REQUEST_ID,
       providerProtocol: 'routing-state-store',

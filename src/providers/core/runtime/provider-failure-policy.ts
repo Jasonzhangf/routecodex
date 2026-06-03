@@ -14,6 +14,7 @@ export {
   resolveProviderFailureExclusionDecision,
   isProviderFailureHealthNeutral,
   extractProviderFailureStatusCode,
+  classify_error_err_03_runtime_from_error_err_02_host,
 } from './provider-failure-policy-impl.js';
 
 export type ProviderFailureClassification =
@@ -92,3 +93,5 @@ export type ProviderFailureStage =
   | 'provider.http'
   | 'provider.runtime.init'
   | 'provider.responses';
+
+export type ErrorErr03RuntimeClassified = ProviderFailureOutcome;

@@ -17,6 +17,7 @@ import type {
   ProviderFailureExclusionDecision,
   ProviderFailureStage,
 } from './provider-failure-policy.js';
+import type { ErrorErr02HostCaptured } from '../utils/provider-error-reporter.js';
 import { loadNativeFailurePolicyBridge } from './provider-failure-policy-native.js';
 import {
   computeProviderFailureBackoffDelayMsBlock,
@@ -538,6 +539,36 @@ export function resolveProviderFailureOutcome(args: {
       classification
     })
   };
+}
+
+export function classify_error_err_03_runtime_from_error_err_02_host(
+  captured: ErrorErr02HostCaptured
+): ProviderFailureOutcome {
+  return resolveProviderFailureOutcome({
+    error: {
+      message: captured.message,
+      code: captured.code,
+      status: captured.status,
+      statusCode: captured.status,
+      upstreamCode: captured.details?.upstreamCode,
+      rateLimitKind: captured.details?.rateLimitKind,
+    },
+    stage: captured.stage,
+    statusCode: captured.status,
+    errorCode: captured.code,
+    upstreamCode: typeof captured.details?.upstreamCode === 'string' ? captured.details.upstreamCode : undefined,
+    reason: captured.message,
+    classification:
+      captured.errorClassification === 'recoverable'
+        || captured.errorClassification === 'unrecoverable'
+        || captured.errorClassification === 'special_400'
+        ? captured.errorClassification
+        : undefined,
+    rateLimitKind:
+      captured.quotaScope === 'daily' || captured.quotaReason === 'daily_limit'
+        ? 'daily_limit'
+        : undefined,
+  });
 }
 
 export function isBlockingRecoverableProviderFailure(args: {

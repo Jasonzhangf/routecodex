@@ -20,6 +20,9 @@ export interface HttpErrorPayload {
   };
 }
 
+export type ErrorErr05ExecutionDecision = unknown;
+export type ErrorErr06ClientProjected = HttpErrorPayload;
+
 type RawErrorDetails = {
   status?: number;
   requestId?: string;
@@ -217,6 +220,12 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     ...validationFields,
     ...detailField
   });
+}
+
+export function project_error_err_06_client_from_error_err_05_execution_decision(
+  decision: ErrorErr05ExecutionDecision
+): ErrorErr06ClientProjected {
+  return mapErrorToHttp(decision);
 }
 
 function extractStatus(err: RawErrorPayload): number | undefined {

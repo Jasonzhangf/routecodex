@@ -19,6 +19,18 @@ import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
+export type ErrorErr04RouterPolicyApplied = {
+  retryExecutionPlan: ProviderRetryExecutionPlan;
+};
+
+export type ErrorErr05ExecutionDecision = ProviderRetryExecutionPlan;
+
+export function consume_error_err_05_execution_decision_from_error_err_04_router_policy(
+  applied: ErrorErr04RouterPolicyApplied
+): ErrorErr05ExecutionDecision {
+  return applied.retryExecutionPlan;
+}
+
 function isTerminalQuotaRerouteCandidate(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;

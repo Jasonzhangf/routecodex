@@ -233,10 +233,11 @@ ServerReqInbound01ClientRaw
 
 ```text
 ErrorErr01SourceRaised
-  -> ErrorErr02CatalogNormalized
-  -> ErrorErr03PolicyClassified
-  -> ErrorErr04RetryOrFailPlanned
-  -> ErrorErr05ClientProjected
+  -> ErrorErr02HostCaptured
+  -> ErrorErr03RuntimeClassified
+  -> ErrorErr04RouterPolicyApplied
+  -> ErrorErr05ExecutionDecision
+  -> ErrorErr06ClientProjected
 ```
 
 ### 5.0 错误链连接矩阵
@@ -244,12 +245,13 @@ ErrorErr01SourceRaised
 | 节点 | 输入 | 输出 | 唯一职责 | 禁止连接 |
 |---|---|---|---|---|
 | `ErrorErr01SourceRaised` | throw/error result | source error fact | 记录发生点、stage、provider/runtime context | 直接 retry/fallback |
-| `ErrorErr02CatalogNormalized` | source error | normalized code/status/retryable | provider/local error catalog 归一 | message-only 分叉 |
-| `ErrorErr03PolicyClassified` | normalized error | classified failure | 策略分类、熔断/冷却语义 | provider payload patch |
-| `ErrorErr04RetryOrFailPlanned` | classified failure | retry/fail plan | 单一路径 retry/fail 计划 | direct 失败重入 reroute |
-| `ErrorErr05ClientProjected` | final failure | client error response | client-safe 错误投影 | secret/metadata/snapshot 泄漏 |
+| `ErrorErr02HostCaptured` | source error | provider error event carrier | Host 侧唯一组装 provider error event | 调用点手拼 event |
+| `ErrorErr03RuntimeClassified` | captured event | recoverable/unrecoverable/special_400 | runtime/catalog 唯一分类 | message-only 分叉 |
+| `ErrorErr04RouterPolicyApplied` | classified event | Router policy state/event | VR/Rust 唯一写 health/cooldown/reroute policy | direct/executor 自写 health |
+| `ErrorErr05ExecutionDecision` | router policy result | retry/reroute/fail execution decision | 执行层只消费 policy decision | 重新分类或本地 cooldown |
+| `ErrorErr06ClientProjected` | final failure | client error response | client-safe 错误投影 | secret/metadata/snapshot 泄漏 |
 
-错误链连接标准：错误可以引用 request/response 节点 id，但不能回写 req/resp 正常 payload；错误进入 client 前必须经过 `ErrorErr05ClientProjected`。
+错误链连接标准：错误可以引用 request/response 节点 id，但不能回写 req/resp 正常 payload；错误进入 client 前必须经过 `ErrorErr06ClientProjected`。
 
 ## 6. Metadata Carrier 拓扑
 

@@ -1,5 +1,20 @@
 import type { ProviderErrorEvent, ProviderSuccessEvent } from './types.js';
 
+export type InternalRouterPolicyErrorSource = {
+  code: string;
+  message: string;
+  stage: string;
+  runtime: ProviderErrorEvent['runtime'];
+  details?: Record<string, unknown>;
+  status?: number;
+  recoverable?: boolean;
+  affectsHealth?: boolean;
+  fatal?: boolean;
+  errorClassification?: string;
+};
+
+export type ErrorErr04RouterPolicyApplied = ProviderErrorEvent;
+
 type RuntimeRouterHooks = {
   handleProviderError?: (event: ProviderErrorEvent) => void;
   handleProviderSuccess?: (event: ProviderSuccessEvent) => void;
@@ -155,6 +170,28 @@ export function reportProviderErrorToRouterPolicy(event: ProviderErrorEvent): Pr
   dispatchToProviderQuotaHooks(normalized);
   dispatchToObserverHooks(normalized, 'error');
   return normalized;
+}
+
+export function report_internal_error_err_02_host_to_router_policy(source: InternalRouterPolicyErrorSource): ProviderErrorEvent {
+  return reportProviderErrorToRouterPolicy({
+    code: source.code,
+    message: source.message,
+    stage: source.stage,
+    status: source.status,
+    recoverable: source.recoverable,
+    affectsHealth: source.affectsHealth,
+    fatal: source.fatal,
+    errorClassification: source.errorClassification,
+    runtime: source.runtime,
+    timestamp: Date.now(),
+    details: source.details
+  });
+}
+
+export function apply_error_err_04_router_policy_from_error_err_03_runtime(
+  source: InternalRouterPolicyErrorSource
+): ErrorErr04RouterPolicyApplied {
+  return report_internal_error_err_02_host_to_router_policy(source);
 }
 
 export function reportProviderSuccessToRouterPolicy(event: ProviderSuccessEvent): ProviderSuccessEvent {

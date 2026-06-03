@@ -17,6 +17,7 @@
 14. **Hub Pipeline 流水线锁定原则**：靠“类型不可接 + 运行时必拦 + 导出不可见 + 红测必红”锁住 `req_inbound -> req_chatprocess -> req_outbound -> resp_inbound -> resp_chatprocess -> resp_outbound`，禁止靠约定维护阶段边界；`req_inbound` 是唯一标准化入口，`req_chatprocess` 禁止协议转换，`req_outbound` 是唯一 provider wire build。
 15. **metadata 请求/响应闭环隔离**：metadata 只能作为单个 request/response 闭环内的无状态内部控制语义 carrier；provider 出站 body、provider SDK options、client response body、provider/runtime 持久状态均不得携带内部 metadata。闭环结束必须释放，不得跨 requestId / pipelineId / port(serverId) / sessionId / conversationId 复用或污染。禁止 `body.metadata -> provider options`、`rawBody.metadata -> SDK request`、`payload.metadata.context -> provider wire payload`、snapshot metadata 进入正常 live path。
 16. **全局流水线类型拓扑锁**：请求链、响应链、错误链、metadata carrier、Virtual Router、Provider Runtime、Server Runtime 的关键数据结构必须按“模块 + 阶段 + 节点序号 + 节点语义”唯一命名并唯一拥有；Hub 主链阶段固定为 `ReqInbound` / `ReqChatProcess` / `ReqOutbound` / `RespInbound` / `RespChatProcess` / `RespOutbound`。只允许相邻节点 builder/parser 转换，禁止跨节点 shortcut、同义 DTO、重复 shape、散落 `From` 转换、裸 `unknown`/`Record`/`Value` 承载关键语义。拓扑、命名、插节点规则真源见 `docs/design/pipeline-type-topology-and-module-boundaries.md`。
+17. **错误链唯一入口锁**：provider/runtime/direct/executor 错误必须单向进入 `ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`；`router-direct` / `RequestExecutor` / provider runtime 只能作为 source/caller，不得本地实现 retry/reroute/cooldown/health policy，不得手拼 provider error event。
 
 ## Metadata 生命周期硬边界（醒目）
 1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。
@@ -71,6 +72,37 @@ Client HTTP
   |                                           v
   +----------------------------> [ServerRespOutbound05ClientFrame] ---> Client HTTP/SSE
 ```
+
+## 标准错误链契约图（醒目）
+
+```text
+provider/runtime/direct/executor throw
+  |
+  v
+[ErrorErr01SourceRaised]
+  |  owner: error source/caller; raw error + stage + runtime scope only
+  v
+[ErrorErr02HostCaptured]
+  |  owner: src/providers/core/utils/provider-error-reporter.ts
+  v
+[ErrorErr03RuntimeClassified]
+  |  owner: src/providers/core/runtime/provider-failure-policy-impl.ts
+  v
+[ErrorErr04RouterPolicyApplied]
+  |  owner: sharedmodule/llmswitch-core virtual_router_engine / provider-runtime-ingress
+  v
+[ErrorErr05ExecutionDecision]
+  |  owner: request/direct executor consumer; execute Router policy decision only
+  v
+[ErrorErr06ClientProjected]
+  |  owner: HTTP/server error projection only
+  v
+client-visible error
+```
+
+- direct provider 5xx/429/524 必须进入 `ErrorErr02HostCaptured -> ErrorErr04RouterPolicyApplied`；失败仍原样 fail-fast，不得 fallback 成成功。
+- `ErrorHandlingCenter` 只能属于 `ErrorErr06ClientProjected`，禁止进入 provider retry/reroute/cooldown policy。
+- metadata/debug/snapshot/error carrier 不得混入 provider normal request payload 或 client normal response body。
 
 - 图中每个 `[]` 都是唯一接口契约节点；只能相邻转换，禁止跨节点 shortcut。
 - metadata / error / snapshot 永远走图顶 side-channel carrier，不得混入 request/response normal payload。

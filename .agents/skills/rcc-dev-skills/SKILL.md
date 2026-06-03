@@ -52,6 +52,26 @@ ServerReqInbound01 -> HubReqInbound02 -> HubReqChatProcess03 -> VrRoute04
 3. 新增红测必须锁同一节点边界：非相邻 shortcut、metadata 泄漏、旧 stage shell、required export 扩展、owner-pair 扩展。
 4. 修改后跑对应节点定向测试，再跑 Phase residue/API contract 门禁。
 
+## 错误链定位法（direct / 5xx / cooldown）
+
+遇到 provider 502/503/524/429、死打同一 provider、cooldown 不生效、direct path 无 `[provider-switch]` 时，先按 `AGENTS.md` 的“标准错误链契约图”定位，禁止在现场调用点补第二套策略。
+
+```text
+ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
+  -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected
+```
+
+| 现象 / 证据 | 先查节点 | 唯一修改对象 | 禁止动作 |
+|---|---|---|---|
+| direct 502/524 没有 provider health/cooldown | `ErrorErr02HostCaptured` | `src/providers/core/utils/provider-error-reporter.ts` + `router-direct-pipeline.ts` hook | 在 direct 本地写 cooldown |
+| provider error event 字段不完整 | `ErrorErr02HostCaptured` | `capture_error_err_02_host_from_error_err_01_source` | 调用点手拼 `reportProviderErrorToRouterPolicy({ ... })` |
+| recoverable/unrecoverable 判错 | `ErrorErr03RuntimeClassified` | `provider-error-catalog.ts` / `provider-failure-policy-impl.ts` | message-only 特例分叉 |
+| health/cooldown/reroute 状态错误 | `ErrorErr04RouterPolicyApplied` | Rust `virtual_router_engine` / `provider-runtime-ingress.ts` | executor/provider runtime 直接写 health |
+| 请求内 retry/reroute 执行错误 | `ErrorErr05ExecutionDecision` | request/direct executor consumer | 重新分类 provider error |
+| client 错误输出格式问题 | `ErrorErr06ClientProjected` | HTTP/server error projection | 回写 provider policy 或修 payload |
+
+取证顺序：先读 `~/.rcc/diag/error-*.json` / `~/.rcc/codex-samples/**` 确认 runtime stack；如果 stack 是 `executeRouterDirectPipeline`，必须验证 direct 错误是否进入 `ErrorErr02HostCaptured`，不能只改 `RequestExecutor`。
+
 ## Metadata 请求/响应闭环隔离硬规则（2026-06-01，强制）
 
 - metadata 是无状态、短生命周期、单个 request/response 闭环内的内部控制语义 carrier；不是 provider request/response 的一部分。

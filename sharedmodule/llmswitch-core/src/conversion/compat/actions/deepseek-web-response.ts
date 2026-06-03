@@ -11,7 +11,8 @@ import {
   isNativeDisabledByEnv,
   makeNativeRequiredError
 } from '../../../router/virtual-router/engine-selection/native-router-hotpath-policy.js';
-import { reportProviderErrorToRouterPolicy } from '../../../router/virtual-router/provider-runtime-ingress.js';
+import { report_internal_error_err_02_host_to_router_policy } from '../../../router/virtual-router/provider-runtime-ingress.js';
+import type { ProviderErrorEvent } from '../../../router/virtual-router/types.js';
 
 type UnknownRecord = Record<string, unknown>;
 type DeepSeekToolProtocol = 'native' | 'text';
@@ -57,11 +58,13 @@ function buildRuntimeMetadata(
   adapterContext?: AdapterContext,
   payload?: JsonObject,
   details?: Record<string, unknown>
-): Record<string, unknown> {
+): ProviderErrorEvent['runtime'] {
   const contextRecord = adapterContext && typeof adapterContext === 'object'
     ? (adapterContext as Record<string, unknown>)
     : undefined;
-  const runtime: Record<string, unknown> = {};
+  const runtime: ProviderErrorEvent['runtime'] & Record<string, unknown> = {
+    requestId: 'deepseek-web-response-compat',
+  };
   const assignString = (key: string, value: unknown): void => {
     if (typeof value === 'string' && value.trim()) {
       runtime[key] = value.trim();
@@ -80,10 +83,6 @@ function buildRuntimeMetadata(
     assignString('target', (payload as Record<string, unknown>).model);
   }
 
-  if (details && Object.keys(details).length > 0) {
-    runtime.details = details;
-  }
-
   return runtime;
 }
 
@@ -93,7 +92,7 @@ function emitCompatError(
   payload?: JsonObject,
   details?: Record<string, unknown>
 ): never {
-  reportProviderErrorToRouterPolicy({
+  report_internal_error_err_02_host_to_router_policy({
     code: 'DEEPSEEK_WEB_COMPAT_ERROR',
     message: error.message,
     stage: 'compat:deepseek-web-response',
@@ -102,7 +101,7 @@ function emitCompatError(
       compatibilityProfile: PROFILE,
       ...(details ?? {})
     }
-  } as any);
+  });
   throw error;
 }
 
