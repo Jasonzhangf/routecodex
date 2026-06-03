@@ -5,6 +5,7 @@ import {
   backfillAdapterContextSessionIdentifiersFromOriginalRequest,
   syncStoplessGoalStateFromCapturedRequest
 } from './servertool-request-normalizer.js';
+import { backfillServertoolAdapterContextToolsNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -19,59 +20,6 @@ function readNonEmptyString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
-}
-
-function readToolName(tool: unknown): string {
-  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
-    return '';
-  }
-  const directName = readNonEmptyString((tool as { name?: unknown }).name);
-  if (directName) {
-    return directName.toLowerCase();
-  }
-  const fn = (tool as { function?: unknown }).function;
-  if (!fn || typeof fn !== 'object' || Array.isArray(fn)) {
-    return '';
-  }
-  return readNonEmptyString((fn as { name?: unknown }).name)?.toLowerCase() ?? '';
-}
-
-function shouldReplaceCapturedChatRequestTools(args: {
-  baseContext: Record<string, unknown>;
-  existingTools?: unknown[];
-  clientToolsRaw?: unknown[];
-  forceReplace?: boolean;
-}): boolean {
-  const existingTools = Array.isArray(args.existingTools) ? args.existingTools : undefined;
-  const clientToolsRaw = Array.isArray(args.clientToolsRaw) ? args.clientToolsRaw : undefined;
-  if (!clientToolsRaw?.length) {
-    return false;
-  }
-  if (!existingTools?.length) {
-    return true;
-  }
-  if (args.forceReplace) {
-    const existingNames = existingTools.map(readToolName).filter(Boolean);
-    const clientNames = new Set(clientToolsRaw.map(readToolName).filter(Boolean));
-    return existingNames.length < clientNames.size && existingNames.every((name) => clientNames.has(name));
-  }
-
-  const rt = asFlatRecord(args.baseContext.__rt);
-  const isServerToolFollowup =
-    rt?.serverToolFollowup === true
-    || args.baseContext.serverToolFollowup === true
-    || args.baseContext.isServerToolFollowup === true;
-  if (!isServerToolFollowup) {
-    return false;
-  }
-
-  const existingNames = existingTools.map(readToolName).filter(Boolean);
-  const clientNames = new Set(clientToolsRaw.map(readToolName).filter(Boolean));
-  if (!existingNames.length || !clientNames.size) {
-    return false;
-  }
-
-  return existingNames.length < clientNames.size && existingNames.every((name) => clientNames.has(name));
 }
 
 function hasRccFenceInRequestPayload(payload: unknown): boolean {
@@ -107,23 +55,18 @@ function backfillCapturedChatRequestToolsFromRequestSemantics(
     forceReplace?: boolean;
   }
 ): void {
-  const capturedChatRequest = asFlatRecord(baseContext.capturedChatRequest);
-  const semanticsRecord = asFlatRecord(requestSemantics);
-  const toolsRecord = asFlatRecord(semanticsRecord?.tools);
-  const clientToolsRaw = Array.isArray(toolsRecord?.clientToolsRaw) ? toolsRecord.clientToolsRaw : undefined;
-  if (!capturedChatRequest || !clientToolsRaw?.length) {
-    return;
-  }
-  const existingTools = Array.isArray(capturedChatRequest.tools) ? capturedChatRequest.tools : undefined;
-  if (!shouldReplaceCapturedChatRequestTools({
+  const result = backfillServertoolAdapterContextToolsNative(
     baseContext,
-    existingTools,
-    clientToolsRaw,
-    forceReplace: options?.forceReplace
-  })) {
+    asFlatRecord(requestSemantics),
+    options?.forceReplace === true
+  );
+  if (!result.changed) {
     return;
   }
-  capturedChatRequest.tools = clientToolsRaw;
+  for (const key of Object.keys(baseContext)) {
+    delete baseContext[key];
+  }
+  Object.assign(baseContext, result.context);
 }
 
 function preferOriginalRequestForStoplessGoalSync(

@@ -1557,4 +1557,17 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(findings).toEqual([]);
   });
+
+  it('servertool adapter context must not backfill captured tools with TS semantics', () => {
+    const filePath = path.join(process.cwd(), 'src/server/runtime/http-server/executor/servertool-adapter-context.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'ts-read-tool-name', pattern: /function\s+readToolName\s*\(/ },
+      { label: 'ts-replace-captured-tools', pattern: /capturedChatRequest\.tools\s*=/ },
+      { label: 'ts-client-tool-name-set', pattern: /new\s+Set\([^\n]*clientToolsRaw\.map\(readToolName\)/ },
+      { label: 'ts-existing-tool-name-map', pattern: /existingTools\.map\(readToolName\)/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
 });

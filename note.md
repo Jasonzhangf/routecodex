@@ -14536,3 +14536,8 @@ forwarder 引用的 provider profile（minimax/mini27/minimonth）加载失败 �
 - Root cause: servertool followup Responses shape normalization preserved `tool_choice` only inside semantics, while nested live body lost root `tool_choice`; MiniMax followup can reject requests without tool choice. Rust SSOT now projects current-turn `semantics.responses.requestParameters.tool_choice` back to followup root without rewriting history.
 - Boundary fix: native synthetic RouteCodex control-text scan now checks visible text fields only (`content/text/input_text/output_text/output`) and no longer recursively scans metadata/id/debug fields; prevents stop followup from being skipped by non-visible carriers.
 - Test evidence: Rust `normalizes_responses_followup` and `synthetic_routecodex_control_text`; Jest servertool stop/dispatch targeted; residue audit targeted; `npm run build:min` passed and bumped build to 0.90.2718.
+
+## 2026-06-03 servertool adapter context tool backfill rustification
+- Violation found: `src/server/runtime/http-server/executor/servertool-adapter-context.ts` read tool names and replaced `capturedChatRequest.tools` in TS. This is servertool tool semantics and violates Rust-only Hub/servertool boundary.
+- Fix: moved captured tool backfill decision to Rust NAPI `backfillServertoolAdapterContextToolsJson`; TS now calls `backfillServertoolAdapterContextToolsNative` and only applies native `changed/context` result.
+- Red/green evidence: residue audit `servertool adapter context must not backfill captured tools with TS semantics` red before fix, green after; adapter-context targeted Jest green; Rust `backfill_servertool_adapter_context_tools` green; `npm run build:min` green after rootDir import fix.
