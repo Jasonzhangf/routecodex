@@ -19,6 +19,7 @@ use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecuti
 /// Tool names treated as pure noop — acknowledged and auto-continued without handler execution.
 /// Outcome is a standard delta: tool_outputs entry + clientInjectOnly followup.
 const NOOP_SERVERTOOL_NAMES: [&str; 1] = ["continue_execution"];
+const DEFAULT_STOP_MESSAGE_EXECUTION_PROMPT: &str = "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。";
 
 fn is_visible_text_field(key: Option<&str>) -> bool {
     matches!(
@@ -2370,7 +2371,7 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .or_else(|| input.decision.get("followup_text").and_then(|v| v.as_str()))
         .map(str::trim)
         .filter(|text| !text.is_empty())
-        .unwrap_or("继续执行")
+        .unwrap_or(DEFAULT_STOP_MESSAGE_EXECUTION_PROMPT)
         .to_string();
     // 3. Extract runtime metadata and metadata for field lookups
     let runtime = extract_runtime(&input.adapter_context);
@@ -3002,6 +3003,39 @@ mod tests {
         assert!(metadata.get("targetProviderKey").is_none());
         assert!(metadata.get("__shadowCompareForcedProviderKey").is_none());
         assert!(metadata["target"].get("providerKey").is_none());
+    }
+
+    #[test]
+    fn test_stop_message_auto_default_followup_prompt_requires_goal_execution() {
+        let input = json!({
+            "base": {
+                "choices": [{"message": {"role": "assistant", "content": "阶段完成"}, "finish_reason": "stop"}]
+            },
+            "decision": {
+                "action": "trigger",
+                "used": 0,
+                "maxRepeats": 3
+            },
+            "adapterContext": {
+                "routeId": "tools",
+                "routecodexPortMode": "router"
+            },
+            "candidateKeys": [],
+            "stickyKey": null,
+            "strictSessionScope": null
+        });
+
+        let output: Value = serde_json::from_str(
+            &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
+        )
+        .expect("json output");
+        let text = output["followup"]["injection"]["ops"][1]["text"]
+            .as_str()
+            .expect("followup text");
+        assert!(text.contains("当前用户目标"));
+        assert!(text.contains("必须调用可用工具"));
+        assert!(text.contains("不要只总结"));
+        assert_ne!(text, "继续执行");
     }
 
     #[test]

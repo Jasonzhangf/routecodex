@@ -3227,6 +3227,54 @@ mod tests {
     }
 
     #[test]
+    fn normalize_chat_response_stop_reasoning_structured_tool_becomes_tool_calls() {
+        let response = json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "Need inspect. <tool_call>{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}</tool_call>"
+                }
+            }]
+        });
+        let raw = normalize_chat_response_reasoning_tools_json(
+            response.to_string(),
+            Some("reasoning_stop_test".to_string()),
+        )
+        .expect("normalized");
+        let normalized: Value = serde_json::from_str(&raw).expect("json");
+        let choice = &normalized["choices"][0];
+        assert_eq!(choice["finish_reason"], Value::String("tool_calls".to_string()));
+        let tool_calls = choice["message"]["tool_calls"].as_array().expect("tool_calls");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0]["function"]["name"], Value::String("exec_command".to_string()));
+    }
+
+    #[test]
+    fn normalize_chat_response_stop_reasoning_plain_text_stays_stop() {
+        let response = json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "Skip analysis. Run it."
+                }
+            }]
+        });
+        let raw = normalize_chat_response_reasoning_tools_json(
+            response.to_string(),
+            Some("reasoning_stop_plain".to_string()),
+        )
+        .expect("normalized");
+        let normalized: Value = serde_json::from_str(&raw).expect("json");
+        let choice = &normalized["choices"][0];
+        assert_eq!(choice["finish_reason"], Value::String("stop".to_string()));
+        assert!(choice["message"].get("tool_calls").is_none());
+    }
+
+    #[test]
     fn normalize_message_lifts_reasoning_to_content() {
         let mut message = json!({
             "role": "assistant",

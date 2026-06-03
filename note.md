@@ -14754,3 +14754,8 @@ forwarder 引用的 provider profile（minimax/mini27/minimonth）加载失败 �
 - Completion audit evidence: runtime help registry/NAPI/TS bridge exists; required native export gate includes all contract help functions; MetaRoute03 VR routing-control path is locked by Rust tests and red tests; observation `dataProcessed` is in `observation`, not control `metadata`; provider/client/direct metadata forbidden exits now fail fast including Gemini and Qwen web_search.
 - Verification passed this turn: red topology/meta/VR/provider-specific/residue suite (9 suites / 114 tests), focused provider/client/direct metadata suite (6 suites / 30 tests), Rust contract/MetaRoute03/observation targeted tests, esbuild syntax bundle for touched TS bridge/provider/client files, and `git diff --check`.
 - Known non-goal worktree note: `package.json`/`package-lock.json`/`src/build-info.ts` show version bump `0.90.2768 -> 0.90.2769`; not modified for this contract goal in this turn and not reverted.
+
+## 2026-06-03 stop followup execution seed + reasoning tool parse
+- Fix: default stop_message followup prompt changed from weak `继续执行` to goal-execution contract: continue current user goal; call tools when operation/check/verification remains; do not only summarize/apologize/restates/plan; final short result only when done.
+- Red tests: stop+structured reasoning tool markup becomes `finish_reason=tool_calls`; stop+plain reasoning text remains stop; stop_message auto default followup prompt contains goal/tool/no-summary contract.
+- Validation: Rust targeted tests passed; servertool Jest focused suite passed 48/48; `npm run build:min` passed and built 0.90.2770; global install + 5555 restart passed health ok/ready/pipelineReady version 0.90.2770.

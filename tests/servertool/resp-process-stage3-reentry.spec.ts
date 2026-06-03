@@ -82,7 +82,7 @@ describe('resp_process stage3 servertool followup reentry', () => {
     fs.mkdirSync(SESSION_DIR, { recursive: true });
   });
 
-  test('stop_message followup hop does not use client inject or reenter orchestration', async () => {
+  test('stop_message followup hop preserves bounded repeat budget without client inject recursion', async () => {
     const sessionId = 'stage3-reentry-guard';
     setStoplessMode(sessionId, 'on');
     const clientInjectDispatch = jest.fn(async () => ({ ok: true } as const));
@@ -112,7 +112,7 @@ describe('resp_process stage3 servertool followup reentry', () => {
     expect(result.executed).toBe(false);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterCalls).toBe(0);
-    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.stopMessageUsed).toBeUndefined();
+    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.stopMessageUsed).toBe(1);
   });
 
   test('non-reasoning followup still bypasses orchestration', async () => {

@@ -70,7 +70,7 @@ async function decideStopMessageAction(
 const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTECODEX_STOPMESSAGE_DEBUG || '').trim() === '1';
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
 const FLOW_ID = 'stop_message_flow';
-const STOP_MESSAGE_EXECUTION_APPEND = '继续执行';
+const STOP_MESSAGE_EXECUTION_APPEND = '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。';
 
 function shouldYieldToEmptyReplyContinueLocal(args: {
   base: unknown;
@@ -179,7 +179,7 @@ function resolveStopMessageDefaultTextLive(): string {
     return fromConfig.trim();
   }
   const raw = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_TEXT;
-  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : '继续执行';
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : STOP_MESSAGE_EXECUTION_APPEND;
 }
 
 function resolveStopMessageDefaultMaxRepeatsLive(): number {
