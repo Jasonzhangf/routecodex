@@ -44,6 +44,7 @@ const routingInstructionTests = [
   'tests/red-tests/server_response_projection_metadata_guard.test.ts',
   'tests/red-tests/server_error_projection_metadata_guard.test.ts',
   'tests/server/handlers/handler-utils.metadata-contract.spec.ts',
+  'tests/sharedmodule/server-module-help.live.spec.ts',
   'tests/server/runtime/http-server/provider-direct-pipeline.spec.ts',
   'tests/server/runtime/http-server/router-direct-pipeline.spec.ts',
   'tests/server/runtime/http-server/port-config-validator-sameprotocol.spec.ts',
