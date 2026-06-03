@@ -6,6 +6,7 @@ use crate::hub_tool_session_compat::{
 };
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tool_mapping::enforce_builtin_tool_schema;
+use crate::shared_tooling::strip_provider_tool_sentinel_residue;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
@@ -371,6 +372,31 @@ fn rewrite_responses_tool_history_entry_call_id(
     next
 }
 
+fn strip_provider_tool_sentinel_residue_from_value(value: Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(strip_provider_tool_sentinel_residue(text.as_str())),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(strip_provider_tool_sentinel_residue_from_value)
+                .collect(),
+        ),
+        Value::Object(row) => Value::Object(
+            row.into_iter()
+                .map(|(key, value)| (key, strip_provider_tool_sentinel_residue_from_value(value)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn strip_provider_tool_sentinel_residue_from_row(row: Map<String, Value>) -> Map<String, Value> {
+    match strip_provider_tool_sentinel_residue_from_value(Value::Object(row)) {
+        Value::Object(cleaned) => cleaned,
+        _ => Map::new(),
+    }
+}
+
 pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
     let mut mapped: Vec<Value> = Vec::new();
 
@@ -640,11 +666,15 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                     if let Some(value) = effective_call_id {
                         valid_call_ids.insert(value);
                     }
-                    normalized.push(Value::Object(rewrite_responses_tool_history_entry_call_id(
-                        index,
-                        row,
-                        &call_id_rewrites,
-                    )));
+                    normalized.push(Value::Object(
+                        strip_provider_tool_sentinel_residue_from_row(
+                            rewrite_responses_tool_history_entry_call_id(
+                                index,
+                                row,
+                                &call_id_rewrites,
+                            ),
+                        ),
+                    ));
                     continue;
                 }
 
@@ -675,11 +705,15 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                         continue;
                     }
                     seen_signatures.insert(payload_signature);
-                    normalized.push(Value::Object(rewritten_row));
+                    normalized.push(Value::Object(
+                        strip_provider_tool_sentinel_residue_from_row(rewritten_row),
+                    ));
                     continue;
                 }
 
-                normalized.push(entry.clone());
+                normalized.push(strip_provider_tool_sentinel_residue_from_value(
+                    entry.clone(),
+                ));
             }
 
             if !saw_function_calls && !allow_output_only_resume {
@@ -1485,6 +1519,41 @@ mod tests {
                 .cloned()
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn normalize_responses_input_items_strips_provider_tool_sentinel_residue_from_history() {
+        let raw_request = json!({
+          "input": [
+            {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {"type": "output_text", "text": "ready]<]minimax[>[\n\n• minimax:tool_call (minimax:tool_call)\n\n</minimax:tool_call>"}
+              ]
+            },
+            {
+              "type": "function_call",
+              "call_id": "call_1",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"pwd]<]minimax[>[\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_1",
+              "output": "ok]<]minimax[>["
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap()).unwrap();
+        let serialized = serde_json::to_string(&normalized).unwrap();
+        assert!(!serialized.contains("]<]minimax[>["));
+        assert!(!serialized.contains("minimax:tool_call"));
+        assert!(!serialized.contains("</minimax:tool_call>"));
+        assert_eq!(normalized[0]["content"][0]["text"], "ready");
+        assert_eq!(normalized[1]["arguments"], "{\"cmd\":\"pwd\"}");
+        assert_eq!(normalized[2]["output"], "ok");
     }
 
     #[test]

@@ -2,7 +2,10 @@ use napi::bindgen_prelude::Result as NapiResult;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use std::{collections::HashSet, sync::{LazyLock, OnceLock}};
+use std::{
+    collections::HashSet,
+    sync::{LazyLock, OnceLock},
+};
 
 fn parse_lenient_string(value: &str) -> Value {
     let s0 = value.trim();
@@ -432,7 +435,41 @@ pub(crate) fn normalize_ran_tree_or_chunked_tool_text(raw: &str) -> String {
 }
 
 pub(crate) fn normalize_tool_result_text(raw: &str) -> String {
-    replace_inline_data_images_with_placeholder(normalize_ran_tree_or_chunked_tool_text(raw).as_str())
+    let normalized = normalize_ran_tree_or_chunked_tool_text(raw);
+    let without_provider_sentinels = strip_provider_tool_sentinel_residue(normalized.as_str());
+    replace_inline_data_images_with_placeholder(
+        collapse_extra_newlines_and_trim(without_provider_sentinels.as_str()).as_str(),
+    )
+}
+
+pub(crate) fn strip_provider_tool_sentinel_residue(raw: &str) -> String {
+    static BRACKET_SENTINEL_RE: OnceLock<Regex> = OnceLock::new();
+    static EMPTY_TOOL_CALL_LINE_RE: OnceLock<Regex> = OnceLock::new();
+    static EMPTY_TOOL_CALL_TAG_RE: OnceLock<Regex> = OnceLock::new();
+
+    let bracket_sentinel_re = BRACKET_SENTINEL_RE.get_or_init(|| {
+        Regex::new(r"\]<\][A-Za-z][A-Za-z0-9_-]*\[>\[")
+            .expect("valid provider bracket sentinel regex")
+    });
+    let empty_tool_call_line_re = EMPTY_TOOL_CALL_LINE_RE.get_or_init(|| {
+        Regex::new(
+            r"(?im)^\s*(?:[-*•]\s*)?[A-Za-z][A-Za-z0-9_-]*:tool_call\s*\([^\n)]*:tool_call\)\s*$",
+        )
+        .expect("valid empty provider tool-call line regex")
+    });
+    let empty_tool_call_tag_re = EMPTY_TOOL_CALL_TAG_RE.get_or_init(|| {
+        Regex::new(r"(?im)^\s*</[A-Za-z][A-Za-z0-9_-]*:tool_call>\s*$")
+            .expect("valid empty provider tool-call tag regex")
+    });
+
+    let without_brackets = bracket_sentinel_re.replace_all(raw, "");
+    let without_lines = empty_tool_call_line_re.replace_all(without_brackets.as_ref(), "");
+    let without_tags = empty_tool_call_tag_re.replace_all(without_lines.as_ref(), "");
+    without_tags
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<&str>>()
+        .join("\n")
 }
 
 fn replace_inline_data_images_with_placeholder(raw: &str) -> String {
