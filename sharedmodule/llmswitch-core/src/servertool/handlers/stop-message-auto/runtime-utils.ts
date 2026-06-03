@@ -29,6 +29,36 @@ export function resolveStickyKey(
   return resolveServertoolStickyKeyWithNative(buildServertoolRoutingMetadata(record, runtimeMetadata)) || undefined;
 }
 
+export function resolveStateKey(
+  record: {
+    requestId?: unknown;
+    providerProtocol?: unknown;
+    continuation?: unknown;
+    responsesResume?: unknown;
+    sessionId?: unknown;
+    conversationId?: unknown;
+    metadata?: unknown;
+    [key: string]: unknown;
+  },
+  runtimeMetadata?: unknown
+): string {
+  const metadata = buildServertoolRoutingMetadata(record, runtimeMetadata);
+  const continuation = asRecord(metadata.continuation);
+  const continuationScope = toNonEmptyText(continuation?.continuationScope) || toNonEmptyText(continuation?.stickyScope);
+  if (continuationScope === 'request_chain') {
+    const resumeFrom = asRecord(continuation?.resumeFrom);
+    const chainId = toNonEmptyText(continuation?.chainId) || toNonEmptyText(resumeFrom?.requestId);
+    if (chainId) {
+      return chainId;
+    }
+  }
+  const stopScope = resolveStopMessageSessionScope(metadata, runtimeMetadata);
+  if (stopScope) {
+    return stopScope;
+  }
+  return toNonEmptyText(metadata.requestId) || 'default';
+}
+
 export function planStopMessagePersistedLookup(
   record: {
     tmuxSessionId?: unknown;

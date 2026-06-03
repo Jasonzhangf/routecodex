@@ -606,7 +606,11 @@ const handler: ServerToolHandler = async (
     explicit_mode: explicitMode === 'on' ? 'on' as any : explicitMode === 'auto' ? 'auto' as any : undefined,
     goal_status: goalLoopContext && goalLoopContext.goalContextCount > 0
       ? 'active' as any
-      : (!effectiveGoal || effectiveGoal.status === 'idle' ? 'idle' as any : effectiveGoal.status as any),
+      : (requestScopedGoal.explicit && effectiveGoal?.status === 'active'
+        ? 'active' as any
+        : (!effectiveGoal || effectiveGoal.status === 'idle' || effectiveGoal.status === 'active'
+          ? 'idle' as any
+          : effectiveGoal.status as any)),
     plan_mode_active: isPlanModeActiveFromCapturedRequest(ctx.adapterContext),
     default_enabled: resolveStopMessageDefaultEnabledLive(),
     default_max_repeats: resolveStopMessageDefaultMaxRepeatsLive(),

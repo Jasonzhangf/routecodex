@@ -3751,6 +3751,46 @@ fn test_govern_response_moves_minimax_sentinel_prefix_to_reasoning() {
 }
 
 #[test]
+fn test_govern_response_strips_minimax_sentinel_from_native_tool_arguments() {
+    let input = ToolGovernanceInput {
+        payload: json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"cd /repo && npx tsc --noEmit]<]minimax[>[\",\"workdir\":\"/repo/android]<]minimax[>[\",\"nested\":{\"note\":\"ok]<]minimax[>[\"}}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }),
+        client_protocol: "openai-responses".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_minimax_sentinel_tool_args".to_string(),
+    };
+
+    let result = govern_response(input).unwrap();
+    let serialized = serde_json::to_string(&result.governed_payload).unwrap();
+    assert!(!serialized.contains("]<]minimax[>["));
+    let message = &result.governed_payload["choices"][0]["message"];
+    let args: Value = serde_json::from_str(
+        message["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(args["cmd"], "cd /repo && npx tsc --noEmit");
+    assert_eq!(args["workdir"], "/repo/android");
+    assert_eq!(args["nested"]["note"], "ok");
+}
+
+#[test]
 fn test_govern_response_cleans_explicit_wrapper_when_tool_calls_are_unharvested() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({

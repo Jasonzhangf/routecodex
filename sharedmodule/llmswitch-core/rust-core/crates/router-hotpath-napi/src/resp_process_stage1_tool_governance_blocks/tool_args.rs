@@ -10,8 +10,34 @@ use crate::resp_process_stage1_tool_governance_blocks::exec_command_guard::{
 };
 use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
+use crate::shared_tooling::strip_provider_tool_sentinel_residue;
+
+fn strip_provider_sentinels_from_value(value: Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(strip_provider_tool_sentinel_residue(&text)),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(strip_provider_sentinels_from_value)
+                .collect(),
+        ),
+        Value::Object(obj) => Value::Object(
+            obj.into_iter()
+                .map(|(key, value)| (key, strip_provider_sentinels_from_value(value)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn strip_provider_sentinels_from_args(args: Map<String, Value>) -> Map<String, Value> {
+    args.into_iter()
+        .map(|(key, value)| (key, strip_provider_sentinels_from_value(value)))
+        .collect()
+}
+
 pub(crate) fn infer_tool_name_from_args(raw_args: Option<&Value>) -> Option<String> {
-    let args = parse_json_record(raw_args).unwrap_or_default();
+    let args = strip_provider_sentinels_from_args(parse_json_record(raw_args).unwrap_or_default());
     if args.is_empty() {
         return None;
     }
@@ -58,7 +84,7 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
         "shell_command" | "shell" | "bash" | "terminal" | "execute_command" | "execute-command"
     );
     let name = normalize_routecodex_tool_name(Some(tool_name))?;
-    let args = parse_json_record(raw_args).unwrap_or_default();
+    let args = strip_provider_sentinels_from_args(parse_json_record(raw_args).unwrap_or_default());
     if name == "exec_command" {
         let cmd = normalize_exec_command_text(read_command_from_args(&args)?.as_str());
         if let Some((reason, message)) = detect_dangerous_command(cmd.as_str()) {
@@ -290,7 +316,7 @@ pub(crate) fn normalize_tool_args_preserving_raw_shape(
         source_tool_name.as_str(),
         "shell_command" | "shell" | "bash" | "terminal" | "execute_command" | "execute-command"
     );
-    let args = parse_json_record(raw_args).unwrap_or_default();
+    let args = strip_provider_sentinels_from_args(parse_json_record(raw_args).unwrap_or_default());
     let cmd = read_command_from_args(&args)?;
     if let Some((reason, message)) = detect_dangerous_command(cmd.as_str()) {
         return build_dangerous_command_blocked_object(
