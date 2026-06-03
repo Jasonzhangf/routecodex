@@ -63,7 +63,6 @@ fn extract_responses_top_level_parameters(
 pub(crate) fn normalize_followup_parameters(value: &Value) -> Option<Value> {
     let mut row = value.as_object()?.clone();
     row.remove("stream");
-    row.remove("tool_choice");
     if row.is_empty() {
         None
     } else {
@@ -757,8 +756,12 @@ pub(crate) fn apply_followup_delta_plan(input: &Value) -> Option<Value> {
             payload.insert("tools".to_string(), Value::Array(tools.clone()));
         }
     }
-    if let Some(parameters) = seed.get("parameters").and_then(Value::as_object) {
-        payload.insert("parameters".to_string(), Value::Object(parameters.clone()));
+    if let Some(parameters) = seed
+        .get("parameters")
+        .and_then(normalize_followup_parameters)
+        .and_then(|value| value.as_object().cloned())
+    {
+        payload.insert("parameters".to_string(), Value::Object(parameters));
     }
     let ops = injection
         .get("ops")
@@ -880,7 +883,7 @@ mod tests {
         assert_eq!(chat_seed["messages"][0]["content"], "hello");
         assert_eq!(chat_seed["parameters"]["temperature"], 0.2);
         assert!(chat_seed["parameters"].get("stream").is_none());
-        assert!(chat_seed["parameters"].get("tool_choice").is_none());
+        assert_eq!(chat_seed["parameters"]["tool_choice"], "auto");
 
         let responses = json!({
             "model": "gpt-resp",
@@ -894,7 +897,26 @@ mod tests {
         assert_eq!(responses_seed["messages"][0]["content"], "explain this");
         assert_eq!(responses_seed["parameters"]["max_output_tokens"], 42);
         assert!(responses_seed["parameters"].get("stream").is_none());
-        assert!(responses_seed["parameters"].get("tool_choice").is_none());
+        assert_eq!(responses_seed["parameters"]["tool_choice"], "auto");
+    }
+
+    #[test]
+    fn apply_followup_delta_preserves_seed_tool_choice() {
+        let input = json!({
+            "adapterContext": {},
+            "finalChatResponse": {"choices": [{"message": {"role": "assistant", "content": "continue"}}]},
+            "seed": {
+                "model": "gpt-test",
+                "messages": [{"role": "user", "content": "continue"}],
+                "tools": [{"type": "function", "function": {"name": "apply_patch", "parameters": {"type": "object"}}}],
+                "parameters": {"stream": true, "tool_choice": {"type": "auto"}, "temperature": 0.2}
+            },
+            "injection": {"ops": [{"op": "preserve_tools"}]}
+        });
+
+        let payload = apply_followup_delta_plan(&input).expect("payload");
+        assert_eq!(payload["parameters"]["tool_choice"], json!({"type": "auto"}));
+        assert!(payload["parameters"].get("stream").is_none());
     }
 
     #[test]
