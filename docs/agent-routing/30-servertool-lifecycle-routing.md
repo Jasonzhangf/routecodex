@@ -15,7 +15,11 @@
 2. `/goal active` 时收到 `finish_reason=stop`：不自动续轮。
 3. `/goal non-active` 时收到 `finish_reason=stop`：自动注入执行质询提示，要求判断目标是否完成；未完成必须调用工具，已完成必须给证据。
 4. 非 `/goal` 时收到 `finish_reason=stop`：自动注入执行质询提示，要求判断目标是否完成；未完成必须调用工具，已完成必须给证据。
-5. 注入失败必须清理状态，防止循环。
+5. stopless 激活时校验当前 assistant stop schema：`stopreason` 数字 `0=finished/1=blocked/2=continue_needed`、`has_evidence` 数字 `0/1`；文本字段只判空。
+6. `stopreason=0|1` 且 `reason` 非空才允许 stop，并把 reason 加到 stop summary 开头；否则按缺失字段生成 followup。
+7. `stopreason!=0|1` 且 `next_step` 非空时不允许 stop，followup 要求执行下一步；缺 next_step 时要求继续目标或补完整 schema。
+8. budget 只统计连续 stop；非 stop 响应、工具调用或正常进展必须 reset budget。预算耗尽显式 fail-fast，不循环。
+9. 注入失败必须清理状态，防止循环。
 
 ## followup 边界
 1. followup 只能基于 origin snapshot 重建。

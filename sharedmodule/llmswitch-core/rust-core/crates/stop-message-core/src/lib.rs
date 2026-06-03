@@ -4,6 +4,7 @@
 //! The TS shell collects context, calls `decide()`, and acts on the result.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 const LEGACY_DEFAULT_TEXT: &str = "继续执行";
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
@@ -183,6 +184,32 @@ pub enum Action {
     Trigger,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StopSchemaParsed {
+    pub stopreason: Option<u8>,
+    pub has_evidence: Option<u8>,
+    pub reason: Option<String>,
+    pub next_step: Option<String>,
+    pub evidence: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum StopSchemaGateAction {
+    AllowStop,
+    Followup,
+    FailFast,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StopSchemaGateDecision {
+    pub action: StopSchemaGateAction,
+    pub reason_code: String,
+    pub summary_prefix: Option<String>,
+    pub followup_text: Option<String>,
+    pub parsed: Option<StopSchemaParsed>,
+}
+
 // ── Core decision function ──────────────────────────────────────────────────
 
 /// Decide whether `stop_message_auto` should trigger a followup.
@@ -244,6 +271,199 @@ fn normalize_followup_text(text: String, used: u32) -> String {
     } else {
         text
     }
+}
+
+pub fn evaluate_stop_schema_gate(
+    assistant_text: &str,
+    used: u32,
+    max_repeats: u32,
+) -> StopSchemaGateDecision {
+    if max_repeats > 0 && used >= max_repeats {
+        return StopSchemaGateDecision {
+            action: StopSchemaGateAction::FailFast,
+            reason_code: "stop_schema_budget_exhausted".to_string(),
+            summary_prefix: None,
+            followup_text: None,
+            parsed: parse_stop_schema(assistant_text),
+        };
+    }
+
+    let parsed = match parse_stop_schema(assistant_text) {
+        Some(parsed) => parsed,
+        None => {
+            return schema_followup(
+                "stop_schema_missing",
+                used,
+                "你停止了，但没有提供 stop schema。请继续当前用户目标；如果确实要停止，必须提供字段：stopreason(数字：0=finished,1=blocked,2=continue_needed)、reason、has_evidence(数字：0/1)、next_step。",
+                None,
+            );
+        }
+    };
+
+    let stopreason = match parsed.stopreason {
+        Some(v) => v,
+        None => {
+            return schema_followup(
+                "stop_schema_stopreason_missing_or_non_numeric",
+                used,
+                "stop schema 缺少数字 stopreason。请补充 stopreason(数字：0=finished,1=blocked,2=continue_needed)；如果目标未完成，必须继续执行下一步。",
+                Some(parsed),
+            );
+        }
+    };
+
+    if stopreason == 0 || stopreason == 1 {
+        let reason = parsed.reason.as_deref().map(str::trim).unwrap_or("");
+        if reason.is_empty() {
+            return schema_followup(
+                "stop_schema_reason_missing",
+                used,
+                "stopreason 表示 finished/blocked，但 reason 为空。请补充停止原因；如果其实未完成或未阻塞，必须继续调用工具执行。",
+                Some(parsed),
+            );
+        }
+        return StopSchemaGateDecision {
+            action: StopSchemaGateAction::AllowStop,
+            reason_code: if stopreason == 0 {
+                "stop_schema_finished".to_string()
+            } else {
+                "stop_schema_blocked".to_string()
+            },
+            summary_prefix: Some(format!("停止原因：{}\n\n", reason)),
+            followup_text: None,
+            parsed: Some(parsed),
+        };
+    }
+
+    let next_step = parsed.next_step.as_deref().map(str::trim).unwrap_or("");
+    if !next_step.is_empty() {
+        return schema_followup(
+            "stop_schema_continue_next_step",
+            used,
+            &format!(
+                "stopreason 不是 finished/blocked，且 next_step 已给出。不要停止，立即继续执行下一步：{}",
+                next_step
+            ),
+            Some(parsed),
+        );
+    }
+
+    schema_followup(
+        "stop_schema_next_step_missing",
+        used,
+        "stopreason 不是 finished/blocked，但 next_step 为空。请继续当前用户目标；如果要停止，必须提供 stopreason、reason、has_evidence、next_step，并给出完成/阻塞证据。",
+        Some(parsed),
+    )
+}
+
+fn schema_followup(
+    reason_code: &str,
+    used: u32,
+    message: &str,
+    parsed: Option<StopSchemaParsed>,
+) -> StopSchemaGateDecision {
+    let mut text = default_execution_prompt(used);
+    text.push_str("\n\nStop schema 校验未通过：");
+    text.push_str(message);
+    StopSchemaGateDecision {
+        action: StopSchemaGateAction::Followup,
+        reason_code: reason_code.to_string(),
+        summary_prefix: None,
+        followup_text: Some(text),
+        parsed,
+    }
+}
+
+fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
+    let value = parse_first_json_object(text)?;
+    let row = value.as_object()?;
+    Some(StopSchemaParsed {
+        stopreason: read_u8(row.get("stopreason")),
+        has_evidence: read_u8(row.get("has_evidence")),
+        reason: read_string(row.get("reason")),
+        next_step: read_string(row.get("next_step")),
+        evidence: read_string(row.get("evidence")),
+    })
+}
+
+fn read_u8(value: Option<&Value>) -> Option<u8> {
+    value
+        .and_then(|v| v.as_u64())
+        .and_then(|v| if v <= u8::MAX as u64 { Some(v as u8) } else { None })
+}
+
+fn read_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+}
+
+fn parse_first_json_object(text: &str) -> Option<Value> {
+    if let Some(value) = parse_fenced_json_object(text) {
+        return Some(value);
+    }
+    let bytes = text.as_bytes();
+    for start in 0..bytes.len() {
+        if bytes[start] != b'{' {
+            continue;
+        }
+        let mut depth = 0i32;
+        let mut in_string = false;
+        let mut escaped = false;
+        for end in start..bytes.len() {
+            let ch = bytes[end];
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if ch == b'\\' {
+                    escaped = true;
+                } else if ch == b'"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            if ch == b'"' {
+                in_string = true;
+            } else if ch == b'{' {
+                depth += 1;
+            } else if ch == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    let candidate = &text[start..=end];
+                    if let Ok(value) = serde_json::from_str::<Value>(candidate) {
+                        if value.is_object() {
+                            return Some(value);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    None
+}
+
+fn parse_fenced_json_object(text: &str) -> Option<Value> {
+    let marker = "```";
+    let mut rest = text;
+    while let Some(start) = rest.find(marker) {
+        let after = &rest[start + marker.len()..];
+        let after = after.strip_prefix("json").unwrap_or(after);
+        let after = after.strip_prefix('\n').unwrap_or(after);
+        let Some(end) = after.find(marker) else {
+            return None;
+        };
+        let candidate = &after[..end];
+        if let Ok(value) = serde_json::from_str::<Value>(candidate.trim()) {
+            if value.is_object() {
+                return Some(value);
+            }
+        }
+        rest = &after[end + marker.len()..];
+    }
+    None
 }
 
 fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReason> {
@@ -777,5 +997,86 @@ mod tests {
         assert_eq!(result.followup_text.unwrap(), "runtime");
         assert_eq!(result.max_repeats, 3);
         assert_eq!(result.used, 1);
+    }
+
+    #[test]
+    fn stop_schema_finished_or_blocked_with_reason_allows_stop() {
+        let finished = evaluate_stop_schema_gate(
+            r#"Done {"stopreason":0,"reason":"已完成并验证","has_evidence":1,"next_step":""}"#,
+            0,
+            3,
+        );
+        assert_eq!(finished.action, StopSchemaGateAction::AllowStop);
+        assert!(finished.summary_prefix.unwrap().contains("已完成并验证"));
+
+        let blocked = evaluate_stop_schema_gate(
+            r#"{"stopreason":1,"reason":"缺少上游权限","has_evidence":1,"next_step":"等待授权"}"#,
+            0,
+            3,
+        );
+        assert_eq!(blocked.action, StopSchemaGateAction::AllowStop);
+        assert!(blocked.summary_prefix.unwrap().contains("缺少上游权限"));
+    }
+
+    #[test]
+    fn stop_schema_finished_or_blocked_without_reason_follows_up() {
+        let decision = evaluate_stop_schema_gate(
+            r#"{"stopreason":0,"reason":"","has_evidence":1,"next_step":""}"#,
+            0,
+            3,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(decision.reason_code, "stop_schema_reason_missing");
+        assert!(decision.followup_text.unwrap().contains("reason 为空"));
+    }
+
+    #[test]
+    fn stop_schema_continue_needed_with_next_step_follows_up_to_execute_next_step() {
+        let decision = evaluate_stop_schema_gate(
+            r#"```json
+{"stopreason":2,"reason":"还没完成","has_evidence":0,"next_step":"运行 targeted tests"}
+```"#,
+            1,
+            3,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(decision.reason_code, "stop_schema_continue_next_step");
+        let text = decision.followup_text.unwrap();
+        assert!(text.contains("运行 targeted tests"));
+        assert!(text.contains("再次停止"));
+    }
+
+    #[test]
+    fn stop_schema_missing_invalid_or_no_next_step_follows_up() {
+        let missing = evaluate_stop_schema_gate("普通停止文本", 0, 3);
+        assert_eq!(missing.action, StopSchemaGateAction::Followup);
+        assert_eq!(missing.reason_code, "stop_schema_missing");
+
+        let invalid = evaluate_stop_schema_gate(
+            r#"{"stopreason":"finished","reason":"done","has_evidence":1,"next_step":""}"#,
+            0,
+            3,
+        );
+        assert_eq!(invalid.action, StopSchemaGateAction::Followup);
+        assert_eq!(
+            invalid.reason_code,
+            "stop_schema_stopreason_missing_or_non_numeric"
+        );
+
+        let no_next = evaluate_stop_schema_gate(
+            r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":""}"#,
+            0,
+            3,
+        );
+        assert_eq!(no_next.action, StopSchemaGateAction::Followup);
+        assert_eq!(no_next.reason_code, "stop_schema_next_step_missing");
+    }
+
+    #[test]
+    fn stop_schema_budget_exhausted_fail_fast() {
+        let decision = evaluate_stop_schema_gate("普通停止文本", 3, 3);
+        assert_eq!(decision.action, StopSchemaGateAction::FailFast);
+        assert_eq!(decision.reason_code, "stop_schema_budget_exhausted");
+        assert!(decision.followup_text.is_none());
     }
 }

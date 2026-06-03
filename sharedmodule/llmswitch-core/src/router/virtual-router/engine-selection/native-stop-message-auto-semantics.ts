@@ -70,6 +70,14 @@ type StopMessageHandlerResult = {
   stateUpdate: Record<string, unknown> | null;
 };
 
+export type StopSchemaGateDecision = {
+  action: 'allow_stop' | 'followup' | 'fail_fast';
+  reason_code: string;
+  summary_prefix?: string;
+  followup_text?: string;
+  parsed?: Record<string, unknown>;
+};
+
 export function runStopMessageAutoHandlerWithNative(input: {
   decision: StopMessageDecision;
   adapterContext: Record<string, unknown>;
@@ -114,5 +122,28 @@ export function decideStopMessageActionWithNative(ctx: StopMessageDecisionContex
     return JSON.parse(resultJson) as StopMessageDecision;
   } catch {
     return fallbackSkip('native_parse_failed');
+  }
+}
+
+export function evaluateStopSchemaGateWithNative(args: {
+  assistantText: string;
+  used: number;
+  maxRepeats: number;
+}): StopSchemaGateDecision {
+  const capability = 'evaluateStopSchemaGateJson';
+  const fail = (reason?: string) => failNativeRequired<StopSchemaGateDecision>(capability, reason);
+  try {
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+      return fail('native_unavailable');
+    }
+    const raw = fn(args.assistantText, args.used, args.maxRepeats);
+    if (typeof raw !== 'string') {
+      return fail(`native_returned_non_string: ${typeof raw}`);
+    }
+    return JSON.parse(raw) as StopSchemaGateDecision;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
   }
 }

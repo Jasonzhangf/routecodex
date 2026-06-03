@@ -1826,3 +1826,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-06-03 servertool followup 单次复入精华
 - `servertool` followup 禁止同一 `followupRequestId` provider 重试；空 followup 响应只能 fail-fast + 落 empty sample，不能 `retryEmptyFollowupOnce` 二次复入，否则会消耗 provider 次数并造成重复 VR hit。
+
+### Stopless schema gate 精华（2026-06-03）
+- stopless schema gate 只在 `finish_reason=stop` 且非 `/goal active`、非 plan mode 时激活；只解析当前 assistant stop 文本，不扫历史、不改历史、不改工具列表。
+- stop schema 只校验数字字段 `stopreason` / `has_evidence`；`reason` / `next_step` / `evidence` 只判空。`stopreason=0|1` 且 reason 非空才允许 stop 并 prefix summary；否则按缺失/错误生成 followup。budget 只统计连续 stop，非 stop/工具进展必须 reset。

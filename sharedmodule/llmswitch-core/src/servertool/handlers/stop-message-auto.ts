@@ -36,7 +36,10 @@ import type {
   StopMessageDecisionContext,
   StopMessageDecision
 } from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
-import { runStopMessageAutoHandlerWithNative } from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
+import {
+  evaluateStopSchemaGateWithNative,
+  runStopMessageAutoHandlerWithNative
+} from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
 import {
   applyStopMessageSnapshotToState,
   clearStopMessageState,
@@ -71,6 +74,114 @@ const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTE
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
 const FLOW_ID = 'stop_message_flow';
 const STOP_MESSAGE_EXECUTION_APPEND = '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。';
+
+function extractCurrentAssistantStopText(payload: unknown): string {
+  const row = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : null;
+  if (!row) return '';
+  const choices = Array.isArray(row.choices) ? row.choices : [];
+  const texts: string[] = [];
+  for (const choice of choices) {
+    const choiceRow = choice && typeof choice === 'object' && !Array.isArray(choice) ? choice as Record<string, unknown> : null;
+    const message = choiceRow?.message && typeof choiceRow.message === 'object' && !Array.isArray(choiceRow.message)
+      ? choiceRow.message as Record<string, unknown>
+      : null;
+    collectTextBlocks(message?.content, texts);
+  }
+  const output = Array.isArray(row.output) ? row.output : [];
+  for (const item of output) {
+    const itemRow = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : null;
+    collectTextBlocks(itemRow?.content, texts);
+  }
+  return texts.join('\n').trim();
+}
+
+function collectTextBlocks(value: unknown, out: string[]): void {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (text) out.push(text);
+    return;
+  }
+  if (!Array.isArray(value)) return;
+  for (const part of value) {
+    if (typeof part === 'string') {
+      const text = part.trim();
+      if (text) out.push(text);
+      continue;
+    }
+    const partRow = part && typeof part === 'object' && !Array.isArray(part) ? part as Record<string, unknown> : null;
+    const text = typeof partRow?.text === 'string'
+      ? partRow.text
+      : typeof partRow?.output_text === 'string'
+        ? partRow.output_text
+        : typeof partRow?.content === 'string'
+          ? partRow.content
+          : '';
+    const trimmed = text.trim();
+    if (trimmed) out.push(trimmed);
+  }
+}
+
+function applyStopSummaryPrefix(payload: JsonObject, prefix: unknown): JsonObject {
+  const text = typeof prefix === 'string' ? prefix.trim() : '';
+  if (!text) return payload;
+  const cloned = JSON.parse(JSON.stringify(payload)) as JsonObject;
+  if (prefixChatChoiceContent(cloned, text)) return cloned;
+  if (prefixResponsesOutputContent(cloned, text)) return cloned;
+  return cloned;
+}
+
+function prefixChatChoiceContent(payload: JsonObject, prefix: string): boolean {
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  let changed = false;
+  for (const choice of choices) {
+    const choiceRow = choice && typeof choice === 'object' && !Array.isArray(choice) ? choice as Record<string, unknown> : null;
+    const message = choiceRow?.message && typeof choiceRow.message === 'object' && !Array.isArray(choiceRow.message)
+      ? choiceRow.message as Record<string, unknown>
+      : null;
+    if (!message) continue;
+    if (typeof message.content === 'string') {
+      message.content = `${prefix}\n${message.content}`;
+      changed = true;
+      continue;
+    }
+    if (Array.isArray(message.content)) {
+      message.content.unshift({ type: 'text', text: `${prefix}\n` });
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function prefixResponsesOutputContent(payload: JsonObject, prefix: string): boolean {
+  const output = Array.isArray(payload.output) ? payload.output : [];
+  for (const item of output) {
+    const itemRow = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : null;
+    const content = Array.isArray(itemRow?.content) ? itemRow.content : null;
+    if (!content) continue;
+    content.unshift({ type: 'output_text', text: `${prefix}\n` });
+    return true;
+  }
+  return false;
+}
+
+function clearPersistedStopMessageRuntimeState(keys: string[]): void {
+  for (const key of keys) {
+    if (!isPersistentStickyKey(key)) continue;
+    const persistedState = loadRoutingInstructionStateSync(key) ?? null;
+    if (!persistedState) continue;
+    clearStopMessageState(persistedState, Date.now());
+    persistStopMessageState(key, persistedState);
+  }
+}
+
+function handlerResultPersistKeys(candidateKeys: string[], stickyKey?: string, strictSessionScope?: string): string[] {
+  const out: string[] = [];
+  for (const key of [stickyKey, strictSessionScope, ...candidateKeys]) {
+    if (!isPersistentStickyKey(key)) continue;
+    if (!out.includes(key)) out.push(key);
+  }
+  return out;
+}
 
 function shouldYieldToEmptyReplyContinueLocal(args: {
   base: unknown;
@@ -136,37 +247,6 @@ function readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys: strin
     }
   }
   return { exhaustedDefault: false };
-}
-
-function clearPersistedStopMessageSnapshot(args: {
-  stickyKey?: string;
-  snapshot: {
-    text: string;
-    maxRepeats: number;
-    source?: string;
-    stageMode?: 'on' | 'off' | 'auto';
-    aiMode?: 'on' | 'off';
-  };
-}): void {
-  if (!isPersistentStickyKey(args.stickyKey)) {
-    return;
-  }
-  const now = Date.now();
-  const persistedState = loadRoutingInstructionStateSync(args.stickyKey) ?? null;
-  const nextState = applyStopMessageSnapshotToState(persistedState, {
-    text: args.snapshot.text,
-    maxRepeats: args.snapshot.maxRepeats,
-    used: 0,
-    source: args.snapshot.source,
-    stageMode: args.snapshot.stageMode,
-    aiMode: args.snapshot.aiMode ?? 'off',
-    updatedAt: now
-  });
-  clearStopMessageState(nextState, now);
-  if (args.snapshot.source === 'default') {
-    nextState.stopMessageSource = 'default_exhausted';
-  }
-  persistStopMessageState(args.stickyKey, nextState);
 }
 
 function resolveStopMessageDefaultEnabledLive(): boolean {
@@ -430,15 +510,44 @@ const handler: ServerToolHandler = async (
   };
 
   try {
+    if (decision.action !== 'trigger' && decision.skip_reason === 'skip_reached_max_repeats') {
+      throw new Error('stop_schema_gate_failed: stop_schema_budget_exhausted');
+    }
     if (decision.action !== 'trigger') {
       return null;
     }
+
+    const schemaGate = evaluateStopSchemaGateWithNative({
+      assistantText: extractCurrentAssistantStopText(ctx.base),
+      used: decision.used,
+      maxRepeats: decision.max_repeats
+    });
+    compare.reason = schemaGate.reason_code || compare.reason;
+    if (schemaGate.action === 'fail_fast') {
+      throw new Error(`stop_schema_gate_failed: ${schemaGate.reason_code}`);
+    }
+
+    if (schemaGate.action === 'allow_stop') {
+      const prefixed = applyStopSummaryPrefix(ctx.base, schemaGate.summary_prefix);
+      clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
+      return {
+        flowId: FLOW_ID,
+        finalize: async () => ({
+          chatResponse: prefixed,
+          execution: { flowId: FLOW_ID }
+        })
+      };
+    }
+
+    const effectiveDecision = schemaGate.followup_text
+      ? { ...decision, followup_text: schemaGate.followup_text, followupText: schemaGate.followup_text }
+      : decision;
 
     // ── Call native handler result assembler ──
     const stickyKey = persistedLookupPlan.stickyKey || undefined;
     const strictSessionScope = persistedLookupPlan.strictSessionScope || undefined;
     const handlerResult = runStopMessageAutoHandlerWithNative({
-      decision: decision as any,
+      decision: effectiveDecision as any,
       adapterContext: record,
       base: { ...ctx.base } as Record<string, unknown>,
       candidateKeys,

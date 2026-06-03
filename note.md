@@ -14769,3 +14769,8 @@ forwarder 引用的 provider profile（minimax/mini27/minimonth）加载失败 �
 - Requirement: three stop_message followup rounds must not be identical; each round should escalate expectation and explicitly question whether the user goal is complete, requiring evidence if complete and tool execution if incomplete.
 - Fix: Rust decision/handler legacy exact-match prompt now maps used=0/1/2+ to escalating prompts. Custom stopMessage text is preserved.
 - Verification: `cargo test -p stop-message-core ...` passed; `cargo test -p router-hotpath-napi ... stop_message_auto --lib` passed with escalation-by-used-count red/green coverage.
+
+## 2026-06-03 stopless schema gate lifecycle
+- Requirement: stopless budget counts continuous stop only; non-stop/tool progress resets. `/goal active` and plan mode do not activate schema gate.
+- Fix: design and /goal docs landed; Rust stop-message-core parses current assistant stop schema and returns allow_stop/followup/fail_fast. Handler consumes native gate: allow stop prefixes summary reason and clears state; followup uses native-generated prompt; max budget fail-fast.
+- Verification: stop-message-core 30/30, router-hotpath-napi stop_message_auto 5/5, Jest servertool focused 17/17, build:min passed at 0.90.2777 before deploy.
