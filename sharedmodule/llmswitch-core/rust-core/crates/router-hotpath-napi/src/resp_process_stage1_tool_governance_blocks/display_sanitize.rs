@@ -339,6 +339,7 @@ pub(crate) fn strip_orphan_tool_markup_lines(raw: &str) -> String {
     let patterns = [
         r"(?im)^[ \t]*</function_calls>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</tool_call>[ \t]*\r?\n?",
+        r"(?im)^[ \t]*<tool_calls_endl>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</tool:exec_command>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</function>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</parameter>[ \t]*\r?\n?",
