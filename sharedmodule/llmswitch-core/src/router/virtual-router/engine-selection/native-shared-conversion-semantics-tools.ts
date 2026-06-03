@@ -33,6 +33,12 @@ export function injectMcpToolsForChatWithNative(
       return fail('empty result');
     }
     const parsed = parseJson(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const row = parsed as Record<string, unknown>;
+      if (row.__rccNativeError === true && typeof row.message === 'string' && row.message.trim()) {
+        return fail(row.message.trim());
+      }
+    }
     return Array.isArray(parsed) ? parsed : fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -104,6 +110,12 @@ export function normalizeOpenaiChatMessagesWithNative(messages: unknown): unknow
       return fail('empty result');
     }
     const parsed = parseJson(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const row = parsed as Record<string, unknown>;
+      if (row.__rccNativeError === true && typeof row.message === 'string' && row.message.trim()) {
+        return fail(row.message.trim());
+      }
+    }
     return Array.isArray(parsed) ? parsed : fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

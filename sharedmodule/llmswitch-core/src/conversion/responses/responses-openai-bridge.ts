@@ -58,7 +58,6 @@ import {
   unwrapData
 } from './responses-openai-bridge/utils.js';
 import {
-  inspectBridgeInputToolHistory,
   inspectSyntheticRouteCodexAssistantMessages,
   inspectSyntheticRouteCodexBridgeInput,
   type ToolHistoryContractViolation
@@ -92,13 +91,6 @@ function assertNoSyntheticOrMalformedBridgeInput(
   const syntheticViolation = inspectSyntheticRouteCodexBridgeInput(input);
   if (syntheticViolation) {
     throwBridgeInputViolation(syntheticViolation, context);
-  }
-  const historyViolation = inspectBridgeInputToolHistory(input, {
-    allowDanglingToolCalls: options?.allowDanglingToolCalls === true,
-    allowOutputOnlyResumeBatches: options?.allowOutputOnlyResumeBatches === true
-  });
-  if (historyViolation) {
-    throwBridgeInputViolation(historyViolation, context);
   }
 }
 

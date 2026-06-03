@@ -1,7 +1,7 @@
 use crate::shared_json_utils::split_command_string;
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 fn value_to_non_empty_text(value: Option<&Value>) -> Option<String> {
     match value {
@@ -381,6 +381,178 @@ pub(crate) fn normalize_openai_chat_messages(messages: &Value) -> Value {
     Value::Array(filtered)
 }
 
+fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+}
+
+fn is_synthetic_routecodex_tool_call_id(call_id: &str) -> bool {
+    call_id
+        .to_ascii_lowercase()
+        .starts_with("call_servertool_fallback_")
+}
+
+fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
+fn extract_plain_text_from_content(content: &Value) -> Option<String> {
+    if let Some(text) = content.as_str() {
+        let normalized = normalize_whitespace(text);
+        return if normalized.is_empty() { None } else { Some(normalized) };
+    }
+    let parts = content.as_array()?;
+    let mut fragments: Vec<String> = Vec::new();
+    for part in parts {
+        let row = part.as_object()?;
+        let text = row
+            .get("text")
+            .and_then(Value::as_str)
+            .or_else(|| row.get("input_text").and_then(Value::as_str))
+            .or_else(|| row.get("output_text").and_then(Value::as_str))
+            .or_else(|| row.get("content").and_then(Value::as_str))?;
+        let normalized = normalize_whitespace(text);
+        if !normalized.is_empty() {
+            fragments.push(normalized);
+        }
+    }
+    if fragments.is_empty() {
+        None
+    } else {
+        Some(fragments.join("\n"))
+    }
+}
+
+fn is_synthetic_routecodex_control_text(text: &str) -> bool {
+    let normalized = normalize_whitespace(text);
+    let lowered = normalized.to_ascii_lowercase();
+    lowered.starts_with("[routecodex]")
+        && (lowered.starts_with("[routecodex] request timed out before a response was received")
+            || lowered == "[routecodex] assistant response became empty after response sanitization."
+            || lowered == "[routecodex] assistant response became empty after response sanitization"
+            || lowered == "[routecodex] tool output was empty; execution status unknown."
+            || lowered == "[routecodex] tool output was empty; execution status unknown"
+            || lowered.starts_with("[routecodex] tool call result unknown"))
+}
+
+fn validate_assistant_tool_calls_shape(
+    tool_calls: &[Value],
+    index: usize,
+) -> Result<Vec<String>, String> {
+    let mut call_ids = Vec::new();
+    for tool_call in tool_calls {
+        let Some(row) = tool_call.as_object() else {
+            continue;
+        };
+        let Some(call_id) = read_trimmed_string(row.get("id"))
+            .or_else(|| read_trimmed_string(row.get("call_id")))
+            .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+        else {
+            return Err(format!(
+                "missing_tool_call_id: assistant tool_call is missing id/call_id at index {}",
+                index
+            ));
+        };
+        if is_synthetic_routecodex_tool_call_id(call_id.as_str()) {
+            return Err(format!(
+                "synthetic_tool_call_id: assistant tool_call uses synthetic RouteCodex fallback id at index {}: {}",
+                index, call_id
+            ));
+        }
+        call_ids.push(call_id);
+    }
+    Ok(call_ids)
+}
+
+fn validate_openai_chat_tool_history(messages: &[Value]) -> Result<(), String> {
+    let mut seen_tool_calls = HashSet::<String>::new();
+    let mut pending_tool_calls = HashMap::<String, usize>::new();
+    for (index, raw_message) in messages.iter().enumerate() {
+        let Some(message) = raw_message.as_object() else {
+            continue;
+        };
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .map(|value| value.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if role == "assistant" {
+            let has_tool_calls = message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .map(|items| !items.is_empty())
+                .unwrap_or(false);
+            if !has_tool_calls {
+                if let Some(content) = message.get("content") {
+                    if extract_plain_text_from_content(content)
+                        .map(|text| is_synthetic_routecodex_control_text(text.as_str()))
+                        .unwrap_or(false)
+                    {
+                        return Err(format!(
+                            "synthetic_local_control_text: chat history contains synthetic RouteCodex local control text at index {}",
+                            index
+                        ));
+                    }
+                }
+                continue;
+            }
+            let tool_calls = message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            for call_id in validate_assistant_tool_calls_shape(tool_calls, index)? {
+                seen_tool_calls.insert(call_id.clone());
+                pending_tool_calls.insert(call_id, index);
+            }
+            continue;
+        }
+        if role != "tool" {
+            continue;
+        }
+        let Some(call_id) = read_trimmed_string(message.get("tool_call_id"))
+            .or_else(|| read_trimmed_string(message.get("call_id")))
+            .or_else(|| read_trimmed_string(message.get("id")))
+        else {
+            return Err(format!(
+                "missing_tool_call_id: tool message is missing tool_call_id/call_id at index {}",
+                index
+            ));
+        };
+        if is_synthetic_routecodex_tool_call_id(call_id.as_str()) {
+            return Err(format!(
+                "synthetic_tool_call_id: tool message uses synthetic RouteCodex fallback id at index {}: {}",
+                index, call_id
+            ));
+        }
+        if !seen_tool_calls.contains(call_id.as_str()) || !pending_tool_calls.contains_key(call_id.as_str()) {
+            return Err(format!(
+                "orphan_tool_result: tool message references unknown or already-consumed tool_call_id at index {}: {}",
+                index, call_id
+            ));
+        }
+        pending_tool_calls.remove(call_id.as_str());
+    }
+    if let Some((call_id, index)) = pending_tool_calls.iter().next() {
+        return Err(format!(
+            "dangling_tool_call: tool call {} does not have a matching tool result in history at index {}",
+            call_id, index
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn normalize_openai_chat_messages_checked(messages: &Value) -> Result<Value, String> {
+    let output = normalize_openai_chat_messages(messages);
+    if let Some(items) = output.as_array() {
+        validate_openai_chat_tool_history(items)?;
+    }
+    Ok(output)
+}
+
 #[napi_derive::napi]
 pub fn normalize_openai_message_json(
     message_json: String,
@@ -415,14 +587,22 @@ pub fn normalize_openai_tool_call_json(
 pub fn normalize_openai_chat_messages_json(messages_json: String) -> NapiResult<String> {
     let messages: Value = serde_json::from_str(&messages_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = normalize_openai_chat_messages(&messages);
+    let output = match normalize_openai_chat_messages_checked(&messages) {
+        Ok(value) => value,
+        Err(message) => serde_json::json!({
+            "__rccNativeError": true,
+            "code": "MALFORMED_REQUEST",
+            "message": message
+        }),
+    };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_openai_chat_messages, normalize_openai_message, normalize_openai_tool_call,
+        normalize_openai_chat_messages, normalize_openai_chat_messages_checked,
+        normalize_openai_message, normalize_openai_tool_call,
     };
     use serde_json::json;
 
@@ -547,5 +727,39 @@ mod tests {
         let out = normalize_openai_chat_messages(&messages);
         assert_eq!(out[0]["role"], "system");
         assert_eq!(out[1]["role"], "user");
+    }
+
+    #[test]
+    fn normalize_openai_chat_messages_rejects_orphan_tool_result() {
+        let messages = json!([
+          { "role": "user", "content": "hi" },
+          { "role": "tool", "tool_call_id": "call_orphan_1", "content": "" }
+        ]);
+
+        let err = normalize_openai_chat_messages_checked(&messages).unwrap_err();
+        assert!(err.contains("orphan_tool_result"));
+    }
+
+    #[test]
+    fn normalize_openai_chat_messages_rejects_dangling_tool_call() {
+        let messages = json!([
+          { "role": "user", "content": "hi" },
+          { "role": "assistant", "content": "", "tool_calls": [{ "id": "call_missing_1", "type": "function", "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" } }] },
+          { "role": "assistant", "content": "next turn" }
+        ]);
+
+        let err = normalize_openai_chat_messages_checked(&messages).unwrap_err();
+        assert!(err.contains("dangling_tool_call"));
+    }
+
+    #[test]
+    fn normalize_openai_chat_messages_rejects_synthetic_control_text() {
+        let messages = json!([
+          { "role": "user", "content": "hi" },
+          { "role": "assistant", "content": "[RouteCodex] assistant response became empty after response sanitization." }
+        ]);
+
+        let err = normalize_openai_chat_messages_checked(&messages).unwrap_err();
+        assert!(err.contains("synthetic_local_control_text"));
     }
 }

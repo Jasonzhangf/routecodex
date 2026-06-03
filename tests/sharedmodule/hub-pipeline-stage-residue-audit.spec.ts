@@ -1474,6 +1474,12 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/utils.js.map',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/utils.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/mcp-injection.js',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.js',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.js.map',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.d.ts',
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-shared-conversion-semantics-tools.js',
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-shared-conversion-semantics-tools.js.map',
+      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-shared-conversion-semantics-tools.d.ts',
     ];
     const existing = forbiddenArtifacts.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
@@ -1505,5 +1511,26 @@ describe('hub pipeline stage residue audit', () => {
     const existing = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
     expect(existing).toEqual([]);
+  });
+
+  it('shared normalize and bridge wrappers must not run TS tool-history inspectors', () => {
+    const repoRoot = process.cwd();
+    const files = [
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts',
+      'sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
+    ];
+    const findings: string[] = [];
+    for (const relativePath of files) {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      for (const match of collectMatches(source, [
+        { label: 'runs TS chat tool-history inspector', pattern: /inspectOpenAiChatToolHistory\s*\(/ },
+        { label: 'runs TS bridge tool-history inspector', pattern: /inspectBridgeInputToolHistory\s*\(/ },
+      ])) {
+        findings.push(`${relativePath}:${match}`);
+      }
+    }
+
+    expect(findings).toEqual([]);
   });
 });
