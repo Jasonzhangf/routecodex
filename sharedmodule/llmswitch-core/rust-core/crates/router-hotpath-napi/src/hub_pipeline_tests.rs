@@ -1049,7 +1049,7 @@ fn test_build_captured_chat_request_snapshot_preserves_shape() {
 }
 
 #[test]
-fn test_build_captured_chat_request_snapshot_fills_nulls_for_missing_optional_fields() {
+fn test_build_captured_chat_request_snapshot_does_not_materialize_missing_tool_choice() {
     let input = json!({
         "model": "glm-5",
         "messages": []
@@ -1058,7 +1058,7 @@ fn test_build_captured_chat_request_snapshot_fills_nulls_for_missing_optional_fi
         build_captured_chat_request_snapshot(&input).expect("captured chat request snapshot");
     let row = output.as_object().expect("output object");
     assert!(row.get("tools").is_some_and(Value::is_null));
-    assert!(row.get("tool_choice").is_some_and(Value::is_null));
+    assert!(!row.contains_key("tool_choice"));
     assert!(row.get("semantics").is_some_and(Value::is_null));
     assert!(row.get("parameters").is_some_and(Value::is_null));
 }

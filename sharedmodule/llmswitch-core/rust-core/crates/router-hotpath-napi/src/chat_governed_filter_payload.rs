@@ -38,8 +38,14 @@ fn build_governed_filter_payload(request: Value) -> Value {
     let tool_choice = request_obj
         .and_then(|obj| obj.get("tool_choice"))
         .or_else(|| parameter_obj.and_then(|obj| obj.get("tool_choice")))
+        .filter(|value| !value.is_null())
         .cloned()
-        .unwrap_or(Value::Null);
+        .or_else(|| {
+            tools
+                .as_array()
+                .filter(|items| !items.is_empty())
+                .map(|_| Value::String("auto".to_string()))
+        });
     let stream = request_obj
         .and_then(|obj| obj.get("stream"))
         .or_else(|| parameter_obj.and_then(|obj| obj.get("stream")))
@@ -52,7 +58,9 @@ fn build_governed_filter_payload(request: Value) -> Value {
     if !tools.is_null() {
         out.insert("tools".to_string(), tools);
     }
-    out.insert("tool_choice".to_string(), tool_choice);
+    if let Some(tool_choice) = tool_choice {
+        out.insert("tool_choice".to_string(), tool_choice);
+    }
     out.insert("stream".to_string(), Value::Bool(stream));
     out.insert("parameters".to_string(), parameters);
     Value::Object(out)

@@ -91,31 +91,6 @@ fn join_text_segments(parts: &[String]) -> String {
     out
 }
 
-fn parse_structured_anthropic_content_string(value: &str) -> Option<Vec<Value>> {
-    let trimmed = value.trim();
-    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
-        return None;
-    }
-    let parsed = serde_json::from_str::<Value>(trimmed).ok()?;
-    let items = parsed.as_array()?.clone();
-    let has_tool_block = items.iter().any(|entry| {
-        entry
-            .as_object()
-            .and_then(|row| row.get("type"))
-            .and_then(Value::as_str)
-            .map(|kind| {
-                let normalized = kind.trim().to_ascii_lowercase();
-                normalized == "tool_use" || normalized == "tool_result"
-            })
-            .unwrap_or(false)
-    });
-    if has_tool_block {
-        Some(items)
-    } else {
-        None
-    }
-}
-
 fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -523,6 +498,29 @@ fn split_parallel_tool_use_result_turns(messages: Vec<Value>) -> Vec<Value> {
     out
 }
 
+fn collect_declared_tool_names(tools: Option<&Value>) -> Vec<String> {
+    tools
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|tool| {
+                    let row = tool.as_object()?;
+                    read_trimmed_string(row.get("name")).or_else(|| {
+                        row.get("function")
+                            .and_then(Value::as_object)
+                            .and_then(|function| read_trimmed_string(function.get("name")))
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn is_declared_tool_name(name: &str, declared_tool_names: &[String]) -> bool {
+    declared_tool_names.iter().any(|entry| entry == name)
+}
+
 fn normalize_anthropic_tool_history(messages: Vec<Value>) -> Vec<Value> {
     split_parallel_tool_use_result_turns(merge_adjacent_anthropic_messages(messages))
 }
@@ -539,6 +537,7 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    let declared_tool_names = collect_declared_tool_names(request_row.get("tools"));
 
     let mut known_tool_call_ids: Vec<String> = Vec::new();
     for entry in &messages_source {
@@ -551,12 +550,7 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
         {
             continue;
         }
-        if let Some(content_items) = row
-            .get("content")
-            .and_then(Value::as_str)
-            .and_then(parse_structured_anthropic_content_string)
-            .or_else(|| row.get("content").and_then(Value::as_array).cloned())
-        {
+        if let Some(content_items) = row.get("content").and_then(Value::as_array).cloned() {
             for block in content_items {
                 let Some(block_row) = block.as_object() else {
                     continue;
@@ -565,6 +559,12 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
                     .unwrap_or_default()
                     .to_ascii_lowercase();
                 if block_type != "tool_use" {
+                    continue;
+                }
+                if read_trimmed_string(block_row.get("name"))
+                    .as_deref()
+                    .is_some_and(|name| !is_declared_tool_name(name, &declared_tool_names))
+                {
                     continue;
                 }
                 if let Some(id) = read_trimmed_string(block_row.get("id")) {
@@ -583,6 +583,17 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
             let Some(tool_row) = tool_call.as_object() else {
                 continue;
             };
+            let tool_name = tool_row
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| read_trimmed_string(function.get("name")))
+                .or_else(|| read_trimmed_string(tool_row.get("name")));
+            if tool_name
+                .as_deref()
+                .is_some_and(|name| !is_declared_tool_name(name, &declared_tool_names))
+            {
+                continue;
+            }
             if let Some(id) = read_trimmed_string(tool_row.get("id")) {
                 if !known_tool_call_ids.iter().any(|entry| entry == &id) {
                     known_tool_call_ids.push(id);
@@ -676,17 +687,7 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
         }
 
         let mut blocks: Vec<Value> = Vec::new();
-        let parsed_content_node;
-        let content_node = if let Some(items) = row
-            .get("content")
-            .and_then(Value::as_str)
-            .and_then(parse_structured_anthropic_content_string)
-        {
-            parsed_content_node = Value::Array(items);
-            &parsed_content_node
-        } else {
-            row.get("content").unwrap_or(&Value::Null)
-        };
+        let content_node = row.get("content").unwrap_or(&Value::Null);
         if let Some(content_parts) = content_node.as_array() {
             for part in content_parts {
                 let Some(part_obj) = part.as_object() else {
@@ -699,6 +700,9 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
                     let Some(name) = read_trimmed_string(part_obj.get("name")) else {
                         continue;
                     };
+                    if !is_declared_tool_name(&name, &declared_tool_names) {
+                        continue;
+                    }
                     let Some(id) = read_trimmed_string(part_obj.get("id")) else {
                         continue;
                     };
@@ -847,6 +851,9 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
                 let Some(name) = read_trimmed_string(function_row.get("name")) else {
                     continue;
                 };
+                if !is_declared_tool_name(&name, &declared_tool_names) {
+                    continue;
+                }
                 let id = read_trimmed_string(tool_row.get("id"))
                     .unwrap_or_else(|| format!("call_{}", index));
                 let input = function_row
@@ -1151,6 +1158,15 @@ mod tests {
                         { "type": "text", "text": "describe the image" }
                     ]
                 }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": { "type": "object" }
+                    }
+                }
             ]
         });
 
@@ -1239,7 +1255,7 @@ mod tests {
     }
 
     #[test]
-    fn build_anthropic_from_openai_chat_preserves_stringified_tool_use_blocks() {
+    fn build_anthropic_from_openai_chat_does_not_resurrect_stringified_tool_use_blocks() {
         let payload = json!({
             "model": "mimo-v2.5",
             "messages": [
@@ -1262,25 +1278,51 @@ mod tests {
         .expect("json output");
 
         let messages = output["messages"].as_array().expect("messages array");
-        assert_eq!(messages[0]["role"].as_str(), Some("assistant"));
-        assert_eq!(messages[0]["content"][0]["type"].as_str(), Some("tool_use"));
-        assert_eq!(
-            messages[0]["content"][0]["id"].as_str(),
-            Some("call_stringified_tool_use_1")
-        );
-        assert_eq!(
-            messages[0]["content"][0]["input"]["cmd"].as_str(),
-            Some("pwd")
-        );
-        assert_eq!(messages[1]["role"].as_str(), Some("user"));
-        assert_eq!(
-            messages[1]["content"][0]["type"].as_str(),
-            Some("tool_result")
-        );
-        assert_eq!(
-            messages[1]["content"][0]["tool_use_id"].as_str(),
-            Some("call_stringified_tool_use_1")
-        );
+        let serialized = serde_json::to_string(messages).unwrap();
+        assert!(!serialized.contains("\"type\":\"tool_use\""));
+        assert!(!serialized.contains("\"type\":\"tool_result\""));
+        assert!(serialized.contains("call_stringified_tool_use_1"));
+    }
+
+    #[test]
+    fn build_anthropic_from_openai_chat_does_not_resurrect_content_tool_use_blocks() {
+        let payload = json!({
+            "model": "mimo-v2.5",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"id":"call_content_tool_use_1","input":{"cmd":"bd"},"name":"bd","type":"tool_use"}
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_content_tool_use_1",
+                    "content": "ok"
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": { "type": "object" }
+                    }
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_anthropic_from_openai_chat_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        let messages = output["messages"].as_array().expect("messages array");
+        let serialized = serde_json::to_string(messages).unwrap();
+        assert!(!serialized.contains("\"name\":\"bd\""));
+        assert!(!serialized.contains("\"type\":\"tool_use\""));
+        assert!(!serialized.contains("\"type\":\"tool_result\""));
     }
 
     #[test]
@@ -1309,6 +1351,15 @@ mod tests {
                 {
                     "role": "user",
                     "content": "继续"
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": { "type": "object" }
+                    }
                 }
             ]
         });

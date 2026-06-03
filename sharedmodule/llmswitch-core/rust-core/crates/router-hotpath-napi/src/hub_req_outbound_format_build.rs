@@ -600,6 +600,47 @@ mod tests {
     }
 
     #[test]
+    fn test_build_anthropic_messages_from_responses_does_not_emit_undeclared_tool_use() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "MiniMax-M3",
+                    "input": [
+                        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "inspect app"}]},
+                        {"type": "function_call", "call_id": "call_ui", "name": "get_app_state", "arguments": "{\"app\":\"ZTerm\"}"},
+                        {"type": "function_call_output", "call_id": "call_ui", "output": [{"type": "text", "text": "[Image omitted]"}]},
+                        {"type": "function_call", "call_id": "call_exec", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"},
+                        {"type": "function_call_output", "call_id": "call_exec", "output": "ok"}
+                    ],
+                    "tools": [{"type": "function", "name": "exec_command", "description": "run command", "parameters": {"type": "object"}}]
+                }
+            }),
+            protocol: "anthropic-messages".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        let serialized = serde_json::to_string(&result.payload).unwrap();
+        assert!(!serialized.contains("call_ui"));
+        assert!(!serialized.contains("get_app_state"));
+        assert!(serialized.contains("call_exec"));
+        let messages = result.payload["messages"].as_array().unwrap();
+        for (index, message) in messages.iter().enumerate() {
+            for part in message["content"].as_array().cloned().unwrap_or_default() {
+                if part["type"].as_str() == Some("tool_result") {
+                    let previous = messages.get(index.saturating_sub(1)).unwrap();
+                    assert_eq!(previous["role"].as_str(), Some("assistant"));
+                    assert_eq!(
+                        previous["content"][0]["id"].as_str(),
+                        part["tool_use_id"].as_str()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_build_anthropic_messages_preserves_tool_result_with_inline_image_placeholder() {
         let input = FormatBuildInput {
             format_envelope: serde_json::json!({

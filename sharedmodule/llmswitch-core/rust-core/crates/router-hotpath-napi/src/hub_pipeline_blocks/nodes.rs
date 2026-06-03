@@ -146,8 +146,6 @@ pub(crate) fn build_captured_chat_request_snapshot(input: &Value) -> Result<Valu
     }
     if let Some(tool_choice) = row.get("tool_choice") {
         out.insert("tool_choice".to_string(), tool_choice.clone());
-    } else {
-        out.insert("tool_choice".to_string(), Value::Null);
     }
     if let Some(semantics) = row.get("semantics") {
         out.insert("semantics".to_string(), semantics.clone());

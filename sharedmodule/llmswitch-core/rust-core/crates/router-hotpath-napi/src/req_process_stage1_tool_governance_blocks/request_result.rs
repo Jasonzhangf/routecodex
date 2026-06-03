@@ -54,8 +54,14 @@ pub(crate) fn build_governed_filter_payload(request: &Value) -> Value {
     let tool_choice = request_obj
         .and_then(|obj| obj.get("tool_choice"))
         .or_else(|| parameter_obj.and_then(|obj| obj.get("tool_choice")))
+        .filter(|value| !value.is_null())
         .cloned()
-        .unwrap_or(Value::Null);
+        .or_else(|| {
+            tools
+                .as_array()
+                .filter(|items| !items.is_empty())
+                .map(|_| Value::String("auto".to_string()))
+        });
     let stream = request_obj
         .and_then(|obj| obj.get("stream"))
         .or_else(|| parameter_obj.and_then(|obj| obj.get("stream")))
@@ -72,7 +78,9 @@ pub(crate) fn build_governed_filter_payload(request: &Value) -> Value {
     if !tools.is_null() {
         out.insert("tools".to_string(), tools);
     }
-    out.insert("tool_choice".to_string(), tool_choice);
+    if let Some(tool_choice) = tool_choice {
+        out.insert("tool_choice".to_string(), tool_choice);
+    }
     out.insert("stream".to_string(), Value::Bool(stream));
     out.insert("parameters".to_string(), parameters);
     Value::Object(out)
@@ -209,4 +217,32 @@ fn attach_chat_process_sanitizer_metadata(
             "backfilledToolCallIds": 0
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn governed_filter_payload_defaults_tool_choice_auto_when_tools_exist() {
+        let output = build_governed_filter_payload(&json!({
+            "model": "MiniMax-M3",
+            "messages": [{ "role": "user", "content": "继续执行" }],
+            "tools": [{ "type": "function", "function": { "name": "apply_patch" } }]
+        }));
+
+        assert_eq!(output["tool_choice"], json!("auto"));
+    }
+
+    #[test]
+    fn governed_filter_payload_drops_null_tool_choice_without_tools() {
+        let output = build_governed_filter_payload(&json!({
+            "model": "MiniMax-M3",
+            "messages": [],
+            "tool_choice": null
+        }));
+
+        assert!(!output.as_object().unwrap().contains_key("tool_choice"));
+    }
 }
