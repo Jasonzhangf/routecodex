@@ -14588,3 +14588,9 @@ forwarder 引用的 provider profile（minimax/mini27/minimonth）加载失败 �
 - Evidence: MiniMax samples showed `]<]minimax[>[` inside assistant visible text and stop_followup provider requests carrying merged ordinary `text` history. This marker separates provider-side reasoning prefix from visible assistant text; it is not VR `thinking` route marker.
 - Fix: shared Rust `split_provider_tool_sentinel_text()` now provides one parser. `resp_process_stage1_tool_governance` moves sentinel prefix into canonical `message.reasoning.content[].reasoning_text` before stripping tool markup; no ordinary wrapper-only content is preserved. `servertool_followup_delta` maps Responses assistant history/followup assistant output from `A]<]minimax[>[B` to `{reasoning_content:A, content:B}` instead of merging `AB`.
 - Verification: `cargo test -p router-hotpath-napi resp_process_stage1_tool_governance --lib` = 189 passed, 0 failed, 1 ignored; `cargo test -p router-hotpath-napi servertool_followup_delta --lib` = 6 passed; TS marker native red gate passed.
+
+[2026-06-03] anthropic response helper TS residue rustified
+- Violation: `response-runtime-anthropic-helpers.ts` kept resp boundary reasoning collapse, reasoning payload projection, and Anthropic tool alias resolution in TS.
+- Red gate: `tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts` first failed because helper had no native calls and local reasoning/tool semantics.
+- Fix: added Rust `anthropic_response_helper.rs` with native reasoning payload normalization, reasoning application, and Anthropic tool-name resolution; TS helper is now a compatibility thin shell over `*WithNative` calls.
+- Verification: `cargo test -p router-hotpath-napi anthropic_response_helper --lib` = 3 passed; red gate passed; `npm run build:min` passed.

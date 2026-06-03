@@ -8,6 +8,7 @@ export type {
 
 export {
   applyClientPassthroughPatchWithNative,
+  applyReasoningPayloadToMessageWithNative,
   buildOpenAIChatResponseFromAnthropicMessageWithNative,
   buildAnthropicResponseFromChatWithNative,
   buildRespInboundSseErrorDescriptorWithNative,
@@ -15,7 +16,9 @@ export {
   extractSseWrapperErrorWithNative,
   isContextLengthExceededSignalWithNative,
   normalizeAliasMapWithNative,
+  normalizeMessageReasoningPayloadWithNative,
   normalizeRespInboundReasoningPayloadWithNative,
+  resolveAnthropicToolNameWithNative,
   resolveAliasMapFromRespSemanticsWithNative,
   resolveAliasMapFromSourcesWithNative,
   resolveClientToolsRawFromRespSemanticsWithNative,

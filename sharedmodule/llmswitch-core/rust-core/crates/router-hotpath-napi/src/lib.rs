@@ -9,6 +9,7 @@ use chat_process_media_semantics::{
 };
 use chat_web_search_intent::{analyze_chat_web_search_intent, extract_web_search_semantics_hint};
 mod anthropic_openai_codec;
+mod anthropic_response_helper;
 mod chat_anthropic_tool_alias;
 mod chat_continue_execution_directive_injection;
 mod chat_governance_context;
@@ -786,6 +787,7 @@ pub fn run_hub_pipeline_lib_json(input_json: String) -> NapiResult<String> {
     hub_pipeline_lib::run_hub_pipeline_lib_json(input_json)
         .map_err(|error| napi::Error::from_reason(format!("{}: {}", error.code, error.message)))
 }
+
 
 #[napi(js_name = "planSseStreamEffectJson")]
 pub fn plan_sse_stream_effect_json(input_json: String) -> NapiResult<String> {

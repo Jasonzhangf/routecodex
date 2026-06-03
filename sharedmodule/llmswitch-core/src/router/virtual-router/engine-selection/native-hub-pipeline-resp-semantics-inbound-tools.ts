@@ -54,6 +54,87 @@ export function buildOpenAIChatResponseFromAnthropicMessageWithNative(
   }
 }
 
+export function normalizeMessageReasoningPayloadWithNative(candidate: unknown): Record<string, unknown> | undefined {
+  const capability = 'normalizeMessageReasoningPayloadJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown> | undefined>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const candidateJson = safeStringify(candidate ?? null);
+  if (!candidateJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(candidateJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw, 'normalizeMessageReasoningPayloadWithNative');
+    return parsed ?? undefined;
+  } catch (error) {
+    return fail(extractNativeErrorMessage(error));
+  }
+}
+
+export function applyReasoningPayloadToMessageWithNative(
+  message: Record<string, unknown>,
+  reasoning: unknown
+): Record<string, unknown> {
+  const capability = 'applyReasoningPayloadToMessageJson';
+  const fail = (reason?: string): Record<string, unknown> => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const messageJson = safeStringify(message ?? {});
+  const reasoningJson = safeStringify(reasoning ?? null);
+  if (!messageJson || !reasoningJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(messageJson, reasoningJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return parseRecord(raw, 'applyReasoningPayloadToMessageWithNative') ?? fail('invalid payload');
+  } catch (error) {
+    return fail(extractNativeErrorMessage(error));
+  }
+}
+
+export function resolveAnthropicToolNameWithNative(rawName: string, aliasMap?: Record<string, string>): string {
+  const capability = 'resolveAnthropicToolNameJson';
+  const fail = (reason?: string): string => failNative<string>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const aliasMapJson = safeStringify(aliasMap ?? null);
+  if (!aliasMapJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(rawName, aliasMapJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseStringOrUndefined(raw);
+    return typeof parsed === 'string' ? parsed : fail('invalid payload');
+  } catch (error) {
+    return fail(extractNativeErrorMessage(error));
+  }
+}
+
 export function normalizeAliasMapWithNative(
   candidate: unknown
 ): Record<string, string> | undefined {
