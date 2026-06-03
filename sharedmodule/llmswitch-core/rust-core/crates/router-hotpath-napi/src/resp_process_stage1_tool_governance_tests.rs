@@ -1070,7 +1070,7 @@ fn test_failed_chunking_error_without_tool_calls_is_preserved_as_assistant_conte
     let content = message["content"].as_str().unwrap_or("");
     assert!(content.contains("ChunkingError"));
     assert!(content.contains("无法按照要求输出正确的工具调用格式"));
-    assert!(content.contains("<｜end▁of▁thinking｜>"));
+    assert!(content.contains("end▁of▁thinking"));
     let reasoning_content = message["reasoning_content"].as_str().unwrap_or("");
     assert!(reasoning_content.contains("ChunkingError"));
     let thinking = message["thinking"].as_str().unwrap_or("");

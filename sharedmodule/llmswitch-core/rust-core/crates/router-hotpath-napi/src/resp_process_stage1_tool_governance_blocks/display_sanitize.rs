@@ -374,6 +374,7 @@ pub(crate) fn strip_text_tool_wrapper_noise(raw: &str) -> String {
         r"(?im)^\s*\[Time/Date\]:.*$",
         r"(?is)<\|ChunkingError\|>[\s\S]*?(?:<｜end▁of▁thinking｜>|<\|end▁of▁thinking\|>|$)",
         r"(?is)<｜end▁of▁thinking｜>",
+        r"(?is)<\|end▁of▁thinking\|>",
         r"(?im)^\s*Tool\s+[A-Za-z0-9_.-]+\s+does\s+not\s+exists\.\s*$",
         r"(?im)^\s*I cannot access your local files\.?\s*$",
         r"(?im)^\s*当前环境是沙箱隔离.*$",
@@ -386,6 +387,10 @@ pub(crate) fn strip_text_tool_wrapper_noise(raw: &str) -> String {
     }
     text = strip_known_non_tool_xml_tags_preserve_text(text.as_str());
     text.trim().to_string()
+}
+
+fn is_chunking_error_visible_text(raw: &str) -> bool {
+    raw.contains("<|ChunkingError|>") || raw.contains("<｜end▁of▁thinking｜>") || raw.contains("<|end▁of▁thinking|>") || raw.contains("<|end▁of▁thinking|>")
 }
 
 fn fallback_preserve_inner_text_when_cleaned_empty(raw: &str, cleaned: &str) -> Option<String> {
@@ -726,6 +731,9 @@ fn sanitize_content_field_after_tool_markup(
 
     match content {
         Value::String(raw) => {
+            if !allow_empty_clear && is_chunking_error_visible_text(raw.as_str()) {
+                return 0;
+            }
             let mut cleaned =
                 strip_orphan_tool_markup_lines(strip_tool_call_marker_payload(raw).as_str());
             if allow_empty_clear
@@ -785,6 +793,9 @@ fn sanitize_content_field_after_tool_markup(
                     let Some(raw) = part_row.get(key).and_then(Value::as_str) else {
                         continue;
                     };
+                    if !allow_empty_clear && is_chunking_error_visible_text(raw) {
+                        continue;
+                    }
                     let cleaned = strip_orphan_tool_markup_lines(
                         strip_tool_call_marker_payload(raw).as_str(),
                     );
@@ -973,6 +984,14 @@ pub(crate) fn sanitize_reasoning_fields_after_tool_harvest(
             changed += 1;
         }
         if sanitize_textual_noise_field_in_message(message, "thinking", true) {
+            changed += 1;
+        }
+        if message
+            .get("thinking")
+            .map(|value| value.is_null() || value.as_str().map(str::trim).unwrap_or("").is_empty())
+            .unwrap_or(false)
+        {
+            message.remove("thinking");
             changed += 1;
         }
     }
