@@ -1,3 +1,58 @@
+
+/**
+ * Phase Server-C: assertClientResponseHasNoInternalCarriers.
+ * Client response body / SSE payload must NOT contain internal metadata,
+ * Meta* carriers, Error* carriers, or Snapshot* carriers.
+ * Violations must fail-fast, never silently delete.
+ */
+const CLIENT_RESPONSE_FORBIDDEN_FIELDS: ReadonlySet<string> = new Set([
+  'metadata',
+  'metaCarrier',
+  'runtimeMetadata',
+  'errorCarrier',
+  'classifiedError',
+  '__rt',
+  'snapshot',
+  'snapshotId',
+  '__raw_request_body',
+  'internalDetails',
+  'upstreamRequestId',
+  'providerStack',
+]);
+
+function findForbiddenFieldInResponsePayload(
+  payload: unknown,
+  seen: WeakSet<object> = new WeakSet()
+): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  if (seen.has(payload as object)) return undefined;
+  seen.add(payload as object);
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const found = findForbiddenFieldInResponsePayload(item, seen);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+    if (CLIENT_RESPONSE_FORBIDDEN_FIELDS.has(key)) {
+      return key;
+    }
+    const found = findForbiddenFieldInResponsePayload(value, seen);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+export function assertClientResponseHasNoInternalCarriers(payload: unknown, requestId: string): void {
+  const found = findForbiddenFieldInResponsePayload(payload);
+  if (found) {
+    throw new Error(
+      `[server.response_projection] client response contains internal carrier field "${found}" (requestId=${requestId})`
+    );
+  }
+}
+
 import { Readable, Transform } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
@@ -1821,6 +1876,7 @@ export async function sendPipelineResponse(
       logResponseNonBlockingError(`writeServerSnapshot:json_payload:${requestLabel}`, error);
     });
   }
+  assertClientResponseHasNoInternalCarriers(sanitized, requestLabel);
   res.status(status).json(sanitized);
   logPipelineStage('response.json.completed', requestLabel, { status });
   logResponseCompleted({

@@ -1,0 +1,46 @@
+/**
+* Phase Server-C red test: client JSON/SSE response must not contain
+* internal carrier fields; violations must fail-fast (no silent delete).
+*/
+
+import {
+  assertClientResponseHasNoInternalCarriers
+} from '../../src/server/handlers/handler-response-utils.js';
+
+describe('server.response_projection internal carrier guard (Phase Server-C)', () => {
+  const FORBIDDEN = [
+    'metadata', 'metaCarrier', 'runtimeMetadata',
+    'errorCarrier', 'classifiedError', '__rt', 'snapshot', 'snapshotId',
+    '__raw_request_body', 'internalDetails', 'upstreamRequestId', 'providerStack'
+  ];
+
+  for (const field of FORBIDDEN) {
+    it(`fails fast when top-level response body contains "${field}"`, () => {
+      expect(() => assertClientResponseHasNoInternalCarriers(
+        { id: 'x', [field]: 'oops' },
+        'req-1'
+      )).toThrow(`[server.response_projection] client response contains internal carrier field "${field}"`);
+    });
+  }
+
+  it('fails fast on nested forbidden field (deep object)', () => {
+    expect(() => assertClientResponseHasNoInternalCarriers(
+      { id: 'x', choices: [{ message: { __rt: 'oops' } }] },
+      'req-1'
+    )).toThrow('__rt');
+  });
+
+  it('passes on clean response body', () => {
+    expect(() => assertClientResponseHasNoInternalCarriers(
+      { id: 'x', choices: [{ message: { role: 'assistant', content: 'hi' } }] },
+      'req-1'
+    )).not.toThrow();
+  });
+
+  it('handles cycles without infinite loop and still detects forbidden field', () => {
+    const a: any = { id: 'x' };
+    a.self = a;
+    a.metadata = 'oops';
+    expect(() => assertClientResponseHasNoInternalCarriers(a, 'req-1')).toThrow('metadata');
+  });
+});

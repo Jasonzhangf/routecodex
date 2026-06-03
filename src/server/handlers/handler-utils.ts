@@ -14,6 +14,7 @@ import {
   resolveEffectiveRequestId
 } from '../utils/request-id-manager.js';
 export { hasSsePayload, sendPipelineResponse, type SsePayloadShape } from './handler-response-utils.js';
+import { assertClientResponseHasNoInternalCarriers as assertClientErrorBodyHasNoInternalCarriers } from './handler-response-utils.js';
 
 const CLIENT_HEADER_DENYLIST = new Set([
   'host',
@@ -396,12 +397,14 @@ export async function respondWithPipelineError(
     || mapped.status === 425
     || mapped.status === 429
     || mapped.status >= 500;
+  assertClientErrorBodyHasNoInternalCarriers(mapped.body, effectiveRequestId);
   if (options?.forceSse) {
     // For streaming clients, return an SSE error event so the client can surface the failure.
     // Use the mapped HTTP status so clients can fail fast; embed the status in the event payload as well.
     const payload = mapped.body?.error
       ? { type: 'error', status: mapped.status, error: mapped.body.error }
       : { type: 'error', status: mapped.status, error: mapped.body };
+    assertClientErrorBodyHasNoInternalCarriers(payload, effectiveRequestId);
     res.status(mapped.status);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -438,6 +441,7 @@ export async function respondWithPipelineError(
       logHandlerNonBlockingError(`writeServerSnapshot:json_error:${effectiveRequestId}`, error);
     });
   }
+  assertClientErrorBodyHasNoInternalCarriers(mapped.body, effectiveRequestId);
   res.status(mapped.status).json(mapped.body);
 }
 
@@ -641,15 +645,61 @@ export function mergePipelineMetadata(
   return merged;
 }
 
+// Phase Server-B: explicit whitelist + explicit denied list for client-supplied metadata.
+// Unknown fields are forwarded as before, but route/runtime/provider control fields
+// must be denied at entry. The list mirrors server.req_adapter module help contract.
+const PIPELINE_METADATA_ALLOWED_CLIENT_FIELDS = new Set<string>([
+  'clientRequestId',
+  'userAgent',
+  'clientOriginator',
+  'requestSource',
+  'experimentFlag',
+  'appVersion',
+]);
+
+const PIPELINE_METADATA_DENIED_CLIENT_FIELDS = new Set<string>([
+  'routeHint',
+  '__routeHint',
+  'routingDecision',
+  '__shadowCompareForcedProviderKey',
+  '__routecodexRetryProviderKey',
+  'providerKey',
+  '__rt',
+  'snapshot',
+  'snapshotId',
+  'upstreamRequestId',
+  'metaCarrier',
+  'runtimeMetadata',
+  'errorCarrier',
+  'classifiedError',
+  '__raw_request_body',
+]);
+
 function sanitizeClientPipelineMetadata(
   metadata: Record<string, unknown> | undefined
 ): Record<string, unknown> | undefined {
   if (!metadata || Object.keys(metadata).length === 0) {
     return undefined;
   }
-  const sanitized: Record<string, unknown> = { ...metadata };
-  delete sanitized.routeHint;
-  return sanitized;
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (PIPELINE_METADATA_DENIED_CLIENT_FIELDS.has(key)) {
+      throw new Error(`[server.req_adapter] forbidden client metadata field: ${key}`);
+    }
+    if (!PIPELINE_METADATA_ALLOWED_CLIENT_FIELDS.has(key)) {
+      throw new Error(`[server.req_adapter] unsupported client metadata field: ${key}`);
+    }
+    sanitized[key] = value;
+  }
+  return Object.keys(sanitized).length === 0 ? undefined : sanitized;
+}
+
+export function __pipelineMetadataAllowedClientFields(): ReadonlySet<string> {
+  return PIPELINE_METADATA_ALLOWED_CLIENT_FIELDS;
+}
+
+export function __pipelineMetadataDeniedClientFields(): ReadonlySet<string> {
+  return PIPELINE_METADATA_DENIED_CLIENT_FIELDS;
 }
 
 function normalizeError(error: unknown, requestId: string, endpoint: string): Error & Record<string, unknown> {
