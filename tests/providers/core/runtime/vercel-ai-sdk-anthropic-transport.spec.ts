@@ -1,502 +1,10 @@
 import {
-  buildAnthropicSdkCallOptions,
   hasRemoteAnthropicImageUrls,
   inlineRemoteAnthropicImageUrls,
   resolveAnthropicRemoteImagePolicy,
   shouldRetryWithInlineRemoteImage
 } from '../../../../src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-transport.js';
-import {
-  executeAnthropicRequestWithBody,
-  restoreAnthropicThinkingHistoryFromRawBody
-} from '../../../../src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-request-exec.js';
-
-describe('buildAnthropicSdkCallOptions', () => {
-  it('maps top-level assistant reasoning_content into AI SDK reasoning parts', () => {
-    const options = buildAnthropicSdkCallOptions(
-      {
-        model: 'mimo-v2.5-pro',
-        thinking: { type: 'enabled', budget_tokens: 1024 },
-        messages: [
-          {
-            role: 'user',
-            content: '继续分析'
-          },
-          {
-            role: 'assistant',
-            content: [
-              {
-                type: 'tool_use',
-                id: 'call_1',
-                name: 'exec_command',
-                input: { cmd: 'pwd' }
-              }
-            ],
-            reasoning_content: '.'
-          },
-          {
-            role: 'assistant',
-            content: '',
-            reasoning_content: '我已经确认工作目录，接下来继续分析锁恢复链路。'
-          }
-        ]
-      },
-      {
-        'anthropic-beta': 'claude-code'
-      }
-    );
-
-    expect(options.prompt).toEqual([
-      { role: 'user', content: [{ type: 'text', text: '继续分析' }] },
-      {
-        role: 'assistant',
-        content: [
-          { type: 'reasoning', text: '.' },
-          {
-            type: 'tool-call',
-            toolCallId: 'call_1',
-            toolName: 'exec_command',
-            input: { cmd: 'pwd' },
-            providerExecuted: undefined
-          }
-        ]
-      },
-      {
-        role: 'assistant',
-        content: [
-          {
-            type: 'reasoning',
-            text: '我已经确认工作目录，接下来继续分析锁恢复链路。'
-          }
-        ]
-      }
-    ]);
-  });
-
-  it('restores anthropic thinking blocks from raw assistant reasoning history', () => {
-    const rawBody = {
-      model: 'mimo-v2.5-pro',
-      thinking: { type: 'enabled', budget_tokens: 1024 },
-      messages: [
-        { role: 'user', content: '继续分析' },
-        {
-          role: 'assistant',
-          content: [
-            {
-              type: 'tool_use',
-              id: 'call_1',
-              name: 'exec_command',
-              input: { cmd: 'pwd' }
-            }
-          ],
-          reasoning_content: '.'
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'call_1',
-              content: 'ok'
-            }
-          ]
-        },
-        {
-          role: 'assistant',
-          content: '',
-          reasoning_content: '我已经确认工作目录，接下来继续分析锁恢复链路。'
-        },
-        {
-          role: 'assistant',
-          content: '',
-          reasoning_content: '最终结论：继续排查 provider busy 恢复逻辑。'
-        }
-      ]
-    };
-
-    const builtBody = {
-      model: 'mimo-v2.5-pro',
-      messages: [
-        { role: 'user', content: [{ type: 'text', text: '继续分析' }] },
-        {
-          role: 'assistant',
-          content: [
-            {
-              type: 'tool_use',
-              id: 'call_1',
-              name: 'exec_command',
-              input: { cmd: 'pwd' }
-            }
-          ]
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'call_1',
-              content: 'ok'
-            }
-          ]
-        },
-        {
-          role: 'assistant',
-          content: []
-        }
-      ]
-    };
-
-    const restored = restoreAnthropicThinkingHistoryFromRawBody(rawBody as any, builtBody as any) as any;
-    expect(restored.messages).toEqual([
-      { role: 'user', content: '继续分析' },
-      {
-        role: 'assistant',
-        content: [
-          { type: 'thinking', thinking: '.' },
-          {
-            type: 'tool_use',
-            id: 'call_1',
-            name: 'exec_command',
-            input: { cmd: 'pwd' }
-          }
-        ]
-      },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'tool_result',
-            tool_use_id: 'call_1',
-            content: 'ok'
-          }
-        ]
-      },
-      {
-        role: 'assistant',
-        content: [
-          { type: 'thinking', thinking: '我已经确认工作目录，接下来继续分析锁恢复链路。' },
-          { type: 'thinking', thinking: '最终结论：继续排查 provider busy 恢复逻辑。' }
-        ]
-      }
-    ]);
-  });
-
-  it('canonicalizes assistant thinking blocks to anthropic thinking field before send', () => {
-    const rawBody = {
-      model: 'mimo-v2.5-pro',
-      thinking: { type: 'adaptive' },
-      messages: [
-        { role: 'user', content: '继续分析' },
-        {
-          role: 'assistant',
-          content: [
-            { type: 'thinking', text: '先确认工具结果是否已回填。', signature: 'sig_1' },
-            {
-              type: 'tool_use',
-              id: 'call_1',
-              name: 'echo_json',
-              input: { message: 'ping' }
-            }
-          ]
-        }
-      ]
-    };
-
-    const restored = restoreAnthropicThinkingHistoryFromRawBody(rawBody as any, {
-      model: 'mimo-v2.5-pro',
-      messages: []
-    } as any) as any;
-
-    expect(restored.messages).toEqual([
-      { role: 'user', content: '继续分析' },
-      {
-        role: 'assistant',
-        content: [
-          { type: 'thinking', thinking: '先确认工具结果是否已回填。', signature: 'sig_1' },
-          {
-            type: 'tool_use',
-            id: 'call_1',
-            name: 'echo_json',
-            input: { message: 'ping' }
-          }
-        ]
-      }
-    ]);
-  });
-
-
-  it('coalesces consecutive user messages into a single anthropic user message with mixed text and tool_result blocks', () => {
-    const rawBody = {
-      model: 'mimo-v2.5-pro',
-      messages: [
-        { role: 'user', content: 'system-like prompt chunk' },
-        { role: 'user', content: 'user asks to continue' },
-        {
-          role: 'assistant',
-          content: [
-            {
-              type: 'tool_use',
-              id: 'call_1',
-              name: 'exec_command',
-              input: { cmd: 'pwd' }
-            }
-          ],
-          reasoning_content: '.'
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'call_1',
-              content: 'ok'
-            }
-          ]
-        },
-        { role: 'user', content: '继续' }
-      ]
-    };
-
-    const restored = restoreAnthropicThinkingHistoryFromRawBody(rawBody as any, {
-      model: 'mimo-v2.5-pro',
-      messages: []
-    } as any) as any;
-
-    expect(restored.messages).toEqual([
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: 'system-like prompt chunk' },
-          { type: 'text', text: 'user asks to continue' }
-        ]
-      },
-      {
-        role: 'assistant',
-        content: [
-          { type: 'thinking', thinking: '.' },
-          {
-            type: 'tool_use',
-            id: 'call_1',
-            name: 'exec_command',
-            input: { cmd: 'pwd' }
-          }
-        ]
-      },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'tool_result',
-            tool_use_id: 'call_1',
-            content: 'ok'
-          },
-          { type: 'text', text: '继续' }
-        ]
-      }
-    ]);
-  });
-
-  it('coalesces consecutive restored assistant reasoning turns into one anthropic assistant message', () => {
-    const rawBody = {
-      model: 'mimo-v2.5-pro',
-      thinking: { type: 'adaptive' },
-      messages: [
-        { role: 'user', content: '继续' },
-        {
-          role: 'assistant',
-          content: '',
-          reasoning_content: '先测试 WebSocket 节点。'
-        },
-        {
-          role: 'assistant',
-          content: '',
-          reasoning_content: '再检查 shunt 规则是否生效。'
-        },
-        {
-          role: 'assistant',
-          content: [
-            {
-              type: 'tool_use',
-              id: 'call_1',
-              name: 'exec_command',
-              input: { cmd: 'pwd' }
-            }
-          ],
-          reasoning_content: '.'
-        }
-      ]
-    };
-
-    const restored = restoreAnthropicThinkingHistoryFromRawBody(rawBody as any, {
-      model: 'mimo-v2.5-pro',
-      messages: []
-    } as any) as any;
-
-    expect(restored.messages).toEqual([
-      { role: 'user', content: '继续' },
-      {
-        role: 'assistant',
-        content: [
-          { type: 'thinking', thinking: '先测试 WebSocket 节点。' },
-          { type: 'thinking', thinking: '再检查 shunt 规则是否生效。' },
-          { type: 'thinking', thinking: '.' },
-          {
-            type: 'tool_use',
-            id: 'call_1',
-            name: 'exec_command',
-            input: { cmd: 'pwd' }
-          }
-        ]
-      }
-    ]);
-  });
-
-  it('maps anthropic thinking, effort, tools, and tool results into AI SDK call options', () => {
-    const options = buildAnthropicSdkCallOptions(
-      {
-        model: 'glm-5',
-        max_tokens: 1024,
-        system: 'You are terse.',
-        messages: [
-          {
-            role: 'assistant',
-            content: [
-              {
-                type: 'tool_use',
-                id: 'toolu_1',
-                name: 'bash',
-                input: { command: 'pwd' }
-              }
-            ]
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'tool_result',
-                tool_use_id: 'toolu_1',
-                content: 'ok'
-              },
-              {
-                type: 'text',
-                text: 'continue'
-              }
-            ]
-          }
-        ],
-        tools: [
-          {
-            name: 'bash',
-            description: 'run shell',
-            input_schema: {
-              type: 'object',
-              properties: {
-                command: { type: 'string' }
-              },
-              required: ['command']
-            }
-          }
-        ],
-        tool_choice: { type: 'any' },
-        thinking: { type: 'adaptive' },
-        output_config: { effort: 'high' }
-      },
-      {
-        'anthropic-beta': 'claude-code'
-      }
-    );
-
-    expect(options.maxOutputTokens).toBe(1024);
-    expect(options.toolChoice).toEqual({ type: 'required' });
-    expect(options.tools).toEqual([
-      {
-        type: 'function',
-        name: 'bash',
-        description: 'run shell',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            command: { type: 'string' }
-          },
-          required: ['command']
-        }
-      }
-    ]);
-    expect(options.providerOptions).toEqual({
-      anthropic: {
-        thinking: { type: 'adaptive' },
-        effort: 'high'
-      }
-    });
-    expect(options.prompt).toEqual([
-      { role: 'system', content: 'You are terse.' },
-      {
-        role: 'assistant',
-        content: [
-          {
-            type: 'tool-call',
-            toolCallId: 'toolu_1',
-            toolName: 'bash',
-            input: { command: 'pwd' },
-            providerExecuted: undefined
-          }
-        ]
-      },
-      {
-        role: 'tool',
-        content: [
-          {
-            type: 'tool-result',
-            toolCallId: 'toolu_1',
-            toolName: 'bash',
-            output: { type: 'text', value: 'ok' }
-          }
-        ]
-      },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: 'continue'
-          }
-        ]
-      }
-    ]);
-  });
-
-  it('maps standard input_image and image_url parts into anthropic file parts', () => {
-    const options = buildAnthropicSdkCallOptions(
-      {
-        model: 'qwen3.6-plus',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'input_text', text: 'look' },
-              { type: 'input_image', image_url: 'https://example.com/a.png' },
-              { type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } }
-            ]
-          }
-        ]
-      },
-      {}
-    );
-
-    expect(options.prompt).toHaveLength(1);
-    expect(options.prompt[0]).toMatchObject({
-      role: 'user',
-      content: [
-        { type: 'text', text: 'look' },
-        { type: 'file', mediaType: 'image/*' },
-        { type: 'file', mediaType: 'image/png' }
-      ]
-    });
-    const promptContent = (options.prompt[0] as any).content;
-    expect(promptContent[1].data).toBeInstanceOf(URL);
-    expect(String(promptContent[1].data)).toBe('https://example.com/a.png');
-    expect(promptContent[2].data).toBe('QUJD');
-  });
-});
+import { executeAnthropicRequestWithBody } from '../../../../src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-request-exec.js';
 
 describe('inlineRemoteAnthropicImageUrls', () => {
   it('inlines remote image URL as base64 and normalizes media type via byte sniff when header is octet-stream', async () => {
@@ -693,7 +201,7 @@ describe('hasRemoteAnthropicImageUrls', () => {
 });
 
 describe('executeAnthropicRequestWithBody exact bad-sample family regression', () => {
-  it('strips internal session headers and coalesces consecutive anthropic roles before upstream send', async () => {
+  it('strips internal session headers without coalescing historical user turns before upstream send', async () => {
     const originalFetch = global.fetch;
     let capturedHeaders: Record<string, string> | undefined;
     let capturedBody: Record<string, unknown> | undefined;
@@ -718,8 +226,8 @@ describe('executeAnthropicRequestWithBody exact bad-sample family regression', (
             { role: 'user', content: 'u1' },
             { role: 'user', content: 'u2' },
             { role: 'user', content: 'u3' },
-            { role: 'assistant', content: '', reasoning_content: 'r1' },
-            { role: 'assistant', content: '', reasoning_content: 'r2' },
+            { role: 'assistant', content: [{ type: 'thinking', thinking: 'r1' }] },
+            { role: 'assistant', content: [{ type: 'thinking', thinking: 'r2' }] },
             { role: 'user', content: '继续' }
           ]
         } as any,
@@ -745,16 +253,103 @@ describe('executeAnthropicRequestWithBody exact bad-sample family regression', (
       expect(capturedHeaders?.originator).toBeUndefined();
       expect(Array.isArray(capturedBody?.messages)).toBe(true);
       const roles = ((capturedBody?.messages as Array<Record<string, unknown>>) || []).map((entry) => entry.role);
-      expect(roles).toEqual(['user', 'assistant', 'user']);
-      expect((capturedBody?.messages as Array<Record<string, unknown>>)[0]?.content).toEqual([
-        { type: 'text', text: 'u1' },
-        { type: 'text', text: 'u2' },
-        { type: 'text', text: 'u3' }
+      expect(roles).toEqual(['user', 'user', 'user', 'assistant', 'assistant', 'user']);
+      expect((capturedBody?.messages as Array<Record<string, unknown>>)[0]?.content).toBe('u1');
+      expect((capturedBody?.messages as Array<Record<string, unknown>>)[1]?.content).toBe('u2');
+      expect((capturedBody?.messages as Array<Record<string, unknown>>)[2]?.content).toBe('u3');
+      expect((capturedBody?.messages as Array<Record<string, unknown>>)[3]).toEqual({
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'r1' }]
+      });
+      expect((capturedBody?.messages as Array<Record<string, unknown>>)[4]).toEqual({
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'r2' }]
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('preserves tool_result before following image-placeholder user turn in outbound body', async () => {
+    const originalFetch = global.fetch;
+    let capturedBody: Record<string, unknown> | undefined;
+
+    global.fetch = (async (_url, init) => {
+      capturedBody = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>;
+      return new Response(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', content: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }) as typeof fetch;
+
+    try {
+      await executeAnthropicRequestWithBody(
+        {
+          model: 'MiniMax-M3',
+          stream: true,
+          messages: [
+            {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'call_inline_image_history',
+                  name: 'exec_command',
+                  input: { cmd: 'tail -n 60 note.md' }
+                }
+              ]
+            },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'call_inline_image_history',
+                  content: 'Total output lines: 141\n[Image omitted]'
+                }
+              ]
+            },
+            {
+              role: 'user',
+              content: [{ type: 'text', text: '[Image omitted]' }]
+            }
+          ]
+        } as any,
+        {
+          endpoint: '/v1/messages',
+          headers: {
+            'content-type': 'application/json',
+            'anthropic-version': '2023-06-01',
+            'anthropic-beta': 'claude-code',
+            'x-api-key': 'test-key'
+          },
+          targetUrl: 'https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages',
+          body: {},
+          wantsSse: true
+        } as any
+      );
+
+      const messages = (capturedBody?.messages as Array<Record<string, unknown>>) || [];
+      expect(messages.map((entry) => entry.role)).toEqual(['assistant', 'user', 'user']);
+      expect(messages[0]).toEqual({
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'call_inline_image_history',
+            name: 'exec_command',
+            input: { cmd: 'tail -n 60 note.md' }
+          }
+        ]
+      });
+      expect(messages[1]?.content).toEqual([
+        {
+          type: 'tool_result',
+          tool_use_id: 'call_inline_image_history',
+          content: 'Total output lines: 141\n[Image omitted]'
+        }
       ]);
-      expect((capturedBody?.messages as Array<Record<string, unknown>>)[1]?.content).toEqual([
-        { type: 'thinking', thinking: 'r1' },
-        { type: 'thinking', thinking: 'r2' }
-      ]);
+      expect(messages[2]?.content).toEqual([{ type: 'text', text: '[Image omitted]' }]);
     } finally {
       global.fetch = originalFetch;
     }
@@ -762,7 +357,7 @@ describe('executeAnthropicRequestWithBody exact bad-sample family regression', (
 });
 
 describe('executeAnthropicRequestWithBody', () => {
-  it('does not copy raw request metadata into Anthropic SDK request body', async () => {
+  it('fails fast when internal metadata reaches Anthropic provider wire body', async () => {
     const originalFetch = global.fetch;
     const calls: Array<{ init: RequestInit | undefined }> = [];
     global.fetch = (async (_url: URL | RequestInfo, init?: RequestInit) => {
@@ -774,28 +369,28 @@ describe('executeAnthropicRequestWithBody', () => {
     }) as typeof fetch;
 
     try {
-      await executeAnthropicRequestWithBody(
-        {
-          model: 'mimo-v2.5-pro',
-          max_tokens: 64,
-          messages: [{ role: 'user', content: 'hi' }],
-          metadata: { user_id: 'must-not-leak', routeHint: 'internal' }
-        } as any,
-        {
-          endpoint: '/v1/messages',
-          headers: {
-            'content-type': 'application/json',
-            'anthropic-version': '2023-06-01'
-          },
-          targetUrl: 'https://example.com/anthropic/v1/messages',
-          body: {},
-          wantsSse: false
-        } as any
-      );
+      await expect(
+        executeAnthropicRequestWithBody(
+          {
+            model: 'mimo-v2.5-pro',
+            max_tokens: 64,
+            messages: [{ role: 'user', content: 'hi' }],
+            metadata: { user_id: 'must-not-leak', routeHint: 'internal' }
+          } as any,
+          {
+            endpoint: '/v1/messages',
+            headers: {
+              'content-type': 'application/json',
+              'anthropic-version': '2023-06-01'
+            },
+            targetUrl: 'https://example.com/anthropic/v1/messages',
+            body: {},
+            wantsSse: false
+          } as any
+        )
+      ).rejects.toThrow('provider-runtime-error: anthropic provider wire body contains internal metadata');
 
-      expect(calls).toHaveLength(1);
-      const requestBody = JSON.parse(String(calls[0].init?.body));
-      expect(requestBody.metadata).toBeUndefined();
+      expect(calls).toHaveLength(0);
     } finally {
       global.fetch = originalFetch;
     }

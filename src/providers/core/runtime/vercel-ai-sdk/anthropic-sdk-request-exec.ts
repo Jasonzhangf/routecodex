@@ -1,17 +1,8 @@
 import { Readable } from 'node:stream';
 
-import { AnthropicMessagesLanguageModel } from '@ai-sdk/anthropic/internal';
-
 import type { UnknownObject } from '../../../../types/common-types.js';
 import type { PreparedHttpRequest } from '../http-request-executor.js';
-import { buildAnthropicSdkCallOptions } from './anthropic-sdk-call-options.js';
-import { asRecord, pickString, type UnknownRecord } from './anthropic-sdk-transport-shared.js';
-
-function mergePreservedRequestFields(rawBody: UnknownRecord, builtBody: UnknownRecord): UnknownRecord {
-  const next = { ...builtBody };
-  void rawBody;
-  return next;
-}
+import { pickString, type UnknownRecord } from './anthropic-sdk-transport-shared.js';
 
 function sanitizeAnthropicOutboundHeaders(headers: Record<string, string>): Record<string, string> {
   const next = { ...headers };
@@ -134,246 +125,28 @@ function buildInvalidJsonError(responseText: string): Error & {
   return error;
 }
 
-function cloneUnknown<T>(value: T): T {
-  if (value == null) {
-    return value;
+function assertAnthropicProviderWireBody(providerWireBody: UnknownRecord): void {
+  if (Object.prototype.hasOwnProperty.call(providerWireBody, 'metadata')) {
+    throw new Error('provider-runtime-error: anthropic provider wire body contains internal metadata');
   }
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function extractReasoningText(value: unknown): string | undefined {
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return trimmed ? trimmed : undefined;
-  }
-  if (Array.isArray(value)) {
-    const parts = value
-      .map((item) => extractReasoningText(item))
-      .filter((item): item is string => Boolean(item));
-    return parts.length ? parts.join('\n') : undefined;
-  }
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-  const row = value as Record<string, unknown>;
-  return (
-    extractReasoningText(row.text) ??
-    extractReasoningText(row.thinking) ??
-    extractReasoningText(row.content) ??
-    extractReasoningText(row.reasoning) ??
-    extractReasoningText(row.reasoning_content)
-  );
-}
-
-function hasAnthropicThinkingBlock(content: unknown[]): boolean {
-  return content.some((entry) => {
-    if (!entry || typeof entry !== 'object') {
-      return false;
-    }
-    const type = pickString((entry as Record<string, unknown>).type)?.toLowerCase();
-    return type === 'thinking' || type === 'redacted_thinking';
-  });
-}
-
-function canonicalizeAnthropicAssistantBlocks(content: unknown[]): unknown[] {
-  return content.map((entry) => {
-    if (!entry || typeof entry !== 'object') {
-      return cloneUnknown(entry);
-    }
-    const row = cloneUnknown(entry as Record<string, unknown>);
-    const type = pickString(row.type)?.toLowerCase();
-    if (type !== 'thinking') {
-      return row;
-    }
-    const thinkingText = extractReasoningText(row.thinking) ?? extractReasoningText(row.text);
-    if (!thinkingText) {
-      return row;
-    }
-    row.thinking = thinkingText;
-    if (Object.prototype.hasOwnProperty.call(row, 'text')) {
-      delete row.text;
-    }
-    return row;
-  });
-}
-
-function toAnthropicAssistantContent(rawMessage: UnknownRecord): unknown {
-  const rawContent = rawMessage.content;
-  const reasoningText =
-    extractReasoningText(rawMessage.reasoning_content) ??
-    extractReasoningText(rawMessage.reasoningContent) ??
-    extractReasoningText(rawMessage.reasoning);
-
-  if (Array.isArray(rawContent)) {
-    const content = canonicalizeAnthropicAssistantBlocks(rawContent);
-    if (reasoningText && !hasAnthropicThinkingBlock(content)) {
-      content.unshift({ type: 'thinking', thinking: reasoningText });
-    }
-    return content;
-  }
-
-  if (typeof rawContent === 'string') {
-    const trimmedContent = rawContent.trim();
-    if (!reasoningText) {
-      return trimmedContent ? rawContent : rawContent;
-    }
-    const content: unknown[] = [{ type: 'thinking', thinking: reasoningText }];
-    if (trimmedContent) {
-      content.push({ type: 'text', text: rawContent });
-    }
-    return content;
-  }
-
-  if (reasoningText) {
-    return [{ type: 'thinking', thinking: reasoningText }];
-  }
-
-  return cloneUnknown(rawContent);
-}
-
-function toAnthropicAssistantContentBlocks(content: unknown): unknown[] {
-  if (Array.isArray(content)) {
-    return cloneUnknown(content);
-  }
-  if (typeof content === 'string') {
-    return content.trim() ? [{ type: 'text', text: content }] : [];
-  }
-  if (content == null) {
-    return [];
-  }
-  return [cloneUnknown(content)];
-}
-
-function toAnthropicUserContentBlocks(content: unknown): unknown[] {
-  if (Array.isArray(content)) {
-    return cloneUnknown(content);
-  }
-  if (typeof content === 'string') {
-    return content.trim() ? [{ type: 'text', text: content }] : [];
-  }
-  if (content == null) {
-    return [];
-  }
-  return [cloneUnknown(content)];
-}
-
-function coalesceConsecutiveAnthropicMessages(messages: UnknownRecord[]): UnknownRecord[] {
-  const out: UnknownRecord[] = [];
-  for (const message of messages) {
-    const role = pickString(message.role)?.toLowerCase();
-    const previous = out[out.length - 1];
-    const previousRole = previous ? pickString(previous.role)?.toLowerCase() : undefined;
-    if (!previous || previousRole !== role) {
-      out.push(message);
-      continue;
-    }
-    if (role === 'assistant') {
-      previous.content = [
-        ...toAnthropicAssistantContentBlocks(previous.content),
-        ...toAnthropicAssistantContentBlocks(message.content)
-      ];
-      continue;
-    }
-    if (role === 'user') {
-      previous.content = [
-        ...toAnthropicUserContentBlocks(previous.content),
-        ...toAnthropicUserContentBlocks(message.content)
-      ];
-      continue;
-    }
-    out.push(message);
-  }
-  return out;
-}
-
-export function restoreAnthropicThinkingHistoryFromRawBody(
-  rawBody: UnknownRecord,
-  builtBody: UnknownRecord
-): UnknownRecord {
-  const rawMessages = Array.isArray(rawBody.messages) ? rawBody.messages : undefined;
-  if (!rawMessages?.length) {
-    return builtBody;
-  }
-
-  const thinking = asRecord(rawBody.thinking);
-  const thinkingType = pickString(thinking.type)?.toLowerCase();
-  const shouldRestoreThinkingHistory =
-    thinkingType === 'enabled' || thinkingType === 'adaptive' || rawMessages.some((message) => {
-      if (!message || typeof message !== 'object') {
-        return false;
-      }
-      const row = message as Record<string, unknown>;
-      return (
-        extractReasoningText(row.reasoning_content) !== undefined ||
-        extractReasoningText(row.reasoningContent) !== undefined ||
-        extractReasoningText(row.reasoning) !== undefined
-      );
-    });
-  if (!shouldRestoreThinkingHistory) {
-    return builtBody;
-  }
-
-  const restoredMessages = coalesceConsecutiveAnthropicMessages(rawMessages
-    .filter((message): message is UnknownRecord => Boolean(message && typeof message === 'object'))
-    .map((message) => {
-      const role = pickString(message.role)?.toLowerCase();
-      if (role !== 'assistant') {
-        return cloneUnknown(message);
-      }
-      const next: UnknownRecord = {
-        ...cloneUnknown(message),
-        content: toAnthropicAssistantContent(message)
-      };
-      delete next.reasoning_content;
-      delete next.reasoningContent;
-      delete next.reasoning;
-      return next;
-    }));
-
-  return {
-    ...builtBody,
-    messages: restoredMessages
-  };
 }
 
 export async function executeAnthropicRequestWithBody(
-  rawBody: UnknownRecord,
+  providerWireBody: UnknownRecord,
   requestInfo: PreparedHttpRequest
 ): Promise<unknown> {
-  const modelId = pickString(rawBody.model);
+  assertAnthropicProviderWireBody(providerWireBody);
+  const modelId = pickString(providerWireBody.model);
   if (!modelId) {
     throw new Error('provider-runtime-error: missing model from anthropic sdk transport');
   }
 
-  const model = new AnthropicMessagesLanguageModel(modelId, {
-    provider: 'anthropic.messages',
-    baseURL: requestInfo.targetUrl,
-    headers: () => ({}),
-    buildRequestUrl: () => requestInfo.targetUrl,
-    transformRequestBody: (body: Record<string, unknown>) => mergePreservedRequestFields(rawBody, body)
-  } as never) as any;
+  const headers = sanitizeAnthropicOutboundHeaders(requestInfo.headers);
 
-  const callOptions = buildAnthropicSdkCallOptions(rawBody, requestInfo.headers);
-  const argsResult = await model.getArgs({
-    ...callOptions,
-    stream: requestInfo.wantsSse,
-    userSuppliedBetas: await model.getBetasFromHeaders(callOptions.headers)
-  });
-  const args = asRecord(argsResult.args);
-  const betas = argsResult.betas instanceof Set ? argsResult.betas : new Set<string>();
-  const url = model.buildRequestUrl(requestInfo.wantsSse);
-  const headers = sanitizeAnthropicOutboundHeaders(
-    await model.getHeaders({ betas, headers: callOptions.headers })
-  );
-  const body = restoreAnthropicThinkingHistoryFromRawBody(
-    rawBody,
-    asRecord(model.transformRequestBody(args, betas))
-  );
-
-  const response = await fetch(url, {
+  const response = await fetch(requestInfo.targetUrl, {
     method: 'POST',
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify(providerWireBody),
     ...(requestInfo.abortSignal ? { signal: requestInfo.abortSignal } : {})
   });
 

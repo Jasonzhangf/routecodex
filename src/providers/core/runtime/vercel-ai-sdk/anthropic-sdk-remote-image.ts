@@ -322,10 +322,10 @@ function deepCloneRecord<T extends UnknownRecord>(value: T): T {
 }
 
 export async function inlineRemoteAnthropicImageUrls(
-  rawBody: UnknownRecord,
+  providerWireBody: UnknownRecord,
   options: InlineRemoteAnthropicImageOptions = {}
 ): Promise<{ body: UnknownRecord; rewrites: number }> {
-  const nextBody = deepCloneRecord(rawBody);
+  const nextBody = deepCloneRecord(providerWireBody);
   let rewrites = 0;
 
   const messages = asArray(nextBody.messages);
@@ -360,8 +360,8 @@ export async function inlineRemoteAnthropicImageUrls(
   return { body: nextBody, rewrites };
 }
 
-export function hasRemoteAnthropicImageUrls(rawBody: UnknownRecord): boolean {
-  const messages = asArray(rawBody.messages);
+export function hasRemoteAnthropicImageUrls(providerWireBody: UnknownRecord): boolean {
+  const messages = asArray(providerWireBody.messages);
   for (const message of messages) {
     const messageRow = asRecord(message);
     const content = asArray(messageRow.content);
@@ -383,7 +383,7 @@ export function hasRemoteAnthropicImageUrls(rawBody: UnknownRecord): boolean {
   return false;
 }
 
-export function resolveAnthropicRemoteImagePolicy(context: ProviderContext, rawBody: UnknownRecord): RemoteImagePolicy {
+export function resolveAnthropicRemoteImagePolicy(context: ProviderContext, providerWireBody: UnknownRecord): RemoteImagePolicy {
   const metadata = asRecord(context.metadata);
   const metadataMultimodal = asRecord(metadata.multimodal);
   const requestPolicy =
@@ -395,7 +395,7 @@ export function resolveAnthropicRemoteImagePolicy(context: ProviderContext, rawB
 
   const providerHint = pickString(context.providerId ?? context.providerKey)?.toLowerCase() ?? '';
   const providerId = providerHint.includes('.') ? providerHint.split('.')[0] : providerHint;
-  const modelHint = pickString(rawBody.model)?.toLowerCase() ?? '';
+  const modelHint = pickString(providerWireBody.model)?.toLowerCase() ?? '';
 
   const envOverrides = parseRemoteImagePolicyOverrideMap(
     pickString(process.env.ROUTECODEX_REMOTE_IMAGE_POLICY_OVERRIDES ?? process.env.RCC_REMOTE_IMAGE_POLICY_OVERRIDES)
