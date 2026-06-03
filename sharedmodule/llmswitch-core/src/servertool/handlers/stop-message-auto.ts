@@ -130,6 +130,24 @@ function applyStopSummaryPrefix(payload: JsonObject, prefix: unknown): JsonObjec
   return cloned;
 }
 
+function buildStopSchemaBudgetExhaustedSummary(reasonCode = 'stop_schema_budget_exhausted'): string {
+  return [
+    'Stopless 校验结果：连续 stop 预算已耗尽。',
+    `校验状态：${reasonCode}`,
+    '处理结果：不再继续自动续杯，返回当前模型停止内容。'
+  ].join('\n');
+}
+
+function buildStopSchemaFinalPlan(chatResponse: JsonObject): ServerToolHandlerPlan {
+  return {
+    flowId: FLOW_ID,
+    finalize: async () => ({
+      chatResponse,
+      execution: { flowId: FLOW_ID }
+    })
+  };
+}
+
 function prefixChatChoiceContent(payload: JsonObject, prefix: string): boolean {
   const choices = Array.isArray(payload.choices) ? payload.choices : [];
   let changed = false;
@@ -511,7 +529,13 @@ const handler: ServerToolHandler = async (
 
   try {
     if (decision.action !== 'trigger' && decision.skip_reason === 'skip_reached_max_repeats') {
-      throw new Error('stop_schema_gate_failed: stop_schema_budget_exhausted');
+      const prefixed = applyStopSummaryPrefix(
+        ctx.base,
+        buildStopSchemaBudgetExhaustedSummary('stop_schema_budget_exhausted')
+      );
+      clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
+      compare.reason = 'stop_schema_budget_exhausted';
+      return buildStopSchemaFinalPlan(prefixed);
     }
     if (decision.action !== 'trigger') {
       return null;
@@ -524,19 +548,18 @@ const handler: ServerToolHandler = async (
     });
     compare.reason = schemaGate.reason_code || compare.reason;
     if (schemaGate.action === 'fail_fast') {
-      throw new Error(`stop_schema_gate_failed: ${schemaGate.reason_code}`);
+      const prefixed = applyStopSummaryPrefix(
+        ctx.base,
+        buildStopSchemaBudgetExhaustedSummary(schemaGate.reason_code)
+      );
+      clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
+      return buildStopSchemaFinalPlan(prefixed);
     }
 
     if (schemaGate.action === 'allow_stop') {
       const prefixed = applyStopSummaryPrefix(ctx.base, schemaGate.summary_prefix);
       clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
-      return {
-        flowId: FLOW_ID,
-        finalize: async () => ({
-          chatResponse: prefixed,
-          execution: { flowId: FLOW_ID }
-        })
-      };
+      return buildStopSchemaFinalPlan(prefixed);
     }
 
     const effectiveDecision = schemaGate.followup_text

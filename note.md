@@ -14774,3 +14774,8 @@ forwarder 引用的 provider profile（minimax/mini27/minimonth）加载失败 �
 - Requirement: stopless budget counts continuous stop only; non-stop/tool progress resets. `/goal active` and plan mode do not activate schema gate.
 - Fix: design and /goal docs landed; Rust stop-message-core parses current assistant stop schema and returns allow_stop/followup/fail_fast. Handler consumes native gate: allow stop prefixes summary reason and clears state; followup uses native-generated prompt; max budget fail-fast.
 - Verification: stop-message-core 30/30, router-hotpath-napi stop_message_auto 5/5, Jest servertool focused 17/17, build:min passed at 0.90.2777 before deploy.
+
+## 2026-06-03 stopless budget exhausted exit fix
+- Evidence: live request `222630770-253528-1365` reached `:stop_followup:stop_followup:stop_followup`; budget exhaustion threw `stop_schema_gate_failed`, was wrapped by followup mainline into `SERVERTOOL_FOLLOWUP_FAILED` and failed the original response with 500.
+- Fix: budget exhausted now returns a final prefixed stop summary (`Stopless 校验结果：连续 stop 预算已耗尽...`) and clears stop state, instead of throwing through followup.
+- Verification: stop-message-core 30/30, focused servertool Jest 17/17, build:min passed at 0.90.2778 before deploy.
