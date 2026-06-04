@@ -31,19 +31,6 @@ export function consume_error_err_05_execution_decision_from_error_err_04_router
   return applied.retryExecutionPlan;
 }
 
-function isWindsurfManagedAccountPoolCooldown(args: {
-  error: unknown;
-  retryError: RetryErrorSnapshot;
-}): boolean {
-  const record =
-    args.error && typeof args.error === 'object' && !Array.isArray(args.error)
-      ? (args.error as Record<string, unknown>)
-      : undefined;
-  const code = String(record?.code ?? args.retryError.errorCode ?? '').trim().toUpperCase();
-  const upstreamCode = String(record?.upstreamCode ?? args.retryError.upstreamCode ?? '').trim().toUpperCase();
-  return code === 'WINDSURF_ACCOUNT_POOL_COOLDOWN' || upstreamCode === 'WINDSURF_ACCOUNT_POOL_COOLDOWN';
-}
-
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
 };
@@ -91,17 +78,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     maxContextOverflowRetries: args.maxContextOverflowRetries
   });
   args.recordAttempt({ error: true });
-
-  if (isWindsurfManagedAccountPoolCooldown({ error: args.error, retryError: args.retryError })) {
-    return {
-      shouldRetry: false,
-      blockingRecoverable: false,
-      excludedCurrentProvider: false,
-      holdOnLastAvailable429: false,
-      retryBackoffMs: 0,
-      recoverableBackoffMs: 0
-    };
-  }
 
   const exclusionPlan = hostContractFailure
     ? {

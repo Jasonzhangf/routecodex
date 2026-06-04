@@ -164,6 +164,6 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
   it('executor retry path does not locally classify quota or periodic recovery candidates', () => {
     const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
     expect(executionPlan).not.toMatch(/isTerminalQuotaRerouteCandidate/);
-    expect(executionPlan).not.toMatch(/WINDSURF_WEEKLY_QUOTA_EXHAUSTED|quotaScope|quotaReason|daily_limit/);
+    expect(executionPlan).not.toMatch(/WINDSURF_WEEKLY_QUOTA_EXHAUSTED|WINDSURF_ACCOUNT_POOL_COOLDOWN|quotaScope|quotaReason|daily_limit/);
   });
 });
