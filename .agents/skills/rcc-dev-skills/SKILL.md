@@ -9,6 +9,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 
 - 审计/修复 Hub Pipeline 工具问题前，先读 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
 - Servertool followup 固定节点锁：`HubRespChatProcess03Governed -> ServertoolResp03RuntimeAction -> ServertoolReq04FollowupBuilt -> normal Hub reenter -> ServertoolResp03FollowupResult -> HubRespOutbound04ClientSemantic`；`ServertoolResp03RuntimeAction` 必须在 chat-process 标准态判定，并携带 chat-process payload 给 TS IO/reenter 薄壳。TS 禁止判断工具语义、清洗工具列表、修补 `requires_action`、从 `rawBody` 正常构造请求、用 provider raw/client outbound/SSE payload 判定 stopless，或用旧 `streamPipe.payload` 覆盖 post-servertool payload。
+- Servertool 响应职责锁：servertool 只代客户端执行本地工具或发起正常 followup；它没有专用 response projection。followup 响应方向固定为 provider/model -> `RespInbound` -> `HubRespChatProcess03Governed` -> `HubRespOutbound04ClientSemantic` -> client。`ServertoolResp03FollowupResult` 若仍是 chatprocess payload，只能经 `buildHubRespOutbound04FromHubRespChatProcess03` 相邻转换；禁止手写 Responses wrapper、直接写 SSE/client frame、或把 chat completion shape 泄到 `/v1/responses`。
 - Servertool 命名真相：`finalChatResponse` 只代表 pre-followup governed response；`followupBody` / `ServertoolResp03FollowupResult` 非空时必须成为 `HubRespOutbound04ClientSemantic` 的唯一输入。
 - 请求/响应转换必须是唯一语义链：`req_inbound -> req_chatprocess -> req_outbound -> provider_runtime -> resp_inbound -> resp_chatprocess -> resp_outbound`；`req_inbound/resp_inbound` 只解析入口协议和捕获上下文，所有字段的唯一语义映射必须发生在 `req_chatprocess/resp_chatprocess`，再由 outbound 只编码目标协议 wire，禁止绕过 chatprocess 直接重建上下文。
 - 字段守恒规则：正常传输链路不得丢字段、不得把工具语义/`thinking`/`reasoning`/`tool_use`/`tool_result` 降级成普通文本；协议不支持的字段必须进入明确 canonical carrier 或 fail-fast，不允许静默删除、合并、清理、fallback。
@@ -1836,3 +1837,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-06-04 stopless Responses followup 红测精华
 - stopless 线上日志出现 `decision=trigger` 仍“没作用”时，红测不能只断 `executed/flowId`；必须断最终 `reenterPipeline.body`：`/v1/responses` 入口要有 `input`、无 `messages`、包含原始历史与 stop schema 质询文本。
 - 线上 sample 若 adapterContext 无 `capturedChatRequest`，必须检查 `__raw_request_body` / `responsesRequestContext.payload` 是否作为 captured seed 进入 `seedLoopPayload`；本地 ignored 源码旁 `.js/.d.ts` 会遮蔽 TS 测试，发现后先删除再跑红测。
+
+### 2026-06-04 servertool response chain 精华
+- 看到 servertool/followup 响应 shape 错误时，先查 stage，不要找“servertool response”：servertool 只在 `HubRespChatProcess03Governed` 代客户端执行本地工具，后续必须走正常 `HubRespOutbound04ClientSemantic`。
+- `/v1/responses` followup 红测必须断最终 client payload 顶层 `object=response`；Chat Completions 红测必须断没有被 Responses builder 包装。两个断言同时存在，才能证明 `buildHubRespOutbound04FromHubRespChatProcess03` 是按入口协议做唯一相邻转换。

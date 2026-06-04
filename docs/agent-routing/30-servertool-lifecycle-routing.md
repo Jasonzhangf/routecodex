@@ -25,7 +25,10 @@
 1. followup 只能基于 origin snapshot 重建。
 2. 不得从当前污染 payload 猜测补偿。
 3. 不得绕过 Hub Pipeline req/resp process 的 Rust 工具治理。
-4. 失败必须 fail-fast，禁止吞异常或降级。
+4. servertool 只代客户端执行本地工具；除“工具执行发生在服务端”外，followup 请求和响应必须与普通请求完全同链路。
+5. 响应方向固定为模型/provider 进入 `RespInbound`，经 `HubRespChatProcess03Governed`，再到客户端出口 `HubRespOutbound04ClientSemantic` / `ServerRespOutbound05ClientFrame`。
+6. servertool 执行后的 payload 若仍处于 `HubRespChatProcess03Governed`，只能通过相邻 builder `buildHubRespOutbound04FromHubRespChatProcess03` 进入 `HubRespOutbound04ClientSemantic`；禁止 servertool 专用响应出口、手工 Responses 包装、或绕过正常响应口。
+7. 失败必须 fail-fast，禁止吞异常或降级。
 
 ## 已移除功能禁区
 - clock / reminder / 定时回查功能已移除，禁止重新接入。
@@ -35,6 +38,7 @@
 ## 权威文档
 - `docs/stop-message-auto.md`
 - `docs/design/servertool-stopmessage-lifecycle.md`
+- `docs/design/servertool-followup-rebuild-from-origin.md`
 - `docs/design/rcc-unified-fence-marker-spec.md`
 - `docs/design/servertool-rust-only-architecture.md`
 - `docs/routing-instructions.md`

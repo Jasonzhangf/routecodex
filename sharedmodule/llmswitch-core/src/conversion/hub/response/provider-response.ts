@@ -244,6 +244,9 @@ type HubRespProcessEffectResult = {
   stage: HubRespPayloadStage;
 };
 
+// Normal adjacent response-stage builder. Servertool may leave a post-tool/followup
+// result at HubRespChatProcess03Governed, but it never owns a private response exit.
+// This is the only 03 -> 04 projection point for Responses-shaped client payloads.
 function buildHubRespOutbound04FromHubRespChatProcess03(args: {
   payload: JsonObject;
   entryEndpoint: string;
@@ -298,6 +301,9 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         clientInjectDispatch: args.clientInjectDispatch as any
       });
       if (orchestration.executed) {
+        // The orchestration shell only executed local tool IO / normal reentry on
+        // behalf of the client. The returned payload is still chat-process truth
+        // and must be projected by buildHubRespOutbound04FromHubRespChatProcess03.
         payload = orchestration.payload;
         stage = 'HubRespChatProcess03Governed';
       }
@@ -326,6 +332,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         clientInjectDispatch: args.clientInjectDispatch as any
       });
       if (orchestration.executed) {
+        // Keep servertool response semantics on the normal response chain.
         payload = orchestration.payload;
         stage = 'HubRespChatProcess03Governed';
       }

@@ -5,8 +5,8 @@
 This document defines the only valid lifecycle for:
 
 - stop_message / stopless auto-continue
-- `clock` client injection
-- `continue_execution` client injection
+- stop schema gate / learned note write
+- servertool followup reentry
 
 Design goals:
 
@@ -14,39 +14,43 @@ Design goals:
 2. `stop_message_flow` execution path is servertool reenter through the same Hub Pipeline entry, not tmux/client injection.
 3. `stop_message_flow` followup hops are normal tool-capable requests and may retrigger when their response ends with `finish_reason=stop`.
 4. Loop safety is enforced by stopMessage `used/max_repeats` counters plus normal tool availability, not by disabling stopMessage on followup metadata.
+5. Servertool has no private response protocol: it only executes local tool work on behalf of the client; the result returns through the normal response chain.
+6. Response direction is provider/model inbound -> `HubRespInbound02Parsed` -> `HubRespChatProcess03Governed` -> `HubRespOutbound04ClientSemantic` -> client outbound.
 
 ## 2. Current Code Entry Points
 
 - Request metadata resolution: `src/server/runtime/http-server/executor-metadata.ts`
-- Scope resolution: `src/server/runtime/http-server/clock-scope-resolution.ts`
 - Followup dispatch: `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
 - ServerTool orchestration (response side): `sharedmodule/llmswitch-core/src/servertool/engine.ts`
 - StopMessage handler: `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
-- Routing state store (tmux scope selection): `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/store.ts`
+- Response stage transition: `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
 
 ## 3. Lifecycle (Approved Target)
 
-1. Client starts via `routecodex codex` / `routecodex claude` inside tmux.
-2. Client request carries tmux metadata (`tmuxSessionId` family fields / headers).
-3. Server resolves tmux session and marks `clientInjectReady=true`.
-4. stopless default state exists under `tmux:<sessionId>`.
-5. Model response reaches response orchestration.
-6. stopless matcher runs in chat-process servertool stage.
+1. Client request enters the normal request chain and reaches upstream through Hub Pipeline.
+2. Provider/model response enters `resp_inbound`, then `resp_chatprocess`.
+3. stopless matcher runs only on `HubRespChatProcess03Governed` chat standard state.
+4. `finish_reason` must already be canonicalized to OpenAI-style chat finish reasons before stopless evaluation.
+5. Servertool may execute local tool work or build a followup request only from this chat-process stage.
+6. Followup reenters as a normal request and its response returns through the normal response chain.
 7. If `finish_reason=stop`:
    - `/goal active` => skip
-   - `/goal non-active` => inject `继续执行`
-   - non-`/goal` => inject `继续执行`
-8. Dispatch `stop_message_flow` through servertool reenter with original request tools/semantics preserved.
-9. Reenter success increments/persists `used`; if followup response again ends with `stop`, it may retrigger until `used >= max_repeats`.
-10. Reenter failure is explicit/fail-fast through servertool followup error handling; do not hide it as client-visible success.
-11. Main request response must include the materialized followup result on the same client stream/response chain.
-12. When stop schema allows the final stop, `learned` may be written to project `note.md`; followup / invalid schema / missing schema / budget exhausted must not write memory.
+   - plan mode => skip
+   - other cases => run schema gate and possibly build followup prompt
+8. Dispatch `stop_message_flow` through servertool reenter with original request tools/semantics preserved; no tool list cleaning or history rewrite outside the latest followup turn.
+9. Reenter success increments continuous valid-stop-schema budget only when the followup response is again `stop` with schema; missing schema does not count.
+10. Non-stop responses, tool calls, or real progress reset the continuous stop budget.
+11. Reenter failure is explicit/fail-fast through servertool followup error handling; do not hide it as client-visible success.
+12. Main request response must include the materialized followup result on the same client stream/response chain.
+13. When stop schema allows the final stop, `learned` may be written to project `note.md`; followup / invalid schema / missing schema / budget exhausted must not write memory.
 
 ## 4. Hard Rules
 
-1. Split dispatch:
+1. Servertool execution boundary:
 - `stop_message_flow` must use servertool reenter and must not set `clientInjectOnly/clientInjectSource=servertool.stop_message`.
-- `clock` / explicit client-injection flows use client injection dispatcher.
+- servertool only replaces the client-side tool execution step; request reentry and response projection remain the same Hub Pipeline path as normal traffic.
+- The servertool result may be `HubRespChatProcess03Governed`; it must enter `HubRespOutbound04ClientSemantic` only through `buildHubRespOutbound04FromHubRespChatProcess03`.
+- Do not add servertool-specific response projection, hand-built Responses wrappers, or client-frame shortcuts.
 - Other servertools follow their skeleton/profile policy.
 
 1.1. Followup eligibility:
@@ -104,30 +108,39 @@ Required logs:
 
 1. stopMessage set parse:
 - parse success/fail
-- resolved tmux scope
+- resolved session / request scope
 
 2. stopMessage match:
 - matched/miss
 - reason
 - scope
 
-3. client injection:
-- selected tmux session
-- submit key result
-- success/failure reason
+3. servertool followup:
+- runtime action emitted from `HubRespChatProcess03Governed`
+- origin snapshot selected
+- followup requestId / routeHint / routeName
+- reenter success/failure reason
 
-4. state mutation:
+4. response stage transition:
+- post-servertool payload stage
+- `HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic` builder used when needed
+- final entry-protocol shape (`/v1/responses` => `object=response`)
+
+5. state mutation:
 - set/override
 - trigger used counter
 - clear on failure
-- rebind migration (old scope -> new scope)
+- reset on non-stop/tool-call progress
 
 ## 7. Validation Checklist
 
-1. Set stopMessage in tmux session A -> state key is `tmux:A`.
-2. Trigger matched response -> tmux A receives injected text + enter.
-3. Counter decrements and persists.
-4. Restart client with new tmux session B (same client identity) -> state migrates to `tmux:B`.
-5. Next trigger injects into B, not A.
-6. Injection failure clears active state and does not create reenter loop.
-7. Non-stop servertools still execute through normal reenter path.
+1. Provider/model response reaches `HubRespChatProcess03Governed` with canonical `finish_reason=stop`.
+2. Stopless match emits servertool runtime action from chat-process stage only.
+3. Followup body is built from origin snapshot and preserves entry endpoint, tools, model parameters, and latest stopless prompt.
+4. Followup response reenters normal response chain and returns as post-servertool governed payload.
+5. `/v1/responses` final response is projected by `buildHubRespOutbound04FromHubRespChatProcess03` and has top-level `object=response`.
+6. Chat Completions final response remains chat completion shape and is not wrapped by Responses builder.
+7. Missing `servertoolRuntimeAction.payload` fails fast; no fallback to client payload.
+8. Client body does not contain `metadata`, `__rt`, or snapshot/debug carrier.
+9. Reenter failure clears active state and does not create followup loop.
+10. Non-stop servertools still execute through normal Hub Pipeline reentry path.
