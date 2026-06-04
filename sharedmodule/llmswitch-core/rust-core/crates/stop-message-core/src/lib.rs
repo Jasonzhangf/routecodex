@@ -7,7 +7,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const LEGACY_DEFAULT_TEXT: &str = "继续执行";
-const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS: u32 = 3;
+// Schema gate budget is split by submitted-shape: providing a stop schema
+// (any parsed `stopreason` value) burns the strict 3-round budget because
+// the model already committed to stop intent; failing to provide any schema
+// keeps the lenient 10-round safety net so we never hard-kill a session
+// that simply forgot the marker. Both branches reset the counter the
+// moment a non-stop finish_reason lands (handled at the snapshot level).
+const STOP_SCHEMA_PROVIDED_MAX_REPEATS: u32 = 3;
+const STOP_SCHEMA_MISSING_MAX_REPEATS: u32 = 10;
+const STOP_SCHEMA_HISTORY_MAX_ROUNDS: u32 = 3;
+// Kept as a shared alias for callers/tests that intentionally do not
+// distinguish between the two regimes (kept equal to the strict side).
+const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS: u32 = STOP_SCHEMA_PROVIDED_MAX_REPEATS;
+
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
     "停止前先核对六件事：1) 目标：当前用户目标是什么，是否逐项完成；2) 过程：你实际做过哪些操作/检查/验证，哪些还没做；3) 证据：完成或阻塞的证据在哪里；4) 问题原因：若出现异常，最可能原因是什么，依据是什么；5) 已排除因素：你已经排除了哪些可能原因，证据是什么；6) 排查顺序：下一步应按什么顺序继续排查。若任一项缺文件、日志、命令输出或测试证据，禁止总结、道歉、解释工具被拒或停下；必须在本轮直接发出工具调用执行最小下一步（优先 exec_command 读取/验证/测试）。只有目标已完成或确实阻塞时，才输出最终结果并给出证据。",
     "你刚才再次停止。请重新核对：目标是否真的完成？过程是否覆盖用户要求的每一项？证据是否能被日志、文件、命令结果或测试结果验证？异常原因是否已定位？哪些因素已被证据排除？排查顺序是否合理且已执行到当前最小下一步？如果答案不是全部明确，禁止继续总结、复述阻塞、声称工具被拒；必须在本轮直接发出工具调用按排查顺序补齐缺口（优先 exec_command）。如果确实完成/阻塞，必须说明目标、过程、证据、问题原因、已排除因素、排查顺序，并在 stop schema 的 learned 字段写出过去 turns 学到的可复用结论；没有则填空字符串。",
@@ -206,6 +218,7 @@ pub struct StopSchemaGateDecision {
     pub summary_prefix: Option<String>,
     pub followup_text: Option<String>,
     pub count_budget: bool,
+    pub max_repeats: u32,
     pub parsed: Option<StopSchemaParsed>,
 }
 
@@ -297,13 +310,19 @@ pub fn evaluate_stop_schema_gate(
     used: u32,
     max_repeats: u32,
 ) -> StopSchemaGateDecision {
+    // Compute the effective budget cap for each schema path so downstream
+    // consumers (TS compare context, persisted snapshot, log output) see the
+    // real gate cap (10 for missing, 3 for provided) instead of the input
+    // max_repeats which comes from the snapshot and may lag behind.
+    let provided_cap = stop_schema_provided_max_repeats(max_repeats);
+    let missing_cap = stop_schema_missing_max_repeats(max_repeats);
     let parsed = match parse_stop_schema(assistant_text) {
         Some(parsed) => parsed,
         None => {
             return schema_missing_followup(
                 "stop_schema_missing",
                 used,
-                max_repeats,
+                missing_cap,
                 &format!("你刚才试图停止，但没有提供 stop schema。先核对目标、过程、证据、问题原因、已排除因素、排查顺序：目标是否逐项完成？过程是否覆盖要求？证据是否可核验？异常原因是否有依据？哪些因素已被排除？下一步排查顺序是什么？现在必须二选一：1) 若完成或阻塞，立即给出 stop schema；{} 2) 若任一项没有文件/日志/命令输出/测试证据，不准总结、道歉、解释工具被拒或复述计划，必须在本轮直接发出工具调用继续执行当前目标；需要读文件/验证/测试时优先调用 exec_command。", STOP_SCHEMA_JSON_EXAMPLE),
             );
         }
@@ -315,7 +334,7 @@ pub fn evaluate_stop_schema_gate(
             return schema_invalid_followup(
                 "stop_schema_stopreason_missing_or_non_numeric",
                 used,
-                max_repeats,
+                provided_cap,
                 &format!("stop schema 缺少数字 stopreason。不要猜、不要总结。先回答：目标是什么、过程做到哪一步、证据是什么、问题原因在哪里、已排除哪些因素、排查顺序是什么。{} 若目标/过程/证据/原因/排除项/顺序任一项不足，选择 2，给 next_step 并立即执行。", STOP_SCHEMA_JSON_EXAMPLE),
                 parsed,
             );
@@ -328,19 +347,21 @@ pub fn evaluate_stop_schema_gate(
             return schema_invalid_followup(
                 "stop_schema_reason_missing",
                 used,
-                max_repeats,
+                provided_cap,
                 "你声明 finished/blocked，但没有给 reason。停止不成立。请具体说明：完成/阻塞对应哪个用户目标？过程里做过哪些验证？证据是什么？问题原因在哪里？已排除哪些因素？排查顺序是什么？如果不能逐项回答，禁止再停，必须调用工具继续执行。",
                 parsed,
             );
         }
+        let summary_prefix = build_allow_stop_summary_prefix(reason);
         return StopSchemaGateDecision {
+            max_repeats: provided_cap,
             action: StopSchemaGateAction::AllowStop,
             reason_code: if stopreason == 0 {
                 "stop_schema_finished".to_string()
             } else {
                 "stop_schema_blocked".to_string()
             },
-            summary_prefix: Some(format!("停止原因：{}\n\n", reason)),
+            summary_prefix: Some(summary_prefix),
             followup_text: None,
             count_budget: false,
             parsed: Some(parsed),
@@ -352,7 +373,7 @@ pub fn evaluate_stop_schema_gate(
         return schema_invalid_followup(
             "stop_schema_continue_next_step",
             used,
-            max_repeats,
+            provided_cap,
             &format!(
                 "你已经提供 next_step，说明目标/过程/证据/原因/排除项/排查顺序仍有缺口。本轮不允许停止、不允许改写计划、不允许总结。立即调用工具执行这个下一步，并用结果补齐证据、问题原因、已排除因素和后续排查顺序：{}",
                 next_step
@@ -364,7 +385,7 @@ pub fn evaluate_stop_schema_gate(
     schema_invalid_followup(
         "stop_schema_next_step_missing",
         used,
-        max_repeats,
+        provided_cap,
         "你没有证明 finished/blocked，也没有给 next_step。停止不成立。请按目标、过程、证据、问题原因、已排除因素、排查顺序六项检查：目标是否完成？过程是否验证？证据是否可核验？原因是否有依据？排除了哪些因素？下一步排查顺序是什么？完成/阻塞就给 stopreason=0/1、reason、has_evidence、evidence、issue_cause、excluded_factors、diagnostic_order、learned；否则必须给 next_step 并调用工具执行。learned 是过去 turns 学到的可复用结论，没有则空字符串。",
         parsed,
     )
@@ -558,13 +579,13 @@ fn normalize_loop_text(text: &str) -> String {
 fn schema_invalid_followup(
     reason_code: &str,
     used: u32,
-    max_repeats: u32,
+    effective_max: u32,
     message: &str,
     parsed: StopSchemaParsed,
 ) -> StopSchemaGateDecision {
-    let rejection_max = stop_schema_provided_max_repeats(max_repeats);
-    if rejection_max > 0 && used.saturating_add(1) >= rejection_max {
+    if used >= effective_max {
         return StopSchemaGateDecision {
+            max_repeats: effective_max,
             action: StopSchemaGateAction::FailFast,
             reason_code: "stop_schema_budget_exhausted".to_string(),
             summary_prefix: None,
@@ -573,18 +594,18 @@ fn schema_invalid_followup(
             parsed: Some(parsed),
         };
     }
-    schema_followup(reason_code, used, message, Some(parsed), true)
+    schema_followup(reason_code, used, effective_max, message, Some(parsed), true)
 }
 
 fn schema_missing_followup(
     reason_code: &str,
     used: u32,
-    max_repeats: u32,
+    effective_max: u32,
     message: &str,
 ) -> StopSchemaGateDecision {
-    let rejection_max = stop_schema_missing_max_repeats(max_repeats);
-    if rejection_max > 0 && used.saturating_add(1) >= rejection_max {
+    if used >= effective_max {
         return StopSchemaGateDecision {
+            max_repeats: effective_max,
             action: StopSchemaGateAction::FailFast,
             reason_code: "stop_schema_budget_exhausted".to_string(),
             summary_prefix: None,
@@ -593,11 +614,15 @@ fn schema_missing_followup(
             parsed: None,
         };
     }
-    schema_followup(reason_code, used, message, None, true)
+    schema_followup(reason_code, used, effective_max, message, None, true)
 }
 
 fn stop_schema_missing_max_repeats(max_repeats: u32) -> u32 {
-    stop_schema_consecutive_stop_max_repeats(max_repeats)
+    let cap = STOP_SCHEMA_MISSING_MAX_REPEATS;
+    if max_repeats > 0 {
+        return max_repeats.max(cap);
+    }
+    cap
 }
 
 fn stop_schema_provided_max_repeats(max_repeats: u32) -> u32 {
@@ -611,9 +636,63 @@ fn stop_schema_consecutive_stop_max_repeats(max_repeats: u32) -> u32 {
     STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS
 }
 
+/// Build the final allow-stop summary prefix.
+///
+/// The prefix embeds:
+/// 1. The current stop reason the model just committed to.
+/// 2. The trail of prior `followup_text` injections the gate asked the
+///    model to answer, so the user can see the rounds the system burned
+///    instead of letting them disappear.
+///
+/// Callers pass the most-recent history tail (oldest-first or newest-first
+/// doesn't matter; the helper normalises order) collected across the
+/// consecutive-stop chain. The cap is `STOP_SCHEMA_HISTORY_MAX_ROUNDS`
+/// to keep the prefix bounded even on the 10-round missing-schema path.
+pub fn build_allow_stop_summary_prefix_from_history(
+    current_reason: &str,
+    history: &[String],
+) -> String {
+    let mut out = String::new();
+    out.push_str("停止原因：");
+    out.push_str(current_reason.trim());
+    out.push('\n');
+    out.push('\n');
+    let cap = STOP_SCHEMA_HISTORY_MAX_ROUNDS as usize;
+    let total = history.len();
+    if total > cap {
+        out.push_str("过去 stop 续杯注入（仅保留最近 ");
+        out.push_str(&cap.to_string());
+        out.push_str(" 次 / 共 ");
+        out.push_str(&total.to_string());
+        out.push_str(" 次）：\n");
+    } else if total > 0 {
+        out.push_str("过去 stop 续杯注入（");
+        out.push_str(&total.to_string());
+        out.push_str(" 次）：\n");
+    }
+    let start = total.saturating_sub(cap);
+    for (idx, item) in history.iter().skip(start).enumerate() {
+        let round = start + idx + 1;
+        out.push_str("[round ");
+        out.push_str(&round.to_string());
+        out.push_str("] ");
+        out.push_str(item.trim());
+        out.push('\n');
+    }
+    if total == 0 {
+        out.push_str("（无历史注入）\n");
+    }
+    out
+}
+
+fn build_allow_stop_summary_prefix(current_reason: &str) -> String {
+    build_allow_stop_summary_prefix_from_history(current_reason, &[])
+}
+
 fn schema_followup(
     reason_code: &str,
     used: u32,
+    effective_max: u32,
     message: &str,
     parsed: Option<StopSchemaParsed>,
     count_budget: bool,
@@ -627,6 +706,7 @@ fn schema_followup(
         text.push_str(message);
     }
     StopSchemaGateDecision {
+        max_repeats: effective_max,
         action: StopSchemaGateAction::Followup,
         reason_code: reason_code.to_string(),
         summary_prefix: None,
@@ -760,11 +840,6 @@ fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReas
     }
     if ctx.goal_status.is_active() {
         return Some(SkipReason::GoalActive);
-    }
-    if let Some(flow_id) = ctx.followup_flow_id.as_deref().map(str::trim) {
-        if !flow_id.is_empty() && flow_id != "stop_message_flow" {
-            return Some(SkipReason::ServertoolFollowupHop);
-        }
     }
     if ctx.persisted_snapshot.is_none() && ctx.runtime_snapshot.is_none() {
         if ctx.persisted_default_exhausted {
@@ -935,6 +1010,36 @@ mod tests {
         assert!(text.contains("目标"));
         assert!(text.contains("过程"));
         assert!(text.contains("证据"));
+    }
+
+    #[test]
+    fn allow_stop_summary_prefix_includes_full_history_trail() {
+        // The final summary must surface ALL the prior followup injections
+        // the gate asked the model to answer, plus the current reason, so
+        // the user can see the rounds the system burned.
+        let history: Vec<String> = (1..=3)
+            .map(|i| format!("续杯 #{}: 你需要继续执行", i))
+            .collect();
+        let prefix = build_allow_stop_summary_prefix_from_history(
+            "目标已完成，全部轮次均已恢复",
+            &history,
+        );
+        assert!(prefix.contains("停止原因：目标已完成"));
+        for entry in &history {
+            assert!(prefix.contains(entry.as_str()), "missing history entry: {}", entry);
+        }
+        // Last-3 cap: with 5 entries, only the last 3 are kept.
+        let long_history: Vec<String> = (1..=5)
+            .map(|i| format!("续杯 #{}", i))
+            .collect();
+        let trimmed = build_allow_stop_summary_prefix_from_history(
+            "完成",
+            &long_history,
+        );
+        assert!(trimmed.contains("续杯 #3"));
+        assert!(trimmed.contains("续杯 #5"));
+        assert!(!trimmed.contains("续杯 #1"));
+        assert!(!trimmed.contains("续杯 #2"));
     }
 
     #[test]
@@ -1153,12 +1258,16 @@ mod tests {
     }
 
     #[test]
-    fn skips_non_stop_message_followup_flow_to_prevent_generic_recursion() {
+    fn non_stop_message_followup_flow_no_longer_short_circuits_stop_message() {
+        // Per the strict contract, only /goal active and plan mode may skip
+        // stop-message followup. Generic followup hops (apply_patch_flow, etc.)
+        // must fall through to the standard stop-message path so the gate,
+        // schema and budget logic all still apply.
         let mut ctx = base_ctx();
         ctx.followup_flow_id = Some("apply_patch_flow".to_string());
         let result = decide(&ctx);
-        assert_eq!(result.action, Action::Skip);
-        assert_eq!(result.skip_reason.unwrap(), "skip_servertool_followup_hop");
+        assert_eq!(result.action, Action::Trigger);
+        assert!(result.skip_reason.is_none());
     }
 
     #[test]
@@ -1390,23 +1499,49 @@ mod tests {
     }
 
     #[test]
-    fn stop_schema_missing_exhausts_after_three_consecutive_stops() {
-        let still_followup = evaluate_stop_schema_gate("普通停止文本", 1, 3);
+    fn stop_schema_missing_exhausts_after_ten_consecutive_stops() {
+        // 10-round safety net: missing-schema gate keeps following up
+        // through used=9 (so 10 followup injections land) and only
+        // fail-fasts at used=10.
+        let still_followup = evaluate_stop_schema_gate("普通停止文本", 9, 10);
         assert_eq!(still_followup.action, StopSchemaGateAction::Followup);
         assert_eq!(still_followup.reason_code, "stop_schema_missing");
         assert!(still_followup.count_budget);
 
-        let exhausted = evaluate_stop_schema_gate("普通停止文本", 2, 3);
+        let exhausted = evaluate_stop_schema_gate("普通停止文本", 10, 10);
         assert_eq!(exhausted.action, StopSchemaGateAction::FailFast);
         assert_eq!(exhausted.reason_code, "stop_schema_budget_exhausted");
         assert!(exhausted.count_budget);
     }
 
     #[test]
-    fn stop_schema_invalid_exhausts_budget_but_valid_stop_does_not() {
-        let invalid = evaluate_stop_schema_gate(
+    fn stop_schema_provided_exhausts_after_three_consecutive_stops() {
+        // Strict 3-round budget for the provided-schema path: at used=2
+        // still followup (3rd followup injection lands), at used=3
+        // fail-fast (no more followup, stop must commit).
+        let still_followup = evaluate_stop_schema_gate(
             r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
             2,
+            3,
+        );
+        assert_eq!(still_followup.action, StopSchemaGateAction::Followup);
+        assert!(still_followup.count_budget);
+
+        let exhausted = evaluate_stop_schema_gate(
+            r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
+            3,
+            3,
+        );
+        assert_eq!(exhausted.action, StopSchemaGateAction::FailFast);
+        assert_eq!(exhausted.reason_code, "stop_schema_budget_exhausted");
+    }
+
+    #[test]
+    fn stop_schema_invalid_exhausts_budget_but_valid_stop_does_not() {
+        // cap=3: used=2 still followup, used=3 fail-fast.
+        let invalid = evaluate_stop_schema_gate(
+            r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
+            3,
             3,
         );
         assert_eq!(invalid.action, StopSchemaGateAction::FailFast);

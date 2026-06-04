@@ -895,15 +895,30 @@ const handler: ServerToolHandler = async (
     const usedAt = Date.now();
     const stateUpdate = handlerResult.stateUpdate || {};
     const shouldCountBudget = schemaGate.count_budget !== false;
-    const schemaBudgetMaxRepeats = Math.max(
-      1,
-      Math.min(
-        STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS,
-        typeof decision.max_repeats === 'number' && Number.isFinite(decision.max_repeats)
+    // The schema gate in Rust already enforces the per-path budget
+    // (3 rounds for provided schema, 10 rounds for missing schema) via
+    // `stop_schema_*_max_repeats`. The TS side must mirror that decision
+    // so the persisted `stopMessageMaxRepeats` reflects the *actual* cap
+    // the gate used, not a separate hard-coded constant. The gate's
+    // `max_repeats` is the source of truth — fall back to the snapshot's
+    // `decision.max_repeats` only if the gate didn't report one (e.g.
+    // allow_stop path).
+    const gateMaxRepeats = typeof schemaGate.max_repeats === 'number' && Number.isFinite(schemaGate.max_repeats)
+      ? Math.floor(schemaGate.max_repeats)
+      : 0;
+    const resolvedMaxRepeats = gateMaxRepeats > 0
+      ? gateMaxRepeats
+      : (typeof decision.max_repeats === 'number' && Number.isFinite(decision.max_repeats)
           ? Math.floor(decision.max_repeats)
-          : STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS
-      )
-    );
+          : 0);
+    const schemaBudgetMaxRepeats = Math.max(1, resolvedMaxRepeats);
+    // The compare context captures the *actual* gate cap so logs and
+    // samples show the real remaining budget (10 for missing schema,
+    // 3 for provided schema) instead of the snapshot's prior round value.
+    compare.maxRepeats = schemaBudgetMaxRepeats;
+    compare.remaining = schemaBudgetMaxRepeats > decision.used
+      ? schemaBudgetMaxRepeats - decision.used
+      : 0;
     const nextMaxRepeats = shouldCountBudget
       ? schemaBudgetMaxRepeats
       : decision.max_repeats;
