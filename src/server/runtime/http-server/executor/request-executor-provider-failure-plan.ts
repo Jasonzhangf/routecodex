@@ -23,6 +23,9 @@ import {
 import {
   resolveRequestExecutorProviderErrorClassification
 } from './request-executor-provider-failure.js';
+import {
+  shouldSuppressForcedProviderExclusion
+} from '../../../../providers/core/runtime/provider-failure-policy.js';
 
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
@@ -73,10 +76,10 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     retryError: args.retryError,
     stage: reportPlan.stageHint as RequestExecutorProviderErrorStage
   });
-  const suppressForceExclude =
-    classification === 'special_400'
-    || reportPlan.stageHint === 'host.response_contract'
-    || reportPlan.stageHint === 'provider.followup';
+  const suppressForceExclude = shouldSuppressForcedProviderExclusion({
+    classification,
+    stage: reportPlan.stageHint
+  });
   const forceExcludeCurrentProviderOnRetry =
     suppressForceExclude
       ? false
