@@ -260,11 +260,8 @@ export function resolveProviderFailureClassification(args: {
   if (args.stage === 'provider.followup' || isHostFailureStage(args.stage)) {
     return undefined;
   }
-  if (args.rateLimitKind === 'daily_limit') {
-    return 'unrecoverable';
-  }
-  if (args.rateLimitKind === 'synthetic_cooldown') {
-    return 'recoverable';
+  if (args.rateLimitKind === 'daily_limit' || args.rateLimitKind === 'synthetic_cooldown') {
+    return 'periodic_recovery';
   }
   if (isProviderFailureClientDisconnect(args.error)) {
     return 'unrecoverable';
@@ -496,7 +493,12 @@ export function resolveProviderFailureClassification(args: {
     const nativeMod = loadNativeFailurePolicyBridge();
     if (nativeMod?.classifyProviderFailure) {
       const nativeResult = nativeMod.classifyProviderFailure(statusCode, errorCode, upstreamCode, isNetworkError);
-      if (nativeResult === 'unrecoverable' || nativeResult === 'recoverable' || nativeResult === 'special_400') {
+      if (
+        nativeResult === 'unrecoverable'
+        || nativeResult === 'recoverable'
+        || nativeResult === 'special_400'
+        || nativeResult === 'periodic_recovery'
+      ) {
         return nativeResult;
       }
     }
@@ -562,6 +564,7 @@ export function classify_error_err_03_runtime_from_error_err_02_host(
       captured.errorClassification === 'recoverable'
         || captured.errorClassification === 'unrecoverable'
         || captured.errorClassification === 'special_400'
+        || captured.errorClassification === 'periodic_recovery'
         ? captured.errorClassification
         : undefined,
     rateLimitKind:

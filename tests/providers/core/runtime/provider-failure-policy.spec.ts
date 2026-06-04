@@ -90,6 +90,68 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('classifies quota cooldown windows as periodic recovery without changing short-lived 429 recovery', () => {
+    const dailyLimitError = Object.assign(new Error('weekly quota exhausted'), {
+      code: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+      statusCode: 429,
+      rateLimitKind: 'daily_limit'
+    });
+    const syntheticCooldownError = Object.assign(new Error('provider account pool cooling down'), {
+      code: 'WINDSURF_ACCOUNT_POOL_COOLDOWN',
+      statusCode: 429,
+      rateLimitKind: 'synthetic_cooldown'
+    });
+    const shortLivedError = Object.assign(new Error('HTTP 429: saturated'), {
+      code: 'HTTP_429',
+      statusCode: 429,
+      rateLimitKind: 'short_lived'
+    });
+
+    expect(resolveProviderFailureClassification({
+      error: dailyLimitError,
+      stage: 'provider.send',
+      statusCode: 429,
+      errorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+      reason: 'weekly quota exhausted',
+      rateLimitKind: 'daily_limit'
+    })).toBe('periodic_recovery');
+
+    expect(resolveProviderFailureClassification({
+      error: syntheticCooldownError,
+      stage: 'provider.send',
+      statusCode: 429,
+      errorCode: 'WINDSURF_ACCOUNT_POOL_COOLDOWN',
+      reason: 'provider account pool cooling down',
+      rateLimitKind: 'synthetic_cooldown'
+    })).toBe('periodic_recovery');
+
+    expect(resolveProviderFailureClassification({
+      error: shortLivedError,
+      stage: 'provider.send',
+      statusCode: 429,
+      errorCode: 'HTTP_429',
+      reason: 'HTTP 429: saturated',
+      rateLimitKind: 'short_lived'
+    })).toBe('recoverable');
+
+    expect(resolveProviderFailureActionPlan({
+      error: dailyLimitError,
+      stage: 'provider.send',
+      statusCode: 429,
+      errorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+      reason: 'weekly quota exhausted',
+      rateLimitKind: 'daily_limit',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'periodic_recovery',
+      affectsHealth: true,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return'
+    }));
+  });
+
   it('classifies DeepSeek file upload failure as unrecoverable direct-return', () => {
     const error = Object.assign(new Error('DeepSeek file upload returned non-JSON payload'), {
       code: 'DEEPSEEK_FILE_UPLOAD_FAILED',

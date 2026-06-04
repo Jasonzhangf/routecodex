@@ -20,7 +20,8 @@ export {
 export type ProviderFailureClassification =
   | 'unrecoverable'
   | 'recoverable'
-  | 'special_400';
+  | 'special_400'
+  | 'periodic_recovery';
 
 export type ProviderFailureRateLimitKind =
   | 'synthetic_cooldown'
