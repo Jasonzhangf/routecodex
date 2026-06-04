@@ -1872,3 +1872,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ## 2026-06-04 请求字段等价精华
 - `Responses -> Chat -> Responses` 投影禁止从 `ctx.parameters`、`ctx.metadata.parameters`、`ctx.metadata`、`ctx.toolsRaw` 或 context tool controls 补 live request 字段；这些只能作为 response-only/session/debug carrier，不能进入 ReqOutbound/ProviderReqOutbound。
 - 审计请求字段等价时，不能只看 no-leak guard。必须同时跑跨协议矩阵红测，确认同一语义只从 ChatProcess/Chat 源字段进入 provider request。
+
+### 2026-06-04 ErrorPolicyCenter 唯一链路精华
+- 错误策略中心不是 `ErrorHandlingCenter`；它只允许做 HTTP/server/client projection。provider/runtime/direct/executor 错误必须进 `ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`。
+- 分类先行：`recoverable | unrecoverable | special_400 | periodic_recovery`；retry/reroute/cooldown/fail 只能由唯一 policy decision 驱动。审计时先扫旧节点名与第二套 `recoverable/affectsHealth/shouldRetry/cooldown/reroute` 决策点。

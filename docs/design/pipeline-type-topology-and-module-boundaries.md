@@ -287,7 +287,7 @@ ErrorErr01SourceRaised
 |---|---|---|---|---|
 | `ErrorErr01SourceRaised` | throw/error result | source error fact | 记录发生点、stage、provider/runtime context | 直接 retry/fallback |
 | `ErrorErr02HostCaptured` | source error | provider error event carrier | Host 侧唯一组装 provider error event | 调用点手拼 event |
-| `ErrorErr03RuntimeClassified` | captured event | recoverable/unrecoverable/special_400 | runtime/catalog 唯一分类 | message-only 分叉 |
+| `ErrorErr03RuntimeClassified` | captured event | recoverable/unrecoverable/special_400/periodic_recovery | runtime/catalog 唯一分类 | message-only 分叉 |
 | `ErrorErr04RouterPolicyApplied` | classified event | Router policy state/event | VR/Rust 唯一写 health/cooldown/reroute policy | direct/executor 自写 health |
 | `ErrorErr05ExecutionDecision` | router policy result | retry/reroute/fail execution decision | 执行层只消费 policy decision | 重新分类或本地 cooldown |
 | `ErrorErr06ClientProjected` | final failure | client error response | client-safe 错误投影 | secret/metadata/snapshot 泄漏 |
@@ -374,10 +374,11 @@ MetaReq01EntryCaptured
 - 目标目录：`src/providers/core/runtime/`、`src/server/runtime/http-server/executor/`、`src/server/utils/`。
 - 类型模板：
   - `ErrorErr01SourceRaised`
-  - `ErrorErr02CatalogNormalized`
-  - `ErrorErr03PolicyClassified`
-  - `ErrorErr04RetryOrFailPlanned`
-  - `ErrorErr05ClientProjected`
+  - `ErrorErr02HostCaptured`
+  - `ErrorErr03RuntimeClassified`
+  - `ErrorErr04RouterPolicyApplied`
+  - `ErrorErr05ExecutionDecision`
+  - `ErrorErr06ClientProjected`
 - 禁止：错误对象回流成 request payload；禁止 message-only retry/failure branch。
 
 ## 8. 中间插节点规则

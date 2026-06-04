@@ -8,7 +8,7 @@
 2. 每个错误节点只能有一个 owning module；其它模块只能调用 owning module，不得重新实现同义逻辑。
 3. provider/runtime/send/convert/direct/followup 错误都必须进入统一错误链；`router-direct` 不是错误处理旁路。
 4. `RequestExecutor`、`router-direct-pipeline`、provider runtime 只能做 error source/caller；不得自己定义 retry/reroute/cooldown/health 语义。
-5. `ErrorHandlingCenter` 只负责 HTTP/server/client-facing projection；不得参与 provider policy。
+5. `ErrorHandlingCenter` 只负责 HTTP/server/client-facing projection；不得参与 provider policy，也不得承载 recoverable / cooldown / reroute 决策。
 6. 错误不是 fallback：错误链可以产生 retry/reroute/cooldown decision，但不能吞错成成功 truth。
 
 ## 2. 标准错误链
@@ -26,10 +26,10 @@ ErrorErr01SourceRaised
 |---|---|---|---|
 | `ErrorErr01SourceRaised` | 源头只产生原始 error + stage marker | provider runtime / direct / executor source | 源头自行判定 retry/cooldown |
 | `ErrorErr02HostCaptured` | 组装 provider error event carrier | `src/providers/core/utils/provider-error-reporter.ts` | 各调用点手拼 event / 多套 marker |
-| `ErrorErr03RuntimeClassified` | 归一 code/status/classification | `src/providers/core/runtime/provider-error-catalog.ts` + `provider-failure-policy*` | message-only 分叉、局部分类器 |
+| `ErrorErr03RuntimeClassified` | 归一 code/status/classification（`recoverable | unrecoverable | special_400 | periodic_recovery`） | `src/providers/core/runtime/provider-error-catalog.ts` + `provider-failure-policy*` | message-only 分叉、局部分类器 |
 | `ErrorErr04RouterPolicyApplied` | 写入 VR health/quota/cooldown/policy state | `sharedmodule/.../virtual_router_engine/engine/events.rs` + `health.rs` | executor/direct 自己维护 provider health |
 | `ErrorErr05ExecutionDecision` | 消费 router policy 输出并执行 retry/reroute/fail | `RequestExecutor` / future direct consumer | 自己重新决策 provider 池切换 |
-| `ErrorErr06ClientProjected` | 投影 HTTP/client 错误响应 | handler response utils / ErrorHandlingCenter | 回写 provider policy / 修补请求 payload |
+| `ErrorErr06ClientProjected` | 投影 HTTP/client 错误响应 | handler response utils / ErrorHandlingCenter | 回写 provider policy / 修补请求 payload / 反推分类 |
 
 ## 3. 当前已存在的错误入口
 

@@ -48,19 +48,21 @@
 - 记录 telemetry
 
 但不允许再独立决定：
-- recoverable / unrecoverable
+- recoverable / unrecoverable / special_400 / periodic_recovery
 - affectsHealth
 - should exclude current provider
 - should reroute
 
 否则它就不是 orchestration shell，而是第二个 policy center。
 
-### 4. recoverable 与 unrecoverable 是第一分叉，不是附属字段
-全局先问：**错误是否可恢复**。
+### 4. classification 是第一分叉，不是附属字段
+全局先问：**错误属于哪一类**。
 
 然后再决定：
 - unrecoverable → 直接返回
+- special_400 → 直接投影 4xx，不进入 provider retry/reroute
 - recoverable → 阻塞 + 指数 backoff
+- periodic_recovery → 进入 quota/cooldown/VR health 周期恢复链
 
 禁止先做“切 provider 试试”，再回头补 recoverable 判定。
 
@@ -113,7 +115,7 @@ provider/runtime/send/convert error
 新增唯一策略块：`ProviderFailurePolicy`
 
 它是唯一允许回答以下问题的地方：
-1. `classification`: `special_400 | recoverable | unrecoverable`
+1. `classification`: `special_400 | recoverable | unrecoverable | periodic_recovery`
 2. `affectsHealth`: `true | false`
 3. `action`:
    - `direct_return`
