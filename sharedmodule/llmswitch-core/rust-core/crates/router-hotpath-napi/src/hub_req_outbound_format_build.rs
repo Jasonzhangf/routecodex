@@ -51,20 +51,37 @@ fn strip_private_fields(value: &Value) -> Value {
     }
 }
 
-fn chat_content_to_responses_content(content: &Value) -> Value {
+fn normalize_responses_content_part_for_role(part: &Value, role: &str) -> Value {
+    let mut normalized = strip_private_fields(part);
+    let is_assistant = role.eq_ignore_ascii_case("assistant");
+    if let Some(row) = normalized.as_object_mut() {
+        let part_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim();
+        if is_assistant && (part_type.is_empty() || part_type == "input_text") {
+            row.insert("type".to_string(), Value::String("output_text".to_string()));
+        }
+    }
+    normalized
+}
+
+fn chat_content_to_responses_content(content: &Value, role: &str) -> Value {
+    let text_type = if role.eq_ignore_ascii_case("assistant") {
+        "output_text"
+    } else {
+        "input_text"
+    };
     match content {
         Value::String(text) => Value::Array(vec![serde_json::json!({
-            "type": "input_text",
+            "type": text_type,
             "text": text
         })]),
         Value::Array(items) => Value::Array(
             items
                 .iter()
-                .map(strip_private_fields)
+                .map(|part| normalize_responses_content_part_for_role(part, role))
                 .collect::<Vec<Value>>(),
         ),
         Value::Null => Value::Array(Vec::new()),
-        other => Value::Array(vec![strip_private_fields(other)]),
+        other => Value::Array(vec![normalize_responses_content_part_for_role(other, role)]),
     }
 }
 
@@ -163,7 +180,7 @@ fn build_responses_input_from_chat_messages(messages: &[Value]) -> Value {
                 }
                 let content = row
                     .get("content")
-                    .map(chat_content_to_responses_content)
+                    .map(|content| chat_content_to_responses_content(content, role))
                     .unwrap_or_else(|| Value::Array(Vec::new()));
                 vec![Value::Object(Map::from_iter([
                     ("type".to_string(), Value::String("message".to_string())),
@@ -373,6 +390,32 @@ mod tests {
             "input_text"
         );
         assert_eq!(result.payload["input"][0]["content"][0]["text"], "hello");
+    }
+
+    #[test]
+    fn test_build_openai_responses_request_encodes_assistant_history_as_output_text() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-chat",
+                "version": "v1",
+                "payload": {
+                    "model": "gpt-4",
+                    "messages": [
+                        {"role": "user", "content": "start"},
+                        {"role": "assistant", "content": "assistant history"},
+                        {"role": "assistant", "content": [{"type": "input_text", "text": "legacy assistant history"}]}
+                    ]
+                }
+            }),
+            protocol: "openai-responses".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        assert_eq!(result.payload["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(result.payload["input"][1]["role"], "assistant");
+        assert_eq!(result.payload["input"][1]["content"][0]["type"], "output_text");
+        assert_eq!(result.payload["input"][2]["role"], "assistant");
+        assert_eq!(result.payload["input"][2]["content"][0]["type"], "output_text");
     }
 
     #[test]
