@@ -107,10 +107,8 @@ export function createClientDisconnectWatcher(options: {
         return;
       }
       timer = setTimeout(check, interval);
-      timer.unref?.();
     };
     timer = setTimeout(check, interval);
-    timer.unref?.();
   });
   return { promise, cancel };
 }

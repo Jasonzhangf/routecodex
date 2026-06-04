@@ -43,11 +43,22 @@ export function resolveClientAbortSignalFromCarriers(
 
 export function throwIfClientCarrierAborted(...sources: unknown[]): void {
   const signal = resolveClientAbortSignalFromCarriers(...sources);
-  if (!signal?.aborted) {
-    return;
+  if (signal?.aborted) {
+    const reason = (signal as { reason?: unknown }).reason;
+    throw reason instanceof Error ? reason : createClientDisconnectedAbortError(reason);
   }
-  const reason = (signal as { reason?: unknown }).reason;
-  throw reason instanceof Error ? reason : createClientDisconnectedAbortError(reason);
+  for (const source of sources) {
+    if (isRecord(source)) {
+      const direct = source as { disconnected?: unknown; clientDisconnected?: unknown };
+      if (direct.disconnected === true || direct.clientDisconnected === true) {
+        throw createClientDisconnectedAbortError('CLIENT_DISCONNECTED');
+      }
+      const state = source.clientConnectionState;
+      if (isRecord(state) && (state as { disconnected?: unknown }).disconnected === true) {
+        throw createClientDisconnectedAbortError('CLIENT_DISCONNECTED');
+      }
+    }
+  }
 }
 
 export function preserveLiveClientAbortCarriers(args: {

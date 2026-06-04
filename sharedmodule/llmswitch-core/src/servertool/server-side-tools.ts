@@ -65,12 +65,13 @@ export async function runServerSideToolEngine(
     return { mode: 'passthrough', finalChatResponse: options.chatResponse };
   }
 
-  const toolCalls = extractToolCalls(base, options.requestId);
-  if (isClientDisconnected(options.adapterContext) && toolCalls.length > 0) {
-    // When client is already disconnected, skip executing explicit tool_call servertools.
-    // Auto hooks (e.g. stop_message_auto) still need to run to keep session state consistent.
-    return { mode: 'passthrough', finalChatResponse: base };
+  if (isClientDisconnected(options.adapterContext)) {
+    throw Object.assign(new Error('[servertool] client disconnected before servertool execution'), {
+      code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+      details: { requestId: options.requestId }
+    });
   }
+  const toolCalls = extractToolCalls(base, options.requestId);
   const contextBase: Omit<ServerToolHandlerContext, 'toolCall'> = {
     base,
     toolCalls,

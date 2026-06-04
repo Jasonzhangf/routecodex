@@ -87,6 +87,7 @@ async function evaluateGoalActiveStopLoopGuard(args: {
 const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTECODEX_STOPMESSAGE_DEBUG || '').trim() === '1';
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
 const FLOW_ID = 'stop_message_flow';
+const STOP_SCHEMA_REJECTION_MAX_REPEATS = 5;
 const STOP_MESSAGE_EXECUTION_APPEND = '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。';
 
 function extractCurrentAssistantStopText(payload: unknown): string {
@@ -776,12 +777,15 @@ const handler: ServerToolHandler = async (
     const usedAt = Date.now();
     const stateUpdate = handlerResult.stateUpdate || {};
     const shouldCountBudget = schemaGate.count_budget !== false;
+    const nextMaxRepeats = shouldCountBudget
+      ? Math.max(decision.max_repeats, STOP_SCHEMA_REJECTION_MAX_REPEATS)
+      : decision.max_repeats;
     const nextUsed = shouldCountBudget
       ? (typeof stateUpdate.used === 'number' ? stateUpdate.used : decision.used + 1)
       : decision.used;
     const snapInput = {
       text: String(stateUpdate.text ?? STOP_MESSAGE_EXECUTION_APPEND),
-      maxRepeats: typeof stateUpdate.maxRepeats === 'number' ? stateUpdate.maxRepeats : decision.max_repeats,
+      maxRepeats: typeof stateUpdate.maxRepeats === 'number' ? Math.max(stateUpdate.maxRepeats, nextMaxRepeats) : nextMaxRepeats,
       used: nextUsed,
       source: typeof stateUpdate.source === 'string' ? stateUpdate.source : 'default',
       stageMode: typeof stateUpdate.stageMode === 'string' ? stateUpdate.stageMode as any : 'on' as any,

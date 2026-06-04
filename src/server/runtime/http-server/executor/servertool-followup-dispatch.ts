@@ -866,6 +866,7 @@ export async function executeServerToolReenterPipeline(args: {
         abortSignal: getNestedFollowupAbortSignal(
           nestedInputAttempt.metadata as Record<string, unknown> | undefined
         ),
+        abortCarrier: nestedInputAttempt.metadata,
         timeoutMs: resolveServerToolNestedFollowupTimeoutMs(),
         requestId: args.requestId
       });
@@ -894,6 +895,7 @@ export async function executeServerToolReenterPipeline(args: {
       await awaitNestedExecutionWithFailFast({
         promise: sleep(backoffMs),
         abortSignal: getNestedFollowupAbortSignal(nestedInput.metadata),
+        abortCarrier: nestedInput.metadata,
         timeoutMs: resolveServerToolNestedFollowupTimeoutMs(),
         requestId: args.requestId
       });

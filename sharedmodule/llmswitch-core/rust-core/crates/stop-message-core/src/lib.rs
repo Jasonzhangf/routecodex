@@ -7,10 +7,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const LEGACY_DEFAULT_TEXT: &str = "继续执行";
+const STOP_SCHEMA_REJECTION_MAX_REPEATS: u32 = 5;
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
-    "停止前先核对六件事：1) 目标：当前用户目标是什么，是否逐项完成；2) 过程：你实际做过哪些操作/检查/验证，哪些还没做；3) 证据：完成或阻塞的证据在哪里；4) 问题原因：若出现异常，最可能原因是什么，依据是什么；5) 已排除因素：你已经排除了哪些可能原因，证据是什么；6) 排查顺序：下一步应按什么顺序继续排查。若任一项缺证据，禁止总结或停下，必须调用可用工具按排查顺序继续执行到有证据。只有目标已完成或确实阻塞时，才输出最终结果并给出证据。",
-    "你刚才再次停止。请重新核对：目标是否真的完成？过程是否覆盖用户要求的每一项？证据是否能被日志、文件、命令结果或测试结果验证？异常原因是否已定位？哪些因素已被证据排除？排查顺序是否合理且已执行到当前最小下一步？如果答案不是全部明确，禁止继续总结，必须调用工具按排查顺序补齐缺口；如果确实完成/阻塞，必须说明目标、过程、证据、问题原因、已排除因素、排查顺序，并在 stop schema 的 learned 字段写出过去 turns 学到的可复用结论；没有则填空字符串。",
-    "最后一次续杯预算。停止必须同时满足：目标逐项完成或明确阻塞；过程已说明关键操作与验证；证据可核验且对应目标；异常原因有依据；已排除因素有证据；排查顺序清晰且已执行到最小下一步。缺任何一项都不允许停，必须立即调用工具继续执行最小下一步。禁止空泛总结、道歉、计划或无证据停止。",
+    "停止前先核对六件事：1) 目标：当前用户目标是什么，是否逐项完成；2) 过程：你实际做过哪些操作/检查/验证，哪些还没做；3) 证据：完成或阻塞的证据在哪里；4) 问题原因：若出现异常，最可能原因是什么，依据是什么；5) 已排除因素：你已经排除了哪些可能原因，证据是什么；6) 排查顺序：下一步应按什么顺序继续排查。若任一项缺文件、日志、命令输出或测试证据，禁止总结、道歉、解释工具被拒或停下；必须在本轮直接发出工具调用执行最小下一步（优先 exec_command 读取/验证/测试）。只有目标已完成或确实阻塞时，才输出最终结果并给出证据。",
+    "你刚才再次停止。请重新核对：目标是否真的完成？过程是否覆盖用户要求的每一项？证据是否能被日志、文件、命令结果或测试结果验证？异常原因是否已定位？哪些因素已被证据排除？排查顺序是否合理且已执行到当前最小下一步？如果答案不是全部明确，禁止继续总结、复述阻塞、声称工具被拒；必须在本轮直接发出工具调用按排查顺序补齐缺口（优先 exec_command）。如果确实完成/阻塞，必须说明目标、过程、证据、问题原因、已排除因素、排查顺序，并在 stop schema 的 learned 字段写出过去 turns 学到的可复用结论；没有则填空字符串。",
+    "最后一次续杯预算。停止必须同时满足：目标逐项完成或明确阻塞；过程已说明关键操作与验证；证据可核验且对应目标；异常原因有依据；已排除因素有证据；排查顺序清晰且已执行到最小下一步。缺任何一项都不允许停；禁止空泛总结、道歉、计划、复述工具被拒或无证据停止，必须在本轮直接发出工具调用继续执行最小下一步。",
 ];
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -306,12 +307,11 @@ pub fn evaluate_stop_schema_gate(
     let parsed = match parse_stop_schema(assistant_text) {
         Some(parsed) => parsed,
         None => {
-            return schema_followup(
+            return schema_missing_followup(
                 "stop_schema_missing",
                 used,
-                "你刚才试图停止，但没有提供 stop schema。先核对目标、过程、证据、问题原因、已排除因素、排查顺序：目标是否逐项完成？过程是否覆盖要求？证据是否可核验？异常原因是否有依据？哪些因素已被排除？下一步排查顺序是什么？现在必须二选一：1) 若完成或阻塞，立即给出 stop schema：stopreason(数字：0=finished,1=blocked)、reason(具体原因)、has_evidence(数字0/1)、evidence(可核验证据)、issue_cause(问题原因；没有异常则空字符串)、excluded_factors(已排除因素；没有则空字符串)、diagnostic_order(排查顺序/已执行顺序)、next_step(后续动作或空)、learned(过去 turns 学到的可复用事实/踩坑/配置结论；没有则空字符串)；2) 若任一项没有证据，不准总结，必须立刻调用工具按排查顺序继续执行当前目标。",
-                None,
-                false,
+                max_repeats,
+                "你刚才试图停止，但没有提供 stop schema。先核对目标、过程、证据、问题原因、已排除因素、排查顺序：目标是否逐项完成？过程是否覆盖要求？证据是否可核验？异常原因是否有依据？哪些因素已被排除？下一步排查顺序是什么？现在必须二选一：1) 若完成或阻塞，立即给出 stop schema：stopreason(数字：0=finished,1=blocked)、reason(具体原因)、has_evidence(数字0/1)、evidence(可核验证据)、issue_cause(问题原因；没有异常则空字符串)、excluded_factors(已排除因素；没有则空字符串)、diagnostic_order(排查顺序/已执行顺序)、next_step(后续动作或空)、learned(过去 turns 学到的可复用事实/踩坑/配置结论；没有则空字符串)；2) 若任一项没有文件/日志/命令输出/测试证据，不准总结、道歉、解释工具被拒或复述计划，必须在本轮直接发出工具调用继续执行当前目标；需要读文件/验证/测试时优先调用 exec_command。",
             );
         }
     };
@@ -569,7 +569,8 @@ fn schema_invalid_followup(
     message: &str,
     parsed: StopSchemaParsed,
 ) -> StopSchemaGateDecision {
-    if max_repeats > 0 && used >= max_repeats {
+    let rejection_max = stop_schema_rejection_max_repeats(max_repeats);
+    if rejection_max > 0 && used >= rejection_max {
         return StopSchemaGateDecision {
             action: StopSchemaGateAction::FailFast,
             reason_code: "stop_schema_budget_exhausted".to_string(),
@@ -580,6 +581,30 @@ fn schema_invalid_followup(
         };
     }
     schema_followup(reason_code, used, message, Some(parsed), true)
+}
+
+fn schema_missing_followup(
+    reason_code: &str,
+    used: u32,
+    max_repeats: u32,
+    message: &str,
+) -> StopSchemaGateDecision {
+    let rejection_max = stop_schema_rejection_max_repeats(max_repeats);
+    if rejection_max > 0 && used >= rejection_max {
+        return StopSchemaGateDecision {
+            action: StopSchemaGateAction::FailFast,
+            reason_code: "stop_schema_budget_exhausted".to_string(),
+            summary_prefix: None,
+            followup_text: None,
+            count_budget: true,
+            parsed: None,
+        };
+    }
+    schema_followup(reason_code, used, message, None, true)
+}
+
+fn stop_schema_rejection_max_repeats(max_repeats: u32) -> u32 {
+    max_repeats.max(STOP_SCHEMA_REJECTION_MAX_REPEATS)
 }
 
 fn schema_followup(
@@ -624,11 +649,16 @@ fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
 }
 
 fn read_u8(value: Option<&Value>) -> Option<u8> {
-    value.and_then(|v| v.as_u64()).and_then(|v| {
-        if v <= u8::MAX as u64 {
-            Some(v as u8)
-        } else {
-            None
+    value.and_then(|v| {
+        if let Some(n) = v.as_u64() {
+            return if n <= u8::MAX as u64 { Some(n as u8) } else { None };
+        }
+        let text = v.as_str()?.trim().to_lowercase();
+        match text.as_str() {
+            "0" | "finished" | "finish" | "done" => Some(0),
+            "1" | "blocked" | "block" => Some(1),
+            "2" | "continue" | "continue_needed" | "next" => Some(2),
+            _ => None,
         }
     })
 }
@@ -1323,7 +1353,12 @@ mod tests {
         assert_eq!(missing.action, StopSchemaGateAction::Followup);
         assert_eq!(missing.reason_code, "stop_schema_missing");
         assert!(!missing.count_budget);
-        assert!(!missing.followup_text.unwrap().contains("质询"));
+        let missing_text = missing.followup_text.unwrap();
+        assert!(!missing_text.contains("质询"));
+        assert!(missing_text.contains("直接发出工具调用"));
+        assert!(missing_text.contains("优先调用 exec_command"));
+        assert!(missing_text.contains("不准总结"));
+        assert!(missing_text.contains("解释工具被拒"));
 
         let invalid = evaluate_stop_schema_gate(
             r#"{"stopreason":"finished","reason":"done","has_evidence":1,"next_step":""}"#,

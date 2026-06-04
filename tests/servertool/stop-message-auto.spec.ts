@@ -579,10 +579,10 @@ describe('stop_message_auto servertool', () => {
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
       resolveStopStatePath(sessionId),
-      (data) => data?.state?.stopMessageUsed === 0 && typeof data?.state?.stopMessageLastUsedAt === 'number'
+      (data) => data?.state?.stopMessageUsed === 1 && typeof data?.state?.stopMessageLastUsedAt === 'number'
     );
     // llmswitch-core main: stopMessage usage counter increments as soon as we decide to trigger followup.
-    expect(persisted?.state?.stopMessageUsed).toBe(0);
+    expect(persisted?.state?.stopMessageUsed).toBe(1);
     expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
   });
 
@@ -725,7 +725,7 @@ describe('stop_message_auto servertool', () => {
     expect(JSON.stringify(followupBody)).toContain('继续执行');
   });
 
-  test('missing stop schema followup preserves schema budget at current used count', async () => {
+  test('missing stop schema followup increments schema rejection budget', async () => {
     const sessionId = 'stopmessage-spec-session-missing-schema-budget';
     writeRoutingStateForSession(sessionId, {
       forcedTarget: undefined,
@@ -769,8 +769,8 @@ describe('stop_message_auto servertool', () => {
 
     expect(result.executed).toBe(true);
     expect((followupRuntime?.serverToolLoopState as any)?.repeatCount).toBe(1);
-    expect((followupRuntime?.stopMessageState as any)?.stopMessageUsed).toBe(0);
-    expect(resolveRuntimeStopMessageState(followupRuntime)?.used).toBe(0);
+    expect((followupRuntime?.stopMessageState as any)?.stopMessageUsed).toBe(1);
+    expect(resolveRuntimeStopMessageState(followupRuntime)?.used).toBe(1);
   });
 
   test('ai followup prompt requires stop schema when asking for summary', () => {
@@ -2440,7 +2440,7 @@ describe('stop_message_auto servertool', () => {
     const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number } }>(
       resolveStopStatePath(sessionId),
     );
-    expect(persisted?.state?.stopMessageUsed).toBe(0);
+    expect(persisted?.state?.stopMessageUsed).toBe(1);
   });
 
   test('maps stop_message_flow loop state into runtime stop snapshot on followup hops', () => {
@@ -2813,7 +2813,7 @@ describe('stop_message_auto servertool', () => {
     expect(inputText).toContain('继续执行');
   });
 
-  test('still arms stopMessage followup when client is already disconnected', async () => {
+  test('does not arm stopMessage followup when client is already disconnected', async () => {
     const sessionId = 'stopmessage-spec-session-disconnected';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2862,24 +2862,16 @@ describe('stop_message_auto servertool', () => {
       clientConnectionState: { disconnected: true }
     } as any;
 
-    const result = await runServerSideToolEngine({
+    await expect(runServerSideToolEngine({
       chatResponse,
       adapterContext,
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-stopmessage-2',
       providerProtocol: 'openai-chat'
-    });
-
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('stop_message_flow');
-    const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
-      resolveStopStatePath(sessionId),
-      (data) => data?.state?.stopMessageUsed === 0 && typeof data?.state?.stopMessageLastUsedAt === 'number'
-    );
-    expect(persisted?.state?.stopMessageUsed).toBe(0);
+    })).rejects.toThrow(/client disconnected/i);
   });
 
-  test('emits stop compare context even when client is already disconnected', async () => {
+  test('does not run stop compare when client is already disconnected', async () => {
     const sessionId = 'stopmessage-spec-session-disconnected-compare';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2928,25 +2920,18 @@ describe('stop_message_auto servertool', () => {
       }
     } as any;
 
-    const result = await runServerToolOrchestration({
+    await expect(runServerToolOrchestration({
       chat: chatResponse,
       adapterContext,
       requestId: 'req-stopmessage-disconnected-compare',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       stageRecorder
-    });
-
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe('stop_message_flow');
-    const compare = records.find((entry) => entry.stage === 'servertool.stop_compare')?.payload as any;
-    expect(compare).toBeDefined();
-    expect(typeof compare?.summary).toBe('string');
-    expect(String(compare?.summary)).not.toContain('no_context');
-    expect(compare?.compare?.reason).toBe('stop_schema_missing');
+    })).rejects.toThrow(/client disconnected/i);
+    expect(records.find((entry) => entry.stage === 'servertool.stop_compare')).toBeUndefined();
   });
 
-  test('stops waiting followup when client disconnects during reenter', async () => {
+  test('aborts waiting followup when client disconnects during reenter', async () => {
     const sessionId = 'stopmessage-spec-session-disconnect-during-followup';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2999,9 +2984,10 @@ describe('stop_message_auto servertool', () => {
     let reenterCalls = 0;
     setTimeout(() => {
       connectionState.disconnected = true;
+      (adapterContext as any).clientDisconnected = true;
     }, 30);
 
-    const orchestration = await runServerToolOrchestration({
+    await expect(runServerToolOrchestration({
       chat: chatResponse,
       adapterContext,
       requestId: 'req-stopmessage-disconnect-during-followup',
@@ -3019,12 +3005,9 @@ describe('stop_message_auto servertool', () => {
           } as JsonObject
         };
       }
-    });
+    })).rejects.toThrow(/client disconnected|CLIENT_DISCONNECTED|CLIENT_RESPONSE_CLOSED|CLIENT_REQUEST_ABORTED|CLIENT_TIMEOUT_HINT_EXPIRED/i);
 
     expect(reenterCalls).toBe(1);
-    expect(orchestration.executed).toBe(true);
-    expect(orchestration.flowId).toBe('stop_message_flow');
-    expect((orchestration.chat as any)?.choices?.[0]?.message?.content).toBe('done');
   });
 
   test('stop followup never uses client injection even when client inject is ready', async () => {
@@ -4143,7 +4126,7 @@ describe('stop_message_auto servertool', () => {
       expect(first.mode).toBe('tool_flow');
       await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
         resolveStopStatePath(sessionId),
-        (data) => data?.state?.stopMessageUsed === 0
+        (data) => data?.state?.stopMessageUsed === 1
       );
 
       const second = await runServerSideToolEngine({
@@ -4156,7 +4139,7 @@ describe('stop_message_auto servertool', () => {
       expect(second.mode).toBe('tool_flow');
       await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
         resolveStopStatePath(sessionId),
-        (data) => data?.state?.stopMessageUsed === 0
+        (data) => data?.state?.stopMessageUsed === 2
       );
 
       const third = await runServerSideToolEngine({
@@ -4174,7 +4157,7 @@ describe('stop_message_auto servertool', () => {
           typeof data?.state?.stopMessageText === 'string' &&
           data.state.stopMessageText.includes('Stop schema 校验未通过') &&
           data?.state?.stopMessageMaxRepeats === 10 &&
-          data?.state?.stopMessageUsed === 0
+          data?.state?.stopMessageUsed === 3
       );
       expect(String(persisted?.state?.stopMessageText)).toContain('Stop schema 校验未通过');
       expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);

@@ -141,12 +141,7 @@ export async function runClientInjectOnlyFollowup(args: {
   } catch (error) {
     disconnectWatcher.cancel();
     if (args.isServerToolClientDisconnectedError(error) || args.isAdapterClientDisconnected(args.adapterContext)) {
-      args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId });
-      return {
-        chat: args.finalChatResponse,
-        executed: true,
-        flowId: args.flowId
-      };
+      throw error;
     }
     if (args.clearStateOnFollowupFailure) {
       args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);

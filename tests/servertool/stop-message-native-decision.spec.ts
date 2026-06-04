@@ -176,15 +176,15 @@ describe('stop-message native decision (blackbox)', () => {
     expect(decision.skip_reason).toContain('servertool_followup');
   });
 
-  test('stop schema gate does not count missing schema budget', () => {
+  test('stop schema gate counts missing schema as schema error budget', () => {
     const gate = evaluateStopSchemaGateWithNative({
       assistantText: '未完成。继续处理 DNS。',
-      used: 99,
+      used: 0,
       maxRepeats: 3,
     });
     expect(gate.action).toBe('followup');
     expect(gate.reason_code).toBe('stop_schema_missing');
-    expect(gate.count_budget).toBe(false);
+    expect(gate.count_budget).toBe(true);
     expect(gate.followup_text).not.toContain('质询');
     expect(gate.followup_text).toContain('问题原因');
     expect(gate.followup_text).toContain('已排除因素');
@@ -192,6 +192,28 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.followup_text).toContain('issue_cause');
     expect(gate.followup_text).toContain('excluded_factors');
     expect(gate.followup_text).toContain('diagnostic_order');
+  });
+
+  test('stop schema gate exhausts repeated missing schema loop', () => {
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText: '还是无法继续，工具被拒绝。',
+      used: 5,
+      maxRepeats: 3,
+    });
+    expect(gate.action).toBe('fail_fast');
+    expect(gate.reason_code).toBe('stop_schema_budget_exhausted');
+    expect(gate.count_budget).toBe(true);
+  });
+
+  test('stop schema gate allows blocked string stopreason', () => {
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText: '{"stopreason":"blocked","reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":"0","evidence":"","next_step":""}',
+      used: 5,
+      maxRepeats: 3,
+    });
+    expect(gate.action).toBe('allow_stop');
+    expect(gate.reason_code).toBe('stop_schema_blocked');
+    expect(gate.count_budget).toBe(false);
   });
 
   test('default stopless followup prompt asks for cause exclusions and diagnostic order', () => {
@@ -208,7 +230,7 @@ describe('stop-message native decision (blackbox)', () => {
   test('stop schema gate exhausts only invalid schema budget', () => {
     const invalid = evaluateStopSchemaGateWithNative({
       assistantText: '{"stopreason":2,"reason":"未完成","has_evidence":0,"next_step":"运行测试"}',
-      used: 3,
+      used: 5,
       maxRepeats: 3,
     });
     expect(invalid.action).toBe('fail_fast');

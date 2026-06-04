@@ -86,6 +86,19 @@ function isTerminalFollowupError(error: unknown): boolean {
   return false;
 }
 
+function createClientDisconnectedFollowupError(args: { requestId: string; flowId?: string }): Error {
+  return Object.assign(
+    new Error(`[servertool] client disconnected during followup${args.flowId ? ` flow=${args.flowId}` : ''}`),
+    {
+      code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+      details: {
+        requestId: args.requestId,
+        flowId: args.flowId
+      }
+    }
+  );
+}
+
 function sanitizeFileSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 220) || 'unknown';
 }
@@ -380,15 +393,7 @@ export async function runReenterFollowup(args: {
   });
   try {
     if (args.isAdapterClientDisconnected(args.adapterContext)) {
-      args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
-      return {
-        kind: 'completed',
-        result: {
-          chat: args.finalChatResponse,
-          executed: true,
-          flowId: args.flowId
-        }
-      };
+      throw createClientDisconnectedFollowupError({ requestId: args.requestId, flowId: args.flowId });
     }
     const followupPromise = args.reenterPipeline({
       entryEndpoint: args.followupEntryEndpoint,
@@ -411,15 +416,7 @@ export async function runReenterFollowup(args: {
     );
     disconnectWatcher.cancel();
     if (args.isAdapterClientDisconnected(args.adapterContext)) {
-      args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
-      return {
-        kind: 'completed',
-        result: {
-          chat: args.finalChatResponse,
-          executed: true,
-          flowId: args.flowId
-        }
-      };
+      throw createClientDisconnectedFollowupError({ requestId: args.requestId, flowId: args.flowId });
     }
     const attemptBodyCandidate = resolveFollowupBodyCandidate(followup);
     lifecycle('attempt_result', {
@@ -485,15 +482,7 @@ export async function runReenterFollowup(args: {
       message: error instanceof Error ? error.message : String(error ?? 'unknown')
     });
     if (args.isServerToolClientDisconnectedError(error) || args.isAdapterClientDisconnected(args.adapterContext)) {
-      args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
-      return {
-        kind: 'completed',
-        result: {
-          chat: args.finalChatResponse,
-          executed: true,
-          flowId: args.flowId
-        }
-      };
+      throw error;
     }
     if (isTerminalFollowupError(error) || (
       error &&

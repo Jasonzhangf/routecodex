@@ -243,12 +243,10 @@ export async function runFollowupMainline(args: {
   }
 
   if (isAdapterClientDisconnected(args.adapterContext)) {
-    args.onLogProgress(5, args.totalSteps, 'completed (client disconnected)', { flowId: args.flowId });
-    return {
-      chat: args.finalChatResponse,
-      executed: true,
-      flowId: args.execution.flowId
-    };
+    throw Object.assign(new Error(`[servertool] client disconnected during followup${args.flowId ? ` flow=${args.flowId}` : ''}`), {
+      code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+      details: { requestId: args.requestId, flowId: args.flowId }
+    });
   }
 
   const metadata: JsonObject = {

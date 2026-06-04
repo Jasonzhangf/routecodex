@@ -56,15 +56,17 @@ export function createServerToolFollowupTimeoutError(args: {
 export async function awaitNestedExecutionWithFailFast<T>(args: {
   promise: Promise<T>;
   abortSignal?: AbortSignal;
+  abortCarrier?: unknown;
   timeoutMs: number;
   requestId: string;
 }): Promise<T> {
-  const { promise, abortSignal, timeoutMs, requestId } = args;
-  if (!(timeoutMs > 0) && !abortSignal) {
+  const { promise, abortSignal, abortCarrier, timeoutMs, requestId } = args;
+  if (!(timeoutMs > 0) && !abortSignal && !abortCarrier) {
     return await promise;
   }
 
   let timer: NodeJS.Timeout | undefined;
+  let abortPoller: NodeJS.Timeout | undefined;
   let abortListener: (() => void) | undefined;
   const cleanup = () => {
     if (timer) {
@@ -78,6 +80,10 @@ export async function awaitNestedExecutionWithFailFast<T>(args: {
         // no-op
       }
       abortListener = undefined;
+    }
+    if (abortPoller) {
+      clearInterval(abortPoller);
+      abortPoller = undefined;
     }
   };
 
@@ -96,6 +102,16 @@ export async function awaitNestedExecutionWithFailFast<T>(args: {
         reject(reason instanceof Error ? reason : new Error('CLIENT_DISCONNECTED'));
       };
       abortSignal.addEventListener('abort', abortListener, { once: true });
+    }
+    if (abortCarrier) {
+      abortPoller = setInterval(() => {
+        try {
+          throwIfClientCarrierAborted(abortCarrier);
+        } catch (error) {
+          cleanup();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      }, 100);
     }
   });
 

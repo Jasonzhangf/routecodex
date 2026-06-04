@@ -1852,3 +1852,9 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - same-protocol direct / provider-direct 是 provider passthrough + hooks；`serverToolFollowup` 或 `:stop_followup` 不能禁用 direct、不能强制 relay、不能进入 Hub response chat-process，direct 响应不激活 stopless/servertool。
 - Responses bridge / SSE client projection 禁止把 retention/context `metadata` 回写到 client payload；metadata 只能走 side-channel carrier，发现 `client response contains internal carrier field "metadata"` 时先查 bridge wrapper 是否重投 metadata，不要在 server projection 静默 strip。
 - direct raw SSE 报 `[server.response_projection] client response contains internal carrier field "metadata"` 时，先确认 routeName 是否 `router-direct:*` / `port.provider-direct`；direct 应直接 pipe provider raw stream，不跑 response projection restore/guard，relay/non-direct 才保留该 guard。
+
+### 2026-06-04 stopless/schema/abort 调试精华
+- stopless missing/invalid schema 是 schema rejection budget，不是“无预算继续”；连续拒绝最多 5 次，耗尽后必须走 budget-exhausted final summary，禁止无限 followup。
+- `stopreason=blocked` 是合法停止态；schema parser 要接受数字与常见字符串态，不能因模型写 `"blocked"` 导致十几次不停止。
+- 客户端断开是 servertool 生命周期最高优先级终止信号：server-side-tools / followup-mainline / reenter / client-inject / nested followup 都必须抛 `SERVERTOOL_CLIENT_DISCONNECTED`，禁止返回 completed 或继续 provider 请求。
+- `exec_command` 安全校验只解析真实 tool arguments 的 `cmd`；不得扫描 prompt/history/工具结果文本来判定命令，sudo/osascript/admin 文本不是 broad kill，`xargs kill` 与 `kill $(...)` 才是禁止模式。
