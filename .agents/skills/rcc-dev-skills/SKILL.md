@@ -1842,3 +1842,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-06-04 servertool response chain 精华
 - 看到 servertool/followup 响应 shape 错误时，先查 stage，不要找“servertool response”：servertool 只在 `HubRespChatProcess03Governed` 代客户端执行本地工具，后续必须走正常 `HubRespOutbound04ClientSemantic`。
 - `/v1/responses` followup 红测必须断最终 client payload 顶层 `object=response`；Chat Completions 红测必须断没有被 Responses builder 包装。两个断言同时存在，才能证明 `buildHubRespOutbound04FromHubRespChatProcess03` 是按入口协议做唯一相邻转换。
+
+### 2026-06-04 stopless followup requestId 精华
+- stopless / servertool 日志出现 `:stop_followup` 多次叠加或 codex-samples `File name too long` 时，先查 Rust `followup-core::build_followup_request_id` 的幂等与收敛；requestId 只能作为 followup identity carrier，不能按 hop 无限增长。
+- 修复必须在 Rust followup-core 真源，TS bridge 缺 native 必须 fail-fast；验证要包含 Node 黑盒：`req:stop_followup:stop_followup:stop_followup -> req:stop_followup`，再 build/install/restart 5555。

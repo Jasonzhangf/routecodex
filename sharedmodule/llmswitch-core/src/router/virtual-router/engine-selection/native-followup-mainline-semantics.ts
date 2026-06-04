@@ -38,10 +38,7 @@ export function buildFollowupRequestIdWithNative(base: string, suffix?: string |
   const capability = 'buildFollowupRequestId';
   const fn = readNativeFunction(capability);
   if (!fn) {
-    // Fallback: pure TS implementation
-    const b = (base || '').trim() || 'servertool';
-    const s = (suffix || '').trim() || ':followup';
-    return `${b}${s}`;
+    throw new Error('native buildFollowupRequestId is required');
   }
   return String(fn(base, suffix ?? null));
 }

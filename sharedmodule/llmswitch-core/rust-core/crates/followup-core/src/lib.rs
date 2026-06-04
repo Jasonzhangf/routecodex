@@ -31,6 +31,15 @@ pub fn build_followup_request_id(base: &str, suffix: Option<&str>) -> String {
             }
         })
         .unwrap_or(DEFAULT_FOLLOWUP_SUFFIX);
+    if b.ends_with(s) {
+        let mut canonical = b.to_string();
+        let repeated_suffix = format!("{}{}", s, s);
+        while canonical.ends_with(&repeated_suffix) {
+            let next_len = canonical.len().saturating_sub(s.len());
+            canonical.truncate(next_len);
+        }
+        return canonical;
+    }
     format!("{}{}", b, s)
 }
 
@@ -137,6 +146,27 @@ mod tests {
     fn builds_request_id_with_custom_suffix() {
         let result = build_followup_request_id("req-123", Some(":stop_followup"));
         assert_eq!(result, "req-123:stop_followup");
+    }
+
+    #[test]
+    fn keeps_existing_custom_suffix_idempotent() {
+        let result = build_followup_request_id("req-123:stop_followup", Some(":stop_followup"));
+        assert_eq!(result, "req-123:stop_followup");
+    }
+
+    #[test]
+    fn collapses_repeated_custom_suffix() {
+        let result = build_followup_request_id(
+            "req-123:stop_followup:stop_followup:stop_followup",
+            Some(":stop_followup"),
+        );
+        assert_eq!(result, "req-123:stop_followup");
+    }
+
+    #[test]
+    fn keeps_existing_default_suffix_idempotent() {
+        let result = build_followup_request_id("req-123:followup", None);
+        assert_eq!(result, "req-123:followup");
     }
 
     #[test]
