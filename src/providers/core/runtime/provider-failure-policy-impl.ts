@@ -877,6 +877,12 @@ export function resolveProviderFailureExclusionDecision(args: {
       retryAction: 'retry_same_provider'
     };
   }
+  if (args.classification === 'unrecoverable') {
+    return {
+      excludeCurrentProvider: false,
+      retryAction: 'retry_same_provider'
+    };
+  }
   if (args.classification === 'recoverable') {
     return {
       excludeCurrentProvider: false,

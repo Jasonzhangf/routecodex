@@ -4305,6 +4305,26 @@ describe('HubRequestExecutor failover', () => {
     expect(Array.from(excluded)).toEqual([]);
   });
 
+  test('unrecoverable 401 keeps current provider from being rerouted even when alternative exists', () => {
+    const excluded = new Set<string>();
+    const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+      providerKey: 'fetch.key1.primary',
+      status: 401,
+      error: Object.assign(new Error('HTTP 401: unauthorized'), {
+        statusCode: 401,
+        code: 'INVALID_API_KEY'
+      }),
+      classification: 'unrecoverable',
+      attempt: 1,
+      promptTooLong: false,
+      routePool: ['fetch.key1.primary', 'fetch.key2.backup'],
+      excludedProviderKeys: excluded
+    });
+
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excluded)).toEqual([]);
+  });
+
   test('recoverable 502 keeps current provider when no alternative exists', () => {
     const excluded = new Set<string>();
     const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({

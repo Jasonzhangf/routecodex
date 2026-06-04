@@ -154,4 +154,10 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(executionPlan).not.toMatch(/recoverableProviderReroute|terminalRecoverableReroute/);
     expect(executionPlan).not.toMatch(/providerKey\.startsWith\(['"]windsurf\./);
   });
+
+  it('executor retry path does not locally reroute unrecoverable failures away from direct failure', () => {
+    const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
+    expect(executionPlan).not.toMatch(/terminalProviderFailureReroute/);
+    expect(executionPlan).not.toMatch(/classification\s*===\s*['"]unrecoverable['"][\s\S]{0,240}hasTerminalAlternativeCandidate/);
+  });
 });
