@@ -244,7 +244,7 @@ type HubRespProcessEffectResult = {
   stage: HubRespPayloadStage;
 };
 
-function projectHubRespChatProcess03ToRespOutbound04(args: {
+function buildHubRespOutbound04FromHubRespChatProcess03(args: {
   payload: JsonObject;
   entryEndpoint: string;
   requestId: string;
@@ -436,7 +436,7 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     clientInjectDispatch: args.clientInjectDispatch
   });
   hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'
-    ? projectHubRespChatProcess03ToRespOutbound04({
+    ? buildHubRespOutbound04FromHubRespChatProcess03({
       payload: respProcessEffect.payload,
       entryEndpoint: args.entryEndpoint,
       requestId: args.requestId,
