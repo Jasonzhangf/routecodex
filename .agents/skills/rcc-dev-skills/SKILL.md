@@ -1878,6 +1878,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-06-04 ErrorPolicyCenter 唯一链路精华
 - 错误策略中心不是 `ErrorHandlingCenter`；它只允许做 HTTP/server/client projection。provider/runtime/direct/executor 错误必须进 `ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`。
 - 分类先行：`recoverable | unrecoverable | special_400 | periodic_recovery`；retry/reroute/cooldown/fail 只能由唯一 policy decision 驱动。审计时先扫旧节点名与第二套 `recoverable/affectsHealth/shouldRetry/cooldown/reroute` 决策点。
+- `provider-error-classifier` 只能做 host 捕获/adapter 记账并暴露 `resolveProviderFailureOutcome` 的 `classification/recoverable/affectsHealth`；禁止在 classifier、executor、direct 路径二次推导这些最终策略字段。
 
 ### 2026-06-04 ProviderForwarder sticky 精华
 - Forwarder `stickyKey=session` 验证不能只跑 `ForwarderRegistry::select` 单测；必须覆盖 `engine::selection::select_provider` 从 metadata `sessionId/session_id/routecodexSessionId` 透传到 Rust registry，否则配置写了 sticky 但 live selection 实际按 request 轮换。

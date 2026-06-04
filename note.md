@@ -15302,3 +15302,8 @@ Task: investigate stopless stopping on schema missing and servertool log noise.
 - Config parse evidence: ports `[5520,10000,5555]`, qwen=false. Isolation evidence: `tests/red-tests/multi_port_server_isolation.test.ts` green 7/7; 10000 forwarder/route-level red tests green 17/17 after updating the 10000 drift guard.
 - Restart evidence: `rcc restart --config ~/.rcc/config.toml --port 10000` sent scoped in-place restart but localhost health timed out because Baidu Netdisk owns `127.0.0.1:10000`; LAN health `http://192.168.0.93:10000/health` returned ok and listener PID changed to node 96284.
 - Remaining unrelated validation risk: full `tests/servertool/stop-message-auto.spec.ts` still has failures around mode-only stopMessage activation and some followup expectations; not part of 10000 config target.
+
+## 2026-06-04 error policy center goal step8
+- Code update: `provider-error-classifier` now exposes `classification` from `resolveProviderFailureOutcome`; `recoverable/affectsHealth` are returned directly from the policy outcome, not locally re-derived.
+- Red evidence: `error_chain_singleton_truth` now locks classifier to `outcome.classification/recoverable/affectsHealth` and rejects local policy-style derivation.
+- Green evidence: `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/provider-error-classifier.spec.ts tests/red-tests/error_chain_singleton_truth.test.ts --runInBand --forceExit` passed 21/21; `npx tsc --noEmit --pretty false` passed.

@@ -5,6 +5,7 @@ import {
   extractProviderFailureStatusCode,
   isProviderFailureNetworkTransportLike,
   resolveProviderFailureOutcome,
+  type ProviderFailureClassification,
   type ProviderFailureRateLimitKind
 } from './provider-failure-policy.js';
 
@@ -14,6 +15,7 @@ export type ProviderErrorClassification = {
   statusCode?: number;
   upstreamCode?: string;
   upstreamMessage?: string;
+  classification?: ProviderFailureClassification;
   recoverable: boolean;
   affectsHealth: boolean;
   forceFatalRateLimit: boolean;
@@ -87,17 +89,15 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
     reason: message,
     rateLimitKind
   });
-  const recoverable = outcome.recoverable;
-  const affectsHealth = outcome.affectsHealth;
-
   return {
     error: err,
     message,
     statusCode,
     upstreamCode,
     upstreamMessage,
-    recoverable,
-    affectsHealth,
+    classification: outcome.classification,
+    recoverable: outcome.recoverable,
+    affectsHealth: outcome.affectsHealth,
     forceFatalRateLimit,
     isRateLimit,
     isDailyLimitRateLimit: isDailyLimit429

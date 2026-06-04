@@ -33,12 +33,13 @@ describe('Provider error classifier - 429 handling', () => {
     expect(registerCalled).toBe(true);
     expect(classification.isRateLimit).toBe(true);
     expect(classification.isDailyLimitRateLimit).toBe(false);
+    expect(classification.classification).toBe('recoverable');
     expect(classification.recoverable).toBe(true);
     expect(classification.forceFatalRateLimit).toBe(false);
-    expect(classification.affectsHealth).toBe(false);
+    expect(classification.affectsHealth).toBe(true);
   });
 
-  it('marks daily-limit 429 as non-recoverable and fatal', () => {
+  it('marks daily-limit 429 as periodic recovery and fatal', () => {
     let forceCalled = false;
     const classification = classifyProviderError({
       error: Object.assign(new Error('HTTP 429: quota has been exhausted'), {
@@ -59,6 +60,7 @@ describe('Provider error classifier - 429 handling', () => {
     expect(forceCalled).toBe(true);
     expect(classification.isRateLimit).toBe(true);
     expect(classification.isDailyLimitRateLimit).toBe(true);
+    expect(classification.classification).toBe('periodic_recovery');
     expect(classification.recoverable).toBe(false);
     expect(classification.forceFatalRateLimit).toBe(true);
     expect(classification.affectsHealth).toBe(true);
@@ -87,9 +89,10 @@ describe('Provider error classifier - 429 handling', () => {
     expect(forceCalled).toBe(false);
     expect(classification.isRateLimit).toBe(true);
     expect(classification.isDailyLimitRateLimit).toBe(false);
-    expect(classification.recoverable).toBe(true);
+    expect(classification.classification).toBe('periodic_recovery');
+    expect(classification.recoverable).toBe(false);
     expect(classification.forceFatalRateLimit).toBe(false);
-    expect(classification.affectsHealth).toBe(false);
+    expect(classification.affectsHealth).toBe(true);
   });
 });
 
@@ -103,7 +106,7 @@ describe('Provider error classifier - internal conversion errors', () => {
     model: 'gpt-5.2-codex'
   } as any;
 
-  it('treats SSE_TO_JSON_ERROR as recoverable and does not affect health', () => {
+  it('treats SSE_TO_JSON_ERROR as recoverable and health-affecting via unified policy', () => {
     const error = Object.assign(new Error('SSE_TO_JSON_ERROR: terminated'), { code: 'SSE_TO_JSON_ERROR' });
     const classification = classifyProviderError({
       error,
@@ -115,7 +118,8 @@ describe('Provider error classifier - internal conversion errors', () => {
     });
 
     expect(classification.recoverable).toBe(true);
-    expect(classification.affectsHealth).toBe(false);
+    expect(classification.classification).toBe('recoverable');
+    expect(classification.affectsHealth).toBe(true);
     expect(classification.isRateLimit).toBe(false);
   });
 
@@ -134,6 +138,7 @@ describe('Provider error classifier - internal conversion errors', () => {
     });
 
     expect(classification.recoverable).toBe(false);
+    expect(classification.classification).toBe('unrecoverable');
     expect(classification.affectsHealth).toBe(false);
     expect(classification.isRateLimit).toBe(false);
   });
@@ -164,6 +169,7 @@ describe('Provider error classifier - internal conversion errors', () => {
 
     expect(classification.statusCode).toBe(434);
     expect(classification.recoverable).toBe(false);
+    expect(classification.classification).toBe('unrecoverable');
     expect(classification.affectsHealth).toBe(true);
     expect(classification.isRateLimit).toBe(false);
   });

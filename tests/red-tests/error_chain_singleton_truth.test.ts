@@ -16,6 +16,7 @@ function readSrc(rel: string): string {
 
 const PROVIDER_FAILURE_IMPL = 'src/providers/core/runtime/provider-failure-policy-impl.ts';
 const PROVIDER_FAILURE_POLICY = 'src/providers/core/runtime/provider-failure-policy.ts';
+const PROVIDER_ERROR_CLASSIFIER = 'src/providers/core/runtime/provider-error-classifier.ts';
 const PROVIDER_ERROR_REPORTER = 'src/providers/core/utils/provider-error-reporter.ts';
 const EXECUTOR_ERROR_REPORT = 'src/server/runtime/http-server/executor/request-executor-error-report.ts';
 const EXECUTOR_RETRY_DECISION = 'src/server/runtime/http-server/executor/request-executor-retry-decision.ts';
@@ -145,6 +146,16 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(reporter).toMatch(/explicit recoverable\/affectsHealth is required/);
     expect(reporter).not.toMatch(/recoverable\s*\?\?/);
     expect(reporter).not.toMatch(/affectsHealth\s*\?\?/);
+  });
+
+  it('provider-error-classifier exposes policy outcome classification without local recoverable/affectsHealth derivation', () => {
+    const classifier = readSrc(PROVIDER_ERROR_CLASSIFIER);
+    expect(classifier).toMatch(/classification:\s*outcome\.classification/);
+    expect(classifier).toMatch(/recoverable:\s*outcome\.recoverable/);
+    expect(classifier).toMatch(/affectsHealth:\s*outcome\.affectsHealth/);
+    expect(classifier).not.toMatch(/const\s+recoverable\s*=\s*outcome\.recoverable/);
+    expect(classifier).not.toMatch(/const\s+affectsHealth\s*=\s*outcome\.affectsHealth/);
+    expect(classifier).not.toMatch(/recoverable:\s*rateLimitKind|recoverable:\s*isRateLimit|affectsHealth:\s*rateLimitKind|affectsHealth:\s*isRateLimit/);
   });
 
   it('executor retry path does not locally reroute recoverable failures away from the policy decision', () => {
