@@ -31,36 +31,6 @@ export function consume_error_err_05_execution_decision_from_error_err_04_router
   return applied.retryExecutionPlan;
 }
 
-function isTerminalQuotaRerouteCandidate(args: {
-  error: unknown;
-  retryError: RetryErrorSnapshot;
-  status?: number;
-}): boolean {
-  const record =
-    args.error && typeof args.error === 'object' && !Array.isArray(args.error)
-      ? (args.error as Record<string, unknown>)
-      : undefined;
-  const code = String(record?.code ?? args.retryError.errorCode ?? '').trim().toUpperCase();
-  const upstreamCode = String(record?.upstreamCode ?? args.retryError.upstreamCode ?? '').trim().toUpperCase();
-  const rateLimitKind = String(record?.rateLimitKind ?? '').trim().toLowerCase();
-  const quotaScope = String(record?.quotaScope ?? '').trim().toLowerCase();
-  const quotaReason = String(record?.quotaReason ?? '').trim().toLowerCase();
-  const status =
-    typeof args.status === 'number'
-      ? args.status
-      : (typeof record?.status === 'number' ? (record.status as number) : args.retryError.statusCode);
-  return (
-    status === 429
-    && (
-      code === 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED'
-      || upstreamCode === 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED'
-      || rateLimitKind === 'daily_limit'
-      || quotaScope === 'weekly'
-      || quotaReason === 'windsurf_weekly_exhausted'
-    )
-  );
-}
-
 function isWindsurfManagedAccountPoolCooldown(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;
@@ -173,11 +143,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   const terminalQuotaReroute =
     !eligibilityPlan.shouldRetry
     && hasTerminalAlternativeCandidate
-    && isTerminalQuotaRerouteCandidate({
-      error: args.error,
-      retryError: args.retryError,
-      status: args.status
-    });
+    && classification === 'periodic_recovery';
   if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute) {
     const keepTerminalExclusion =
       exclusionPlan.excludedCurrentProvider

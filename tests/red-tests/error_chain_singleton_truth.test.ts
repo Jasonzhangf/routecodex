@@ -160,4 +160,10 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(executionPlan).not.toMatch(/terminalProviderFailureReroute/);
     expect(executionPlan).not.toMatch(/classification\s*===\s*['"]unrecoverable['"][\s\S]{0,240}hasTerminalAlternativeCandidate/);
   });
+
+  it('executor retry path does not locally classify quota or periodic recovery candidates', () => {
+    const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
+    expect(executionPlan).not.toMatch(/isTerminalQuotaRerouteCandidate/);
+    expect(executionPlan).not.toMatch(/WINDSURF_WEEKLY_QUOTA_EXHAUSTED|quotaScope|quotaReason|daily_limit/);
+  });
 });
