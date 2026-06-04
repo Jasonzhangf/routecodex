@@ -6,10 +6,8 @@ import {
   computeProviderFailureBackoffDelayMs,
   describeProviderFailureDecision,
   resolveProviderFailureExclusionDecision,
-  isProviderFailureHealthNeutral,
   normalizeProviderFailureCodeKey,
   resolveProviderFailureRetryEligibility,
-  resolveProviderFailureClassification,
   resolveProviderFailureActionPlan,
   type ProviderFailureClassification
 } from '../../../providers/core/runtime/provider-failure-policy.js';

@@ -185,6 +185,12 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(executionPlan).not.toMatch(/classification\s*===\s*['"]unrecoverable['"]/);
   });
 
+  it('request-executor thin shell does not import classification or health policy internals directly', () => {
+    const executor = readSrc(REQUEST_EXECUTOR);
+    expect(executor).not.toMatch(/isProviderFailureHealthNeutral/);
+    expect(executor).not.toMatch(/resolveProviderFailureClassification/);
+  });
+
   it('request-executor-provider-failure-plan delegates force-exclude suppression policy', () => {
     const failurePlan = readSrc('src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts');
     expect(failurePlan).toMatch(/shouldSuppressForcedProviderExclusion/);
