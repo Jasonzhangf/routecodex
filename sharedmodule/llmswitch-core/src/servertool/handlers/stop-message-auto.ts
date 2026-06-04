@@ -154,7 +154,7 @@ function buildStopSchemaBudgetExhaustedSummary(args: {
   const lines = [
     'Stopless 校验结果：连续 stop 预算已耗尽。',
     `校验状态：${args.reasonCode ?? 'stop_schema_budget_exhausted'}`,
-    '处理结果：不再继续自动续杯；以下保留三次续杯询问、模型返回内容与最后原始 summary，请完整呈现当前问题、已做事项、未完成事项与阻塞点。'
+    '处理结果：不再继续自动续杯；以下保留三次续杯询问、模型返回内容与最后原始 summary，请完整呈现当前问题、已做事项、未完成事项、阻塞点、问题原因、已排除因素与建议排查顺序。'
   ];
   rounds.forEach((round, index) => {
     lines.push(`\n第 ${index + 1} 次续杯询问：\n${round.question}`);

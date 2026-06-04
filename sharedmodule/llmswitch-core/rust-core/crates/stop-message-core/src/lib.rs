@@ -8,9 +8,9 @@ use serde_json::Value;
 
 const LEGACY_DEFAULT_TEXT: &str = "继续执行";
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
-    "停止前先核对三件事：1) 目标：当前用户目标是什么，是否逐项完成；2) 过程：你实际做过哪些操作/检查/验证，哪些还没做；3) 证据：完成或阻塞的证据在哪里。若任一项缺证据，禁止总结或停下，必须调用可用工具继续执行到有证据。只有目标已完成或确实阻塞时，才输出最终结果并给出证据。",
-    "你刚才再次停止。请重新核对：目标是否真的完成？过程是否覆盖用户要求的每一项？证据是否能被日志、文件、命令结果或测试结果验证？如果答案不是全部明确，禁止继续总结，必须调用工具补齐缺口；如果确实完成/阻塞，必须说明目标、过程、证据，并在 stop schema 的 learned 字段写出过去 turns 学到的可复用结论；没有则填空字符串。",
-    "最后一次续杯预算。停止必须同时满足：目标逐项完成或明确阻塞；过程已说明关键操作与验证；证据可核验且对应目标。缺任何一项都不允许停，必须立即调用工具继续执行最小下一步。禁止空泛总结、道歉、计划或无证据停止。",
+    "停止前先核对六件事：1) 目标：当前用户目标是什么，是否逐项完成；2) 过程：你实际做过哪些操作/检查/验证，哪些还没做；3) 证据：完成或阻塞的证据在哪里；4) 问题原因：若出现异常，最可能原因是什么，依据是什么；5) 已排除因素：你已经排除了哪些可能原因，证据是什么；6) 排查顺序：下一步应按什么顺序继续排查。若任一项缺证据，禁止总结或停下，必须调用可用工具按排查顺序继续执行到有证据。只有目标已完成或确实阻塞时，才输出最终结果并给出证据。",
+    "你刚才再次停止。请重新核对：目标是否真的完成？过程是否覆盖用户要求的每一项？证据是否能被日志、文件、命令结果或测试结果验证？异常原因是否已定位？哪些因素已被证据排除？排查顺序是否合理且已执行到当前最小下一步？如果答案不是全部明确，禁止继续总结，必须调用工具按排查顺序补齐缺口；如果确实完成/阻塞，必须说明目标、过程、证据、问题原因、已排除因素、排查顺序，并在 stop schema 的 learned 字段写出过去 turns 学到的可复用结论；没有则填空字符串。",
+    "最后一次续杯预算。停止必须同时满足：目标逐项完成或明确阻塞；过程已说明关键操作与验证；证据可核验且对应目标；异常原因有依据；已排除因素有证据；排查顺序清晰且已执行到最小下一步。缺任何一项都不允许停，必须立即调用工具继续执行最小下一步。禁止空泛总结、道歉、计划或无证据停止。",
 ];
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -192,6 +192,9 @@ pub struct StopSchemaParsed {
     pub next_step: Option<String>,
     pub evidence: Option<String>,
     pub learned: Option<String>,
+    pub issue_cause: Option<String>,
+    pub excluded_factors: Option<String>,
+    pub diagnostic_order: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -306,7 +309,7 @@ pub fn evaluate_stop_schema_gate(
             return schema_followup(
                 "stop_schema_missing",
                 used,
-                "你刚才试图停止，但没有提供 stop schema。先核对目标、过程、证据：目标是否逐项完成？过程是否覆盖要求？证据是否可核验？现在必须二选一：1) 若完成或阻塞，立即给出 stop schema：stopreason(数字：0=finished,1=blocked)、reason(具体原因)、has_evidence(数字0/1)、evidence(可核验证据)、next_step(后续动作或空)、learned(过去 turns 学到的可复用事实/踩坑/配置结论；没有则空字符串)；2) 若任一项没有证据，不准总结，必须立刻调用工具继续执行当前目标。",
+                "你刚才试图停止，但没有提供 stop schema。先核对目标、过程、证据、问题原因、已排除因素、排查顺序：目标是否逐项完成？过程是否覆盖要求？证据是否可核验？异常原因是否有依据？哪些因素已被排除？下一步排查顺序是什么？现在必须二选一：1) 若完成或阻塞，立即给出 stop schema：stopreason(数字：0=finished,1=blocked)、reason(具体原因)、has_evidence(数字0/1)、evidence(可核验证据)、issue_cause(问题原因；没有异常则空字符串)、excluded_factors(已排除因素；没有则空字符串)、diagnostic_order(排查顺序/已执行顺序)、next_step(后续动作或空)、learned(过去 turns 学到的可复用事实/踩坑/配置结论；没有则空字符串)；2) 若任一项没有证据，不准总结，必须立刻调用工具按排查顺序继续执行当前目标。",
                 None,
                 false,
             );
@@ -320,7 +323,7 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_stopreason_missing_or_non_numeric",
                 used,
                 max_repeats,
-                "stop schema 缺少数字 stopreason。不要猜、不要总结。先回答：目标是什么、过程做到哪一步、证据是什么。现在必须补齐数字 stopreason：0=finished、1=blocked、2=continue_needed。若选择 0/1，必须给 reason、evidence、learned；若目标/过程/证据任一项不足，选择 2，给 next_step 并立即执行。learned 是过去 turns 学到的可复用事实/踩坑/配置结论，没有则空字符串。",
+                "stop schema 缺少数字 stopreason。不要猜、不要总结。先回答：目标是什么、过程做到哪一步、证据是什么、问题原因在哪里、已排除哪些因素、排查顺序是什么。现在必须补齐数字 stopreason：0=finished、1=blocked、2=continue_needed。若选择 0/1，必须给 reason、evidence、issue_cause、excluded_factors、diagnostic_order、learned；若目标/过程/证据/原因/排除项/顺序任一项不足，选择 2，给 next_step 并立即执行。learned 是过去 turns 学到的可复用事实/踩坑/配置结论，没有则空字符串。",
                 parsed,
             );
         }
@@ -333,7 +336,7 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_reason_missing",
                 used,
                 max_repeats,
-                "你声明 finished/blocked，但没有给 reason。停止不成立。请具体说明：完成/阻塞对应哪个用户目标？过程里做过哪些验证？证据是什么？如果不能逐项回答，禁止再停，必须调用工具继续执行。",
+                "你声明 finished/blocked，但没有给 reason。停止不成立。请具体说明：完成/阻塞对应哪个用户目标？过程里做过哪些验证？证据是什么？问题原因在哪里？已排除哪些因素？排查顺序是什么？如果不能逐项回答，禁止再停，必须调用工具继续执行。",
                 parsed,
             );
         }
@@ -358,7 +361,7 @@ pub fn evaluate_stop_schema_gate(
             used,
             max_repeats,
             &format!(
-                "你已经提供 next_step，说明目标/过程/证据仍有缺口。本轮不允许停止、不允许改写计划、不允许总结。立即调用工具执行这个下一步，并用结果补齐证据：{}",
+                "你已经提供 next_step，说明目标/过程/证据/原因/排除项/排查顺序仍有缺口。本轮不允许停止、不允许改写计划、不允许总结。立即调用工具执行这个下一步，并用结果补齐证据、问题原因、已排除因素和后续排查顺序：{}",
                 next_step
             ),
             parsed,
@@ -369,7 +372,7 @@ pub fn evaluate_stop_schema_gate(
         "stop_schema_next_step_missing",
         used,
         max_repeats,
-        "你没有证明 finished/blocked，也没有给 next_step。停止不成立。请按目标、过程、证据三项检查：目标是否完成？过程是否验证？证据是否可核验？完成/阻塞就给 stopreason=0/1、reason、has_evidence、evidence、learned；否则必须给 next_step 并调用工具执行。learned 是过去 turns 学到的可复用结论，没有则空字符串。",
+        "你没有证明 finished/blocked，也没有给 next_step。停止不成立。请按目标、过程、证据、问题原因、已排除因素、排查顺序六项检查：目标是否完成？过程是否验证？证据是否可核验？原因是否有依据？排除了哪些因素？下一步排查顺序是什么？完成/阻塞就给 stopreason=0/1、reason、has_evidence、evidence、issue_cause、excluded_factors、diagnostic_order、learned；否则必须给 next_step 并调用工具执行。learned 是过去 turns 学到的可复用结论，没有则空字符串。",
         parsed,
     )
 }
@@ -614,6 +617,9 @@ fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
         next_step: read_string(row.get("next_step")),
         evidence: read_string(row.get("evidence")),
         learned: read_string(row.get("learned")),
+        issue_cause: read_string(row.get("issue_cause")),
+        excluded_factors: read_string(row.get("excluded_factors")),
+        diagnostic_order: read_string(row.get("diagnostic_order")),
     })
 }
 

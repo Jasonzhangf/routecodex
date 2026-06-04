@@ -186,6 +186,23 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.reason_code).toBe('stop_schema_missing');
     expect(gate.count_budget).toBe(false);
     expect(gate.followup_text).not.toContain('质询');
+    expect(gate.followup_text).toContain('问题原因');
+    expect(gate.followup_text).toContain('已排除因素');
+    expect(gate.followup_text).toContain('排查顺序');
+    expect(gate.followup_text).toContain('issue_cause');
+    expect(gate.followup_text).toContain('excluded_factors');
+    expect(gate.followup_text).toContain('diagnostic_order');
+  });
+
+  test('default stopless followup prompt asks for cause exclusions and diagnostic order', () => {
+    const decision = decideStopMessageActionWithNative(buildMinimalDecisionContext({
+      stopEligible: true,
+      finishReasons: ['stop'],
+    }));
+    expect(decision.action).toBe('trigger');
+    expect(decision.followup_text).toContain('问题原因');
+    expect(decision.followup_text).toContain('已排除因素');
+    expect(decision.followup_text).toContain('排查顺序');
   });
 
   test('stop schema gate exhausts only invalid schema budget', () => {

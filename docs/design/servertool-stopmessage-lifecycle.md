@@ -60,8 +60,10 @@ Design goals:
 - Rust `stop-message-core` must allow followup eligibility only from `stop_message_followup_policy=preserve_eligibility`, not from `followup_flow_id` string matching.
 - Do not change router-direct/provider selection to fix stopless continuation; stopless eligibility belongs to servertool dispatch + Rust stop-message decision only.
 
-1.2. Final-stop learned note:
+1.2. Stop schema / final-stop learned note:
 - Stop schema includes `learned` as the model-provided “what was learned in past turns” text.
+- Stop schema prompt must ask six diagnostic fields: target, process, evidence, `issue_cause`, `excluded_factors`, and `diagnostic_order`.
+- Debug / outage / validation tasks must not stop after only listing target/process/evidence; they must also state likely cause, ruled-out factors, and next diagnostic order, or call tools to gather that evidence.
 - Rust `stop-message-core` is the schema parse / gate truth; TS may only do the final file IO.
 - `note.md` write is allowed only on `schemaGate.action=allow_stop` and non-empty `learned`.
 - No write on followup, invalid schema, missing schema, budget exhausted, or reenter failure.
