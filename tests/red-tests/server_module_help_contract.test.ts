@@ -64,4 +64,13 @@ describe('Server module help contract (Phase Server-A)', () => {
     const source = fs.readFileSync(path.join(TYPES_DIR, 'server_contracts.rs'), 'utf8');
     expect(source).not.toContain('#[napi_derive::napi]');
   });
+
+  it('contract allowed fields stay in sync with handler-utils whitelist (requestSource, experimentFlag, appVersion)', () => {
+    const hu = fs.readFileSync('src/server/handlers/handler-utils.ts', 'utf8');
+    const src = fs.readFileSync('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs', 'utf8');
+    for (const field of ['requestSource', 'experimentFlag', 'appVersion']) {
+      expect(hu).toContain("'" + field + "'");
+      expect(src).toContain('"' + field + '"');
+    }
+  });
 });

@@ -152,6 +152,7 @@ type ChatUsageNormalizationResult = {
 type ClientVisibleResponseRestoreContext = {
   model?: string;
   reasoningEffort?: string;
+  requestId?: string;
 };
 
 const SHOULD_LOG_HTTP_EVENTS = process.env.ROUTECODEX_HTTP_LOG_DISABLE !== '1'
@@ -716,9 +717,6 @@ function createClientVisibleSseRestoreStream(
   stream: Readable,
   restore: ClientVisibleResponseRestoreContext | undefined
 ): Readable {
-  if (!restore) {
-    return stream;
-  }
   let pending = '';
   const transform = new Transform({
     transform(chunk, _encoding, callback) {
@@ -742,19 +740,23 @@ function createClientVisibleSseRestoreStream(
             this.push(frame);
             continue;
           }
+          const dataText = lines[dataLineIndex].slice('data: '.length);
+          let parsed: unknown;
           try {
-            const dataText = lines[dataLineIndex].slice('data: '.length);
-            const parsed = JSON.parse(dataText);
-            const restored = restoreClientVisibleResponsePayload(parsed, restore);
-            if (restored === parsed) {
-              this.push(frame);
-              continue;
-            }
-            lines[dataLineIndex] = `data: ${JSON.stringify(restored)}`;
-            this.push(`${lines.join('\n')}\n\n`);
+            parsed = JSON.parse(dataText);
           } catch {
             this.push(frame);
+            continue;
           }
+          assertClientResponseHasNoInternalCarriers(parsed, restore?.requestId ?? 'sse-frame');
+          const restored = restoreClientVisibleResponsePayload(parsed, restore);
+          if (restored === parsed) {
+            this.push(frame);
+            continue;
+          }
+          assertClientResponseHasNoInternalCarriers(restored, restore?.requestId ?? 'sse-frame');
+          lines[dataLineIndex] = `data: ${JSON.stringify(restored)}`;
+          this.push(`${lines.join('\n')}\n\n`);
         }
         callback();
       } catch (error) {
@@ -1278,7 +1280,8 @@ export async function sendPipelineResponse(
     const sseBody = body as SsePayloadShape & Record<string, unknown>;
     const streamSource = sseBody.__sse_responses;
     const stream = toNodeReadable(streamSource);
-    const restoreContext = buildClientVisibleResponseRestoreContext(result.metadata);
+    const restoreContext = buildClientVisibleResponseRestoreContext({ ...result.metadata, requestId: requestLabel })
+      ?? { requestId: requestLabel };
     if (!stream) {
       logPipelineStage('response.sse.missing', requestLabel, {});
       logResponseCompleted({ status: 200, mode: 'sse', reason: 'missing_stream', bridgeStatus: 502 });
@@ -1572,7 +1575,7 @@ export async function sendPipelineResponse(
       });
     };
     let ssePending = '';
-    stream.on('data', (chunk: unknown) => {
+    outboundStream.on('data', (chunk: unknown) => {
       // SSE frames may span TCP chunk boundaries. Buffer partial frames
       // and only feed complete \n\n-delimited blocks to the probe/tracker.
       const text = typeof chunk === 'string' ? chunk
@@ -1637,7 +1640,7 @@ export async function sendPipelineResponse(
       }, 25);
       terminalFlushTimer.unref?.();
     });
-    stream.on('error', (error: Error) => {
+    outboundStream.on('error', (error: Error) => {
       ended = true;
       clearTimers();
       detachOutboundStream();
@@ -1659,11 +1662,14 @@ export async function sendPipelineResponse(
         ...(finishTracker.finishReason ? { finishReason: finishTracker.finishReason } : {})
       });
       try {
+        const clientVisibleMessage = error.message.startsWith('[server.response_projection]')
+          ? 'SSE stream response projection failed'
+          : error.message;
         const payload = {
           type: 'error',
           status: 500,
           error: {
-            message: error.message,
+            message: clientVisibleMessage,
             code: 'sse_stream_error',
             request_id: requestLabel
           }
@@ -1679,7 +1685,7 @@ export async function sendPipelineResponse(
       }
       clientSseSnapshotRecorder?.flush(error);
     });
-    stream.on('end', () => {
+    outboundStream.on('end', () => {
       ended = true;
       streamEnded = true;
       clearTimers();

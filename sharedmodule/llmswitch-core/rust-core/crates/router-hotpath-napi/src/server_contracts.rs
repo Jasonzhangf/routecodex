@@ -52,7 +52,7 @@ fn server_module_helps() -> Vec<ServerModuleHelp> {
             owner_builder: None,
             phase: "server.req_inbound",
             description: "Server adapter layer: parses HTTP request, captures client request body, headers, and path; binds request/session/conversation identity into pipeline metadata carrier. Does NOT build provider wire, NOT route, NOT apply tool governance.",
-            allowed_request_metadata_fields: &["clientRequestId", "userAgent", "clientOriginator"],
+            allowed_request_metadata_fields: &["clientRequestId", "userAgent", "clientOriginator", "requestSource", "experimentFlag", "appVersion"],
             forbidden_metadata_fields: &[
                 "routeHint",
                 "__routeHint",
@@ -101,7 +101,7 @@ fn server_module_helps() -> Vec<ServerModuleHelp> {
                 "server_req_adapter_provider_exits.red",
             ],
             debug_flow: "1. Query describeServerModuleHelp('server.req_adapter'). 2. Inspect handler source: src/server/handlers/*.  3. Verify allowed fields in metadata carrier vs forbidden fields fail-fast.",
-            help: "Server request adapter: captures client request facts and session scope into pipeline metadata. Only clientRequestId/userAgent/clientOriginator may enter metadata carrier. Route/provider/runtime control fields must fail-fast, not silently delete.",
+            help: "Server request adapter: captures client request facts and session scope into pipeline metadata. Only clientRequestId/userAgent/clientOriginator/requestSource/experimentFlag/appVersion may enter metadata carrier. Route/provider/runtime control fields must fail-fast, not silently delete.",
         },
         ServerModuleHelp {
             module_id: "server.direct_passthrough",
@@ -267,7 +267,10 @@ mod tests {
     fn describes_single_module_help() {
         let output = describe_server_module_help("server.direct_passthrough").unwrap();
         assert_eq!(output["module"]["moduleId"], "server.direct_passthrough");
-        assert!(!output["module"]["forbiddenProviderExits"].as_array().unwrap().is_empty());
+        assert!(!output["module"]["forbiddenProviderExits"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -290,11 +293,18 @@ mod tests {
     #[test]
     fn all_modules_forbid_internal_carriers() {
         let modules = server_module_helps();
-        let expected: &[&str] = &["metadata", "metaCarrier", "runtimeMetadata", "errorCarrier", "classifiedError", "__rt", "snapshot"];
+        let expected: &[&str] = &[
+            "metadata",
+            "metaCarrier",
+            "runtimeMetadata",
+            "errorCarrier",
+            "classifiedError",
+            "__rt",
+            "snapshot",
+        ];
         for m in modules {
             assert_eq!(
-                m.forbidden_carriers,
-                expected,
+                m.forbidden_carriers, expected,
                 "module {} must forbid all internal carriers",
                 m.module_id
             );
@@ -307,8 +317,16 @@ mod tests {
             .into_iter()
             .find(|m| m.module_id == "server.req_adapter")
             .unwrap();
-        assert!(m.allowed_request_metadata_fields.contains(&"clientRequestId"));
+        assert!(m
+            .allowed_request_metadata_fields
+            .contains(&"clientRequestId"));
         assert!(!m.allowed_request_metadata_fields.contains(&"routeHint"));
         assert!(!m.allowed_request_metadata_fields.contains(&"providerKey"));
+        // Lock sync with handler-utils PIPELINE_METADATA_ALLOWED_CLIENT_FIELDS:
+        assert!(m.allowed_request_metadata_fields.contains(&"requestSource"));
+        assert!(m
+            .allowed_request_metadata_fields
+            .contains(&"experimentFlag"));
+        assert!(m.allowed_request_metadata_fields.contains(&"appVersion"));
     }
 }
