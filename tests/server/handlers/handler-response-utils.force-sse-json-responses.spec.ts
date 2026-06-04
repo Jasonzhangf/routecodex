@@ -2,11 +2,59 @@ import { describe, expect, it } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { Readable } from 'node:stream';
 
 import { sendPipelineResponse } from '../../../src/server/handlers/handler-response-utils.js';
 import { normalizeResponsesJsonBody } from '../../../src/server/handlers/handler-response-utils.js';
 
 describe('handler-response-utils forceSSE responses json bridge', () => {
+  it('passes through direct raw SSE frames without applying internal metadata guard', async () => {
+    const app = express();
+    app.get('/direct-sse-with-provider-metadata', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            __sse_responses: Readable.from([
+              'event: response.created\n',
+              'data: {"type":"response.created","response":{"id":"resp_direct_meta","metadata":{"provider":"raw"}}}\n\n',
+              'event: response.completed\n',
+              'data: {"type":"response.completed","response":{"id":"resp_direct_meta","metadata":{"provider":"raw"}}}\n\n',
+            ]),
+          },
+          metadata: {
+            outboundStream: true,
+            __routecodexDirectPassthrough: true,
+          },
+          usageLogInfo: {
+            routeName: 'router-direct:thinking',
+            requestStartedAtMs: Date.now(),
+          },
+        } as any,
+        'req_direct_sse_provider_metadata',
+        { entryEndpoint: '/v1/responses' }
+      );
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/direct-sse-with-provider-metadata`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(text).toContain('"metadata":{"provider":"raw"}');
+      expect(text).not.toContain('sse_bridge_error');
+      expect(text).not.toContain('internal carrier');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('encodes JSON responses payload into client-visible SSE instead of sse_bridge_error', async () => {
     const app = express();
     app.get('/responses-sse-from-json', (_req, res) => {

@@ -1410,8 +1410,8 @@ export class RouteCodexHttpServer {
       ...normalized,
       metadata:
         input.metadata && typeof input.metadata === 'object'
-          ? { ...(input.metadata as Record<string, unknown>) }
-          : normalized.metadata,
+          ? { ...(input.metadata as Record<string, unknown>), __routecodexDirectPassthrough: true }
+          : { ...(normalized.metadata ?? {}), __routecodexDirectPassthrough: true },
       usageLogInfo: {
         ...normalized.usageLogInfo ?? {},
         providerKey: auditContext.providerKey,
@@ -1465,8 +1465,8 @@ export class RouteCodexHttpServer {
       ...normalized,
       metadata:
         input.metadata && typeof input.metadata === 'object'
-          ? { ...(input.metadata as Record<string, unknown>) }
-          : normalized.metadata,
+          ? { ...(input.metadata as Record<string, unknown>), __routecodexDirectPassthrough: true }
+          : { ...(normalized.metadata ?? {}), __routecodexDirectPassthrough: true },
       usageLogInfo: {
         ...(normalized.usageLogInfo ?? {}),
         providerKey: providerBinding,

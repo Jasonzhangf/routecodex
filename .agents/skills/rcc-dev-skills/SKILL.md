@@ -1851,3 +1851,4 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 - same-protocol direct / provider-direct 是 provider passthrough + hooks；`serverToolFollowup` 或 `:stop_followup` 不能禁用 direct、不能强制 relay、不能进入 Hub response chat-process，direct 响应不激活 stopless/servertool。
 - Responses bridge / SSE client projection 禁止把 retention/context `metadata` 回写到 client payload；metadata 只能走 side-channel carrier，发现 `client response contains internal carrier field "metadata"` 时先查 bridge wrapper 是否重投 metadata，不要在 server projection 静默 strip。
+- direct raw SSE 报 `[server.response_projection] client response contains internal carrier field "metadata"` 时，先确认 routeName 是否 `router-direct:*` / `port.provider-direct`；direct 应直接 pipe provider raw stream，不跑 response projection restore/guard，relay/non-direct 才保留该 guard。

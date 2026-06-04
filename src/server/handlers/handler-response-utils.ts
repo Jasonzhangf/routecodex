@@ -1139,6 +1139,20 @@ function shouldDispatchSseToClient(
   return metadata?.outboundStream === true || metadata?.stream === true;
 }
 
+function isDirectPassthroughResponse(result: PipelineExecutionResult): boolean {
+  const metadata =
+    result.metadata && typeof result.metadata === 'object' && !Array.isArray(result.metadata)
+      ? (result.metadata as Record<string, unknown>)
+      : undefined;
+  if (metadata?.__routecodexDirectPassthrough === true) {
+    return true;
+  }
+  const routeName = typeof result.usageLogInfo?.routeName === 'string'
+    ? result.usageLogInfo.routeName
+    : '';
+  return routeName === 'port.provider-direct' || routeName.startsWith('router-direct:');
+}
+
 export function isAnalysisModeEnabled(): boolean {
   const mode = String(process.env.ROUTECODEX_MODE || process.env.RCC_MODE || '').trim().toLowerCase();
   if (mode === 'analysis') {
@@ -1306,7 +1320,10 @@ export async function sendPipelineResponse(
       sendSseBridgeError(res, requestLabel, 502);
       return;
     }
-    const restoredStream = createClientVisibleSseRestoreStream(stream, restoreContext);
+    const directPassthrough = isDirectPassthroughResponse(result);
+    const restoredStream = directPassthrough
+      ? stream
+      : createClientVisibleSseRestoreStream(stream, restoreContext);
     const clientSseSnapshotRecorder = captureClientResponse
       ? createClientSseSnapshotRecorder(restoredStream, res, {
         requestId: requestLabel,

@@ -31,7 +31,8 @@
 6. servertool 执行后的 payload 若仍处于 `HubRespChatProcess03Governed`，只能通过相邻 builder `buildHubRespOutbound04FromHubRespChatProcess03` 进入 `HubRespOutbound04ClientSemantic`；禁止 servertool 专用响应出口、手工 Responses 包装、或绕过正常响应口。
 7. 失败必须 fail-fast，禁止吞异常或降级。
 8. same-protocol direct / provider-direct 端口不得因 `serverToolFollowup` 或 `:stop_followup` 改道 relay；direct 响应不进入 Hub response chat-process，因此 stopless/servertool 不激活。
-9. followup / stopless 的运行时 metadata 只能走 side-channel carrier；Responses bridge / SSE / client JSON 不得把 `metadata`、`__rt`、`metaCarrier` 等内部字段投到 client body。
+9. direct passthrough 的 provider raw SSE 不进入 server response projection restore/guard；只能透传 provider wire frame + hooks，禁止把 provider 协议字段误判成内部 carrier。
+10. followup / stopless 的运行时 metadata 只能走 side-channel carrier；Responses bridge / relay SSE / client JSON 不得把内部 `metadata`、`__rt`、`metaCarrier` 等字段投到 client body。
 
 ## 已移除功能禁区
 - clock / reminder / 定时回查功能已移除，禁止重新接入。
