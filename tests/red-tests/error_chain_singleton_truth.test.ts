@@ -16,10 +16,53 @@ function readSrc(rel: string): string {
 
 const PROVIDER_FAILURE_IMPL = 'src/providers/core/runtime/provider-failure-policy-impl.ts';
 const PROVIDER_FAILURE_POLICY = 'src/providers/core/runtime/provider-failure-policy.ts';
+const PROVIDER_ERROR_REPORTER = 'src/providers/core/utils/provider-error-reporter.ts';
 const EXECUTOR_ERROR_REPORT = 'src/server/runtime/http-server/executor/request-executor-error-report.ts';
 const EXECUTOR_RETRY_DECISION = 'src/server/runtime/http-server/executor/request-executor-retry-decision.ts';
 const EXECUTOR_PROVIDER_FAILURE = 'src/server/runtime/http-server/executor/request-executor-provider-failure.ts';
 const REQUEST_EXECUTOR = 'src/server/runtime/http-server/request-executor.ts';
+const ERROR_CHAIN_DOCS = [
+  'docs/design/pipeline-type-topology-and-module-boundaries.md',
+  'docs/design/error-pipeline-contract-and-routing-audit.md',
+  'docs/design/provider-failure-policy-ssot.md',
+  'docs/goals/error-policy-center-unification-plan.md',
+  '.agents/skills/rcc-dev-skills/SKILL.md'
+];
+const ERROR_POLICY_SOURCE_GLOBS = [
+  'src/providers',
+  'src/server/runtime/http-server/executor',
+  'src/server/runtime/http-server/router-direct-pipeline.ts',
+  'src/server/runtime/http-server/provider-direct-pipeline.ts',
+  'sharedmodule/llmswitch-core/src/router/virtual-router'
+];
+
+function listFiles(rootRel: string): string[] {
+  const root = path.join(ROOT, rootRel);
+  if (!fs.existsSync(root)) {
+    return [];
+  }
+  const stat = fs.statSync(root);
+  if (stat.isFile()) {
+    return [rootRel];
+  }
+  const output: string[] = [];
+  for (const entry of fs.readdirSync(root)) {
+    const rel = path.join(rootRel, entry);
+    const entryPath = path.join(ROOT, rel);
+    const entryStat = fs.statSync(entryPath);
+    if (entryStat.isDirectory()) {
+      if (entry === 'node_modules' || entry === 'dist' || entry === 'target') {
+        continue;
+      }
+      output.push(...listFiles(rel));
+      continue;
+    }
+    if (/\.(ts|tsx|js|mjs)$/.test(entry)) {
+      output.push(rel);
+    }
+  }
+  return output;
+}
 
 describe('Error chain singleton truth — no executor-layer redefinition', () => {
   it('isProviderFailureNetworkTransportLike: exactly one definition in provider-failure-policy-impl.ts', () => {
@@ -61,5 +104,45 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     // Must import from policy, not define locally
     expect(decision).toMatch(/isProviderFailureNetworkTransportLike/);
     expect(decision).not.toMatch(/function\s+isNetworkTransportLikeError/);
+  });
+
+  it('authoritative docs and skill do not use stale error node names', () => {
+    const staleNames = /ErrorErr02CatalogNormalized|ErrorErr03PolicyClassified|ErrorErr04RetryOrFailPlanned|ErrorErr05ClientProjected/;
+    for (const rel of ERROR_CHAIN_DOCS) {
+      expect(readSrc(rel)).not.toMatch(staleNames);
+    }
+  });
+
+  it('authoritative docs and skill name the full ErrorErr01-06 chain and periodic recovery class', () => {
+    for (const rel of ERROR_CHAIN_DOCS) {
+      const src = readSrc(rel);
+      expect(src).toMatch(/ErrorErr01SourceRaised/);
+      expect(src).toMatch(/ErrorErr02HostCaptured/);
+      expect(src).toMatch(/ErrorErr03RuntimeClassified/);
+      expect(src).toMatch(/ErrorErr04RouterPolicyApplied/);
+      expect(src).toMatch(/ErrorErr05ExecutionDecision/);
+      expect(src).toMatch(/ErrorErr06ClientProjected/);
+      expect(src).toMatch(/periodic_recovery/);
+    }
+  });
+
+  it('ErrorHandlingCenter is not imported by provider policy, executor retry, direct, or VR policy code', () => {
+    const offenders: string[] = [];
+    for (const rootRel of ERROR_POLICY_SOURCE_GLOBS) {
+      for (const rel of listFiles(rootRel)) {
+        const src = readSrc(rel);
+        if (/ErrorHandlingCenter|rcc-errorhandling/.test(src)) {
+          offenders.push(rel);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('provider-error-reporter requires explicit recoverable and affectsHealth instead of inferring policy defaults', () => {
+    const reporter = readSrc(PROVIDER_ERROR_REPORTER);
+    expect(reporter).toMatch(/explicit recoverable\/affectsHealth is required/);
+    expect(reporter).not.toMatch(/recoverable\s*\?\?/);
+    expect(reporter).not.toMatch(/affectsHealth\s*\?\?/);
   });
 });
