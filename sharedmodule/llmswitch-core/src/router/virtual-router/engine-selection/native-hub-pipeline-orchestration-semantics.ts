@@ -33,6 +33,8 @@ export interface NativeHubPipelineOrchestrationOutput {
   success: boolean;
   payload?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  standardizedRequest?: Record<string, unknown>;
+  entryOriginRequest?: Record<string, unknown>;
   error?: {
     code: string;
     message: string;

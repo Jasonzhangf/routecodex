@@ -2098,7 +2098,7 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 
 ## 2026-06-04 Request field equivalence / followup no-backfill truth
 - Servertool followup is a normal nested request reentry, not a request-field patch DSL. Followup must not inject `requestSemantics` into nested body/metadata and must not restore `tools/tool_choice` from `rawBody`, `__raw_request_body`, `requestMetadata`, `contextSnapshot`, `responsesContext`, `toolsRaw`, or `clientToolsRaw`.
-- `servertool_followup_delta` no longer supports `preserve_tools`, `ensure_standard_tools`, `replace_tools`, `force_tool_choice`, `drop_tool_by_name`, or `append_tool_if_missing`; seed `tools` and `parameters.tool_choice` must not be carried into followup payload. Tool governance belongs to `ReqChatProcess`.
+- Superseded on 2026-06-04 by the clone-delta truth below: `servertool_followup_delta` must not support request-field patch/backfill ops such as `preserve_tools`, `ensure_standard_tools`, `replace_tools`, `force_tool_choice`, `drop_tool_by_name`, or `append_tool_if_missing`; however origin standard request fields such as `tools`, `tool_choice`, and params must be preserved by cloning `capturedChatRequest`.
 - Provider wire guard truth: `ProviderReqOutbound06WirePayload` must fail-fast if provider body contains request-context carriers (`toolsRaw`, `clientToolsRaw`, `responsesContext`, `contextSnapshot`, `requestMetadata`, `__raw_request_body`, `rawBody`) or Codex namespace aggregate tools (`type:"namespace"` / `{name, tools:[...]}`).
 
 ## 2026-06-04 Full architecture audit closeout
@@ -2115,3 +2115,21 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 - Request live fields must come from ChatProcess/Chat source semantics only. Responses bridge must not use `ctx.parameters`, `ctx.metadata.parameters`, `ctx.metadata`, `ctx.toolsRaw`, or context tool controls to project live request fields.
 - `PrepareResponsesRequestEnvelopeInput` is now single-source for request fields: Chat parameters only, plus explicit instruction/stream/strip flags. Context/metadata request-field entries were physically removed to prevent future raw/context backfill.
 - Verified gates: TS targeted 10 suites/82 tests, Rust `prepare_responses_request_envelope`/`servertool_followup_delta`/`provider_req_outbound_06_wire_payload`, `npm run build:min`, global install/restart 5555 `0.90.2826`, and live provider-request namespace/internal-carrier scan `hits=[]`.
+
+## 2026-06-04 stopless schema 连续 stop 预算真相
+- stopless / stop schema 终止规则：missing schema、invalid schema、`stopreason=2` 都共享同一个连续 `finish_reason=stop` 预算；第三次连续 stop 走 budget-exhausted final summary。中间只要出现 tool call / 非 stop / 真实进展，必须 reset `stopMessageUsed`。
+- `stop_message_flow` followup hop 是 bounded continuation，仍可重新触发 stopless；只有非 `stop_message_flow` 的 generic servertool followup 才 `skip_servertool_followup_hop`。
+- 真实样本锚点：`~/.rcc/codex-samples/openai-responses/port-5555/req_1780562260281_0ffba4a1/provider-response.json` 与同端口 `*_stop_followup/provider-request.json`。
+- 验证基线：改 Rust stop-message-core 后必须先重建 NAPI（`node scripts/build-core.mjs && node scripts/vendor-core.mjs`），再跑 `cargo test -p stop-message-core --lib` 和 stop-message 三文件 Jest。
+
+## 2026-06-04 usage lifecycle truth
+- Usage has two separate projections: internal/log accounting keeps `prompt_tokens`/`completion_tokens` as canonical aggregate fields, while `/v1/responses` client payload must project only Responses usage fields (`input_tokens`, `output_tokens`, `total_tokens`, details). Do not leak chat usage aliases to Responses clients.
+- Cache accounting is protocol-sensitive: OpenAI Responses `input_tokens` already includes cached tokens, while Anthropic-style `input_tokens` may exclude `cache_read_input_tokens`; always pass `providerProtocol` into usage extraction before computing cache hit/total metrics.
+
+## 2026-06-04 servertool followup clone-delta truth
+- Supersedes earlier same-day wording that implied followup should rebuild or prune request fields. Servertool followup must clone the captured `HubReqInbound02Standardized` standard request and apply only followup delta; it must not reconstruct from raw payload/context or selectively rebuild `model/messages/tools/parameters`.
+- Origin semantic fields such as `tools`, `tool_choice`, `parameters`, `parallel_tool_calls`, and protocol controls are preserved in the cloned standard request. Internal metadata remains side-channel and must not become provider/client payload.
+- Verified after native rebuild and global install: Rust `servertool_followup_delta` 11/11, focused Jest 4 suites/12 tests, `npm run build:min`, `routecodex restart --port 5555`, health `0.90.2842`.
+
+- 2026-06-04: servertool followup origin 真源收敛：followup capture 必须发生在请求 entry，保存 `entryOriginRequest/capturedEntryRequest`，followup 只能 clone 入口协议原请求并加 delta；`/v1/responses` 必须保持 `input` shape，不能从 chat `messages`、raw metadata、responses context 或当前污染 payload 重建。旧 `backfillServertoolAdapterContextTools*` 是错误实现，已从活路径/生成导出物理删除。验证：Rust `servertool_followup_delta` 11/11、focused Jest 4 suites/16 tests、`npm run build:min` 通过，版本 `0.90.2847`。
+Tags: servertool, stopless, followup, entryOriginRequest, capturedEntryRequest, responses-input, no-raw-backfill, no-tool-list-backfill, rust-only

@@ -81,6 +81,12 @@ function invokeNativeStringCapability(capability: string, args: unknown[]): stri
   }
   try {
     const raw = fn(...args);
+    if (raw instanceof Error) {
+      return fail(raw.message || 'native error');
+    }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as { message?: unknown }).message === 'string') {
+      return fail(String((raw as { message: unknown }).message));
+    }
     if (typeof raw !== 'string' || !raw) {
       return fail('empty result');
     }

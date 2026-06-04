@@ -332,6 +332,122 @@ fn strip_responses_reasoning_content(payload: &mut Map<String, Value>) {
     }
 }
 
+fn assert_no_namespace_tool_aggregate(value: &Value, path: &str) -> Result<(), String> {
+    match value {
+        Value::Object(object) => {
+            let item_type = object
+                .get("type")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("");
+            if item_type.eq_ignore_ascii_case("namespace") {
+                return Err(format!(
+                    "provider outbound payload must not carry namespace tool aggregate at {path}"
+                ));
+            }
+            if object.contains_key("tools")
+                && object.get("tools").is_some_and(Value::is_array)
+                && object.get("name").and_then(Value::as_str).is_some()
+                && !object.contains_key("function")
+            {
+                return Err(format!(
+                    "provider outbound payload must not carry namespace tool aggregate at {path}"
+                ));
+            }
+            for (key, child) in object {
+                let child_path = if path == "$" {
+                    format!("$.{key}")
+                } else {
+                    format!("{path}.{key}")
+                };
+                assert_no_namespace_tool_aggregate(child, child_path.as_str())?;
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                assert_no_namespace_tool_aggregate(child, format!("{path}[{index}]").as_str())?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
+    let Some(row) = tool.as_object() else {
+        return vec![tool.clone()];
+    };
+    let tool_type = row
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if !tool_type.eq_ignore_ascii_case("namespace") {
+        return vec![tool.clone()];
+    }
+
+    let Some(children) = row.get("tools").and_then(Value::as_array) else {
+        return vec![tool.clone()];
+    };
+
+    children
+        .iter()
+        .filter_map(|child| {
+            let child_row = child.as_object()?;
+            let child_function = child_row.get("function").and_then(Value::as_object);
+            let name = child_function
+                .and_then(|function| function.get("name"))
+                .or_else(|| child_row.get("name"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())?;
+
+            let mut function = Map::new();
+            function.insert("name".to_string(), Value::String(name.to_string()));
+            if let Some(description) = child_function
+                .and_then(|function| function.get("description"))
+                .or_else(|| child_row.get("description"))
+                .cloned()
+            {
+                function.insert("description".to_string(), description);
+            }
+            if let Some(parameters) = child_function
+                .and_then(|function| function.get("parameters"))
+                .or_else(|| child_row.get("parameters"))
+                .cloned()
+            {
+                function.insert("parameters".to_string(), parameters);
+            }
+            if let Some(strict) = child_function
+                .and_then(|function| function.get("strict"))
+                .or_else(|| child_row.get("strict"))
+                .cloned()
+            {
+                function.insert("strict".to_string(), strict);
+            }
+
+            let mut out = Map::new();
+            out.insert("type".to_string(), Value::String("function".to_string()));
+            out.insert("function".to_string(), Value::Object(function));
+            Some(Value::Object(out))
+        })
+        .collect()
+}
+
+fn normalize_provider_outbound_tools(protocol: &str, payload: &mut Map<String, Value>) {
+    if protocol != "openai-chat" && protocol != "openai-responses" {
+        return;
+    }
+    let Some(Value::Array(tools)) = payload.get_mut("tools") else {
+        return;
+    };
+    let normalized = tools
+        .iter()
+        .flat_map(normalize_provider_outbound_tool)
+        .collect::<Vec<Value>>();
+    *tools = normalized;
+}
+
 fn default_allowlists_for_input() -> HubProtocolAllowlists {
     let allowlists = build_default_allowlists();
     HubProtocolAllowlists {
@@ -365,6 +481,8 @@ fn apply_provider_outbound_policy(
     {
         strip_responses_reasoning_content(&mut payload);
     }
+
+    normalize_provider_outbound_tools(protocol, &mut payload);
 
     if !spec.provider_outbound.enforce_enabled {
         return payload;
@@ -624,6 +742,7 @@ pub fn sanitize_provider_outbound_payload_json(input_json: String) -> NapiResult
     };
     let protocol = normalize_provider_protocol(input.protocol.as_deref());
     if input.enforce_layout == Some(false) {
+        normalize_provider_outbound_tools(&protocol, &mut payload);
         if protocol == "openai-responses"
             && !input
                 .compatibility_profile
@@ -634,11 +753,15 @@ pub fn sanitize_provider_outbound_payload_json(input_json: String) -> NapiResult
         {
             strip_responses_reasoning_content(&mut payload);
         }
+        assert_no_namespace_tool_aggregate(&Value::Object(payload.clone()), "$")
+            .map_err(napi::Error::from_reason)?;
         return serde_json::to_string(&Value::Object(payload))
             .map_err(|e| napi::Error::from_reason(e.to_string()));
     }
     let output =
         apply_provider_outbound_policy(&protocol, input.compatibility_profile.as_deref(), payload);
+    assert_no_namespace_tool_aggregate(&Value::Object(output.clone()), "$")
+        .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&Value::Object(output))
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -736,5 +859,28 @@ mod tests {
         let input_items = output.get("input").and_then(Value::as_array).unwrap();
         let reasoning = input_items[0].as_object().unwrap();
         assert!(reasoning.contains_key("content"));
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_flattens_namespace_tool_aggregate() {
+        let input = serde_json::json!({
+            "protocol": "openai-responses",
+            "payload": {
+                "model": "minimax-m3-free",
+                "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+                "tools": [{"type": "namespace", "name": "multi_agent_v1", "tools": [{"type":"function", "name":"spawn_agent", "description":"spawn", "parameters":{"type":"object"}}]}]
+            }
+        });
+
+        let output: Value = serde_json::from_str(
+            &sanitize_provider_outbound_payload_json(input.to_string()).unwrap(),
+        )
+        .unwrap();
+        let tools = output["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], serde_json::json!("function"));
+        assert_eq!(tools[0]["function"]["name"], serde_json::json!("spawn_agent"));
+        assert_eq!(tools[0]["function"]["description"], serde_json::json!("spawn"));
+        assert_eq!(tools[0]["function"]["parameters"], serde_json::json!({"type":"object"}));
     }
 }

@@ -186,8 +186,14 @@ export async function resolveProviderRetryExecutionPlan(args: {
     !eligibilityPlan.shouldRetry
     && hasTerminalAlternativeCandidate
     && classification === 'recoverable';
+  const terminalProviderFailureReroute =
+    !eligibilityPlan.shouldRetry
+    && hasTerminalAlternativeCandidate
+    && classification === 'unrecoverable'
+    && !(args.error as { retryScope?: unknown; providerAccountOwnership?: unknown } | undefined)?.retryScope
+    && (args.error as { providerAccountOwnership?: unknown } | undefined)?.providerAccountOwnership !== 'internal';
 
-  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute && !terminalRecoverableReroute && !recoverableProviderReroute) {
+  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute && !terminalRecoverableReroute && !recoverableProviderReroute && !terminalProviderFailureReroute) {
     const keepTerminalExclusion =
       exclusionPlan.excludedCurrentProvider
       && (args.status === 429 || args.forceExcludeCurrentProviderOnRetry === true);
@@ -201,8 +207,8 @@ export async function resolveProviderRetryExecutionPlan(args: {
     };
   }
 
-  if (terminalQuotaReroute || terminalRecoverableReroute || recoverableProviderReroute) {
-    const retryBackoffPlan = (terminalRecoverableReroute || recoverableProviderReroute)
+  if (terminalQuotaReroute || terminalRecoverableReroute || recoverableProviderReroute || terminalProviderFailureReroute) {
+    const retryBackoffPlan = (terminalRecoverableReroute || recoverableProviderReroute || terminalProviderFailureReroute)
       ? {
           blockingRecoverable: false,
           retryBackoffMs: 0,

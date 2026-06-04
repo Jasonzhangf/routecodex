@@ -27,6 +27,7 @@ type HubStageTopEntry = {
 };
 
 const DEFAULT_HUB_STAGE_TOP_N = 5;
+const USAGE_DETAIL_TIMING_MIN_MS = 100;
 
 function readTopN(): number {
   const raw = process.env.ROUTECODEX_USAGE_HUB_TOP_N ?? process.env.RCC_USAGE_HUB_TOP_N;
@@ -47,6 +48,41 @@ function hiValue(value: string | number, baseColor: string): string {
 
 function hiPair(key: string, value: string | number, baseColor: string): string {
   return `${key}=${hiValue(value, baseColor)}`;
+}
+
+function hiMsPairIfSlow(key: string, valueMs: number, baseColor: string): string {
+  if (!Number.isFinite(valueMs) || valueMs < USAGE_DETAIL_TIMING_MIN_MS) {
+    return '';
+  }
+  return hiPair(key, formatMs(valueMs), baseColor);
+}
+
+function colorizeNumericValues(text: string, baseColor: string): string {
+  if (!text) {
+    return '';
+  }
+  return text.replace(/=([-+]?\d+(?:\.\d+)?(?:ms|MB|%|t\/s)?)/g, (_match, value: string) => `=${hiValue(value, baseColor)}`);
+}
+
+function formatTimingSuffix(raw: string, baseColor: string): string {
+  if (!raw) {
+    return '';
+  }
+  const match = /^\s*timing=\{(.+)\}\s*$/.exec(raw);
+  if (!match) {
+    return colorizeNumericValues(raw, baseColor);
+  }
+  const slowParts = match[1]
+    .split(/,\s*/)
+    .map((part) => part.trim())
+    .filter((part) => {
+      const valueMatch = /=([-+]?\d+(?:\.\d+)?)ms$/.exec(part);
+      return valueMatch ? Number(valueMatch[1]) >= USAGE_DETAIL_TIMING_MIN_MS : true;
+    });
+  if (!slowParts.length) {
+    return '';
+  }
+  return ` timing ${colorizeNumericValues(slowParts.join(', '), baseColor)}`;
 }
 
 function pad(value: string, width: number): string {
@@ -97,6 +133,7 @@ function formatHubStageTop(entries: HubStageTopEntry[] | undefined): string {
   const topN = readTopN();
   const normalized = entries
     .filter((entry) => entry && typeof entry.stage === 'string' && Number.isFinite(entry.totalMs))
+    .filter((entry) => entry.totalMs >= USAGE_DETAIL_TIMING_MIN_MS)
     .sort((a, b) => b.totalMs - a.totalMs)
     .slice(0, topN)
     .map((entry) => {
@@ -262,11 +299,18 @@ export function logUsageSummary(
   const totalTokens = usage?.total_tokens ?? 'n/a';
   const route = info.routeName ?? '-';
   const pool = info.poolId ?? '-';
+  const formattedTimingSuffix = formatTimingSuffix(timingSuffix, requestColor);
+  const diagTimings = [
+    hiMsPairIfSlow('wait.traffic', trafficWaitMs, requestColor),
+    hiMsPairIfSlow('wait.inject', clientInjectWaitMs, requestColor),
+    hiMsPairIfSlow('decode.sse', sseDecodeMs, requestColor),
+    hiMsPairIfSlow('decode.codec', codecDecodeMs, requestColor)
+  ].filter(Boolean).join(' ');
   const lines = [
     `${requestColor}[usage] ${pad(`req=${requestId}`, 56)} route=${route}/${pool} -> provider=${providerLabel}${ANSI_RESET}`,
     `${requestColor}        time ${hiPair('total', `${latency}ms`, requestColor)} ${hiPair('external', formatMs(externalLatencyMs), requestColor)} ${hiPair('internal', formatMs(internalLatencyMs), requestColor)} ${hiPair('attempts', providerAttemptCount, requestColor)} ${hiPair('retries', retryCount, requestColor)} ${hiPair('finish_reason', finishReason, requestColor)}${ANSI_RESET}`,
     `${requestColor}        tok  ${hiPair('in', inputTokens, requestColor)} ${hiPair('out', outputTokens, requestColor)} ${hiPair('total', totalTokens, requestColor)} ${hiPair('cache', cacheValue, requestColor)} ${hiPair('day.calls', dailyProviderStat.calls, requestColor)} ${hiPair('day.fail', dailyProviderStat.failures, requestColor)} ${hiPair('day.avg', formatMs(dailyProviderStat.avgMs), requestColor)}${tokenSuffix}${ANSI_RESET}`,
-    `${requestColor}        diag mem=${formatMemoryHealth()} sample=${sampleId} ${hiPair('wait.traffic', formatMs(trafficWaitMs), requestColor)} ${hiPair('wait.inject', formatMs(clientInjectWaitMs), requestColor)} ${hiPair('decode.sse', formatMs(sseDecodeMs), requestColor)} ${hiPair('decode.codec', formatMs(codecDecodeMs), requestColor)}${typeof info.providerDecodeTag === 'string' && info.providerDecodeTag.trim() ? ` ${info.providerDecodeTag.trim()}` : ''}${timingSuffix}${hubStageTopSuffix}${ANSI_RESET}`
+    `${requestColor}        diag mem=${formatMemoryHealth()} sample=${sampleId}${diagTimings ? ` ${diagTimings}` : ''}${typeof info.providerDecodeTag === 'string' && info.providerDecodeTag.trim() ? ` ${info.providerDecodeTag.trim()}` : ''}${formattedTimingSuffix}${hubStageTopSuffix}${ANSI_RESET}`
   ];
   console.log(lines.join('\n'));
 }

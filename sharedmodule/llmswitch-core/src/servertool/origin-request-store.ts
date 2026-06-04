@@ -13,6 +13,7 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
 
 export type OriginSnapshot = {
+  capturedEntryRequest?: JsonObject;
   capturedChatRequest?: JsonObject;
   model?: string;
   messages: JsonObject[];

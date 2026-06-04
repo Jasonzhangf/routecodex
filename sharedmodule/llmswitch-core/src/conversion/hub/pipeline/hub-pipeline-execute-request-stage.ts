@@ -70,6 +70,8 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
   return {
     requestId: normalized.id,
     providerPayload,
+    standardizedRequest: nativePlan.standardizedRequest as unknown as HubPipelineResult['standardizedRequest'],
+    entryOriginRequest: nativePlan.entryOriginRequest as HubPipelineResult['entryOriginRequest'],
     target: outputMetadata.target as HubPipelineResult['target'],
     routingDecision: outputMetadata.routingDecision as HubPipelineResult['routingDecision'],
     routingDiagnostics: outputMetadata.routingDiagnostics as HubPipelineResult['routingDiagnostics'],

@@ -16,7 +16,6 @@
 import type { PortConfig } from './port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
 import { detectInboundProtocolFromRequest } from './provider-direct-pipeline.js';
-import type { ErrorErr01SourceRaised } from '../../../providers/core/utils/provider-error-reporter.js';
 
 /** Context snapshot for a single router-direct request — feeds snapshot hooks and logs. */
 export interface RouterDirectAuditContext {
@@ -53,8 +52,8 @@ export interface RouterDirectInput {
   onSnapshotBefore?: (payload: Record<string, unknown>, context: RouterDirectAuditContext) => void;
   /** Called with the raw provider response before any further processing. */
   onSnapshotAfter?: (response: unknown, context: RouterDirectAuditContext) => void;
-  /** Called when direct provider transport fails; must report through ErrorErr02HostCaptured and rethrow. */
-  onProviderError?: (source: ErrorErr01SourceRaised, context: RouterDirectAuditContext) => Promise<void> | void;
+  /** Called when direct provider transport fails; caller must classify/report through the unified ErrorErr chain. */
+  onProviderError?: (error: unknown, context: RouterDirectAuditContext) => Promise<void> | void;
 }
 
 export interface RouterDirectResult {
@@ -73,6 +72,7 @@ export interface RouterDirectResult {
 export interface RouterDirectSkipped {
   used: false;
   reason: string;
+  retryMetadata?: Record<string, unknown>;
   preselectedRoute?: {
     target: Record<string, unknown>;
     decision?: Record<string, unknown>;
@@ -145,28 +145,7 @@ export async function executeRouterDirectPipeline(
         ? await providerHandle.instance.processIncomingDirect(payloadToSend)
         : await providerHandle.instance.processIncoming(payloadToSend);
   } catch (error) {
-    await input.onProviderError?.({
-      error,
-      stage: 'provider.send',
-      runtime: {
-        requestId: input.requestId ?? '',
-        providerKey: target.providerKey,
-        providerType: target.providerType,
-        providerProtocol,
-        routeName: input.routingDecision?.routeName,
-        pipelineId: target.providerKey,
-        target,
-        runtimeKey,
-      },
-      dependencies: {} as never,
-      statusCode: readStatusCode(error),
-      recoverable: isRecoverableDirectProviderError(error),
-      affectsHealth: true,
-      details: {
-        routePoolSize: Array.isArray(input.routingDecision?.pool) ? input.routingDecision?.pool?.length : 0,
-        errorClassification: isRecoverableDirectProviderError(error) ? 'recoverable' : 'unrecoverable',
-      },
-    }, auditContext);
+    await input.onProviderError?.(error, auditContext);
     throw error;
   }
 
@@ -178,33 +157,6 @@ export async function executeRouterDirectPipeline(
     providerHandle,
     auditContext,
   };
-}
-
-function readStatusCode(error: unknown): number | undefined {
-  if (!error || typeof error !== 'object') {
-    return undefined;
-  }
-  const record = error as { status?: unknown; statusCode?: unknown };
-  return typeof record.statusCode === 'number'
-    ? record.statusCode
-    : (typeof record.status === 'number' ? record.status : undefined);
-}
-
-function isRecoverableDirectProviderError(error: unknown): boolean {
-  const statusCode = readStatusCode(error);
-  if (typeof statusCode === 'number') {
-    return statusCode === 408 || statusCode === 425 || statusCode === 429 || statusCode >= 500;
-  }
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-  const record = error as { code?: unknown; message?: unknown };
-  const code = typeof record.code === 'string' ? record.code.trim().toUpperCase() : '';
-  if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'EPIPE') {
-    return true;
-  }
-  const message = typeof record.message === 'string' ? record.message.toLowerCase() : '';
-  return message.includes('fetch failed') || message.includes('timeout') || message.includes('temporarily unavailable');
 }
 
 function readNonEmptyString(value: unknown): string | undefined {

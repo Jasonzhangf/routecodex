@@ -541,7 +541,11 @@ export class HubRequestExecutor implements RequestExecutor {
       try {
         const pipelineLabel = 'hub';
         let aggregatedUsage: UsageMetrics | undefined;
-        const excludedProviderKeys = new Set<string>();
+        const excludedProviderKeys = new Set<string>(
+          Array.isArray(initialMetadata.excludedProviderKeys)
+            ? initialMetadata.excludedProviderKeys.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+            : []
+        );
         const maxAttempts = resolveMaxProviderAttempts();
         const retryPayloadSeed = prepareRequestPayloadRetrySeed(input.body);
         const providerFailureAttemptOffset = (() => {
@@ -1202,7 +1206,7 @@ export class HubRequestExecutor implements RequestExecutor {
               requestId: input.requestId,
               serverToolsEnabled,
               wantsStream: wantsStreamBase,
-              originalRequest: resolveOriginalRequestForResponseConversion(retryPayloadSeed),
+              entryOriginRequest: pipelineResult.entryOriginRequest as Record<string, unknown> | undefined,
               requestSemantics,
               processMode: pipelineResult.processMode,
               response: normalized,
@@ -1482,7 +1486,7 @@ export class HubRequestExecutor implements RequestExecutor {
     requestId: string;
     serverToolsEnabled?: boolean;
     wantsStream: boolean;
-    originalRequest?: Record<string, unknown>;
+    entryOriginRequest?: Record<string, unknown>;
     requestSemantics?: Record<string, unknown>;
     processMode?: string;
     response: PipelineExecutionResult;

@@ -3,6 +3,7 @@ use serde_json::Value;
 
 use super::hub_req_inbound_02_standardized::assert_no_inline_metadata;
 use super::hub_resp_inbound_02_parsed::{assert_not_success_error_payload, HubRespInbound02Parsed};
+use super::tool_surface_contract::{assert_tool_surface_contract, ToolNamespacePolicy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +29,11 @@ pub(crate) fn build_hub_resp_chatprocess_03_from_hub_resp_inbound_02(
     assert_not_success_error_payload(inbound.payload(), "HubRespChatProcess03Governed.source")?;
     assert_no_inline_metadata(&governed_payload, "HubRespChatProcess03Governed")?;
     assert_not_success_error_payload(&governed_payload, "HubRespChatProcess03Governed")?;
+    assert_tool_surface_contract(
+        &governed_payload,
+        "HubRespChatProcess03Governed",
+        ToolNamespacePolicy::AllowSemanticNamespace,
+    )?;
     Ok(HubRespChatProcess03Governed {
         payload: governed_payload,
     })

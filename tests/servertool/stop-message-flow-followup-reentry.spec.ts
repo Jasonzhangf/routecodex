@@ -164,6 +164,12 @@ describe("stop_message_flow reentry", () => {
         capturedChatRequest: {
           model: "gpt-test",
           messages: [{ role: "user", content: "start" }],
+          tools: [
+            {
+              type: "function",
+              function: { name: "exec_command", parameters: { type: "object" } },
+            },
+          ],
         },
         __rt: {
           serverToolFollowup: true,
@@ -181,6 +187,13 @@ describe("stop_message_flow reentry", () => {
     expect(result.flowId).toBe("stop_message_flow");
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    const followupBody = reenterPipeline.mock.calls[0]?.[0]?.body as Record<string, unknown>;
+    expect((followupBody.tools as any[])?.[0]?.function?.name).toBe("exec_command");
+    const messages = followupBody.messages as Array<Record<string, unknown>>;
+    expect(messages[0]).toEqual({ role: "user", content: "start" });
+    expect(messages.at(-1)?.role).toBe("user");
+    expect(String(messages.at(-1)?.content)).toContain("Stop schema 校验未通过");
+    expect(String(messages.at(-1)?.content)).toContain("必须在本轮直接发出工具调用");
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
   });
 

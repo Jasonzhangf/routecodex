@@ -75,6 +75,114 @@ fn first_normalized_parameters(candidates: Vec<Option<Value>>) -> Option<Value> 
         .find_map(|value| normalize_followup_parameters(&value))
 }
 
+fn extract_standard_followup_captured_request(adapter_context: &Value) -> Option<&Value> {
+    let row = adapter_context.as_object()?;
+    row.get("capturedEntryRequest")
+        .or_else(|| row.get("capturedChatRequest"))
+        .filter(|value| value.as_object().is_some())
+}
+
+fn seed_has_conversation(seed: &Map<String, Value>) -> bool {
+    seed.get("messages")
+        .and_then(Value::as_array)
+        .is_some_and(|messages| !messages.is_empty())
+        || seed
+            .get("input")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|text| !text.is_empty())
+        || seed
+            .get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+}
+
+fn messages_from_payload(payload: &Map<String, Value>) -> Vec<Value> {
+    if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
+        return messages.clone();
+    }
+    if let Some(text) = payload
+        .get("input")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        return vec![Value::Object(Map::from_iter([
+            ("role".to_string(), Value::String("user".to_string())),
+            ("content".to_string(), Value::String(text.to_string())),
+        ]))];
+    }
+    payload
+        .get("input")
+        .and_then(Value::as_array)
+        .map(|input| extract_chat_messages_from_responses_input(input))
+        .unwrap_or_default()
+}
+
+fn messages_to_responses_input(messages: &[Value]) -> Value {
+    let mut input = Vec::new();
+    for message in messages {
+        let Some(row) = message.as_object() else { continue; };
+        let role = row.get("role").and_then(Value::as_str).unwrap_or("user");
+        if role == "tool" {
+            let call_id = row
+                .get("tool_call_id")
+                .or_else(|| row.get("call_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if !call_id.is_empty() {
+                input.push(Value::Object(Map::from_iter([
+                    ("type".to_string(), Value::String("function_call_output".to_string())),
+                    ("call_id".to_string(), Value::String(call_id.to_string())),
+                    (
+                        "output".to_string(),
+                        Value::String(extract_responses_message_text(row.get("content").unwrap_or(&Value::Null))),
+                    ),
+                ])));
+            }
+            continue;
+        }
+        if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
+            for tool_call in tool_calls {
+                let Some(call) = tool_call.as_object() else { continue; };
+                let function = call.get("function").and_then(Value::as_object);
+                input.push(Value::Object(Map::from_iter([
+                    ("type".to_string(), Value::String("function_call".to_string())),
+                    (
+                        "call_id".to_string(),
+                        Value::String(call.get("id").and_then(Value::as_str).unwrap_or("").to_string()),
+                    ),
+                    (
+                        "name".to_string(),
+                        Value::String(function.and_then(|f| f.get("name")).and_then(Value::as_str).unwrap_or("").to_string()),
+                    ),
+                    (
+                        "arguments".to_string(),
+                        Value::String(function.and_then(|f| f.get("arguments")).and_then(Value::as_str).unwrap_or("{}").to_string()),
+                    ),
+                ])));
+            }
+        }
+        let text = extract_responses_message_text(row.get("content").unwrap_or(&Value::Null));
+        if text.trim().is_empty() {
+            continue;
+        }
+        let content_type = if role == "assistant" { "output_text" } else { "input_text" };
+        input.push(Value::Object(Map::from_iter([
+            ("type".to_string(), Value::String("message".to_string())),
+            ("role".to_string(), Value::String(role.to_string())),
+            (
+                "content".to_string(),
+                Value::Array(vec![Value::Object(Map::from_iter([
+                    ("type".to_string(), Value::String(content_type.to_string())),
+                    ("text".to_string(), Value::String(text)),
+                ]))]),
+            ),
+        ])));
+    }
+    Value::Array(input)
+}
+
 pub(crate) fn resolve_followup_model(seed_model: &Value, adapter_context: &Value) -> String {
     let seed = seed_model.as_str().map(str::trim).filter(|s| !s.is_empty());
     let Some(record) = adapter_context.as_object() else {
@@ -160,49 +268,35 @@ fn extract_chat_messages_from_responses_input(input: &[Value]) -> Vec<Value> {
 
 pub(crate) fn extract_captured_chat_seed(captured: &Value) -> Option<Value> {
     let row = captured.as_object()?;
-    let mut out = Map::new();
-    if let Some(model) = row
+    if !seed_has_conversation(row) {
+        return None;
+    }
+    let mut out = row.clone();
+    if let Some(model) = out
         .get("model")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        .map(str::to_string)
     {
-        out.insert("model".to_string(), Value::String(model.to_string()));
-    }
-    if let Some(messages) = row.get("messages").and_then(Value::as_array) {
-        if messages.is_empty() {
-            return None;
-        }
-        out.insert("messages".to_string(), Value::Array(messages.clone()));
-    } else if let Some(text) = row
-        .get("input")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        out.insert(
-            "messages".to_string(),
-            Value::Array(vec![Value::Object(Map::from_iter([
-                ("role".to_string(), Value::String("user".to_string())),
-                ("content".to_string(), Value::String(text.to_string())),
-            ]))]),
-        );
-    } else if let Some(input) = row.get("input").and_then(Value::as_array) {
-        let messages = extract_chat_messages_from_responses_input(input);
-        if messages.is_empty() {
-            return None;
-        }
-        out.insert("messages".to_string(), Value::Array(messages));
+        out.insert("model".to_string(), Value::String(model));
     } else {
-        return None;
-    }
-    if let Some(parameters) = first_normalized_parameters(vec![
-        row.get("parameters").cloned(),
-        extract_responses_top_level_parameters(row).map(Value::Object),
-    ]) {
-        out.insert("parameters".to_string(), parameters);
+        out.remove("model");
     }
     Some(Value::Object(out))
+}
+
+pub(crate) fn build_servertool_req04_followup_seed(adapter_context: &Value) -> Option<Value> {
+    let captured = extract_standard_followup_captured_request(adapter_context)?;
+    extract_captured_chat_seed(captured)
+}
+
+pub(crate) fn build_servertool_req04_followup_payload(adapter_context: &Value) -> Option<Value> {
+    let seed = build_servertool_req04_followup_seed(adapter_context)?;
+    if !seed.as_object().is_some_and(seed_has_conversation) {
+        return None;
+    }
+    Some(seed)
 }
 
 fn extract_captured_tool_outputs(responses_context: Option<&Map<String, Value>>) -> Vec<Value> {
@@ -609,11 +703,7 @@ fn apply_single_delta_op(
         return true;
     };
     let kind = op_row.get("op").and_then(Value::as_str).unwrap_or("");
-    let mut messages = payload
-        .get("messages")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let mut messages = messages_from_payload(payload);
     match kind {
         "append_assistant_message" => {
             if let Some(message) = extract_assistant_followup_message(final_chat_response) {
@@ -700,23 +790,13 @@ pub(crate) fn apply_followup_delta_plan(input: &Value) -> Option<Value> {
     let row = input.as_object()?;
     let seed = row.get("seed")?.as_object()?;
     let injection = row.get("injection")?.as_object()?;
-    let mut payload = Map::new();
-    let messages = seed.get("messages").and_then(Value::as_array)?.clone();
-    payload.insert("messages".to_string(), Value::Array(messages));
-    if let Some(model) = seed
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        payload.insert("model".to_string(), Value::String(model.to_string()));
+    if !seed_has_conversation(seed) {
+        return None;
     }
-    if let Some(parameters) = seed
-        .get("parameters")
-        .and_then(normalize_followup_parameters)
-        .and_then(|value| value.as_object().cloned())
-    {
-        payload.insert("parameters".to_string(), Value::Object(parameters));
+    let mut payload = seed.clone();
+    let use_responses_input = payload.contains_key("input") && !payload.contains_key("messages");
+    if use_responses_input {
+        payload.insert("messages".to_string(), Value::Array(messages_from_payload(&payload)));
     }
     let ops = injection
         .get("ops")
@@ -730,6 +810,15 @@ pub(crate) fn apply_followup_delta_plan(input: &Value) -> Option<Value> {
             return None;
         }
     }
+    if use_responses_input {
+        let messages = payload
+            .get("messages")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        payload.remove("messages");
+        payload.insert("input".to_string(), messages_to_responses_input(&messages));
+    }
     Some(Value::Object(payload))
 }
 
@@ -739,6 +828,16 @@ pub fn extract_captured_chat_seed_json(captured_json: String) -> NapiResult<Stri
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
     serde_json::to_string(&extract_captured_chat_seed(&captured).unwrap_or(Value::Null))
         .map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+#[napi]
+pub fn build_servertool_req04_followup_payload_json(adapter_context_json: String) -> NapiResult<String> {
+    let adapter_context: Value = serde_json::from_str(&adapter_context_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    serde_json::to_string(
+        &build_servertool_req04_followup_payload(&adapter_context).unwrap_or(Value::Null),
+    )
+    .map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
 #[napi]
@@ -820,7 +919,44 @@ mod tests {
             "call_apply_patch_test"
         );
         assert_eq!(payload["messages"][2]["role"], "tool");
-        assert!(payload.get("tools").is_none());
+        assert_eq!(payload["tools"][0]["function"]["name"], "apply_patch");
+        assert_eq!(payload["tools"][1]["function"]["name"], "exec_command");
+    }
+
+    #[test]
+    fn followup_delta_clones_origin_request_and_only_applies_delta() {
+        let input = json!({
+            "adapterContext": {},
+            "finalChatResponse": {
+                "choices": [{"message": {"role":"assistant", "content":"need more"}}]
+            },
+            "seed": {
+                "model": "gpt-test",
+                "messages": [{"role":"user", "content":"origin"}],
+                "tools": [{"type":"namespace", "name":"multi_agent_v1", "tools":[{"type":"function", "name":"spawn_agent"}]}],
+                "tool_choice": "auto",
+                "parallel_tool_calls": true,
+                "response_format": {"type":"json_object"},
+                "parameters": {"stream": true, "temperature": 0.1}
+            },
+            "injection": {
+                "ops": [
+                    {"op":"append_assistant_message", "required": true},
+                    {"op":"append_user_text", "text":"continue"}
+                ]
+            }
+        });
+        let payload = apply_followup_delta_plan(&input).expect("payload");
+        assert_eq!(payload["model"], "gpt-test");
+        assert_eq!(payload["tools"][0]["type"], "namespace");
+        assert_eq!(payload["tool_choice"], "auto");
+        assert_eq!(payload["parallel_tool_calls"], true);
+        assert_eq!(payload["response_format"]["type"], "json_object");
+        assert_eq!(payload["parameters"]["temperature"], 0.1);
+        assert_eq!(payload["parameters"]["stream"], true);
+        assert_eq!(payload["messages"][0]["content"], "origin");
+        assert_eq!(payload["messages"][1]["role"], "assistant");
+        assert_eq!(payload["messages"][2]["content"], "continue");
     }
 
     #[test]
@@ -835,13 +971,13 @@ mod tests {
         assert_eq!(chat_seed["model"], "gpt-test");
         assert_eq!(chat_seed["messages"][0]["content"], "hello");
         assert_eq!(chat_seed["parameters"]["temperature"], 0.2);
-        assert!(chat_seed["parameters"].get("stream").is_none());
-        assert!(chat_seed.get("tools").is_none());
-        assert!(chat_seed["parameters"].get("tool_choice").is_none());
+        assert_eq!(chat_seed["tools"][0]["function"]["name"], "exec_command");
+        assert_eq!(chat_seed["parameters"]["stream"], true);
+        assert_eq!(chat_seed["parameters"]["tool_choice"], "auto");
 
         let responses = json!({
             "model": "gpt-resp",
-            "input": "  explain this  ",
+            "messages": [{"role":"user", "content":"explain this"}],
             "max_tokens": 42,
             "stream": true,
             "tool_choice": "auto"
@@ -849,22 +985,19 @@ mod tests {
         let responses_seed = extract_captured_chat_seed(&responses).expect("responses seed");
         assert_eq!(responses_seed["messages"][0]["role"], "user");
         assert_eq!(responses_seed["messages"][0]["content"], "explain this");
-        assert_eq!(responses_seed["parameters"]["max_output_tokens"], 42);
-        assert!(responses_seed["parameters"].get("stream").is_none());
-        assert!(responses_seed["parameters"].get("tool_choice").is_none());
+        assert_eq!(responses_seed["max_tokens"], 42);
+        assert_eq!(responses_seed["stream"], true);
+        assert_eq!(responses_seed["tool_choice"], "auto");
     }
 
     #[test]
     fn extracts_followup_seed_maps_responses_history_sentinel_prefix_to_reasoning() {
         let responses = json!({
             "model": "gpt-resp",
-            "input": [{
-                "type": "message",
+            "messages": [{
                 "role": "assistant",
-                "content": [{
-                    "type": "output_text",
-                    "text": "DNS 已切回 coder2。]<]minimax[>[Jason，继续执行。"
-                }]
+                "reasoning_content": "DNS 已切回 coder2。",
+                "content": "Jason，继续执行。"
             }]
         });
 
@@ -880,7 +1013,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_followup_delta_does_not_preserve_seed_tools_or_tool_choice() {
+    fn servertool_req04_followup_built_preserves_seed_tools_and_parameters() {
         let input = json!({
             "adapterContext": {},
             "finalChatResponse": {"choices": [{"message": {"role": "assistant", "content": "continue"}}]},
@@ -894,9 +1027,75 @@ mod tests {
         });
 
         let payload = apply_followup_delta_plan(&input).expect("payload");
-        assert!(payload.get("tools").is_none());
-        assert!(payload["parameters"].get("tool_choice").is_none());
-        assert!(payload["parameters"].get("stream").is_none());
+        assert_eq!(payload["tools"][0]["function"]["name"], "apply_patch");
+        assert_eq!(payload["parameters"]["tool_choice"]["type"], "auto");
+        assert_eq!(payload["parameters"]["stream"], true);
+    }
+
+    #[test]
+    fn servertool_req04_followup_seed_uses_standard_adapter_context_origin() {
+        let adapter_context = json!({
+            "capturedChatRequest": {
+                "model": "gpt-test",
+                "messages": [{"role": "user", "content": "fix it"}],
+                "tools": [{"type": "function", "function": {"name": "exec_command"}}],
+                "tool_choice": "auto",
+                "stream": true,
+                "temperature": 0.1
+            }
+        });
+        let seed = build_servertool_req04_followup_seed(&adapter_context).expect("seed");
+        assert_eq!(seed["messages"][0]["content"], "fix it");
+        assert_eq!(seed["tools"][0]["function"]["name"], "exec_command");
+        assert_eq!(seed["tool_choice"], "auto");
+        assert_eq!(seed["stream"], true);
+    }
+
+    #[test]
+    fn servertool_req04_followup_built_payload_preserves_tools_from_standard_origin() {
+        let adapter_context = json!({
+            "capturedChatRequest": {
+                "model": "gpt-test",
+                "messages": [{"role": "user", "content": "fix it"}],
+                "tools": [{"type": "function", "function": {"name": "exec_command"}}],
+                "tool_choice": "auto",
+                "stream": true,
+                "temperature": 0.1
+            }
+        });
+        let payload = build_servertool_req04_followup_payload(&adapter_context).expect("payload");
+        assert_eq!(payload["messages"][0]["content"], "fix it");
+        assert_eq!(payload["model"], "gpt-test");
+        assert_eq!(payload["tools"][0]["function"]["name"], "exec_command");
+        assert_eq!(payload["temperature"], 0.1);
+        assert_eq!(payload["tool_choice"], "auto");
+        assert_eq!(payload["stream"], true);
+    }
+
+    #[test]
+    fn servertool_req04_followup_does_not_rebuild_from_raw_or_responses_context() {
+        let adapter_context = json!({
+            "__raw_request_body": {
+                "model": "raw-model",
+                "messages": [{"role": "user", "content": "raw"}],
+                "tools": [{"type": "function", "function": {"name": "raw_tool"}}]
+            },
+            "responsesRequestContext": {
+                "payload": {
+                    "model": "responses-model",
+                    "input": "responses",
+                    "tools": [{"type": "function", "function": {"name": "responses_tool"}}]
+                },
+                "context": {
+                    "model": "context-model",
+                    "input": "context",
+                    "tools": [{"type": "function", "function": {"name": "context_tool"}}]
+                }
+            }
+        });
+
+        assert!(build_servertool_req04_followup_seed(&adapter_context).is_none());
+        assert!(build_servertool_req04_followup_payload(&adapter_context).is_none());
     }
 
     #[test]

@@ -14,6 +14,7 @@ Design goals:
 2. `stop_message_flow` execution path is servertool reenter through the same Hub Pipeline entry, not tmux/client injection.
 3. `stop_message_flow` followup hops are normal tool-capable requests and may retrigger when their response ends with `finish_reason=stop`.
 4. Loop safety is enforced by stopMessage `used/max_repeats` counters plus normal tool availability, not by disabling stopMessage on followup metadata.
+5. Followup origin is captured at request entry as `entryOriginRequest` / `capturedEntryRequest`; `/v1/responses` followup must clone `input` shape and add only the followup delta, never rebuild from chat `messages` or raw metadata.
 5. Servertool has no private response protocol: it only executes local tool work on behalf of the client; the result returns through the normal response chain.
 6. Response direction is provider/model inbound -> `HubRespInbound02Parsed` -> `HubRespChatProcess03Governed` -> `HubRespOutbound04ClientSemantic` -> client outbound.
 
@@ -45,6 +46,26 @@ Design goals:
 13. When stop schema allows the final stop, `learned` may be written to project `note.md`; followup / invalid schema / missing schema / budget exhausted must not write memory.
 
 ## 4. Hard Rules
+
+### 4.0 Servertool Followup Numbered Skeleton
+
+```text
+Client standard request
+  -> [HubReqInbound02Standardized]
+  -> [HubReqChatProcess03Governed]
+  -> provider/model
+  -> [HubRespChatProcess03Governed]
+  -> [ServertoolResp03RuntimeAction]
+  -> [ServertoolReq04FollowupBuilt]
+  -> normal Hub reenter
+  -> [HubReqInbound02Standardized]
+  -> [HubReqChatProcess03Governed]
+```
+
+- `ServertoolResp03RuntimeAction` only decides that `stop_message_flow` requires followup from the chat-process governed response; it must not build or patch request payloads.
+- `ServertoolReq04FollowupBuilt` is the only owner for stop_message followup request construction. It clones the captured `HubReqInbound02Standardized` standard request origin and applies only the followup delta at the standard chat/input position.
+- `ServertoolReq04FollowupBuilt` must preserve the original standard request's semantic fields (`model`, `messages`/standard chat history, `tools`, params, and protocol controls). Internal metadata remains side-channel only. If the captured standard request has lost required semantic fields, it must fail-fast instead of rebuilding from raw payloads.
+- TypeScript is an IO-only shell for `ServertoolReq04FollowupBuilt`: it may call native and pass the returned payload to `reenterPipeline`; it must not reconstruct messages/tools, clean tool lists, or patch provider wire bodies.
 
 1. Servertool execution boundary:
 - `stop_message_flow` must use servertool reenter and must not set `clientInjectOnly/clientInjectSource=servertool.stop_message`.

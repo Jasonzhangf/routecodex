@@ -61,6 +61,9 @@ import {
 } from './direct-passthrough-payload.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { extractStatusCodeFromError } from './executor/utils.js';
+import { resolveRequestExecutorProviderFailurePlan } from './executor/request-executor-provider-failure-plan.js';
+import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
+import { extractRetryErrorSnapshot } from './executor/retry-payload-snapshot.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
@@ -73,7 +76,6 @@ import { isPoolExhaustedPipelineError } from './executor/request-executor-core-u
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
 import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
-import { report_error_err_02_host_to_router_policy_from_error_err_01_source } from '../../../providers/core/utils/provider-error-reporter.js';
 import {
   resolveVirtualRouterInput,
   getModuleDependencies,
@@ -149,6 +151,14 @@ function readRuntimeScopeFromMetadata(metadata: Record<string, unknown>): { sess
     sessionDir: readTrimmedString(rt?.sessionDir),
     rccUserDir: readTrimmedString(rt?.rccUserDir),
   };
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim());
 }
 
 function hasDeclaredApplyPatchTool(body: unknown): boolean {
@@ -1145,6 +1155,20 @@ export class RouteCodexHttpServer {
         if (directResult.used) {
           return this.buildRouterDirectResult(directResult, input);
         }
+        if (directResult.retryMetadata) {
+          this.logStage('router-direct.retry.standard_pipeline', input.requestId, {
+            reason: directResult.reason,
+            excludedProviderKeys: directResult.retryMetadata.excludedProviderKeys,
+            providerFailureAttemptOffset: directResult.retryMetadata.__routecodexProviderFailureAttemptOffset,
+          });
+          return await this.executePipeline({
+            ...nextInput,
+            metadata: {
+              ...(nextInput.metadata ?? {}),
+              ...directResult.retryMetadata,
+            },
+          });
+        }
         if (directResult.preselectedRoute) {
           return await this.executePipeline({
             ...nextInput,
@@ -1272,7 +1296,10 @@ export class RouteCodexHttpServer {
       },
     );
     let capturedUsage: Record<string, unknown> | undefined;
-    const directOutcome = await executeRouterDirectPipeline({
+    let retryMetadata: Record<string, unknown> | undefined;
+    let directOutcome: RouterDirectOutcome;
+    try {
+      directOutcome = await executeRouterDirectPipeline({
       portConfig,
       providerPayload,
       requestPayload,
@@ -1334,30 +1361,95 @@ export class RouteCodexHttpServer {
           directAttempt,
         });
       },
-      onProviderError: async (source, ctx) => {
+      onProviderError: async (error, ctx) => {
         const runtimeScope = readRuntimeScopeFromMetadata(metadataForHub);
+        const retryError = extractRetryErrorSnapshot(error);
+        const statusCode = typeof retryError.statusCode === 'number'
+          ? retryError.statusCode
+          : extractStatusCodeFromError(error);
         this.logStage('router-direct.send.error', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
           routeName: ctx.routingDecision?.routeName,
-          statusCode: source.statusCode,
+          statusCode,
+          errorCode: retryError.errorCode,
+          upstreamCode: retryError.upstreamCode,
           directAttempt,
         });
-        await report_error_err_02_host_to_router_policy_from_error_err_01_source({
-          ...source,
-          runtime: {
-            ...source.runtime,
-            ...runtimeScope,
+        const excludedProviderKeys = new Set<string>(readStringArray(metadataForHub.excludedProviderKeys));
+        const maxAttempts = resolveMaxProviderAttempts();
+        const providerFailurePlan = await resolveRequestExecutorProviderFailurePlan({
+          error,
+          retryError,
+          requestId: input.requestId,
+          providerKey: ctx.providerKey,
+          providerType: target.providerType,
+          providerProtocol: ctx.providerProtocol,
+          routeName: ctx.routingDecision?.routeName,
+          runtimeKey: target.runtimeKey ?? target.providerKey,
+          target: {
+            providerKey: target.providerKey,
+            providerType: target.providerType,
+            runtimeKey: target.runtimeKey,
+            processMode: target.processMode,
+          },
+          dependencies: this.getModuleDependencies(),
+          attempt: directAttempt,
+          maxAttempts,
+          stage: 'provider.send',
+          logicalRequestChainKey: input.requestId,
+          logicalChainRetryLimitStageRequestId: input.requestId,
+          routePool: Array.isArray(ctx.routingDecision?.pool) ? ctx.routingDecision?.pool : undefined,
+          runtimeManager: {
+            resolveRuntimeKey: (providerKey?: string, fallback?: string, metadata?: Record<string, unknown>) =>
+              this.resolveRuntimeKeyForProviderBinding(providerKey, metadata) ?? fallback,
+          },
+          excludedProviderKeys,
+          recordAttempt: () => undefined,
+          logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
+          status: statusCode,
+          metadata: {
+            ...metadataForHub,
+            __rt: {
+              ...(metadataForHub.__rt && typeof metadataForHub.__rt === 'object' && !Array.isArray(metadataForHub.__rt)
+                ? (metadataForHub.__rt as Record<string, unknown>)
+                : {}),
+              ...runtimeScope,
+            },
+          },
+          logNonBlockingError: (stage, reportError, details) => {
+            this.logStage(stage, input.requestId, {
+              ...(details ?? {}),
+              message: reportError instanceof Error ? reportError.message : String(reportError ?? 'Unknown error'),
+            });
           },
         });
+        const retryExecutionPlan = providerFailurePlan.retryExecutionPlan;
+        if (retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan) {
+          retryMetadata = {
+            excludedProviderKeys: Array.from(excludedProviderKeys),
+            __routecodexProviderFailureAttemptOffset: directAttempt,
+          };
+        }
       },
       });
+    } catch (error) {
+      if (retryMetadata) {
+        return {
+          used: false,
+          reason: 'router-direct-provider-failure-standard-retry',
+          retryMetadata,
+        };
+      }
+      throw error;
+    }
 
     if (!directOutcome.used) {
       this.logStage('router-direct.skipped', input.requestId, { reason: directOutcome.reason });
       return {
         used: false,
         reason: directOutcome.reason,
+        ...(directOutcome.retryMetadata ? { retryMetadata: directOutcome.retryMetadata } : {}),
         preselectedRoute: {
           target,
           decision: routingDecision,

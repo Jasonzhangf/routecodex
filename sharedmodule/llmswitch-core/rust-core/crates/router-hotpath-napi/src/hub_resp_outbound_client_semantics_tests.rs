@@ -92,6 +92,45 @@ fn normalize_openai_chat_reasoning_outbound_projects_responses_payload_to_chat_c
 }
 
 #[test]
+fn normalize_responses_usage_projects_responses_only_fields_from_anthropic_cache_shape() {
+    let usage = json!({
+        "cache_read_input_tokens": 28672,
+        "input_tokens": 5076,
+        "output_tokens": 16
+    });
+
+    let output = normalize_responses_usage(&usage);
+
+    assert_eq!(output["input_tokens"], json!(5076.0));
+    assert_eq!(output["output_tokens"], json!(16.0));
+    assert_eq!(output["total_tokens"], json!(5092.0));
+    assert_eq!(output["input_tokens_details"]["cached_tokens"], json!(28672.0));
+    assert!(output.get("prompt_tokens").is_none());
+    assert!(output.get("completion_tokens").is_none());
+    assert!(output.get("cache_read_input_tokens").is_none());
+}
+
+#[test]
+fn normalize_responses_usage_projects_responses_only_fields_from_chat_shape() {
+    let usage = json!({
+        "prompt_tokens": 640,
+        "completion_tokens": 2575,
+        "total_tokens": 3215,
+        "prompt_tokens_details": { "cached_tokens": 626 }
+    });
+
+    let output = normalize_responses_usage(&usage);
+
+    assert_eq!(output["input_tokens"], json!(640.0));
+    assert_eq!(output["output_tokens"], json!(2575.0));
+    assert_eq!(output["total_tokens"], json!(3215.0));
+    assert_eq!(output["input_tokens_details"]["cached_tokens"], json!(626.0));
+    assert!(output.get("prompt_tokens").is_none());
+    assert!(output.get("completion_tokens").is_none());
+    assert!(output.get("prompt_tokens_details").is_none());
+}
+
+#[test]
 fn build_responses_payload_from_chat_filters_executed_tool_outputs_from_required_action() {
     let payload = serde_json::json!({
         "id": "resp_partial",

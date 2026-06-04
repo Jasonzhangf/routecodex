@@ -475,50 +475,6 @@ fn should_replace_servertool_adapter_captured_tools(
             .all(|name| client_names.contains(name))
 }
 
-fn backfill_servertool_adapter_context_tools_value(
-    base_context: Value,
-    request_semantics: Value,
-    force_replace: bool,
-) -> Value {
-    let mut base_context = match base_context {
-        Value::Object(row) => row,
-        other => return other,
-    };
-    let client_tools_raw = request_semantics
-        .get("tools")
-        .and_then(Value::as_object)
-        .and_then(|tools| tools.get("clientToolsRaw"))
-        .and_then(Value::as_array);
-    if client_tools_raw.filter(|tools| !tools.is_empty()).is_none() {
-        return serde_json::json!({ "changed": false, "context": Value::Object(base_context) });
-    }
-
-    let existing_tools = base_context
-        .get("capturedChatRequest")
-        .and_then(Value::as_object)
-        .and_then(|captured| captured.get("tools"))
-        .and_then(Value::as_array);
-    if !should_replace_servertool_adapter_captured_tools(
-        &base_context,
-        existing_tools,
-        client_tools_raw,
-        force_replace,
-    ) {
-        return serde_json::json!({ "changed": false, "context": Value::Object(base_context) });
-    }
-
-    if let Some(captured) = base_context
-        .get_mut("capturedChatRequest")
-        .and_then(Value::as_object_mut)
-    {
-        captured.insert(
-            "tools".to_string(),
-            Value::Array(client_tools_raw.cloned().unwrap_or_default()),
-        );
-    }
-    serde_json::json!({ "changed": true, "context": Value::Object(base_context) })
-}
-
 fn as_json_object(value: Option<&Value>) -> Option<&Map<String, Value>> {
     value.and_then(Value::as_object)
 }
@@ -788,24 +744,6 @@ pub fn resolve_provider_response_request_semantics_json(
         processed,
         standardized,
         request_metadata,
-    );
-    serde_json::to_string(&output).map_err(|error| napi::Error::from_reason(error.to_string()))
-}
-
-#[napi(js_name = "backfillServertoolAdapterContextToolsJson")]
-pub fn backfill_servertool_adapter_context_tools_json(
-    base_context_json: String,
-    request_semantics_json: String,
-    force_replace: bool,
-) -> NapiResult<String> {
-    let base_context: Value = serde_json::from_str(&base_context_json)
-        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
-    let request_semantics: Value = serde_json::from_str(&request_semantics_json)
-        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
-    let output = backfill_servertool_adapter_context_tools_value(
-        base_context,
-        request_semantics,
-        force_replace,
     );
     serde_json::to_string(&output).map_err(|error| napi::Error::from_reason(error.to_string()))
 }
@@ -2839,31 +2777,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_backfill_servertool_adapter_context_tools_force_replace() {
-        let context = json!({
-            "capturedChatRequest": {
-                "tools": [{ "type": "function", "function": { "name": "reasoning.stop" } }]
-            },
-            "__rt": { "serverToolFollowup": true }
-        });
-        let semantics = json!({
-            "tools": {
-                "clientToolsRaw": [
-                    { "type": "function", "function": { "name": "exec_command" } },
-                    { "type": "function", "function": { "name": "apply_patch" } }
-                ]
-            }
-        });
-
-        let output = backfill_servertool_adapter_context_tools_value(context, semantics, true);
-        assert_eq!(output["changed"], true);
-        let tools = output["context"]["capturedChatRequest"]["tools"]
-            .as_array()
-            .unwrap();
-        assert_eq!(tools[0]["function"]["name"], "exec_command");
-        assert_eq!(tools[1]["function"]["name"], "apply_patch");
-    }
 
     #[test]
     fn test_extract_runtime_reads_runtime_carrier() {
@@ -2898,14 +2811,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_backfill_servertool_adapter_context_tools_no_client_tools_is_noop() {
-        let context = json!({
-            "capturedChatRequest": { "messages": [] }
-        });
-        let output = backfill_servertool_adapter_context_tools_value(context, json!({}), false);
-        assert_eq!(output["changed"], false);
-    }
 
     #[test]
     fn test_resolve_provider_response_request_semantics_merges_followup_tools() {

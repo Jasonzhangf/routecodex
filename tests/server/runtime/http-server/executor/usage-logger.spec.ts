@@ -179,11 +179,13 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('request.internal=100ms');
-    expect(rendered).toContain('hub=140ms');
-    expect(rendered).toContain('provider.send=800ms');
-    expect(rendered).toContain('hub.response=40ms');
-    expect(rendered).toContain('response=20ms');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toContain('request.internal=100ms');
+    expect(plain).toContain('hub=140ms');
+    expect(plain).toContain('provider.send=800ms');
+    expect(plain).not.toContain('hub.response=40ms');
+    expect(plain).not.toContain('response=20ms');
+    expect(rendered).toContain(`request.internal=\x1b[97m100ms\x1b[0m`);
   });
 
   it('does not print timing/hub.top in release by default', async () => {
@@ -252,12 +254,13 @@ describe('usage logger timing summary', () => {
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
     expect(rendered).toContain('[usage] req=req_release_usage');
     expect(rendered.replace(/\u001b\[[0-9;]*m/g, '')).toContain('total=1025.0ms');
-    expect(rendered).toContain('timing={');
-    expect(rendered).toContain('request.internal=0ms');
-    expect(rendered).toContain('hub=');
-    expect(rendered).toContain('provider.send=');
-    expect(rendered).toContain('hub.response=');
-    expect(rendered).toContain('response=');
+    expect(rendered).not.toContain('timing={');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).not.toContain('request.internal=0ms');
+    expect(plain).toContain('hub=300ms');
+    expect(plain).toContain('provider.send=600ms');
+    expect(plain).toContain('hub.response=100ms');
+    expect(plain).not.toContain('response=25ms');
   });
 
   it('accumulates repeated scope timings in release usage summary', async () => {
@@ -293,11 +296,12 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('request.internal=100ms');
-    expect(rendered).toContain('hub=150ms');
-    expect(rendered).toContain('provider.send=700ms');
-    expect(rendered).toContain('hub.response=40ms');
-    expect(rendered).toContain('response=10ms');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toContain('request.internal=100ms');
+    expect(plain).toContain('hub=150ms');
+    expect(plain).toContain('provider.send=700ms');
+    expect(plain).not.toContain('hub.response=40ms');
+    expect(plain).not.toContain('response=10ms');
   });
 
   it('aggregates timing from multiple request ids in release usage summary', async () => {
@@ -330,11 +334,12 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('request.internal=145ms');
-    expect(rendered).toContain('hub=120ms');
-    expect(rendered).toContain('provider.send=700ms');
-    expect(rendered).toContain('hub.response=30ms');
-    expect(rendered).toContain('response=5ms');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toContain('request.internal=145ms');
+    expect(plain).toContain('hub=120ms');
+    expect(plain).toContain('provider.send=700ms');
+    expect(plain).not.toContain('hub.response=30ms');
+    expect(plain).not.toContain('response=5ms');
   });
 
   it('keeps release timing available for usage after non-stream request complete log', async () => {
@@ -375,11 +380,12 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('request.internal=60ms');
-    expect(rendered).toContain('hub=180ms');
-    expect(rendered).toContain('provider.send=700ms');
-    expect(rendered).toContain('hub.response=45ms');
-    expect(rendered).toContain('response=15ms');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).not.toContain('request.internal=60ms');
+    expect(plain).toContain('hub=180ms');
+    expect(plain).toContain('provider.send=700ms');
+    expect(plain).not.toContain('hub.response=45ms');
+    expect(plain).not.toContain('response=15ms');
   });
 
   it('includes host.internal in release timing summary when host-side scopes exist', async () => {
@@ -421,11 +427,12 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('request.internal=');
-    expect(rendered).toContain('hub=310ms');
-    expect(rendered).toContain('provider.send=700ms');
-    expect(rendered).toContain('hub.response=90ms');
-    expect(rendered).toContain('response=20ms');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toContain('request.internal=');
+    expect(plain).toContain('hub=310ms');
+    expect(plain).toContain('provider.send=700ms');
+    expect(plain).not.toContain('hub.response=90ms');
+    expect(plain).not.toContain('response=20ms');
   });
 
   it('appends hub stage top summary when provided by pipeline metadata', async () => {
@@ -457,6 +464,56 @@ describe('usage logger timing summary', () => {
     expect(rendered).toContain('req_inbound.stage2_semantic_map:7600msx1');
     expect(rendered).toContain('req_outbound.stage1_semantic_map:2100msx1');
     expect(rendered).not.toContain('req_process.stage2_route_select:900msx1');
+  });
+
+  it('prints only usage detail timing fields at or above 100ms', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await import('../../../../../src/server/utils/stage-logger.js');
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logPipelineStage('request.internal.start', 'req_usage_slow_fields', {});
+    logPipelineStage('request.internal.completed', 'req_usage_slow_fields', { elapsedMs: 99 });
+    logPipelineStage('hub.start', 'req_usage_slow_fields', {});
+    logPipelineStage('hub.completed', 'req_usage_slow_fields', { elapsedMs: 100 });
+    logPipelineStage('provider.send.start', 'req_usage_slow_fields', {});
+    logPipelineStage('provider.send.completed', 'req_usage_slow_fields', { elapsedMs: 101 });
+    logPipelineStage('response.dispatch.start', 'req_usage_slow_fields', { status: 200, stream: false });
+    logPipelineStage('response.completed', 'req_usage_slow_fields', { elapsedMs: 1 });
+
+    logUsageSummary('req_usage_slow_fields', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      finishReason: 'stop',
+      latencyMs: 1200,
+      trafficWaitMs: 99,
+      clientInjectWaitMs: 100,
+      sseDecodeMs: 1,
+      codecDecodeMs: 101,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      hubStageTop: [
+        { stage: 'fast.stage', totalMs: 99, count: 1 },
+        { stage: 'slow.stage', totalMs: 100, count: 1 }
+      ]
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).not.toContain('request.internal=99ms');
+    expect(plain).toContain('hub=100ms');
+    expect(plain).toContain('provider.send=101ms');
+    expect(plain).not.toContain('response=1ms');
+    expect(plain).not.toContain('wait.traffic=99ms');
+    expect(plain).toContain('wait.inject=100ms');
+    expect(plain).not.toContain('decode.sse=1ms');
+    expect(plain).toContain('decode.codec=101ms');
+    expect(plain).not.toContain('fast.stage:99msx1');
+    expect(plain).toContain('slow.stage:100msx1');
   });
 
   it('rolls up non-stop usage logs into 1-minute summary', async () => {

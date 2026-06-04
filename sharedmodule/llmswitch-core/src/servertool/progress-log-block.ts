@@ -42,11 +42,13 @@ function compactStopCompareSummary(summary: string): string {
     if (index <= 0) continue;
     fields.set(part.slice(0, index), part.slice(index + 1));
   }
+  const decision = fields.get('decision');
+  const reason = fields.get('reason');
+  const showBudget = decision === 'trigger' || fields.get('active') === 'true';
   return [
     ['decision', fields.get('decision')],
-    ['reason', fields.get('reason')],
-    ['used', fields.get('used')],
-    ['left', fields.get('left')],
+    ['reason', reason],
+    ...(showBudget ? ([['used', fields.get('used')], ['left', fields.get('left')]] as Array<[string, string | undefined]>) : []),
     ['active', fields.get('active')]
   ]
     .filter((item): item is [string, string] => typeof item[1] === 'string' && item[1].length > 0)
@@ -72,6 +74,9 @@ type CommonArgs = {
 };
 
 export function createServertoolProgressLogger(args: CommonArgs) {
+  let stopEntryBrief: Record<string, string> | null = null;
+  let stopMatchBrief: Record<string, string> | null = null;
+
   const logStopEntry = (
     stage: 'entry' | 'trigger',
     result: string,
@@ -83,27 +88,10 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     const reason = typeof extra?.reason === 'string' ? extra.reason : 'unknown';
     const eligible = typeof extra?.eligible === 'boolean' ? String(extra.eligible) : 'unknown';
     const flowId = typeof extra?.flowId === 'string' ? extra.flowId : '';
-    const brief =
-      stage === 'entry'
-        ? `source=${source} reason=${reason} eligible=${eligible}`
-        : `result=${result} flow=${flowId || 'none'}`;
-    try {
-      const parts = [
-        field('requestId', args.requestId, color, args.reset),
-        'tool=stop_message_auto',
-        `stage=${viewStage}`,
-        ...brief.split(/\s+/).map((part) => {
-          const index = part.indexOf('=');
-          if (index <= 0) return part;
-          return field(part.slice(0, index), part.slice(index + 1), color, args.reset);
-        })
-      ];
-      printServertoolLine(color, args.reset, parts);
-    } catch (error) {
-      args.logNonBlocking('log_stop_entry_console', error, {
-        requestId: args.requestId,
-        stage: viewStage
-      });
+    if (stage === 'entry') {
+      stopEntryBrief = { source, reason, eligible };
+    } else {
+      stopMatchBrief = { result, flow: flowId || 'none' };
     }
     appendServerToolProgressFileEvent({
       requestId: args.requestId,
@@ -124,7 +112,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     const stage = resolveStage(step, message);
     const result = normalizeResult(message);
     const color = shouldUseGoldProgressHighlight(flowId) ? args.gold : args.yellow;
-    const shouldPrintConsole = true;
+    const shouldPrintConsole = tool !== 'stop_message_auto';
     if (shouldPrintConsole) {
       try {
         printServertoolLine(color, args.reset, [
@@ -197,45 +185,6 @@ export function createServertoolProgressLogger(args: CommonArgs) {
         hookId: event.hookId
       });
     }
-
-    if (event.hookId === 'stop_message_auto' && event.result === 'miss') {
-      const compareContext = readStopMessageCompareContext(args.adapterContext);
-      const summary = formatStopMessageCompareContext(compareContext);
-      const compareResult = compareContext
-        ? `${compareContext.decision}_${compareContext.reason.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'unknown'}`
-        : 'unknown_no_context';
-      appendServerToolProgressFileEvent({
-        requestId: args.requestId,
-        flowId: 'none',
-        tool: 'stop_message_auto',
-        stage: 'compare',
-        result: compareResult,
-        message: summary,
-        step: 2,
-        entryEndpoint: args.entryEndpoint,
-        providerProtocol: args.providerProtocol
-      });
-      try {
-        const compact = compactStopCompareSummary(summary);
-        printServertoolLine(args.blue, args.reset, [
-          field('requestId', args.requestId, args.blue, args.reset),
-          'tool=stop_message_auto',
-          'stage=compare',
-          field('result', compareResult, args.blue, args.reset),
-          'flow=none',
-          ...compact.split(/\s+/).filter(Boolean).map((part) => {
-            const index = part.indexOf('=');
-            if (index <= 0) return part;
-            return field(part.slice(0, index), part.slice(index + 1), args.blue, args.reset);
-          })
-        ]);
-      } catch (error) {
-        args.logNonBlocking('log_auto_hook_trace_compare_console', error, {
-          requestId: args.requestId,
-          hookId: event.hookId
-        });
-      }
-    }
   };
 
   const logStopCompare = (stage: 'entry' | 'trigger', flowId?: string): void => {
@@ -259,12 +208,22 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     });
     try {
       const compact = compactStopCompareSummary(summary);
+      const entryBrief = stopEntryBrief ? [
+        ['source', stopEntryBrief.source],
+        ['finish_reason', stopEntryBrief.reason.replace(/^finish_reason_/, '')],
+        ['eligible', stopEntryBrief.eligible]
+      ] : [];
+      const matchBrief = stopMatchBrief ? [
+        ['match', stopMatchBrief.result],
+        ['flow', flowToken || stopMatchBrief.flow]
+      ] : [['flow', flowToken]];
       printServertoolLine(args.blue, args.reset, [
         field('requestId', args.requestId, args.blue, args.reset),
         'tool=stop_message_auto',
-        'stage=compare',
+        'stage=summary',
+        ...entryBrief.map(([key, value]) => field(key, value, args.blue, args.reset)),
+        ...matchBrief.map(([key, value]) => field(key, value, args.blue, args.reset)),
         field('result', compareResult, args.blue, args.reset),
-        field('flow', flowToken, args.blue, args.reset),
         ...compact.split(/\s+/).filter(Boolean).map((part) => {
           const index = part.indexOf('=');
           if (index <= 0) return part;

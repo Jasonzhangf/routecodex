@@ -37,6 +37,41 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
   });
 
+  it('cycles provider-level terminal failures through explicit alternatives before returning to client', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const error = Object.assign(new Error('HTTP 403: {"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}'), {
+      statusCode: 403,
+      code: 'HTTP_403',
+      upstreamCode: 'INSUFFICIENT_BALANCE'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 403,
+        errorCode: 'HTTP_403',
+        upstreamCode: 'INSUFFICIENT_BALANCE',
+        reason: 'HTTP 403: {"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'dibittai.crsa.gpt-5.5',
+      runtimeKey: 'dibittai.crsa',
+      logicalRequestChainKey: 'req-direct-403-cycle',
+      logicalChainRetryLimitStageRequestId: 'req-direct-403-cycle',
+      routePool: ['dibittai.crsa.gpt-5.5', 'mimo.key2.mimo-v2.5'],
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn()
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(Array.from(excludedProviderKeys)).toEqual(['dibittai.crsa.gpt-5.5']);
+  });
+
   it('does not clear other excluded providers on recoverable retry threshold', async () => {
     const excludedProviderKeys = new Set<string>(['cc.key1.gpt-5.5']);
     const error = Object.assign(new Error('HTTP 503'), {

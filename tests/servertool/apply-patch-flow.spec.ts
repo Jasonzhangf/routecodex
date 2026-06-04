@@ -143,7 +143,10 @@ describe('apply_patch servertool flow', () => {
       role: 'tool',
       tool_call_id: 'call_apply_patch_test'
     });
-    expect(payload.tools).toBeUndefined();
+    expect(payload.tools).toEqual([
+      { type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } },
+      { type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }
+    ]);
     expect(JSON.stringify(payload)).not.toContain('fileContent');
     expect(JSON.stringify(payload)).not.toContain('*** Begin Patch');
   });

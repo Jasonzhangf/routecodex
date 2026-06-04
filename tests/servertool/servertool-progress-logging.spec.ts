@@ -205,33 +205,11 @@ describe('servertool progress logging', () => {
       });
 
       const lines = spy.mock.calls.map((c) => String(c[0] ?? ''));
-      expect(
-        lines.some(
-          (l) =>
-            l.includes('\u001b[38;5;214m[servertool]') &&
-            l.includes('tool=stop_message_auto') &&
-            l.includes('stage=match') &&
-            l.includes('result=matched')
-        )
-      ).toBe(true);
-      expect(
-        lines.some(
-          (l) =>
-            l.includes('\u001b[38;5;214m[servertool]') &&
-            l.includes('tool=stop_message_auto') &&
-            l.includes('stage=final') &&
-            l.includes('result=completed')
-        )
-      ).toBe(true);
-      expect(
-        lines.some(
-          (l) =>
-            l.includes('\u001b[38;5;39m[servertool]') &&
-            l.includes('tool=stop_message_auto') &&
-            l.includes('stage=compare') &&
-            l.includes('decision=trigger')
-        )
-      ).toBe(true);
+      const servertoolLines = lines.filter((l) => l.includes('[servertool]') && l.includes('tool=stop_message_auto'));
+      expect(servertoolLines).toHaveLength(1);
+      expect(servertoolLines[0]).toContain('stage=summary');
+      expect(servertoolLines[0]).toContain('match=activated');
+      expect(servertoolLines[0]).toContain('decision=trigger');
     } finally {
       spy.mockRestore();
       if (ORIGINAL === undefined) {
@@ -245,7 +223,7 @@ describe('servertool progress logging', () => {
     }
   });
 
-  testIfProgressConsoleLogs('prints stop entry + trigger logs when finish_reason=stop is observed', async () => {
+  testIfProgressConsoleLogs('prints one stop summary log when finish_reason=stop is observed', async () => {
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const adapterContext: AdapterContext = {
@@ -297,34 +275,13 @@ describe('servertool progress logging', () => {
       });
 
       const lines = spy.mock.calls.map((c) => String(c[0] ?? ''));
-      expect(
-        lines.some(
-          (l) =>
-            l.includes('\u001b[38;5;39m[servertool]') &&
-            l.includes('tool=stop_message_auto') &&
-            l.includes('stage=entry') &&
-            l.includes('source=chat') &&
-            l.includes('reason=finish_reason_stop')
-        )
-      ).toBe(true);
-      expect(
-        lines.some(
-          (l) =>
-            l.includes('\u001b[38;5;39m[servertool]') &&
-            l.includes('tool=stop_message_auto') &&
-            l.includes('stage=match') &&
-            l.includes('result=activated')
-        )
-      ).toBe(true);
-      expect(
-        lines.some(
-          (l) =>
-            l.includes('\u001b[38;5;39m[servertool]') &&
-            l.includes('tool=stop_message_auto') &&
-            l.includes('stage=compare') &&
-            l.includes('decision=trigger')
-        )
-      ).toBe(true);
+      const servertoolLines = lines.filter((l) => l.includes('[servertool]') && l.includes('tool=stop_message_auto'));
+      expect(servertoolLines).toHaveLength(1);
+      expect(servertoolLines[0]).toContain('stage=summary');
+      expect(servertoolLines[0]).toContain('source=chat');
+      expect(servertoolLines[0]).toContain('finish_reason=');
+      expect(servertoolLines[0]).toContain('match=activated');
+      expect(servertoolLines[0]).toContain('decision=trigger');
     } finally {
       spy.mockRestore();
     }
@@ -394,34 +351,15 @@ describe('servertool progress logging', () => {
       });
 
       const lines = spy.mock.calls.map((c) => String(c[0] ?? ''));
-      expect(
-        lines.some(
-          (l) =>
-            l.includes('\u001b[38;5;39m[servertool]') &&
-            l.includes('tool=stop_message_auto') &&
-            l.includes('stage=entry') &&
-            l.includes('reason=finish_reason_tool_calls') &&
-            l.includes('eligible=false')
-        )
-      ).toBe(true);
-      expect(
-        lines.some(
-          (l) =>
-            l.includes('\u001b[38;5;39m[servertool]') &&
-            l.includes('tool=stop_message_auto') &&
-            l.includes('stage=match') &&
-            l.includes('result=skipped_passthrough')
-        )
-      ).toBe(true);
-      expect(
-        lines.some(
-          (l) =>
-            l.includes('\u001b[38;5;39m[servertool]') &&
-            l.includes('tool=stop_message_auto') &&
-            l.includes('stage=compare') &&
-            l.includes('decision=skip')
-        )
-      ).toBe(true);
+      const servertoolLines = lines.filter((l) => l.includes('[servertool]') && l.includes('tool=stop_message_auto'));
+      expect(servertoolLines).toHaveLength(1);
+      expect(servertoolLines[0]).toContain('stage=summary');
+      expect(servertoolLines[0]).toContain('finish_reason=');
+      expect(servertoolLines[0]).toContain('eligible=false');
+      expect(servertoolLines[0]).toContain('match=skipped_passthrough');
+      expect(servertoolLines[0]).toContain('decision=skip');
+      expect(servertoolLines[0]).not.toContain('used=');
+      expect(servertoolLines[0]).not.toContain('left=');
     } finally {
       spy.mockRestore();
     }

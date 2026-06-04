@@ -1607,3 +1607,18 @@ pub use shared_responses_conversation_utils::{
     materialize_responses_continuation_payload_json, plan_responses_handler_entry_json,
     prepare_responses_conversation_entry_json, resume_responses_conversation_payload_json,
 };
+
+#[napi(js_name = "resolveHubProtocolSpecJson")]
+pub fn resolve_hub_protocol_spec_export_json(input_json: String) -> NapiResult<String> {
+    hub_protocol_spec_semantics::resolve_hub_protocol_spec_json(input_json)
+}
+
+#[napi(js_name = "resolveHubProtocolAllowlistsJson")]
+pub fn resolve_hub_protocol_allowlists_export_json() -> NapiResult<String> {
+    hub_protocol_spec_semantics::resolve_hub_protocol_allowlists_json()
+}
+
+#[napi(js_name = "sanitizeProviderOutboundPayloadJson")]
+pub fn sanitize_provider_outbound_payload_export_json(input_json: String) -> NapiResult<String> {
+    hub_protocol_spec_semantics::sanitize_provider_outbound_payload_json(input_json)
+}

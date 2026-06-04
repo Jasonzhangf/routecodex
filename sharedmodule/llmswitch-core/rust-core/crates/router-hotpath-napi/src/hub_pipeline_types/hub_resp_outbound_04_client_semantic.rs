@@ -7,6 +7,7 @@ use super::hub_resp_inbound_02_parsed::{
     assert_not_success_error_payload, clone_response_object_payload,
 };
 use super::meta_error_carriers::assert_payload_has_no_meta_or_error_carrier;
+use super::tool_surface_contract::{assert_tool_surface_contract, ToolNamespacePolicy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +37,11 @@ pub(crate) fn project_hub_resp_outbound_04_from_hub_resp_chatprocess_03(
         "HubRespOutbound04ClientSemantic",
     )?;
     assert_not_success_error_payload(&client_payload, "HubRespOutbound04ClientSemantic")?;
+    assert_tool_surface_contract(
+        &client_payload,
+        "HubRespOutbound04ClientSemantic",
+        ToolNamespacePolicy::AllowSemanticNamespace,
+    )?;
     let payload =
         clone_response_object_payload(&client_payload, "HubRespOutbound04ClientSemantic")?;
     Ok(HubRespOutbound04ClientSemantic { payload })

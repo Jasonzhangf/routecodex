@@ -369,35 +369,6 @@ export function containsSyntheticRouteCodexControlTextWithNative(payload: unknow
   }
 }
 
-export function backfillServertoolAdapterContextToolsWithNative(
-  baseContext: Record<string, unknown>,
-  requestSemantics: Record<string, unknown> | undefined,
-  forceReplace: boolean
-): { changed: boolean; context: Record<string, unknown> } {
-  const capability = 'backfillServertoolAdapterContextToolsJson';
-  const fail = (reason?: string) => failNativeRequired<{ changed: boolean; context: Record<string, unknown> }>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapability(capability, [
-      encodeJsonArg(capability, baseContext),
-      encodeJsonArg(capability, requestSemantics ?? {}),
-      forceReplace === true
-    ]);
-    const parsed = parseJson(capability, raw);
-    if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return fail('invalid payload');
-    }
-    const row = parsed as Record<string, unknown>;
-    const context = row.context;
-    if (typeof row.changed !== 'boolean' || !context || typeof context !== 'object' || Array.isArray(context)) {
-      return fail('invalid payload');
-    }
-    return { changed: row.changed, context: context as Record<string, unknown> };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
 export function isStopMessageStateActiveWithNative(raw: unknown): boolean {
   const capability = 'isStopMessageStateActiveJson';
   const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
@@ -766,6 +737,22 @@ export function extractCapturedChatSeedWithNative(captured: unknown): Record<str
   try {
     const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [captured ?? null]);
     const parsed = parseJson('extractCapturedChatSeed', raw);
+    if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
+    if (parsed === null) return null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('invalid payload');
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function buildServertoolReq04FollowupPayloadWithNative(adapterContext: unknown): Record<string, unknown> | null {
+  const capability = 'buildServertoolReq04FollowupPayloadJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [adapterContext ?? null]);
+    const parsed = parseJson('buildServertoolReq04FollowupPayload', raw);
     if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
     if (parsed === null) return null;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('invalid payload');

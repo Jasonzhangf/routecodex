@@ -201,6 +201,7 @@ impl HubPipelineEngine {
         ));
         let (normal_request_payload, inline_payload_metadata) =
             split_normal_payload_and_inline_metadata(normalized_payload.clone());
+        let entry_origin_request = normal_request_payload.clone();
         let standardizer_metadata =
             merge_standardizer_metadata(normalized_metadata.clone(), inline_payload_metadata);
         let standardized = coerce_standardized_request_from_payload(&serde_json::json!({
@@ -260,7 +261,7 @@ impl HubPipelineEngine {
             Some(serde_json::json!({ "metadataObject": normalized_metadata.is_object() })),
         ));
         let governed = apply_hub_req_chatprocess_03_tool_governance(ToolGovernanceInput {
-            request: standardized_payload,
+            request: standardized_payload.clone(),
             raw_payload: standardized_raw_payload,
             metadata: normalized_metadata.clone(),
             entry_endpoint: entry_endpoint.clone(),
@@ -316,6 +317,10 @@ impl HubPipelineEngine {
             .unwrap_or(entry_provider_protocol);
         attach_context_snapshot_to_metadata(&mut routed.normalized_metadata, context_snapshot)?;
         if let Some(metadata) = routed.normalized_metadata.as_object_mut() {
+            metadata.insert(
+                "capturedEntryRequest".to_string(),
+                entry_origin_request.clone(),
+            );
             if let Some(decision) = route_output.get("decision").cloned() {
                 metadata.insert("routingDecision".to_string(), decision);
             }
@@ -412,6 +417,8 @@ impl HubPipelineEngine {
             success: output.success,
             payload: Some(compat.payload),
             metadata: Some(routed.normalized_metadata),
+            standardized_request: Some(standardized_payload),
+            entry_origin_request: Some(entry_origin_request),
             effect_plan: HubPipelineEffectPlan::empty(),
             diagnostics,
             error: output.error.map(|error| HubPipelineError {
@@ -634,6 +641,8 @@ impl HubPipelineEngine {
             success: output.success,
             payload: Some(stream_decision.payload),
             metadata: Some(normalized_metadata),
+            standardized_request: None,
+            entry_origin_request: None,
             effect_plan,
             diagnostics,
             error: output.error.map(|error| HubPipelineError {
@@ -1029,6 +1038,8 @@ pub fn execute_hub_pipeline_json(input_json: String) -> HubPipelineResult<String
             success: false,
             payload: None,
             metadata: None,
+            standardized_request: None,
+            entry_origin_request: None,
             effect_plan: HubPipelineEffectPlan::empty(),
             diagnostics: Vec::new(),
             error: Some(error),

@@ -984,7 +984,7 @@ describe('stop_message_auto servertool', () => {
           requestId: 'req-stopmessage-responses-entry-chatprocess',
           entryEndpoint: '/v1/responses',
           providerProtocol: 'anthropic-messages',
-          sessionId: 'stopmessage-spec-session-responses-entry-chatprocess',
+          sessionId: 'stopmessage-spec-session-responses-entry-chatprocess-standard-origin',
           __rt: {
             stopMessageEnabled: true,
             routecodexPortStopMessageEnabled: true
@@ -1100,7 +1100,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('raw responses request body is captured for default stopless', async () => {
+  test('raw responses request body cannot build stopless followup without standard origin', async () => {
     const decisionContexts: StopMessageDecisionContext[] = [];
     const reenterPipeline = jest.fn(async (input: any) => ({
       body: {
@@ -1114,7 +1114,7 @@ describe('stop_message_auto servertool', () => {
       return testStopMessageDecision(ctx as any) as StopMessageDecision;
     });
     try {
-      const result = await runServerToolOrchestration({
+      await expect(runServerToolOrchestration({
         chat: buildStopChatResponse('chatcmpl-stop-raw-responses-captured'),
         adapterContext: {
           requestId: 'req-stopmessage-raw-responses-captured',
@@ -1145,6 +1145,52 @@ describe('stop_message_auto servertool', () => {
         requestId: 'req-stopmessage-raw-responses-captured',
         providerProtocol: 'openai-chat',
         reenterPipeline
+      })).rejects.toMatchObject({
+        code: 'SERVERTOOL_FOLLOWUP_FAILED',
+        details: expect.objectContaining({ reason: 'followup_payload_missing_after_validation' })
+      });
+
+      expect(decisionContexts[0]?.goal_status).toBe('idle');
+      expect(reenterPipeline).not.toHaveBeenCalled();
+    } finally {
+      __setDecideOverrideForTests(testStopMessageDecision as any);
+    }
+  });
+
+  test('standard captured responses request builds stopless followup with tools', async () => {
+    const decisionContexts: StopMessageDecisionContext[] = [];
+    const reenterPipeline = jest.fn(async (input: any) => ({
+      body: {
+        id: `${input.requestId}:done`,
+        object: 'chat.completion',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'continued' }, finish_reason: 'stop' }]
+      }
+    }));
+    __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {
+      decisionContexts.push(ctx);
+      return testStopMessageDecision(ctx as any) as StopMessageDecision;
+    });
+    try {
+      const result = await runServerToolOrchestration({
+        chat: buildStopChatResponse('chatcmpl-stop-standard-responses-captured'),
+        adapterContext: {
+          requestId: 'req-stopmessage-standard-responses-captured',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          sessionId: 'stopmessage-spec-session-standard-responses-captured',
+          routecodexPortStopMessageEnabled: true,
+          stopMessageEnabled: true,
+          capturedChatRequest: {
+            model: 'gpt-test',
+            input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+            tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }]
+          },
+          __rt: { sessionDir: '/tmp/rcc-test-session-5555' }
+        } as any,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-stopmessage-standard-responses-captured',
+        providerProtocol: 'openai-chat',
+        reenterPipeline
       });
 
       expect(decisionContexts[0]?.goal_status).toBe('idle');
@@ -1157,6 +1203,7 @@ describe('stop_message_auto servertool', () => {
       expect(followupBody.messages).toBeUndefined();
       expect(followupBody.input?.[0]).toMatchObject({ role: 'user', content: [{ type: 'input_text', text: 'hi' }] });
       expect(followupBody.input?.[1]).toMatchObject({ role: 'assistant', content: [{ type: 'input_text', text: 'ok' }] });
+      expect(followupBody.tools?.[0]?.function?.name).toBe('exec_command');
       const followupText = JSON.stringify(followupBody);
       expect(followupText).toContain('Stop schema 校验未通过');
       expect(followupText).toContain('目标是否逐项完成');

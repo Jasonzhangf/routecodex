@@ -338,9 +338,9 @@ function hasGoalPersistenceScope(adapterContext: Record<string, unknown>): boole
 function readClientToolsRawForResponsesNormalization(args: {
   adapterContext?: Record<string, unknown>;
   requestSemantics?: Record<string, unknown>;
-  originalRequest?: Record<string, unknown>;
+  entryOriginRequest?: Record<string, unknown>;
 }): unknown[] {
-  const adapterCapturedRequest = asFlatRecord(args.adapterContext?.capturedChatRequest);
+  const adapterCapturedRequest = asFlatRecord(args.adapterContext?.capturedEntryRequest) ?? asFlatRecord(args.adapterContext?.capturedChatRequest);
   const adapterTools = Array.isArray(adapterCapturedRequest?.tools) ? adapterCapturedRequest.tools : undefined;
   if (adapterTools?.length) {
     return adapterTools;
@@ -354,7 +354,7 @@ function readClientToolsRawForResponsesNormalization(args: {
   if (rootTools?.length) {
     return rootTools;
   }
-  const originalTools = Array.isArray(args.originalRequest?.tools) ? args.originalRequest.tools : undefined;
+  const originalTools = Array.isArray(args.entryOriginRequest?.tools) ? args.entryOriginRequest.tools : undefined;
   return originalTools?.length ? originalTools : [];
 }
 
@@ -362,7 +362,7 @@ async function normalizeResponsesToolCallsViaRustSsot(args: {
   payload: Record<string, unknown>;
   adapterContext?: Record<string, unknown>;
   requestSemantics?: Record<string, unknown>;
-  originalRequest?: Record<string, unknown>;
+  entryOriginRequest?: Record<string, unknown>;
   entryEndpoint?: string;
 }): Promise<Record<string, unknown>> {
   const entry = String(args.entryEndpoint || '').toLowerCase();
@@ -372,7 +372,7 @@ async function normalizeResponsesToolCallsViaRustSsot(args: {
   const toolsRaw = readClientToolsRawForResponsesNormalization({
     adapterContext: args.adapterContext,
     requestSemantics: args.requestSemantics,
-    originalRequest: args.originalRequest
+    entryOriginRequest: args.entryOriginRequest
   });
   return normalizeResponsesToolCallArgumentsForClientWithNative(args.payload, toolsRaw);
 }
@@ -554,7 +554,7 @@ export type ConvertProviderResponseOptions = {
   requestId: string;
   serverToolsEnabled?: boolean;
   wantsStream: boolean;
-  originalRequest?: Record<string, unknown> | undefined;
+  entryOriginRequest?: Record<string, unknown> | undefined;
   requestSemantics?: Record<string, unknown> | undefined;
   processMode?: string;
   response: PipelineExecutionResult;
@@ -668,7 +668,7 @@ export async function convertProviderResponseIfNeeded(
         : metadataBag;
     const baseContext = buildServerToolAdapterContext({
       metadata: responseMetadataBag,
-      originalRequest: options.originalRequest,
+      entryOriginRequest: options.entryOriginRequest,
       requestSemantics: options.requestSemantics,
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint || entry,
@@ -894,14 +894,14 @@ export async function convertProviderResponseIfNeeded(
         : Array.isArray(existing?.tools)
           ? existing.tools
           : undefined;
-      if (existingClientToolsRaw?.length || !Array.isArray(options.originalRequest?.tools) || options.originalRequest.tools.length === 0) {
+      if (existingClientToolsRaw?.length || !Array.isArray(options.entryOriginRequest?.tools) || options.entryOriginRequest.tools.length === 0) {
         return options.requestSemantics;
       }
       return {
         ...(existing ?? {}),
         tools: {
           ...(existingTools ?? {}),
-          clientToolsRaw: options.originalRequest.tools
+          clientToolsRaw: options.entryOriginRequest.tools
         }
       };
     })();
@@ -915,7 +915,7 @@ export async function convertProviderResponseIfNeeded(
         toolsRaw: readClientToolsRawForResponsesNormalization({
           adapterContext,
           requestSemantics: effectiveRequestSemantics,
-          originalRequest: options.originalRequest
+          entryOriginRequest: options.entryOriginRequest
         })
       });
       logPipelineStage('convert.bridge.windsurf_native_chat_direct', options.requestId, {
@@ -956,7 +956,7 @@ export async function convertProviderResponseIfNeeded(
         payload: converted.body as Record<string, unknown>,
         adapterContext,
         requestSemantics: effectiveRequestSemantics,
-        originalRequest: options.originalRequest,
+        entryOriginRequest: options.entryOriginRequest,
         entryEndpoint: options.entryEndpoint || entry
       });
       if (
@@ -969,7 +969,7 @@ export async function convertProviderResponseIfNeeded(
           toolsRaw: readClientToolsRawForResponsesNormalization({
             adapterContext,
             requestSemantics: effectiveRequestSemantics,
-            originalRequest: options.originalRequest
+            entryOriginRequest: options.entryOriginRequest
           })
         });
       }

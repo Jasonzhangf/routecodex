@@ -787,6 +787,10 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
     let done_payload = serde_json::json!({"type":"response.done","response":response_value});
     let mut frames: Vec<String> = Vec::new();
     if let Some(required_action) = required_action {
+        let completed_payload = serde_json::json!({
+            "type":"response.completed",
+            "response": Value::Object(response_payload.clone())
+        });
         let required_payload = serde_json::json!({
             "type":"response.required_action",
             "response": Value::Object(response_payload.clone()),
@@ -795,6 +799,10 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
         frames.push(format!(
             "event: response.required_action\ndata: {}\n\n",
             required_payload
+        ));
+        frames.push(format!(
+            "event: response.completed\ndata: {}\n\n",
+            completed_payload
         ));
         frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
         frames.push("data: [DONE]\n\n".to_string());

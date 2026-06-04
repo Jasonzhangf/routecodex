@@ -2,10 +2,9 @@ import { applyClientConnectionStateToContext } from '../../../utils/client-conne
 import { resolveStopMessageClientInjectReadiness } from './client-injection-flow.js';
 import { extractClientModelId } from './provider-response-utils.js';
 import {
-  backfillAdapterContextSessionIdentifiersFromOriginalRequest,
+  backfillAdapterContextSessionIdentifiersFromEntryOriginRequest,
   syncStoplessGoalStateFromCapturedRequest
 } from './servertool-request-normalizer.js';
-import { backfillServertoolAdapterContextToolsNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -33,56 +32,20 @@ function hasRccFenceInRequestPayload(payload: unknown): boolean {
   }
 }
 
-function hasManagedStoplessGoalInContext(baseContext: Record<string, unknown>): boolean {
-  const directGoal =
-    baseContext.stoplessGoalState && typeof baseContext.stoplessGoalState === 'object' && !Array.isArray(baseContext.stoplessGoalState)
-      ? (baseContext.stoplessGoalState as Record<string, unknown>)
-      : undefined;
-  const directStatus =
-    typeof directGoal?.status === 'string' ? directGoal.status.trim().toLowerCase() : '';
-  if (directStatus === 'active' || directStatus === 'paused' || directStatus === 'stopped' || directStatus === 'completed') {
-    return true;
-  }
-  const rt = asFlatRecord(baseContext.__rt);
-  const rtStatus = typeof rt?.stoplessGoalStatus === 'string' ? rt.stoplessGoalStatus.trim().toLowerCase() : '';
-  return rtStatus === 'active' || rtStatus === 'paused' || rtStatus === 'stopped' || rtStatus === 'completed';
-}
-
-function backfillCapturedChatRequestToolsFromRequestSemantics(
+function preferEntryOriginRequestForStoplessGoalSync(
   baseContext: Record<string, unknown>,
-  requestSemantics: unknown,
-  options?: {
-    forceReplace?: boolean;
-  }
+  entryOriginRequest: unknown
 ): void {
-  const result = backfillServertoolAdapterContextToolsNative(
-    baseContext,
-    asFlatRecord(requestSemantics),
-    options?.forceReplace === true
-  );
-  if (!result.changed) {
+  if (!asFlatRecord(entryOriginRequest)) {
     return;
   }
-  for (const key of Object.keys(baseContext)) {
-    delete baseContext[key];
-  }
-  Object.assign(baseContext, result.context);
-}
-
-function preferOriginalRequestForStoplessGoalSync(
-  baseContext: Record<string, unknown>,
-  originalRequest: unknown
-): void {
-  if (!asFlatRecord(originalRequest)) {
+  if (!hasRccFenceInRequestPayload(entryOriginRequest)) {
     return;
   }
-  if (!hasRccFenceInRequestPayload(originalRequest)) {
+  if (hasRccFenceInRequestPayload(baseContext.capturedEntryRequest)) {
     return;
   }
-  if (hasRccFenceInRequestPayload(baseContext.capturedChatRequest)) {
-    return;
-  }
-  baseContext.capturedChatRequest = originalRequest as Record<string, unknown>;
+  baseContext.capturedEntryRequest = entryOriginRequest as Record<string, unknown>;
 }
 
 function resolveAssignedModelId(metadataBag?: Record<string, unknown>): string | undefined {
@@ -98,7 +61,7 @@ function resolveCompatProfile(metadataBag?: Record<string, unknown>): string | u
 
 export function buildServerToolAdapterContext(args: {
   metadata?: Record<string, unknown>;
-  originalRequest?: Record<string, unknown>;
+  entryOriginRequest?: Record<string, unknown>;
   requestSemantics?: Record<string, unknown>;
   requestId: string;
   entryEndpoint: string;
@@ -110,21 +73,14 @@ export function buildServerToolAdapterContext(args: {
   const baseContext: Record<string, unknown> = {
     ...metadataBag
   };
-  if (!asFlatRecord(baseContext.capturedChatRequest) && asFlatRecord(args.originalRequest)) {
-    baseContext.capturedChatRequest = args.originalRequest as Record<string, unknown>;
+  const originRequest = args.entryOriginRequest;
+  if (!asFlatRecord(baseContext.capturedEntryRequest) && asFlatRecord(originRequest)) {
+    baseContext.capturedEntryRequest = originRequest as Record<string, unknown>;
   }
 
-  backfillAdapterContextSessionIdentifiersFromOriginalRequest(baseContext, args.originalRequest);
-  preferOriginalRequestForStoplessGoalSync(baseContext, args.originalRequest);
+  backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(baseContext, originRequest);
+  preferEntryOriginRequestForStoplessGoalSync(baseContext, originRequest);
   syncStoplessGoalStateFromCapturedRequest(baseContext, args.onReasoningStopSeedError);
-  const managedStoplessGoal = hasManagedStoplessGoalInContext(baseContext);
-  backfillCapturedChatRequestToolsFromRequestSemantics(
-    baseContext,
-    args.requestSemantics,
-    managedStoplessGoal
-      ? { forceReplace: true }
-      : undefined
-  );
 
   const routeName = readNonEmptyString(metadataBag.routeName) ?? readNonEmptyString(metadataBag.routeHint);
   if (routeName) {
@@ -134,7 +90,7 @@ export function buildServerToolAdapterContext(args: {
   baseContext.entryEndpoint = args.entryEndpoint;
   baseContext.providerProtocol = args.providerProtocol;
 
-  const originalModelId = extractClientModelId(metadataBag, args.originalRequest);
+  const originalModelId = extractClientModelId(metadataBag, originRequest);
   if (originalModelId) {
     baseContext.originalModelId = originalModelId;
   }

@@ -9,7 +9,7 @@ import {
   extractCapturedChatSeedWithNative
 } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 
-export type FollowupOriginSeed = { model?: string; messages: JsonObject[]; tools?: JsonObject[]; parameters?: Record<string, unknown> };
+export type FollowupOriginSeed = JsonObject;
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -20,17 +20,26 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function normalizeSeed(value: Record<string, unknown> | null): FollowupOriginSeed | null {
-  if (!value || !Array.isArray(value.messages) || value.messages.length === 0) {
+  const hasMessages = Array.isArray(value?.messages) && value.messages.length > 0;
+  const hasInput = typeof value?.input === 'string'
+    ? value.input.trim().length > 0
+    : Array.isArray(value?.input) && value.input.length > 0;
+  if (!value || (!hasMessages && !hasInput)) {
     return null;
   }
-  return {
-    ...(typeof value.model === 'string' && value.model.trim() ? { model: value.model.trim() } : {}),
-    messages: cloneJson(value.messages as JsonObject[]),
-    ...(Array.isArray(value.tools) ? { tools: cloneJson(value.tools as JsonObject[]) } : {}),
-    ...(value.parameters && typeof value.parameters === 'object' && !Array.isArray(value.parameters)
-      ? { parameters: cloneJson(value.parameters as Record<string, unknown>) }
-      : {})
-  };
+  const seed = cloneJson(value) as JsonObject & { messages?: unknown };
+  if (typeof seed.model === 'string') {
+    const model = seed.model.trim();
+    if (model) {
+      seed.model = model;
+    } else {
+      delete seed.model;
+    }
+  }
+  if (hasMessages) {
+    seed.messages = cloneJson(value.messages as JsonObject[]);
+  }
+  return seed as FollowupOriginSeed;
 }
 
 export function extractAssistantFollowupMessage(finalChatResponse: JsonObject): JsonObject | null {
@@ -39,7 +48,8 @@ export function extractAssistantFollowupMessage(finalChatResponse: JsonObject): 
 
 export function loadFollowupOriginSeed(adapterContext: AdapterContext): FollowupOriginSeed | null {
   const record = asRecord(adapterContext);
-  const directSeed = normalizeSeed(extractCapturedChatSeedWithNative(record?.capturedChatRequest ?? null));
+  const directSeed = normalizeSeed(record?.capturedEntryRequest as Record<string, unknown> | null)
+    ?? normalizeSeed(extractCapturedChatSeedWithNative(record?.capturedChatRequest ?? null));
   if (directSeed) {
     return directSeed;
   }
@@ -51,7 +61,8 @@ export function loadFollowupOriginSeed(adapterContext: AdapterContext): Followup
   if (!snapshot) {
     return null;
   }
-  const capturedSeed = normalizeSeed(extractCapturedChatSeedWithNative(snapshot.capturedChatRequest ?? null));
+  const capturedSeed = normalizeSeed(asRecord(snapshot.capturedEntryRequest) ?? null)
+    ?? normalizeSeed(extractCapturedChatSeedWithNative(snapshot.capturedChatRequest ?? null));
   if (capturedSeed) {
     return capturedSeed;
   }

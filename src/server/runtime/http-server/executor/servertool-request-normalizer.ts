@@ -15,22 +15,22 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
-export function backfillAdapterContextSessionIdentifiersFromOriginalRequest(
+export function backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(
   baseContext: Record<string, unknown>,
-  originalRequest: unknown
+  entryOriginRequest: unknown
 ): void {
-  const original = asFlatRecord(originalRequest);
-  if (!original) {
+  const entryOrigin = asFlatRecord(entryOriginRequest);
+  if (!entryOrigin) {
     return;
   }
-  const requestMetadata = asFlatRecord(original.metadata);
-  const capturedRequest = asFlatRecord(baseContext.capturedChatRequest);
+  const requestMetadata = asFlatRecord(entryOrigin.metadata);
+  const capturedRequest = asFlatRecord(baseContext.capturedEntryRequest) ?? asFlatRecord(baseContext.capturedChatRequest);
   const capturedMetadata = asFlatRecord(capturedRequest?.metadata);
 
   const sessionId =
     readSessionLikeToken(baseContext.sessionId) ??
-    readSessionLikeToken(original.sessionId) ??
-    readSessionLikeToken(original.session_id) ??
+    readSessionLikeToken(entryOrigin.sessionId) ??
+    readSessionLikeToken(entryOrigin.session_id) ??
     readSessionLikeToken(requestMetadata?.sessionId) ??
     readSessionLikeToken(requestMetadata?.session_id) ??
     readSessionLikeToken(capturedRequest?.sessionId) ??
@@ -39,8 +39,8 @@ export function backfillAdapterContextSessionIdentifiersFromOriginalRequest(
     readSessionLikeToken(capturedMetadata?.session_id);
   const conversationId =
     readSessionLikeToken(baseContext.conversationId) ??
-    readSessionLikeToken(original.conversationId) ??
-    readSessionLikeToken(original.conversation_id) ??
+    readSessionLikeToken(entryOrigin.conversationId) ??
+    readSessionLikeToken(entryOrigin.conversation_id) ??
     readSessionLikeToken(requestMetadata?.conversationId) ??
     readSessionLikeToken(requestMetadata?.conversation_id) ??
     readSessionLikeToken(capturedRequest?.conversationId) ??

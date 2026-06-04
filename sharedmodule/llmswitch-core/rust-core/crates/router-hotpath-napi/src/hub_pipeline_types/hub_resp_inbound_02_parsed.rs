@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::hub_req_inbound_02_standardized::assert_no_inline_metadata;
+use super::tool_surface_contract::{assert_tool_surface_contract, ToolNamespacePolicy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +25,11 @@ pub(crate) fn parse_hub_resp_inbound_02_from_provider_resp_inbound_01(
 ) -> Result<HubRespInbound02Parsed, String> {
     assert_no_inline_metadata(&payload, "HubRespInbound02Parsed")?;
     assert_not_success_error_payload(&payload, "HubRespInbound02Parsed")?;
+    assert_tool_surface_contract(
+        &payload,
+        "HubRespInbound02Parsed",
+        ToolNamespacePolicy::AllowSemanticNamespace,
+    )?;
     Ok(HubRespInbound02Parsed { payload })
 }
 

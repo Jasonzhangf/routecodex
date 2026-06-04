@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use super::tool_surface_contract::{assert_tool_surface_contract, ToolNamespacePolicy};
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HubReqInbound02Standardized {
@@ -21,6 +23,11 @@ pub(crate) fn build_hub_req_inbound_02_from_payload(
     payload: Value,
 ) -> Result<HubReqInbound02Standardized, String> {
     assert_no_inline_metadata(&payload, "HubReqInbound02Standardized")?;
+    assert_tool_surface_contract(
+        &payload,
+        "HubReqInbound02Standardized",
+        ToolNamespacePolicy::AllowSemanticNamespace,
+    )?;
     Ok(HubReqInbound02Standardized { payload })
 }
 

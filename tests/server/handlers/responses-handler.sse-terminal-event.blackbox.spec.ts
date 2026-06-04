@@ -141,9 +141,60 @@ describe('responses-handler SSE terminal contract', () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type') || '').toContain('text/event-stream');
-      // The repair path must emit response.done so client SDKs see a normal terminal event
+      // The repair path must emit response.completed and response.done so client SDKs see a normal terminal event.
+      expect(text).toContain('event: response.completed');
       expect(text).toContain('event: response.done');
       expect(text).not.toContain('upstream_stream_incomplete');
+      expect(text).not.toContain('stream closed before response.completed');
+    });
+  });
+
+  it('HTTP blackbox: upstream required_action without response.completed is repaired before close', async () => {
+    const executePipeline = jest.fn(async () => ({
+      status: 200,
+      headers: {},
+      metadata: { outboundStream: true, stream: true },
+      body: {
+        __routecodex_stream_finish_reason: 'tool_calls',
+        __routecodex_stream_contract_probe_body: {
+          id: 'resp_required_only',
+          object: 'response',
+          status: 'requires_action',
+          output: [{ id: 'fc_1', type: 'function_call', status: 'completed', name: 'shell', call_id: 'call_1', arguments: '{}' }],
+          required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: [{ id: 'call_1', type: 'function_call', function: { name: 'shell', arguments: '{}' } }] } }
+        },
+        __sse_responses: Readable.from([
+          'event: response.required_action\n',
+          `data: ${JSON.stringify({
+            type: 'response.required_action',
+            response: { id: 'resp_required_only', object: 'response', status: 'requires_action' },
+            required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: [{ id: 'call_1', type: 'function_call', function: { name: 'shell', arguments: '{}' } }] } }
+          })}\n\n`
+        ])
+      },
+      usageLogInfo: { finishReason: 'tool_calls' }
+    }));
+
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, { executePipeline, errorHandling: null });
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+        body: JSON.stringify({ model: 'gpt-5.5', stream: true, input: 'call tool' })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('event: response.required_action');
+      expect(text).toContain('event: response.completed');
+      expect(text).toContain('event: response.done');
+      expect(text).not.toContain('upstream_stream_incomplete');
+      expect(text).not.toContain('stream closed before response.completed');
     });
   });
 });

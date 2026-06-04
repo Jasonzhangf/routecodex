@@ -69,6 +69,7 @@ export interface HubPipelineResult {
   requestId: string;
   providerPayload?: Record<string, unknown>;
   standardizedRequest?: StandardizedRequest;
+  entryOriginRequest?: Record<string, unknown>;
   processedRequest?: ProcessedRequest;
   routingDecision?: RoutingDecision;
   routingDiagnostics?: RoutingDiagnostics;

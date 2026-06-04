@@ -3,7 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import { applyFollowupDeltaPlan } from '../../sharedmodule/llmswitch-core/src/servertool/followup-origin-delta.js';
 
 describe('servertool followup origin clone delta', () => {
-  test('clones origin request and appends canonical apply_patch result delta without tools backfill', () => {
+  test('clones origin request and appends canonical apply_patch result delta', () => {
     const originTool = {
       type: 'function',
       function: { name: 'apply_patch', parameters: { type: 'object' } }
@@ -15,7 +15,9 @@ describe('servertool followup origin clone delta', () => {
         originTool,
         { type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }
       ],
-      parameters: { temperature: 0.2 }
+      parameters: { temperature: 0.2 },
+      parallel_tool_calls: true,
+      store: false
     } as any;
     const finalChatResponse = {
       tool_outputs: [{
@@ -39,6 +41,8 @@ describe('servertool followup origin clone delta', () => {
 
     expect(payload.model).toBe('gpt-test');
     expect(payload.parameters).toEqual({ temperature: 0.2 });
+    expect(payload.parallel_tool_calls).toBe(true);
+    expect(payload.store).toBe(false);
     expect(payload.messages[0]).toEqual({ role: 'user', content: 'edit sample' });
     expect(payload.messages[1]).toMatchObject({
       role: 'assistant',
@@ -57,7 +61,7 @@ describe('servertool followup origin clone delta', () => {
       tool_call_id: 'call_patch_1',
       content: JSON.stringify({ status: 'APPLY_PATCH_APPLIED', ok: true, filePath: 'sample.txt' })
     });
-    expect(payload.tools).toBeUndefined();
+    expect(payload.tools).toEqual(seed.tools);
     expect(seed.messages).toEqual([{ role: 'user', content: 'edit sample' }]);
     expect(seed.tools[0]).toBe(originTool);
     expect(JSON.stringify(payload)).not.toContain('fileContent');
@@ -121,7 +125,7 @@ describe('servertool followup origin clone delta', () => {
       tool_call_id: 'call_patch_ctx_1'
     });
     expect(JSON.parse(payload.messages[2].content)).toEqual({ status: 'APPLY_PATCH_ERROR', ok: false });
-    expect(payload.tools).toBeUndefined();
+    expect(payload.tools).toEqual(seed.tools);
   });
 
   test('normalizes split pending tool calls before appending multiple tool outputs', () => {
@@ -208,5 +212,43 @@ describe('servertool followup origin clone delta', () => {
         content: JSON.stringify({ status: 'APPLY_PATCH_APPLIED', ok: true, filePath: 'tmp/b.txt' })
       }
     ]);
+    expect(payload.tools).toEqual(seed.tools);
+  });
+
+  test('clones responses entry origin and appends followup delta to input', () => {
+    const seed = {
+      model: 'gpt-test',
+      input: [{
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'original responses request' }]
+      }],
+      tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
+      tool_choice: 'auto',
+      parallel_tool_calls: true
+    } as any;
+
+    const payload = applyFollowupDeltaPlan({
+      adapterContext: {},
+      finalChatResponse: {} as any,
+      seed,
+      injection: {
+        ops: [
+          { op: 'append_user_text', text: 'continue with stopless schema' }
+        ]
+      } as any
+    }) as any;
+
+    expect(payload.messages).toBeUndefined();
+    expect(payload.input).toHaveLength(2);
+    expect(payload.input[0]).toMatchObject({ type: 'message', role: 'user' });
+    expect(payload.input[1]).toMatchObject({
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text: 'continue with stopless schema' }]
+    });
+    expect(payload.tools).toEqual(seed.tools);
+    expect(payload.tool_choice).toBe('auto');
+    expect(payload.parallel_tool_calls).toBe(true);
   });
 });

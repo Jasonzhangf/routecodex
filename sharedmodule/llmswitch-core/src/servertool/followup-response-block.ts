@@ -103,8 +103,10 @@ export function createMissingFollowupPayloadError(args: {
     args.followupPlan && typeof args.followupPlan === 'object' && !Array.isArray(args.followupPlan)
       ? (args.followupPlan as Record<string, unknown>)
       : undefined;
-  const capturedChatRequest = (args.adapterContext as Record<string, unknown> | null)?.capturedChatRequest;
-  const seedAvailable = Boolean(extractCapturedChatSeed(capturedChatRequest));
+  const adapterRecord = args.adapterContext as Record<string, unknown> | null;
+  const capturedEntryRequest = adapterRecord?.capturedEntryRequest;
+  const capturedChatRequest = adapterRecord?.capturedChatRequest;
+  const seedAvailable = Boolean(extractCapturedChatSeed(capturedEntryRequest ?? capturedChatRequest));
   const wrapped = new ProviderProtocolError('[servertool] followup payload missing for non-clientInject flow', {
     code: 'SERVERTOOL_FOLLOWUP_FAILED',
     category: 'INTERNAL_ERROR',
@@ -119,10 +121,10 @@ export function createMissingFollowupPayloadError(args: {
       hasMetadataPlan: Boolean(
         followupPlanRecord && Object.prototype.hasOwnProperty.call(followupPlanRecord, 'metadata')
       ),
-      hasCapturedChatRequest: Boolean(
-        capturedChatRequest &&
-          typeof capturedChatRequest === 'object' &&
-          !Array.isArray(capturedChatRequest)
+      hasCapturedEntryRequest: Boolean(
+        capturedEntryRequest &&
+          typeof capturedEntryRequest === 'object' &&
+          !Array.isArray(capturedEntryRequest)
       ),
       capturedSeedAvailable: seedAvailable
     }

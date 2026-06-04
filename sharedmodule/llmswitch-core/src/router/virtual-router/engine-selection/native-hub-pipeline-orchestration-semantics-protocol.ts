@@ -33,6 +33,8 @@ type HubPipelineLibInput = {
 };
 
 type HubPipelineLibOutput = HubPipelineOutput & {
+  standardizedRequest?: Record<string, unknown>;
+  entryOriginRequest?: Record<string, unknown>;
   effectPlan: {
     effects: Array<Record<string, unknown>>;
   };

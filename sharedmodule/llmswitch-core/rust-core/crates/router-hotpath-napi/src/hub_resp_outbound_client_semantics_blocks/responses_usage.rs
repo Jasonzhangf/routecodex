@@ -24,33 +24,32 @@ pub(crate) fn normalize_responses_usage(usage_raw: &Value) -> Value {
             .get("input_tokens_details")
             .and_then(|v| v.as_object())
             .and_then(|row| read_number_field(row.get("cached_tokens")))
+    }).or_else(|| {
+        usage
+            .get("prompt_tokens_details")
+            .and_then(|v| v.as_object())
+            .and_then(|row| read_number_field(row.get("cached_tokens")))
     });
 
     let mut total_tokens = read_number_field(usage.get("total_tokens"));
-    let prompt_tokens_raw = read_number_field(usage.get("prompt_tokens"));
-    let prompt_tokens = match (prompt_tokens_raw, input_tokens, cache_read_tokens) {
-        (Some(prompt), Some(input), Some(cache)) => {
-            let with_cache = input + cache;
-            if prompt >= with_cache {
-                prompt
-            } else {
-                with_cache
-            }
-        }
-        (Some(prompt), _, _) => prompt,
-        (None, Some(input), Some(cache)) => input + cache,
-        (None, Some(input), None) => input,
-        (None, None, Some(cache)) => cache,
-        _ => return Value::Object(usage),
-    };
+    if input_tokens.is_none() && output_tokens.is_none() && total_tokens.is_none() {
+        return Value::Object(usage);
+    }
     if total_tokens.is_none() {
-        if let (Some(prompt), Some(output)) = (Some(prompt_tokens), output_tokens) {
-            let total = prompt + output;
+        if let (Some(input), Some(output)) = (input_tokens, output_tokens) {
+            let total = input + output;
             if total.is_finite() {
                 total_tokens = Some(total);
             }
         }
     }
+
+    usage.remove("prompt_tokens");
+    usage.remove("completion_tokens");
+    usage.remove("prompt_tokens_details");
+    usage.remove("completion_tokens_details");
+    usage.remove("cache_read_input_tokens");
+    usage.remove("cache_creation_input_tokens");
 
     if let Some(input_tokens) = input_tokens {
         usage.insert("input_tokens".to_string(), Value::from(input_tokens));
@@ -60,22 +59,6 @@ pub(crate) fn normalize_responses_usage(usage_raw: &Value) -> Value {
     }
     if let Some(total_tokens) = total_tokens {
         usage.insert("total_tokens".to_string(), Value::from(total_tokens));
-    }
-
-    if !usage.contains_key("prompt_tokens") {
-        usage.insert("prompt_tokens".to_string(), Value::from(prompt_tokens));
-    } else if let Some(prompt_tokens_raw) = read_number_field(usage.get("prompt_tokens")) {
-        if let (Some(input_tokens), Some(cache_read_tokens)) = (input_tokens, cache_read_tokens) {
-            let with_cache = input_tokens + cache_read_tokens;
-            if prompt_tokens_raw < with_cache {
-                usage.insert("prompt_tokens".to_string(), Value::from(with_cache));
-            }
-        }
-    }
-    if !usage.contains_key("completion_tokens") {
-        if let Some(output_tokens) = output_tokens {
-            usage.insert("completion_tokens".to_string(), Value::from(output_tokens));
-        }
     }
 
     if let Some(cache_read_tokens) = cache_read_tokens {

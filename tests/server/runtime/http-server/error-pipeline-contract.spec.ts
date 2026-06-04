@@ -67,21 +67,23 @@ describe('Error Pipeline contract', () => {
     expect(source).toContain('export async function emitProviderErrorAndWait(options: EmitOptions): Promise<void>');
   });
 
-  it('router-direct reports provider transport errors through ErrorErr02 hook before rethrow', () => {
+  it('router-direct does not classify provider transport errors locally', () => {
     const filePath = path.join(ROOT, 'src/server/runtime/http-server/router-direct-pipeline.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    expect(source).toContain('onProviderError?: (source: ErrorErr01SourceRaised');
-    expect(source).toContain('await input.onProviderError?.({');
-    expect(source).toContain("stage: 'provider.send'");
-    expect(source).toContain('recoverable: isRecoverableDirectProviderError(error)');
-    expect(source).toContain('affectsHealth: true');
+    expect(source).toContain('onProviderError?: (error: unknown, context: RouterDirectAuditContext)');
+    expect(source).toContain('await input.onProviderError?.(error, auditContext);');
+    expect(source).not.toContain('isRecoverableDirectProviderError');
+    expect(source).not.toContain('errorClassification:');
     expect(source).toContain('throw error;');
   });
 
-  it('router-direct live path does not implement local retry/reroute fallback', () => {
+  it('router-direct live path consumes unified ErrorErr04/05 before standard reentry', () => {
     const filePath = path.join(ROOT, 'src/server/runtime/http-server/index.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    expect(source).not.toContain('router-direct.retry.exclude_and_reroute');
+    expect(source).toContain('resolveRequestExecutorProviderFailurePlan');
+    expect(source).toContain('providerFailurePlan.retryExecutionPlan');
+    expect(source).toContain("reason: 'router-direct-provider-failure-standard-retry'");
+    expect(source).toContain('return await this.executePipeline({');
     expect(source).not.toContain('__routerDirectFailedProviderKey');
     expect(source).not.toContain('__routerDirectRecoverable');
   });

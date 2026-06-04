@@ -219,7 +219,7 @@ export function hasStoplessDirectiveInRequestPayload(source: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 export function collectDeclaredToolNames(baseContext: Record<string, unknown>): Set<string> {
-  const capturedRequest = asFlatRecord(baseContext.capturedChatRequest);
+  const capturedRequest = asFlatRecord(baseContext.capturedEntryRequest) ?? asFlatRecord(baseContext.capturedChatRequest);
   const tools = Array.isArray(capturedRequest?.tools) ? capturedRequest.tools : [];
   const names = new Set<string>();
   for (const tool of tools) {

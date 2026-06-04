@@ -268,27 +268,9 @@ export function getCapturedRequest(adapterContext: unknown): JsonObject | null {
   }
   const contextRecord = adapterContext as Record<string, unknown>;
 
-  const direct = contextRecord.capturedChatRequest;
+  const direct = contextRecord.capturedEntryRequest ?? contextRecord.capturedChatRequest;
   if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
     return direct as JsonObject;
-  }
-
-  const rawBody = contextRecord.__raw_request_body;
-  if (rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody)) {
-    return rawBody as JsonObject;
-  }
-
-  const responsesRequestContext = contextRecord.responsesRequestContext;
-  if (responsesRequestContext && typeof responsesRequestContext === 'object' && !Array.isArray(responsesRequestContext)) {
-    const responsesRecord = responsesRequestContext as Record<string, unknown>;
-    const payload = responsesRecord.payload;
-    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      return payload as JsonObject;
-    }
-    const context = responsesRecord.context;
-    if (context && typeof context === 'object' && !Array.isArray(context)) {
-      return context as JsonObject;
-    }
   }
 
   return null;

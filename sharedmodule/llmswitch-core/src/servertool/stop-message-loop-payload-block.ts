@@ -1,28 +1,13 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { getCapturedRequest } from './handlers/stop-message-auto/runtime-utils.js';
-import { extractCapturedChatSeed } from './followup-seed.js';
-
-function resolveCapturedChatRequest(adapterContext: AdapterContext): JsonObject | null {
-  return getCapturedRequest(adapterContext);
-}
+import { buildServertoolReq04FollowupPayloadWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 
 export function buildStopMessageLoopPayload(adapterContext: AdapterContext): JsonObject | null {
-  const captured = resolveCapturedChatRequest(adapterContext);
-  const seed = extractCapturedChatSeed(captured);
-  if (!seed || !Array.isArray(seed.messages) || seed.messages.length === 0) {
+  const payload = buildServertoolReq04FollowupPayloadWithNative(adapterContext);
+  if (!payload || !Array.isArray(payload.messages) || payload.messages.length === 0) {
     return null;
   }
-  const payload: JsonObject = {
-    messages: seed.messages
-  };
-  if (seed.model) {
-    payload.model = seed.model;
-  }
-  if (seed.parameters && typeof seed.parameters === 'object' && !Array.isArray(seed.parameters)) {
-    payload.parameters = seed.parameters as JsonObject;
-  }
-  return payload;
+  return payload as JsonObject;
 }
 
 export function appendStopMessageLoopWarning(args: {

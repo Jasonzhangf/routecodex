@@ -13,6 +13,7 @@ import {
 } from './vision-debug-utils.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { Readable } from 'node:stream';
+import { sanitizeProviderOutboundPayload } from '../../../modules/llmswitch/bridge.js';
 
 const formatUnknownError = (error: unknown): string => {
   if (error instanceof Error) {
@@ -213,7 +214,8 @@ export class HttpRequestExecutor {
     const wantsSse = this.deps.wantsUpstreamSse(processedRequest, context);
     const defaultEndpoint = this.deps.getEffectiveEndpoint();
     const endpoint = this.deps.resolveRequestEndpoint(processedRequest, defaultEndpoint);
-    const finalBody = this.deps.buildHttpRequestBody(processedRequest);
+    const builtBody = this.deps.buildHttpRequestBody(processedRequest);
+    const finalBody = await this.sanitizeProviderWireBody(builtBody, context);
     if (wantsSse) {
       this.deps.prepareSseRequestBody(finalBody, context);
     }
@@ -270,6 +272,57 @@ export class HttpRequestExecutor {
       wantsSse,
       ...(context.abortSignal ? { abortSignal: context.abortSignal } : {})
     };
+  }
+
+  private async sanitizeProviderWireBody(
+    body: UnknownObject,
+    context: ProviderContext,
+  ): Promise<UnknownObject> {
+    const providerProtocol = this.resolveProviderWireProtocol(context);
+    if (!providerProtocol) {
+      return body;
+    }
+    return await sanitizeProviderOutboundPayload({
+      protocol: providerProtocol,
+      compatibilityProfile: this.resolveCompatibilityProfile(context),
+      payload: body,
+    });
+  }
+
+  private resolveProviderWireProtocol(context: ProviderContext): string | undefined {
+    const target = context.runtimeMetadata?.target ?? context.target;
+    const outboundProfile = typeof target?.outboundProfile === 'string'
+      ? target.outboundProfile.trim().toLowerCase()
+      : '';
+    if (outboundProfile) {
+      if (outboundProfile === 'openai-chat' || outboundProfile === 'openai-responses' || outboundProfile === 'anthropic-messages' || outboundProfile === 'gemini-chat') {
+        return outboundProfile;
+      }
+      if (outboundProfile === 'openai') return 'openai-chat';
+      if (outboundProfile === 'responses') return 'openai-responses';
+      if (outboundProfile === 'anthropic') return 'anthropic-messages';
+      if (outboundProfile === 'gemini') return 'gemini-chat';
+    }
+    if (context.providerType === 'openai') return 'openai-chat';
+    if (context.providerType === 'responses') return 'openai-responses';
+    if (context.providerType === 'anthropic') return 'anthropic-messages';
+    if (context.providerType === 'gemini') return 'gemini-chat';
+    return undefined;
+  }
+
+  private resolveCompatibilityProfile(context: ProviderContext): string | undefined {
+    const values = [
+      context.runtimeMetadata?.target?.compatibilityProfile,
+      context.target?.compatibilityProfile,
+      context.runtimeMetadata?.compatibilityProfile,
+      context.metadata?.compatibilityProfile,
+    ];
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim().toLowerCase();
+      }
+    }
+    return undefined;
   }
 
   private async captureVisionDebugRequest(

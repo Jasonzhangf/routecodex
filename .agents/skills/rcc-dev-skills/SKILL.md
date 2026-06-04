@@ -8,7 +8,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ## Hub Pipeline 工具边界审计硬规则（最醒目）
 
 - 审计/修复 Hub Pipeline 工具问题前，先读 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
-- Servertool followup 固定节点锁：`HubRespChatProcess03Governed -> ServertoolResp03RuntimeAction -> ServertoolReq04FollowupBuilt -> normal Hub reenter -> ServertoolResp03FollowupResult -> HubRespOutbound04ClientSemantic`；`ServertoolResp03RuntimeAction` 必须在 chat-process 标准态判定，并携带 chat-process payload 给 TS IO/reenter 薄壳。TS 禁止判断工具语义、清洗工具列表、修补 `requires_action`、从 `rawBody` 正常构造请求、用 provider raw/client outbound/SSE payload 判定 stopless，或用旧 `streamPipe.payload` 覆盖 post-servertool payload。
+- Servertool followup 固定节点锁：`HubRespChatProcess03Governed -> ServertoolResp03RuntimeAction -> ServertoolReq04FollowupBuilt -> normal Hub reenter -> ServertoolResp03FollowupResult -> HubRespOutbound04ClientSemantic`；`ServertoolResp03RuntimeAction` 必须在 chat-process 标准态判定，只决定 followup action。`ServertoolReq04FollowupBuilt` 是唯一标准 followup 请求 builder：clone `HubReqInbound02Standardized` 捕获的标准请求 origin，只在标准 chat/input 位置追加 followup delta，并保留 origin 标准请求语义字段；内部 metadata 仍走 side-channel。TS 只能调用 native 并执行 IO/reenter，禁止判断工具语义、拼装 messages/tools、清洗工具列表、修补 `requires_action`、从 `rawBody` 正常构造请求、用 provider raw/client outbound/SSE payload 判定 stopless，或用旧 `streamPipe.payload` 覆盖 post-servertool payload。
 - Servertool 响应职责锁：servertool 只代客户端执行本地工具或发起正常 followup；它没有专用 response projection。followup 响应方向固定为 provider/model -> `RespInbound` -> `HubRespChatProcess03Governed` -> `HubRespOutbound04ClientSemantic` -> client。`ServertoolResp03FollowupResult` 若仍是 chatprocess payload，只能经 `buildHubRespOutbound04FromHubRespChatProcess03` 相邻转换；禁止手写 Responses wrapper、直接写 SSE/client frame、或把 chat completion shape 泄到 `/v1/responses`。
 - Servertool 命名真相：`finalChatResponse` 只代表 pre-followup governed response；`followupBody` / `ServertoolResp03FollowupResult` 非空时必须成为 `HubRespOutbound04ClientSemantic` 的唯一输入。
 - 请求/响应转换必须是唯一语义链：`req_inbound -> req_chatprocess -> req_outbound -> provider_runtime -> resp_inbound -> resp_chatprocess -> resp_outbound`；`req_inbound/resp_inbound` 只解析入口协议和捕获上下文，所有字段的唯一语义映射必须发生在 `req_chatprocess/resp_chatprocess`，再由 outbound 只编码目标协议 wire，禁止绕过 chatprocess 直接重建上下文。
@@ -637,7 +637,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 1. **Origin 捕获层（请求进入时）**
    - 文件：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-adapter-context-metadata-blocks.ts`
    - 职责：保存 `capturedChatRequest` 到 `adapterContext` + `origin-request-store`
-   - 改这里的触发：followup 重建缺历史/模型/tools
+   - 改这里的触发：followup origin clone 缺历史/模型/tools
 
 2. **Origin 存储层（生命周期）**
    - 文件：`sharedmodule/llmswitch-core/src/servertool/origin-request-store.ts`
@@ -1474,6 +1474,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Responses SSE tool_calls 调试锚点（2026-05-23）：如果 `/v1/responses stream=true` 日志显示 `finish_reason=tool_calls` 但 mem-observer 仍 `responseIndex=0 scopeIndex=0 pendingNoResponseId>0`，先查 `src/server/handlers/handler-response-utils.ts::streamResponsesJsonAsSse()` 是否像 JSON path 一样调用 conversation store 记录。样本必须进 `tests/server/handlers/handler-response-utils.responses-conversation.spec.ts` 红测，断言 response id + router id + provider timing id 均入库。
 - apply_patch servertool 骨架事实（2026-05-23）：`[servertool.apply_patch].mode=servertool` 时，`apply_patch` 只在 Hub/servertool 层本地执行，并通过标准 servertool followup 骨架（captured origin + injection ops）把 `APPLY_PATCH_APPLIED/FAILED` 回给模型；不得走 tmux/client injection，不得在 provider/Windsurf 层处理。默认 `client` 模式必须保持 client 原生 tool_call 透传，runtime dispatch gate 不得消费。
 - stop_message_flow 路径修正（2026-06-03）：stopless/stopMessage 普通续杯不走 tmux/client injection；Rust `servertool_skeleton_config.rs` 中 `stop_message_flow` 的 active fact 是 servertool `reenter` + `stickyProvider` + `seedLoopPayload` + `retryEmptyFollowupOnce`，无 `clientInjectOnly/clientInjectSource`。测试或实现若看到 `servertool.stop_message -> client_inject_only` 或 followup metadata stopMessage false，这是旧事实污染。
+- servertool followup origin 修正（2026-06-04）：followup capture 必须在请求 entry 保存 `entryOriginRequest/capturedEntryRequest`，哪个入口协议就 clone 哪个请求 shape；`/v1/responses` 只能在 `input` 上加 delta，不能从 chat `messages`、raw metadata、responses context 或当前污染 payload 重建。旧 `backfillServertoolAdapterContextTools*` 属于错误实现，发现即删除而不是闲置。
 - Responses retention cleanup（2026-05-23）：`retainedInputItems` 与 `pendingNoResponseId` 同步增长时，唯一先查 `handler-response-utils.ts` 在拿到 client `resp_*` 后是否清掉 superseded router/provider requestId；释放 payload 只能保留工具定义与 pending tool-call ids 摘要，禁止保留完整 input prefix 伪装指标下降。
 - Windsurf RCC text-tool typed args（2026-05-23）：若 unsupported tool 经 RCC fence 后工具层报 `plan expected sequence` / 参数类型错，先查 `windsurf-chat-provider.ts` harvester 是否按 JSON schema 还原 array/object/boolean/number；禁止把所有 `<|RCC|parameter>` 都当 string。guidance 必须列出所有 required 参数，不能只示例第一个。
 - Windsurf managed-account 请求内账号固定（2026-05-28）：健康/extra quota 探测结果只在启动/首次缓存填充时进入 `windsurfHealthCache`；单次请求内 transient retry 必须复用第一次 `resolveCascadeApiKey()` 的账号，不得重新 health probe 或静默切账号。quota exhausted 只标记 alias 并显式抛给外层 provider/VR 策略处理。

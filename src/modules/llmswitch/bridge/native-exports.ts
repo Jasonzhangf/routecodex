@@ -58,11 +58,6 @@ type NativeChatProcessNodeResultSemantics = {
   detectToolExecutionFailuresJson?: (bodyJson: string) => string;
   updateResponsesContractProbeFromSseChunkJson?: (chunkJson: string, probeJson: string) => string;
   buildResponsesTerminalSseFramesFromProbeJson?: (probeJson: string, requestLabel: string) => string;
-  backfillServertoolAdapterContextToolsJson?: (
-    baseContextJson: string,
-    requestSemanticsJson: string,
-    forceReplace: boolean
-  ) => string;
   resolveProviderResponseRequestSemanticsJson?: (
     processedJson: string,
     standardizedJson: string,
@@ -506,28 +501,6 @@ export function detectToolExecutionFailuresNative(body: unknown): ToolExecutionF
     throw new Error('[llmswitch-bridge] detectToolExecutionFailuresJson returned invalid payload');
   }
   return parsed as ToolExecutionFailureSignal[];
-}
-
-export function backfillServertoolAdapterContextToolsNative(
-  baseContext: Record<string, unknown>,
-  requestSemantics: Record<string, unknown> | undefined,
-  forceReplace: boolean
-): { changed: boolean; context: Record<string, unknown> } {
-  const fn = getChatProcessNodeResultSemantics().backfillServertoolAdapterContextToolsJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] backfillServertoolAdapterContextToolsJson not available');
-  }
-  const raw = fn(JSON.stringify(baseContext ?? {}), JSON.stringify(requestSemantics ?? {}), forceReplace === true);
-  const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('[llmswitch-bridge] backfillServertoolAdapterContextToolsJson returned invalid payload');
-  }
-  const row = parsed as Record<string, unknown>;
-  const context = row.context;
-  if (typeof row.changed !== 'boolean' || !context || typeof context !== 'object' || Array.isArray(context)) {
-    throw new Error('[llmswitch-bridge] backfillServertoolAdapterContextToolsJson returned invalid payload');
-  }
-  return { changed: row.changed, context: context as Record<string, unknown> };
 }
 
 export function resolveProviderResponseRequestSemanticsNative(

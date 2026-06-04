@@ -14,6 +14,7 @@ mod meta_error_carriers;
 mod provider_req_outbound_06_wire_payload;
 mod request_typed_entrypoints;
 mod response_typed_entrypoints;
+mod tool_surface_contract;
 mod vr_route_04_selected_target;
 
 pub(crate) use hub_req_chatprocess_03_governed::{

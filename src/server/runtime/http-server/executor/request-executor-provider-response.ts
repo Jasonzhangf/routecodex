@@ -23,6 +23,22 @@ export type HubDecodeBreakdown = {
   codecDecodeMs: number;
 };
 
+function coalesceUsageMetrics(primary?: UsageMetrics, secondary?: UsageMetrics): UsageMetrics | undefined {
+  if (!primary) {
+    return secondary;
+  }
+  if (!secondary) {
+    return primary;
+  }
+  return {
+    prompt_tokens: primary.prompt_tokens ?? secondary.prompt_tokens,
+    completion_tokens: primary.completion_tokens ?? secondary.completion_tokens,
+    total_tokens: primary.total_tokens ?? secondary.total_tokens,
+    cache_read_input_tokens: primary.cache_read_input_tokens ?? secondary.cache_read_input_tokens,
+    cache_creation_input_tokens: primary.cache_creation_input_tokens ?? secondary.cache_creation_input_tokens
+  };
+}
+
 export function buildProviderExecutionSuccessResult(args: {
   converted: PipelineExecutionResult;
   providerKey: string;
@@ -409,7 +425,12 @@ export async function processSuccessfulProviderResponse(args: {
     source: 'converted_response',
     attempt: args.attempt
   });
-  const usage = extractUsageFromResult(args.converted, args.mergedMetadata) ?? args.providerUsageFallback;
+  const convertedUsage = extractUsageFromResult(args.converted, {
+    ...args.mergedMetadata,
+    providerProtocol: args.providerProtocol,
+    providerKey: args.providerKey
+  });
+  const usage = coalesceUsageMetrics(args.providerUsageFallback, convertedUsage);
   const aggregatedUsage = mergeUsageMetrics(args.aggregatedUsage, usage);
   args.logStage('provider.usage_extract.completed', args.inputRequestId, {
     providerKey: args.providerKey,

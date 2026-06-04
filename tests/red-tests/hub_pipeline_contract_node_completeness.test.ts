@@ -50,4 +50,21 @@ describe('hub pipeline contract node completeness (online help)', () => {
       expect(typeof detail?.node?.dataOut?.typeName === 'string').toBe(true);
     }
   });
+
+  it('declares tool-surface validation on every request and response phase', () => {
+    const expectedToolValidation: Record<string, string> = {
+      HubReqInbound02Standardized: 'tool_surface_validate',
+      HubReqChatProcess03Governed: 'tool_surface_validate',
+      HubReqOutbound05ProviderSemantic: 'tool_surface_validate',
+      ProviderReqOutbound06WirePayload: 'tool_surface_validate_provider_wire',
+      HubRespInbound02Parsed: 'tool_surface_validate',
+      HubRespChatProcess03Governed: 'tool_surface_validate',
+      HubRespOutbound04ClientSemantic: 'tool_surface_validate',
+    };
+
+    for (const [nodeId, effect] of Object.entries(expectedToolValidation)) {
+      const detail = describePipelineContractWithNative(nodeId);
+      expect(detail?.node?.effects).toContain(effect);
+    }
+  });
 });
