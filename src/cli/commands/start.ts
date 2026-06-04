@@ -353,7 +353,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         // Ensure port state aligns with requested behavior.
         // Default behavior is takeover/restart; pass --no-restart for legacy non-disruptive mode.
         const shouldRestart = options.restart !== false || options.exclusive === true;
-        const grouped = hasMultiPortConfig
+        const explicitPortRequested = typeof options.port === 'string' && Number(options.port) > 0;
+        const grouped = hasMultiPortConfig && !explicitPortRequested
           ? resolvedPortGroup
           : (ctx.isDevPackage
             ? null

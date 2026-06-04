@@ -18,6 +18,78 @@ function createStubSpinner() {
 }
 
 describe('cli start command', () => {
+  it('starts only the requested port from a multi-port config', async () => {
+    const program = new Command();
+    const configPath = '/tmp/rcc/config.toml';
+    const checkedPorts: number[] = [];
+    const spawnCalls: Array<{ options: any }> = [];
+
+    createStartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: (target: string) => target === configPath || target === '/tmp/index.js' || target === '/tmp/modules.json',
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => `
+[httpserver]
+port = 5520
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+port = 5520
+mode = "router"
+routingPolicyGroup = "gateway_priority_5520"
+
+[[httpserver.ports]]
+port = 10000
+mode = "router"
+routingPolicyGroup = "gateway_coding_10000"
+`,
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {},
+        createWriteStream: () => ({ write: () => true, end: () => {} } as any)
+      } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensureTokenDaemonAutoStart: async () => {},
+      ensurePortAvailable: async (port) => { checkedPorts.push(port); },
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: (_command, _args, options) => {
+        spawnCalls.push({ options });
+        return { pid: 12345, on: () => {}, once: () => {}, kill: () => true } as any;
+      },
+      fetch: (async () => ({ ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
+      setupKeypress: () => () => undefined,
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'start', '--config', configPath, '--port', '10000'], { from: 'node' });
+
+    expect(checkedPorts).toEqual([10000]);
+    expect(spawnCalls[0]?.options.env.ROUTECODEX_PORT).toBe('10000');
+    expect(spawnCalls[0]?.options.env.RCC_PORT).toBe('10000');
+  });
+
   it('managed restart succeeds when the restarted child becomes healthy', async () => {
     const program = new Command();
     const infoLogs: string[] = [];
