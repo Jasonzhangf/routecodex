@@ -286,35 +286,12 @@ export function prepareResponsesRequestEnvelopeWithNative(
   }
   const payloadJson = safeStringify({
     request: input.request,
-    contextSystemInstruction: input.contextSystemInstruction,
     extraSystemInstruction: input.extraSystemInstruction,
-    metadataSystemInstruction: input.metadataSystemInstruction,
     combinedSystemInstruction: input.combinedSystemInstruction,
-    reasoningInstructionSegments: input.reasoningInstructionSegments,
-    contextParameters: input.contextParameters,
     chatParameters: input.chatParameters,
-    metadataParameters: input.metadataParameters,
-    contextStream: input.contextStream,
-    metadataStream: input.metadataStream,
     chatStream: input.chatStream,
     chatParametersStream: input.chatParametersStream,
-    contextInclude: input.contextInclude,
-    metadataInclude: input.metadataInclude,
-    contextStore: input.contextStore,
-    metadataStore: input.metadataStore,
-    stripHostFields: input.stripHostFields,
-    contextToolChoice: input.contextToolChoice,
-    metadataToolChoice: input.metadataToolChoice,
-    contextParallelToolCalls: input.contextParallelToolCalls,
-    metadataParallelToolCalls: input.metadataParallelToolCalls,
-    contextResponseFormat: input.contextResponseFormat,
-    metadataResponseFormat: input.metadataResponseFormat,
-    contextServiceTier: input.contextServiceTier,
-    metadataServiceTier: input.metadataServiceTier,
-    contextTruncation: input.contextTruncation,
-    metadataTruncation: input.metadataTruncation,
-    contextMetadata: input.contextMetadata,
-    metadataMetadata: input.metadataMetadata
+    stripHostFields: input.stripHostFields
   });
   if (!payloadJson) {
     return fail('json stringify failed');

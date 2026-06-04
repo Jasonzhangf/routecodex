@@ -144,7 +144,7 @@ describe("stop_message_flow reentry", () => {
     );
   });
 
-  test("skips stop_message_flow when the hop is already followup", async () => {
+  test("continues stop_message_flow when followup hop stops again", async () => {
     const sessionId = "stop-message-flow-followup-hop";
     const stateKey = `session:${sessionId}`;
     const state = createEmptyRoutingInstructionState();
@@ -165,9 +165,52 @@ describe("stop_message_flow reentry", () => {
           model: "gpt-test",
           messages: [{ role: "user", content: "start" }],
         },
-        __rt: { serverToolFollowup: true },
+        __rt: {
+          serverToolFollowup: true,
+          serverToolLoopState: { flowId: "stop_message_flow", maxRepeats: 3 },
+        },
       } as unknown as AdapterContext,
       requestId: "req_stop_message_flow_followup_hop",
+      entryEndpoint: "/v1/chat/completions",
+      providerProtocol: "openai-chat",
+      clientInjectDispatch,
+      reenterPipeline,
+    });
+
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe("stop_message_flow");
+    expect(clientInjectDispatch).not.toHaveBeenCalled();
+    expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
+  });
+
+  test("tool call response resets consecutive stop_message_flow count", async () => {
+    const sessionId = "stop-message-flow-tool-call-reset";
+    const stateKey = `session:${sessionId}`;
+    const state = createEmptyRoutingInstructionState();
+    state.stopMessageText = "继续执行";
+    state.stopMessageMaxRepeats = 3;
+    state.stopMessageUsed = 1;
+    state.stopMessageUpdatedAt = Date.now();
+    saveRoutingInstructionStateSync(stateKey, state);
+
+    const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
+    const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
+
+    const result = await runServerToolOrchestration({
+      chat: buildToolCallsResponse(),
+      adapterContext: {
+        sessionId,
+        capturedChatRequest: {
+          model: "gpt-test",
+          messages: [{ role: "user", content: "start" }],
+        },
+        __rt: {
+          serverToolFollowup: true,
+          serverToolLoopState: { flowId: "stop_message_flow", maxRepeats: 3 },
+        },
+      } as unknown as AdapterContext,
+      requestId: "req_stop_message_flow_tool_call_reset",
       entryEndpoint: "/v1/chat/completions",
       providerProtocol: "openai-chat",
       clientInjectDispatch,
@@ -177,16 +220,16 @@ describe("stop_message_flow reentry", () => {
     expect(result.executed).toBe(false);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
-    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(0);
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBeUndefined();
   });
 
-  test("non-goal stopless default does not count missing schema stops", async () => {
+  test("non-goal stopless default counts missing schema stops", async () => {
     const sessionId = "stopless-default-missing-schema";
     const stateKey = `session:${sessionId}`;
     const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
     const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
 
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 2; index += 1) {
       const result = await runServerToolOrchestration({
         chat: buildStopResponse(`stop-${index + 1}`),
         adapterContext: {
@@ -205,9 +248,28 @@ describe("stop_message_flow reentry", () => {
 
       expect(result.executed).toBe(true);
       expect(result.flowId).toBe("stop_message_flow");
-      expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(0);
+      expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(index + 1);
     }
-    expect(reenterPipeline).toHaveBeenCalledTimes(3);
+    const exhausted = await runServerToolOrchestration({
+      chat: buildStopResponse("stop-3"),
+      adapterContext: {
+        sessionId,
+        capturedChatRequest: {
+          model: "gpt-test",
+          messages: [{ role: "user", content: "start" }],
+        },
+      } as unknown as AdapterContext,
+      requestId: "req_stopless_default_3",
+      entryEndpoint: "/v1/chat/completions",
+      providerProtocol: "openai-chat",
+      clientInjectDispatch,
+      reenterPipeline,
+    });
+
+    expect(exhausted.executed).toBe(true);
+    expect(JSON.stringify(exhausted.chat)).toContain("Stopless 校验结果");
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBeUndefined();
+    expect(reenterPipeline).toHaveBeenCalledTimes(2);
   });
 
   test("non-goal stopless default counts invalid schema stops then returns final summary", async () => {
@@ -217,7 +279,7 @@ describe("stop_message_flow reentry", () => {
     const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
     const invalidSchema = '{"stopreason":2,"reason":"未完成","has_evidence":0,"next_step":"继续测试"}';
 
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 2; index += 1) {
       const result = await runServerToolOrchestration({
         chat: buildStopResponse(invalidSchema),
         adapterContext: {
@@ -256,7 +318,7 @@ describe("stop_message_flow reentry", () => {
           ],
         },
       } as unknown as AdapterContext,
-      requestId: "req_stopless_default_4",
+      requestId: "req_stopless_default_3",
       entryEndpoint: "/v1/chat/completions",
       providerProtocol: "openai-chat",
       clientInjectDispatch,
@@ -270,12 +332,11 @@ describe("stop_message_flow reentry", () => {
     expect(finalText).toContain("第一次停止：未完成，只总结。");
     expect(finalText).toContain("第 2 次续杯询问");
     expect(finalText).toContain("第二次停止：仍未执行 A。");
-    expect(finalText).toContain("第 3 次续杯询问");
     expect(finalText).toContain('\\"stopreason\\":2');
     expect(finalText).toContain('\\"next_step\\":\\"继续测试\\"');
     expect(finalText).toContain("最后原始 summary");
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).toHaveBeenCalledTimes(3);
+    expect(reenterPipeline).toHaveBeenCalledTimes(2);
   });
 
   test("stopless writes learned note only when schema allows final stop", async () => {
@@ -449,6 +510,10 @@ describe("stop_message_flow reentry", () => {
         capturedChatRequest: {
           model: "gpt-test",
           messages: [{ role: "user", content: "start" }],
+        },
+        __rt: {
+          serverToolFollowup: true,
+          serverToolLoopState: { flowId: "apply_patch_flow", maxRepeats: 1 },
         },
       } as unknown as AdapterContext,
       requestId: "req_responses_relay_chat_completion_stopless",

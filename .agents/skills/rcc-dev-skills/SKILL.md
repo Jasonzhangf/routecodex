@@ -752,26 +752,25 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ## Chat Process 定义
 
-**Chat Process = req_process + resp_process**
+**Chat Process = `HubReqChatProcess03Governed` + `HubRespChatProcess03Governed`**
 
-这是 inbound/outbound 之间的**核心处理阶段**，负责：
+这是 Hub 请求/响应链中 inbound/outbound 之间的**核心处理阶段**，负责：
 1. 输入输出协议归一化
 2. 工具调用归一化（工具治理、兼容处理）
 3. servertool 编排
 
 **全局唯一的地方**，所有工具相关的处理都在这里。
 
-### 阶段说明
+### 当前拓扑节点
 
-| 阶段 | 目录 | 功能 |
+| 节点 | Rust 迁移遗留入口 | 功能 |
 |---|---|---|
-| **req_process_stage1** | `stages/req_process/req_process_stage1_tool_governance.rs` | 请求侧工具治理、heredoc 引导注入 |
-| **req_process_stage2** | `stages/req_process/req_process_stage2_route_select.rs` | 路由选择、metadata attach |
-| **resp_process_stage1** | `stages/resp_process/resp_process_stage1_tool_governance.rs` | 响应侧工具收割、heredoc 剥离 |
-| **resp_process_stage2** | `stages/resp_process/resp_process_stage2_finalize.rs` | finalize payload |
-| **resp_process_stage3** | `stages/resp_process/resp_process_stage3_servertool_orchestration.rs` | servertool followup 编排 |
+| **HubReqChatProcess03Governed** | `req_process_stage1_tool_governance.rs` / `req_process_stage2_route_select.rs` | 请求侧工具治理、history/tool 归一、路由前治理 |
+| **VrRoute04SelectedTarget** | `req_process_stage2_route_select.rs` / `virtual_router_engine` | 路由分类与目标选择，不修 payload |
+| **HubRespChatProcess03Governed** | `resp_process_stage1_tool_governance.rs` / `resp_process_stage2_finalize.rs` / servertool orchestration | 响应侧工具收割、finalize、servertool followup 编排 |
 
 **注意**：`req_outbound_stage3_compat` 和 `resp_inbound_stage3_compat` 是 **provider 格式转换层**，不是工具治理的位置。
+- 旧 `req_process_*` / `resp_process_*` 只能作为 Rust 文件迁移遗留名或历史排障关键词；当前文档、运行标签、红测和对外说明必须使用 `HubReqChatProcess03Governed` / `HubRespChatProcess03Governed` 等拓扑节点名。
 - continuation/state 统一补丁（2026-04-17）：**非 Responses 协议的 response continuity 也必须在 `chat_process.resp` 恢复到 `chat.semantics.continuation`**；不要把 session/conversation 状态恢复留给 outbound remap。可复用动作：先看 `response-mappers.ts` 是否把 request-side `semantics.continuation` 回填到 chat response，再看 `buildProcessedRequestFromChatResponse` / outbound 是否只做映射消费。
 - Responses continuation 路由模型护栏（2026-04-21）：若 `/v1/responses` 已在 `req_process_stage2_route_select` 命中过目标模型，后续 **route-aware continuation materialize** 只能恢复 history/messages/tools，**不得用 store 里的原始 responses `payload.model` 覆盖当前 workingRequest.model**；排查 5555/5520 出现“virtual-router-hit 是 A，providerRequestId/上游报错却是 B”时，先看 `route-aware-responses-continuation.ts` 是否把模型翻回 client/original model。
 - Anthropic alias fidelity（2026-04-19）：`Bash/Glob/...` 这类客户端原始工具名必须同时落盘到 `semantics.tools.toolNameAliasMap + clientToolsRaw`，必要时再镜像到 `semantics.anthropic.*`；response-side client remap 只能消费这些 semantics 恢复原始 tool name，不能回读 metadata。
@@ -1099,8 +1098,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - servertool → client remap 闭环（2026-04-12）：若日志出现 `CLIENT_TOOL_NAME_MISMATCH unknown=[review|clock|...]`，不要去放宽 client allowlist；先查 `strip-servertool-calls.ts` 是否按 **`tool_outputs.tool_call_id`** 剥掉所有已执行 servertool 调用，避免 internal servertool 泄露到客户端工具集合校验。
 - followup 剥离护栏（2026-04-14）：若 `reasoning.stop` / `review` 这类 internal servertool 在 **followup** 样本里出现在 `required_action.submit_tool_outputs` 或 `output.function_call`，优先检查 `resp_process.stage2_finalize` 是否错误跳过 `filterOutExecutedServerToolCalls`；servertool followup 也必须剥离已执行 internal tool_call，不能因为 `serverToolFollowup` 标记而放行。
 - followup 编排顺序（2026-04-14）：若 followup 样本里 internal RCC tool_call 只在 `resp_process.stage1_tool_governance` 后才出现，但 `resp_process.stage3_servertool_orchestration` 仍在 governance 之前且对 `serverToolFollowup` 直接 bypass，就会出现“统一请求注入了、统一响应收割却没吃到”的假象；要补 **post-governance servertool pass**，不能只靠 pre-governance orchestration。
-- reasoning.stop 单一真源（2026-04-14）：`reasoning.stop` 的 schema/注入只能以 **chat-process request tooling** 为真源；guard/followup 只能 `preserve_tools + ensure_standard_tools`，禁止再用 `append_tool_if_missing` 造第二份工具定义，否则 followup 的 declared tools 与 host validator 会漂移成 `unknown_tool`。
-- stopless 越界修复（2026-04-14）：**不要为了逼模型调用 `reasoning.stop` 而砍掉真实工具面，也不要额外注入“本轮只能 reasoning.stop/工具缺失”这类约束文案。** 正确动作只有两步：保留真实 tools（`preserve_tools + ensure_standard_tools`），并在 `reasoning.stop` 工具定义/validator 上坚持“未调用不得停止”；若线上出现“exec_command 不存在”式自造阻塞，先回查是否有人为缩了 followup tools。
+- reasoning.stop 单一真源（2026-06-04 更新）：`reasoning.stop` 的 schema/注入只能以 **chat-process request tooling** 为真源；guard/followup 禁止再用 `preserve_tools` / `ensure_standard_tools` / `append_tool_if_missing` / `replace_tools` / `force_tool_choice` 等 DSL 补工具，followup 必须作为正常请求重新进入 ReqInbound -> ReqChatProcess。
+- stopless 越界修复（2026-06-04 更新）：**不要为了逼模型调用 `reasoning.stop` 而砍掉、替换、补回或伪造工具面。** 正确动作是让 followup 走同一请求链，由 chat process 统一治理工具；若线上出现“exec_command 不存在”式自造阻塞，先查是否仍有 raw/context/metadata 或 followup DSL 回填工具。
 - stopless 只读任务边界（2026-04-15）：若任务本身就是 **plan mode / audit / 其它有意只读交付**，`reasoning.stop` 说明与 schema 里要显式提供 `stop_reason=plan_mode`，并要求同时给 `is_completed=true + completion_evidence`；不要把这类任务误判成“必须继续写动作”或硬塞成 blocked reason。
 - tool-call reject 可观测性（2026-04-14）：`provider-response-converter` 对 canonical client tool args 的拒绝，必须同时上浮 **toolName + validationReason + validationMessage + missingFields**，并继续映射到 HTTP error body；只报内部 reason code 会让模型/客户端都不知道到底缺了什么。
 
@@ -1246,7 +1245,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 触发信号：`stopless` 明明已开启，但在线表现仍像完全没生效；`reasoning-stop-guard.spec` 同时从 “tool_flow” 退化成 “passthrough”。
 - 可复用动作：先查 `reasoning-stop-guard` 这类 **post-hook** 是否误从 `ctx.base`（响应）读取 request-only 字段（如 `tools`）；在 servertool auto hook 里，`ctx.base` 默认是模型响应，不是原始请求。请求级判定应改读 `capturedChatRequest` / sticky session state，而不是 response payload。
 - 触发信号：直连 `/v1/responses` 或 direct-model 场景里，request 已带 `<**stopless:on**>`，但 response 侧 followup 没触发，sticky state 里也没有 `reasoningStopMode`。
-- 可复用动作：先查 response converter 是否在 `bridgeConvertProviderResponse` 前**回填 `capturedChatRequest + sessionId/conversationId` 并立刻调用 `syncReasoningStopModeFromRequest`**；其次检查 `reasoning-stop-guard` followup 是否显式补回 `reasoning.stop` 工具（`preserve_tools + ensure_standard_tools + append_tool_if_missing`），避免首跳是无工具请求时续轮失去 stopless 护栏。
+- 可复用动作：先查 response converter 是否在 `bridgeConvertProviderResponse` 前**回填 `capturedChatRequest + sessionId/conversationId` 并立刻调用 `syncReasoningStopModeFromRequest`**；其次检查 `reasoning-stop-guard` followup 是否仍通过 raw/context/metadata 或 followup DSL 补回 `reasoning.stop` 工具，发现即删，避免续轮工具面漂移。
 - 触发信号：router、stop_message、sticky state 对同一轮 continuation 给出不同 sticky key，或只有 Responses 能续轮而 openai-chat / anthropic / gemini 走回 session/request fallback。
 - 可复用动作：先查 `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/keys.ts` 是否仍被旁路；`request_chain/session/conversation/request` 必须都从统一 continuation helper 解析，`stop-message-auto/runtime-utils.ts` 之类 sidecar 只能复用该 helper，`responsesResume.previousRequestId` 只允许保留为 migration fallback。
 - 触发信号：`stopless:endless` 文案说“绝不停止”，但真实需求是“完成可停、不可抗阻塞也可停”，线上表现出现文档/提示词/validator/finalize 四处语义打架。
@@ -1824,17 +1823,17 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 多端口隔离验收必须同时看：`ports/<port>/server-<port>.log`、`codex-samples/<entry>/ports/<port>/...`、`provider-stats.jsonl` 的 `entryPort`、非主端口 `/admin/ports` 404 JSON、以及真实 `/v1/chat/completions` HTTP JSON。
 
 ### 2026-06-03 servertool followup 唯一路径精华
-- stop_message followup 只能单次复入：主请求可触发一个 `:stop_followup`，followup hop 响应侧必须 `skip_servertool_followup_hop`，禁止 nested followup / 连续续杯。
+- stop_message followup 是 bounded continuation：若 `:stop_followup` 响应仍 `finish_reason=stop` 且 stop schema 未通过，必须按 `used/max_repeats` 继续续杯；只有非 `stop_message_flow` 的 generic followup hop 才 `skip_servertool_followup_hop`。
 - `stopMessageFollowupPolicy` / `preserve_eligibility` 是已删除旧契约；不得在 skeleton/profile/runtime metadata/Rust context/测试 mock 中恢复。
-- 验证必须看在线样本：同一客户端 requestId 下最多一个 `_stop_followup` 目录/请求；缺 schema 时只注入一次强 schema 引导，不递归追问。
+- 验证必须看在线样本：同一客户端 requestId 可出现 bounded `:stop_followup` 链；缺 schema/invalid schema 时应递归追问到预算耗尽，不得只注入一次强 schema 引导后放行停止。
 
 ### 2026-06-03 servertool followup 单次复入精华
 - `servertool` followup 禁止同一 `followupRequestId` provider 重试；空 followup 响应只能 fail-fast + 落 empty sample，不能 `retryEmptyFollowupOnce` 二次复入，否则会消耗 provider 次数并造成重复 VR hit。
 
 ### Stopless schema gate 精华（2026-06-03）
 - stopless schema gate 只在 `finish_reason=stop` 且非 `/goal active`、非 plan mode 时激活；只解析当前 assistant stop 文本，不扫历史、不改历史、不改工具列表。
-- stop schema 只校验数字字段 `stopreason` / `has_evidence`；`reason` / `next_step` / `evidence` / `issue_cause` / `excluded_factors` / `diagnostic_order` 只判空。followup prompt 必须质询六项：目标、过程、证据、问题原因、已排除因素、排查顺序；`stopreason=0|1` 且 reason 非空才允许 stop 并 prefix summary；缺 schema 只 followup 不计预算；带 schema 的无效 stop 才计入连续预算，非 stop/工具进展必须 reset；预算耗尽 summary 必须聚合最近三轮追问、三轮回复与最后原始 summary，并保留原因/排除项/顺序。
-- stopless summary 提示锁：任何 system prompt / ai-followup prompt 要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报时，必须同条消息要求 stop schema JSON；缺 schema 的 stop 不能增加 `stopMessageUsed`，`serverToolLoopState.repeatCount` 只用于 loop guard，不是 schema budget。
+- stop schema 只校验数字字段 `stopreason` / `has_evidence`；`reason` / `next_step` / `evidence` / `issue_cause` / `excluded_factors` / `diagnostic_order` 只判空。followup prompt 必须质询六项：目标、过程、证据、问题原因、已排除因素、排查顺序；`stopreason=0|1` 且 reason 非空才允许 stop 并 prefix summary；缺 schema、无效 schema、`stopreason=2` 都计入同一个连续 stop 预算；非 stop/工具进展必须 reset；第三次连续 stop 预算耗尽并输出 summary。
+- stopless summary 提示锁：任何 system prompt / ai-followup prompt 要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报时，必须同条消息要求 stop schema JSON；缺 schema 的 stop 也会增加 `stopMessageUsed`，`serverToolLoopState.repeatCount` 只用于 loop guard，不是 schema budget。
 
 ### 2026-06-04 stopless Responses followup 红测精华
 - stopless 线上日志出现 `decision=trigger` 仍“没作用”时，红测不能只断 `executed/flowId`；必须断最终 `reenterPipeline.body`：`/v1/responses` 入口要有 `input`、无 `messages`、包含原始历史与 stop schema 质询文本。
@@ -1856,8 +1855,19 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - direct raw SSE 报 `[server.response_projection] client response contains internal carrier field "metadata"` 时，先确认 routeName 是否 `router-direct:*` / `port.provider-direct`；direct 应直接 pipe provider raw stream，不跑 response projection restore/guard，relay/non-direct 才保留该 guard。
 
 ### 2026-06-04 stopless/schema/abort 调试精华
-- stopless missing/invalid schema 是 schema rejection budget，不是“无预算继续”；连续拒绝最多 5 次，耗尽后必须走 budget-exhausted final summary，禁止无限 followup。
+- stopless missing/invalid schema 是连续 stop rejection budget，不是“无预算继续”；连续 stop 第 3 次必须走 budget-exhausted final summary，禁止无限 followup。
 - `stopreason=blocked` 是合法停止态；schema parser 要接受数字与常见字符串态，不能因模型写 `"blocked"` 导致十几次不停止。
 - 客户端断开是 servertool 生命周期最高优先级终止信号：server-side-tools / followup-mainline / reenter / client-inject / nested followup 都必须抛 `SERVERTOOL_CLIENT_DISCONNECTED`，禁止返回 completed 或继续 provider 请求。
 - `exec_command` 安全校验只解析真实 tool arguments 的 `cmd`；不得扫描 prompt/history/工具结果文本来判定命令，sudo/osascript/admin 文本不是 broad kill，`xargs kill` 与 `kill $(...)` 才是禁止模式。
 - stopless final projection 必须把 `<stop_schema>...</stop_schema>` / stopreason JSON 当控制结构剥离；允许解析、允许写 summary prefix，但禁止把 schema 原文作为 assistant text 返回客户端。
+
+### 2026-06-04 response/stopless boundary closeout
+- Client response guard must identify internal carrier by shape/scope, not by raw field name: legal protocol `metadata` is allowed; `metadata.routeHint` / `providerKey` / `__routecodex*` / `__rt*` remains fail-fast.
+- direct/router-direct SSE must not bypass `ServerRespOutbound05ClientFrame` no-leak guard. Direct skips Hub Pipeline conversion, not client frame validation.
+- Stopless schema parser must pick the first JSON object that actually has `stopreason`; earlier evidence JSON must not be treated as missing/invalid schema.
+- Stopless visible final response strips only explicit control schema (`<stop_schema>` or fenced JSON schema object), preserving ordinary evidence blocks that mention `stopreason` text.
+- Stopless budget is one consecutive-stop counter: missing-schema、provided-invalid、`stopreason=2` share `stopMessageUsed`; tool calls / non-stop progress reset it.
+
+## 2026-06-04 请求字段等价精华
+- `Responses -> Chat -> Responses` 投影禁止从 `ctx.parameters`、`ctx.metadata.parameters`、`ctx.metadata`、`ctx.toolsRaw` 或 context tool controls 补 live request 字段；这些只能作为 response-only/session/debug carrier，不能进入 ReqOutbound/ProviderReqOutbound。
+- 审计请求字段等价时，不能只看 no-leak guard。必须同时跑跨协议矩阵红测，确认同一语义只从 ChatProcess/Chat 源字段进入 provider request。

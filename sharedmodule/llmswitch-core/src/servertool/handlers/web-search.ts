@@ -189,11 +189,6 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
               followup: {
                 requestIdSuffix: ':web_search_followup',
                 entryEndpoint: ctx.entryEndpoint,
-                injection: {
-                  ops: [
-                    { op: 'drop_tool_by_name', name: toolName }
-                  ]
-                },
                 metadata: {
                   stream: false,
                   preserveRouteHint: false

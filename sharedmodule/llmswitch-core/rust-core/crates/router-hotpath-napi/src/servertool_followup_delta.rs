@@ -25,10 +25,6 @@ fn read_trimmed_string(record: Option<&Map<String, Value>>, keys: &[&str]) -> Op
     None
 }
 
-fn clone_array(value: Option<&Value>) -> Vec<Value> {
-    value.and_then(Value::as_array).cloned().unwrap_or_default()
-}
-
 fn extract_responses_top_level_parameters(
     record: &Map<String, Value>,
 ) -> Option<Map<String, Value>> {
@@ -40,7 +36,6 @@ fn extract_responses_top_level_parameters(
         "logit_bias",
         "user",
         "parallel_tool_calls",
-        "tool_choice",
         "response_format",
         "stream",
     ];
@@ -65,6 +60,7 @@ fn extract_responses_top_level_parameters(
 pub(crate) fn normalize_followup_parameters(value: &Value) -> Option<Value> {
     let mut row = value.as_object()?.clone();
     row.remove("stream");
+    row.remove("tool_choice");
     if row.is_empty() {
         None
     } else {
@@ -199,9 +195,6 @@ pub(crate) fn extract_captured_chat_seed(captured: &Value) -> Option<Value> {
         out.insert("messages".to_string(), Value::Array(messages));
     } else {
         return None;
-    }
-    if let Some(tools) = row.get("tools").and_then(Value::as_array) {
-        out.insert("tools".to_string(), Value::Array(tools.clone()));
     }
     if let Some(parameters) = first_normalized_parameters(vec![
         row.get("parameters").cloned(),
@@ -583,28 +576,6 @@ fn tool_name(tool: &Value) -> String {
         .to_string()
 }
 
-fn drop_tool_by_function_name(tools: &[Value], name: &str) -> Vec<Value> {
-    let target = name.trim();
-    tools
-        .iter()
-        .filter(|tool| tool_name(tool) != target)
-        .cloned()
-        .collect()
-}
-
-fn append_tool_if_missing(
-    tools: Option<&Vec<Value>>,
-    tool_name_value: &str,
-    tool_definition: &Value,
-) -> Vec<Value> {
-    let name = tool_name_value.trim();
-    let mut next = tools.cloned().unwrap_or_default();
-    if !next.iter().any(|tool| tool_name(tool) == name) {
-        next.push(tool_definition.clone());
-    }
-    next
-}
-
 fn rebuild_vision_followup(
     messages: &[Value],
     summary: Option<&str>,
@@ -684,29 +655,6 @@ fn apply_single_delta_op(
             payload.insert("messages".to_string(), Value::Array(messages));
             true
         }
-        "preserve_tools" | "ensure_standard_tools" => true,
-        "replace_tools" => {
-            payload.insert(
-                "tools".to_string(),
-                Value::Array(clone_array(op_row.get("tools"))),
-            );
-            true
-        }
-        "force_tool_choice" => {
-            if let Some(value) = op_row.get("value") {
-                payload.insert("tool_choice".to_string(), value.clone());
-            }
-            true
-        }
-        "drop_tool_by_name" => {
-            let tools = clone_array(payload.get("tools"));
-            let name = op_row.get("name").and_then(Value::as_str).unwrap_or("");
-            payload.insert(
-                "tools".to_string(),
-                Value::Array(drop_tool_by_function_name(&tools, name)),
-            );
-            true
-        }
         "inject_vision_summary" => {
             append_text_message(
                 &mut messages,
@@ -738,20 +686,6 @@ fn apply_single_delta_op(
             );
             true
         }
-        "append_tool_if_missing" => {
-            let tool_name_value = op_row.get("toolName").and_then(Value::as_str).unwrap_or("");
-            let tool_definition = op_row.get("toolDefinition").unwrap_or(&Value::Null);
-            let tools = payload.get("tools").and_then(Value::as_array);
-            payload.insert(
-                "tools".to_string(),
-                Value::Array(append_tool_if_missing(
-                    tools,
-                    tool_name_value,
-                    tool_definition,
-                )),
-            );
-            true
-        }
         "compact_tool_content" => {
             let max = op_row.get("maxChars").and_then(Value::as_i64).unwrap_or(1);
             compact_tool_content(&mut messages, max);
@@ -776,11 +710,6 @@ pub(crate) fn apply_followup_delta_plan(input: &Value) -> Option<Value> {
         .filter(|s| !s.is_empty())
     {
         payload.insert("model".to_string(), Value::String(model.to_string()));
-    }
-    if let Some(tools) = seed.get("tools").and_then(Value::as_array) {
-        if !tools.is_empty() {
-            payload.insert("tools".to_string(), Value::Array(tools.clone()));
-        }
     }
     if let Some(parameters) = seed
         .get("parameters")
@@ -859,7 +788,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn applies_tool_output_delta_and_drops_tool() {
+    fn applies_tool_output_delta_without_tools_field_patch_ops() {
         let input = json!({
             "adapterContext": {},
             "finalChatResponse": {
@@ -881,8 +810,7 @@ mod tests {
             },
             "injection": {
                 "ops": [
-                    {"op":"append_tool_messages_from_tool_outputs", "required": true},
-                    {"op":"drop_tool_by_name", "name":"apply_patch"}
+                    {"op":"append_tool_messages_from_tool_outputs", "required": true}
                 ]
             }
         });
@@ -892,8 +820,7 @@ mod tests {
             "call_apply_patch_test"
         );
         assert_eq!(payload["messages"][2]["role"], "tool");
-        assert_eq!(payload["tools"].as_array().unwrap().len(), 1);
-        assert_eq!(payload["tools"][0]["function"]["name"], "exec_command");
+        assert!(payload.get("tools").is_none());
     }
 
     #[test]
@@ -909,7 +836,8 @@ mod tests {
         assert_eq!(chat_seed["messages"][0]["content"], "hello");
         assert_eq!(chat_seed["parameters"]["temperature"], 0.2);
         assert!(chat_seed["parameters"].get("stream").is_none());
-        assert_eq!(chat_seed["parameters"]["tool_choice"], "auto");
+        assert!(chat_seed.get("tools").is_none());
+        assert!(chat_seed["parameters"].get("tool_choice").is_none());
 
         let responses = json!({
             "model": "gpt-resp",
@@ -923,7 +851,7 @@ mod tests {
         assert_eq!(responses_seed["messages"][0]["content"], "explain this");
         assert_eq!(responses_seed["parameters"]["max_output_tokens"], 42);
         assert!(responses_seed["parameters"].get("stream").is_none());
-        assert_eq!(responses_seed["parameters"]["tool_choice"], "auto");
+        assert!(responses_seed["parameters"].get("tool_choice").is_none());
     }
 
     #[test]
@@ -952,7 +880,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_followup_delta_preserves_seed_tool_choice() {
+    fn apply_followup_delta_does_not_preserve_seed_tools_or_tool_choice() {
         let input = json!({
             "adapterContext": {},
             "finalChatResponse": {"choices": [{"message": {"role": "assistant", "content": "continue"}}]},
@@ -962,14 +890,12 @@ mod tests {
                 "tools": [{"type": "function", "function": {"name": "apply_patch", "parameters": {"type": "object"}}}],
                 "parameters": {"stream": true, "tool_choice": {"type": "auto"}, "temperature": 0.2}
             },
-            "injection": {"ops": [{"op": "preserve_tools"}]}
+            "injection": {"ops": []}
         });
 
         let payload = apply_followup_delta_plan(&input).expect("payload");
-        assert_eq!(
-            payload["parameters"]["tool_choice"],
-            json!({"type": "auto"})
-        );
+        assert!(payload.get("tools").is_none());
+        assert!(payload["parameters"].get("tool_choice").is_none());
         assert!(payload["parameters"].get("stream").is_none());
     }
 

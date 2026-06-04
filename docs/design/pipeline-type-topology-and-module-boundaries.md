@@ -468,3 +468,9 @@ MetaReq01EntryCaptured
 8. Hub Pipeline / Virtual Router 出现 provider-specific 分支。
 9. 新增旧命名 `ReqProc` / `RespProc` / `req_process` / `resp_process` 数据结构或 API。
 10. 新增临时编号 `03b` / `03_1` / `03.5` / `03p5`。
+### 4.0 Client Metadata Boundary
+
+- `metadata` is a protocol field when it belongs to a client-visible provider response shape; it is not forbidden by name alone.
+- Internal carriers are forbidden by shape and scope: `Meta*` carrier fields, `__rt*`, `__routecodex*`, route controls, provider/runtime controls, snapshots, and error carriers must never enter `ServerRespOutbound05ClientFrame`.
+- `router-direct`/`provider-direct` may bypass Hub Pipeline conversion, but they still pass through the same client-frame no-leak guard before JSON/SSE leaves the server.
+- Cross-protocol projections that cannot represent all source fields in the target protocol must keep a typed source-semantics block instead of silently dropping fields.

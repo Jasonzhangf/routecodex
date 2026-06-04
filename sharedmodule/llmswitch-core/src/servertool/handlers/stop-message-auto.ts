@@ -87,8 +87,7 @@ async function evaluateGoalActiveStopLoopGuard(args: {
 const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTECODEX_STOPMESSAGE_DEBUG || '').trim() === '1';
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
 const FLOW_ID = 'stop_message_flow';
-const STOP_SCHEMA_MISSING_MAX_REPEATS = 10;
-const STOP_SCHEMA_PROVIDED_MAX_REPEATS = 3;
+const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS = 3;
 const STOP_MESSAGE_EXECUTION_APPEND = '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。';
 
 function extractCurrentAssistantStopText(payload: unknown): string {
@@ -149,13 +148,45 @@ function applyStopSummaryPrefix(payload: JsonObject, prefix: unknown): JsonObjec
 function stripStopSchemaControlBlocks(text: string): string {
   let current = String(text || '');
   current = current.replace(/<stop_schema>\s*[\s\S]*?\s*<\/stop_schema>/gi, '');
-  current = current.replace(/```(?:json)?\s*\{[\s\S]*?"stopreason"[\s\S]*?\}\s*```/gi, '');
+  current = current.replace(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/gi, (block, rawJson) => {
+    if (!isStopSchemaControlJson(rawJson)) {
+      return block;
+    }
+    return '';
+  });
   return current
     .split('\n')
     .map((line) => line.trimEnd())
     .filter((line, index, lines) => line.trim() || (index > 0 && index < lines.length - 1))
     .join('\n')
     .trim();
+}
+
+function isStopSchemaControlJson(rawJson: string): boolean {
+  try {
+    const parsed = JSON.parse(String(rawJson || '').trim()) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return false;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(record, 'stopreason')) {
+      return false;
+    }
+    const recognized = [
+      'stopreason',
+      'reason',
+      'has_evidence',
+      'evidence',
+      'issue_cause',
+      'excluded_factors',
+      'diagnostic_order',
+      'next_step',
+      'learned'
+    ];
+    return recognized.some((key) => Object.prototype.hasOwnProperty.call(record, key));
+  } catch {
+    return false;
+  }
 }
 
 function stripStopSchemaControlText(payload: JsonObject): JsonObject {
@@ -261,10 +292,11 @@ function isStoplessFollowupQuestion(text: string): boolean {
 }
 
 function buildStopSchemaFinalPlan(chatResponse: JsonObject): ServerToolHandlerPlan {
+  const visibleChatResponse = stripStopSchemaControlText({ ...chatResponse } as JsonObject);
   return {
     flowId: FLOW_ID,
     finalize: async () => ({
-      chatResponse,
+      chatResponse: visibleChatResponse,
       execution: { flowId: FLOW_ID }
     })
   };
@@ -639,7 +671,7 @@ const handler: ServerToolHandler = async (
   // ── Build native decision context ──
   const followupFlowId = readServerToolFollowupFlowId(rt)
     || (rt.serverToolFollowup === true ? '__servertool_followup__' : '');
-  if (followupFlowId) {
+  if (followupFlowId && followupFlowId !== FLOW_ID) {
     const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
     attachStopMessageCompareContext(ctx.adapterContext, {
       armed: false,
@@ -761,6 +793,9 @@ const handler: ServerToolHandler = async (
       return buildStopSchemaFinalPlan(prefixed);
     }
     if (decision.action !== 'trigger') {
+      if (decision.skip_reason === 'skip_not_stop_finish_reason') {
+        clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
+      }
       if (decision.skip_reason === 'skip_no_stopmessage_snapshot' || decision.skip_reason === 'skip_goal_active') {
         const assistantText = assistantStopText;
         if (assistantText && captured) {
@@ -790,11 +825,12 @@ const handler: ServerToolHandler = async (
       return null;
     }
 
-    const schemaGate = evaluateStopSchemaGateWithNative({
+    let schemaGate = evaluateStopSchemaGateWithNative({
       assistantText: extractCurrentAssistantStopText(ctx.base),
       used: decision.used,
       maxRepeats: decision.max_repeats
     });
+    const schemaUsedBeforeCount = decision.used;
     compare.reason = schemaGate.reason_code || compare.reason;
     if (schemaGate.action === 'fail_fast') {
       const prefixed = applyStopSummaryPrefix(
@@ -821,7 +857,7 @@ const handler: ServerToolHandler = async (
     }
 
     const effectiveDecision = schemaGate.followup_text
-      ? { ...decision, followup_text: schemaGate.followup_text, followupText: schemaGate.followup_text }
+      ? { ...decision, used: schemaUsedBeforeCount, followup_text: schemaGate.followup_text, followupText: schemaGate.followup_text }
       : decision;
 
     // ── Call native handler result assembler ──
@@ -841,14 +877,20 @@ const handler: ServerToolHandler = async (
     const usedAt = Date.now();
     const stateUpdate = handlerResult.stateUpdate || {};
     const shouldCountBudget = schemaGate.count_budget !== false;
-    const schemaBudgetMaxRepeats = schemaGate.reason_code === 'stop_schema_missing'
-      ? STOP_SCHEMA_MISSING_MAX_REPEATS
-      : STOP_SCHEMA_PROVIDED_MAX_REPEATS;
+    const schemaBudgetMaxRepeats = Math.max(
+      1,
+      Math.min(
+        STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS,
+        typeof decision.max_repeats === 'number' && Number.isFinite(decision.max_repeats)
+          ? Math.floor(decision.max_repeats)
+          : STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS
+      )
+    );
     const nextMaxRepeats = shouldCountBudget
       ? schemaBudgetMaxRepeats
       : decision.max_repeats;
     const nextUsed = shouldCountBudget
-      ? (typeof stateUpdate.used === 'number' ? stateUpdate.used : decision.used + 1)
+      ? (typeof stateUpdate.used === 'number' ? stateUpdate.used : schemaUsedBeforeCount + 1)
       : decision.used;
     const snapInput = {
       text: String(stateUpdate.text ?? STOP_MESSAGE_EXECUTION_APPEND),

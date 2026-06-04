@@ -168,6 +168,35 @@ function maskHeaders(headers: Record<string, unknown> | undefined | null): Recor
   return result;
 }
 
+const SNAPSHOT_REQUEST_METADATA_FORBIDDEN_KEYS = new Set([
+  '__raw_request_body',
+  'rawBody',
+  'requestMetadata',
+  'responsesRequestContext',
+  'responsesContext',
+  'contextSnapshot',
+  'toolsRaw',
+  'clientToolsRaw',
+  'toolsNormalized'
+]);
+
+function sanitizeSnapshotRequestMetadata(value: unknown): unknown {
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeSnapshotRequestMetadata(entry));
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (SNAPSHOT_REQUEST_METADATA_FORBIDDEN_KEYS.has(key)) {
+      continue;
+    }
+    out[key] = sanitizeSnapshotRequestMetadata(child);
+  }
+  return out;
+}
+
 function buildSnapshotPayload(options: {
   stage: string;
   data: unknown;
@@ -549,7 +578,7 @@ function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions
       ...(options.providerKey ? { providerKey: options.providerKey } : {}),
       ...(options.providerId ? { providerId: options.providerId } : {}),
       ...(typeof entryPort === 'number' ? { entryPort, matchedPort: entryPort } : {}),
-      ...(options.metadata ? { requestMetadata: options.metadata } : {})
+      ...(options.metadata ? { requestMetadata: sanitizeSnapshotRequestMetadata(options.metadata) } : {})
     }
   }));
 
@@ -934,7 +963,7 @@ export async function writeClientSnapshot(options: {
         entryEndpoint: endpoint,
         stream: options.metadata?.stream,
         userAgent: options.metadata?.userAgent,
-        ...(metadataSnapshot ? { requestMetadata: metadataSnapshot } : {})
+        ...(metadataSnapshot ? { requestMetadata: sanitizeSnapshotRequestMetadata(metadataSnapshot) } : {})
       }
     }));
     try {

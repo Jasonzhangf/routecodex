@@ -19,9 +19,6 @@ export function buildStopMessageLoopPayload(adapterContext: AdapterContext): Jso
   if (seed.model) {
     payload.model = seed.model;
   }
-  if (Array.isArray(seed.tools) && seed.tools.length > 0) {
-    payload.tools = seed.tools;
-  }
   if (seed.parameters && typeof seed.parameters === 'object' && !Array.isArray(seed.parameters)) {
     payload.parameters = seed.parameters as JsonObject;
   }

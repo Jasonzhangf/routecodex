@@ -64,7 +64,10 @@ fn normalize_openai_chat_reasoning_outbound_projects_responses_payload_to_chat_c
         "object": "response",
         "created_at": 1780550359,
         "model": "gpt-5.5",
-        "metadata": {},
+        "metadata": { "user_tag": "safe" },
+        "parallel_tool_calls": true,
+        "service_tier": "default",
+        "reasoning": { "effort": "medium" },
         "status": "completed",
         "output": [{
             "id": "msg_abc123",
@@ -82,8 +85,10 @@ fn normalize_openai_chat_reasoning_outbound_projects_responses_payload_to_chat_c
     assert_eq!(output["object"], Value::String("chat.completion".to_string()));
     assert_eq!(output["choices"][0]["message"]["content"], Value::String("pong".to_string()));
     assert_eq!(output["choices"][0]["finish_reason"], Value::String("stop".to_string()));
-    assert!(output.get("metadata").is_none());
-    assert!(output.get("reasoning").is_none());
+    assert_eq!(output["routecodex_response"]["metadata"]["user_tag"], Value::String("safe".to_string()));
+    assert_eq!(output["routecodex_response"]["reasoning"]["effort"], Value::String("medium".to_string()));
+    assert_eq!(output["routecodex_response"]["parallel_tool_calls"], Value::Bool(true));
+    assert_eq!(output["routecodex_response"]["service_tier"], Value::String("default".to_string()));
 }
 
 #[test]

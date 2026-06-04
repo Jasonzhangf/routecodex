@@ -102,8 +102,7 @@ describe('apply_patch servertool flow', () => {
       entryEndpoint: '/v1/chat/completions',
       injection: {
         ops: [
-          { op: 'append_tool_messages_from_tool_outputs', required: true },
-          { op: 'drop_tool_by_name', name: 'apply_patch' }
+          { op: 'append_tool_messages_from_tool_outputs', required: true }
         ]
       }
     });
@@ -144,7 +143,7 @@ describe('apply_patch servertool flow', () => {
       role: 'tool',
       tool_call_id: 'call_apply_patch_test'
     });
-    expect(payload.tools.map((tool: any) => tool.function.name)).toEqual(['exec_command']);
+    expect(payload.tools).toBeUndefined();
     expect(JSON.stringify(payload)).not.toContain('fileContent');
     expect(JSON.stringify(payload)).not.toContain('*** Begin Patch');
   });

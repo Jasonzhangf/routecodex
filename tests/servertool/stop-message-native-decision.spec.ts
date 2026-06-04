@@ -153,14 +153,14 @@ describe('stop-message native decision (blackbox)', () => {
     expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
   });
 
-  test('stop_message followup flow always skips nested stopless', () => {
+  test('stop_message followup flow remains eligible for bounded continuation', () => {
     const ctx: StopMessageDecisionContext = {
       ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
       followup_flow_id: 'stop_message_flow',
     };
     const decision = decideStopMessageActionWithNative(ctx);
-    expect(decision.action).toBe('skip');
-    expect(decision.skip_reason).toBe('skip_servertool_followup_hop');
+    expect(decision.action).toBe('trigger');
+    expect(decision.skip_reason ?? undefined).toBeUndefined();
   });
 
   test('non-stop_message followup flow skips as generic followup hop', () => {
@@ -194,7 +194,7 @@ describe('stop-message native decision (blackbox)', () => {
   test('stop schema gate exhausts repeated missing schema loop', () => {
     const beforeLimit = evaluateStopSchemaGateWithNative({
       assistantText: '还是无法继续，工具被拒绝。',
-      used: 9,
+      used: 1,
       maxRepeats: 3,
     });
     expect(beforeLimit.action).toBe('followup');
@@ -202,7 +202,7 @@ describe('stop-message native decision (blackbox)', () => {
 
     const gate = evaluateStopSchemaGateWithNative({
       assistantText: '还是无法继续，工具被拒绝。',
-      used: 10,
+      used: 2,
       maxRepeats: 3,
     });
     expect(gate.action).toBe('fail_fast');

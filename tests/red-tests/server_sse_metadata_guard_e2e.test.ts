@@ -8,10 +8,12 @@
  * - This is the runtime guarantee that SSE frames never leak internal metadata to client.
  *
  * Pipeline contract: ServerRespOutbound05ClientFrame
- * Prohibits: metadata/__rt/__internal 进入 SSE frame data channel.
+ * Prohibits: internal metadata carriers / __rt / __internal entering SSE frame data channel.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ServerError } from '../../../src/shared/errors/index.js';
+import { describe, expect, it } from '@jest/globals';
+import {
+  assertClientResponseHasNoInternalCarriers
+} from '../../src/server/handlers/handler-response-utils.js';
 
 // ─── Mock strategy ────────────────────────────────────────────────────────────
 // We need to intercept the guard before any server runtime boots.
@@ -29,21 +31,6 @@ import { ServerError } from '../../../src/shared/errors/index.js';
 // 2. sendPipelineResponse (SSE path) calls this guard before writing to client.
 
 describe('server_sse_metadata_guard_e2e', () => {
-  // Import the guard directly — it is a pure function with no server deps.
-  let assertClientResponseHasNoInternalCarriers: (payload: unknown) => void;
-
-  beforeEach(async () => {
-    vi.resetModules();
-    // Load the guard from the server runtime module.
-    // Path: src/server/runtime/http-server/send-pipeline-response.ts
-    // exports: assertClientResponseHasNoInternalCarriers
-    const mod = await import(
-      '../../../src/server/runtime/http-server/send-pipeline-response.js'
-    );
-    assertClientResponseHasNoInternalCarriers =
-      mod.assertClientResponseHasNoInternalCarriers;
-  });
-
   describe('assertClientResponseHasNoInternalCarriers — SSE frame guard', () => {
     it('REJECTS SSE frame data containing __rt internal carrier', () => {
       // Simulate an SSE data-frame emitted by Hub resp_outbound that
@@ -61,8 +48,8 @@ describe('server_sse_metadata_guard_e2e', () => {
       };
 
       expect(() =>
-        assertClientResponseHasNoInternalCarriers(sseFrameData)
-      ).toThrow(ServerError);
+        assertClientResponseHasNoInternalCarriers(sseFrameData, 'sse-metadata-guard')
+      ).toThrow(/internal carrier/);
     });
 
     it('REJECTS SSE frame data containing __internal carrier', () => {
@@ -75,11 +62,11 @@ describe('server_sse_metadata_guard_e2e', () => {
       };
 
       expect(() =>
-        assertClientResponseHasNoInternalCarriers(sseFrameData)
-      ).toThrow(ServerError);
+        assertClientResponseHasNoInternalCarriers(sseFrameData, 'sse-metadata-guard')
+      ).toThrow(/internal carrier/);
     });
 
-    it('REJECTS SSE frame data containing body.metadata', () => {
+    it('REJECTS SSE frame data containing internal body.metadata carrier', () => {
       // HubRespOutbound04 must not inject request-scoped metadata into SSE.
       const sseFrameData = {
         id: 'msg_003',
@@ -91,8 +78,25 @@ describe('server_sse_metadata_guard_e2e', () => {
       };
 
       expect(() =>
-        assertClientResponseHasNoInternalCarriers(sseFrameData)
-      ).toThrow(ServerError);
+        assertClientResponseHasNoInternalCarriers(sseFrameData, 'sse-metadata-guard')
+      ).toThrow(/internal carrier/);
+    });
+
+    it('ACCEPTS client-visible protocol metadata', () => {
+      const sseFrameData = {
+        id: 'msg_003_safe',
+        event: 'message',
+        data: 'ok',
+        response: {
+          id: 'resp_003_safe',
+          object: 'response',
+          metadata: { user_tag: 'safe' },
+        },
+      };
+
+      expect(() =>
+        assertClientResponseHasNoInternalCarriers(sseFrameData, 'sse-metadata-guard')
+      ).not.toThrow();
     });
 
     it('ACCEPTS SSE frame data with no forbidden carriers (clean SSE)', () => {
@@ -101,11 +105,11 @@ describe('server_sse_metadata_guard_e2e', () => {
         id: 'msg_004',
         event: 'message',
         data: 'streaming response text',
-        // No __rt, no __internal, no metadata — safe to send to client.
+        // No __rt, no __internal — safe to send to client.
       };
 
       expect(() =>
-        assertClientResponseHasNoInternalCarriers(cleanFrame)
+        assertClientResponseHasNoInternalCarriers(cleanFrame, 'sse-metadata-guard')
       ).not.toThrow();
     });
 
@@ -118,7 +122,7 @@ describe('server_sse_metadata_guard_e2e', () => {
       };
 
       expect(() =>
-        assertClientResponseHasNoInternalCarriers(clientSafeFrame)
+        assertClientResponseHasNoInternalCarriers(clientSafeFrame, 'sse-metadata-guard')
       ).not.toThrow();
     });
   });

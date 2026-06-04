@@ -323,7 +323,7 @@ describe('recursive_detection_guard servertool', () => {
       })
     );
     const firstOps = ((first.execution.followup as any).injection.ops || []) as Array<{ op: string }>;
-    expect(firstOps.some((op) => op.op === 'drop_tool_by_name')).toBe(false);
+    expect(firstOps.some((op) => op.op.includes('tool'))).toBe(false);
 
     for (let i = 1; i <= 9; i += 1) {
       await expect(
@@ -342,7 +342,7 @@ describe('recursive_detection_guard servertool', () => {
       })
     );
     const secondOps = ((second.execution.followup as any).injection.ops || []) as Array<{ op: string }>;
-    expect(secondOps.some((op) => op.op === 'drop_tool_by_name')).toBe(true);
+    expect(secondOps.some((op) => op.op.includes('tool'))).toBe(false);
 
     // After stop, state should be cleared: next cycle starts from warning tier again.
     for (let i = 1; i <= 9; i += 1) {
@@ -362,6 +362,6 @@ describe('recursive_detection_guard servertool', () => {
       })
     );
     const thirdOps = ((third.execution.followup as any).injection.ops || []) as Array<{ op: string }>;
-    expect(thirdOps.some((op) => op.op === 'drop_tool_by_name')).toBe(false);
+    expect(thirdOps.some((op) => op.op.includes('tool'))).toBe(false);
   });
 });

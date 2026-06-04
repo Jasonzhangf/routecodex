@@ -96,19 +96,13 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                         "append_tool_messages_from_tool_outputs"
                     ],
                     "nativeSupportedOps": [
-                        "preserve_tools",
-                        "ensure_standard_tools",
-                        "replace_tools",
-                        "force_tool_choice",
                         "append_assistant_message",
                         "append_tool_messages_from_tool_outputs",
                         "append_user_text",
                         "inject_system_text",
-                        "drop_tool_by_name",
                         "inject_vision_summary",
                         "trim_openai_messages",
-                        "compact_tool_content",
-                        "append_tool_if_missing"
+                        "compact_tool_content"
                     ],
                     "flowPolicy": {
                         "profilesByFlowId": {

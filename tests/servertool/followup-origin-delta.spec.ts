@@ -3,7 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import { applyFollowupDeltaPlan } from '../../sharedmodule/llmswitch-core/src/servertool/followup-origin-delta.js';
 
 describe('servertool followup origin clone delta', () => {
-  test('clones origin request, appends canonical apply_patch result delta, and drops apply_patch tool', () => {
+  test('clones origin request and appends canonical apply_patch result delta without tools backfill', () => {
     const originTool = {
       type: 'function',
       function: { name: 'apply_patch', parameters: { type: 'object' } }
@@ -32,8 +32,7 @@ describe('servertool followup origin clone delta', () => {
       seed,
       injection: {
         ops: [
-          { op: 'append_tool_messages_from_tool_outputs', required: true },
-          { op: 'drop_tool_by_name', name: 'apply_patch' }
+          { op: 'append_tool_messages_from_tool_outputs', required: true }
         ]
       } as any
     }) as any;
@@ -58,7 +57,7 @@ describe('servertool followup origin clone delta', () => {
       tool_call_id: 'call_patch_1',
       content: JSON.stringify({ status: 'APPLY_PATCH_APPLIED', ok: true, filePath: 'sample.txt' })
     });
-    expect(payload.tools.map((tool: any) => tool.function.name)).toEqual(['exec_command']);
+    expect(payload.tools).toBeUndefined();
     expect(seed.messages).toEqual([{ role: 'user', content: 'edit sample' }]);
     expect(seed.tools[0]).toBe(originTool);
     expect(JSON.stringify(payload)).not.toContain('fileContent');
@@ -95,13 +94,12 @@ describe('servertool followup origin clone delta', () => {
       seed,
       injection: {
         ops: [
-          { op: 'append_tool_messages_from_tool_outputs', required: true },
-          { op: 'drop_tool_by_name', name: 'apply_patch' }
+          { op: 'append_tool_messages_from_tool_outputs', required: true }
         ]
       } as any
     }) as any;
 
-    expect(payload.messages).toEqual([
+    expect(payload.messages.slice(0, 2)).toEqual([
       { role: 'user', content: 'retry edit' },
       {
         role: 'assistant',
@@ -116,14 +114,14 @@ describe('servertool followup origin clone delta', () => {
             }
           }
         ]
-      },
-      {
-        role: 'tool',
-        tool_call_id: 'call_patch_ctx_1',
-        content: JSON.stringify({ status: 'APPLY_PATCH_ERROR', ok: false })
       }
     ]);
-    expect(payload.tools.map((tool: any) => tool.function.name)).toEqual(['exec_command']);
+    expect(payload.messages[2]).toMatchObject({
+      role: 'tool',
+      tool_call_id: 'call_patch_ctx_1'
+    });
+    expect(JSON.parse(payload.messages[2].content)).toEqual({ status: 'APPLY_PATCH_ERROR', ok: false });
+    expect(payload.tools).toBeUndefined();
   });
 
   test('normalizes split pending tool calls before appending multiple tool outputs', () => {
@@ -177,8 +175,7 @@ describe('servertool followup origin clone delta', () => {
       seed,
       injection: {
         ops: [
-          { op: 'append_tool_messages_from_tool_outputs', required: true },
-          { op: 'drop_tool_by_name', name: 'apply_patch' }
+          { op: 'append_tool_messages_from_tool_outputs', required: true }
         ]
       } as any
     }) as any;

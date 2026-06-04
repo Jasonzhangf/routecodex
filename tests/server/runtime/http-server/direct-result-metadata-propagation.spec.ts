@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 import { RouteCodexHttpServer } from '../../../../src/server/runtime/http-server/index.js';
 import {
   captureResponsesRequestContext,
   clearResponsesConversationByRequestId,
+  clearAllResponsesConversationState,
   responsesConversationStore,
   resumeLatestResponsesContinuationByScope,
 } from '../../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
@@ -14,10 +15,15 @@ const RESPONSES_REQUEST_IDS = [
   'req-router-direct-retention-sse-wrapper',
 ];
 
+beforeEach(() => {
+  clearAllResponsesConversationState();
+});
+
 afterEach(() => {
   for (const requestId of RESPONSES_REQUEST_IDS) {
     clearResponsesConversationByRequestId(requestId);
   }
+  clearAllResponsesConversationState();
 });
 
 describe('http-server direct result metadata propagation', () => {
@@ -68,6 +74,25 @@ describe('http-server direct result metadata propagation', () => {
       clientModelId: 'gpt-5.3-codex',
       originalModelId: 'gpt-5.3-codex'
     });
+  });
+
+  it('provider-direct result fails fast when model rewrite cannot be applied', async () => {
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'gpt-5.4';
+    const readonlyBody: Record<string, unknown> = { id: 'resp_provider_direct_readonly', model: 'gpt-5.4' };
+    Object.freeze(readonlyBody);
+
+    await expect(server.buildProviderDirectResult({
+      response: {
+        status: 200,
+        data: readonlyBody
+      },
+      providerProtocol: 'openai-responses',
+      providerHandle: { providerType: 'openai' }
+    }, {
+      body: { model: 'gpt-5.3-codex', stream: false },
+      metadata: {}
+    }, {}, 'test.key1')).rejects.toThrow(/read only|Cannot assign|object is not extensible/i);
   });
   it('router-direct responses result records response retention state instead of leaving pending request payload orphaned', async () => {
     captureResponsesRequestContext({

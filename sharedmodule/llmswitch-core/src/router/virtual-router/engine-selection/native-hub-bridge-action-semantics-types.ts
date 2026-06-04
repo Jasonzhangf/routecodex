@@ -83,35 +83,12 @@ export interface NativeFilterBridgeInputForUpstreamOutput {
 
 export interface NativePrepareResponsesRequestEnvelopeInput {
   request: Record<string, unknown>;
-  contextSystemInstruction?: unknown;
   extraSystemInstruction?: unknown;
-  metadataSystemInstruction?: unknown;
   combinedSystemInstruction?: unknown;
-  reasoningInstructionSegments?: unknown;
-  contextParameters?: unknown;
   chatParameters?: unknown;
-  metadataParameters?: unknown;
-  contextStream?: unknown;
-  metadataStream?: unknown;
   chatStream?: unknown;
   chatParametersStream?: unknown;
-  contextInclude?: unknown;
-  metadataInclude?: unknown;
-  contextStore?: unknown;
-  metadataStore?: unknown;
   stripHostFields?: boolean;
-  contextToolChoice?: unknown;
-  metadataToolChoice?: unknown;
-  contextParallelToolCalls?: unknown;
-  metadataParallelToolCalls?: unknown;
-  contextResponseFormat?: unknown;
-  metadataResponseFormat?: unknown;
-  contextServiceTier?: unknown;
-  metadataServiceTier?: unknown;
-  contextTruncation?: unknown;
-  metadataTruncation?: unknown;
-  contextMetadata?: unknown;
-  metadataMetadata?: unknown;
 }
 
 export interface NativePrepareResponsesRequestEnvelopeOutput {

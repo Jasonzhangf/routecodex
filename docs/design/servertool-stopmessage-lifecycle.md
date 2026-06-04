@@ -53,11 +53,19 @@ Design goals:
 - Do not add servertool-specific response projection, hand-built Responses wrappers, or client-frame shortcuts.
 - Other servertools follow their skeleton/profile policy.
 
+### 4.1 Stop Schema / Stopless Budget Contract
+
+- Stop schema parsing is semantic: only JSON objects that contain `stopreason` are schema candidates; earlier evidence/log JSON blocks are preserved and ignored for schema matching.
+- Client-visible final summaries may include evidence that mentions `stopreason`, but explicit control schema blocks are stripped before response projection.
+- Stop schema budget is a single consecutive-stop counter: missing schema, invalid schema, and `stopreason=2` continuation all consume the same budget.
+- The third consecutive `finish_reason=stop` without a valid final stop schema stops the loop with a budget-exhausted summary. Valid `finished` or `blocked` schema clears stopless runtime state and may stop.
+- Followup/client disconnect must share the live client abort signal through nested reentry; a disconnected client must fail-fast and must not continue servertool followup work.
+
 1.1. Followup eligibility:
-- One client request may trigger at most one `stop_message_flow` followup. Any followup hop (`__rt.serverToolFollowup` or `serverToolLoopState.flowId`) must skip stopless with `skip_servertool_followup_hop`.
+- `stop_message_flow` followup hops remain stopless-eligible while `used < max_repeats`; repeated schema failures must continue through bounded `:stop_followup` reentry instead of stopping after the first followup.
 - `stopMessageFollowupPolicy` / `preserve_eligibility` is obsolete and must not appear in skeleton, runtime metadata, Rust decision context, or response projection.
-- A missing stop schema is handled by the single followup prompt. If the followup still stops without schema, it is returned as the followup result; it must not recursively create another followup.
-- Stop schema budget is two-tiered across consecutive stop attempts: missing schema is a protection loop capped at 10; once schema is present but still requests/needs continuation, the consecutive schema budget is 3. Non-consecutive stop attempts reset the budget.
+- A missing stop schema is handled by bounded followup prompts. If the followup still stops without valid schema, it must re-enter until the single consecutive-stop budget is exhausted.
+- Stop schema budget is consecutive across all stop schema failure kinds. A non-stop response, tool call, or real progress resets the counter; the third consecutive stop ends the loop.
 - Do not change router-direct/provider selection to fix stopless continuation; stopless eligibility belongs to servertool dispatch + Rust stop-message decision only.
 
 1.2. Stop schema / final-stop learned note:
@@ -65,7 +73,7 @@ Design goals:
 - Stop schema prompt must ask six diagnostic fields: target, process, evidence, `issue_cause`, `excluded_factors`, and `diagnostic_order`.
 - Debug / outage / validation tasks must not stop after only listing target/process/evidence; they must also state likely cause, ruled-out factors, and next diagnostic order, or call tools to gather that evidence.
 - Any system prompt / ai-followup prompt that asks the main model to produce a summary, final summary, stop explanation, completion report, or blocked report must require stop schema JSON in the same injected message.
-- Missing stop schema must not consume continuous stop budget; budget state comes from `stopMessageState.stopMessageUsed`, not `serverToolLoopState.repeatCount`.
+- Missing stop schema consumes the same continuous stop budget as invalid/provided schema failures; budget state comes from `stopMessageState.stopMessageUsed`, not `serverToolLoopState.repeatCount`.
 - Rust `stop-message-core` is the schema parse / gate truth; TS may only do the final file IO.
 - `note.md` write is allowed only on `schemaGate.action=allow_stop` and non-empty `learned`.
 - No write on followup, invalid schema, missing schema, budget exhausted, or reenter failure.
@@ -145,6 +153,6 @@ Required logs:
 5. `/v1/responses` final response is projected by `buildHubRespOutbound04FromHubRespChatProcess03` and has top-level `object=response`.
 6. Chat Completions final response remains chat completion shape and is not wrapped by Responses builder.
 7. Missing `servertoolRuntimeAction.payload` fails fast; no fallback to client payload.
-8. Client body does not contain `metadata`, `__rt`, or snapshot/debug carrier.
+8. Client body does not contain internal metadata carrier, `__rt`, or snapshot/debug carrier; legal protocol `metadata` is allowed when it is client-visible data.
 9. Reenter failure clears active state and does not create followup loop.
 10. Non-stop servertools still execute through normal Hub Pipeline reentry path.

@@ -9,7 +9,7 @@ import {
 
 describe('server.response_projection internal carrier guard (Phase Server-C)', () => {
   const FORBIDDEN = [
-    'metadata', 'metaCarrier', 'runtimeMetadata',
+    'metaCarrier', 'runtimeMetadata',
     'errorCarrier', 'classifiedError', '__rt', 'snapshot', 'snapshotId',
     '__raw_request_body', 'internalDetails', 'upstreamRequestId', 'providerStack'
   ];
@@ -37,10 +37,24 @@ describe('server.response_projection internal carrier guard (Phase Server-C)', (
     )).not.toThrow();
   });
 
+  it('passes legal client-visible protocol metadata', () => {
+    expect(() => assertClientResponseHasNoInternalCarriers(
+      { id: 'resp_1', object: 'response', metadata: { user_tag: 'safe' } },
+      'req-1'
+    )).not.toThrow();
+  });
+
+  it('fails fast when metadata carries internal routing controls', () => {
+    expect(() => assertClientResponseHasNoInternalCarriers(
+      { id: 'resp_1', object: 'response', metadata: { routeHint: 'tools' } },
+      'req-1'
+    )).toThrow('metadata');
+  });
+
   it('handles cycles without infinite loop and still detects forbidden field', () => {
     const a: any = { id: 'x' };
     a.self = a;
-    a.metadata = 'oops';
-    expect(() => assertClientResponseHasNoInternalCarriers(a, 'req-1')).toThrow('metadata');
+    a.__rt = 'oops';
+    expect(() => assertClientResponseHasNoInternalCarriers(a, 'req-1')).toThrow('__rt');
   });
 });

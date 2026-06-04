@@ -440,14 +440,11 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     sanitizeName: sanitizeResponsesFunctionName
   });
 
-  const originalTools = Array.isArray(ctx?.toolsRaw) ? (ctx!.toolsRaw as BridgeToolDefinition[]) : undefined;
   const resumeTools = continuationPreviousResponseId.length > 0
     ? readResumeToolsFromChatSemantics(chat as Record<string, unknown>)
     : undefined;
   const resolvedBridgeTools = resolveResponsesBridgeToolsWithNative({
-    originalTools: Array.isArray(originalTools)
-      ? (originalTools as Array<Record<string, unknown>>)
-      : Array.isArray(resumeTools)
+    originalTools: Array.isArray(resumeTools)
         ? (resumeTools as Array<Record<string, unknown>>)
         : undefined,
     chatTools: Array.isArray(responsesToolsFromChat) ? (responsesToolsFromChat as Array<Record<string, unknown>>) : undefined,
@@ -516,69 +513,34 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   const streamFromParameters = (chat as any)?.parameters && typeof ((chat as any).parameters as any)?.stream === 'boolean'
     ? (((chat as any).parameters as any).stream as boolean)
     : undefined;
-  const contextParameters =
-    ctx?.parameters && typeof ctx.parameters === 'object' && !Array.isArray(ctx.parameters)
-      ? ({ ...(ctx.parameters as Record<string, unknown>) } as Record<string, unknown>)
-      : undefined;
-  if (contextParameters) {
-    delete contextParameters.stream;
-  }
-  const contextToolChoice =
-    (ctx as any)?.toolChoice !== undefined ? (ctx as any).toolChoice : (ctx as any)?.tool_choice;
-  const contextParallelToolCalls =
-    typeof (ctx as any)?.parallelToolCalls === 'boolean'
-      ? (ctx as any).parallelToolCalls
-      : typeof (ctx as any)?.parallel_tool_calls === 'boolean'
-        ? (ctx as any).parallel_tool_calls
-        : undefined;
-  const contextResponseFormat =
-    (ctx as any)?.responseFormat !== undefined ? (ctx as any).responseFormat : (ctx as any)?.response_format;
-  const contextServiceTier =
-    (ctx as any)?.serviceTier !== undefined ? (ctx as any).serviceTier : (ctx as any)?.service_tier;
-  const contextTruncation =
-    (ctx as any)?.truncation !== undefined ? (ctx as any).truncation : (ctx as any)?.truncation_mode;
-  const preparedEnvelope = prepareResponsesRequestEnvelopeWithNative({
-    request: out as Record<string, unknown>,
-    contextSystemInstruction: ctx?.systemInstruction,
-    extraSystemInstruction: extras?.systemInstruction,
-    metadataSystemInstruction: envelopeMetadata?.systemInstruction,
-    combinedSystemInstruction,
-    reasoningInstructionSegments: (ctx as any)?.__rcc_reasoning_instructions_segments,
-    contextParameters,
-    chatParameters: chat.parameters,
-    metadataParameters: stripToolControlFieldsFromParameterObject(
-      metadataExtraFields?.parameters as JsonObject | undefined
-    ),
-    contextStream: typeof (ctx as any)?.stream === 'boolean' ? ((ctx as any).stream as boolean) : undefined,
-    metadataStream: undefined,
-    chatStream: streamFromChat,
-    chatParametersStream: streamFromParameters,
-    contextInclude: Array.isArray((ctx as any)?.include) ? ((ctx as any).include as unknown[]) : undefined,
-    metadataInclude: undefined,
-    contextStore: typeof (ctx as any)?.store === 'boolean' ? ((ctx as any).store as boolean) : undefined,
-    metadataStore: undefined,
-    stripHostFields,
-    contextToolChoice,
-    contextParallelToolCalls,
-    contextResponseFormat,
-    metadataResponseFormat: undefined,
-    contextServiceTier,
-    metadataServiceTier: undefined,
-    contextTruncation,
-    metadataTruncation: undefined,
-    contextMetadata: stripToolControlFieldsFromContextMetadata(ctx?.metadata),
-    metadataMetadata: metadataExtraFields?.metadata
+  const chatRootParameters = collectResponsesRequestParameters(chat as Record<string, unknown>, {
+    streamHint: streamFromChat
   });
-  Object.assign(out, preparedEnvelope.request);
-  delete out.parameters;
-
-  const retainedParameters: Record<string, unknown> = {
-    ...(contextParameters ?? {}),
+  const mergedChatParameters: Record<string, unknown> | undefined = {
+    ...(chatRootParameters ?? {}),
     ...(
       chat.parameters && typeof chat.parameters === 'object' && !Array.isArray(chat.parameters)
         ? (chat.parameters as Record<string, unknown>)
         : {}
     )
+  };
+  if (Object.keys(mergedChatParameters).length === 0) {
+    delete (mergedChatParameters as Record<string, unknown>).stream;
+  }
+  const preparedEnvelope = prepareResponsesRequestEnvelopeWithNative({
+    request: out as Record<string, unknown>,
+    extraSystemInstruction: extras?.systemInstruction,
+    combinedSystemInstruction,
+    chatParameters: Object.keys(mergedChatParameters).length ? mergedChatParameters : undefined,
+    chatStream: streamFromChat,
+    chatParametersStream: streamFromParameters,
+    stripHostFields,
+  });
+  Object.assign(out, preparedEnvelope.request);
+  delete out.parameters;
+
+  const retainedParameters: Record<string, unknown> = {
+    ...(Object.keys(mergedChatParameters).length ? mergedChatParameters : {})
   };
   for (const key of RESPONSES_REQUEST_PARAMETER_KEYS) {
     if (key === 'temperature' || key === 'top_p') {

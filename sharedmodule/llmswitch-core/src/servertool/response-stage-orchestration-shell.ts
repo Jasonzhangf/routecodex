@@ -85,7 +85,7 @@ export async function runServertoolResponseStageOrchestrationShell(
     && !allowReasoningStopFollowupReentry
     && !stoplessEligibleFollowup
   ) {
-    recordStage(options.stageRecorder, 'chat_process.resp.stage5.servertool_orchestration', {
+    recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
       executed: false,
       skipReason: 'followup_bypass',
       inputShape: detectProviderResponseShapeWithNative(options.payload)
@@ -100,7 +100,7 @@ export async function runServertoolResponseStageOrchestrationShell(
     Boolean(options.providerInvoker) || Boolean(options.reenterPipeline) || Boolean(options.clientInjectDispatch);
   const inputShape = detectProviderResponseShapeWithNative(options.payload);
   if (!hasServerToolSupport) {
-    recordStage(options.stageRecorder, 'chat_process.resp.stage5.servertool_orchestration', {
+    recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
       executed: false,
       skipReason: 'no_servertool_support',
       inputShape
@@ -112,7 +112,7 @@ export async function runServertoolResponseStageOrchestrationShell(
     };
   }
 
-  logHubStageTiming(options.requestId, 'resp_process.stage3_orchestration_engine', 'start');
+  logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'start');
   const orchestrationStart = Date.now();
   markServertoolResponseOrchestration(options.adapterContext);
   const orchestration = await runServerToolOrchestration({
@@ -126,7 +126,7 @@ export async function runServertoolResponseStageOrchestrationShell(
     reenterPipeline: options.reenterPipeline,
     clientInjectDispatch: options.clientInjectDispatch
   });
-  logHubStageTiming(options.requestId, 'resp_process.stage3_orchestration_engine', 'completed', {
+  logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'completed', {
     elapsedMs: Date.now() - orchestrationStart,
     executed: orchestration.executed,
     flowId: orchestration.flowId,
@@ -136,7 +136,7 @@ export async function runServertoolResponseStageOrchestrationShell(
   if (orchestration.executed) {
     const outputPayload = orchestration.chat as ChatCompletionLike;
     const outputShape = detectProviderResponseShapeWithNative(outputPayload);
-    recordStage(options.stageRecorder, 'chat_process.resp.stage5.servertool_orchestration', {
+    recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
       executed: true,
       flowId: orchestration.flowId,
       inputShape,
@@ -149,7 +149,7 @@ export async function runServertoolResponseStageOrchestrationShell(
     };
   }
 
-  recordStage(options.stageRecorder, 'chat_process.resp.stage5.servertool_orchestration', {
+  recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
     executed: false,
     inputShape
   });

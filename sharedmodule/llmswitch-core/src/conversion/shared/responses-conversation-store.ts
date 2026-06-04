@@ -366,12 +366,16 @@ class ResponsesConversationStore {
     const responseId = typeof response.id === 'string' ? response.id : undefined;
     const requestId = typeof args.requestId === 'string' ? args.requestId.trim() : '';
     if (!requestId) {
-      // Silent return + log: preserves original fire-and-forget behavior while maintaining observability
-      console.error('[ResponsesConversationStore] recordResponse: missing requestId, skipping', {
-        context: 'responses-conversation-store.recordResponse',
-        responseId
+      throw new ProviderProtocolError('Responses conversation response capture requires request context', {
+        code: 'MALFORMED_RESPONSE',
+        protocol: 'openai-responses',
+        providerType: 'responses',
+        details: {
+          context: 'responses-conversation-store.recordResponse',
+          reason: 'missing_request_id',
+          responseId
+        }
       });
-      return;
     }
     let entry = this.requestMap.get(requestId);
     if (!entry && responseId) {
@@ -393,15 +397,30 @@ class ResponsesConversationStore {
       }
     }
     if (!entry) {
-      console.warn('[ResponsesConversationStore] recordResponse: missing request context, skipping', {
-        context: 'responses-conversation-store.recordResponse',
-        reason: 'missing_request_context',
-        requestId,
-        responseId
+      throw new ProviderProtocolError('Responses conversation request context missing for response capture', {
+        code: 'MALFORMED_RESPONSE',
+        protocol: 'openai-responses',
+        providerType: 'responses',
+        details: {
+          context: 'responses-conversation-store.recordResponse',
+          reason: 'missing_request_context',
+          requestId,
+          responseId
+        }
       });
-      return;
     }
-    if (!responseId) return;
+    if (!responseId) {
+      throw new ProviderProtocolError('Responses conversation response capture requires response id', {
+        code: 'MALFORMED_RESPONSE',
+        protocol: 'openai-responses',
+        providerType: 'responses',
+        details: {
+          context: 'responses-conversation-store.recordResponse',
+          reason: 'missing_response_id',
+          requestId
+        }
+      });
+    }
     const responsePortScopeKey = readPortScopeKey(args);
     if (responsePortScopeKey && !entry.portScopeKey) {
       entry.portScopeKey = responsePortScopeKey;

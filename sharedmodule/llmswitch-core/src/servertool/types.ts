@@ -81,19 +81,13 @@ export interface ServerSideToolEngineOptions {
 }
 
 export type ServerToolFollowupInjectionOp =
-  | { op: 'preserve_tools' }
-  | { op: 'ensure_standard_tools' }
-  | { op: 'replace_tools'; tools: JsonObject[] }
-  | { op: 'force_tool_choice'; value: JsonValue }
   | { op: 'append_assistant_message'; required?: boolean }
   | { op: 'append_tool_messages_from_tool_outputs'; required?: boolean }
   | { op: 'inject_system_text'; text: string }
   | { op: 'append_user_text'; text: string }
-  | { op: 'drop_tool_by_name'; name: string }
   | { op: 'inject_vision_summary'; summary: string }
   | { op: 'rebuild_vision_followup'; summary: string; originalPrompt?: string }
   | { op: 'trim_openai_messages'; maxNonSystemMessages: number }
-  | { op: 'append_tool_if_missing'; toolName: string; toolDefinition: JsonObject }
   | { op: 'compact_tool_content'; maxChars: number };
 
 export type ServerToolFollowupInjectionPlan = {

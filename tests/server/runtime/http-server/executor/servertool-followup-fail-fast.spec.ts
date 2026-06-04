@@ -23,6 +23,25 @@ describe('servertool followup fail-fast helper', () => {
     });
   });
 
+  it('fails fast when client aborts after nested execute starts', async () => {
+    const controller = new AbortController();
+    const pending = awaitNestedExecutionWithFailFast({
+      promise: new Promise(() => {
+        // provider transport is still pending; abort must win immediately
+      }),
+      abortSignal: controller.signal,
+      timeoutMs: 60_000,
+      requestId: 'req_followup_dispatch_abort_after_start'
+    });
+
+    controller.abort(Object.assign(new Error('CLIENT_RESPONSE_CLOSED'), {
+      code: 'CLIENT_DISCONNECTED',
+      name: 'AbortError'
+    }));
+
+    await expect(pending).rejects.toMatchObject({ code: 'CLIENT_DISCONNECTED' });
+  });
+
   it('reads timeout override from env', () => {
     process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS = '1234';
     try {

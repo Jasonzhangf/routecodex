@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from '@jest/globals';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const repoRoot = resolve(__dirname, '../..');
+const repoRoot = process.cwd();
 
 describe('Hub Pipeline TS marker strip boundary', () => {
   it('keeps chat-process generic marker strip as a native-only wrapper', () => {

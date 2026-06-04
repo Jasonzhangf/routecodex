@@ -866,40 +866,18 @@ fn filters_bridge_input_for_upstream_strips_tool_call_id_and_clamps_id() {
 fn reasoning_prepare_responses_request_envelope_combines_segments_before_instruction() {
     let output = prepare_responses_request_envelope(PrepareResponsesRequestEnvelopeInput {
         request: json!({}),
-        context_system_instruction: Some(json!("  ctx keep  ")),
         extra_system_instruction: Some(json!("extra ignored")),
-        metadata_system_instruction: Some(json!("meta ignored")),
-        combined_system_instruction: Some(json!("history ignored")),
+        combined_system_instruction: Some(json!("history keep")),
         reasoning_instruction_segments: Some(json!(["  segment one  ", "segment two"])),
-        context_parameters: None,
         chat_parameters: None,
-        metadata_parameters: None,
-        context_stream: None,
-        metadata_stream: None,
         chat_stream: None,
         chat_parameters_stream: None,
-        context_include: None,
-        metadata_include: None,
-        context_store: None,
-        metadata_store: None,
         strip_host_fields: None,
-        context_tool_choice: None,
-        metadata_tool_choice: None,
-        context_parallel_tool_calls: None,
-        metadata_parallel_tool_calls: None,
-        context_response_format: None,
-        metadata_response_format: None,
-        context_service_tier: None,
-        metadata_service_tier: None,
-        context_truncation: None,
-        metadata_truncation: None,
-        context_metadata: None,
-        metadata_metadata: None,
     });
     let request = output.request.as_object().cloned().unwrap();
     assert_eq!(
         request.get("instructions").and_then(Value::as_str),
-        Some("segment one\nsegment two\nctx keep")
+        Some("segment one\nsegment two\nextra ignored")
     );
     assert_eq!(
         request.get("instructions_is_raw").and_then(Value::as_bool),
@@ -908,55 +886,28 @@ fn reasoning_prepare_responses_request_envelope_combines_segments_before_instruc
 }
 
 #[test]
-fn reasoning_prepare_responses_request_envelope_flattens_allowed_parameters() {
+fn reasoning_prepare_responses_request_envelope_flattens_chat_parameters_only() {
     let output = prepare_responses_request_envelope(PrepareResponsesRequestEnvelopeInput {
         request: json!({
             "stream": false,
             "parameters": { "ignored": true }
         }),
-        context_system_instruction: None,
         extra_system_instruction: None,
-        metadata_system_instruction: None,
         combined_system_instruction: None,
         reasoning_instruction_segments: None,
-        context_parameters: Some(json!({
+        chat_parameters: Some(json!({
             "max_tokens": 123,
             "response_format": { "type": "json_schema" },
             "include": ["reasoning.encrypted_content"],
-            "stream": true
-        })),
-        chat_parameters: Some(json!({
             "prompt_cache_key": "chat-cache",
             "ignored_field": "drop"
         })),
-        metadata_parameters: None,
-        context_stream: None,
-        metadata_stream: None,
         chat_stream: None,
         chat_parameters_stream: None,
-        context_include: None,
-        metadata_include: None,
-        context_store: None,
-        metadata_store: None,
         strip_host_fields: None,
-        context_tool_choice: None,
-        metadata_tool_choice: None,
-        context_parallel_tool_calls: None,
-        metadata_parallel_tool_calls: None,
-        context_response_format: None,
-        metadata_response_format: None,
-        context_service_tier: None,
-        metadata_service_tier: None,
-        context_truncation: None,
-        metadata_truncation: None,
-        context_metadata: None,
-        metadata_metadata: None,
     });
     let request = output.request.as_object().cloned().unwrap();
-    assert_eq!(
-        request.get("max_output_tokens").and_then(Value::as_i64),
-        Some(123)
-    );
+    assert_eq!(request.get("max_output_tokens").and_then(Value::as_i64), Some(123));
     assert_eq!(
         request
             .get("response_format")
@@ -978,86 +929,47 @@ fn reasoning_prepare_responses_request_envelope_flattens_allowed_parameters() {
 }
 
 #[test]
-fn reasoning_prepare_responses_request_envelope_prefers_ctx_over_metadata_and_defaults_store_false()
-{
+fn reasoning_prepare_responses_request_envelope_uses_only_chat_source_and_defaults_store_false() {
     let output = prepare_responses_request_envelope(PrepareResponsesRequestEnvelopeInput {
         request: json!({}),
-        context_system_instruction: None,
         extra_system_instruction: None,
-        metadata_system_instruction: None,
         combined_system_instruction: None,
         reasoning_instruction_segments: None,
-        context_parameters: None,
         chat_parameters: Some(json!({
             "response_format": { "type": "chat-params" },
-            "parallel_tool_calls": false
+            "parallel_tool_calls": false,
+            "service_tier": "priority",
+            "truncation": "auto",
+            "include": ["chat-include"]
         })),
-        metadata_parameters: Some(json!({
-            "response_format": { "type": "metadata-params" },
-            "parallel_tool_calls": false
-        })),
-        context_stream: Some(json!(false)),
-        metadata_stream: Some(json!(true)),
         chat_stream: Some(json!(true)),
         chat_parameters_stream: Some(json!(true)),
-        context_include: Some(json!(["ctx-include"])),
-        metadata_include: Some(json!(["meta-include"])),
-        context_store: None,
-        metadata_store: None,
         strip_host_fields: Some(false),
-        context_tool_choice: Some(json!("required")),
-        metadata_tool_choice: Some(json!("auto")),
-        context_parallel_tool_calls: Some(json!(true)),
-        metadata_parallel_tool_calls: Some(json!(false)),
-        context_response_format: Some(json!({ "type": "ctx-format" })),
-        metadata_response_format: Some(json!({ "type": "meta-format" })),
-        context_service_tier: Some(json!("priority")),
-        metadata_service_tier: Some(json!("flex")),
-        context_truncation: Some(json!("auto")),
-        metadata_truncation: Some(json!("disabled")),
-        context_metadata: Some(json!({ "ctx": true })),
-        metadata_metadata: Some(json!({ "meta": true })),
     });
     let request = output.request.as_object().cloned().unwrap();
-    assert_eq!(request.get("stream").and_then(Value::as_bool), Some(false));
+    assert_eq!(request.get("stream").and_then(Value::as_bool), Some(true));
     assert_eq!(request.get("store").and_then(Value::as_bool), Some(false));
     assert!(!request.contains_key("tool_choice"));
-    assert_eq!(
-        request.get("parallel_tool_calls").and_then(Value::as_bool),
-        Some(false)
-    );
+    assert_eq!(request.get("parallel_tool_calls").and_then(Value::as_bool), Some(false));
     assert_eq!(
         request
             .get("response_format")
             .and_then(Value::as_object)
             .and_then(|row| row.get("type"))
             .and_then(Value::as_str),
-        Some("ctx-format")
+        Some("chat-params")
     );
-    assert_eq!(
-        request.get("service_tier").and_then(Value::as_str),
-        Some("priority")
-    );
-    assert_eq!(
-        request.get("truncation").and_then(Value::as_str),
-        Some("auto")
-    );
+    assert_eq!(request.get("service_tier").and_then(Value::as_str), Some("priority"));
+    assert_eq!(request.get("truncation").and_then(Value::as_str), Some("auto"));
     assert_eq!(
         request
             .get("include")
             .and_then(Value::as_array)
             .and_then(|items| items.first())
             .and_then(Value::as_str),
-        Some("ctx-include")
+        Some("chat-include")
     );
-    assert_eq!(
-        request
-            .get("metadata")
-            .and_then(Value::as_object)
-            .and_then(|row| row.get("ctx"))
-            .and_then(Value::as_bool),
-        Some(true)
-    );
+    assert!(!request.contains_key("metadata"));
 }
 
 #[test]
@@ -1069,63 +981,28 @@ fn reasoning_prepare_responses_request_envelope_keeps_chat_tool_controls_as_sing
                 "function": { "name": "exec_command", "parameters": { "type": "object", "properties": {} } }
             }]
         }),
-        context_system_instruction: None,
         extra_system_instruction: None,
-        metadata_system_instruction: None,
         combined_system_instruction: None,
         reasoning_instruction_segments: None,
-        context_parameters: Some(json!({
-            "tool_choice": "none",
-            "parallel_tool_calls": false,
-            "response_format": { "type": "ctx-params-format" }
-        })),
         chat_parameters: Some(json!({
             "tool_choice": "required",
             "parallel_tool_calls": true,
             "response_format": { "type": "chat-params-format" }
         })),
-        metadata_parameters: Some(json!({
-            "tool_choice": "auto",
-            "parallel_tool_calls": false
-        })),
-        context_stream: None,
-        metadata_stream: None,
         chat_stream: None,
         chat_parameters_stream: None,
-        context_include: None,
-        metadata_include: None,
-        context_store: None,
-        metadata_store: None,
         strip_host_fields: Some(false),
-        context_tool_choice: Some(json!("auto")),
-        metadata_tool_choice: Some(json!("none")),
-        context_parallel_tool_calls: Some(json!(false)),
-        metadata_parallel_tool_calls: Some(json!(false)),
-        context_response_format: Some(json!({ "type": "ctx-format" })),
-        metadata_response_format: Some(json!({ "type": "meta-format" })),
-        context_service_tier: None,
-        metadata_service_tier: None,
-        context_truncation: None,
-        metadata_truncation: None,
-        context_metadata: None,
-        metadata_metadata: None,
     });
     let request = output.request.as_object().cloned().unwrap();
-    assert_eq!(
-        request.get("tool_choice").and_then(Value::as_str),
-        Some("required")
-    );
-    assert_eq!(
-        request.get("parallel_tool_calls").and_then(Value::as_bool),
-        Some(true)
-    );
+    assert_eq!(request.get("tool_choice").and_then(Value::as_str), Some("required"));
+    assert_eq!(request.get("parallel_tool_calls").and_then(Value::as_bool), Some(true));
     assert_eq!(
         request
             .get("response_format")
             .and_then(Value::as_object)
             .and_then(|row| row.get("type"))
             .and_then(Value::as_str),
-        Some("ctx-format")
+        Some("chat-params-format")
     );
 }
 
@@ -1133,45 +1010,20 @@ fn reasoning_prepare_responses_request_envelope_keeps_chat_tool_controls_as_sing
 fn reasoning_prepare_responses_request_envelope_drops_tool_choice_without_tools() {
     let output = prepare_responses_request_envelope(PrepareResponsesRequestEnvelopeInput {
         request: json!({}),
-        context_system_instruction: None,
         extra_system_instruction: None,
-        metadata_system_instruction: None,
         combined_system_instruction: None,
         reasoning_instruction_segments: None,
-        context_parameters: Some(json!({
+        chat_parameters: Some(json!({
             "tool_choice": "required",
             "parallel_tool_calls": true
         })),
-        chat_parameters: None,
-        metadata_parameters: None,
-        context_stream: None,
-        metadata_stream: None,
         chat_stream: None,
         chat_parameters_stream: None,
-        context_include: None,
-        metadata_include: None,
-        context_store: None,
-        metadata_store: None,
         strip_host_fields: Some(false),
-        context_tool_choice: Some(json!("auto")),
-        metadata_tool_choice: Some(json!("required")),
-        context_parallel_tool_calls: Some(json!(true)),
-        metadata_parallel_tool_calls: Some(json!(false)),
-        context_response_format: None,
-        metadata_response_format: None,
-        context_service_tier: None,
-        metadata_service_tier: None,
-        context_truncation: None,
-        metadata_truncation: None,
-        context_metadata: None,
-        metadata_metadata: None,
     });
     let request = output.request.as_object().cloned().unwrap();
     assert!(!request.contains_key("tool_choice"));
-    assert_eq!(
-        request.get("parallel_tool_calls").and_then(Value::as_bool),
-        Some(true)
-    );
+    assert_eq!(request.get("parallel_tool_calls").and_then(Value::as_bool), Some(true));
 }
 
 #[test]

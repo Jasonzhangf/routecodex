@@ -1,7 +1,7 @@
-# Integration Notes
+# Topology Integration Notes
 
-1. Introduce a `StageRunner` inside `HubPipeline.execute` that loads the stage manifest per protocol and sequentially executes `req_inbound → req_process → req_outbound`.
-2. Each stage module should expose a factory `(deps) => StageHandler` to keep dependencies (format adapters, semantic mappers, router engine, SSE codecs) injectable for testing.
-3. StageRecorder MUST reference the exact stage id defined in this directory. Avoid ad-hoc names (e.g., "hub-inbound").
-4. `ResponsesOpenAIPipelineCodec` and `provider-response.ts` should reuse the same stage modules to keep Responses semantics capture/restoration consistent (via `ChatEnvelope.semantics.responses.*`, not legacy `metadata.responsesContext`).
-5. Tests (`responses-in-out-closed-loop`, `responses-sse-closed-loop`, `scripts/test-responses-roundtrip.mjs`) must assert stage ordering by reading recorder snapshots once the runner is wired.
+1. New work must enter through the canonical chain: `HubReqInbound02Standardized → HubReqChatProcess03Governed → VrRoute04SelectedTarget → HubReqOutbound05ProviderSemantic → ProviderReqOutbound06WirePayload`.
+2. Response work must return through: `ProviderRespInbound01Raw → HubRespInbound02Parsed → HubRespChatProcess03Governed → HubRespOutbound04ClientSemantic → ServerRespOutbound05ClientFrame`.
+3. StageRecorder and timing labels must use canonical node names or node-derived labels; ad-hoc legacy segment names are not design truth.
+4. Metadata, error, debug, and snapshot data must stay in side-channel carrier chains and never become provider wire payload or client response body.
+5. Tests must assert node ordering and boundary guards from the Rust contract help and `tests/red-tests/*` topology contracts.

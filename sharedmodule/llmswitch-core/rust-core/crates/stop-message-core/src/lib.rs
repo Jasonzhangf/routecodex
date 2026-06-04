@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const LEGACY_DEFAULT_TEXT: &str = "继续执行";
-const STOP_SCHEMA_MISSING_MAX_REPEATS: u32 = 10;
-const STOP_SCHEMA_PROVIDED_MAX_REPEATS: u32 = 3;
+const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS: u32 = 3;
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
     "停止前先核对六件事：1) 目标：当前用户目标是什么，是否逐项完成；2) 过程：你实际做过哪些操作/检查/验证，哪些还没做；3) 证据：完成或阻塞的证据在哪里；4) 问题原因：若出现异常，最可能原因是什么，依据是什么；5) 已排除因素：你已经排除了哪些可能原因，证据是什么；6) 排查顺序：下一步应按什么顺序继续排查。若任一项缺文件、日志、命令输出或测试证据，禁止总结、道歉、解释工具被拒或停下；必须在本轮直接发出工具调用执行最小下一步（优先 exec_command 读取/验证/测试）。只有目标已完成或确实阻塞时，才输出最终结果并给出证据。",
     "你刚才再次停止。请重新核对：目标是否真的完成？过程是否覆盖用户要求的每一项？证据是否能被日志、文件、命令结果或测试结果验证？异常原因是否已定位？哪些因素已被证据排除？排查顺序是否合理且已执行到当前最小下一步？如果答案不是全部明确，禁止继续总结、复述阻塞、声称工具被拒；必须在本轮直接发出工具调用按排查顺序补齐缺口（优先 exec_command）。如果确实完成/阻塞，必须说明目标、过程、证据、问题原因、已排除因素、排查顺序，并在 stop schema 的 learned 字段写出过去 turns 学到的可复用结论；没有则填空字符串。",
@@ -564,7 +563,7 @@ fn schema_invalid_followup(
     parsed: StopSchemaParsed,
 ) -> StopSchemaGateDecision {
     let rejection_max = stop_schema_provided_max_repeats(max_repeats);
-    if rejection_max > 0 && used >= rejection_max {
+    if rejection_max > 0 && used.saturating_add(1) >= rejection_max {
         return StopSchemaGateDecision {
             action: StopSchemaGateAction::FailFast,
             reason_code: "stop_schema_budget_exhausted".to_string(),
@@ -584,7 +583,7 @@ fn schema_missing_followup(
     message: &str,
 ) -> StopSchemaGateDecision {
     let rejection_max = stop_schema_missing_max_repeats(max_repeats);
-    if rejection_max > 0 && used >= rejection_max {
+    if rejection_max > 0 && used.saturating_add(1) >= rejection_max {
         return StopSchemaGateDecision {
             action: StopSchemaGateAction::FailFast,
             reason_code: "stop_schema_budget_exhausted".to_string(),
@@ -597,12 +596,19 @@ fn schema_missing_followup(
     schema_followup(reason_code, used, message, None, true)
 }
 
-fn stop_schema_missing_max_repeats(_max_repeats: u32) -> u32 {
-    STOP_SCHEMA_MISSING_MAX_REPEATS
+fn stop_schema_missing_max_repeats(max_repeats: u32) -> u32 {
+    stop_schema_consecutive_stop_max_repeats(max_repeats)
 }
 
-fn stop_schema_provided_max_repeats(_max_repeats: u32) -> u32 {
-    STOP_SCHEMA_PROVIDED_MAX_REPEATS
+fn stop_schema_provided_max_repeats(max_repeats: u32) -> u32 {
+    stop_schema_consecutive_stop_max_repeats(max_repeats)
+}
+
+fn stop_schema_consecutive_stop_max_repeats(max_repeats: u32) -> u32 {
+    if max_repeats > 0 {
+        return max_repeats.min(STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS);
+    }
+    STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS
 }
 
 fn schema_followup(
@@ -631,7 +637,7 @@ fn schema_followup(
 }
 
 fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
-    let value = parse_first_json_object(text)?;
+    let value = parse_first_stop_schema_json_object(text)?;
     let row = value.as_object()?;
     Some(StopSchemaParsed {
         stopreason: read_u8(row.get("stopreason")),
@@ -644,6 +650,12 @@ fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
         excluded_factors: read_string(row.get("excluded_factors")),
         diagnostic_order: read_string(row.get("diagnostic_order")),
     })
+}
+
+fn parse_first_stop_schema_json_object(text: &str) -> Option<Value> {
+    parse_json_objects(text)
+        .into_iter()
+        .find(|value| value.get("stopreason").is_some())
 }
 
 fn read_u8(value: Option<&Value>) -> Option<u8> {
@@ -669,9 +681,10 @@ fn read_string(value: Option<&Value>) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn parse_first_json_object(text: &str) -> Option<Value> {
+fn parse_json_objects(text: &str) -> Vec<Value> {
+    let mut values = Vec::new();
     if let Some(value) = parse_fenced_json_object(text) {
-        return Some(value);
+        values.push(value);
     }
     let bytes = text.as_bytes();
     for start in 0..bytes.len() {
@@ -703,7 +716,7 @@ fn parse_first_json_object(text: &str) -> Option<Value> {
                     let candidate = &text[start..=end];
                     if let Ok(value) = serde_json::from_str::<Value>(candidate) {
                         if value.is_object() {
-                            return Some(value);
+                            values.push(value);
                         }
                     }
                     break;
@@ -711,7 +724,7 @@ fn parse_first_json_object(text: &str) -> Option<Value> {
             }
         }
     }
-    None
+    values
 }
 
 fn parse_fenced_json_object(text: &str) -> Option<Value> {
@@ -748,13 +761,10 @@ fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReas
     if ctx.goal_status.is_active() {
         return Some(SkipReason::GoalActive);
     }
-    if ctx
-        .followup_flow_id
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|flow_id| !flow_id.is_empty())
-    {
-        return Some(SkipReason::ServertoolFollowupHop);
+    if let Some(flow_id) = ctx.followup_flow_id.as_deref().map(str::trim) {
+        if !flow_id.is_empty() && flow_id != "stop_message_flow" {
+            return Some(SkipReason::ServertoolFollowupHop);
+        }
     }
     if ctx.persisted_snapshot.is_none() && ctx.runtime_snapshot.is_none() {
         if ctx.persisted_default_exhausted {
@@ -1133,12 +1143,13 @@ mod tests {
     }
 
     #[test]
-    fn stop_message_followup_flow_skips_to_prevent_nested_followup() {
+    fn stop_message_followup_flow_remains_eligible_for_bounded_continuation() {
         let mut ctx = base_ctx();
         ctx.followup_flow_id = Some("stop_message_flow".to_string());
         let result = decide(&ctx);
-        assert_eq!(result.action, Action::Skip);
-        assert_eq!(result.skip_reason.unwrap(), "skip_servertool_followup_hop");
+        assert_eq!(result.action, Action::Trigger);
+        assert_eq!(result.used, 0);
+        assert_eq!(result.max_repeats, 3);
     }
 
     #[test]
@@ -1244,7 +1255,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_message_followup_runtime_snapshot_does_not_override_skip() {
+    fn stop_message_followup_runtime_snapshot_uses_budgeted_snapshot() {
         let mut ctx = base_ctx();
         ctx.followup_flow_id = Some("stop_message_flow".to_string());
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
@@ -1264,13 +1275,13 @@ mod tests {
 
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
-        assert_eq!(result.skip_reason.unwrap(), "skip_servertool_followup_hop");
+        assert_eq!(result.skip_reason.unwrap(), "skip_reached_max_repeats");
     }
 
     #[test]
     fn stop_schema_finished_or_blocked_with_reason_allows_stop() {
         let finished = evaluate_stop_schema_gate(
-            r#"Done {"stopreason":0,"reason":"已完成并验证","has_evidence":1,"next_step":"","learned":"缺 schema 不计预算"}"#,
+            r#"Done {"stopreason":0,"reason":"已完成并验证","has_evidence":1,"next_step":"","learned":"缺 schema 计入连续 stop 预算"}"#,
             0,
             3,
         );
@@ -1281,7 +1292,7 @@ mod tests {
                 .parsed
                 .as_ref()
                 .and_then(|row| row.learned.as_deref()),
-            Some("缺 schema 不计预算")
+            Some("缺 schema 计入连续 stop 预算")
         );
 
         let blocked = evaluate_stop_schema_gate(
@@ -1361,13 +1372,31 @@ mod tests {
     }
 
     #[test]
-    fn stop_schema_missing_exhausts_after_ten_protection_repeats() {
-        let still_followup = evaluate_stop_schema_gate("普通停止文本", 9, 3);
+    fn stop_schema_parser_ignores_non_control_evidence_json_before_schema() {
+        let decision = evaluate_stop_schema_gate(
+            r#"日志：
+```json
+{"event":"audit","message":"model mentioned stopreason in evidence text"}
+```
+<stop_schema>
+{"stopreason":1,"reason":"工具被拒","has_evidence":1,"evidence":"上方日志","next_step":""}
+</stop_schema>"#,
+            0,
+            3,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(decision.reason_code, "stop_schema_blocked");
+        assert!(!decision.count_budget);
+    }
+
+    #[test]
+    fn stop_schema_missing_exhausts_after_three_consecutive_stops() {
+        let still_followup = evaluate_stop_schema_gate("普通停止文本", 1, 3);
         assert_eq!(still_followup.action, StopSchemaGateAction::Followup);
         assert_eq!(still_followup.reason_code, "stop_schema_missing");
         assert!(still_followup.count_budget);
 
-        let exhausted = evaluate_stop_schema_gate("普通停止文本", 10, 3);
+        let exhausted = evaluate_stop_schema_gate("普通停止文本", 2, 3);
         assert_eq!(exhausted.action, StopSchemaGateAction::FailFast);
         assert_eq!(exhausted.reason_code, "stop_schema_budget_exhausted");
         assert!(exhausted.count_budget);
@@ -1377,7 +1406,7 @@ mod tests {
     fn stop_schema_invalid_exhausts_budget_but_valid_stop_does_not() {
         let invalid = evaluate_stop_schema_gate(
             r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
-            3,
+            2,
             3,
         );
         assert_eq!(invalid.action, StopSchemaGateAction::FailFast);

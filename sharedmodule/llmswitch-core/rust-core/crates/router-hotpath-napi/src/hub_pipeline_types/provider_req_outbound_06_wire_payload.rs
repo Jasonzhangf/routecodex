@@ -34,6 +34,7 @@ pub(crate) fn build_provider_req_outbound_06_from_hub_req_outbound_05(
     assert_no_inline_metadata(&payload, "ProviderReqOutbound06WirePayload")?;
     assert_payload_has_no_meta_or_error_carrier(&payload, "ProviderReqOutbound06WirePayload")?;
     assert_no_provider_options_metadata(&payload, "ProviderReqOutbound06WirePayload")?;
+    assert_no_request_context_or_namespace_tools(&payload, "ProviderReqOutbound06WirePayload")?;
     let payload = clone_object_payload(&payload, "ProviderReqOutbound06WirePayload")?;
     Ok(ProviderReqOutbound06WirePayload { payload })
 }
@@ -57,6 +58,68 @@ pub(super) fn assert_no_provider_options_metadata(
         }
     }
     Ok(())
+}
+
+fn assert_no_request_context_or_namespace_tools(
+    value: &Value,
+    node_name: &str,
+) -> Result<(), String> {
+    fn walk(value: &Value, node_name: &str, path: &str) -> Result<(), String> {
+        match value {
+            Value::Object(object) => {
+                for forbidden in [
+                    "toolsRaw",
+                    "clientToolsRaw",
+                    "responsesContext",
+                    "contextSnapshot",
+                    "requestMetadata",
+                    "__raw_request_body",
+                    "rawBody",
+                ] {
+                    if object.contains_key(forbidden) {
+                        return Err(format!(
+                            "{node_name} must not carry request context field {forbidden} at {path}"
+                        ));
+                    }
+                }
+                let item_type = object
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .unwrap_or("");
+                if item_type.eq_ignore_ascii_case("namespace") {
+                    return Err(format!(
+                        "{node_name} must not carry namespace tool aggregate at {path}"
+                    ));
+                }
+                if object.contains_key("tools")
+                    && object.get("tools").is_some_and(Value::is_array)
+                    && object.get("name").and_then(Value::as_str).is_some()
+                    && !object.contains_key("function")
+                {
+                    return Err(format!(
+                        "{node_name} must not carry namespace tool aggregate at {path}"
+                    ));
+                }
+                for (key, child) in object {
+                    let child_path = if path == "$" {
+                        format!("$.{key}")
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    walk(child, node_name, child_path.as_str())?;
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    walk(child, node_name, format!("{path}[{index}]").as_str())?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    walk(value, node_name, "$")
 }
 
 #[cfg(test)]
@@ -106,5 +169,46 @@ mod tests {
         let err = build_provider_req_outbound_06_from_hub_req_outbound_05(&selected, semantic)
             .unwrap_err();
         assert!(err.contains("provider SDK options"));
+    }
+
+    #[test]
+    fn rejects_request_context_fields_in_wire_payload() {
+        let payload = json!({"model":"m","toolsRaw":[{"type":"function","name":"leak"}]});
+        let inbound = build_hub_req_inbound_02_from_payload(json!({"model":"m"})).unwrap();
+        let governed =
+            build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound, json!({"model":"m"}))
+                .unwrap();
+        let selected = build_vr_route_04_from_hub_req_chatprocess_03(
+            &governed,
+            json!({"providerKey":"p.key","model":"m"}),
+        )
+        .unwrap();
+        let semantic =
+            build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, payload).unwrap();
+        let err = build_provider_req_outbound_06_from_hub_req_outbound_05(&selected, semantic)
+            .unwrap_err();
+        assert!(err.contains("request context field toolsRaw"));
+    }
+
+    #[test]
+    fn rejects_namespace_tool_aggregate_in_wire_payload() {
+        let payload = json!({
+            "model":"m",
+            "tools":[{"type":"namespace","name":"multi_agent_v1","tools":[{"type":"function","name":"spawn_agent"}]}]
+        });
+        let inbound = build_hub_req_inbound_02_from_payload(json!({"model":"m"})).unwrap();
+        let governed =
+            build_hub_req_chatprocess_03_from_hub_req_inbound_02(inbound, json!({"model":"m"}))
+                .unwrap();
+        let selected = build_vr_route_04_from_hub_req_chatprocess_03(
+            &governed,
+            json!({"providerKey":"p.key","model":"m"}),
+        )
+        .unwrap();
+        let semantic =
+            build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, payload).unwrap();
+        let err = build_provider_req_outbound_06_from_hub_req_outbound_05(&selected, semantic)
+            .unwrap_err();
+        assert!(err.contains("namespace tool aggregate"));
     }
 }

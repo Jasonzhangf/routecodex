@@ -1,7 +1,6 @@
 import {
   applyOpenCodeZenThinkingDefaults,
   buildOpenAiSdkChatCallOptions,
-  mergePreservedOpenAiRequestFields,
   VercelAiSdkOpenAiTransport
 } from '../../../../src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.js';
 
@@ -261,52 +260,8 @@ describe('buildOpenAiSdkChatCallOptions', () => {
   });
 });
 
-describe('mergePreservedOpenAiRequestFields', () => {
-  it('keeps top-level provider-specific fields not rebuilt by the SDK', () => {
-    expect(
-      mergePreservedOpenAiRequestFields(
-        {
-          model: 'qwen3.5-plus',
-          messages: [],
-          parameters: { reasoning: true },
-          input: [{ role: 'user', content: [{ text: 'hi' }] }],
-          __internal: { drop: true }
-        },
-        {
-          model: 'qwen3.5-plus',
-          messages: []
-        }
-      )
-    ).toEqual({
-      model: 'qwen3.5-plus',
-      messages: [],
-      parameters: { reasoning: true },
-      input: [{ role: 'user', content: [{ text: 'hi' }] }]
-    });
-  });
-
-  it('does not preserve internal metadata as provider request field', () => {
-    expect(
-      mergePreservedOpenAiRequestFields(
-        {
-          model: 'qwen3.5-plus',
-          messages: [],
-          metadata: { user_id: 'must-not-leak' }
-        },
-        {
-          model: 'qwen3.5-plus',
-          messages: []
-        }
-      )
-    ).toEqual({
-      model: 'qwen3.5-plus',
-      messages: []
-    });
-  });
-});
-
 describe('VercelAiSdkOpenAiTransport', () => {
-  it('builds request body via AI SDK and preserves unknown top-level fields before sending', async () => {
+  it('builds request body via AI SDK without merging raw request fields', async () => {
     const originalFetch = global.fetch;
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     global.fetch = (async (url: URL | RequestInfo, init?: RequestInit) => {
@@ -328,7 +283,10 @@ describe('VercelAiSdkOpenAiTransport', () => {
             model: 'qwen3.5-plus',
             messages: [{ role: 'user', content: 'hello' }],
             reasoning_effort: 'high',
-            parameters: { reasoning: true }
+            parameters: { reasoning: true },
+            input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw-only' }] }],
+            contextSnapshot: { toolsRaw: [{ type: 'namespace', name: 'bad' }] },
+            __raw_request_body: { tools: [{ type: 'namespace', name: 'bad' }] }
           },
           wantsSse: false
         },
@@ -341,10 +299,12 @@ describe('VercelAiSdkOpenAiTransport', () => {
       const requestBody = JSON.parse(String(calls[0].init?.body));
       expect(requestBody).toMatchObject({
         model: 'qwen3.5-plus',
-        messages: [{ role: 'user', content: 'hello' }],
-        reasoning_effort: 'high',
-        parameters: { reasoning: true }
+        messages: [{ role: 'user', content: 'hello' }]
       });
+      expect(requestBody.parameters).toBeUndefined();
+      expect(requestBody.input).toBeUndefined();
+      expect(requestBody.contextSnapshot).toBeUndefined();
+      expect(requestBody.__raw_request_body).toBeUndefined();
       expect(requestBody.metadata).toBeUndefined();
       expect(response).toMatchObject({
         status: 200,

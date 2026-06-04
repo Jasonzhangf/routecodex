@@ -64,7 +64,11 @@ import { extractStatusCodeFromError } from './executor/utils.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
-import { clearResponsesConversationByRequestId } from '../../../modules/llmswitch/bridge.js';
+import {
+  clearResponsesConversationByRequestId,
+  finalizeResponsesConversationRequestRetention,
+  recordResponsesResponseForRequest,
+} from '../../../modules/llmswitch/bridge.js';
 import { isPoolExhaustedPipelineError } from './executor/request-executor-core-utils.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
@@ -1406,6 +1410,27 @@ export class RouteCodexHttpServer {
       normalized.body && typeof normalized.body === 'object'
         ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
+    if (input.requestId && providerHandle.providerProtocol === 'openai-responses') {
+      const responseBody = normalized.body;
+      if (
+        normalized.status && normalized.status >= 400
+        || !responseBody
+        || typeof responseBody !== 'object'
+        || Array.isArray(responseBody)
+        || '__sse_responses' in (responseBody as Record<string, unknown>)
+      ) {
+        await clearResponsesConversationByRequestId(input.requestId);
+      } else {
+        await recordResponsesResponseForRequest({
+          requestId: input.requestId,
+          response: responseBody as Record<string, unknown>,
+          providerKey: auditContext.providerKey,
+        });
+        await finalizeResponsesConversationRequestRetention(input.requestId, {
+          keepForSubmitToolOutputs: finishReason === 'tool_calls',
+        });
+      }
+    }
     const baseResult: PipelineExecutionResult = {
       ...normalized,
       metadata:
@@ -1455,11 +1480,7 @@ export class RouteCodexHttpServer {
         ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
     if (requestModel && normalized.body && typeof normalized.body === 'object' && !Array.isArray(normalized.body)) {
-      try {
-        (normalized.body as Record<string, unknown>).model = requestModel;
-      } catch {
-        // ignore model rewrite failures
-      }
+      (normalized.body as Record<string, unknown>).model = requestModel;
     }
     return {
       ...normalized,

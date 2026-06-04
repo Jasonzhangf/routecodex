@@ -300,10 +300,10 @@ function convertAssistantContent(content: unknown, toolCalls: unknown): unknown[
   return parts;
 }
 
-function convertPrompt(rawBody: UnknownRecord): LanguageModelV3Prompt {
+function convertPrompt(providerBody: UnknownRecord): LanguageModelV3Prompt {
   const prompt: LanguageModelV3Prompt = [];
 
-  for (const message of asArray(rawBody.messages)) {
+  for (const message of asArray(providerBody.messages)) {
     const bag = asRecord(message);
     const role = pickString(bag.role)?.toLowerCase();
     if (!role) {
@@ -360,8 +360,8 @@ function convertPrompt(rawBody: UnknownRecord): LanguageModelV3Prompt {
   return prompt;
 }
 
-function convertTools(rawBody: UnknownRecord): LanguageModelV3FunctionTool[] | undefined {
-  const tools = asArray(rawBody.tools)
+function convertTools(providerBody: UnknownRecord): LanguageModelV3FunctionTool[] | undefined {
+  const tools = asArray(providerBody.tools)
     .map((entry) => asRecord(entry))
     .map((tool) => {
       const type = pickString(tool.type)?.toLowerCase();
@@ -382,10 +382,10 @@ function convertTools(rawBody: UnknownRecord): LanguageModelV3FunctionTool[] | u
 }
 
 function convertResponseFormat(
-  rawBody: UnknownRecord,
+  providerBody: UnknownRecord,
   openaiProviderOptions: OpenAiProviderOptions
 ): LanguageModelV3CallOptions['responseFormat'] | undefined {
-  const format = asRecord(rawBody.response_format ?? rawBody.responseFormat);
+  const format = asRecord(providerBody.response_format ?? providerBody.responseFormat);
   const type = pickString(format.type)?.toLowerCase();
   if (!type) {
     return undefined;
@@ -515,23 +515,6 @@ export function buildOpenAiSdkChatCallOptions(
   };
 }
 
-export function mergePreservedOpenAiRequestFields(rawBody: UnknownRecord, builtBody: UnknownRecord): UnknownRecord {
-  const merged = { ...builtBody };
-  for (const [key, value] of Object.entries(rawBody)) {
-    if (key.startsWith('__')) {
-      continue;
-    }
-    if (key === 'metadata') {
-      continue;
-    }
-    if (Object.prototype.hasOwnProperty.call(merged, key)) {
-      continue;
-    }
-    merged[key] = stripInternalKeysDeep(value);
-  }
-  return merged;
-}
-
 function responseHeadersToRecord(headers: Headers): Record<string, string> | undefined {
   const entries = Array.from(headers.entries());
   if (!entries.length) {
@@ -593,9 +576,9 @@ export class VercelAiSdkOpenAiTransport {
     requestInfo: PreparedHttpRequest,
     context: ProviderContext
   ): Promise<unknown> {
-    const rawBody = applyOpenCodeZenThinkingDefaults(asRecord(requestInfo.body), context);
-    normalizeResponsesToChatBody(rawBody);
-    const modelId = pickString(rawBody.model);
+    const providerBody = applyOpenCodeZenThinkingDefaults(asRecord(requestInfo.body), context);
+    normalizeResponsesToChatBody(providerBody);
+    const modelId = pickString(providerBody.model);
     if (!modelId) {
       throw new Error('provider-runtime-error: missing model from openai sdk transport');
     }
@@ -606,9 +589,9 @@ export class VercelAiSdkOpenAiTransport {
       url: () => requestInfo.targetUrl
     } as never) as any;
 
-    const callOptions = buildOpenAiSdkChatCallOptions(rawBody, requestInfo.headers);
+    const callOptions = buildOpenAiSdkChatCallOptions(providerBody, requestInfo.headers);
     const argsResult = await model.getArgs(callOptions);
-    const body = mergePreservedOpenAiRequestFields(rawBody, asRecord(argsResult.args));
+    const body = asRecord(argsResult.args);
 
     const response = await fetch(requestInfo.targetUrl, {
       method: 'POST',

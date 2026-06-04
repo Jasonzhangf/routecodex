@@ -664,22 +664,6 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
         context.as_object().and_then(|row| row.get("input")),
     ));
 
-    let tools = context
-        .as_object()
-        .and_then(|row| row.get("toolsRaw"))
-        .and_then(Value::as_array)
-        .cloned()
-        .or_else(|| {
-            payload
-                .as_object()
-                .and_then(|row| row.get("tools"))
-                .and_then(Value::as_array)
-                .cloned()
-        });
-
-    if let Some(tool_values) = tools.clone() {
-        base_payload.insert("tools".to_string(), Value::Array(tool_values));
-    }
     if let Some(provider_key) = read_trimmed_string(
         context
             .as_object()
@@ -697,7 +681,6 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
     serde_json::json!({
         "basePayload": Value::Object(base_payload),
         "input": Value::Array(input),
-        "tools": tools.map(Value::Array).unwrap_or(Value::Null),
         "providerKey": provider_key_value,
     })
 }
@@ -766,11 +749,6 @@ fn resume_responses_conversation_payload(
         Value::String(response_id.to_string()),
     );
 
-    if let Some(tools) = entry_obj.get("tools").and_then(Value::as_array).cloned() {
-        if !tools.is_empty() {
-            payload.insert("tools".to_string(), Value::Array(tools));
-        }
-    }
     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
     if let Some(provider_key) = provider_key.clone() {
         payload.insert("providerKey".to_string(), Value::String(provider_key));
@@ -1167,11 +1145,6 @@ fn restore_responses_continuation_payload(
         payload.insert(key, value);
     }
 
-    if let Some(tools) = entry_obj.get("tools").and_then(Value::as_array).cloned() {
-        if !tools.is_empty() && !payload.contains_key("tools") {
-            payload.insert("tools".to_string(), Value::Array(tools));
-        }
-    }
     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
     if let Some(provider_key) = provider_key.clone() {
         payload.insert("providerKey".to_string(), Value::String(provider_key));
@@ -1183,12 +1156,6 @@ fn restore_responses_continuation_payload(
         Value::String(response_id.clone()),
     );
 
-    let restored_tools = entry_obj
-        .get("tools")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-
     serde_json::json!({
         "payload": Value::Object(payload),
         "meta": {
@@ -1198,7 +1165,6 @@ fn restore_responses_continuation_payload(
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "deltaInputItems": delta_input.len(),
-            "restoredTools": restored_tools,
             "toolOutputsDetailed": submitted_details,
             "restored": true,
         }
@@ -1265,11 +1231,6 @@ fn materialize_responses_continuation_payload(
         payload.insert(key, value);
     }
 
-    if let Some(tools) = entry_obj.get("tools").and_then(Value::as_array).cloned() {
-        if !tools.is_empty() && !payload.contains_key("tools") {
-            payload.insert("tools".to_string(), Value::Array(tools));
-        }
-    }
     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
     if let Some(provider_key) = provider_key.clone() {
         payload.insert("providerKey".to_string(), Value::String(provider_key));
@@ -1486,7 +1447,7 @@ mod tests {
                 "requestId": "req_1",
                 "basePayload": entry.get("basePayload").cloned().unwrap_or(Value::Null),
                 "input": entry.get("input").cloned().unwrap_or(Value::Null),
-                "tools": entry.get("tools").cloned().unwrap_or(Value::Null)
+                "tools": Value::Null
             }),
             "resp_1",
             &json!({
@@ -1549,7 +1510,7 @@ mod tests {
                 "requestId": "req_1",
                 "basePayload": entry.get("basePayload").cloned().unwrap_or(Value::Null),
                 "input": entry.get("input").cloned().unwrap_or(Value::Null),
-                "tools": entry.get("tools").cloned().unwrap_or(Value::Null)
+                "tools": Value::Null
             }),
             "resp_1",
             &json!({
@@ -1588,7 +1549,7 @@ mod tests {
                 "requestId": "req_1",
                 "basePayload": entry.get("basePayload").cloned().unwrap_or(Value::Null),
                 "input": entry.get("input").cloned().unwrap_or(Value::Null),
-                "tools": entry.get("tools").cloned().unwrap_or(Value::Null)
+                "tools": Value::Null
             }),
             "resp_1",
             &json!({

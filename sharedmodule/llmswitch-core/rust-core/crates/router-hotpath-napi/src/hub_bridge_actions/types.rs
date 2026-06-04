@@ -164,63 +164,19 @@ pub struct PrepareResponsesRequestEnvelopeInput {
     #[serde(default)]
     pub request: Value,
     #[serde(default)]
-    pub context_system_instruction: Option<Value>,
-    #[serde(default)]
     pub extra_system_instruction: Option<Value>,
-    #[serde(default)]
-    pub metadata_system_instruction: Option<Value>,
     #[serde(default)]
     pub combined_system_instruction: Option<Value>,
     #[serde(default)]
     pub reasoning_instruction_segments: Option<Value>,
     #[serde(default)]
-    pub context_parameters: Option<Value>,
-    #[serde(default)]
     pub chat_parameters: Option<Value>,
-    #[serde(default)]
-    pub metadata_parameters: Option<Value>,
-    #[serde(default)]
-    pub context_stream: Option<Value>,
-    #[serde(default)]
-    pub metadata_stream: Option<Value>,
     #[serde(default)]
     pub chat_stream: Option<Value>,
     #[serde(default)]
     pub chat_parameters_stream: Option<Value>,
     #[serde(default)]
-    pub context_include: Option<Value>,
-    #[serde(default)]
-    pub metadata_include: Option<Value>,
-    #[serde(default)]
-    pub context_store: Option<Value>,
-    #[serde(default)]
-    pub metadata_store: Option<Value>,
-    #[serde(default)]
     pub strip_host_fields: Option<bool>,
-    #[serde(default)]
-    pub context_tool_choice: Option<Value>,
-    #[serde(default)]
-    pub metadata_tool_choice: Option<Value>,
-    #[serde(default)]
-    pub context_parallel_tool_calls: Option<Value>,
-    #[serde(default)]
-    pub metadata_parallel_tool_calls: Option<Value>,
-    #[serde(default)]
-    pub context_response_format: Option<Value>,
-    #[serde(default)]
-    pub metadata_response_format: Option<Value>,
-    #[serde(default)]
-    pub context_service_tier: Option<Value>,
-    #[serde(default)]
-    pub metadata_service_tier: Option<Value>,
-    #[serde(default)]
-    pub context_truncation: Option<Value>,
-    #[serde(default)]
-    pub metadata_truncation: Option<Value>,
-    #[serde(default)]
-    pub context_metadata: Option<Value>,
-    #[serde(default)]
-    pub metadata_metadata: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]

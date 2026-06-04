@@ -6,12 +6,12 @@
  * Violations must fail-fast, never silently delete.
  */
 const CLIENT_RESPONSE_FORBIDDEN_FIELDS: ReadonlySet<string> = new Set([
-  'metadata',
   'metaCarrier',
   'runtimeMetadata',
   'errorCarrier',
   'classifiedError',
   '__rt',
+  '__internal',
   'snapshot',
   'snapshotId',
   '__raw_request_body',
@@ -19,6 +19,39 @@ const CLIENT_RESPONSE_FORBIDDEN_FIELDS: ReadonlySet<string> = new Set([
   'upstreamRequestId',
   'providerStack',
 ]);
+
+const INTERNAL_METADATA_KEYS: ReadonlySet<string> = new Set([
+  'routeHint',
+  'routeName',
+  'providerKey',
+  'runtimeKey',
+  'poolId',
+  'serverToolFollowup',
+  'serverToolFollowupMode',
+  'stopMessageEnabled',
+  'routecodexPortStopMessageEnabled',
+  'clientAbortSignal',
+  'clientConnectionState',
+  '__routecodexDirectPassthrough',
+  '__routecodexProviderFailureAttemptOffset',
+]);
+
+function isInternalMetadataCarrier(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key.startsWith('__routecodex') || key.startsWith('__rt') || INTERNAL_METADATA_KEYS.has(key)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function allowsClientVisibleProtocolMetadata(payload: Record<string, unknown>): boolean {
+  return payload.object === 'response' && typeof payload.id === 'string' && payload.id.trim().length > 0;
+}
 
 function findForbiddenFieldInResponsePayload(
   payload: unknown,
@@ -34,7 +67,16 @@ function findForbiddenFieldInResponsePayload(
     }
     return undefined;
   }
-  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+  const record = payload as Record<string, unknown>;
+  for (const [key, value] of Object.entries(record)) {
+    if (key === 'metadata') {
+      if (!allowsClientVisibleProtocolMetadata(record)) {
+        return key;
+      }
+      if (isInternalMetadataCarrier(value)) {
+        return key;
+      }
+    }
     if (CLIENT_RESPONSE_FORBIDDEN_FIELDS.has(key)) {
       return key;
     }
@@ -1139,20 +1181,6 @@ function shouldDispatchSseToClient(
   return metadata?.outboundStream === true || metadata?.stream === true;
 }
 
-function isDirectPassthroughResponse(result: PipelineExecutionResult): boolean {
-  const metadata =
-    result.metadata && typeof result.metadata === 'object' && !Array.isArray(result.metadata)
-      ? (result.metadata as Record<string, unknown>)
-      : undefined;
-  if (metadata?.__routecodexDirectPassthrough === true) {
-    return true;
-  }
-  const routeName = typeof result.usageLogInfo?.routeName === 'string'
-    ? result.usageLogInfo.routeName
-    : '';
-  return routeName === 'port.provider-direct' || routeName.startsWith('router-direct:');
-}
-
 export function isAnalysisModeEnabled(): boolean {
   const mode = String(process.env.ROUTECODEX_MODE || process.env.RCC_MODE || '').trim().toLowerCase();
   if (mode === 'analysis') {
@@ -1322,10 +1350,7 @@ export async function sendPipelineResponse(
       sendSseBridgeError(res, requestLabel, 502);
       return;
     }
-    const directPassthrough = isDirectPassthroughResponse(result);
-    const restoredStream = directPassthrough
-      ? stream
-      : createClientVisibleSseRestoreStream(stream, restoreContext);
+    const restoredStream = createClientVisibleSseRestoreStream(stream, restoreContext);
     const clientSseSnapshotRecorder = captureClientResponse
       ? createClientSseSnapshotRecorder(restoredStream, res, {
         requestId: requestLabel,

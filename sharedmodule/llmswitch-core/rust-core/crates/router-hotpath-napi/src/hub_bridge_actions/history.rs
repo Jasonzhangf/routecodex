@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
 use crate::hub_tool_session_compat::{normalize_tool_session_payload, ToolSessionCompatInput};
 use crate::shared_json_utils::{
-    clone_non_empty_object, clone_plain_object, read_optional_bool, read_trimmed_string,
+    clone_non_empty_object, read_optional_bool, read_trimmed_string,
 };
 use crate::shared_metadata_semantics::read_runtime_metadata_json;
 use crate::shared_responses_tool_utils::resolve_tool_call_id_style_json;
@@ -853,39 +853,8 @@ fn collect_reasoning_instruction_segments(value: Option<&Value>) -> Vec<String> 
         .collect()
 }
 
-fn strip_tool_control_fields(mut record: Map<String, Value>) -> Option<Map<String, Value>> {
-    record.remove("tool_choice");
-    record.remove("parallel_tool_calls");
-    if record.is_empty() {
-        return None;
-    }
-    Some(record)
-}
-
-fn merge_parameter_sources(
-    context: Option<&Value>,
-    chat: Option<&Value>,
-    metadata: Option<&Value>,
-) -> Option<Map<String, Value>> {
-    let mut merged = Map::new();
-    for (source, preserve_tool_controls) in [(metadata, false), (chat, true), (context, false)] {
-        if let Some(record) = clone_non_empty_object(source).and_then(|record| {
-            if preserve_tool_controls {
-                Some(record)
-            } else {
-                strip_tool_control_fields(record)
-            }
-        }) {
-            for (key, value) in record {
-                merged.insert(key, value);
-            }
-        }
-    }
-    if merged.is_empty() {
-        None
-    } else {
-        Some(merged)
-    }
+fn merge_chat_parameter_source(chat: Option<&Value>) -> Option<Map<String, Value>> {
+    clone_non_empty_object(chat)
 }
 
 fn merge_parameters_into_request(request: &mut Map<String, Value>, source: &Map<String, Value>) {
@@ -928,30 +897,13 @@ fn merge_parameters_into_request(request: &mut Map<String, Value>, source: &Map<
     }
 }
 
-fn apply_direct_override(request: &mut Map<String, Value>, key: &str, value: Option<&Value>) {
-    if request.contains_key(key) {
-        return;
-    }
-    if let Some(candidate) = value.cloned() {
-        request.insert(key.to_string(), candidate);
-    }
-}
-
-fn upsert_direct_override(request: &mut Map<String, Value>, key: &str, value: Option<&Value>) {
-    if let Some(candidate) = value.cloned() {
-        request.insert(key.to_string(), candidate);
-    }
-}
-
 pub(crate) fn prepare_responses_request_envelope(
     input: PrepareResponsesRequestEnvelopeInput,
 ) -> PrepareResponsesRequestEnvelopeOutput {
     let mut request = input.request.as_object().cloned().unwrap_or_default();
 
     let instruction_candidates = [
-        read_trimmed_string(input.context_system_instruction.as_ref()),
         read_trimmed_string(input.extra_system_instruction.as_ref()),
-        read_trimmed_string(input.metadata_system_instruction.as_ref()),
         read_trimmed_string(input.combined_system_instruction.as_ref()),
     ];
     let resolved_instruction = instruction_candidates.into_iter().flatten().next();
@@ -975,100 +927,20 @@ pub(crate) fn prepare_responses_request_envelope(
         }
     }
 
-    if let Some(parameters) = merge_parameter_sources(
-        input.context_parameters.as_ref(),
-        input.chat_parameters.as_ref(),
-        input.metadata_parameters.as_ref(),
-    ) {
+    if let Some(parameters) = merge_chat_parameter_source(input.chat_parameters.as_ref()) {
         merge_parameters_into_request(&mut request, &parameters);
     }
 
-    let resolved_stream = read_optional_bool(input.context_stream.as_ref())
-        .or_else(|| read_optional_bool(input.chat_stream.as_ref()))
-        .or_else(|| read_optional_bool(input.chat_parameters_stream.as_ref()))
-        .or_else(|| read_optional_bool(input.metadata_stream.as_ref()));
+    let resolved_stream = read_optional_bool(input.chat_stream.as_ref())
+        .or_else(|| read_optional_bool(input.chat_parameters_stream.as_ref()));
     if let Some(stream) = resolved_stream {
         request.insert("stream".to_string(), Value::Bool(stream));
     }
 
-    upsert_direct_override(&mut request, "include", input.metadata_include.as_ref());
-    upsert_direct_override(&mut request, "include", input.context_include.as_ref());
-
     if input.strip_host_fields.unwrap_or(false) {
         request.remove("store");
     } else if !request.contains_key("store") {
-        if let Some(value) = input.context_store.as_ref().cloned() {
-            request.insert("store".to_string(), value);
-        } else if let Some(value) = input.metadata_store.as_ref().cloned() {
-            request.insert("store".to_string(), value);
-        } else {
-            request.insert("store".to_string(), Value::Bool(false));
-        }
-    }
-
-    if !request.contains_key("tool_choice") {
-        upsert_direct_override(
-            &mut request,
-            "tool_choice",
-            input.metadata_tool_choice.as_ref(),
-        );
-        upsert_direct_override(
-            &mut request,
-            "tool_choice",
-            input.context_tool_choice.as_ref(),
-        );
-    }
-
-    if !request.contains_key("parallel_tool_calls") {
-        upsert_direct_override(
-            &mut request,
-            "parallel_tool_calls",
-            input.metadata_parallel_tool_calls.as_ref(),
-        );
-        upsert_direct_override(
-            &mut request,
-            "parallel_tool_calls",
-            input.context_parallel_tool_calls.as_ref(),
-        );
-    }
-
-    upsert_direct_override(
-        &mut request,
-        "response_format",
-        input.metadata_response_format.as_ref(),
-    );
-    upsert_direct_override(
-        &mut request,
-        "response_format",
-        input.context_response_format.as_ref(),
-    );
-
-    upsert_direct_override(
-        &mut request,
-        "service_tier",
-        input.metadata_service_tier.as_ref(),
-    );
-    upsert_direct_override(
-        &mut request,
-        "service_tier",
-        input.context_service_tier.as_ref(),
-    );
-
-    upsert_direct_override(
-        &mut request,
-        "truncation",
-        input.metadata_truncation.as_ref(),
-    );
-    upsert_direct_override(
-        &mut request,
-        "truncation",
-        input.context_truncation.as_ref(),
-    );
-
-    if let Some(metadata) = clone_non_empty_object(input.context_metadata.as_ref()) {
-        request.insert("metadata".to_string(), Value::Object(metadata));
-    } else if let Some(metadata) = clone_plain_object(input.metadata_metadata.as_ref()) {
-        request.insert("metadata".to_string(), Value::Object(metadata));
+        request.insert("store".to_string(), Value::Bool(false));
     }
 
     let has_tools = request

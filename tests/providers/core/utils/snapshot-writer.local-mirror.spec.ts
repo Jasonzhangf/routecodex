@@ -73,6 +73,8 @@ describe('provider snapshot writer local mirror', () => {
     const filePath = path.join(
       tempDir,
       'openai-responses',
+      'ports',
+      '5555',
       providerKey,
       requestId,
       'provider-response.json'
@@ -80,6 +82,8 @@ describe('provider snapshot writer local mirror', () => {
     const runtimePath = path.join(
       tempDir,
       'openai-responses',
+      'ports',
+      '5555',
       providerKey,
       requestId,
       '__runtime.json'
@@ -104,5 +108,53 @@ describe('provider snapshot writer local mirror', () => {
     expect(runtimeParsed.providerKey).toBe(providerKey);
     expect(runtimeParsed.entryPort).toBe(5555);
     expect(runtimeParsed.matchedPort).toBe(5555);
+  });
+
+  it('does not write raw request/context tool carriers into provider snapshot requestMetadata', async () => {
+    const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
+    const requestId = 'req_provider_snapshot_metadata_sanitize';
+    const providerKey = 'minimax.key1.MiniMax-M3';
+
+    allowSnapshotLocalDiskWrite(requestId);
+
+    await writeProviderSnapshot({
+      phase: 'provider-request',
+      requestId,
+      clientRequestId: requestId,
+      entryEndpoint: '/v1/responses',
+      providerKey,
+      metadata: {
+        matchedPort: 5555,
+        __raw_request_body: { tools: [{ type: 'namespace', name: 'multi_agent_v1' }] },
+        responsesRequestContext: {
+          context: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
+          payload: { tools: [{ type: 'namespace', name: 'multi_agent_v1' }] }
+        },
+        responsesContext: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
+        contextSnapshot: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
+        portContext: { logNamespace: 'server-5555' }
+      },
+      data: { model: 'minimax-m3-free', messages: [{ role: 'user', content: 'ok' }] }
+    });
+    await __flushProviderSnapshotQueueForTests();
+
+    const filePath = path.join(
+      tempDir,
+      'openai-responses',
+      'ports',
+      '5555',
+      providerKey,
+      requestId,
+      'provider-request.json'
+    );
+    const parsed = JSON.parse(await fs.readFile(filePath, 'utf-8')) as { meta?: Record<string, any> };
+    const serializedMeta = JSON.stringify(parsed.meta?.requestMetadata ?? {});
+
+    expect(parsed.meta?.requestMetadata?.matchedPort).toBe(5555);
+    expect(parsed.meta?.requestMetadata?.portContext?.logNamespace).toBe('server-5555');
+    expect(serializedMeta).not.toContain('__raw_request_body');
+    expect(serializedMeta).not.toContain('responsesRequestContext');
+    expect(serializedMeta).not.toContain('toolsRaw');
+    expect(serializedMeta).not.toContain('"type":"namespace"');
   });
 });

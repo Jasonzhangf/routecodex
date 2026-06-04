@@ -230,8 +230,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext) => {
             entryEndpoint: ctx.entryEndpoint,
             injection: {
               ops: [
-                { op: 'append_tool_messages_from_tool_outputs', required: true },
-                { op: 'drop_tool_by_name', name: 'apply_patch' }
+                { op: 'append_tool_messages_from_tool_outputs', required: true }
               ]
             }
           }

@@ -172,6 +172,10 @@ pub(crate) fn build_openai_chat_completion_from_responses_payload(candidate: &Va
     if let Some(usage) = response.get("usage").filter(|value| value.is_object()) {
         out.insert("usage".to_string(), usage.clone());
     }
+    out.insert(
+        "routecodex_response".to_string(),
+        Value::Object(response.clone()),
+    );
     Some(Value::Object(out))
 }
 

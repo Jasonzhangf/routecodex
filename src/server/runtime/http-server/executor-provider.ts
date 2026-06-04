@@ -177,14 +177,14 @@ export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryO
       clearTimeout(timer);
       try {
         signal?.removeEventListener?.('abort', onAbort as EventListener);
-      } catch {
-        // ignore cleanup errors
+      } catch (error) {
+        console.warn(
+          `[executor-provider] retry abort listener cleanup failed: ${error instanceof Error ? error.message : String(error)}`
+        );
       }
     };
-    try {
-      signal?.addEventListener?.('abort', onAbort as EventListener, { once: true } as AddEventListenerOptions);
-    } catch {
-      // ignore listener registration failure and rely on timeout
+    if (signal) {
+      signal.addEventListener('abort', onAbort as EventListener, { once: true } as AddEventListenerOptions);
     }
   });
   return delayMs;

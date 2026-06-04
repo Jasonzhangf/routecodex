@@ -1,15 +1,17 @@
-# Hub Pipeline Stage Catalog
+# Hub Pipeline Topology Catalog
 
-This directory documents the refactored Hub Pipeline stage skeleton. Every provider flow (requests/responses) is expressed as three coarse segments and every stage adopts the
-`<flow>_<segment>_stage<n>_<verb>` naming convention. Each subdirectory contains the contract and future implementation notes for that stage.
+This directory is a historical migration index. New architecture work must use the canonical topology node contract from `docs/design/pipeline-type-topology-and-module-boundaries.md` and Rust contract help, not the old coarse stage skeleton.
 
-## Segments
+## Current Nodes
 
-- `req_inbound`: entry payload → ChatEnvelope (parse, semantic mapping, context capture)
-- `req_process`: governance + routing
-- `req_outbound`: ChatEnvelope → provider wire payload
-- `resp_inbound`: provider payload/SSE → ChatEnvelope
-- `resp_process`: governance + finalization
-- `resp_outbound`: ChatEnvelope → client protocol/SSE output
+- `HubReqInbound02Standardized`: client entry payload → standardized Hub request.
+- `HubReqChatProcess03Governed`: Rust request-side chat-process/tool governance.
+- `VrRoute04SelectedTarget`: Virtual Router target selection only.
+- `HubReqOutbound05ProviderSemantic`: governed Hub semantics → provider semantic envelope.
+- `ProviderReqOutbound06WirePayload`: provider runtime wire payload.
+- `HubRespInbound02Parsed`: provider raw response → parsed Hub response.
+- `HubRespChatProcess03Governed`: Rust response-side chat-process/servertool governance.
+- `HubRespOutbound04ClientSemantic`: Hub response → client protocol semantics.
+- `ServerRespOutbound05ClientFrame`: final guarded JSON/SSE client frame.
 
-See individual READMEs under each stage for behavior and dependencies.
+Legacy subdirectories can help trace migration history, but must not be used as new design entrypoints.

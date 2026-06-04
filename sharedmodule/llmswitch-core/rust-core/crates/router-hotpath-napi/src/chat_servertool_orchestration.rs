@@ -1949,8 +1949,6 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
         "requestIdSuffix": ":continue_execution_followup",
         "injection": {
             "ops": [
-                {"op": "preserve_tools"},
-                {"op": "ensure_standard_tools"},
                 {"op": "append_assistant_message", "required": true},
                 {"op": "append_tool_messages_from_tool_outputs", "required": true}
             ]

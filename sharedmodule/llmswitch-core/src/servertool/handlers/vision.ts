@@ -78,8 +78,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
                   op: 'rebuild_vision_followup',
                   summary: visionSummary,
                   ...(originalPrompt ? { originalPrompt } : {})
-                },
-                { op: 'drop_tool_by_name', name: 'vision' }
+                }
               ]
             }
           }

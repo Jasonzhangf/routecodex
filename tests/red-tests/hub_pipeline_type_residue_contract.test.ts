@@ -50,4 +50,27 @@ describe('Hub Pipeline type residue contract', () => {
     expect(checklist).toContain('req_process_stage1_tool_governance');
     expect(checklist).toContain('resp_process_stage1_tool_governance');
   });
+
+  it('keeps current topology docs and live telemetry labels on canonical node names', () => {
+    const files = [
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/STAGE_CATALOG.md',
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/README.md',
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/INTEGRATION_NOTES.md',
+      'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
+    ];
+    const violations: string[] = [];
+    for (const relative of files) {
+      const source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      for (const pattern of [
+        /\breq_process\b/,
+        /\bresp_process\b/,
+        /req_process\.stage/,
+        /resp_process\.stage/,
+        /chat_process\.resp\.stage/,
+      ]) {
+        if (pattern.test(source)) violations.push(`${relative}: ${pattern}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
 });

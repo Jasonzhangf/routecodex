@@ -8,7 +8,7 @@ import { sendPipelineResponse } from '../../../src/server/handlers/handler-respo
 import { normalizeResponsesJsonBody } from '../../../src/server/handlers/handler-response-utils.js';
 
 describe('handler-response-utils forceSSE responses json bridge', () => {
-  it('passes through direct raw SSE frames without applying internal metadata guard', async () => {
+  it('keeps direct raw SSE frames on the same client-frame metadata guard', async () => {
     const app = express();
     app.get('/direct-sse-with-provider-metadata', (_req, res) => {
       void sendPipelineResponse(
@@ -50,6 +50,49 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       expect(text).toContain('"metadata":{"provider":"raw"}');
       expect(text).not.toContain('sse_bridge_error');
       expect(text).not.toContain('internal carrier');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('rejects direct raw SSE frames that carry internal metadata controls', async () => {
+    const app = express();
+    app.get('/direct-sse-with-internal-metadata', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            __sse_responses: Readable.from([
+              'event: response.created\n',
+              'data: {"type":"response.created","response":{"id":"resp_direct_meta","metadata":{"routeHint":"tools"}}}\n\n',
+            ]),
+          },
+          metadata: {
+            outboundStream: true,
+            __routecodexDirectPassthrough: true,
+          },
+          usageLogInfo: {
+            routeName: 'router-direct:thinking',
+            requestStartedAtMs: Date.now(),
+          },
+        } as any,
+        'req_direct_sse_internal_metadata',
+        { entryEndpoint: '/v1/responses' }
+      );
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/direct-sse-with-internal-metadata`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(text).toContain('sse_stream_error');
+      expect(text).toContain('SSE stream response projection failed');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -98,6 +141,57 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       expect(text).toContain('event: response.completed');
       expect(text).toContain('"type":"response.completed"');
       expect(text).not.toContain('sse_bridge_error');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('encodes Responses function_call JSON into complete SSE terminal frames', async () => {
+    const app = express();
+    app.get('/responses-sse-from-tool-json', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            id: 'resp_tool_json_bridge_1',
+            object: 'response',
+            status: 'completed',
+            model: 'gpt-5.4-medium',
+            output: [
+              {
+                id: 'fc_json_bridge_1',
+                type: 'function_call',
+                call_id: 'call_json_bridge_1',
+                name: 'exec_command',
+                arguments: '{"cmd":"pwd"}',
+                status: 'completed'
+              }
+            ]
+          }
+        } as any,
+        'req_force_sse_tool_json_bridge',
+        { forceSSE: true, entryEndpoint: '/v1/responses' }
+      );
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/responses-sse-from-tool-json`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(text).toContain('event: response.output_item.added');
+      expect(text).toContain('event: response.function_call_arguments.done');
+      expect(text).toContain('event: response.output_item.done');
+      expect(text).toContain('event: response.completed');
+      expect(text).toContain('event: response.done');
+      expect(text).not.toContain('stream closed before response.completed');
+      expect(text).not.toContain('sse_stream_error');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

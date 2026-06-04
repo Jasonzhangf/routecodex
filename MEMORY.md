@@ -2095,3 +2095,23 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
   Tags: guard-order, fail-fast, silent-strip, anti-pattern, hard-guardrail, 2026-06-04
 - Reusable rule: Jest 直接 import router-hotpath-napi (.node) 会出现 `ERR_REQUIRE_ESM` 或 `ERR_UNSUPPORTED_DIR_IMPORT`。最小解法是 spawn 独立 node 进程跑 CLI 二进制,或写 native callability 测试通过 `dist/native/*.node` + `lib/llmswitch-core.js`。不可强行 mock,否则会绕过 native ABI 验证。
   Tags: jest, napi, ERR_REQUIRE_ESM, native-binding, import-error, 2026-06-04
+
+## 2026-06-04 Request field equivalence / followup no-backfill truth
+- Servertool followup is a normal nested request reentry, not a request-field patch DSL. Followup must not inject `requestSemantics` into nested body/metadata and must not restore `tools/tool_choice` from `rawBody`, `__raw_request_body`, `requestMetadata`, `contextSnapshot`, `responsesContext`, `toolsRaw`, or `clientToolsRaw`.
+- `servertool_followup_delta` no longer supports `preserve_tools`, `ensure_standard_tools`, `replace_tools`, `force_tool_choice`, `drop_tool_by_name`, or `append_tool_if_missing`; seed `tools` and `parameters.tool_choice` must not be carried into followup payload. Tool governance belongs to `ReqChatProcess`.
+- Provider wire guard truth: `ProviderReqOutbound06WirePayload` must fail-fast if provider body contains request-context carriers (`toolsRaw`, `clientToolsRaw`, `responsesContext`, `contextSnapshot`, `requestMetadata`, `__raw_request_body`, `rawBody`) or Codex namespace aggregate tools (`type:"namespace"` / `{name, tools:[...]}`).
+
+## 2026-06-04 Full architecture audit closeout
+- Server/client metadata separation truth: `assertClientResponseHasNoInternalCarriers` may allow `metadata` only on true client-visible Responses objects (`object="response"` with string `id`); SSE frames, generic client frames, and nested non-Responses objects carrying `metadata` must fail-fast. Internal metadata keys inside Responses protocol metadata also fail-fast.
+- Current topology naming truth: active docs, red tests, and live telemetry labels must use canonical nodes such as `HubReqChatProcess03Governed` / `HubRespChatProcess03Governed`; old `req_process_*` / `resp_process_*` names are migration legacy/search keywords only, not current design truth.
+- Architecture red-test gate: full `tests/red-tests/*` passed after closeout (22 suites / 122 tests), and `npm run build:min` passed with build version 0.90.2822.
+  Tags: routecodex, architecture-audit, metadata-isolation, topology-naming, red-tests, 2026-06-04
+
+## 2026-06-04 Snapshot requestMetadata no raw tool carriers
+- Provider snapshot `meta.requestMetadata` is debug data and must not persist raw request-field carriers. Snapshot writer must sanitize `__raw_request_body`, `rawBody`, `requestMetadata`, `responsesRequestContext`, `responsesContext`, `contextSnapshot`, `toolsRaw`, `clientToolsRaw`, and `toolsNormalized` before writing provider/client snapshots.
+- This sanitizer is snapshot-only; live metadata side-channel remains separate from provider body, and provider body is guarded by `ProviderReqOutbound06WirePayload`.
+
+## 2026-06-04 Request field equivalence closeout truth
+- Request live fields must come from ChatProcess/Chat source semantics only. Responses bridge must not use `ctx.parameters`, `ctx.metadata.parameters`, `ctx.metadata`, `ctx.toolsRaw`, or context tool controls to project live request fields.
+- `PrepareResponsesRequestEnvelopeInput` is now single-source for request fields: Chat parameters only, plus explicit instruction/stream/strip flags. Context/metadata request-field entries were physically removed to prevent future raw/context backfill.
+- Verified gates: TS targeted 10 suites/82 tests, Rust `prepare_responses_request_envelope`/`servertool_followup_delta`/`provider_req_outbound_06_wire_payload`, `npm run build:min`, global install/restart 5555 `0.90.2826`, and live provider-request namespace/internal-carrier scan `hits=[]`.

@@ -609,7 +609,7 @@ describe('servertool followup dispatch helper', () => {
     expect((result.body as Record<string, any>)?.headers?.authorization).toBe('Bearer test-token');
   });
 
-  it('reenter path injects original request semantics into nested body when followup body lost them', async () => {
+  it('reenter path does not inject original request semantics into nested body when followup body lost them', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
@@ -657,23 +657,13 @@ describe('servertool followup dispatch helper', () => {
     });
 
     const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
-    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual([
-      'exec_command',
-      'reasoning.stop'
-    ]);
-    expect((nestedInput?.body?.semantics as any)?.__routecodex).toEqual({
-      serverToolFollowup: true,
-      serverToolFollowupSource: 'servertool.reasoning_stop_continue'
-    });
-    expect((nestedInput?.body?.semantics as any)?.tools?.clientToolsRaw?.[0]?.function?.name).toBe('exec_command');
-    expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex).toEqual({
-      serverToolFollowup: true,
-      serverToolFollowupSource: 'servertool.reasoning_stop_continue'
-    });
-    expect(((result.body as Record<string, any>)?.tools ?? [])[0]?.function?.name).toBe('exec_command');
+    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual(['reasoning.stop']);
+    expect(nestedInput?.body?.semantics).toBeUndefined();
+    expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
+    expect((result.body as Record<string, any>)?.tools).toBeUndefined();
   });
 
-  it('goal-capable followup restores full client goal tools instead of stale reasoning.stop-only tools', async () => {
+  it('goal-capable followup does not restore client goal tools from requestSemantics', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
@@ -735,14 +725,10 @@ describe('servertool followup dispatch helper', () => {
     });
 
     const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
-    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual([
-      'get_goal',
-      'update_goal',
-      'request_user_input'
-    ]);
-    expect(JSON.stringify(nestedInput?.body?.tools)).not.toContain('reasoning.stop');
-    expect(nestedInput?.body?.tools?.[2]?.function?.parameters?.properties?.questions?.items?.properties?.options?.items)
-      .toEqual({ type: 'object', properties: { label: { type: 'string' } } });
+    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual(['reasoning.stop']);
+    expect(JSON.stringify(nestedInput?.body?.tools)).not.toContain('get_goal');
+    expect(nestedInput?.body?.semantics).toBeUndefined();
+    expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
   });
 
   it('reenter path strips stale responses output budget from servertool followup semantics', async () => {
@@ -805,20 +791,8 @@ describe('servertool followup dispatch helper', () => {
     const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
     expect(nestedInput?.body?.max_tokens).toBeUndefined();
     expect(nestedInput?.body?.max_output_tokens).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.model).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.__routecodex).toEqual({
-      serverToolFollowup: true,
-      serverToolFollowupSource: 'servertool.reasoning_stop_guard'
-    });
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex).toEqual({
-      serverToolFollowup: true,
-      serverToolFollowupSource: 'servertool.reasoning_stop_guard'
-    });
+    expect(nestedInput?.body?.semantics).toBeUndefined();
+    expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
   });
 
   it('reenter path overwrites stale metadata requestSemantics with materialized followup semantics', async () => {
@@ -903,24 +877,11 @@ describe('servertool followup dispatch helper', () => {
     });
 
     const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
-    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual([
-      'exec_command',
-      'apply_patch',
-      'reasoning.stop'
-    ]);
+    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual(['reasoning.stop']);
     expect(nestedInput?.body?.max_tokens).toBeUndefined();
     expect(nestedInput?.body?.max_output_tokens).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.model).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.tools?.clientToolsRaw?.map((tool: any) => tool?.function?.name)).toEqual([
-      'exec_command',
-      'apply_patch'
-    ]);
-    expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex).toEqual({
-      serverToolFollowup: true,
-      serverToolFollowupSource: 'servertool.reasoning_stop_guard'
-    });
+    expect(nestedInput?.body?.semantics).toBeUndefined();
+    expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
   });
 
   it('reenter path strips responses-only request settings without stripping followup tool_choice', async () => {
@@ -1015,24 +976,13 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.body?.max_tokens).toBeUndefined();
     expect(nestedInput?.body?.max_output_tokens).toBeUndefined();
     expect(nestedInput?.body?.parallel_tool_calls).toBeUndefined();
-    expect(nestedInput?.body?.tool_choice).toBe('auto');
+    expect(nestedInput?.body?.tool_choice).toBeUndefined();
     expect(nestedInput?.body?.reasoning).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.model).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.parallel_tool_calls).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.tool_choice).toBe('auto');
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.stream).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.model).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.parallel_tool_calls).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.tool_choice).toBe('auto');
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
-    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.stream).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
-    expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
+    expect((nestedInput?.body?.semantics as any)?.responses).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.tools).toBeUndefined();
+    expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.toolOutputs).toHaveLength(1);
+    expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
   });
 
   it('treats followup source marker alone as servertool followup for sanitize gates', async () => {
@@ -1068,10 +1018,8 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.body?.max_tokens).toBeUndefined();
     expect(nestedInput?.body?.parallel_tool_calls).toBeUndefined();
     expect(nestedInput?.body?.reasoning).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
-    expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex?.serverToolFollowupSource).toBe(
-      'servertool.apply_patch_read_before_retry'
-    );
+    expect(nestedInput?.body?.semantics).toBeUndefined();
+    expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
   });
 
   it('does not pass legacy responsesContext through nested followup metadata', async () => {
@@ -1117,7 +1065,7 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.metadata?.responsesContext).toBeUndefined();
     expect(nestedInput?.metadata?.contextSnapshot).toBeUndefined();
     expect(nestedInput?.metadata?.contextMetadataKey).toBeUndefined();
-    expect(nestedInput?.metadata?.requestSemantics?.responses?.context).toBeDefined();
+    expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
   });
 
   it('disables servertool followup semantics when stopless goal is active (from request semantics)', async () => {
@@ -1157,12 +1105,8 @@ describe('servertool followup dispatch helper', () => {
     });
 
     const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
-    const routecodex = (nestedInput?.metadata?.requestSemantics as any)?.__routecodex ?? {};
-    expect(routecodex.stoplessGoalStatus).toBe('active');
-    expect(routecodex.serverToolFollowup).toBeUndefined();
-    expect(routecodex.serverToolFollowupSource).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.__routecodex?.serverToolFollowup).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.__routecodex?.serverToolFollowupSource).toBeUndefined();
+    expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
+    expect(nestedInput?.body?.semantics).toBeUndefined();
   });
 
   it('reenter path throws when nested pipeline returns HTTP error body instead of success payload', async () => {
@@ -1397,7 +1341,7 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.body?.messages).toBeUndefined();
     expect(nestedInput?.body?.input?.some((entry: any) => entry?.type === 'function_call_output')).toBe(true);
     expect(nestedInput?.body?.semantics?.toolOutputs?.length).toBe(1);
-    expect(nestedInput?.metadata?.requestSemantics?.tools?.clientToolsRaw).toHaveLength(1);
+    expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
   });
 
   it('RED: stop_followup preserves client tool_choice as normal request semantics', async () => {
@@ -1494,7 +1438,7 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.metadata?.__rt).not.toHaveProperty('responses_context');
     expect(nestedInput?.metadata?.__rt).not.toHaveProperty('extraFields');
     expect(nestedInput?.metadata?.__rt).not.toHaveProperty('extra_fields');
-    expect(nestedInput?.body?.semantics?.responses?.context?.previous_response_id).toBe('resp_semantics');
+    expect(nestedInput?.body?.semantics).toBeUndefined();
   });
 
   it('RED: stop_followup continuation rebinds captured responses context to final response id', async () => {

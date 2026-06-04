@@ -94,4 +94,21 @@ describe('executor-provider waitBeforeRetry', () => {
     await pending;
     timerSpy.mockRestore();
   });
+
+  it('fails fast when abort listener registration fails instead of silently waiting for timeout', async () => {
+    const err = Object.assign(new Error('HTTP 500: upstream unavailable'), {
+      statusCode: 500
+    });
+    const signal = {
+      aborted: false,
+      addEventListener: () => {
+        throw Object.assign(new Error('abort listener unavailable'), { code: 'ABORT_LISTENER_UNAVAILABLE' });
+      },
+      removeEventListener: jest.fn()
+    } as unknown as AbortSignal;
+
+    await expect(waitBeforeRetry(err, { attempt: 1, signal })).rejects.toMatchObject({
+      code: 'ABORT_LISTENER_UNAVAILABLE'
+    });
+  });
 });
