@@ -758,6 +758,51 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
+  test('responses entrypoint chatprocess payload does not skip default stopless as empty reply', async () => {
+    const decisionContexts: StopMessageDecisionContext[] = [];
+    __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {
+      decisionContexts.push(ctx);
+      return testStopMessageDecision(ctx as any) as StopMessageDecision;
+    });
+    const reenterPipeline = jest.fn(async (input: any) => ({
+      body: {
+        id: `${input.requestId}:done`,
+        object: 'chat.completion',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'continued' }, finish_reason: 'stop' }]
+      }
+    }));
+    try {
+      const result = await runServerToolOrchestration({
+        chat: buildStopChatResponse('chatcmpl-stop-responses-entry-chatprocess'),
+        adapterContext: {
+          requestId: 'req-stopmessage-responses-entry-chatprocess',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'anthropic-messages',
+          sessionId: 'stopmessage-spec-session-responses-entry-chatprocess',
+          __rt: {
+            stopMessageEnabled: true,
+            routecodexPortStopMessageEnabled: true
+          },
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [{ role: 'user', content: '继续执行' }]
+          }
+        } as any,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-stopmessage-responses-entry-chatprocess',
+        providerProtocol: 'anthropic-messages',
+        reenterPipeline
+      });
+
+      expect(decisionContexts[0]?.empty_reply_continue_local).toBe(false);
+      expect(result.executed).toBe(true);
+      expect(result.flowId).toBe('stop_message_flow');
+      expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    } finally {
+      __setDecideOverrideForTests(testStopMessageDecision as any);
+    }
+  });
+
   test('persisted active goal without current goal context does not skip stopless', async () => {
     const decisionContexts: StopMessageDecisionContext[] = [];
     __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {

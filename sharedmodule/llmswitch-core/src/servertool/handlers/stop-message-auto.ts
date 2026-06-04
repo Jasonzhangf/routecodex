@@ -41,6 +41,7 @@ import {
   evaluateStopSchemaGateWithNative,
   runStopMessageAutoHandlerWithNative
 } from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
+import { detectProviderResponseShapeWithNative } from '../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import {
   applyStopMessageSnapshotToState,
   clearStopMessageState,
@@ -313,6 +314,9 @@ function shouldYieldToEmptyReplyContinueLocal(args: {
     ? (args.base as Record<string, unknown>)
     : null;
   if (endpoint.includes('/v1/responses')) {
+    if (detectProviderResponseShapeWithNative(payload) !== 'openai-responses') {
+      return false;
+    }
     const status = typeof payload?.status === 'string' ? payload.status.trim().toLowerCase() : '';
     const output = Array.isArray(payload?.output) ? payload.output as unknown[] : [];
     const requiredAction = payload?.required_action && typeof payload.required_action === 'object';
