@@ -237,7 +237,14 @@ function readServertoolRuntimeActionChatPayload(effect: Record<string, unknown>)
   return payload as JsonObject;
 }
 
-function projectServertoolChatprocessPayloadToClient(args: {
+type HubRespPayloadStage = 'HubRespOutbound04ClientSemantic' | 'HubRespChatProcess03Governed';
+
+type HubRespProcessEffectResult = {
+  payload: JsonObject;
+  stage: HubRespPayloadStage;
+};
+
+function projectHubRespChatProcess03ToRespOutbound04(args: {
   payload: JsonObject;
   entryEndpoint: string;
   requestId: string;
@@ -263,8 +270,9 @@ async function executeProviderResponseNativeServertoolEffects(args: {
   providerInvoker?: ProviderInvoker;
   reenterPipeline?: ProviderResponseConversionOptions['reenterPipeline'];
   clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
-}): Promise<JsonObject> {
+}): Promise<HubRespProcessEffectResult> {
   let payload = args.payload;
+  let stage: HubRespPayloadStage = 'HubRespOutbound04ClientSemantic';
   for (const effect of readNativeServertoolRuntimeActionEffects(args.effectPlan)) {
     if (effect.action === 'requireReenterPipeline') {
       if (!args.reenterPipeline) {
@@ -290,12 +298,8 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         clientInjectDispatch: args.clientInjectDispatch as any
       });
       if (orchestration.executed) {
-        payload = projectServertoolChatprocessPayloadToClient({
-          payload: orchestration.payload,
-          entryEndpoint: args.entryEndpoint,
-          requestId: args.requestId,
-          context: args.context
-        });
+        payload = orchestration.payload;
+        stage = 'HubRespChatProcess03Governed';
       }
       continue;
     }
@@ -322,18 +326,14 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         clientInjectDispatch: args.clientInjectDispatch as any
       });
       if (orchestration.executed) {
-        payload = projectServertoolChatprocessPayloadToClient({
-          payload: orchestration.payload,
-          entryEndpoint: args.entryEndpoint,
-          requestId: args.requestId,
-          context: args.context
-        });
+        payload = orchestration.payload;
+        stage = 'HubRespChatProcess03Governed';
       }
       continue;
     }
     throw new Error('Rust HubPipeline servertoolRuntimeAction returned unsupported action');
   }
-  return payload;
+  return { payload, stage };
 }
 
 function assertMissingServertoolRuntimeExecutor(args: {
@@ -423,7 +423,7 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     reenterPipeline: args.reenterPipeline,
     clientInjectDispatch: args.clientInjectDispatch
   });
-  hubRespOutbound04ClientSemantic = await executeProviderResponseNativeServertoolEffects({
+  const respProcessEffect = await executeProviderResponseNativeServertoolEffects({
     effectPlan: args.nativeResponsePlan.effectPlan,
     payload: hubRespOutbound04ClientSemantic,
     requestId: args.requestId,
@@ -435,6 +435,14 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     reenterPipeline: args.reenterPipeline,
     clientInjectDispatch: args.clientInjectDispatch
   });
+  hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'
+    ? projectHubRespChatProcess03ToRespOutbound04({
+      payload: respProcessEffect.payload,
+      entryEndpoint: args.entryEndpoint,
+      requestId: args.requestId,
+      context: args.context
+    })
+    : respProcessEffect.payload;
   const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.effectPlan);
   await executeProviderResponseNativeRuntimeStateEffect({
     effectPlan: args.nativeResponsePlan.effectPlan,
