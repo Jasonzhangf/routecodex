@@ -3,6 +3,11 @@ import {
   resolveRequestExecutorProviderErrorClassification,
 } from './request-executor-provider-failure.js';
 import {
+  shouldCancelUnrecoverableRerouteWithoutAlternative,
+  shouldDirectReturnUnrecoverableWithoutForcedExclusion,
+  shouldRerouteTerminalPeriodicRecovery,
+} from '../../../../providers/core/runtime/provider-failure-policy.js';
+import {
   applyRetryExclusionForCurrentProvider,
   buildProviderRetrySwitchPlan,
   hasAlternativeRouteCandidate,
@@ -117,9 +122,11 @@ export async function resolveProviderRetryExecutionPlan(args: {
       excludedProviderKeys: args.excludedProviderKeys
     });
   const terminalQuotaReroute =
-    !eligibilityPlan.shouldRetry
-    && hasTerminalAlternativeCandidate
-    && classification === 'periodic_recovery';
+    shouldRerouteTerminalPeriodicRecovery({
+      classification,
+      shouldRetry: eligibilityPlan.shouldRetry,
+      hasTerminalAlternativeCandidate
+    });
   if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute) {
     const keepTerminalExclusion =
       exclusionPlan.excludedCurrentProvider
@@ -171,9 +178,11 @@ export async function resolveProviderRetryExecutionPlan(args: {
   }
 
   if (
-    classification === 'unrecoverable'
-    && !exclusionPlan.excludedCurrentProvider
-    && (args.error as { retryable?: unknown } | undefined)?.retryable !== true
+    shouldDirectReturnUnrecoverableWithoutForcedExclusion({
+      classification,
+      excludedCurrentProvider: exclusionPlan.excludedCurrentProvider,
+      retryable: (args.error as { retryable?: boolean } | undefined)?.retryable
+    })
   ) {
     return {
       shouldRetry: false,
@@ -209,12 +218,16 @@ export async function resolveProviderRetryExecutionPlan(args: {
     backoffScope: retryBackoffPlan.backoffScope
   });
   if (
-    classification === 'unrecoverable'
-    && retrySwitchPlan.switchAction === 'exclude_and_reroute'
-    && !hasAlternativeRouteCandidate({
-      providerKey: args.providerKey,
-      routePool: args.routePool,
-      excludedProviderKeys: args.excludedProviderKeys
+    shouldCancelUnrecoverableRerouteWithoutAlternative({
+      classification,
+      switchAction: retrySwitchPlan.switchAction === 'exclude_and_reroute'
+        ? 'reroute_explicit_alternative'
+        : 'retry_same_provider',
+      hasAlternativeCandidate: hasAlternativeRouteCandidate({
+        providerKey: args.providerKey,
+        routePool: args.routePool,
+        excludedProviderKeys: args.excludedProviderKeys
+      })
     })
   ) {
     return {

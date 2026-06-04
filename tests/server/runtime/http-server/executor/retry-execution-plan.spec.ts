@@ -2,7 +2,7 @@ import { jest } from '@jest/globals';
 import { resolveProviderRetryExecutionPlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-execution-plan.js';
 
 describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
-  it('excludes current provider immediately on recoverable 502 when pool alternatives exist', async () => {
+  it('keeps recoverable 502 on policy retry path instead of executor reroute', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 502: Upstream service temporarily unavailable'), {
       statusCode: 502,
@@ -33,11 +33,12 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('retry_same_provider');
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
 
-  it('cycles provider-level terminal failures through explicit alternatives before returning to client', async () => {
+  it('direct-returns unrecoverable provider failures instead of executor alternative cycling', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 403: {"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}'), {
       statusCode: 403,
@@ -67,12 +68,13 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       logNonBlockingError: jest.fn()
     });
 
-    expect(plan.shouldRetry).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(Array.from(excludedProviderKeys)).toEqual(['dibittai.crsa.gpt-5.5']);
+    expect(plan.shouldRetry).toBe(false);
+    expect(plan.retrySwitchPlan).toBeUndefined();
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
 
-  it('does not clear other excluded providers on recoverable retry threshold', async () => {
+  it('keeps other excluded providers unchanged on recoverable retry threshold', async () => {
     const excludedProviderKeys = new Set<string>(['cc.key1.gpt-5.5']);
     const error = Object.assign(new Error('HTTP 503'), {
       statusCode: 503,
@@ -103,11 +105,12 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(Array.from(excludedProviderKeys)).toEqual(['cc.key1.gpt-5.5', 'sdfv.key1.gpt-5.5']);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('retry_same_provider');
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual(['cc.key1.gpt-5.5']);
   });
 
-  it('excludes current provider on recoverable retry threshold when alternatives exist', async () => {
+  it('does not exclude current provider on recoverable retry threshold when alternatives exist', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 503'), {
       statusCode: 503,
@@ -138,7 +141,8 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('retry_same_provider');
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
 });

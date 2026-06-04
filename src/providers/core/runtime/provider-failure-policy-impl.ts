@@ -920,6 +920,32 @@ export function shouldKeepProviderExcludedForNextAttempt(args: {
   return args.classification === 'unrecoverable' || args.hasAlternativeCandidate;
 }
 
+export function shouldRerouteTerminalPeriodicRecovery(args: {
+  classification?: ProviderFailureClassification;
+  shouldRetry: boolean;
+  hasTerminalAlternativeCandidate: boolean;
+}): boolean {
+  return !args.shouldRetry && args.hasTerminalAlternativeCandidate && args.classification === 'periodic_recovery';
+}
+
+export function shouldDirectReturnUnrecoverableWithoutForcedExclusion(args: {
+  classification?: ProviderFailureClassification;
+  excludedCurrentProvider: boolean;
+  retryable?: boolean;
+}): boolean {
+  return args.classification === 'unrecoverable' && !args.excludedCurrentProvider && args.retryable !== true;
+}
+
+export function shouldCancelUnrecoverableRerouteWithoutAlternative(args: {
+  classification?: ProviderFailureClassification;
+  switchAction: ProviderFailureRetryAction;
+  hasAlternativeCandidate: boolean;
+}): boolean {
+  return args.classification === 'unrecoverable'
+    && args.switchAction === 'reroute_explicit_alternative'
+    && !args.hasAlternativeCandidate;
+}
+
 export function isProviderFailureHealthNeutral(args: {
   stage?: string;
   error?: unknown;

@@ -176,6 +176,15 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(reselection).not.toMatch(/classification\s*===\s*['"]unrecoverable['"]\s*\|\|\s*hasAlternativeCandidate/);
   });
 
+  it('request-executor-retry-execution delegates terminal classification branch policy', () => {
+    const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
+    expect(executionPlan).toMatch(/shouldRerouteTerminalPeriodicRecovery/);
+    expect(executionPlan).toMatch(/shouldDirectReturnUnrecoverableWithoutForcedExclusion/);
+    expect(executionPlan).toMatch(/shouldCancelUnrecoverableRerouteWithoutAlternative/);
+    expect(executionPlan).not.toMatch(/classification\s*===\s*['"]periodic_recovery['"]/);
+    expect(executionPlan).not.toMatch(/classification\s*===\s*['"]unrecoverable['"]/);
+  });
+
   it('executor retry path does not locally reroute recoverable failures away from the policy decision', () => {
     const decision = readSrc(EXECUTOR_RETRY_DECISION);
     const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
