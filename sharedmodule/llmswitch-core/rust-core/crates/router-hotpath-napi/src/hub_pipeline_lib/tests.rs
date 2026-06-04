@@ -756,3 +756,56 @@ fn response_tool_call_with_runtime_callbacks_returns_servertool_executor_effect_
         json!("req-servertool-tool-call-effect-1")
     );
 }
+
+#[test]
+fn responses_tool_call_servertool_effect_uses_resp_chatprocess_payload_not_client_projection() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-responses-chatprocess-tool-call-effect".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_responses_servertool_tool_call_effect",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_noop_1",
+                            "type": "function",
+                            "function": { "name": "noop_check", "arguments": "{}" }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "runtimeEffects": { "providerInvoker": true }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let effect = output
+        .effect_plan
+        .effects
+        .iter()
+        .find(|effect| {
+            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+                && effect.payload["reason"] == json!("tool_call_dispatch")
+        })
+        .unwrap();
+    assert!(effect.payload["payload"].get("choices").is_some());
+    assert!(effect.payload["payload"].get("required_action").is_none());
+    assert_eq!(effect.payload["payload"]["choices"][0]["finish_reason"], json!("tool_calls"));
+    assert_eq!(output.payload.unwrap()["required_action"]["type"], json!("submit_tool_outputs"));
+}

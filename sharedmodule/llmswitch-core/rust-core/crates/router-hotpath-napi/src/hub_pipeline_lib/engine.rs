@@ -502,14 +502,21 @@ impl HubPipelineEngine {
         .map_err(|message| {
             HubPipelineError::new("hub_pipeline_resp_chatprocess_03_failed", message)
         })?;
-        let servertool_chatprocess_payload = governed.governed_payload.clone();
+        let resp_chatprocess_payload = resp_chatprocess_03.payload().clone();
+        let mut effects = Vec::new();
+        plan_resp_chatprocess_03_servertool_runtime_actions(
+            &mut effects,
+            &normalized_metadata,
+            &resp_chatprocess_payload,
+            output.request_id.as_str(),
+        );
         diagnostics.push(diagnostic(
             HubPipelineStageId::RespProcessFinalize,
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "stream": normalized_metadata.get("stream").and_then(Value::as_bool).unwrap_or(false) })),
         ));
         let finalized_payload = finalize_hub_resp_outbound_04_client_semantic(FinalizeInput {
-            payload: governed.governed_payload,
+            payload: resp_chatprocess_payload,
             stream: normalized_metadata
                 .get("stream")
                 .and_then(Value::as_bool)
@@ -590,42 +597,6 @@ impl HubPipelineEngine {
                 "payloadObject": stream_decision.payload.is_object(),
             })),
         ));
-        let mut effects = Vec::new();
-        let stop_gateway = inspect_stop_gateway_signal(&servertool_chatprocess_payload.to_string())
-            .ok()
-            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-            .unwrap_or(Value::Null);
-        if should_plan_servertool_runtime_action(&normalized_metadata) {
-            if stop_gateway
-                .get("eligible")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                effects.push(HubPipelineEffect {
-                    kind: HubPipelineEffectKind::ServertoolRuntimeAction,
-                    payload: serde_json::json!({
-                        "action": "requireRuntimeExecutor",
-                        "reason": "stop_eligible_followup",
-                        "requestId": output.request_id,
-                        "stopGateway": stop_gateway,
-                        "payload": servertool_chatprocess_payload.clone(),
-                    }),
-                });
-            }
-            if response_has_tool_calls(&stream_decision.payload)
-                || response_requires_submit_tool_outputs(&stream_decision.payload)
-            {
-                effects.push(HubPipelineEffect {
-                    kind: HubPipelineEffectKind::ServertoolRuntimeAction,
-                    payload: serde_json::json!({
-                        "action": "requireRuntimeExecutor",
-                        "reason": "tool_call_dispatch",
-                        "requestId": output.request_id,
-                        "payload": stream_decision.payload.clone(),
-                    }),
-                });
-            }
-        }
         if stream_decision.should_stream {
             effects.push(HubPipelineEffect {
                 kind: HubPipelineEffectKind::StreamPipe,
@@ -695,6 +666,48 @@ fn response_has_tool_calls(payload: &Value) -> bool {
                     .is_some_and(|tool_calls| !tool_calls.is_empty())
             })
         })
+}
+
+fn plan_resp_chatprocess_03_servertool_runtime_actions(
+    effects: &mut Vec<HubPipelineEffect>,
+    metadata: &Value,
+    chatprocess_payload: &Value,
+    request_id: &str,
+) {
+    if !should_plan_servertool_runtime_action(metadata) {
+        return;
+    }
+    let stop_gateway = inspect_stop_gateway_signal(&chatprocess_payload.to_string())
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .unwrap_or(Value::Null);
+    if stop_gateway
+        .get("eligible")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        effects.push(HubPipelineEffect {
+            kind: HubPipelineEffectKind::ServertoolRuntimeAction,
+            payload: serde_json::json!({
+                "action": "requireRuntimeExecutor",
+                "reason": "stop_eligible_followup",
+                "requestId": request_id,
+                "stopGateway": stop_gateway,
+                "payload": chatprocess_payload.clone(),
+            }),
+        });
+    }
+    if response_has_tool_calls(chatprocess_payload) {
+        effects.push(HubPipelineEffect {
+            kind: HubPipelineEffectKind::ServertoolRuntimeAction,
+            payload: serde_json::json!({
+                "action": "requireRuntimeExecutor",
+                "reason": "tool_call_dispatch",
+                "requestId": request_id,
+                "payload": chatprocess_payload.clone(),
+            }),
+        });
+    }
 }
 
 fn should_plan_servertool_runtime_action(metadata: &Value) -> bool {
