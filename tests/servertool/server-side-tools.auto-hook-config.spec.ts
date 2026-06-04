@@ -20,8 +20,7 @@ const skeletonDocument = {
         flowPolicy: {
           profilesByFlowId: {
             stop_message_flow: {
-              seedLoopPayload: true,
-              stopMessageFollowupPolicy: 'preserve_eligibility'
+              seedLoopPayload: true
             }
           }
         }
@@ -90,9 +89,9 @@ describe('servertool skeleton config', () => {
       'append_tool_messages_from_tool_outputs'
     ]);
     expect(followup.flowPolicy.profilesByFlowId.stop_message_flow).toMatchObject({
-      seedLoopPayload: true,
-      stopMessageFollowupPolicy: 'preserve_eligibility'
+      seedLoopPayload: true
     });
+    expect(followup.flowPolicy.profilesByFlowId.stop_message_flow.stopMessageFollowupPolicy).toBeUndefined();
   });
 
   test('normalizes registration spec from config truth', () => {

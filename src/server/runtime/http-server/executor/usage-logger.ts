@@ -1,11 +1,22 @@
 import { isUsageLoggingEnabled } from './env-config.js';
 import type { UsageMetrics } from './usage-aggregator.js';
-import { buildUsageLogText } from './usage-aggregator.js';
+import { computeCacheHitRatio } from './usage-aggregator.js';
 import { buildProviderLabel } from './provider-response-utils.js';
-import { colorizeRequestLog, registerRequestLogContext } from '../../../utils/request-log-color.js';
+import { registerRequestLogContext, resolveRequestLogColorToken } from '../../../utils/request-log-color.js';
 import { formatRequestTimingSummary, isUsageTimingOutputEnabled } from '../../../utils/stage-logger.js';
 import { recordUsageRollup } from './log-rollup.js';
 import { recordTokens, getTokenTotals } from './token-stats-store.js';
+
+type DailyProviderStat = {
+  calls: number;
+  failures: number;
+  totalLatencyMs: number;
+};
+
+const dailyProviderStats = new Map<string, DailyProviderStat>();
+let dailyProviderStatsDate = new Date().toISOString().slice(0, 10);
+const ANSI_WHITE = '\x1b[97m';
+const ANSI_RESET = '\x1b[0m';
 
 type HubStageTopEntry = {
   stage: string;
@@ -28,6 +39,55 @@ function readTopN(): number {
 
 function formatMs(value: number): string {
   return `${Math.max(0, Math.round(value))}ms`;
+}
+
+function hiValue(value: string | number, baseColor: string): string {
+  return `${ANSI_WHITE}${value}${ANSI_RESET}${baseColor}`;
+}
+
+function hiPair(key: string, value: string | number, baseColor: string): string {
+  return `${key}=${hiValue(value, baseColor)}`;
+}
+
+function pad(value: string, width: number): string {
+  return value.length >= width ? value : `${value}${' '.repeat(width - value.length)}`;
+}
+
+function formatMemoryHealth(): string {
+  const memory = process.memoryUsage();
+  const heapTotal = memory.heapTotal > 0 ? memory.heapTotal : 1;
+  const heapRatio = memory.heapUsed / heapTotal;
+  const heapMb = Math.round(memory.heapUsed / 1024 / 1024);
+  const rssMb = Math.round(memory.rss / 1024 / 1024);
+  const state = heapRatio >= 0.9 ? 'high' : heapRatio >= 0.75 ? 'watch' : 'ok';
+  return `${state}(heap=${heapMb}MB/${Math.round(heapRatio * 100)}% rss=${rssMb}MB)`;
+}
+
+function updateDailyProviderStat(args: {
+  providerKey?: string;
+  model?: string;
+  routeName?: string;
+  poolId?: string;
+  latencyMs: number;
+  retryCount: number;
+  finishReason?: string;
+}): { calls: number; failures: number; avgMs: number } {
+  const today = new Date().toISOString().slice(0, 10);
+  if (dailyProviderStatsDate !== today) {
+    dailyProviderStatsDate = today;
+    dailyProviderStats.clear();
+  }
+  const key = [args.routeName || 'route', args.poolId || '-', args.providerKey || 'unknown-provider', args.model || '-'].join('\u0000');
+  const row = dailyProviderStats.get(key) ?? { calls: 0, failures: 0, totalLatencyMs: 0 };
+  row.calls += 1;
+  row.failures += args.retryCount > 0 || args.finishReason === 'error' ? 1 : 0;
+  row.totalLatencyMs += Math.max(0, args.latencyMs);
+  dailyProviderStats.set(key, row);
+  return {
+    calls: row.calls,
+    failures: row.failures,
+    avgMs: row.calls > 0 ? row.totalLatencyMs / row.calls : 0
+  };
 }
 
 function formatHubStageTop(entries: HubStageTopEntry[] | undefined): string {
@@ -78,6 +138,8 @@ export function logUsageSummary(
     firstContentAtMs?: number;
     lastContentAtMs?: number;
     requestStartedAtMs?: number;
+    providerRequestId?: string;
+    inputRequestId?: string;
   },
   options?: {
     terminalTiming?: boolean;
@@ -90,7 +152,6 @@ export function logUsageSummary(
     return;
   }
   const providerLabel = buildProviderLabel(info.providerKey, info.model) ?? '-';
-  const usageText = buildUsageLogText(info.usage);
   const latency = info.latencyMs.toFixed(1);
   registerRequestLogContext(requestId, {
     sessionId: info.sessionId,
@@ -169,19 +230,43 @@ export function logUsageSummary(
     }
   }
   const hubStageTopSuffix = isUsageTimingOutputEnabled() ? formatHubStageTop(info.hubStageTop) : '';
-  const extraBreakdown = ` retries=${retryCount} attempts=${providerAttemptCount}`
-    + ` wait.traffic=${formatMs(trafficWaitMs)} wait.inject=${formatMs(clientInjectWaitMs)}`
-    + ` decode.sse=${formatMs(sseDecodeMs)} decode.codec=${formatMs(codecDecodeMs)}`
-    + (typeof info.providerDecodeTag === 'string' && info.providerDecodeTag.trim()
-      ? ` ${info.providerDecodeTag.trim()}`
-      : '');
   const cumulativeTotals = getTokenTotals();
+  const dailyProviderStat = updateDailyProviderStat({
+    providerKey: info.providerKey,
+    model: info.model,
+    routeName: info.routeName,
+    poolId: info.poolId,
+    latencyMs: info.latencyMs,
+    retryCount,
+    finishReason: info.finishReason
+  });
+  const cacheRatio = computeCacheHitRatio(info.usage);
+  const cacheValue = cacheRatio !== undefined ? `${(cacheRatio * 100).toFixed(1)}%` : 'n/a';
+  const sampleId =
+    (typeof info.providerRequestId === 'string' && info.providerRequestId.trim())
+      ? info.providerRequestId.trim()
+      : (typeof info.inputRequestId === 'string' && info.inputRequestId.trim())
+        ? info.inputRequestId.trim()
+        : requestId;
   const tokenSuffix = cumulativeTotals.alltimeTokens > 0
-    ? ` \x1b[97mtokens.alltime=${cumulativeTotals.alltimeTokens} tokens.daily=${cumulativeTotals.dailyTokens}\x1b[0m`
+    ? ` ${ANSI_WHITE}tokens.day=${cumulativeTotals.dailyTokens} tokens.all=${cumulativeTotals.alltimeTokens}${ANSI_RESET}`
     : '';
-  const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${extraBreakdown}${timingSuffix}${hubStageTopSuffix}`;
-  console.log(colorizeRequestLog(line, requestId, {
+  const requestColor = resolveRequestLogColorToken(requestId, {
     sessionId: info.sessionId,
     conversationId: info.conversationId
-  }) + tokenSuffix);
+  }) ?? '';
+  const finishReason = info.finishReason && info.finishReason.trim() ? info.finishReason.trim() : 'unknown';
+  const usage = info.usage;
+  const inputTokens = usage?.prompt_tokens ?? 'n/a';
+  const outputTokens = usage?.completion_tokens ?? 'n/a';
+  const totalTokens = usage?.total_tokens ?? 'n/a';
+  const route = info.routeName ?? '-';
+  const pool = info.poolId ?? '-';
+  const lines = [
+    `${requestColor}[usage] ${pad(`req=${requestId}`, 56)} route=${route}/${pool} -> provider=${providerLabel}${ANSI_RESET}`,
+    `${requestColor}        time ${hiPair('total', `${latency}ms`, requestColor)} ${hiPair('external', formatMs(externalLatencyMs), requestColor)} ${hiPair('internal', formatMs(internalLatencyMs), requestColor)} ${hiPair('attempts', providerAttemptCount, requestColor)} ${hiPair('retries', retryCount, requestColor)} ${hiPair('finish_reason', finishReason, requestColor)}${ANSI_RESET}`,
+    `${requestColor}        tok  ${hiPair('in', inputTokens, requestColor)} ${hiPair('out', outputTokens, requestColor)} ${hiPair('total', totalTokens, requestColor)} ${hiPair('cache', cacheValue, requestColor)} ${hiPair('day.calls', dailyProviderStat.calls, requestColor)} ${hiPair('day.fail', dailyProviderStat.failures, requestColor)} ${hiPair('day.avg', formatMs(dailyProviderStat.avgMs), requestColor)}${tokenSuffix}${ANSI_RESET}`,
+    `${requestColor}        diag mem=${formatMemoryHealth()} sample=${sampleId} ${hiPair('wait.traffic', formatMs(trafficWaitMs), requestColor)} ${hiPair('wait.inject', formatMs(clientInjectWaitMs), requestColor)} ${hiPair('decode.sse', formatMs(sseDecodeMs), requestColor)} ${hiPair('decode.codec', formatMs(codecDecodeMs), requestColor)}${typeof info.providerDecodeTag === 'string' && info.providerDecodeTag.trim() ? ` ${info.providerDecodeTag.trim()}` : ''}${timingSuffix}${hubStageTopSuffix}${ANSI_RESET}`
+  ];
+  console.log(lines.join('\n'));
 }

@@ -7,12 +7,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const LEGACY_DEFAULT_TEXT: &str = "继续执行";
-const STOP_SCHEMA_REJECTION_MAX_REPEATS: u32 = 5;
+const STOP_SCHEMA_MISSING_MAX_REPEATS: u32 = 10;
+const STOP_SCHEMA_PROVIDED_MAX_REPEATS: u32 = 3;
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
     "停止前先核对六件事：1) 目标：当前用户目标是什么，是否逐项完成；2) 过程：你实际做过哪些操作/检查/验证，哪些还没做；3) 证据：完成或阻塞的证据在哪里；4) 问题原因：若出现异常，最可能原因是什么，依据是什么；5) 已排除因素：你已经排除了哪些可能原因，证据是什么；6) 排查顺序：下一步应按什么顺序继续排查。若任一项缺文件、日志、命令输出或测试证据，禁止总结、道歉、解释工具被拒或停下；必须在本轮直接发出工具调用执行最小下一步（优先 exec_command 读取/验证/测试）。只有目标已完成或确实阻塞时，才输出最终结果并给出证据。",
     "你刚才再次停止。请重新核对：目标是否真的完成？过程是否覆盖用户要求的每一项？证据是否能被日志、文件、命令结果或测试结果验证？异常原因是否已定位？哪些因素已被证据排除？排查顺序是否合理且已执行到当前最小下一步？如果答案不是全部明确，禁止继续总结、复述阻塞、声称工具被拒；必须在本轮直接发出工具调用按排查顺序补齐缺口（优先 exec_command）。如果确实完成/阻塞，必须说明目标、过程、证据、问题原因、已排除因素、排查顺序，并在 stop schema 的 learned 字段写出过去 turns 学到的可复用结论；没有则填空字符串。",
     "最后一次续杯预算。停止必须同时满足：目标逐项完成或明确阻塞；过程已说明关键操作与验证；证据可核验且对应目标；异常原因有依据；已排除因素有证据；排查顺序清晰且已执行到最小下一步。缺任何一项都不允许停；禁止空泛总结、道歉、计划、复述工具被拒或无证据停止，必须在本轮直接发出工具调用继续执行最小下一步。",
 ];
+const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须输出以下 JSON 对象（可包在 <stop_schema>...</stop_schema>，但字段名必须一致）：{"stopreason":0,"reason":"已完成/已阻塞的具体原因","has_evidence":1,"evidence":"文件/日志/命令/测试证据","issue_cause":"问题原因；无异常填空字符串","excluded_factors":"已排除因素；无则空字符串","diagnostic_order":"排查顺序/已执行顺序","next_step":"继续执行的下一步；若 finished/blocked 填空字符串","learned":"过去 turns 学到的可复用事实/踩坑/配置结论；无则空字符串"}。stopreason 只能用数字：0=finished，1=blocked，2=continue_needed。"#;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -49,13 +51,6 @@ pub enum GoalStatus {
     Paused,
     Stopped,
     Completed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum StopMessageFollowupPolicy {
-    Disable,
-    PreserveEligibility,
 }
 
 impl GoalStatus {
@@ -133,7 +128,6 @@ pub struct StopMessageDecisionContext {
 
     // Servertool followup context
     pub followup_flow_id: Option<String>,
-    pub stop_message_followup_policy: Option<StopMessageFollowupPolicy>,
     pub stop_eligible: bool,
     /// finish_reason sequence from current response choices, in original order.
     /// Decision must only consider the latest non-empty finish_reason.
@@ -311,7 +305,7 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_missing",
                 used,
                 max_repeats,
-                "你刚才试图停止，但没有提供 stop schema。先核对目标、过程、证据、问题原因、已排除因素、排查顺序：目标是否逐项完成？过程是否覆盖要求？证据是否可核验？异常原因是否有依据？哪些因素已被排除？下一步排查顺序是什么？现在必须二选一：1) 若完成或阻塞，立即给出 stop schema：stopreason(数字：0=finished,1=blocked)、reason(具体原因)、has_evidence(数字0/1)、evidence(可核验证据)、issue_cause(问题原因；没有异常则空字符串)、excluded_factors(已排除因素；没有则空字符串)、diagnostic_order(排查顺序/已执行顺序)、next_step(后续动作或空)、learned(过去 turns 学到的可复用事实/踩坑/配置结论；没有则空字符串)；2) 若任一项没有文件/日志/命令输出/测试证据，不准总结、道歉、解释工具被拒或复述计划，必须在本轮直接发出工具调用继续执行当前目标；需要读文件/验证/测试时优先调用 exec_command。",
+                &format!("你刚才试图停止，但没有提供 stop schema。先核对目标、过程、证据、问题原因、已排除因素、排查顺序：目标是否逐项完成？过程是否覆盖要求？证据是否可核验？异常原因是否有依据？哪些因素已被排除？下一步排查顺序是什么？现在必须二选一：1) 若完成或阻塞，立即给出 stop schema；{} 2) 若任一项没有文件/日志/命令输出/测试证据，不准总结、道歉、解释工具被拒或复述计划，必须在本轮直接发出工具调用继续执行当前目标；需要读文件/验证/测试时优先调用 exec_command。", STOP_SCHEMA_JSON_EXAMPLE),
             );
         }
     };
@@ -323,7 +317,7 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_stopreason_missing_or_non_numeric",
                 used,
                 max_repeats,
-                "stop schema 缺少数字 stopreason。不要猜、不要总结。先回答：目标是什么、过程做到哪一步、证据是什么、问题原因在哪里、已排除哪些因素、排查顺序是什么。现在必须补齐数字 stopreason：0=finished、1=blocked、2=continue_needed。若选择 0/1，必须给 reason、evidence、issue_cause、excluded_factors、diagnostic_order、learned；若目标/过程/证据/原因/排除项/顺序任一项不足，选择 2，给 next_step 并立即执行。learned 是过去 turns 学到的可复用事实/踩坑/配置结论，没有则空字符串。",
+                &format!("stop schema 缺少数字 stopreason。不要猜、不要总结。先回答：目标是什么、过程做到哪一步、证据是什么、问题原因在哪里、已排除哪些因素、排查顺序是什么。{} 若目标/过程/证据/原因/排除项/顺序任一项不足，选择 2，给 next_step 并立即执行。", STOP_SCHEMA_JSON_EXAMPLE),
                 parsed,
             );
         }
@@ -569,7 +563,7 @@ fn schema_invalid_followup(
     message: &str,
     parsed: StopSchemaParsed,
 ) -> StopSchemaGateDecision {
-    let rejection_max = stop_schema_rejection_max_repeats(max_repeats);
+    let rejection_max = stop_schema_provided_max_repeats(max_repeats);
     if rejection_max > 0 && used >= rejection_max {
         return StopSchemaGateDecision {
             action: StopSchemaGateAction::FailFast,
@@ -589,7 +583,7 @@ fn schema_missing_followup(
     max_repeats: u32,
     message: &str,
 ) -> StopSchemaGateDecision {
-    let rejection_max = stop_schema_rejection_max_repeats(max_repeats);
+    let rejection_max = stop_schema_missing_max_repeats(max_repeats);
     if rejection_max > 0 && used >= rejection_max {
         return StopSchemaGateDecision {
             action: StopSchemaGateAction::FailFast,
@@ -603,8 +597,12 @@ fn schema_missing_followup(
     schema_followup(reason_code, used, message, None, true)
 }
 
-fn stop_schema_rejection_max_repeats(max_repeats: u32) -> u32 {
-    max_repeats.max(STOP_SCHEMA_REJECTION_MAX_REPEATS)
+fn stop_schema_missing_max_repeats(_max_repeats: u32) -> u32 {
+    STOP_SCHEMA_MISSING_MAX_REPEATS
+}
+
+fn stop_schema_provided_max_repeats(_max_repeats: u32) -> u32 {
+    STOP_SCHEMA_PROVIDED_MAX_REPEATS
 }
 
 fn schema_followup(
@@ -755,10 +753,6 @@ fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReas
         .as_deref()
         .map(str::trim)
         .is_some_and(|flow_id| !flow_id.is_empty())
-        && !matches!(
-            ctx.stop_message_followup_policy,
-            Some(StopMessageFollowupPolicy::PreserveEligibility)
-        )
     {
         return Some(SkipReason::ServertoolFollowupHop);
     }
@@ -794,17 +788,6 @@ fn normalize_trigger_max_repeats(snapshot: &StopMessageSnapshot, default_max_rep
 // ── Snapshot resolution ────────────────────────────────────────────────────
 
 fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnapshot> {
-    if ctx.followup_flow_id.as_deref() == Some("stop_message_flow")
-        && matches!(
-            ctx.stop_message_followup_policy,
-            Some(StopMessageFollowupPolicy::PreserveEligibility)
-        )
-    {
-        if let Some(snapshot) = &ctx.runtime_snapshot {
-            return Some(snapshot.clone());
-        }
-    }
-
     // 1. Try persisted snapshot first
     if let Some(snapshot) = &ctx.persisted_snapshot {
         return Some(snapshot.clone());
@@ -874,7 +857,6 @@ mod tests {
         StopMessageDecisionContext {
             port_stop_message_disabled: false,
             followup_flow_id: None,
-            stop_message_followup_policy: None,
             stop_eligible: true,
             finish_reasons: Some(vec!["stop".to_string()]),
             has_responses_submit_tool_outputs_resume: false,
@@ -1151,13 +1133,12 @@ mod tests {
     }
 
     #[test]
-    fn stop_message_followup_flow_can_retrigger_until_counter_exhausts() {
+    fn stop_message_followup_flow_skips_to_prevent_nested_followup() {
         let mut ctx = base_ctx();
         ctx.followup_flow_id = Some("stop_message_flow".to_string());
-        ctx.stop_message_followup_policy = Some(StopMessageFollowupPolicy::PreserveEligibility);
         let result = decide(&ctx);
-        assert_eq!(result.action, Action::Trigger);
-        assert_eq!(result.skip_reason, None);
+        assert_eq!(result.action, Action::Skip);
+        assert_eq!(result.skip_reason.unwrap(), "skip_servertool_followup_hop");
     }
 
     #[test]
@@ -1263,10 +1244,9 @@ mod tests {
     }
 
     #[test]
-    fn stop_message_followup_runtime_snapshot_overrides_exhausted_persisted_snapshot() {
+    fn stop_message_followup_runtime_snapshot_does_not_override_skip() {
         let mut ctx = base_ctx();
         ctx.followup_flow_id = Some("stop_message_flow".to_string());
-        ctx.stop_message_followup_policy = Some(StopMessageFollowupPolicy::PreserveEligibility);
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "persisted".to_string(),
             max_repeats: 1,
@@ -1283,10 +1263,8 @@ mod tests {
         });
 
         let result = decide(&ctx);
-        assert_eq!(result.action, Action::Trigger);
-        assert_eq!(result.followup_text.unwrap(), "runtime");
-        assert_eq!(result.max_repeats, 3);
-        assert_eq!(result.used, 1);
+        assert_eq!(result.action, Action::Skip);
+        assert_eq!(result.skip_reason.unwrap(), "skip_servertool_followup_hop");
     }
 
     #[test]
@@ -1352,7 +1330,7 @@ mod tests {
         let missing = evaluate_stop_schema_gate("普通停止文本", 0, 3);
         assert_eq!(missing.action, StopSchemaGateAction::Followup);
         assert_eq!(missing.reason_code, "stop_schema_missing");
-        assert!(!missing.count_budget);
+        assert!(missing.count_budget);
         let missing_text = missing.followup_text.unwrap();
         assert!(!missing_text.contains("质询"));
         assert!(missing_text.contains("直接发出工具调用"));
@@ -1361,7 +1339,7 @@ mod tests {
         assert!(missing_text.contains("解释工具被拒"));
 
         let invalid = evaluate_stop_schema_gate(
-            r#"{"stopreason":"finished","reason":"done","has_evidence":1,"next_step":""}"#,
+            r#"{"stopreason":"unknown","reason":"done","has_evidence":1,"next_step":""}"#,
             0,
             3,
         );
@@ -1383,11 +1361,16 @@ mod tests {
     }
 
     #[test]
-    fn stop_schema_missing_never_exhausts_budget() {
-        let decision = evaluate_stop_schema_gate("普通停止文本", 99, 3);
-        assert_eq!(decision.action, StopSchemaGateAction::Followup);
-        assert_eq!(decision.reason_code, "stop_schema_missing");
-        assert!(!decision.count_budget);
+    fn stop_schema_missing_exhausts_after_ten_protection_repeats() {
+        let still_followup = evaluate_stop_schema_gate("普通停止文本", 9, 3);
+        assert_eq!(still_followup.action, StopSchemaGateAction::Followup);
+        assert_eq!(still_followup.reason_code, "stop_schema_missing");
+        assert!(still_followup.count_budget);
+
+        let exhausted = evaluate_stop_schema_gate("普通停止文本", 10, 3);
+        assert_eq!(exhausted.action, StopSchemaGateAction::FailFast);
+        assert_eq!(exhausted.reason_code, "stop_schema_budget_exhausted");
+        assert!(exhausted.count_budget);
     }
 
     #[test]

@@ -13,6 +13,7 @@ use crate::hub_resp_outbound_client_semantics_blocks::responses_reasoning::{
     merge_responses_output_items, normalize_reasoning_summary_for_codex_display,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::normalize_responses_usage;
+use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::strip_tool_markup_for_display_text;
 
 fn now_unix_millis() -> u128 {
     SystemTime::now()
@@ -221,6 +222,33 @@ fn normalize_output_text_content(content: &Value) -> Vec<Value> {
         output.push(Value::Object(row.clone()));
     }
 
+    output
+}
+
+fn strip_tool_markup_from_output_text_parts(parts: &[Value]) -> Vec<Value> {
+    let mut output = Vec::new();
+    for part in parts {
+        let Some(row) = part.as_object() else {
+            output.push(part.clone());
+            continue;
+        };
+        let kind = read_object_string(row, "type").unwrap_or_default();
+        if kind != "output_text" {
+            output.push(part.clone());
+            continue;
+        }
+        let Some(text) = read_raw_object_string(row, "text") else {
+            output.push(part.clone());
+            continue;
+        };
+        let cleaned = strip_tool_markup_for_display_text(text.as_str());
+        if cleaned.trim().is_empty() {
+            continue;
+        }
+        let mut next = row.clone();
+        next.insert("text".to_string(), Value::String(cleaned));
+        output.push(Value::Object(next));
+    }
     output
 }
 
@@ -626,7 +654,7 @@ pub(crate) fn build_responses_payload_from_chat_core(
     let message = &normalized_message;
 
     let role = read_object_string(message, "role").unwrap_or_else(|| "assistant".to_string());
-    let content_parts =
+    let mut content_parts =
         normalize_output_text_content(message.get("content").unwrap_or(&Value::Null));
     let reasoning_payload = message.get("reasoning").cloned().or_else(|| {
         read_object_string(message, "reasoning_content")
@@ -638,6 +666,9 @@ pub(crate) fn build_responses_payload_from_chat_core(
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    if !tool_calls.is_empty() {
+        content_parts = strip_tool_markup_from_output_text_parts(content_parts.as_slice());
+    }
     let should_emit_message = !content_parts.is_empty();
 
     let response_id = allocate_responses_id(response_row);

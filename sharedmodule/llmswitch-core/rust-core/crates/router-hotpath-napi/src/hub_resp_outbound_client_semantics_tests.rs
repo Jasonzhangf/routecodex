@@ -58,6 +58,35 @@ fn normalize_openai_chat_reasoning_outbound_maps_structured_reasoning_for_client
 }
 
 #[test]
+fn normalize_openai_chat_reasoning_outbound_projects_responses_payload_to_chat_completion() {
+    let payload = serde_json::json!({
+        "id": "resp_abc123",
+        "object": "response",
+        "created_at": 1780550359,
+        "model": "gpt-5.5",
+        "metadata": {},
+        "status": "completed",
+        "output": [{
+            "id": "msg_abc123",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": "pong" }]
+        }],
+        "output_text": "pong",
+        "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+    });
+
+    let output = normalize_openai_chat_reasoning_outbound(&payload).expect("projected chat");
+
+    assert_eq!(output["object"], Value::String("chat.completion".to_string()));
+    assert_eq!(output["choices"][0]["message"]["content"], Value::String("pong".to_string()));
+    assert_eq!(output["choices"][0]["finish_reason"], Value::String("stop".to_string()));
+    assert!(output.get("metadata").is_none());
+    assert!(output.get("reasoning").is_none());
+}
+
+#[test]
 fn build_responses_payload_from_chat_filters_executed_tool_outputs_from_required_action() {
     let payload = serde_json::json!({
         "id": "resp_partial",
@@ -243,6 +272,53 @@ fn build_responses_payload_from_anthropic_tool_use_preserves_structured_calls() 
         .cloned()
         .expect("required tool calls");
     assert_eq!(required_calls.len(), 2);
+}
+
+#[test]
+fn build_responses_payload_from_anthropic_tool_use_drops_antml_calls_marker_text() {
+    let payload = serde_json::json!({
+        "id": "msg_antml_tool_marker",
+        "type": "message",
+        "role": "assistant",
+        "model": "MiniMax-M3",
+        "content": [
+            { "type": "text", "text": "<antml function=\"calls\">[" },
+            {
+                "type": "tool_use",
+                "id": "call_function_antml_1",
+                "name": "exec_command",
+                "input": { "cmd": "echo ok" }
+            }
+        ],
+        "stop_reason": "tool_use"
+    });
+
+    let output = build_responses_payload_from_chat_core(
+        &payload,
+        Some("req_antml_marker"),
+        &serde_json::json!({ "toolsRaw": [] }),
+    )
+    .expect("build responses payload");
+
+    assert_eq!(
+        output["status"],
+        Value::String("requires_action".to_string())
+    );
+    assert_eq!(output["output_text"], Value::Null);
+    let serialized = serde_json::to_string(&output).unwrap();
+    assert!(!serialized.contains("<antml"));
+    assert!(!serialized.contains("function=\\\"calls\\\""));
+    let function_items: Vec<&Value> = output["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["type"] == Value::String("function_call".to_string()))
+        .collect();
+    assert_eq!(function_items.len(), 1);
+    assert_eq!(
+        function_items[0]["call_id"],
+        Value::String("call_function_antml_1".to_string())
+    );
 }
 
 #[test]

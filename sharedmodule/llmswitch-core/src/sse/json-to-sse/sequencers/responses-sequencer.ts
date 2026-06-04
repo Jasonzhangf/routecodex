@@ -315,13 +315,17 @@ export async function* sequenceResponse(
       }
     }
 
+    const hasRequiredAction = Boolean((response as any).required_action);
+
     // 4. 发送required_action事件（如果有）
-    if ((response as any).required_action) {
+    if (hasRequiredAction) {
       yield buildRequiredActionEvent(response, (response as any).required_action, context, config);
     }
 
-    // 5. 发送response.completed + response.done事件
-    yield buildResponseCompletedEvent(response, context, config);
+    // 5. 发送终止事件：requires_action 不是 completed，禁止伪造 completed 帧
+    if (!hasRequiredAction) {
+      yield buildResponseCompletedEvent(response, context, config);
+    }
     yield buildResponseDoneEvent(response, context, config);
 
   } catch (error) {

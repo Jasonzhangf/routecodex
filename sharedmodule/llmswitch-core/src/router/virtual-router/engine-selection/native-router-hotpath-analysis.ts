@@ -132,7 +132,6 @@ export type ServertoolFollowupFlowProfilePayload = {
   transparentReplayRequestSuffix?: string;
   ignoreRequiresActionFollowup?: boolean;
   contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
-  stopMessageFollowupPolicy?: 'preserve_eligibility' | 'disable';
 };
 
 export type ServertoolFollowupRuntimePlanPayload = {
@@ -144,7 +143,6 @@ export type ServertoolFollowupRuntimePlanPayload = {
   clearStateOnFollowupFailure: boolean;
   seedLoopPayload: boolean;
   ignoreRequiresActionFollowup: boolean;
-  stopMessageFollowupPolicy: 'preserve_eligibility' | 'disable';
   clientInjectSource?: string;
   transparentReplayRequestSuffix?: string;
   contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
@@ -576,9 +574,6 @@ export function parseServertoolFollowupFlowProfilePayload(raw: string): Serverto
     ...(profile.ignoreRequiresActionFollowup === true ? { ignoreRequiresActionFollowup: true } : {}),
     ...(profile.contextDecorationMode === 'continue_execution_summary' || profile.contextDecorationMode === 'web_search_summary'
       ? { contextDecorationMode: profile.contextDecorationMode }
-      : {}),
-    ...(profile.stopMessageFollowupPolicy === 'preserve_eligibility' || profile.stopMessageFollowupPolicy === 'disable'
-      ? { stopMessageFollowupPolicy: profile.stopMessageFollowupPolicy }
       : {})
   };
 }
@@ -605,10 +600,6 @@ export function parseServertoolFollowupRuntimePlanPayload(raw: string): Serverto
     clearStateOnFollowupFailure: plan.clearStateOnFollowupFailure === true,
     seedLoopPayload: plan.seedLoopPayload === true,
     ignoreRequiresActionFollowup: plan.ignoreRequiresActionFollowup === true,
-    stopMessageFollowupPolicy:
-      plan.stopMessageFollowupPolicy === 'preserve_eligibility'
-        ? 'preserve_eligibility'
-        : 'disable',
     ...(typeof plan.clientInjectSource === 'string' && plan.clientInjectSource.trim()
       ? { clientInjectSource: plan.clientInjectSource.trim() }
       : {}),

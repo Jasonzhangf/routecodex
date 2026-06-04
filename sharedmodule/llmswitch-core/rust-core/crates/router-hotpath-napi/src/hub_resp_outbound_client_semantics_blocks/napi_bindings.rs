@@ -4,8 +4,7 @@ use serde_json::{Map, Value};
 
 use crate::hub_resp_outbound_client_semantics_blocks::anthropic_response::build_anthropic_response_from_chat_value;
 use crate::hub_resp_outbound_client_semantics_blocks::chat_reasoning::{
-    apply_client_passthrough_patch, normalize_openai_chat_reasoning_outbound,
-    sanitize_chat_completion_like,
+    normalize_openai_chat_reasoning_outbound, sanitize_chat_completion_like,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::normalize_responses_tool_call_arguments_for_client;
 use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::{
@@ -78,20 +77,6 @@ pub fn sanitize_responses_function_name_json(raw_name_json: String) -> NapiResul
     let raw_name: Value = serde_json::from_str(&raw_name_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = normalize_responses_function_name(raw_name.as_str());
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn apply_client_passthrough_patch_json(
-    client_payload_json: String,
-    source_payload_json: String,
-) -> NapiResult<String> {
-    let client_payload: Value = serde_json::from_str(&client_payload_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let source_payload: Value = serde_json::from_str(&source_payload_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-
-    let output = apply_client_passthrough_patch(&client_payload, &source_payload);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

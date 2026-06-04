@@ -12,6 +12,46 @@ export { type UsageMetrics };
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
 
+function extractUsageCandidatesFromSseText(text: string): unknown[] {
+  const completed: unknown[] = [];
+  const other: unknown[] = [];
+  let currentEvent = '';
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    if (line.startsWith('event:')) {
+      currentEvent = line.slice('event:'.length).trim();
+      continue;
+    }
+    if (!line.startsWith('data:')) {
+      continue;
+    }
+    const dataText = line.slice('data:'.length).trim();
+    if (!dataText || dataText === '[DONE]') {
+      continue;
+    }
+    try {
+      const data = JSON.parse(dataText) as Record<string, unknown>;
+      const response = data.response && typeof data.response === 'object' && !Array.isArray(data.response)
+        ? data.response as Record<string, unknown>
+        : undefined;
+      const usage = response?.usage ?? data.usage;
+      if (!usage) {
+        continue;
+      }
+      if (currentEvent === 'response.completed' || data.type === 'response.completed') {
+        completed.push(usage);
+      } else {
+        other.push(usage);
+      }
+    } catch (error) {
+      logUsageAggregatorNonBlockingError('extractUsageCandidatesFromSseText.parseDataLine', error, {
+        lineLength: dataText.length
+      });
+    }
+  }
+  return [...completed, ...other];
+}
+
 
 function logUsageAggregatorNonBlockingError(
   stage: string,
@@ -58,6 +98,9 @@ export function extractUsageFromResult(
       if (bodyData.usage) {
         candidates.push(bodyData.usage);
       }
+      if (bodyData.usageMetadata) {
+        candidates.push(bodyData.usageMetadata);
+      }
     }
     if (body.response && typeof body.response === 'object') {
       const responseNode = body.response as Record<string, unknown>;
@@ -76,6 +119,9 @@ export function extractUsageFromResult(
           candidates.push(payloadResponse.usage);
         }
       }
+    }
+    if (typeof body.bodyText === 'string' && body.bodyText.trim()) {
+      candidates.push(...extractUsageCandidatesFromSseText(body.bodyText));
     }
   }
 

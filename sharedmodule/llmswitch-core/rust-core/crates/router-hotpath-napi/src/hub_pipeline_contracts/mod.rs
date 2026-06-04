@@ -42,9 +42,17 @@ pub(crate) struct MetaCarrierContract {
 pub(crate) fn describe_hub_pipeline_contracts() -> Value {
     json!({
         "contractVersion": CONTRACT_VERSION,
-        "nodes": hub_pipeline_contracts(),
+        "nodes": all_hub_pipeline_contracts(),
         "metaCarriers": meta_carrier_contracts(),
     })
+}
+
+/// All Hub pipeline nodes (request + response + provider wire).
+/// Excludes VrRoute04SelectedTarget which lives in virtual_router_contracts().
+fn all_hub_pipeline_contracts() -> Vec<NodeContract> {
+    let mut req = hub_pipeline_contracts();
+    req.extend(response_pipeline_contracts());
+    req
 }
 
 pub(crate) fn describe_virtual_router_contracts() -> Value {
@@ -118,6 +126,7 @@ pub(crate) fn validate_pipeline_node_contract_boundary(
 
 fn all_node_contracts() -> Vec<NodeContract> {
     let mut contracts = hub_pipeline_contracts();
+    contracts.extend(response_pipeline_contracts());
     contracts.extend(virtual_router_contracts());
     contracts
 }
@@ -182,6 +191,63 @@ fn hub_pipeline_contracts() -> Vec<NodeContract> {
             effects: &["provider_neutral_semantic_projection"],
             forbidden_paths: COMMON_FORBIDDEN_PATHS,
             help: "Provider-neutral outbound semantics only; provider HTTP body and SDK options are built later by Provider Runtime.",
+        },
+        NodeContract {
+            node_id: "ProviderReqOutbound06WirePayload",
+            version: CONTRACT_VERSION,
+            phase: "req_outbound",
+            owner_builder: "build_provider_req_outbound_06_from_hub_req_outbound_05",
+            data_in: shape("HubReqOutbound05ProviderSemantic", &["model"], PROVIDER_WIRE_FORBIDDEN),
+            data_out: shape("ProviderReqOutbound06WirePayload", &[], PROVIDER_WIRE_FORBIDDEN),
+            meta_read: &[],
+            meta_write: &[],
+            effects: &["provider_wire_build", "sdk_options_encoding"],
+            forbidden_paths: PROVIDER_WIRE_FORBIDDEN_PATHS,
+            help: "Provider wire payload only; provider HTTP body and SDK options must contain zero internal metadata, route controls, or Meta* carriers.",
+        },
+    ]
+}
+
+fn response_pipeline_contracts() -> Vec<NodeContract> {
+    vec![
+        NodeContract {
+            node_id: "HubRespInbound02Parsed",
+            version: CONTRACT_VERSION,
+            phase: "resp_inbound",
+            owner_builder: "parse_hub_resp_inbound_02_from_provider_resp_inbound_01",
+            data_in: shape("ProviderRespInbound01Raw", &[], COMMON_DATA_FORBIDDEN),
+            data_out: shape("HubRespInbound02Parsed", &[], COMMON_DATA_FORBIDDEN),
+            meta_read: &["requestId", "pipelineId", "providerProtocol"],
+            meta_write: &["providerProtocol"],
+            effects: &["parse_provider_response_shape", "preserve_response_semantics"],
+            forbidden_paths: COMMON_FORBIDDEN_PATHS,
+            help: "Response inbound parsing only; no tool governance, no client projection, no metadata injection into response payload.",
+        },
+        NodeContract {
+            node_id: "HubRespChatProcess03Governed",
+            version: CONTRACT_VERSION,
+            phase: "resp_chatprocess",
+            owner_builder: "build_hub_resp_chatprocess_03_from_hub_resp_inbound_02",
+            data_in: shape("HubRespInbound02Parsed", &[], COMMON_DATA_FORBIDDEN),
+            data_out: shape("HubRespChatProcess03Governed", &[], COMMON_DATA_FORBIDDEN),
+            meta_read: &["requestId", "pipelineId", "entryEndpoint", "providerProtocol"],
+            meta_write: &["serverToolRuntimeAction", "stopMessageState"],
+            effects: &["tool_result_harvest", "servertool_followup_plan", "internal_tool_strip"],
+            forbidden_paths: COMMON_FORBIDDEN_PATHS,
+            help: "Response-side tool governance only; no provider wire rebuild, no client protocol projection, no metadata injection into response payload.",
+        },
+        NodeContract {
+            node_id: "HubRespOutbound04ClientSemantic",
+            version: CONTRACT_VERSION,
+            phase: "resp_outbound",
+            owner_builder: "project_hub_resp_outbound_04_from_hub_resp_chatprocess_03",
+            data_in: shape("HubRespChatProcess03Governed", &[], COMMON_DATA_FORBIDDEN),
+            data_out: shape("HubRespOutbound04ClientSemantic", &[], COMMON_DATA_FORBIDDEN),
+            meta_read: &["requestId", "pipelineId", "entryEndpoint", "clientProtocol"],
+            meta_write: &["clientProtocol"],
+            effects: &["client_protocol_projection", "responses_shape_build"],
+            forbidden_paths: COMMON_FORBIDDEN_PATHS,
+            help: "Client-facing response projection only; no provider wire rebuild, no tool governance, no internal carrier injection into client body.",
         },
     ]
 }
@@ -336,6 +402,17 @@ const COMMON_DATA_FORBIDDEN: &[&str] = &[
     "classifiedError",
 ];
 
+const PROVIDER_WIRE_FORBIDDEN: &[&str] = &[
+    "metadata",
+    "metaCarrier",
+    "metadataCarrier",
+    "runtimeMetadata",
+    "errorCarrier",
+    "classifiedError",
+    "routeHint",
+    "__routeHint",
+];
+
 const VR_DECISION_FORBIDDEN: &[&str] = &[
     "metadata",
     "metaCarrier",
@@ -361,6 +438,24 @@ const COMMON_FORBIDDEN_PATHS: &[&str] = &[
     "direct.body.metadata",
     "client.body.metadata",
     "client.response.metadata",
+];
+
+const PROVIDER_WIRE_FORBIDDEN_PATHS: &[&str] = &[
+    "metadata",
+    "metaCarrier",
+    "metadataCarrier",
+    "runtimeMetadata",
+    "provider.body.metadata",
+    "provider.options.metadata",
+    "provider.sdkOptions.metadata",
+    "direct.body.metadata",
+    "client.body.metadata",
+    "client.response.metadata",
+    "routeHint",
+    "__routeHint",
+    "providerKey",
+    "selectedProviderKey",
+    "routingDecisionRecord",
 ];
 
 const VR_FORBIDDEN_PATHS: &[&str] = &[
@@ -404,7 +499,7 @@ mod tests {
     fn describes_hub_and_meta_contracts() {
         let output = describe_hub_pipeline_contracts();
         assert_eq!(output["contractVersion"], CONTRACT_VERSION);
-        assert_eq!(output["nodes"].as_array().unwrap().len(), 3);
+        assert_eq!(output["nodes"].as_array().unwrap().len(), 7);
         assert_eq!(output["metaCarriers"].as_array().unwrap().len(), 5);
         assert_eq!(
             output["metaCarriers"][2]["carrierId"],
@@ -482,3 +577,62 @@ mod tests {
         }
     }
 }
+
+    #[test]
+    fn describes_all_eight_pipeline_contracts() {
+        let all = all_node_contracts();
+        assert_eq!(all.len(), 8);
+        let node_ids: Vec<_> = all.iter().map(|c| c.node_id).collect();
+        for expected in [
+            "HubReqInbound02Standardized",
+            "HubReqChatProcess03Governed",
+            "HubReqOutbound05ProviderSemantic",
+            "ProviderReqOutbound06WirePayload",
+            "HubRespInbound02Parsed",
+            "HubRespChatProcess03Governed",
+            "HubRespOutbound04ClientSemantic",
+            "VrRoute04SelectedTarget",
+        ] {
+            assert!(
+                node_ids.iter().any(|id| *id == expected),
+                "missing node contract: {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn response_pipeline_contracts_have_valid_owners() {
+        for contract in response_pipeline_contracts() {
+            let owner = contract.owner_builder;
+            assert!(
+                owner.starts_with("parse_")
+                    || owner.starts_with("build_")
+                    || owner.starts_with("project_"),
+                "response contract {owner} must use parse_/build_/project_ prefix"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_rejects_provider_wire_metadata() {
+        let err = validate_pipeline_node_contract_boundary(
+            "ProviderReqOutbound06WirePayload",
+            &json!({"model":"m","metadata":{"routeHint":"x"}}),
+            &json!({"model":"m","metadata":{"routeHint":"x"}}),
+        )
+        .unwrap_err();
+        assert!(err.contains("forbidden paths present"));
+        assert!(err.contains("metadata"));
+    }
+
+    #[test]
+    fn validation_rejects_route_hint_in_provider_wire() {
+        let err = validate_pipeline_node_contract_boundary(
+            "ProviderReqOutbound06WirePayload",
+            &json!({"model":"m"}),
+            &json!({"model":"m","routeHint":"ph_xxx"}),
+        )
+        .unwrap_err();
+        assert!(err.contains("forbidden paths present"));
+        assert!(err.contains("routeHint"));
+    }

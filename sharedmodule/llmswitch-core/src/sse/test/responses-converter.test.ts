@@ -347,10 +347,9 @@ describe('Responses协议转换器测试', () => {
       expect(requiredActionEvent!.data.required_action.type).toBe('submit_tool_outputs');
       expect(requiredActionEvent!.data.required_action.submit_tool_outputs.tool_calls).toHaveLength(1);
       const eventTypes = events.map(e => e.type);
-      expect(eventTypes).toContain('response.completed');
+      expect(eventTypes).not.toContain('response.completed');
       expect(eventTypes).toContain('response.done');
-      expect(eventTypes.indexOf('response.required_action')).toBeLessThan(eventTypes.indexOf('response.completed'));
-      expect(eventTypes.indexOf('response.completed')).toBeLessThan(eventTypes.indexOf('response.done'));
+      expect(eventTypes.indexOf('response.required_action')).toBeLessThan(eventTypes.indexOf('response.done'));
     });
 
     it('应该容忍缺少 reasoning.content 的响应', async () => {

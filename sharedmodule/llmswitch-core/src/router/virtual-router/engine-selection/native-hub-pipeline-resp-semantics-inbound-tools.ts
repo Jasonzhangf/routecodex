@@ -460,37 +460,6 @@ export function normalizeRespInboundReasoningPayloadWithNative(
   }
 }
 
-export function applyClientPassthroughPatchWithNative(
-  clientPayload: unknown,
-  sourcePayload: unknown
-): Record<string, unknown> {
-  const capability = 'applyClientPassthroughPatchJson';
-  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const clientPayloadJson = safeStringify(clientPayload);
-  const sourcePayloadJson = safeStringify(sourcePayload);
-  if (!clientPayloadJson || !sourcePayloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(clientPayloadJson, sourcePayloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseRecord(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
 export function buildAnthropicResponseFromChatWithNative(
   chatResponse: unknown,
   aliasMap?: Record<string, string>

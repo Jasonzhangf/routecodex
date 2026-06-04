@@ -86,7 +86,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
         preserveTimingForUsage: true
       });
     }
-    sendPipelineResponse(res, result, requestId, {
+    await sendPipelineResponse(res, result, requestId, {
       forceSSE: wantsSSE,
       entryEndpoint,
       ...(isVideoRequest ? { sseTotalTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS } : {})

@@ -36,7 +36,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "applyChatProcessedRequestJson",
   "buildChatProcessContextMetadataJson",
   "buildChatProcessedDescriptorJson",
-  "applyClientPassthroughPatchJson",
   "applyGovernedControlOperationsJson",
   "applyGovernedMergeRequestJson",
   "buildRouterMetadataInputJson",

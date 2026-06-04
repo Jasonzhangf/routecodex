@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { EventEmitter } from 'node:events';
 
 import { handleChatCompletions } from '../../../src/server/handlers/chat-handler.js';
 import { handleImageGenerations } from '../../../src/server/handlers/images-handler.js';
@@ -30,7 +31,67 @@ async function fetchJson(baseUrl: string, routePath: string, body: unknown): Pro
   return { status: response.status, payload: text ? JSON.parse(text) : null };
 }
 
+function createHandlerIo(body: Record<string, unknown>): { req: any; res: any; writes: { status?: number; json?: unknown } } {
+  const req = new EventEmitter() as any;
+  req.headers = { 'content-type': 'application/json' };
+  req.method = 'POST';
+  req.query = {};
+  req.body = body;
+  const writes: { status?: number; json?: unknown } = {};
+  const res = new EventEmitter() as any;
+  res.headersSent = false;
+  res.writableEnded = false;
+  res.destroyed = false;
+  res.status = jest.fn((status: number) => {
+    writes.status = status;
+    return res;
+  });
+  res.json = jest.fn((payload: unknown) => {
+    writes.json = payload;
+    res.headersSent = true;
+    res.writableEnded = true;
+    res.emit('finish');
+    return res;
+  });
+  res.setHeader = jest.fn();
+  res.write = jest.fn();
+  res.end = jest.fn(() => {
+    res.writableEnded = true;
+    res.emit('finish');
+    return res;
+  });
+  return { req, res, writes };
+}
+
 describe('handler metadata boundary', () => {
+  it('routes chat client-response metadata projection failures through handler error path', async () => {
+    const executePipeline = jest.fn(async () => ({
+      status: 200,
+      body: { id: 'chatcmpl_metadata_leak', choices: [], metadata: { internal: true } }
+    }));
+    const { req, res, writes } = createHandlerIo({ model: 'gpt-test', messages: [] });
+
+    await handleChatCompletions(req, res, { executePipeline, errorHandling: null });
+
+    expect(writes.status).toBeGreaterThanOrEqual(500);
+    expect((writes.json as any)?.error?.code).toBe('HTTP_HANDLER_ERROR');
+    expect(JSON.stringify(writes.json)).not.toContain('metadata');
+  });
+
+  it('routes messages client-response metadata projection failures through handler error path', async () => {
+    const executePipeline = jest.fn(async () => ({
+      status: 200,
+      body: { type: 'message', content: [], metadata: { internal: true } }
+    }));
+    const { req, res, writes } = createHandlerIo({ model: 'claude-test', messages: [] });
+
+    await handleMessages(req, res, { executePipeline, errorHandling: null });
+
+    expect(writes.status).toBeGreaterThanOrEqual(500);
+    expect((writes.json as any)?.error?.code).toBe('HTTP_HANDLER_ERROR');
+    expect(JSON.stringify(writes.json)).not.toContain('metadata');
+  });
+
   it('keeps request body metadata out of chat pipeline body', async () => {
     const executePipeline = jest.fn(async () => ({ status: 200, body: { choices: [{ message: { content: 'ok' } }] } }));
     const app = express();
@@ -40,13 +101,13 @@ describe('handler metadata boundary', () => {
     try {
       const result = await fetchJson(baseUrl, '/v1/chat/completions', {
         model: 'gpt-test',
-        metadata: { session_id: 'chat-sess' },
+        metadata: { userAgent: 'chat-sess' },
         messages: [{ role: 'user', content: 'hi' }]
       });
       expect(result.status).toBe(200);
       const input = executePipeline.mock.calls[0]?.[0] as any;
       expect(input.body.metadata).toBeUndefined();
-      expect(input.metadata.session_id).toBe('chat-sess');
+      expect(input.metadata.userAgent).toBe('chat-sess');
     } finally {
       await closeServer(server);
     }
@@ -61,13 +122,13 @@ describe('handler metadata boundary', () => {
     try {
       const result = await fetchJson(baseUrl, '/v1/responses', {
         model: 'gpt-test',
-        metadata: { session_id: 'responses-sess' },
+        metadata: { userAgent: 'responses-sess' },
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]
       });
       expect(result.status).toBe(200);
       const input = executePipeline.mock.calls[0]?.[0] as any;
       expect(input.body.metadata).toBeUndefined();
-      expect(input.metadata.session_id).toBe('responses-sess');
+      expect(input.metadata.userAgent).toBe('responses-sess');
     } finally {
       await closeServer(server);
     }
@@ -91,7 +152,7 @@ describe('handler metadata boundary', () => {
       await fetchJson(baseUrl, '/v1/responses', {
         model: 'gpt-test',
         store: true,
-        metadata: { session_id: 'persisted-context-must-not-leak' },
+        metadata: { userAgent: 'persisted-context-must-not-leak' },
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]
       });
       const input = executePipeline.mock.calls[0]?.[0] as any;
@@ -112,13 +173,13 @@ describe('handler metadata boundary', () => {
     try {
       const result = await fetchJson(baseUrl, '/v1/messages', {
         model: 'claude-test',
-        metadata: { session_id: 'messages-sess' },
+        metadata: { userAgent: 'messages-sess' },
         messages: [{ role: 'user', content: 'hi' }]
       });
       expect(result.status).toBe(200);
       const input = executePipeline.mock.calls[0]?.[0] as any;
       expect(input.body.metadata).toBeUndefined();
-      expect(input.metadata.session_id).toBe('messages-sess');
+      expect(input.metadata.userAgent).toBe('messages-sess');
     } finally {
       await closeServer(server);
     }
@@ -133,13 +194,13 @@ describe('handler metadata boundary', () => {
     try {
       const result = await fetchJson(baseUrl, '/v1/images/generations', {
         prompt: 'draw boundary',
-        metadata: { session_id: 'image-sess' }
+        metadata: { userAgent: 'image-sess' }
       });
       expect(result.status).toBe(200);
       const input = executePipeline.mock.calls[0]?.[0] as any;
       expect(input.body.metadata).toBeUndefined();
       expect(input.body.qwenImageGeneration).toMatchObject({ enabled: true, mode: 'generate' });
-      expect(input.metadata.session_id).toBe('image-sess');
+      expect(input.metadata.userAgent).toBe('image-sess');
       expect(input.metadata.qwenImageGeneration).toMatchObject({ enabled: true, mode: 'generate' });
     } finally {
       await closeServer(server);

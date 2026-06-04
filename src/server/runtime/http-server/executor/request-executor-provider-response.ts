@@ -100,7 +100,9 @@ export function buildProviderExecutionSuccessResult(args: {
         ?? args.readString(args.mergedMetadata.workdir)
         ?? args.readString(args.mergedMetadata.cwd),
       firstContentAtMs: rccFirstContentAtMs,
-      lastContentAtMs: rccLastContentAtMs
+      lastContentAtMs: rccLastContentAtMs,
+      providerRequestId: args.providerRequestId,
+      inputRequestId: args.inputRequestId
     }
   };
 }

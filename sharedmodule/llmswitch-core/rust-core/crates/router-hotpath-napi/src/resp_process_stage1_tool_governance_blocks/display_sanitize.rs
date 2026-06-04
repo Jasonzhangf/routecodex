@@ -28,6 +28,9 @@ pub(crate) fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
     lowered.contains("<<rcc_tool_calls")
         || lowered.contains("<function_calls>")
         || lowered.contains("</function_calls>")
+        || Regex::new(r#"(?is)<antml\s+function\s*=\s*[\"']calls[\"']\s*>"#)
+            .map(|re| re.is_match(lowered.as_str()))
+            .unwrap_or(false)
         || lowered.contains("<|dsml|tool_calls>")
         || lowered.contains("</|dsml|tool_calls>")
         || lowered.contains("<|dsml|invoke")
@@ -71,6 +74,7 @@ pub(crate) fn mask_tool_wrapper_markup(raw: &str) -> String {
         r"(?im)^[ \t]*<\\|tool_calls_end\\|>[ \t]*\r?\n?",
         r"(?im)^[ \t]*<function_calls>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</function_calls>[ \t]*\r?\n?",
+        r#"(?im)^[ \t]*<antml\s+function\s*=\s*[\"']calls[\"']\s*>\s*\[?[ \t]*\r?\n?"#,
     ];
     for pattern in wrapper_line_patterns {
         if let Ok(re) = Regex::new(pattern) {
@@ -274,6 +278,12 @@ pub(crate) fn strip_tool_call_marker_payload(raw: &str) -> String {
     if raw.trim().is_empty() {
         return String::new();
     }
+    if Regex::new(r#"(?is)^\s*<antml\s+function\s*=\s*[\"']calls[\"']\s*>\s*\[?\s*$"#)
+        .map(|re| re.is_match(raw.as_str()))
+        .unwrap_or(false)
+    {
+        return String::new();
+    }
     if looks_like_direct_tool_payload_text(raw.as_str()) {
         return String::new();
     }
@@ -321,6 +331,7 @@ pub(crate) fn strip_tool_call_marker_payload(raw: &str) -> String {
         r"(?is)<tool_calls>[\s\S]*?</tool_calls>",
         r"(?is)<tool_call>[\s\S]*?</tool_call>",
         r"(?is)<function_calls>[\s\S]*?</function_calls>",
+        r#"(?im)^[ \t]*<antml\s+function\s*=\s*[\"']calls[\"']\s*>\s*\[?[ \t]*\r?\n?"#,
         r"(?is)<quote>\s*[\s\S]*?\btool_calls\b[\s\S]*?</quote>",
     ];
     for pattern in patterns {
@@ -340,6 +351,7 @@ pub(crate) fn strip_orphan_tool_markup_lines(raw: &str) -> String {
     let mut text = raw.to_string();
     let patterns = [
         r"(?im)^[ \t]*</function_calls>[ \t]*\r?\n?",
+        r#"(?im)^[ \t]*<antml\s+function\s*=\s*[\"']calls[\"']\s*>\s*\[?[ \t]*\r?\n?"#,
         r"(?im)^[ \t]*</tool_call>[ \t]*\r?\n?",
         r"(?im)^[ \t]*<tool_calls_endl>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</tool:exec_command>[ \t]*\r?\n?",

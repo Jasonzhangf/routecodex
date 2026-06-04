@@ -1,13 +1,11 @@
 pub(crate) use crate::hub_resp_outbound_client_semantics_blocks::anthropic_chat_response::build_openai_chat_response_from_anthropic_message;
 pub(crate) use crate::hub_resp_outbound_client_semantics_blocks::anthropic_response::build_anthropic_response_from_chat_value;
-pub(crate) use crate::hub_resp_outbound_client_semantics_blocks::chat_reasoning::{
-    apply_client_passthrough_patch, normalize_openai_chat_reasoning_outbound,
-};
+pub(crate) use crate::hub_resp_outbound_client_semantics_blocks::chat_reasoning::normalize_openai_chat_reasoning_outbound;
 pub use crate::hub_resp_outbound_client_semantics_blocks::napi_bindings::{
-    apply_client_passthrough_patch_json, build_anthropic_from_openai_chat_json_bridge,
-    build_anthropic_response_from_chat_full_json, build_anthropic_response_from_chat_json,
-    build_openai_chat_from_anthropic_json_bridge, build_responses_payload_from_chat_json,
-    normalize_alias_map_json, normalize_openai_chat_reasoning_outbound_json,
+    build_anthropic_from_openai_chat_json_bridge, build_anthropic_response_from_chat_full_json,
+    build_anthropic_response_from_chat_json, build_openai_chat_from_anthropic_json_bridge,
+    build_responses_payload_from_chat_json, normalize_alias_map_json,
+    normalize_openai_chat_reasoning_outbound_json,
     normalize_responses_tool_call_arguments_for_client_json, normalize_responses_usage_json,
     resolve_alias_map_from_resp_semantics_json, resolve_alias_map_from_sources_json,
     resolve_anthropic_chat_completion_outcome_json, resolve_anthropic_stop_reason_json,

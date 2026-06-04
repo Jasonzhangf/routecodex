@@ -20,11 +20,11 @@
 2. servertool 的唯一职责是绕过客户端执行本地工具工作，代客户端完成“本应由客户端执行”的步骤。
 3. followup 请求必须基于 origin snapshot 构造，并从正常请求入口复入：
    `HubReqInbound02Standardized -> HubReqChatProcess03Governed -> VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic -> provider runtime`。
-4. followup 响应必须走正常响应链：
+4. followup 响应必须走正常响应链；`RespInbound` 是模型/provider 端进入 Hub，`RespOutbound` 是 Hub 出到客户端入口协议：
    `ProviderRespInbound01Raw -> HubRespInbound02Parsed -> HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame`。
 5. 如果 servertool 执行后返回的是 `HubRespChatProcess03Governed` payload，只能通过相邻 builder `buildHubRespOutbound04FromHubRespChatProcess03` 进入 `HubRespOutbound04ClientSemantic`。
-6. `/v1/responses` 的最终客户端 payload 必须由 normal resp outbound 投影为 Responses shape，顶层 `object` 必须是 `response`。
-7. Chat Completions 的最终客户端 payload 必须保持 chat completion shape，不能被 Responses builder 包装。
+6. `/v1/responses` 的最终客户端 payload 必须由 normal `HubRespOutbound04ClientSemantic` 投影为 Responses shape，顶层 `object` 必须是 `response`。
+7. `/v1/chat/completions` 的最终客户端 payload 必须由 normal `HubRespOutbound04ClientSemantic` 投影为 Chat Completion shape，顶层 `object` 必须是 `chat.completion` 或兼容 chat completion；不能把 Responses payload 直接写给 Chat 客户端。
 8. metadata、runtime carrier、snapshot carrier 只能作为 side-channel，不得进入 provider body 或 client body。
 
 ## 阶段拓扑

@@ -123,7 +123,7 @@ client-visible error
 10. **审计真源**：完整执行文档见 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
 
 ## 全局流水线类型拓扑（醒目）
-1. **双向链条固定**：请求链必须从 `ServerReqInbound01ClientRaw` 单向进入 Hub/VR/Provider；响应链必须从 `ProviderRespInbound01Raw` 单向回到 Hub/Server；错误链必须从发生点进入统一错误 pipeline，不得反向补请求 payload。
+1. **双向链条固定**：请求链必须从 `ServerReqInbound01ClientRaw` 单向进入 Hub/VR/Provider；响应链必须从模型/provider 端的 `ProviderRespInbound01Raw` 单向进入 Hub，再经 `HubRespOutbound04ClientSemantic` 出到 `ServerRespOutbound05ClientFrame`；`RespInbound/RespOutbound` 均以 Hub 为参照。错误链必须从发生点进入统一错误 pipeline，不得反向补请求 payload。
 2. **命名模板固定**：`<Module><Phase><NN><Node>`，例如 `HubReqInbound02Standardized`、`HubReqChatProcess03Governed`、`VrRoute04SelectedTarget`、`ProviderReqOutbound06WirePayload`、`ServerRespOutbound05ClientFrame`、`ErrorErr03RuntimeClassified`。
 3. **节点序号是位置**：序号表达拓扑位置，不表达版本；新增中间节点默认禁止。确需新增时必须先更新 `docs/design/pipeline-type-topology-and-module-boundaries.md`，优先归入既有节点内部 block / carrier；禁止重编号既有节点，禁止 `03b` / `03_1` / `03.5` 临时编号。
 4. **唯一 builder/parser**：每个节点类型只能有一个 owning builder/parser；转换函数必须写明相邻来源和目标，如 `build_hub_req_chatprocess_03_from_hub_req_inbound_02`。

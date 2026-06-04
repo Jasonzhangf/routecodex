@@ -2,8 +2,8 @@ use serde_json::Value;
 
 use crate::hub_pipeline_lib::errors::{HubPipelineError, HubPipelineResult};
 use crate::hub_resp_outbound_client_semantics::{
-    apply_client_passthrough_patch, build_anthropic_response_from_chat_value,
-    build_responses_payload_from_chat_core, normalize_openai_chat_reasoning_outbound,
+    build_anthropic_response_from_chat_value, build_responses_payload_from_chat_core,
+    normalize_openai_chat_reasoning_outbound,
 };
 
 pub(crate) fn build_hub_resp_outbound_04_client_payload_for_protocol(
@@ -61,8 +61,5 @@ pub(crate) fn build_hub_resp_outbound_04_client_payload_for_protocol(
             ));
         }
     };
-    Ok(apply_client_passthrough_patch(
-        &client_payload,
-        &finalized_payload,
-    ))
+    Ok(client_payload)
 }

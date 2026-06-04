@@ -174,14 +174,12 @@ async function main() {
     }));
     harnessServer = await listen(http.createServer(app));
 
-    const sessionId = `sess_${Date.now()}`;
     const resp = await fetch(`${harnessServer.baseUrl}/v1/responses`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model: 'gpt-5.3-codex',
         stream: false,
-        metadata: { sessionId },
         input: [{
           role: 'user',
           content: [{ type: 'input_text', text: '请直接回复一句“阶段完成”，然后结束。<**stopless:on**>' }]

@@ -2872,7 +2872,6 @@ mod tests {
         let context = json!({
             "__rt": {
                 "serverToolFollowup": true,
-                "stopMessageFollowupPolicy": "preserve_eligibility",
                 "serverToolLoopState": {
                     "flowId": "stop_message_flow",
                     "repeatCount": 1,

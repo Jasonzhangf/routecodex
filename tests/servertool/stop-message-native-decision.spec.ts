@@ -27,7 +27,6 @@ function buildMinimalDecisionContext(args: {
   return {
     port_stop_message_disabled: false,
     followup_flow_id: undefined,
-    stop_message_followup_policy: undefined,
     stop_eligible: args.stopEligible,
     finish_reasons: args.finishReasons ?? [],
     has_responses_submit_tool_outputs_resume: false,
@@ -154,22 +153,20 @@ describe('stop-message native decision (blackbox)', () => {
     expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
   });
 
-  test('stop_message followup flow with not eligible uses normal stop eligibility skip', () => {
+  test('stop_message followup flow always skips nested stopless', () => {
     const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: false, finishReasons: ['stop'] }),
+      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
       followup_flow_id: 'stop_message_flow',
-      stop_message_followup_policy: 'preserve_eligibility',
     };
     const decision = decideStopMessageActionWithNative(ctx);
     expect(decision.action).toBe('skip');
-    expect(decision.skip_reason).toBe('skip_not_stop_finish_reason');
+    expect(decision.skip_reason).toBe('skip_servertool_followup_hop');
   });
 
   test('non-stop_message followup flow skips as generic followup hop', () => {
     const ctx: StopMessageDecisionContext = {
       ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
       followup_flow_id: 'apply_patch_flow',
-      stop_message_followup_policy: 'disable',
     };
     const decision = decideStopMessageActionWithNative(ctx);
     expect(decision.action).toBe('skip');
@@ -195,9 +192,17 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('stop schema gate exhausts repeated missing schema loop', () => {
+    const beforeLimit = evaluateStopSchemaGateWithNative({
+      assistantText: '还是无法继续，工具被拒绝。',
+      used: 9,
+      maxRepeats: 3,
+    });
+    expect(beforeLimit.action).toBe('followup');
+    expect(beforeLimit.reason_code).toBe('stop_schema_missing');
+
     const gate = evaluateStopSchemaGateWithNative({
       assistantText: '还是无法继续，工具被拒绝。',
-      used: 5,
+      used: 10,
       maxRepeats: 3,
     });
     expect(gate.action).toBe('fail_fast');

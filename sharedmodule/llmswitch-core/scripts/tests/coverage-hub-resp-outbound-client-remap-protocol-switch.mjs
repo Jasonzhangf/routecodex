@@ -121,15 +121,12 @@ async function main() {
         throw new Error('boom');
       }
     });
-    assert.throws(
-      () =>
-        buildClientPayloadForProtocol({
-          payload,
-          clientProtocol: 'openai-chat',
-          requestId: 'req_chat_throw_error'
-        }),
-      /native applyClientPassthroughPatchJson is required but unavailable/i
-    );
+    const out = buildClientPayloadForProtocol({
+      payload,
+      clientProtocol: 'openai-chat',
+      requestId: 'req_chat_throw_error'
+    });
+    assert.equal(out, payload);
   }
 
   console.log('✅ coverage-hub-resp-outbound-client-remap-protocol-switch passed');

@@ -137,7 +137,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         preserveTimingForUsage: true
       });
     }
-    sendPipelineResponse(res, result, requestId, { forceSSE: wantsStream, entryEndpoint });
+    await sendPipelineResponse(res, result, requestId, { forceSSE: wantsStream, entryEndpoint });
   } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);
     const acceptsSse = typeof req.headers['accept'] === 'string'

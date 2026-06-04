@@ -552,7 +552,7 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 
 ### Slice 2 状态：主体迁移完成 ✅
 剩余 106 行：
-- 活跃 imports：6 个（`normalizeResponsesToolCallIds`、`applyClientPassthroughPatchWithNative` 等）
+- 活跃 imports：client protocol projection helpers；旧 `applyClientPassthroughPatchWithNative` 已删除，relay 不再有 passthrough patch。
 - orchestrator：`buildClientPayloadForProtocol`（~80 行）+ thin wrappers（`remapChatToolCallsToClientNames` 等）
 - **语义已全部委托 Rust**，无纯 TS 业务逻辑残留
 

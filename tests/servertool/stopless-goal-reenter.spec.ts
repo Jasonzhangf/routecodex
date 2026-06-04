@@ -64,7 +64,7 @@ describe('stopless re-enter path (no tmux inject)', () => {
       repeatCount: 1,
       payloadHash: '__servertool_auto__'
     });
-    expect(metadata.__rt?.stopMessageFollowupPolicy).toBe('preserve_eligibility');
+    expect(metadata.__rt?.stopMessageFollowupPolicy).toBeUndefined();
   });
 
   test('reenter followup does not retry empty response with the same followup request id', async () => {

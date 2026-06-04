@@ -95,6 +95,60 @@ describe('usage log text', () => {
     });
   });
 
+  it('extracts OpenAI Responses usage from body.data.usage', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        data: {
+          id: 'resp_sample',
+          usage: {
+            input_tokens: 306,
+            input_tokens_details: {
+              cached_tokens: 12
+            },
+            output_tokens: 40,
+            total_tokens: 346
+          }
+        }
+      }
+    }, {
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 306,
+      completion_tokens: 40,
+      total_tokens: 346,
+      cache_read_input_tokens: 12,
+      cache_creation_input_tokens: undefined
+    });
+  });
+
+  it('extracts OpenAI Responses usage from SSE passthrough bodyText', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        mode: 'sse_passthrough',
+        bodyText: [
+          'event: response.created',
+          'data: {"type":"response.created","response":{"usage":null}}',
+          '',
+          'event: response.completed',
+          'data: {"type":"response.completed","response":{"usage":{"input_tokens":306,"input_tokens_details":{"cached_tokens":12},"output_tokens":40,"total_tokens":346}}}',
+          ''
+        ].join('\n')
+      }
+    }, {
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 306,
+      completion_tokens: 40,
+      total_tokens: 346,
+      cache_read_input_tokens: 12,
+      cache_creation_input_tokens: undefined
+    });
+  });
+
   it('recomputes total when cache tokens are excluded upstream', () => {
     const usage = extractUsageFromResult({
       body: {

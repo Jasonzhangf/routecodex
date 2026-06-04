@@ -1824,8 +1824,9 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 多端口隔离验收必须同时看：`ports/<port>/server-<port>.log`、`codex-samples/<entry>/ports/<port>/...`、`provider-stats.jsonl` 的 `entryPort`、非主端口 `/admin/ports` 404 JSON、以及真实 `/v1/chat/completions` HTTP JSON。
 
 ### 2026-06-03 servertool followup 唯一路径精华
-- stop_message followup 预算/eligibility 的唯一 live carrier 是 `__rt.serverToolLoopState` + `__rt.stopMessageFollowupPolicy`；Rust handler 产出 plan，TS `applyFollowupRuntimeMetadata` 只做一次 materialize，nested metadata builder / request metadata merge 禁止再补偿重建预算。
-- 验证必须看在线 `:stop_followup` 样本：`meta.requestMetadata.__rt.serverToolLoopState.maxRepeats=3` 且 repeatCount 逐轮增长；不要用 `root serverToolLoopState` 或 persisted snapshot 证明 live path 正确。
+- stop_message followup 只能单次复入：主请求可触发一个 `:stop_followup`，followup hop 响应侧必须 `skip_servertool_followup_hop`，禁止 nested followup / 连续续杯。
+- `stopMessageFollowupPolicy` / `preserve_eligibility` 是已删除旧契约；不得在 skeleton/profile/runtime metadata/Rust context/测试 mock 中恢复。
+- 验证必须看在线样本：同一客户端 requestId 下最多一个 `_stop_followup` 目录/请求；缺 schema 时只注入一次强 schema 引导，不递归追问。
 
 ### 2026-06-03 servertool followup 单次复入精华
 - `servertool` followup 禁止同一 `followupRequestId` provider 重试；空 followup 响应只能 fail-fast + 落 empty sample，不能 `retryEmptyFollowupOnce` 二次复入，否则会消耗 provider 次数并造成重复 VR hit。
@@ -1840,8 +1841,9 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 线上 sample 若 adapterContext 无 `capturedChatRequest`，必须检查 `__raw_request_body` / `responsesRequestContext.payload` 是否作为 captured seed 进入 `seedLoopPayload`；本地 ignored 源码旁 `.js/.d.ts` 会遮蔽 TS 测试，发现后先删除再跑红测。
 
 ### 2026-06-04 servertool response chain 精华
+- 响应链命名以 Hub 为参照：`RespInbound` 是模型/provider 端进入 Hub；`RespChatProcess` 是 Hub 内响应治理；`RespOutbound` 是 Hub 出到客户端入口协议。不要把“客户端返回/进入”叫 response inbound。
 - 看到 servertool/followup 响应 shape 错误时，先查 stage，不要找“servertool response”：servertool 只在 `HubRespChatProcess03Governed` 代客户端执行本地工具，后续必须走正常 `HubRespOutbound04ClientSemantic`。
-- `/v1/responses` followup 红测必须断最终 client payload 顶层 `object=response`；Chat Completions 红测必须断没有被 Responses builder 包装。两个断言同时存在，才能证明 `buildHubRespOutbound04FromHubRespChatProcess03` 是按入口协议做唯一相邻转换。
+- `/v1/responses` followup 红测必须断最终 client payload 顶层 `object=response`；`/v1/chat/completions` 红测必须断最终 client payload 是 Chat Completion shape 且没有被 Responses payload 直写。两个断言同时存在，才能证明 `HubRespOutbound04ClientSemantic` 是按入口协议做唯一相邻转换。
 
 ### 2026-06-04 stopless followup requestId 精华
 - stopless / servertool 日志出现 `:stop_followup` 多次叠加或 codex-samples `File name too long` 时，先查 Rust `followup-core::build_followup_request_id` 的幂等与收敛；requestId 只能作为 followup identity carrier，不能按 hop 无限增长。
@@ -1858,3 +1860,4 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - `stopreason=blocked` 是合法停止态；schema parser 要接受数字与常见字符串态，不能因模型写 `"blocked"` 导致十几次不停止。
 - 客户端断开是 servertool 生命周期最高优先级终止信号：server-side-tools / followup-mainline / reenter / client-inject / nested followup 都必须抛 `SERVERTOOL_CLIENT_DISCONNECTED`，禁止返回 completed 或继续 provider 请求。
 - `exec_command` 安全校验只解析真实 tool arguments 的 `cmd`；不得扫描 prompt/history/工具结果文本来判定命令，sudo/osascript/admin 文本不是 broad kill，`xargs kill` 与 `kill $(...)` 才是禁止模式。
+- stopless final projection 必须把 `<stop_schema>...</stop_schema>` / stopreason JSON 当控制结构剥离；允许解析、允许写 summary prefix，但禁止把 schema 原文作为 assistant text 返回客户端。

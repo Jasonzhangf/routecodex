@@ -1619,7 +1619,8 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'keeps streamPipe payload as response truth in TS shell', pattern: /payload:\s*streamPayload|streamPayload\s+as\s+JsonObject/ },
     ]);
 
-    expect(source).toContain('hubRespOutbound04ClientSemantic = await executeProviderResponseNativeServertoolEffects');
+    expect(source).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
+    expect(source).toContain("hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'");
     expect(source).toContain('codec.convertJsonToSse(hubRespOutbound04ClientSemantic');
     expect(findings).toEqual([]);
   });
@@ -1641,11 +1642,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(runtimeUtilsSource).toContain('readPositiveInteger(loopState.maxRepeats)');
     expect(runtimeUtilsSource).not.toContain('readPositiveInteger(loopState.repeatCount)');
     expect(runtimeUtilsSource).toContain('readPositiveInteger(state?.stopMessageUsed)');
-    expect(handlerSource).toContain("followupFlowId === 'stop_message_flow'");
-    expect(handlerSource).toContain("? 'preserve_eligibility'");
+    expect(handlerSource).toContain('if (followupFlowId)');
+    expect(handlerSource).toContain("reason: 'skip_servertool_followup_hop'");
+    expect(handlerSource).not.toContain('stop_message_followup_policy');
+    expect(handlerSource).not.toContain('preserve_eligibility');
 
     const findings = collectMatches(`${runtimeUtilsSource}\n${handlerSource}`, [
-      { label: 'generic followup policy overrides stop_message_flow eligibility', pattern: /followupFlowId\s*\|\|\s*'__servertool_followup__'[\s\S]{0,500}stop_message_followup_policy:\s*undefined/ },
+      { label: 'followup hop preserves stop_message eligibility', pattern: /preserve_eligibility|stop_message_followup_policy|stopMessageFollowupPolicy/ },
       { label: 'runtime stop snapshot ignores servertool loop state', pattern: /return\s+resolveStopMessageSnapshot\(state\);/ },
     ]);
     expect(findings).toEqual([]);

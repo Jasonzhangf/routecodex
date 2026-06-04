@@ -252,6 +252,13 @@ function isRealtimeRollupEnabled(): boolean {
   );
 }
 
+function isRealtimeVirtualRouterLogEnabled(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_LOG_VR_REALTIME ?? process.env.RCC_LOG_VR_REALTIME,
+    false
+  );
+}
+
 
 function ensureStarted(): void {
   if (!isRollupEnabled()) {
@@ -327,6 +334,7 @@ function emitRealtimeSessionRequestLog(args: {
   event: SessionRequestEvent;
 }): void {
   const sessionColor = resolveSessionAnsiColor(args.sessionId) || ANSI_SESSION;
+  const hi = (value: string | number): string => `${ANSI_WHITE}${value}${ANSI_RESET}${sessionColor}`;
   const sessionLabel = shortSessionId(args.sessionId);
   const projectResolution = resolveProjectPathWithSource(args.sessionId, args.projectPath);
   const project = trimPathForLog(projectResolution.path || '-');
@@ -337,7 +345,6 @@ function emitRealtimeSessionRequestLog(args: {
   const sessionAgg = sessionRollups.get(args.sessionId);
   const calls = sessionAgg?.usageCalls ?? 0;
   const retries = sessionAgg?.totalRetryCount ?? 0;
-  console.log(colorize(`[session-request][rt] session=${sessionLabel} project=${project}`, sessionColor));
   const coreInternalMs = computeCoreInternalMs(
     args.event.internalLatencyMs,
     args.event.trafficWaitMs,
@@ -345,17 +352,24 @@ function emitRealtimeSessionRequestLog(args: {
     args.event.sseDecodeMs,
     args.event.codecDecodeMs
   );
-  console.log(
-    `${colorize(
-      `  req=${requestLabel} ${routePool} -> ${provider} total=${formatMs(args.event.latencyMs)} internal=${formatMs(coreInternalMs)} external=${formatMs(args.event.externalLatencyMs)} retries=${args.event.retryCount} attempts=${args.event.providerAttemptCount} wait.traffic=${formatMs(args.event.trafficWaitMs)} wait.inject=${formatMs(args.event.clientInjectWaitMs)} decode.sse=${formatMs(args.event.sseDecodeMs)} decode.codec=${formatMs(args.event.codecDecodeMs)}${args.event.providerDecodeTag ? ` ${args.event.providerDecodeTag}` : ''}`,
-      sessionColor
-    )} ${ANSI_WHITE}finish_reason=${finishReason}${ANSI_RESET}`
-  );
   const ts = getTokenStatsSnapshot();
-  console.log(colorize(`  session.calls=${calls} session.retries=${retries}`, sessionColor) + ` ${ANSI_WHITE}tokens.alltime=${formatTokens(ts.alltime.totalTokens)} tokens.daily=${formatTokens(ts.daily.totalTokens)}${ANSI_RESET}`);
   const reqUsage = args.event;
   const hasReqTokens = reqUsage.promptTokens !== undefined || reqUsage.completionTokens !== undefined
     || reqUsage.cacheReadTokens !== undefined || reqUsage.totalTokens !== undefined;
+  const parts = [
+    `[session-request][rt] session=${sessionLabel}`,
+    `req=${requestLabel}`,
+    `${routePool}->${provider}`,
+    `total=${hi(formatMs(args.event.latencyMs))}`,
+    `internal=${hi(formatMs(coreInternalMs))}`,
+    `external=${hi(formatMs(args.event.externalLatencyMs))}`,
+    `calls=${hi(calls)}`,
+    `fail=${hi(retries)}`,
+    `attempts=${hi(args.event.providerAttemptCount)}`,
+    `tokens.day=${hi(formatTokens(ts.daily.totalTokens))}`,
+    `tokens.all=${hi(formatTokens(ts.alltime.totalTokens))}`,
+    `project=${project}`
+  ];
   if (hasReqTokens) {
     const tokParts: string[] = [];
     if (reqUsage.promptTokens !== undefined) tokParts.push(`in=${formatWholeNumber(reqUsage.promptTokens)}`);
@@ -409,8 +423,11 @@ function emitRealtimeSessionRequestLog(args: {
       tokParts.push(`cache.write=${formatWholeNumber(reqUsage.cacheCreationTokens)}`);
     }
     if (reqUsage.totalTokens !== undefined) tokParts.push(`total=${formatWholeNumber(reqUsage.totalTokens)}`);
-    console.log(`  ${ANSI_WHITE}${tokParts.join(' ')}${ANSI_RESET}`);
+    parts.push(`usage(${tokParts.join(' ')})`);
   }
+  console.log(
+    `${colorize(parts.join(' '), sessionColor)} ${ANSI_WHITE}finish_reason=${finishReason}${ANSI_RESET}`
+  );
 }
 
 function emitRealtimeVirtualRouterHitLog(args: {
@@ -552,7 +569,7 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
   if (sessionExisting) {
     sessionExisting.virtualHits += 1;
     updateSessionProjectPath(sessionId, event.projectPath);
-    if (isRealtimeRollupEnabled()) {
+    if (isRealtimeRollupEnabled() && isRealtimeVirtualRouterLogEnabled()) {
       emitRealtimeVirtualRouterHitLog({
         sessionId,
         projectPath: sessionExisting.projectPath,
@@ -600,7 +617,7 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
     maxRetryCount: 0
   });
   updateSessionProjectPath(sessionId, event.projectPath);
-  if (isRealtimeRollupEnabled()) {
+  if (isRealtimeRollupEnabled() && isRealtimeVirtualRouterLogEnabled()) {
     emitRealtimeVirtualRouterHitLog({
       sessionId,
       projectPath: sessionRollups.get(sessionId)?.projectPath,

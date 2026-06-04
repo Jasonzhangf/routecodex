@@ -51,6 +51,8 @@ export interface PipelineExecutionResult {
     projectPath?: unknown;
     firstContentAtMs?: number;
     lastContentAtMs?: number;
+    providerRequestId?: string;
+    inputRequestId?: string;
   };
 }
 

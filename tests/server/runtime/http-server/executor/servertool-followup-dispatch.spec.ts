@@ -144,8 +144,7 @@ describe('servertool followup dispatch helper', () => {
             flowPolicy: {
               profilesByFlowId: {
                 stop_message_flow: {
-                  seedLoopPayload: true,
-                  stopMessageFollowupPolicy: 'preserve_eligibility'
+                  seedLoopPayload: true
                 }
               }
             }
@@ -374,7 +373,7 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_stopmessage_disabled_nested',
       body: { input: 'continue' },
-      metadata: { __rt: { serverToolFollowup: true, stopMessageFollowupPolicy: 'preserve_eligibility' } },
+      metadata: { __rt: { serverToolFollowup: true } },
       baseMetadata: { stopMessageEnabled: true, routecodexPortStopMessageEnabled: true },
       executeNested
     });
@@ -431,7 +430,7 @@ describe('servertool followup dispatch helper', () => {
     });
   });
 
-  it('keeps stopMessage eligibility when loopState flow is paired with explicit preserve policy', async () => {
+  it('does not preserve stopMessage eligibility from removed preserve policy', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
@@ -468,12 +467,12 @@ describe('servertool followup dispatch helper', () => {
     });
 
     expect(result.body).toEqual({
-      stopMessageEnabled: true,
-      routecodexPortStopMessageEnabled: true,
-      rtStopMessageEnabled: undefined,
-      rtPortStopMessageEnabled: undefined,
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false,
+      rtStopMessageEnabled: false,
+      rtPortStopMessageEnabled: false,
       flowId: 'stop_message_flow',
-      policy: 'preserve_eligibility'
+      policy: undefined
     });
   });
 
@@ -501,7 +500,6 @@ describe('servertool followup dispatch helper', () => {
         __rt: {
           serverToolFollowup: true,
           serverToolLoopState: { flowId: 'stop_message_flow', repeatCount: 1 },
-          stopMessageFollowupPolicy: 'preserve_eligibility'
         }
       },
       baseMetadata: { stopMessageEnabled: true, routecodexPortStopMessageEnabled: true },
@@ -510,7 +508,7 @@ describe('servertool followup dispatch helper', () => {
 
     expect(result.body).toEqual({
       loopState: { flowId: 'stop_message_flow', repeatCount: 1 },
-      policy: 'preserve_eligibility'
+      policy: undefined
     });
   });
 

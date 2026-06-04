@@ -119,8 +119,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                             },
 
                             "stop_message_flow": {
-                                "seedLoopPayload": true,
-                                "stopMessageFollowupPolicy": "preserve_eligibility"
+                                "seedLoopPayload": true
                             },
                             "reasoning_stop_guard_flow": {},
                             "reasoning_stop_continue_flow": {},
@@ -194,11 +193,6 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
         "clientInjectOnly": profile_obj.and_then(|v| v.get("clientInjectOnly")).and_then(|v| v.as_bool()).unwrap_or(false),
         "clearStateOnFollowupFailure": profile_obj.and_then(|v| v.get("clearStateOnFollowupFailure")).and_then(|v| v.as_bool()).unwrap_or(false),
         "seedLoopPayload": profile_obj.and_then(|v| v.get("seedLoopPayload")).and_then(|v| v.as_bool()).unwrap_or(false),
-        "stopMessageFollowupPolicy": profile_obj
-            .and_then(|v| v.get("stopMessageFollowupPolicy"))
-            .and_then(|v| v.as_str())
-            .filter(|v| *v == "preserve_eligibility" || *v == "disable")
-            .unwrap_or("disable"),
         "ignoreRequiresActionFollowup": profile_obj.and_then(|v| v.get("ignoreRequiresActionFollowup")).and_then(|v| v.as_bool()).unwrap_or(false),
         "clientInjectSource": profile_obj.and_then(|v| v.get("clientInjectSource")).cloned().unwrap_or(serde_json::Value::Null),
         "transparentReplayRequestSuffix": profile_obj.and_then(|v| v.get("transparentReplayRequestSuffix")).cloned().unwrap_or(serde_json::Value::Null),
@@ -282,12 +276,7 @@ mod tests {
             parsed.get("seedLoopPayload").and_then(|v| v.as_bool()),
             Some(true)
         );
-        assert_eq!(
-            parsed
-                .get("stopMessageFollowupPolicy")
-                .and_then(|v| v.as_str()),
-            Some("preserve_eligibility")
-        );
+        assert!(parsed.get("stopMessageFollowupPolicy").is_none());
     }
 
     #[test]

@@ -1231,7 +1231,9 @@ export async function sendPipelineResponse(
         projectPath: usageLogInfo.projectPath,
         firstContentAtMs: usageLogInfo.firstContentAtMs,
         lastContentAtMs: usageLogInfo.lastContentAtMs,
-        requestStartedAtMs: usageLogInfo.requestStartedAtMs
+        requestStartedAtMs: usageLogInfo.requestStartedAtMs,
+        providerRequestId: usageLogInfo.providerRequestId,
+        inputRequestId: usageLogInfo.inputRequestId
       });
       logPipelineStage('request.usage_log.completed', requestLabel, {
         providerKey: usageLogInfo.providerKey
@@ -1853,6 +1855,7 @@ export async function sendPipelineResponse(
     });
   }
   const clientBody = usageNormalized.payload;
+  assertClientResponseHasNoInternalCarriers(clientBody, requestLabel);
   const sanitized = stripInternalKeysDeep(clientBody);
   if (status >= 400) {
     await clearResponsesConversationRequestIds({

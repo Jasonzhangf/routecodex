@@ -54,10 +54,10 @@ Design goals:
 - Other servertools follow their skeleton/profile policy.
 
 1.1. Followup eligibility:
-- The structural contract is `stopMessageFollowupPolicy=preserve_eligibility` on the `stop_message_flow` skeleton/profile and runtime carrier; flow names or source strings are not semantic permission.
-- A followup hop may preserve stopMessage eligibility only when the runtime carrier exposes `stopMessageFollowupPolicy=preserve_eligibility`; missing policy defaults to `disable` and generic followups use `skip_servertool_followup_hop`.
-- Preserved stop-message followup metadata must not contain `stopMessageEnabled=false` or `routecodexPortStopMessageEnabled=false`, including inside `__rt`.
-- Rust `stop-message-core` must allow followup eligibility only from `stop_message_followup_policy=preserve_eligibility`, not from `followup_flow_id` string matching.
+- One client request may trigger at most one `stop_message_flow` followup. Any followup hop (`__rt.serverToolFollowup` or `serverToolLoopState.flowId`) must skip stopless with `skip_servertool_followup_hop`.
+- `stopMessageFollowupPolicy` / `preserve_eligibility` is obsolete and must not appear in skeleton, runtime metadata, Rust decision context, or response projection.
+- A missing stop schema is handled by the single followup prompt. If the followup still stops without schema, it is returned as the followup result; it must not recursively create another followup.
+- Stop schema budget is two-tiered across consecutive stop attempts: missing schema is a protection loop capped at 10; once schema is present but still requests/needs continuation, the consecutive schema budget is 3. Non-consecutive stop attempts reset the budget.
 - Do not change router-direct/provider selection to fix stopless continuation; stopless eligibility belongs to servertool dispatch + Rust stop-message decision only.
 
 1.2. Stop schema / final-stop learned note:

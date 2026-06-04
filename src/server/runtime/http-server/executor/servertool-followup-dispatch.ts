@@ -343,35 +343,6 @@ function isManagedStoplessGoalRequestSemantics(requestSemantics: Record<string, 
   return status === 'active' || status === 'paused' || status === 'stopped' || status === 'completed';
 }
 
-function shouldPreserveStopMessageFollowupMetadata(metadata: Record<string, unknown>): boolean {
-  const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-    ? (metadata.__rt as Record<string, unknown>)
-    : undefined;
-  return rt?.stopMessageFollowupPolicy === 'preserve_eligibility'
-    || metadata.stopMessageFollowupPolicy === 'preserve_eligibility';
-}
-
-function removeNestedStopMessageDisableFlags(metadata: Record<string, unknown>): void {
-  if (metadata.stopMessageEnabled === false) {
-    delete metadata.stopMessageEnabled;
-  }
-  if (metadata.routecodexPortStopMessageEnabled === false) {
-    delete metadata.routecodexPortStopMessageEnabled;
-  }
-  const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-    ? (metadata.__rt as Record<string, unknown>)
-    : undefined;
-  if (!rt) {
-    return;
-  }
-  if (rt.stopMessageEnabled === false) {
-    delete rt.stopMessageEnabled;
-  }
-  if (rt.routecodexPortStopMessageEnabled === false) {
-    delete rt.routecodexPortStopMessageEnabled;
-  }
-}
-
 function readBooleanFlag(value: unknown): boolean {
   return value === true || (typeof value === 'string' && value.trim().toLowerCase() === 'true');
 }
@@ -702,18 +673,32 @@ async function buildServerToolNestedInput(args: {
   });
   preserveLiveClientAbortCarriers({ source: args.baseMetadata, target: nestedMetadata });
   preserveLiveClientAbortCarriers({ source: nestedExtra, target: nestedMetadata });
-  const keepStopMessageEnabled = shouldPreserveStopMessageFollowupMetadata(nestedMetadata);
-  if (keepStopMessageEnabled) {
-    removeNestedStopMessageDisableFlags(nestedMetadata);
-  }
-  if (!keepStopMessageEnabled) {
-    nestedMetadata.stopMessageEnabled = false;
-    nestedMetadata.routecodexPortStopMessageEnabled = false;
+  delete nestedMetadata.stopMessageFollowupPolicy;
+  const nestedRtForPolicy = nestedMetadata.__rt && typeof nestedMetadata.__rt === 'object' && !Array.isArray(nestedMetadata.__rt)
+    ? (nestedMetadata.__rt as Record<string, unknown>)
+    : undefined;
+  if (nestedRtForPolicy) {
+    delete nestedRtForPolicy.stopMessageFollowupPolicy;
   }
   const nestedRuntime =
     nestedMetadata.__rt && typeof nestedMetadata.__rt === 'object' && !Array.isArray(nestedMetadata.__rt)
       ? (nestedMetadata.__rt as Record<string, unknown>)
       : {};
+  const followupSource = [nestedMetadata.clientInjectSource, nestedRuntime.clientInjectSource]
+    .find((value) => typeof value === 'string' && value.trim().length > 0);
+  const isNonStopMessageFollowup = typeof followupSource === 'string' && !followupSource.includes('stop_message');
+  const runtimeStopMessageDisabled =
+    nestedRuntime.stopMessageEnabled === false
+    || nestedRuntime.routecodexPortStopMessageEnabled === false;
+  const keepStopMessageEnabled =
+    !isNonStopMessageFollowup
+    && !runtimeStopMessageDisabled
+    && nestedMetadata.stopMessageEnabled === true
+    && nestedMetadata.routecodexPortStopMessageEnabled === true;
+  if (!keepStopMessageEnabled) {
+    nestedMetadata.stopMessageEnabled = false;
+    nestedMetadata.routecodexPortStopMessageEnabled = false;
+  }
   nestedMetadata.__rt = keepStopMessageEnabled
     ? nestedRuntime
     : {

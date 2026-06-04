@@ -7,7 +7,6 @@ export type {
 } from './native-hub-pipeline-resp-semantics-types.js';
 
 export {
-  applyClientPassthroughPatchWithNative,
   applyReasoningPayloadToMessageWithNative,
   buildOpenAIChatResponseFromAnthropicMessageWithNative,
   buildAnthropicResponseFromChatWithNative,

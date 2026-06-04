@@ -449,13 +449,6 @@ function shouldLogStage(
     return false;
   }
 
-  if (
-    normalizedStage === 'provider.traffic.acquire.wait'
-    || normalizedStage === 'provider.traffic.acquire.completed'
-  ) {
-    return true;
-  }
-
   return false;
 }
 

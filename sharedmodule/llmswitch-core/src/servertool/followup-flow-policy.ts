@@ -28,10 +28,6 @@ export function resolveFollowupFlowDecision(flowId: unknown): FollowupFlowDecisi
     clientInjectOnly: plan?.clientInjectOnly === true,
     clearStateOnFollowupFailure: plan?.clearStateOnFollowupFailure === true,
     seedLoopPayload: plan?.seedLoopPayload === true,
-    stopMessageFollowupPolicy:
-      plan?.stopMessageFollowupPolicy === 'preserve_eligibility'
-        ? 'preserve_eligibility'
-        : 'disable',
     ...(plan?.clientInjectSource ? { clientInjectSource: plan.clientInjectSource } : {}),
     ...(plan?.transparentReplayRequestSuffix
       ? { transparentReplayRequestSuffix: plan.transparentReplayRequestSuffix }
@@ -42,7 +38,7 @@ export function resolveFollowupFlowDecision(flowId: unknown): FollowupFlowDecisi
 }
 
 export function shouldPreserveStopMessageEligibilityForFollowup(flowId: unknown): boolean {
-  return resolveFollowupFlowDecision(flowId).stopMessageFollowupPolicy === 'preserve_eligibility';
+  return false;
 }
 
 export function isNoFollowupFlowId(flowId: unknown): boolean {

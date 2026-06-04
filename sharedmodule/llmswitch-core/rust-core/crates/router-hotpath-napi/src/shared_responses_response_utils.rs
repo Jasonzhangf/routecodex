@@ -792,17 +792,9 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
             "response": Value::Object(response_payload.clone()),
             "required_action": Value::Object(required_action.clone())
         });
-        let completed_payload = serde_json::json!({
-            "type":"response.completed",
-            "response": Value::Object(response_payload.clone())
-        });
         frames.push(format!(
             "event: response.required_action\ndata: {}\n\n",
             required_payload
-        ));
-        frames.push(format!(
-            "event: response.completed\ndata: {}\n\n",
-            completed_payload
         ));
         frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
         frames.push("data: [DONE]\n\n".to_string());
@@ -828,7 +820,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn terminal_frames_for_required_action_include_completed_for_codex_client() {
+    fn terminal_frames_for_required_action_must_not_emit_completed() {
         let probe = serde_json::json!({
             "id": "resp_required_terminal",
             "status": "requires_action",
@@ -852,15 +844,11 @@ mod tests {
         let frames: Vec<String> = serde_json::from_str(&frames_json).unwrap();
         let wire = frames.join("");
         assert!(wire.contains("event: response.required_action"));
-        assert!(wire.contains("event: response.completed"));
+        assert!(!wire.contains("event: response.completed"));
         assert!(wire.contains("event: response.done"));
         assert!(wire.contains("data: [DONE]"));
         assert!(
             wire.find("event: response.required_action").unwrap()
-                < wire.find("event: response.completed").unwrap()
-        );
-        assert!(
-            wire.find("event: response.completed").unwrap()
                 < wire.find("event: response.done").unwrap()
         );
     }

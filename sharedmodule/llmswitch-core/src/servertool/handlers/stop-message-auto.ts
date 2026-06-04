@@ -87,7 +87,8 @@ async function evaluateGoalActiveStopLoopGuard(args: {
 const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTECODEX_STOPMESSAGE_DEBUG || '').trim() === '1';
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
 const FLOW_ID = 'stop_message_flow';
-const STOP_SCHEMA_REJECTION_MAX_REPEATS = 5;
+const STOP_SCHEMA_MISSING_MAX_REPEATS = 10;
+const STOP_SCHEMA_PROVIDED_MAX_REPEATS = 3;
 const STOP_MESSAGE_EXECUTION_APPEND = '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。';
 
 function extractCurrentAssistantStopText(payload: unknown): string {
@@ -138,11 +139,57 @@ function collectTextBlocks(value: unknown, out: string[]): void {
 
 function applyStopSummaryPrefix(payload: JsonObject, prefix: unknown): JsonObject {
   const text = typeof prefix === 'string' ? prefix.trim() : '';
-  if (!text) return payload;
-  const cloned = JSON.parse(JSON.stringify(payload)) as JsonObject;
+  const cloned = stripStopSchemaControlText(JSON.parse(JSON.stringify(payload)) as JsonObject);
+  if (!text) return cloned;
   if (prefixChatChoiceContent(cloned, text)) return cloned;
   if (prefixResponsesOutputContent(cloned, text)) return cloned;
   return cloned;
+}
+
+function stripStopSchemaControlBlocks(text: string): string {
+  let current = String(text || '');
+  current = current.replace(/<stop_schema>\s*[\s\S]*?\s*<\/stop_schema>/gi, '');
+  current = current.replace(/```(?:json)?\s*\{[\s\S]*?"stopreason"[\s\S]*?\}\s*```/gi, '');
+  return current
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line, index, lines) => line.trim() || (index > 0 && index < lines.length - 1))
+    .join('\n')
+    .trim();
+}
+
+function stripStopSchemaControlText(payload: JsonObject): JsonObject {
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  for (const choice of choices) {
+    const choiceRow = choice && typeof choice === 'object' && !Array.isArray(choice) ? choice as Record<string, unknown> : null;
+    const message = choiceRow?.message && typeof choiceRow.message === 'object' && !Array.isArray(choiceRow.message)
+      ? choiceRow.message as Record<string, unknown>
+      : null;
+    if (!message) continue;
+    if (typeof message.content === 'string') {
+      message.content = stripStopSchemaControlBlocks(message.content);
+      continue;
+    }
+    if (Array.isArray(message.content)) {
+      for (const part of message.content) {
+        const partRow = part && typeof part === 'object' && !Array.isArray(part) ? part as Record<string, unknown> : null;
+        if (typeof partRow?.text === 'string') partRow.text = stripStopSchemaControlBlocks(partRow.text);
+        if (typeof partRow?.content === 'string') partRow.content = stripStopSchemaControlBlocks(partRow.content);
+      }
+    }
+  }
+  const output = Array.isArray(payload.output) ? payload.output : [];
+  for (const item of output) {
+    const itemRow = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : null;
+    const content = Array.isArray(itemRow?.content) ? itemRow.content : [];
+    for (const part of content) {
+      const partRow = part && typeof part === 'object' && !Array.isArray(part) ? part as Record<string, unknown> : null;
+      if (typeof partRow?.text === 'string') partRow.text = stripStopSchemaControlBlocks(partRow.text);
+      if (typeof partRow?.output_text === 'string') partRow.output_text = stripStopSchemaControlBlocks(partRow.output_text);
+      if (typeof partRow?.content === 'string') partRow.content = stripStopSchemaControlBlocks(partRow.content);
+    }
+  }
+  return payload;
 }
 
 function buildStopSchemaBudgetExhaustedSummary(args: {
@@ -150,7 +197,7 @@ function buildStopSchemaBudgetExhaustedSummary(args: {
   capturedRequest?: JsonObject | null;
   currentSummary?: string;
 } = {}): string {
-  const current = typeof args.currentSummary === 'string' ? args.currentSummary.trim() : '';
+  const current = typeof args.currentSummary === 'string' ? stripStopSchemaControlBlocks(args.currentSummary).trim() : '';
   const rounds = extractStoplessRounds(args.capturedRequest, current);
   const lines = [
     'Stopless 校验结果：连续 stop 预算已耗尽。',
@@ -265,6 +312,13 @@ function attachStopMessageRuntimeStateToMetadata(metadata: Record<string, unknow
     stopMessageMaxRepeats: state.maxRepeats,
     stopMessageUsed: state.used,
     stopMessageStageMode: state.stageMode
+  };
+  const loopState = rt.serverToolLoopState && typeof rt.serverToolLoopState === 'object' && !Array.isArray(rt.serverToolLoopState)
+    ? { ...(rt.serverToolLoopState as Record<string, unknown>) }
+    : {};
+  rt.serverToolLoopState = {
+    ...loopState,
+    maxRepeats: state.maxRepeats
   };
   metadata.__rt = rt;
 }
@@ -585,6 +639,26 @@ const handler: ServerToolHandler = async (
   // ── Build native decision context ──
   const followupFlowId = readServerToolFollowupFlowId(rt)
     || (rt.serverToolFollowup === true ? '__servertool_followup__' : '');
+  if (followupFlowId) {
+    const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
+    attachStopMessageCompareContext(ctx.adapterContext, {
+      armed: false,
+      mode: 'off',
+      allowModeOnly: false,
+      textLength: 0,
+      maxRepeats: 0,
+      used: 0,
+      remaining: 0,
+      active: false,
+      stopEligible: stopGateway.eligible,
+      hasCapturedRequest: Boolean(getCapturedRequest(ctx.adapterContext)),
+      compactionRequest: false,
+      hasSeed: false,
+      decision: 'skip',
+      reason: 'skip_servertool_followup_hop',
+    });
+    return null;
+  }
   const persistedLookupPlan = planStopMessagePersistedLookup(record, rt, {
     includeSnapshotLookup: true,
     includeTombstoneLookup: true
@@ -612,19 +686,9 @@ const handler: ServerToolHandler = async (
       })
     : undefined;
 
-  const stopMessageFollowupPolicy =
-    rt.stopMessageFollowupPolicy === 'preserve_eligibility'
-      ? 'preserve_eligibility'
-      : rt.stopMessageFollowupPolicy === 'disable'
-        ? 'disable'
-        : followupFlowId === 'stop_message_flow'
-          ? 'preserve_eligibility'
-          : undefined;
-
   const decisionCtx: StopMessageDecisionContext = {
     port_stop_message_disabled: isStopMessageDisabledByPort(ctx.adapterContext),
     followup_flow_id: followupFlowId || undefined,
-    stop_message_followup_policy: stopMessageFollowupPolicy,
     stop_eligible: stopGateway.eligible,
     finish_reasons: collectFinishReasonsFromCurrentPayload(ctx.base),
     has_responses_submit_tool_outputs_resume: hasResponsesSubmitToolOutputsResume(ctx.adapterContext),
@@ -777,15 +841,18 @@ const handler: ServerToolHandler = async (
     const usedAt = Date.now();
     const stateUpdate = handlerResult.stateUpdate || {};
     const shouldCountBudget = schemaGate.count_budget !== false;
+    const schemaBudgetMaxRepeats = schemaGate.reason_code === 'stop_schema_missing'
+      ? STOP_SCHEMA_MISSING_MAX_REPEATS
+      : STOP_SCHEMA_PROVIDED_MAX_REPEATS;
     const nextMaxRepeats = shouldCountBudget
-      ? Math.max(decision.max_repeats, STOP_SCHEMA_REJECTION_MAX_REPEATS)
+      ? schemaBudgetMaxRepeats
       : decision.max_repeats;
     const nextUsed = shouldCountBudget
       ? (typeof stateUpdate.used === 'number' ? stateUpdate.used : decision.used + 1)
       : decision.used;
     const snapInput = {
       text: String(stateUpdate.text ?? STOP_MESSAGE_EXECUTION_APPEND),
-      maxRepeats: typeof stateUpdate.maxRepeats === 'number' ? Math.max(stateUpdate.maxRepeats, nextMaxRepeats) : nextMaxRepeats,
+      maxRepeats: nextMaxRepeats,
       used: nextUsed,
       source: typeof stateUpdate.source === 'string' ? stateUpdate.source : 'default',
       stageMode: typeof stateUpdate.stageMode === 'string' ? stateUpdate.stageMode as any : 'on' as any,

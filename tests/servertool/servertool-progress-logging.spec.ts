@@ -58,16 +58,15 @@ async function runServerToolOrchestration(
 
 const serverToolEngineRuntimePath = path.join(
   process.cwd(),
-  'node_modules',
-  '@jsonstudio',
-  'llms',
-  'dist',
+  'sharedmodule',
+  'llmswitch-core',
+  'src',
   'servertool',
-  'engine.js'
+  'progress-log-block.ts'
 );
 const supportsProgressConsoleLogs =
   fs.existsSync(serverToolEngineRuntimePath) &&
-  fs.readFileSync(serverToolEngineRuntimePath, 'utf8').includes('[servertool][stop_watch]');
+  fs.readFileSync(serverToolEngineRuntimePath, 'utf8').includes('[servertool]');
 const testIfProgressConsoleLogs = supportsProgressConsoleLogs ? test : test.skip;
 
 const PROGRESS_MOCK_CODEX_BIN_PATH = path.join(process.cwd(), 'tmp', 'jest-progress-mock-codex.sh');
@@ -227,10 +226,10 @@ describe('servertool progress logging', () => {
       expect(
         lines.some(
           (l) =>
-            l.includes('\u001b[38;5;39m[servertool][stop_compare]') &&
-            l.includes('stage=match') &&
-            l.includes('decision=trigger') &&
-            l.includes('reason=triggered')
+            l.includes('\u001b[38;5;39m[servertool]') &&
+            l.includes('tool=stop_message_auto') &&
+            l.includes('stage=compare') &&
+            l.includes('decision=trigger')
         )
       ).toBe(true);
     } finally {
@@ -246,7 +245,7 @@ describe('servertool progress logging', () => {
     }
   });
 
-  testIfProgressConsoleLogs('prints stop entry + skipped trigger logs when finish_reason=stop is observed but not activated', async () => {
+  testIfProgressConsoleLogs('prints stop entry + trigger logs when finish_reason=stop is observed', async () => {
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const adapterContext: AdapterContext = {
@@ -280,14 +279,29 @@ describe('servertool progress logging', () => {
         adapterContext,
         requestId: 'req-stop-entry-skip-1',
         entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-chat'
+        providerProtocol: 'openai-chat',
+        reenterPipeline: async () => ({
+          body: {
+            id: 'chatcmpl-stop-entry-followup-1',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: 'done' },
+                finish_reason: 'stop'
+              }
+            ]
+          } as JsonObject
+        })
       });
 
       const lines = spy.mock.calls.map((c) => String(c[0] ?? ''));
       expect(
         lines.some(
           (l) =>
-            l.includes('\u001b[38;5;39m[servertool][stop_watch]') &&
+            l.includes('\u001b[38;5;39m[servertool]') &&
+            l.includes('tool=stop_message_auto') &&
             l.includes('stage=entry') &&
             l.includes('source=chat') &&
             l.includes('reason=finish_reason_stop')
@@ -296,17 +310,19 @@ describe('servertool progress logging', () => {
       expect(
         lines.some(
           (l) =>
-            l.includes('\u001b[38;5;39m[servertool][stop_watch]') &&
+            l.includes('\u001b[38;5;39m[servertool]') &&
+            l.includes('tool=stop_message_auto') &&
             l.includes('stage=match') &&
-            l.includes('result=skipped_passthrough')
+            l.includes('result=activated')
         )
       ).toBe(true);
       expect(
         lines.some(
           (l) =>
-            l.includes('\u001b[38;5;39m[servertool][stop_compare]') &&
-            l.includes('stage=match') &&
-            l.includes('decision=skip')
+            l.includes('\u001b[38;5;39m[servertool]') &&
+            l.includes('tool=stop_message_auto') &&
+            l.includes('stage=compare') &&
+            l.includes('decision=trigger')
         )
       ).toBe(true);
     } finally {
@@ -315,7 +331,7 @@ describe('servertool progress logging', () => {
   });
 
 
-  testIfProgressConsoleLogs('prints gold log when continue_execution no-op is triggered', async () => {
+  testIfProgressConsoleLogs('prints compact logs when tool_calls are not stop-message eligible', async () => {
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const adapterContext: AdapterContext = {
@@ -373,26 +389,37 @@ describe('servertool progress logging', () => {
               }
             ]
           } as JsonObject
-        })
+        }),
+        clientInjectDispatch: async () => ({ ok: true })
       });
 
       const lines = spy.mock.calls.map((c) => String(c[0] ?? ''));
       expect(
         lines.some(
           (l) =>
-            l.includes('\u001b[38;5;220m[servertool]') &&
-            l.includes('tool=continue_execution') &&
-            l.includes('stage=match') &&
-            l.includes('result=matched')
+            l.includes('\u001b[38;5;39m[servertool]') &&
+            l.includes('tool=stop_message_auto') &&
+            l.includes('stage=entry') &&
+            l.includes('reason=finish_reason_tool_calls') &&
+            l.includes('eligible=false')
         )
       ).toBe(true);
       expect(
         lines.some(
           (l) =>
-            l.includes('\u001b[38;5;220m[servertool]') &&
-            l.includes('tool=continue_execution') &&
-            l.includes('stage=final') &&
-            l.includes('result=completed')
+            l.includes('\u001b[38;5;39m[servertool]') &&
+            l.includes('tool=stop_message_auto') &&
+            l.includes('stage=match') &&
+            l.includes('result=skipped_passthrough')
+        )
+      ).toBe(true);
+      expect(
+        lines.some(
+          (l) =>
+            l.includes('\u001b[38;5;39m[servertool]') &&
+            l.includes('tool=stop_message_auto') &&
+            l.includes('stage=compare') &&
+            l.includes('decision=skip')
         )
       ).toBe(true);
     } finally {
@@ -546,7 +573,9 @@ describe('servertool progress logging', () => {
       expect(
         consoleLines.some(
           (line) =>
-            line.includes('[servertool][stop_compare]') &&
+            line.includes('[servertool]') &&
+            line.includes('tool=stop_message_auto') &&
+            line.includes('stage=compare') &&
             line.includes('requestId=req-stop-lifecycle-1') &&
             line.includes('used=1') &&
             line.includes('left=1')
@@ -555,7 +584,9 @@ describe('servertool progress logging', () => {
       expect(
         consoleLines.some(
           (line) =>
-            line.includes('[servertool][stop_compare]') &&
+            line.includes('[servertool]') &&
+            line.includes('tool=stop_message_auto') &&
+            line.includes('stage=compare') &&
             line.includes('requestId=req-stop-lifecycle-2') &&
             line.includes('used=2') &&
             line.includes('left=0')

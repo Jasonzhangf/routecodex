@@ -25,7 +25,6 @@ export interface FollowupFlowDecision {
   clientInjectOnly: boolean;
   clearStateOnFollowupFailure: boolean;
   seedLoopPayload: boolean;
-  stopMessageFollowupPolicy: 'preserve_eligibility' | 'disable';
   clientInjectSource?: string;
   transparentReplayRequestSuffix?: string;
   ignoreRequiresActionFollowup: boolean;
@@ -140,7 +139,6 @@ export interface ServertoolSkeletonConfig {
         transparentReplayRequestSuffix?: string;
         ignoreRequiresActionFollowup?: boolean;
         contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
-        stopMessageFollowupPolicy?: 'preserve_eligibility' | 'disable';
       }>;
     };
   };

@@ -225,11 +225,7 @@ describe('log rollup', () => {
     flushLogRollup('manual');
 
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
-    expect(lines.some((line) => line.includes('[virtual-router-hit][rt]'))).toBe(true);
-    expect(lines.some((line) => line.includes('tools/tools-primary -> ali-coding-plan.key1.glm-5.glm-5'))).toBe(true);
-    expect(lines.some((line) => line.includes('[concurrency:2/6]'))).toBe(true);
-    expect(lines.some((line) => line.includes('session.virtual_hits=1'))).toBe(true);
-    expect(lines.some((line) => line.includes('stopless=on state=ready'))).toBe(true);
+    expect(lines.some((line) => line.includes('[virtual-router-hit][rt]'))).toBe(false);
     expect(lines.some((line) => line.includes('[rollup][1m]'))).toBe(false);
     expect(lines.some((line) => line.includes('[virtual-router-hit][1m]'))).toBe(false);
     expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(false);
@@ -306,9 +302,7 @@ describe('log rollup', () => {
 
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
     expect(lines.some((line) => line.includes('[session-request][rt] session=sid-cache-rt'))).toBe(true);
-    expect(lines.some((line) => line.includes('cache.read=750'))).toBe(true);
     expect(lines.some((line) => line.includes('cache.hit=75.0%'))).toBe(true);
-    expect(lines.some((line) => line.includes('cache.write=125'))).toBe(true);
-    expect(lines.some((line) => line.includes('total=1,200'))).toBe(true);
+    expect(lines.some((line) => line.includes('usage('))).toBe(true);
   });
 });

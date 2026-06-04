@@ -48,7 +48,7 @@ describe('usage logger timing summary', () => {
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
     });
 
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[usage] request req_usage_timing'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[usage] req=req_usage_timing'));
   });
 
   it('prints cumulative token totals without requiring hot-path sync writes', async () => {
@@ -78,8 +78,8 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('tokens.alltime=25');
-    expect(rendered).toContain('tokens.daily=25');
+    expect(rendered).toContain('tokens.all=25');
+    expect(rendered).toContain('tokens.day=25');
     expect(writeFileSyncSpy).not.toHaveBeenCalled();
 
     flushTokenStats();
@@ -111,7 +111,7 @@ describe('usage logger timing summary', () => {
 
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
     expect(getTokenTotals()).toEqual({ alltimeTokens: 15, dailyTokens: 15 });
-    expect(lines.some((line) => line.includes('[usage] request req_tokens_tool_calls'))).toBe(true);
+    expect(lines.some((line) => line.includes('[usage] req=req_tokens_tool_calls'))).toBe(true);
 
     await fs.rm(fakeHome, { recursive: true, force: true });
     homedirSpy.mockRestore();
@@ -148,9 +148,7 @@ describe('usage logger timing summary', () => {
 
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
     expect(lines.some((line) => line.includes('[session-request][rt] session=sid-cache-metrics'))).toBe(true);
-    expect(lines.some((line) => line.includes('cache.read=800'))).toBe(true);
     expect(lines.some((line) => line.includes('cache.hit=80.0%'))).toBe(true);
-    expect(lines.some((line) => line.includes('cache.write=120'))).toBe(true);
   });
 
 
@@ -218,7 +216,7 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('[usage] request req_release_no_timing');
+    expect(rendered).toContain('[usage] req=req_release_no_timing');
     expect(rendered).not.toContain('timing={');
     expect(rendered).not.toContain('hub.top=');
   });
@@ -252,8 +250,8 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('[usage] request req_release_usage');
-    expect(rendered).toContain('latency=1025.0ms');
+    expect(rendered).toContain('[usage] req=req_release_usage');
+    expect(rendered.replace(/\u001b\[[0-9;]*m/g, '')).toContain('total=1025.0ms');
     expect(rendered).toContain('timing={');
     expect(rendered).toContain('request.internal=0ms');
     expect(rendered).toContain('hub=');
@@ -494,8 +492,8 @@ describe('usage logger timing summary', () => {
 
     flushLogRollup('manual');
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
-    expect(lines.some((line) => line.includes('[usage] request req_rollup_1'))).toBe(true);
-    expect(lines.some((line) => line.includes('[usage] request req_rollup_2'))).toBe(true);
+    expect(lines.some((line) => line.includes('[usage] req=req_rollup_1'))).toBe(true);
+    expect(lines.some((line) => line.includes('[usage] req=req_rollup_2'))).toBe(true);
     expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(true);
     expect(lines.some((line) => line.includes('default/tools-primary'))).toBe(true);
     expect(lines.some((line) => line.includes('provider=qwen.1.qwen3.6-plus'))).toBe(true);

@@ -150,7 +150,7 @@ ServerReqInbound01ClientRaw
 
 ## 4. 响应链拓扑
 
-响应链是 provider 返回 client 的唯一正常数据链，必须单向：
+响应链是模型/provider 端进入 Hub，再由 Hub 投影到客户端的唯一正常数据链，必须单向。这里的 `Inbound` / `Outbound` 均以 Hub 为参照：`RespInbound` 表示 provider response 进入 Hub；`RespOutbound` 表示 Hub response 出到客户端入口协议。
 
 ```text
 ProviderRespInbound01Raw
@@ -164,13 +164,13 @@ ProviderRespInbound01Raw
 
 | 节点 | 输入 | 输出 | 唯一清洗/构建职责 | 禁止连接 |
 |---|---|---|---|---|
-| `ProviderRespInbound01Raw` | provider HTTP/SSE/raw JSON | raw provider response | 只捕获 provider 原始响应事实 | 直接写 client |
+| `ProviderRespInbound01Raw` | provider HTTP/SSE/raw JSON | raw provider response | 只捕获模型/provider 原始响应事实 | 直接写 client |
 | `HubRespInbound02Parsed` | `ProviderRespInbound01Raw` | parsed Hub response | provider raw -> Hub canonical response | 吞解析错误 |
 | `HubRespChatProcess03Governed` | `HubRespInbound02Parsed` | governed Hub response | 响应侧工具治理、文本工具收割、servertool followup 判定 | 修请求侧历史污染 |
-| `HubRespOutbound04ClientSemantic` | `HubRespChatProcess03Governed` | client protocol semantic | Hub 响应到入口协议语义投影 | provider 特例、吞上游错误 |
+| `HubRespOutbound04ClientSemantic` | `HubRespChatProcess03Governed` | client protocol semantic | Hub 响应投影到客户端入口协议；`/v1/chat/completions` 必须是 Chat Completion shape，`/v1/responses` 必须是 Responses shape | provider 特例、吞上游错误、手工包装 Responses |
 | `ServerRespOutbound05ClientFrame` | `HubRespOutbound04ClientSemantic` | Express JSON/SSE frame | client frame 写出、headers、SSE framing | metadata/runtime state 注入 client body |
 
-响应链清洗标准：provider raw 先解析为 Hub 规范，再治理，再投影到 client；任何错误必须转入错误链，禁止在响应链中伪装成正常成功 payload。
+响应链清洗标准：provider raw 先解析为 Hub 规范，再治理，再按入口协议投影到 client；任何错误必须转入错误链，禁止在响应链中伪装成正常成功 payload。
 
 ### 4.1 请求/响应闭环连接关系
 

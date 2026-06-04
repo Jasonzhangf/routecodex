@@ -200,14 +200,12 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
     return { action: 'skip', skip_reason: 'skip_goal_active' };
   }
 
-  if (ctx.followup_flow_id && ctx.stop_message_followup_policy !== 'preserve_eligibility') {
+  if (ctx.followup_flow_id) {
     return { action: 'skip', skip_reason: 'skip_servertool_followup_hop' };
   }
 
   // Resolve snapshot.
-  const rawSnap = (ctx.followup_flow_id === 'stop_message_flow' && ctx.stop_message_followup_policy === 'preserve_eligibility'
-    ? (ctx.runtime_snapshot ?? ctx.persisted_snapshot)
-    : (ctx.persisted_snapshot ?? ctx.runtime_snapshot)) as Record<string, unknown> | undefined;
+  const rawSnap = (ctx.persisted_snapshot ?? ctx.runtime_snapshot) as Record<string, unknown> | undefined;
   let snap = rawSnap;
 
   // Explicit mode without snapshot?
@@ -769,8 +767,56 @@ describe('stop_message_auto servertool', () => {
 
     expect(result.executed).toBe(true);
     expect((followupRuntime?.serverToolLoopState as any)?.repeatCount).toBe(1);
+    expect((followupRuntime?.serverToolLoopState as any)?.maxRepeats).toBe(10);
     expect((followupRuntime?.stopMessageState as any)?.stopMessageUsed).toBe(1);
+    expect((followupRuntime?.stopMessageState as any)?.stopMessageMaxRepeats).toBe(10);
     expect(resolveRuntimeStopMessageState(followupRuntime)?.used).toBe(1);
+  });
+
+  test('strips stop_schema control block from final visible stop text', async () => {
+    const sessionId = 'stopmessage-spec-session-strip-schema-visible';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+        allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 5,
+      stopMessageUsed: 1
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse = buildStopChatResponse('chatcmpl-strip-schema-visible');
+    ((chatResponse.choices as any[])[0].message as any).content = [
+      '停止原因：工具权限被拒，任务阻塞。',
+      '<stop_schema>',
+      '{"stopreason":"blocked","reason":"工具权限被拒","has_evidence":1,"evidence":"exec_command rejected","next_step":""}',
+      '</stop_schema>'
+    ].join('\n');
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext: {
+        requestId: 'req-stopmessage-strip-schema-visible',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: 'debug this' }]
+        }
+      } as any,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-strip-schema-visible',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    const content = String(((result.finalChatResponse.choices as any[])[0].message as any).content);
+    expect(content).toContain('停止原因：工具权限被拒');
+    expect(content).not.toContain('<stop_schema>');
+    expect(content).not.toContain('"stopreason"');
   });
 
   test('ai followup prompt requires stop schema when asking for summary', () => {
@@ -2376,7 +2422,7 @@ describe('stop_message_auto servertool', () => {
     expect(followup?.metadata?.routecodexPortMode).toBe('router');
   });
 
-  test('allows stop_message retrigger on stop_message_flow followup hops until counter exhausts', async () => {
+  test('skips stop_message retrigger on stop_message_flow followup hops', async () => {
     const sessionId = 'stopmessage-spec-session-followup-allow';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2417,7 +2463,6 @@ describe('stop_message_auto servertool', () => {
       },
       __rt: {
         serverToolFollowup: true,
-        stopMessageFollowupPolicy: 'preserve_eligibility',
         serverToolLoopState: {
           flowId: 'stop_message_flow',
           repeatCount: 1,
@@ -2434,13 +2479,12 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.execution?.flowId).toBe('stop_message_flow');
-    expect(result.execution?.followup).toBeTruthy();
+    expect(result.execution).toBeUndefined();
 
     const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number } }>(
       resolveStopStatePath(sessionId),
     );
-    expect(persisted?.state?.stopMessageUsed).toBe(1);
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
   });
 
   test('maps stop_message_flow loop state into runtime stop snapshot on followup hops', () => {
@@ -3376,7 +3420,7 @@ describe('stop_message_auto servertool', () => {
     expect(fs.existsSync(resolveStopStatePath(sessionId))).toBe(false);
   });
 
-  test('injects loop-break warning after 5 identical stopMessage request/response rounds', async () => {
+  test('does not inject loop-break warning through nested stopMessage followup rounds', async () => {
     const sessionId = 'stopmessage-spec-session-loop-warn';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -3416,13 +3460,12 @@ describe('stop_message_auto servertool', () => {
       capturedChatRequest
     } as any;
 
+    let nextRuntime: Record<string, unknown> | undefined;
     let lastFollowupBody: JsonObject | undefined;
-    for (let round = 1; round <= 5; round += 1) {
-      let nextRuntime: Record<string, unknown> | undefined;
-      const orchestration = await runServerToolOrchestration({
+    const first = await runServerToolOrchestration({
         chat: chatResponse,
         adapterContext,
-        requestId: `req-stopmessage-loop-warn-${round}`,
+      requestId: 'req-stopmessage-loop-warn-1',
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         reenterPipeline: async (opts: any) => {
@@ -3438,11 +3481,21 @@ describe('stop_message_auto servertool', () => {
           };
         }
       });
+    expect(first.executed).toBe(true);
+    expect(first.flowId).toBe('stop_message_flow');
+    adapterContext.__rt = nextRuntime;
 
-      expect(orchestration.executed).toBe(true);
-      expect(orchestration.flowId).toBe('stop_message_flow');
-      adapterContext.__rt = nextRuntime;
-    }
+    const nested = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-stopmessage-loop-warn-2',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        throw new Error('nested followup must not execute');
+      }
+    });
+    expect(nested.executed).toBe(false);
 
     const messages = Array.isArray((lastFollowupBody as any)?.messages) ? ((lastFollowupBody as any).messages as any[]) : [];
     expect(
@@ -3454,10 +3507,10 @@ describe('stop_message_auto servertool', () => {
           typeof item.content === 'string' &&
           item.content.includes('连续 5 轮一致')
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  test('returns fetch failed after 10 identical stopMessage request/response rounds', async () => {
+  test('does not run timeout loop through nested stopMessage followup rounds', async () => {
     const sessionId = 'stopmessage-spec-session-loop-fail';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -3497,12 +3550,11 @@ describe('stop_message_auto servertool', () => {
       capturedChatRequest
     } as any;
 
-    for (let round = 1; round <= 9; round += 1) {
-      let nextRuntime: Record<string, unknown> | undefined;
-      const orchestration = await runServerToolOrchestration({
+    let nextRuntime: Record<string, unknown> | undefined;
+    const first = await runServerToolOrchestration({
         chat: chatResponse,
         adapterContext,
-        requestId: `req-stopmessage-loop-fail-${round}`,
+      requestId: 'req-stopmessage-loop-fail-1',
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         reenterPipeline: async (opts: any) => {
@@ -3517,16 +3569,14 @@ describe('stop_message_auto servertool', () => {
           };
         }
       });
-      expect(orchestration.executed).toBe(true);
-      adapterContext.__rt = nextRuntime;
-    }
+    expect(first.executed).toBe(true);
+    adapterContext.__rt = nextRuntime;
 
     let followupCalled = false;
-    await expect(
-      runServerToolOrchestration({
+    const nested = await runServerToolOrchestration({
         chat: chatResponse,
         adapterContext,
-        requestId: 'req-stopmessage-loop-fail-10',
+      requestId: 'req-stopmessage-loop-fail-2',
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         reenterPipeline: async () => {
@@ -3540,15 +3590,12 @@ describe('stop_message_auto servertool', () => {
             } as JsonObject
           };
         }
-      })
-    ).rejects.toMatchObject({
-      code: 'SERVERTOOL_TIMEOUT',
-      status: 502
-    });
+      });
+    expect(nested.executed).toBe(false);
     expect(followupCalled).toBe(false);
   });
 
-  test('returns fetch failed when stopMessage flow elapsed time exceeds 900 seconds', async () => {
+  test('skips elapsed-time timeout check on stopMessage followup hop', async () => {
     const sessionId = 'stopmessage-spec-session-stage-timeout';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -3597,8 +3644,7 @@ describe('stop_message_auto servertool', () => {
     } as any;
 
     let followupCalled = false;
-    await expect(
-      runServerToolOrchestration({
+    const result = await runServerToolOrchestration({
         chat: chatResponse,
         adapterContext,
         requestId: 'req-stopmessage-stage-timeout-1',
@@ -3615,11 +3661,8 @@ describe('stop_message_auto servertool', () => {
             } as JsonObject
           };
         }
-      })
-    ).rejects.toMatchObject({
-      code: 'SERVERTOOL_TIMEOUT',
-      status: 502
-    });
+      });
+    expect(result.executed).toBe(false);
     expect(followupCalled).toBe(false);
   });
   test.skip('ignores stage policy templates in stop_message_auto followup flow', async () => {

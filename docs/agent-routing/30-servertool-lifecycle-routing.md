@@ -27,8 +27,8 @@
 2. 不得从当前污染 payload 猜测补偿。
 3. 不得绕过 Hub Pipeline req/resp process 的 Rust 工具治理。
 4. servertool 只代客户端执行本地工具；除“工具执行发生在服务端”外，followup 请求和响应必须与普通请求完全同链路。
-5. 响应方向固定为模型/provider 进入 `RespInbound`，经 `HubRespChatProcess03Governed`，再到客户端出口 `HubRespOutbound04ClientSemantic` / `ServerRespOutbound05ClientFrame`。
-6. servertool 执行后的 payload 若仍处于 `HubRespChatProcess03Governed`，只能通过相邻 builder `buildHubRespOutbound04FromHubRespChatProcess03` 进入 `HubRespOutbound04ClientSemantic`；禁止 servertool 专用响应出口、手工 Responses 包装、或绕过正常响应口。
+5. 响应方向固定为模型/provider 端进入 `RespInbound`，经 `HubRespChatProcess03Governed`，再从 Hub 出到客户端出口 `HubRespOutbound04ClientSemantic` / `ServerRespOutbound05ClientFrame`；`Inbound/Outbound` 以 Hub 为参照。
+6. servertool 执行后的 payload 若仍处于 `HubRespChatProcess03Governed`，只能通过相邻 builder `buildHubRespOutbound04FromHubRespChatProcess03` 进入 `HubRespOutbound04ClientSemantic`；禁止 servertool 专用响应出口、手工 Responses 包装、或绕过正常响应口。Chat 入口最终必须是 Chat Completion shape，Responses 入口最终必须是 Responses shape。
 7. 失败必须 fail-fast，禁止吞异常或降级。
 8. same-protocol direct / provider-direct 端口不得因 `serverToolFollowup` 或 `:stop_followup` 改道 relay；direct 响应不进入 Hub response chat-process，因此 stopless/servertool 不激活。
 9. direct passthrough 的 provider raw SSE 不进入 server response projection restore/guard；只能透传 provider wire frame + hooks，禁止把 provider 协议字段误判成内部 carrier。

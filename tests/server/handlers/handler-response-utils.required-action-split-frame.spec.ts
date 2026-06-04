@@ -1,15 +1,56 @@
 import { PassThrough, Readable } from 'node:stream';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, jest } from '@jest/globals';
 
-const writeServerSnapshotMock = jest.fn(async () => undefined);
+const writeServerSnapshotMock = jest.fn(async (options: {
+  phase: string;
+  requestId: string;
+  data: unknown;
+  entryEndpoint?: string;
+}) => {
+  const root = process.env.RCC_SNAPSHOT_DIR;
+  if (!root || options.phase !== 'client-response') return;
+  const dir = path.join(root, 'openai-responses', options.requestId.replace(/[^A-Za-z0-9_.-]/g, '_'));
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    path.join(dir, 'client-response_server.json'),
+    JSON.stringify({ meta: { stage: options.phase }, data: options.data }, null, 2),
+    'utf8'
+  );
+});
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', async () => ({
   createResponsesJsonToSseConverter: jest.fn(),
   importCoreDist: jest.fn(),
   requireCoreDist: jest.fn(),
+  deriveFinishReasonNative: jest.fn(() => undefined),
+  isToolCallContinuationResponseNative: jest.fn(() => false),
+  updateResponsesContractProbeFromSseChunkNative: jest.fn((chunk: unknown, probe: Record<string, unknown> | undefined) => {
+    const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+    const next = { ...(probe ?? {}) } as Record<string, unknown>;
+    const dataLine = text.split('\n').find((line) => line.startsWith('data:'));
+    if (!dataLine) return next;
+    try {
+      const parsed = JSON.parse(dataLine.slice('data:'.length).trim()) as Record<string, unknown>;
+      const response = parsed.response && typeof parsed.response === 'object' && !Array.isArray(parsed.response)
+        ? parsed.response as Record<string, unknown>
+        : undefined;
+      if (response) Object.assign(next, response);
+      if (parsed.required_action) next.required_action = parsed.required_action;
+    } catch {}
+    return next;
+  }),
+  buildResponsesTerminalSseFramesFromProbeNative: jest.fn((probe: Record<string, unknown> | undefined) => {
+    if (!probe?.required_action) return [];
+    const response = { ...probe, status: 'requires_action' };
+    return [
+      `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+      `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+      'data: [DONE]\n\n'
+    ];
+  }),
   captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
   clearResponsesConversationByRequestId: jest.fn(async () => undefined),
   finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
