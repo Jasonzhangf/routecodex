@@ -1,9 +1,9 @@
 # Conversation Cache
 
-## 2026-06-04 ErrorPolicyCenter closeout
-- Commits made for this goal: `aac979bdc`, `adbcfb51e`, `d024720e2`, `1699aef04`, `2cd60c171`, `d3a48f1a5`, `dabcf2167`, `441393f96`, `1cdb0fa54`, `afc8caa3e`, `6ca43d489`, `b10bc4a12`.
-- Error strategy SSOT is `src/providers/core/runtime/provider-failure-policy-impl.ts`; `ErrorHandlingCenter` is projection-only.
-- Categories locked: `recoverable | unrecoverable | special_400 | periodic_recovery`.
-- Final focused gates passed: 6 Jest suites / 62 tests and `npx tsc --noEmit --pretty false`.
-- Static scan: no `classification ===/!==` remains in executor/direct paths; comparisons are confined to provider policy helpers.
-- Unrelated dirty file remains: `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`.
+## 2026-06-05 ErrorPolicyCenter final closeout
+- Final commits added after closeout audit: `a6fdc3594`, `a50380aeb`, `eab791474`, `3da4e10a9`.
+- Error strategy SSOT remains `src/providers/core/runtime/provider-failure-policy-impl.ts`; `ErrorHandlingCenter` is projection-only.
+- Direct passthrough cleanup: provider-direct no longer rewrites request model from `providerBinding`; tests now assert client model preservation.
+- Final target gate passed: 22 Jest suites / 155 tests, `npx tsc --noEmit --pretty false`, and `npm run build:min`.
+- Static scans passed: no executor/direct classification comparisons, no ErrorHandlingCenter in policy paths, no provider-direct bound model rewrite.
+- Known unrelated dirty file remains: `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`.

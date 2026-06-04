@@ -2159,3 +2159,9 @@ Tags: provider-forwarder, sticky-session, port-10000, minimax-family, red-test
 - Active categories are exactly `recoverable | unrecoverable | special_400 | periodic_recovery`; classifier/executor/direct code may expose or consume policy outcomes but must not locally derive `classification/recoverable/affectsHealth/shouldRetry/reroute` branches.
 - Verified closeout gates: classifier/policy/error-chain/retry-execution/reselection focused Jest suites passed 62/62 and `npx tsc --noEmit --pretty false` passed; executor/direct classification comparison scan returned no matches outside provider policy.
 Tags: error-policy-center, ErrorErr-chain, provider-failure-policy, no-fallback, 2026-06-04
+
+## 2026-06-05 ErrorPolicyCenter final verification
+- ErrorPolicyCenter closeout final gate passed after direct passthrough cleanup: 22 Jest suites / 155 tests covered error-chain red tests, provider policy/classifier/reporter, executor retry/reselection, router/provider direct, direct payload, and client projection metadata guards.
+- Build gate passed: `npx tsc --noEmit --pretty false` and `npm run build:min` completed successfully; build auto-bumped package/build-info to `0.90.2858`.
+- Static closeout scan returned no executor/direct `classification ===/!==`, no `ErrorHandlingCenter` in provider/executor/direct/VR policy paths, and no provider-direct bound-model rewrite helper.
+Tags: error-policy-center, final-verification, direct-passthrough, build-min, 2026-06-05
