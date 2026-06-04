@@ -502,6 +502,100 @@ fn anthropic_end_turn_stopless_effect_uses_chatprocess_payload() {
 }
 
 #[test]
+fn anthropic_empty_end_turn_stopless_effect_uses_chatprocess_payload() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-anthropic-empty-stopless-chatprocess".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "anthropic-messages".to_string(),
+            payload: json!({
+                "id": "msg_anthropic_empty_stopless_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "MiniMax-M2.7",
+                "content": [{ "type": "text", "text": "" }],
+                "stop_reason": "end_turn",
+                "usage": { "input_tokens": 0, "output_tokens": 0 }
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "runtimeEffects": { "providerInvoker": true }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let effect = output
+        .effect_plan
+        .effects
+        .iter()
+        .find(|effect| {
+            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+                && effect.payload["reason"] == json!("stop_eligible_followup")
+        })
+        .unwrap();
+    assert_eq!(effect.payload["stopGateway"]["source"], json!("chat"));
+    assert_eq!(effect.payload["stopGateway"]["reason"], json!("finish_reason_stop"));
+    assert_eq!(effect.payload["payload"]["choices"][0]["finish_reason"], json!("stop"));
+    assert_eq!(effect.payload["payload"]["choices"][0]["message"]["content"], json!(""));
+}
+
+#[test]
+fn anthropic_wrapped_empty_end_turn_stopless_effect_uses_body_data() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-anthropic-wrapped-empty-stopless-chatprocess".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "anthropic-messages".to_string(),
+            payload: json!({
+                "body": {
+                    "status": 200,
+                    "headers": { "content-type": "text/event-stream" },
+                    "data": {
+                        "id": "msg_anthropic_wrapped_empty_stopless_1",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "MiniMax-M2.7",
+                        "content": [{ "type": "text", "text": "" }],
+                        "stop_reason": "end_turn",
+                        "usage": { "input_tokens": 0, "output_tokens": 0 }
+                    }
+                }
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "runtimeEffects": { "providerInvoker": true }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let effect = output
+        .effect_plan
+        .effects
+        .iter()
+        .find(|effect| {
+            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+                && effect.payload["reason"] == json!("stop_eligible_followup")
+        })
+        .unwrap();
+    assert_eq!(effect.payload["stopGateway"]["reason"], json!("finish_reason_stop"));
+    assert_eq!(effect.payload["payload"]["choices"][0]["message"]["content"], json!(""));
+}
+
+#[test]
 fn response_stream_path_returns_stream_pipe_effect_plan() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine

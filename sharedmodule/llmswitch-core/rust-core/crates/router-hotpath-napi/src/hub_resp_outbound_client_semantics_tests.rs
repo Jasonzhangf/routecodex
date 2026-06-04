@@ -983,13 +983,7 @@ fn build_responses_payload_from_chat_merges_source_retention_and_context_fields(
         .expect("build responses payload");
 
     assert_eq!(output["request_id"], Value::String("req_merge".to_string()));
-    assert_eq!(output["metadata"]["keep"], Value::Bool(true));
-    assert_eq!(output["metadata"]["source"], Value::Bool(true));
-    assert!(output["metadata"].get("toolCallIdStyle").is_none());
-    assert!(output["metadata"]
-        .get("__routecodexPreselectedRoute")
-        .is_none());
-    assert!(output["metadata"].get("__raw_request_body").is_none());
+    assert!(output.get("metadata").is_none());
     assert_eq!(output["temperature"], Value::from(0.4));
     assert_eq!(output["top_p"], Value::from(0.8));
     assert_eq!(
@@ -1018,7 +1012,7 @@ fn build_responses_payload_from_chat_merges_source_retention_and_context_fields(
 }
 
 #[test]
-fn build_responses_payload_from_chat_source_metadata_overrides_context_deepseek_tool_state() {
+fn build_responses_payload_from_chat_does_not_project_context_or_source_metadata() {
     let payload = serde_json::json!({
         "id": "resp_deepseek_meta",
         "model": "deepseek-chat",
@@ -1067,15 +1061,7 @@ fn build_responses_payload_from_chat_source_metadata_overrides_context_deepseek_
         build_responses_payload_from_chat_core(&payload, Some("req_deepseek_meta"), &context)
             .expect("build responses payload");
 
-    assert_eq!(output["metadata"]["keep"], Value::Bool(true));
-    assert_eq!(
-        output["metadata"]["deepseek"]["toolCallState"],
-        Value::String("text_tool_calls".to_string())
-    );
-    assert_eq!(
-        output["metadata"]["deepseek"]["toolCallSource"],
-        Value::String("fallback".to_string())
-    );
+    assert!(output.get("metadata").is_none());
 }
 
 #[test]

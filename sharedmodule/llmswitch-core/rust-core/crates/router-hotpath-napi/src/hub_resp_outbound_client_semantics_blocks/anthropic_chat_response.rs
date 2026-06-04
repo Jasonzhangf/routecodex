@@ -234,6 +234,11 @@ fn materialize_anthropic_message_payload(payload: &Value) -> Result<Value, Strin
         if body.get("content").and_then(Value::as_array).is_some() {
             return Ok(body.clone());
         }
+        if let Some(data) = body.get("data") {
+            if data.get("content").and_then(Value::as_array).is_some() {
+                return Ok(data.clone());
+            }
+        }
         if let Some(body_text) = body
             .get("bodyText")
             .and_then(Value::as_str)

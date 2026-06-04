@@ -13,7 +13,6 @@ use crate::hub_resp_outbound_client_semantics_blocks::responses_reasoning::{
     merge_responses_output_items, normalize_reasoning_summary_for_codex_display,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::normalize_responses_usage;
-use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
 
 fn now_unix_millis() -> u128 {
     SystemTime::now()
@@ -493,14 +492,6 @@ fn apply_context_passthrough(out: &mut Map<String, Value>, context: &Value) {
         }
     }
 
-    if !out.contains_key("metadata") {
-        if let Some(value) = context_value(context, "metadata") {
-            if let Some(metadata) = sanitize_client_visible_metadata(value) {
-                out.insert("metadata".to_string(), metadata);
-            }
-        }
-    }
-
     for (context_key, output_key) in [
         ("parallelToolCalls", "parallel_tool_calls"),
         ("toolChoice", "tool_choice"),
@@ -520,45 +511,11 @@ fn apply_context_passthrough(out: &mut Map<String, Value>, context: &Value) {
     }
 }
 
-fn sanitize_client_visible_metadata(value: &Value) -> Option<Value> {
-    let row = value.as_object()?;
-    let mut out = Map::new();
-    for (key, item) in row {
-        if key.starts_with("__")
-            || matches!(
-                key.as_str(),
-                "target"
-                    | "route"
-                    | "routing"
-                    | "requestContext"
-                    | "responsesRequestContext"
-                    | "clientHeaders"
-                    | "originalRequest"
-            )
-        {
-            continue;
-        }
-        out.insert(key.clone(), item.clone());
-    }
-    Some(Value::Object(out))
-}
-
 fn merge_source_retention(out: &mut Map<String, Value>, source_row: &Map<String, Value>) {
     if let Some(source_output) = source_row.get("output").and_then(|v| v.as_array()) {
         if let Some(base_output) = out.get("output").and_then(|v| v.as_array()) {
             let merged_output = merge_responses_output_items(base_output, source_output);
             out.insert("output".to_string(), Value::Array(merged_output));
-        }
-    }
-
-    if let Some(source_metadata) = source_row.get("metadata").and_then(|v| v.as_object()) {
-        let existing_metadata = out
-            .entry("metadata".to_string())
-            .or_insert_with(|| Value::Object(Map::new()))
-            .as_object_mut()
-            .unwrap();
-        for (key, value) in source_metadata {
-            existing_metadata.insert(key.clone(), value.clone());
         }
     }
 
@@ -607,12 +564,6 @@ fn finalize_client_responses_payload(
         .unwrap_or_else(|| Value::Array(Vec::new()));
     let mut normalized =
         normalize_responses_tool_call_arguments_for_client(&Value::Object(out), &tools_raw);
-    if let Some(metadata) = normalized
-        .as_object_mut()
-        .and_then(|record| record.get_mut("metadata"))
-    {
-        strip_internal_tooling_metadata_impl(metadata);
-    }
     normalized
 }
 
