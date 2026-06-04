@@ -2,6 +2,9 @@ import {
   resolveRequestExecutorProviderErrorClassification,
 } from './request-executor-provider-failure.js';
 import {
+  shouldKeepProviderExcludedForNextAttempt,
+} from '../../../../providers/core/runtime/provider-failure-policy.js';
+import {
   hasAlternativeRouteCandidate,
 } from './request-executor-retry-decision.js';
 import type {
@@ -38,6 +41,9 @@ export function resolveExcludedProviderReselectionPlan(args: {
       : undefined;
   return {
     hasAlternativeCandidate,
-    keepExcludedForNextAttempt: classification === 'unrecoverable' || hasAlternativeCandidate
+    keepExcludedForNextAttempt: shouldKeepProviderExcludedForNextAttempt({
+      classification,
+      hasAlternativeCandidate
+    })
   };
 }

@@ -170,6 +170,12 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(pf).not.toMatch(/classification\s*===\s*['"]recoverable['"][\s\S]{0,180}return\s+true/);
   });
 
+  it('request-executor-reselection delegates keep-excluded classification policy', () => {
+    const reselection = readSrc('src/server/runtime/http-server/executor/request-executor-reselection-plan.ts');
+    expect(reselection).toMatch(/shouldKeepProviderExcludedForNextAttempt/);
+    expect(reselection).not.toMatch(/classification\s*===\s*['"]unrecoverable['"]\s*\|\|\s*hasAlternativeCandidate/);
+  });
+
   it('executor retry path does not locally reroute recoverable failures away from the policy decision', () => {
     const decision = readSrc(EXECUTOR_RETRY_DECISION);
     const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);

@@ -15313,3 +15313,8 @@ Task: investigate stopless stopping on schema missing and servertool log noise.
 - Red evidence: `error_chain_singleton_truth` locks executor reporting to `outcome.recoverable/outcome.affectsHealth` and forbids local classification branches for report fields.
 - Green evidence: `npm run jest:run -- --runTestsByPath tests/red-tests/error_chain_singleton_truth.test.ts tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts --runInBand --forceExit` passed 22/22; `npx tsc --noEmit --pretty false` passed.
 - Non-gate finding: full `tests/server/runtime/http-server/request-executor.error-reporting.spec.ts` still fails on existing response-processing/projection cases (`HTTP_502` remap, timeout, ERR_REQUIRE_ESM host contract paths); not used as this step's commit gate.
+
+## 2026-06-04 error policy center goal step10
+- Code update: `request-executor-reselection-plan` no longer compares `classification === 'unrecoverable'` directly; keep-excluded decision moved to `shouldKeepProviderExcludedForNextAttempt` in `provider-failure-policy`.
+- Red evidence: `error_chain_singleton_truth` now forbids the executor reselection local classification expression and requires policy helper delegation.
+- Green evidence: `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts tests/red-tests/error_chain_singleton_truth.test.ts tests/providers/core/runtime/provider-failure-policy.spec.ts --runInBand --forceExit -t "excluded provider reselection|keep-excluded|provider failure policy ssot|Error chain singleton truth"` passed 42/42 selected; `npx tsc --noEmit --pretty false` passed.
