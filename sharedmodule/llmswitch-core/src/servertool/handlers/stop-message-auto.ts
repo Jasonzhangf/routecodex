@@ -350,6 +350,7 @@ function attachStopMessageRuntimeStateToMetadata(metadata: Record<string, unknow
     : {};
   rt.serverToolLoopState = {
     ...loopState,
+    flowId: FLOW_ID,
     maxRepeats: state.maxRepeats
   };
   metadata.__rt = rt;
@@ -474,6 +475,20 @@ function readPersistedStopMessageSnapshotFromCandidateKeys(candidateKeys: string
     }
   }
   return null;
+}
+
+function readPersistedStopMessageStageModeFromCandidateKeys(candidateKeys: string[]): 'on' | 'off' | 'auto' | undefined {
+  for (const key of candidateKeys) {
+    if (!isPersistentStickyKey(key)) {
+      continue;
+    }
+    const state = loadRoutingInstructionStateSync(key);
+    const stageMode = normalizeStopMessageStageMode(state?.stopMessageStageMode);
+    if (stageMode) {
+      return stageMode;
+    }
+  }
+  return undefined;
 }
 
 function readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys: string[]): {
@@ -706,7 +721,10 @@ const handler: ServerToolHandler = async (
   const tombstone = persistedLookupPlan.readStopMessageTombstone
     ? readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys)
     : { exhaustedDefault: false };
-  const explicitMode = (normalizeStopMessageStageMode(undefined) ?? readRuntimeStopMessageStageMode(rt));
+  const explicitMode = (
+    readRuntimeStopMessageStageMode(rt)
+    ?? readPersistedStopMessageStageModeFromCandidateKeys(candidateKeys)
+  );
   const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
   const captured = getCapturedRequest(ctx.adapterContext);
   const assistantStopText = extractCurrentAssistantStopText(ctx.base);

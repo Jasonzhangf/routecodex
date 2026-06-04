@@ -255,6 +255,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ## 2026-05-27 调试精华（5555 主备/health/stopless）
 
+- stopless schema-missing 若首轮 `decision=trigger reason=stop_schema_missing` 后，`:stop_followup` 打出 `skip_servertool_followup_hop` 并最终 `finish_reason=stop`，优先查 nested metadata 是否缺 `__rt.serverToolLoopState.flowId=stop_message_flow`；缺 flowId 会被当 generic servertool followup 跳过 schema gate。
+
 ## 2026-05-29 调试精华（CompatProfileRegistry）
 
 - `/v1/responses` 报 `[CompatProfileRegistry] profile not found: "chat:openai"` 时，先查被选 provider 的 `compatibilityProfile` 是否为 registry JSON 真 id；通用 OpenAI-compatible provider 使用 `compat:passthrough`，不要新增 `chat:openai`/`chat:deepseek` 影子 profile。
@@ -1876,3 +1878,15 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-06-04 ErrorPolicyCenter 唯一链路精华
 - 错误策略中心不是 `ErrorHandlingCenter`；它只允许做 HTTP/server/client projection。provider/runtime/direct/executor 错误必须进 `ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`。
 - 分类先行：`recoverable | unrecoverable | special_400 | periodic_recovery`；retry/reroute/cooldown/fail 只能由唯一 policy decision 驱动。审计时先扫旧节点名与第二套 `recoverable/affectsHealth/shouldRetry/cooldown/reroute` 决策点。
+
+### 2026-06-04 ProviderForwarder sticky 精华
+- Forwarder `stickyKey=session` 验证不能只跑 `ForwarderRegistry::select` 单测；必须覆盖 `engine::selection::select_provider` 从 metadata `sessionId/session_id/routecodexSessionId` 透传到 Rust registry，否则配置写了 sticky 但 live selection 实际按 request 轮换。
+
+### 2026-06-04 direct passthrough/provider-wire 红线
+- router-direct 不是 Hub Pipeline：只取 VirtualRouter target，禁止 `hubPipeline.execute`、禁止 req/resp inbound/outbound conversion；direct 只按入口协议与 providerProtocol 一致进入。
+- `/v1/responses` direct payload 必须是 Responses wire；ResponsesProvider 在 transport 前 fail-fast 拒绝 chat `messages` 与 `{type:"function", function:{name}}` 工具，避免上游 400 `tools[n].name`。
+
+## 2026-06-04 调试精华（10000 loopback shadow）
+
+- 若 `127.0.0.1:10000` 返回 `Empty reply from server`，先查 `lsof -nP -iTCP:10000 -sTCP:LISTEN`；macOS 上第三方服务可占 `127.0.0.1:10000`，同时 RCC 占 `*:10000`，导致 loopback 命中特定绑定而 LAN/Tailscale IP 正常。
+- 多端口配置下显式 `rcc start --port <port>` 只能检查/启动目标端口，禁止因同组其他端口 healthy 提前退出；用 “requested port only” 红测锁住。

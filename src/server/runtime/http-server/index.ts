@@ -1398,6 +1398,7 @@ export class RouteCodexHttpServer {
           statusCode,
           errorCode: retryError.errorCode,
           upstreamCode: retryError.upstreamCode,
+          message: error instanceof Error ? error.message : String(error ?? ''),
           directAttempt,
         });
         const excludedProviderKeys = new Set<string>(readStringArray(metadataForHub.excludedProviderKeys));

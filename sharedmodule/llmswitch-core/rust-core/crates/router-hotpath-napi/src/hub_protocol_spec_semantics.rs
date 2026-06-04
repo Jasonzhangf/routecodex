@@ -577,6 +577,7 @@ fn build_default_allowlists() -> HubProtocolAllowlistsOutput {
             "stop".to_string(),
             "stop_sequences".to_string(),
             "stream".to_string(),
+            "stream_options".to_string(),
             "thinking".to_string(),
             "reasoning".to_string(),
         ],

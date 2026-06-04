@@ -110,6 +110,11 @@ export interface HubPipeline {
   ): Promise<HubPipelineExecutionResult>;
   updateVirtualRouterConfig(config: unknown): void;
   getVirtualRouter?(): {
+    route(request: Record<string, unknown>, metadata: Record<string, unknown>): {
+      target?: Record<string, unknown>;
+      decision?: Record<string, unknown>;
+      diagnostics?: Record<string, unknown>;
+    };
     markConcurrencyScopeBusy(scopeKey: string): void;
     markConcurrencyScopeIdle(scopeKey: string): void;
     resetProviderQuota?(providerKey: string): unknown;

@@ -288,7 +288,7 @@ describe('servertool progress logging', () => {
   });
 
 
-  testIfProgressConsoleLogs('prints compact logs when tool_calls are not stop-message eligible', async () => {
+  testIfProgressConsoleLogs('does not print stop summary logs when tool_calls are not stop-message eligible', async () => {
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const adapterContext: AdapterContext = {
@@ -352,14 +352,7 @@ describe('servertool progress logging', () => {
 
       const lines = spy.mock.calls.map((c) => String(c[0] ?? ''));
       const servertoolLines = lines.filter((l) => l.includes('[servertool]') && l.includes('tool=stop_message_auto'));
-      expect(servertoolLines).toHaveLength(1);
-      expect(servertoolLines[0]).toContain('stage=summary');
-      expect(servertoolLines[0]).toContain('finish_reason=');
-      expect(servertoolLines[0]).toContain('eligible=false');
-      expect(servertoolLines[0]).toContain('match=skipped_passthrough');
-      expect(servertoolLines[0]).toContain('decision=skip');
-      expect(servertoolLines[0]).not.toContain('used=');
-      expect(servertoolLines[0]).not.toContain('left=');
+      expect(servertoolLines).toHaveLength(0);
     } finally {
       spy.mockRestore();
     }

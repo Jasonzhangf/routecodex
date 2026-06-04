@@ -31,6 +31,25 @@ fn read_requested_route_policy_group(metadata: &Value) -> Option<String> {
         .map(|value| value.to_string())
 }
 
+fn read_forwarder_sticky_session_id(metadata: &Value) -> Option<String> {
+    for key in [
+        "sessionId",
+        "session_id",
+        "routecodexSessionId",
+        "routecodexSessionID",
+    ] {
+        if let Some(value) = metadata
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
 fn pool_matches_route_policy_group(
     pool: &crate::virtual_router_engine::routing::RoutePoolTier,
     requested_group: Option<&str>,
@@ -183,6 +202,7 @@ impl VirtualRouterEngineCore {
         let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata)
             .into_iter()
             .collect();
+        let forwarder_sticky_session_id = read_forwarder_sticky_session_id(metadata);
 
         if let Some(target) = &routing_state.forced_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
@@ -425,7 +445,7 @@ impl VirtualRouterEngineCore {
                             &key,
                             &mut self.load_balancer,
                             |k: &str| available_real_keys.contains(k),
-                            None,
+                            forwarder_sticky_session_id.as_deref(),
                         ) {
                             Ok(real) => Some(real),
                             Err(e) if e == crate::virtual_router_engine::forwarder::ERR_FORWARDER_NO_AVAILABLE_TARGET => {
@@ -1036,6 +1056,101 @@ mod tests {
             )
             .expect("selection should succeed");
         assert_eq!(selected.provider_key, "sdfv.key1.gpt-5.4");
+    }
+
+    #[test]
+    fn forwarder_selection_uses_metadata_session_for_sticky() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "mini-a.key1.MiniMax-M2.7".to_string(),
+            json!({
+                "providerKey": "mini-a.key1.MiniMax-M2.7",
+                "providerType": "anthropic",
+                "modelId": "MiniMax-M2.7",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "mini-b.key1.MiniMax-M2.7".to_string(),
+            json!({
+                "providerKey": "mini-b.key1.MiniMax-M2.7",
+                "providerType": "anthropic",
+                "modelId": "MiniMax-M2.7",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let mut forwarders = Map::new();
+        forwarders.insert(
+            "fwd.minimax.MiniMax-M2.7".to_string(),
+            json!({
+                "forwarderId": "fwd.minimax.MiniMax-M2.7",
+                "protocol": "anthropic",
+                "modelId": "MiniMax-M2.7",
+                "resolutionMode": "model-first",
+                "strategy": "round-robin",
+                "targets": [
+                    {"providerKey": "mini-a.key1.MiniMax-M2.7", "disabled": false},
+                    {"providerKey": "mini-b.key1.MiniMax-M2.7", "disabled": false}
+                ],
+                "stickyKey": "session"
+            }),
+        );
+        let provider_keys = keys.into_iter().collect::<HashSet<String>>();
+        core.forwarder_registry
+            .load(&forwarders, &provider_keys)
+            .expect("forwarder load");
+
+        let routing = Map::from_iter([(
+            "tools".to_string(),
+            Value::Array(vec![json!({
+                "id": "tools-forwarder",
+                "priority": 100,
+                "mode": "priority",
+                "targets": ["fwd.minimax.MiniMax-M2.7"]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+
+        let classification = ClassificationResult {
+            route_name: "tools".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["tools".to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let routing_state = RoutingInstructionState::default();
+
+        let first = core
+            .select_provider(
+                "tools",
+                &json!({ "sessionId": "sticky-session-1" }),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("first selection should succeed");
+        assert_eq!(core.forwarder_registry.sticky_count(), 1);
+
+        let second = core
+            .select_provider(
+                "tools",
+                &json!({ "sessionId": "sticky-session-1" }),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("second selection should succeed");
+        assert_eq!(second.provider_key, first.provider_key);
     }
 
     #[test]

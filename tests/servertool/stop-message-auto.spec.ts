@@ -768,6 +768,7 @@ describe('stop_message_auto servertool', () => {
     });
 
     expect(result.executed).toBe(true);
+    expect((followupRuntime?.serverToolLoopState as any)?.flowId).toBe('stop_message_flow');
     expect((followupRuntime?.serverToolLoopState as any)?.repeatCount).toBe(1);
     expect((followupRuntime?.serverToolLoopState as any)?.maxRepeats).toBe(3);
     expect((followupRuntime?.stopMessageState as any)?.stopMessageUsed).toBe(1);
@@ -1202,7 +1203,7 @@ describe('stop_message_auto servertool', () => {
       expect(followupBody.model).toBe('gpt-test');
       expect(followupBody.messages).toBeUndefined();
       expect(followupBody.input?.[0]).toMatchObject({ role: 'user', content: [{ type: 'input_text', text: 'hi' }] });
-      expect(followupBody.input?.[1]).toMatchObject({ role: 'assistant', content: [{ type: 'input_text', text: 'ok' }] });
+      expect(followupBody.input?.[1]).toMatchObject({ role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] });
       expect(followupBody.tools?.[0]?.function?.name).toBe('exec_command');
       const followupText = JSON.stringify(followupBody);
       expect(followupText).toContain('Stop schema 校验未通过');

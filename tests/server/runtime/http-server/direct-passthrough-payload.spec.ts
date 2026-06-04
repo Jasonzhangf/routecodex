@@ -97,6 +97,24 @@ describe('direct-passthrough-payload', () => {
     })).toThrow(/chat-style messages/);
   });
 
+  it('rejects historical responses tool input content on responses direct', () => {
+    expect(() => assertDirectPayloadContract({
+      inboundProtocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.5',
+        input: [
+          { role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
+          {
+            type: 'function_call_output',
+            call_id: 'call_1',
+            output: 'ok',
+            content: [{ type: 'output_text', text: 'historical leak' }],
+          },
+        ],
+      },
+    })).toThrow(/tool item must not carry content/);
+  });
+
   it('allows responses-native hosted tools without name', () => {
     expect(() => assertDirectPayloadContract({
       inboundProtocol: 'openai-responses',

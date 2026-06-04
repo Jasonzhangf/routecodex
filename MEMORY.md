@@ -2133,3 +2133,23 @@ Tags: provider-forwarder, routing-selection, select_with_forwarder_resolution, s
 
 - 2026-06-04: servertool followup origin 真源收敛：followup capture 必须发生在请求 entry，保存 `entryOriginRequest/capturedEntryRequest`，followup 只能 clone 入口协议原请求并加 delta；`/v1/responses` 必须保持 `input` shape，不能从 chat `messages`、raw metadata、responses context 或当前污染 payload 重建。旧 `backfillServertoolAdapterContextTools*` 是错误实现，已从活路径/生成导出物理删除。验证：Rust `servertool_followup_delta` 11/11、focused Jest 4 suites/16 tests、`npm run build:min` 通过，版本 `0.90.2847`。
 Tags: servertool, stopless, followup, entryOriginRequest, capturedEntryRequest, responses-input, no-raw-backfill, no-tool-list-backfill, rust-only
+
+## 2026-06-04 ProviderForwarder sticky / 10000 MiniMax route truth
+- Verified forwarder fix: `engine::selection::select_provider` must pass metadata `sessionId/session_id/routecodexSessionId/routecodexSessionID` into `ForwarderRegistry::select`; registry-only sticky tests are insufficient because live selection can otherwise pass `None` and silently disable session sticky.
+- Current 10000 MiniMax policy: `tools` routes to `fwd.minimax.MiniMax-M2.7`; `coding/thinking/longcontext/multimodal` route to `fwd.minimax.MiniMax-M3`. Red-test truth: `tests/red-tests/forwarder_bootstrap_must_surface.test.ts` exact route-target assertions.
+Tags: provider-forwarder, sticky-session, port-10000, minimax-family, red-test
+
+## 2026-06-04 stopless followup schema gate
+- Verified root cause for schema-missing stopless premature stop: followup metadata lacked `__rt.serverToolLoopState.flowId=stop_message_flow`, so nested stop followup became generic `__servertool_followup__` and skipped schema gate via `skip_servertool_followup_hop`.
+- Stopless followup metadata must carry `serverToolLoopState.flowId=stop_message_flow`; skip/tool_call stop_message summary logs should remain file/stage events only, console only for `decision=trigger`.
+
+## 2026-06-04 direct passthrough provider-wire contract
+- direct passthrough 不属于 Hub Pipeline 主链：router-direct 只允许调用 VirtualRouter 选目标，禁止执行 HubPipeline request/response conversion；direct 只按入口协议与 providerProtocol 一致进入。
+- `/v1/responses` direct payload 必须是 Responses wire；ResponsesProvider 在 transport 前 fail-fast 拒绝 chat `messages` 与 chat-style function tool `{type:"function", function:{name}}`，防止上游 400 `tools[n].name`。
+
+## 2026-06-04 stopless live validation
+- Live 5555 validation after install/restart: version `0.90.2852`, request `openai-responses-router-gpt-5.5-20260604T232109287-257121-764` returned 200; logs show nested `:stop_followup` no longer hits `skip_servertool_followup_hop`, instead continues `flow=stop_message_flow` and advances `used=1 -> used=2` until `stop_schema_finished`.
+
+## 2026-06-04 Responses historical tool input content guard
+- Responses provider input 中 `function_call` / `function_call_output` 工具历史项不得携带 `content`；工具调用参数在 `arguments`，工具结果在 `output`。历史不规范项携带 `content` 会触发上游 400 `array_above_max_length`。
+- 唯一清理点是 Rust `hub_bridge_actions::filter_bridge_input_for_upstream`；Provider runtime `ResponsesProvider.assertResponsesWireShape` 只做最后 fail-fast 防线，禁止把污染 payload 发上游。

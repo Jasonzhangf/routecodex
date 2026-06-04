@@ -207,6 +207,9 @@ export function createServertoolProgressLogger(args: CommonArgs) {
       providerProtocol: args.providerProtocol
     });
     try {
+      if (compareContext?.decision !== 'trigger') {
+        return;
+      }
       const compact = compactStopCompareSummary(summary);
       const entryBrief = stopEntryBrief ? [
         ['source', stopEntryBrief.source],

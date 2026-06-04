@@ -31,6 +31,20 @@ function validateOpenAIResponsesDirectTools(payload: Record<string, unknown>): v
       reason: 'chat_messages',
     });
   }
+  if (Array.isArray(payload.input)) {
+    payload.input.forEach((item, index) => {
+      if (!isRecord(item)) {
+        return;
+      }
+      const type = typeof item.type === 'string' ? item.type.trim() : '';
+      if ((type === 'function_call' || type === 'function_call_output') && Object.prototype.hasOwnProperty.call(item, 'content')) {
+        throw makeDirectPayloadContractError(`Invalid direct Responses input at input[${index}]: tool item must not carry content`, {
+          index,
+          reason: 'tool_input_content',
+        });
+      }
+    });
+  }
   if (!Array.isArray(payload.tools)) {
     return;
   }

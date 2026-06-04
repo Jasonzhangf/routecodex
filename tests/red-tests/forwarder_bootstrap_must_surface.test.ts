@@ -94,27 +94,39 @@ describe('RED: forwarder bootstrap must surface (not silent fail)', () => {
     expect(all.filter((t) => t.startsWith('fwd.'))).toEqual([]);
   });
 
-  it('drift guard: 10000 must reference exactly one fwd target', async () => {
+  it('drift guard: 10000 routes M3 and M2.7 pools without qwen leakage', async () => {
     const cfg = parseTomlRecord(readFileSync(LIVE_CONFIG, 'utf8'));
     const input = await buildVirtualRouterInputV2(
       cfg as Record<string, unknown>,
       PROVIDER_ROOT,
       { routingPolicyGroup: 'gateway_coding_10000' },
     );
-    const all: string[] = [];
-    for (const v of Object.values(input.routing)) {
-      const arr = Array.isArray(v) ? v : [v];
-      for (const it of arr) {
-        if (it && typeof it === 'object') {
-          const e = it as Record<string, unknown>;
-          if (Array.isArray(e.targets)) for (const t of e.targets) if (typeof t === 'string') all.push(t);
-          if (typeof e.target === 'string') all.push(e.target);
-        }
-      }
+    for (const routeName of ['tools', 'search', 'web_search']) {
+      expect(routeTargets(input.routing, routeName)).toEqual(['fwd.minimax.MiniMax-M2.7']);
     }
-    expect(all.filter((t) => t.startsWith('fwd.'))).toEqual(['fwd.minimax.MiniMax-M2.7']);
+    for (const routeName of ['coding', 'thinking', 'longcontext']) {
+      expect(routeTargets(input.routing, routeName)).toEqual(['minimax.MiniMax-M3', 'opencode-zen-free.minimax-m3-free']);
+    }
+    expect(JSON.stringify(input.routing)).not.toMatch(/qwen/i);
   });
 });
+
+function routeTargets(routing: Record<string, unknown>, routeName: string): string[] {
+  const value = routing[routeName];
+  const pools = Array.isArray(value) ? value : value ? [value] : [];
+  const out: string[] = [];
+  for (const pool of pools) {
+    if (!pool || typeof pool !== 'object') continue;
+    const record = pool as Record<string, unknown>;
+    if (Array.isArray(record.targets)) {
+      for (const target of record.targets) {
+        if (typeof target === 'string') out.push(target);
+      }
+    }
+    if (typeof record.target === 'string') out.push(record.target);
+  }
+  return out;
+}
 
 describe('RED: live 10000 server must respond (not empty reply)', () => {
   /**
