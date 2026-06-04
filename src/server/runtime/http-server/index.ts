@@ -147,18 +147,6 @@ function readRuntimeScopeFromMetadata(metadata: Record<string, unknown>): { sess
   };
 }
 
-function isServerToolFollowupInput(input: PipelineExecutionInput): boolean {
-  const metadata = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
-    ? (input.metadata as Record<string, unknown>)
-    : {};
-  const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-    ? (metadata.__rt as Record<string, unknown>)
-    : {};
-  return metadata.serverToolFollowup === true
-    || rt.serverToolFollowup === true
-    || String(input.requestId || '').includes(':stop_followup');
-}
-
 function hasDeclaredApplyPatchTool(body: unknown): boolean {
   const record = body && typeof body === 'object' && !Array.isArray(body)
     ? body as Record<string, unknown>
@@ -1131,12 +1119,6 @@ export class RouteCodexHttpServer {
         portConfig?.mode === 'router'
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
       ) {
-        if (isServerToolFollowupInput(nextInput)) {
-          this.logStage('router-direct.skipped', input.requestId, {
-            reason: 'servertool_followup_requires_single_hub_reentry',
-          });
-          return await this.executePipeline(nextInput);
-        }
         // apply_patch servertool mode requires Hub response-stage tool dispatch.
         // Router direct bypass skips response conversion/servertool execution,
         // so we must force relay when request declares apply_patch.
@@ -1184,7 +1166,7 @@ export class RouteCodexHttpServer {
     const behavior = portConfig.protocolBehavior ?? 'auto';
     const shouldUseDirect =
       behavior === 'direct' || (behavior === 'auto' && inboundProtocol === handle.providerProtocol);
-    if (shouldUseDirect && !isServerToolFollowupInput(nextInput)) {
+    if (shouldUseDirect) {
       return await this.executeProviderDirectPipelineForPort(portConfig, nextInput);
     }
 

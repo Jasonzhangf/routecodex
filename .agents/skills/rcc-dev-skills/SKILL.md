@@ -1846,3 +1846,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-06-04 stopless followup requestId 精华
 - stopless / servertool 日志出现 `:stop_followup` 多次叠加或 codex-samples `File name too long` 时，先查 Rust `followup-core::build_followup_request_id` 的幂等与收敛；requestId 只能作为 followup identity carrier，不能按 hop 无限增长。
 - 修复必须在 Rust followup-core 真源，TS bridge 缺 native 必须 fail-fast；验证要包含 Node 黑盒：`req:stop_followup:stop_followup:stop_followup -> req:stop_followup`，再 build/install/restart 5555。
+
+## 2026-06-04 调试精华（direct / stopless / metadata）
+
+- same-protocol direct / provider-direct 是 provider passthrough + hooks；`serverToolFollowup` 或 `:stop_followup` 不能禁用 direct、不能强制 relay、不能进入 Hub response chat-process，direct 响应不激活 stopless/servertool。
+- Responses bridge / SSE client projection 禁止把 retention/context `metadata` 回写到 client payload；metadata 只能走 side-channel carrier，发现 `client response contains internal carrier field "metadata"` 时先查 bridge wrapper 是否重投 metadata，不要在 server projection 静默 strip。

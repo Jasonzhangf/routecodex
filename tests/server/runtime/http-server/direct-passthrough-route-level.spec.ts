@@ -404,7 +404,7 @@ describe('direct passthrough route-level', () => {
     expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay' });
   });
 
-  it('router same-protocol direct is skipped for servertool stop_followup reentry', async () => {
+  it('router same-protocol direct keeps stop_followup on direct path', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -416,15 +416,11 @@ describe('direct passthrough route-level', () => {
       providers: {},
     } as any);
 
-    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
-      status: 200,
-      body: { object: 'response', id: 'resp_stop_followup_relay' },
-      headers: {},
-      metadata: {},
-    } as any);
     const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
-      used: false,
-      reason: 'should-not-run',
+      used: true,
+      response: { status: 200, data: { object: 'response', id: 'resp_stop_followup_direct' } },
+      providerHandle: {} as any,
+      auditContext: {} as any,
     } as any);
     (server as any).userConfig = {
       httpserver: {
@@ -452,12 +448,11 @@ describe('direct passthrough route-level', () => {
       metadata: { __rt: { serverToolFollowup: true } },
     });
 
-    expect(routerDirectSpy).not.toHaveBeenCalled();
-    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
-    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_stop_followup_relay' });
+    expect(routerDirectSpy).toHaveBeenCalledTimes(1);
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_stop_followup_direct' });
   });
 
-  it('provider direct is skipped for servertool stop_followup reentry', async () => {
+  it('provider direct keeps stop_followup on direct path', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -469,15 +464,9 @@ describe('direct passthrough route-level', () => {
       providers: {},
     } as any);
 
-    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
-      status: 200,
-      body: { object: 'response', id: 'resp_provider_followup_relay' },
-      headers: {},
-      metadata: {},
-    } as any);
     const providerDirectSpy = jest.spyOn(server as any, 'executeProviderDirectPipelineForPort').mockResolvedValue({
       status: 200,
-      body: { object: 'response', id: 'resp_provider_direct_should_not_run' },
+      body: { object: 'response', id: 'resp_provider_direct_followup' },
       headers: {},
       metadata: {},
     } as any);
@@ -505,13 +494,8 @@ describe('direct passthrough route-level', () => {
       metadata: { __rt: { serverToolFollowup: true } },
     });
 
-    expect(providerDirectSpy).not.toHaveBeenCalled();
-    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
-    expect(executePipelineSpy.mock.calls[0]?.[0]?.metadata).toEqual(expect.objectContaining({
-      routecodexProviderRelayBinding: 'direct.key1.gpt-test',
-      routecodexProviderRelayProtocol: 'openai-responses',
-    }));
-    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_provider_followup_relay' });
+    expect(providerDirectSpy).toHaveBeenCalledTimes(1);
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_provider_direct_followup' });
   });
 
   it('router same-protocol direct passes x-route-hint into direct preroute metadata', async () => {
@@ -634,16 +618,25 @@ describe('direct passthrough route-level', () => {
     }));
   });
 
-  it('HTTP BLACKBOX: router-direct emits virtual-router-hit for direct success before provider send', async () => {
+  it('HTTP BLACKBOX: router-direct emits direct send log for direct success', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
     const logs: string[] = [];
     const originalLog = console.log;
-    console.log = (...args: unknown[]) => {
+    const originalInfo = console.info;
+    const originalWarn = console.warn;
+    const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+    const captureLog = (...args: unknown[]) => {
       logs.push(args.map((item) => String(item)).join(' '));
-      originalLog(...args);
     };
+    console.log = (...args: unknown[]) => { captureLog(...args); originalLog(...args); };
+    console.info = (...args: unknown[]) => { captureLog(...args); originalInfo(...args); };
+    console.warn = (...args: unknown[]) => { captureLog(...args); originalWarn(...args); };
+    process.stdout.write = ((chunk: unknown, ...args: unknown[]) => {
+      logs.push(String(chunk));
+      return originalStdoutWrite(chunk as string | Uint8Array, ...(args as []));
+    }) as typeof process.stdout.write;
 
     const server = new RouteCodexHttpServer({
       configPath: '/tmp/routecodex-test-config.json',
@@ -737,11 +730,13 @@ describe('direct passthrough route-level', () => {
       expect(response.status).toBe(200);
       expect(body).toEqual(expect.objectContaining({ id: 'resp_direct_log_blackbox' }));
       expect(directSend).toHaveBeenCalledTimes(1);
-      expect(logs.some((line) => line.includes('[virtual-router-hit][rt]'))).toBe(true);
-      expect(logs.some((line) => line.includes('thinking/gateway-priority-5555-thinking -> direct.key1.gpt-test.gpt-test'))).toBe(true);
-      expect(logs.some((line) => line.includes('reason=thinking:user-input'))).toBe(true);
+      expect(logs.some((line) => line.includes('[router-direct.send]'))).toBe(true);
+      expect(logs.some((line) => line.includes('completed'))).toBe(true);
     } finally {
       console.log = originalLog;
+      console.info = originalInfo;
+      console.warn = originalWarn;
+      process.stdout.write = originalStdoutWrite as typeof process.stdout.write;
       await server.stop();
     }
   }, 15000);
