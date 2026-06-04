@@ -64,6 +64,8 @@ Design goals:
 - Stop schema includes `learned` as the model-provided “what was learned in past turns” text.
 - Stop schema prompt must ask six diagnostic fields: target, process, evidence, `issue_cause`, `excluded_factors`, and `diagnostic_order`.
 - Debug / outage / validation tasks must not stop after only listing target/process/evidence; they must also state likely cause, ruled-out factors, and next diagnostic order, or call tools to gather that evidence.
+- Any system prompt / ai-followup prompt that asks the main model to produce a summary, final summary, stop explanation, completion report, or blocked report must require stop schema JSON in the same injected message.
+- Missing stop schema must not consume continuous stop budget; budget state comes from `stopMessageState.stopMessageUsed`, not `serverToolLoopState.repeatCount`.
 - Rust `stop-message-core` is the schema parse / gate truth; TS may only do the final file IO.
 - `note.md` write is allowed only on `schemaGate.action=allow_stop` and non-empty `learned`.
 - No write on followup, invalid schema, missing schema, budget exhausted, or reenter failure.

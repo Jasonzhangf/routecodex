@@ -752,6 +752,7 @@ function buildStopMessageAutoMessagePrompt(args: {
     '4) 必须包含至少一个可执行动作（具体文件、命令、检查点或验证目标），并尽量最小化下一步范围；优先“写动作”（改代码/补测试）。',
     '5) 禁止输出空泛短答：如“继续”“继续执行”“好的”“收到”“ok”。',
     '6) 禁止把回复做成纯状态汇总；默认是推进执行，直到阶段目标或总体目标完成。',
+    '6.1) 只要你输出的 followup 消息要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，就必须同时要求主模型附 stop schema JSON：stopreason(0=finished,1=blocked,2=continue_needed)、reason、has_evidence(0/1)、evidence、issue_cause、excluded_factors、diagnostic_order、next_step、learned；若缺证据则必须调用工具继续执行。',
     '7) 只有在消息内容或历史记录里存在明确证据时，才允许判断“偏离目标”；否则按同轨推进，不要泛化指责偏离。',
     '8) 若判定偏离，必须在指令里点明证据来源（来自消息内容或历史记录）并给出回轨的最小动作；若无证据，直接给下一步动作。',
     '9) 禁止把 review 责任交回主模型（例如“请你先自己 review/自查代码”）；review 必须由你（ai-followup）先完成。',
@@ -801,7 +802,7 @@ function buildStopMessageAutoMessagePrompt(args: {
   ];
 
   const closingInstruction =
-    `现在做完成校验：若确认已完成，仅输出 ${approvedMarker}；否则输出“根据当前状态调整后的下一步 followup 消息文本”。`;
+    `现在做完成校验：若确认已完成，仅输出 ${approvedMarker}；否则输出“根据当前状态调整后的下一步 followup 消息文本”；若该文本要求 summary/最终总结/停止说明，必须包含 stop schema JSON 要求。`;
   lines.push('', closingInstruction);
   const prompt = lines.join('\n').trim();
   if (prompt.length <= STOP_MESSAGE_AUTOMESSAGE_PROMPT_MAX_CHARS) {
@@ -973,7 +974,6 @@ function extractStopMessageProviderProtocol(adapterContext: unknown): string | u
   const fromRuntime = toNonEmptyText(asRecord(runtime)?.providerProtocol);
   return fromRuntime || undefined;
 }
-
 
 
 

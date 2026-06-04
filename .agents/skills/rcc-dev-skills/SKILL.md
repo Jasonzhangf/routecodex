@@ -1833,6 +1833,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### Stopless schema gate 精华（2026-06-03）
 - stopless schema gate 只在 `finish_reason=stop` 且非 `/goal active`、非 plan mode 时激活；只解析当前 assistant stop 文本，不扫历史、不改历史、不改工具列表。
 - stop schema 只校验数字字段 `stopreason` / `has_evidence`；`reason` / `next_step` / `evidence` / `issue_cause` / `excluded_factors` / `diagnostic_order` 只判空。followup prompt 必须质询六项：目标、过程、证据、问题原因、已排除因素、排查顺序；`stopreason=0|1` 且 reason 非空才允许 stop 并 prefix summary；缺 schema 只 followup 不计预算；带 schema 的无效 stop 才计入连续预算，非 stop/工具进展必须 reset；预算耗尽 summary 必须聚合最近三轮追问、三轮回复与最后原始 summary，并保留原因/排除项/顺序。
+- stopless summary 提示锁：任何 system prompt / ai-followup prompt 要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报时，必须同条消息要求 stop schema JSON；缺 schema 的 stop 不能增加 `stopMessageUsed`，`serverToolLoopState.repeatCount` 只用于 loop guard，不是 schema budget。
 
 ### 2026-06-04 stopless Responses followup 红测精华
 - stopless 线上日志出现 `decision=trigger` 仍“没作用”时，红测不能只断 `executed/flowId`；必须断最终 `reenterPipeline.body`：`/v1/responses` 入口要有 `input`、无 `messages`、包含原始历史与 stop schema 质询文本。

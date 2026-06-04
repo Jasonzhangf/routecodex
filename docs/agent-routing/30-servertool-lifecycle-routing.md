@@ -18,8 +18,9 @@
 5. stopless 激活时校验当前 assistant stop schema：`stopreason` 数字 `0=finished/1=blocked/2=continue_needed`、`has_evidence` 数字 `0/1`；文本字段只判空，默认要求包含 `reason`、`evidence`、`issue_cause`、`excluded_factors`、`diagnostic_order`、`next_step`、`learned`。
 6. `stopreason=0|1` 且 `reason` 非空才允许 stop，并把 reason 加到 stop summary 开头；否则按缺失字段生成 followup。
 7. `stopreason!=0|1` 且 `next_step` 非空时不允许 stop，followup 要求执行下一步；缺 next_step 时要求继续目标或补完整 schema。
-8. budget 只统计连续带 schema 的无效 stop；缺 schema 不计数，非 stop 响应、工具调用或正常进展必须 reset budget。预算耗尽返回聚合 summary，不循环。
-9. 注入失败必须清理状态，防止循环。
+8. budget 只统计连续带 schema 的无效 stop；缺 schema 不计数，非 stop 响应、工具调用或正常进展必须 reset budget。预算真源是 stop schema state 的 `stopMessageUsed`，不是 `serverToolLoopState.repeatCount`。
+9. 任何系统提示词/ai-followup 若要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，必须同时要求输出 stop schema JSON；禁止只要求 summary 而不带 schema。
+10. 注入失败必须清理状态，防止循环。
 
 ## followup 边界
 1. followup 只能基于 origin snapshot 重建。

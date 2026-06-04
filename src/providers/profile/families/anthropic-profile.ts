@@ -1,6 +1,7 @@
 import type {
   PrepareStreamBodyInput,
   ProviderFamilyProfile,
+  ResolveBusinessResponseErrorInput,
   ResolveStreamIntentInput
 } from '../profile-contracts.js';
 
@@ -53,9 +54,42 @@ function resolveConfiguredStreamPreference(input: ResolveStreamIntentInput): Str
   );
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function resolveAnthropicBusinessResponseError(input: ResolveBusinessResponseErrorInput): Error | undefined {
+  const response = asRecord(input.response);
+  if (!response) {
+    return undefined;
+  }
+  if (response.__sse_responses || asRecord(response.data)?.__sse_responses) {
+    return undefined;
+  }
+  const payload = asRecord(response.data) ?? response;
+  if (Array.isArray(payload.content)) {
+    return undefined;
+  }
+  const errorNode = asRecord(payload.error);
+  const message = typeof errorNode?.message === 'string' && errorNode.message.trim()
+    ? errorNode.message.trim()
+    : 'Anthropic response must contain content array';
+  return Object.assign(
+    new Error(`[provider] Upstream provider returned malformed Anthropic response: ${message}`),
+    {
+      code: 'MALFORMED_RESPONSE',
+      statusCode: 200,
+      upstreamCode: typeof errorNode?.type === 'string' ? errorNode.type : 'anthropic_malformed_response'
+    }
+  );
+}
+
 export const anthropicFamilyProfile: ProviderFamilyProfile = {
   id: 'anthropic/default',
   providerFamily: 'anthropic',
+  resolveBusinessResponseError: resolveAnthropicBusinessResponseError,
   resolveStreamIntent(input: ResolveStreamIntentInput): boolean | undefined {
     const configuredStreaming = resolveConfiguredStreamPreference(input);
     if (configuredStreaming === 'always') {

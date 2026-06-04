@@ -250,6 +250,41 @@ function persistStoplessLearnedNoteOnAllowStop(args: {
   });
 }
 
+function attachStopMessageRuntimeStateToMetadata(metadata: Record<string, unknown>, state: {
+  text: string;
+  maxRepeats: number;
+  used: number;
+  stageMode: string;
+}): void {
+  const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+    ? metadata.__rt as Record<string, unknown>
+    : {};
+  rt.stopMessageState = {
+    stopMessageText: state.text,
+    stopMessageMaxRepeats: state.maxRepeats,
+    stopMessageUsed: state.used,
+    stopMessageStageMode: state.stageMode
+  };
+  metadata.__rt = rt;
+}
+
+function attachStopMessageRuntimeStateToFollowup(followup: unknown, state: {
+  text: string;
+  maxRepeats: number;
+  used: number;
+  stageMode: string;
+}): void {
+  const row = followup && typeof followup === 'object' && !Array.isArray(followup)
+    ? followup as Record<string, unknown>
+    : null;
+  if (!row) return;
+  const metadata = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+    ? row.metadata as Record<string, unknown>
+    : {};
+  attachStopMessageRuntimeStateToMetadata(metadata, state);
+  row.metadata = metadata;
+}
+
 function prefixChatChoiceContent(payload: JsonObject, prefix: string): boolean {
   const choices = Array.isArray(payload.choices) ? payload.choices : [];
   let changed = false;
@@ -754,6 +789,7 @@ const handler: ServerToolHandler = async (
       updatedAt: usedAt,
       lastUsedAt: usedAt
     };
+    attachStopMessageRuntimeStateToFollowup(handlerResult.followup, snapInput);
     for (const key of handlerResult.persistKeys) {
       const persistedState = loadRoutingInstructionStateSync(key) ?? null;
       const nextState = applyStopMessageSnapshotToState(persistedState, snapInput);

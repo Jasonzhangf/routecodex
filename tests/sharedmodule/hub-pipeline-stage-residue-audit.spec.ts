@@ -1624,7 +1624,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('stop_message followup budget must be restored from servertool loop state before native decision', () => {
+  it('stop_message schema budget must not be restored from servertool loop repeat count', () => {
     const runtimeUtilsPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts',
@@ -1639,7 +1639,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(runtimeUtilsSource).toContain('runtime.serverToolLoopState');
     expect(runtimeUtilsSource).toContain("toNonEmptyText(loopState.flowId) !== 'stop_message_flow'");
     expect(runtimeUtilsSource).toContain('readPositiveInteger(loopState.maxRepeats)');
-    expect(runtimeUtilsSource).toContain('readPositiveInteger(loopState.repeatCount)');
+    expect(runtimeUtilsSource).not.toContain('readPositiveInteger(loopState.repeatCount)');
+    expect(runtimeUtilsSource).toContain('readPositiveInteger(state?.stopMessageUsed)');
     expect(handlerSource).toContain("followupFlowId === 'stop_message_flow'");
     expect(handlerSource).toContain("? 'preserve_eligibility'");
 

@@ -75,3 +75,25 @@ describe('anthropicFamilyProfile.resolveStreamIntent', () => {
     expect(result).toBe(true);
   });
 });
+
+describe('anthropicFamilyProfile.resolveBusinessResponseError', () => {
+  it('rejects non-SSE Anthropic responses without content array before Hub conversion', () => {
+    const error = anthropicFamilyProfile.resolveBusinessResponseError?.({
+      response: { id: 'msg_1', type: 'message', role: 'assistant', stop_reason: 'end_turn' },
+      runtimeMetadata: {}
+    });
+
+    expect(error?.message).toContain('malformed Anthropic response');
+    expect((error as any)?.code).toBe('MALFORMED_RESPONSE');
+    expect((error as any)?.upstreamCode).toBe('anthropic_malformed_response');
+  });
+
+  it('accepts Anthropic message responses with content array', () => {
+    const error = anthropicFamilyProfile.resolveBusinessResponseError?.({
+      response: { id: 'msg_1', type: 'message', role: 'assistant', content: [], stop_reason: 'end_turn' },
+      runtimeMetadata: {}
+    });
+
+    expect(error).toBeUndefined();
+  });
+});

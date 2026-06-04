@@ -19,6 +19,7 @@ import {
 import { resolveStateKey } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 import { resolveRuntimeStopMessageState } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 import { resetStopMessageRuntimeConfigCacheForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js';
+import { buildStopMessageAutoMessagePromptForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
 const USER_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-userdir');
@@ -199,12 +200,14 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
     return { action: 'skip', skip_reason: 'skip_goal_active' };
   }
 
-  if (ctx.followup_flow_id) {
+  if (ctx.followup_flow_id && ctx.stop_message_followup_policy !== 'preserve_eligibility') {
     return { action: 'skip', skip_reason: 'skip_servertool_followup_hop' };
   }
 
   // Resolve snapshot.
-  const rawSnap = (ctx.persisted_snapshot ?? ctx.runtime_snapshot) as Record<string, unknown> | undefined;
+  const rawSnap = (ctx.followup_flow_id === 'stop_message_flow' && ctx.stop_message_followup_policy === 'preserve_eligibility'
+    ? (ctx.runtime_snapshot ?? ctx.persisted_snapshot)
+    : (ctx.persisted_snapshot ?? ctx.runtime_snapshot)) as Record<string, unknown> | undefined;
   let snap = rawSnap;
 
   // Explicit mode without snapshot?
@@ -406,11 +409,12 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('does not trigger default stopMessage without scoped stop state', async () => {
+  test('triggers default stopMessage when default is enabled without scoped stop state', async () => {
     process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '1';
     resetStopMessageRuntimeConfigCacheForTests();
 
     const sessionId = 'stopmessage-red-default-no-followup';
+    fs.rmSync(resolveStopStatePath(sessionId), { force: true });
     // No persisted stopMessage state — no writeRoutingStateForSession
 
     const capturedChatRequest: JsonObject = {
@@ -445,7 +449,7 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.execution?.flowId).not.toBe('stop_message_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
 
     process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
     resetStopMessageRuntimeConfigCacheForTests();
@@ -568,17 +572,17 @@ describe('stop_message_auto servertool', () => {
     expect(followup.injection).toBeDefined();
     expect(followup.metadata?.clientInjectOnly).toBeUndefined();
     expect(followup.metadata?.clientInjectText).toBeUndefined();
-    expect(followup.metadata?.clientInjectSource).toBeUndefined();
+    expect(followup.metadata?.clientInjectSource).toBe('servertool.stop_message');
     const injectMeta = readClientInjectMeta(followup);
     expect(injectMeta.clientInjectOnly).toBe(false);
-    expect(injectMeta.clientInjectText).toBe('立即执行待处理任务');
+    expect(injectMeta.clientInjectText).toContain('Stop schema 校验未通过');
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
       resolveStopStatePath(sessionId),
-      (data) => data?.state?.stopMessageUsed === 1 && typeof data?.state?.stopMessageLastUsedAt === 'number'
+      (data) => data?.state?.stopMessageUsed === 0 && typeof data?.state?.stopMessageLastUsedAt === 'number'
     );
     // llmswitch-core main: stopMessage usage counter increments as soon as we decide to trigger followup.
-    expect(persisted?.state?.stopMessageUsed).toBe(1);
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
     expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
   });
 
@@ -663,12 +667,12 @@ describe('stop_message_auto servertool', () => {
 
     expect(result.mode).toBe('tool_flow');
     const followup = result.execution?.followup as any;
-    expect(followup?.metadata?.__shadowCompareForcedProviderKey).toBe('mini27.key1.MiniMax-M2.7');
-    expect(followup?.metadata?.providerKey).toBe('mini27.key1.MiniMax-M2.7');
-    expect(followup?.metadata?.targetProviderKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(followup?.metadata?.__shadowCompareForcedProviderKey).toBeUndefined();
+    expect(followup?.metadata?.providerKey).toBeUndefined();
+    expect(followup?.metadata?.targetProviderKey).toBeUndefined();
     expect(followup?.metadata?.modelId).toBe('MiniMax-M2.7');
     expect(followup?.metadata?.assignedModelId).toBe('MiniMax-M2.7');
-    expect(followup?.metadata?.target?.providerKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(followup?.metadata?.target?.providerKey).toBeUndefined();
     expect(followup?.metadata?.target?.modelId).toBe('MiniMax-M2.7');
   });
 
@@ -719,6 +723,76 @@ describe('stop_message_auto servertool', () => {
     expect(reenterPipeline).toHaveBeenCalledTimes(1);
     const followupBody = reenterPipeline.mock.calls[0]?.[0]?.body as any;
     expect(JSON.stringify(followupBody)).toContain('继续执行');
+  });
+
+  test('missing stop schema followup preserves schema budget at current used count', async () => {
+    const sessionId = 'stopmessage-spec-session-missing-schema-budget';
+    writeRoutingStateForSession(sessionId, {
+      forcedTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 3,
+      stopMessageUsed: 0
+    });
+
+    let followupRuntime: Record<string, unknown> | undefined;
+    const result = await runServerToolOrchestration({
+      chat: buildStopChatResponse('chatcmpl-stop-missing-schema-budget'),
+      adapterContext: {
+        requestId: 'req-stopmessage-missing-schema-budget',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: 'debug this' }]
+        }
+      } as any,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-missing-schema-budget',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async (opts: any) => {
+        followupRuntime = opts?.metadata?.__rt as Record<string, unknown> | undefined;
+        return {
+          body: {
+            id: 'chatcmpl-followup-missing-schema-budget',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [{ index: 0, message: { role: 'assistant', content: 'still no schema' }, finish_reason: 'stop' }]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(result.executed).toBe(true);
+    expect((followupRuntime?.serverToolLoopState as any)?.repeatCount).toBe(1);
+    expect((followupRuntime?.stopMessageState as any)?.stopMessageUsed).toBe(0);
+    expect(resolveRuntimeStopMessageState(followupRuntime)?.used).toBe(0);
+  });
+
+  test('ai followup prompt requires stop schema when asking for summary', () => {
+    const prompt = buildStopMessageAutoMessagePromptForTests({
+      baseStopMessageText: '请总结当前问题',
+      candidateFollowupText: '要求主模型做最终 summary',
+      responseSnapshot: {
+        providerProtocol: 'openai-chat',
+        finishReason: 'stop',
+        assistantText: '我准备 summary 后停止',
+        responseExcerpt: 'summary'
+      },
+      usedRepeats: 1,
+      maxRepeats: 3,
+      workingDirectory: process.cwd()
+    });
+
+    expect(prompt).toContain('summary');
+    expect(prompt).toContain('stop schema JSON');
+    expect(prompt).toContain('issue_cause');
+    expect(prompt).toContain('excluded_factors');
+    expect(prompt).toContain('diagnostic_order');
   });
 
   test('plan mode active skips stopless trigger at the only decision point', async () => {
@@ -1411,7 +1485,7 @@ describe('stop_message_auto servertool', () => {
     expect(reenterPipeline).toHaveBeenCalledTimes(1);
     const reenterMeta = reenterPipeline.mock.calls[0]?.[0]?.metadata as Record<string, unknown> | undefined;
     expect(reenterMeta?.clientInjectOnly).toBeUndefined();
-    expect(reenterMeta?.clientInjectSource).toBeUndefined();
+    expect(reenterMeta?.clientInjectSource).toBe('servertool.stop_message');
   });
 
   test.skip('main done marker does not terminate until ai-followup reviewer approves', async () => {
@@ -1506,9 +1580,9 @@ describe('stop_message_auto servertool', () => {
 
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
         resolveStopStatePath(sessionId),
-        (data) => data?.state?.stopMessageUsed === 1
+        (data) => data?.state?.stopMessageUsed === 0
       );
-      expect(persisted?.state?.stopMessageUsed).toBe(1);
+      expect(persisted?.state?.stopMessageUsed).toBe(0);
     } finally {
       if (previousAiCodexBin === undefined) {
         delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
@@ -2295,13 +2369,10 @@ describe('stop_message_auto servertool', () => {
 
     expect(result.execution?.flowId).toBe('stop_message_flow');
     const followup = result.execution?.followup as any;
-    expect(followup?.metadata?.__shadowCompareForcedProviderKey).toBe('mini27.key1.MiniMax-M2.7');
-    expect(followup?.metadata?.targetProviderKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(followup?.metadata?.__shadowCompareForcedProviderKey).toBeUndefined();
+    expect(followup?.metadata?.targetProviderKey).toBeUndefined();
     expect(followup?.metadata?.assignedModelId).toBe('MiniMax-M2.7');
-    expect(followup?.metadata?.target).toEqual({
-      providerKey: 'mini27.key1.MiniMax-M2.7',
-      modelId: 'MiniMax-M2.7'
-    });
+    expect(followup?.metadata?.target).toEqual({ modelId: 'MiniMax-M2.7' });
     expect(followup?.metadata?.routecodexPortMode).toBe('router');
   });
 
@@ -2369,7 +2440,7 @@ describe('stop_message_auto servertool', () => {
     const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number } }>(
       resolveStopStatePath(sessionId),
     );
-    expect(persisted?.state?.stopMessageUsed).toBe(1);
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
   });
 
   test('maps stop_message_flow loop state into runtime stop snapshot on followup hops', () => {
@@ -2388,7 +2459,7 @@ describe('stop_message_auto servertool', () => {
     expect(snapshot).toEqual({
       text: '继续执行',
       maxRepeats: 3,
-      used: 1,
+      used: 0,
       source: 'servertool.stop_message',
       stageMode: 'on'
     });
@@ -2803,9 +2874,9 @@ describe('stop_message_auto servertool', () => {
     expect(result.execution?.flowId).toBe('stop_message_flow');
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
       resolveStopStatePath(sessionId),
-      (data) => data?.state?.stopMessageUsed === 1 && typeof data?.state?.stopMessageLastUsedAt === 'number'
+      (data) => data?.state?.stopMessageUsed === 0 && typeof data?.state?.stopMessageLastUsedAt === 'number'
     );
-    expect(persisted?.state?.stopMessageUsed).toBe(1);
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
   });
 
   test('emits stop compare context even when client is already disconnected', async () => {
@@ -2872,7 +2943,7 @@ describe('stop_message_auto servertool', () => {
     expect(compare).toBeDefined();
     expect(typeof compare?.summary).toBe('string');
     expect(String(compare?.summary)).not.toContain('no_context');
-    expect(compare?.compare?.reason).toBe('native_decision');
+    expect(compare?.compare?.reason).toBe('stop_schema_missing');
   });
 
   test('stops waiting followup when client disconnects during reenter', async () => {
@@ -3364,7 +3435,7 @@ describe('stop_message_auto servertool', () => {
 
     let lastFollowupBody: JsonObject | undefined;
     for (let round = 1; round <= 5; round += 1) {
-      let nextLoopState: Record<string, unknown> | undefined;
+      let nextRuntime: Record<string, unknown> | undefined;
       const orchestration = await runServerToolOrchestration({
         chat: chatResponse,
         adapterContext,
@@ -3372,7 +3443,7 @@ describe('stop_message_auto servertool', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         reenterPipeline: async (opts: any) => {
-          nextLoopState = opts?.metadata?.__rt?.serverToolLoopState as Record<string, unknown> | undefined;
+          nextRuntime = opts?.metadata?.__rt as Record<string, unknown> | undefined;
           lastFollowupBody = opts?.body as JsonObject;
           return {
             body: {
@@ -3387,7 +3458,7 @@ describe('stop_message_auto servertool', () => {
 
       expect(orchestration.executed).toBe(true);
       expect(orchestration.flowId).toBe('stop_message_flow');
-      adapterContext.__rt = nextLoopState ? { serverToolLoopState: nextLoopState } : undefined;
+      adapterContext.__rt = nextRuntime;
     }
 
     const messages = Array.isArray((lastFollowupBody as any)?.messages) ? ((lastFollowupBody as any).messages as any[]) : [];
@@ -3444,7 +3515,7 @@ describe('stop_message_auto servertool', () => {
     } as any;
 
     for (let round = 1; round <= 9; round += 1) {
-      let nextLoopState: Record<string, unknown> | undefined;
+      let nextRuntime: Record<string, unknown> | undefined;
       const orchestration = await runServerToolOrchestration({
         chat: chatResponse,
         adapterContext,
@@ -3452,7 +3523,7 @@ describe('stop_message_auto servertool', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         reenterPipeline: async (opts: any) => {
-          nextLoopState = opts?.metadata?.__rt?.serverToolLoopState as Record<string, unknown> | undefined;
+          nextRuntime = opts?.metadata?.__rt as Record<string, unknown> | undefined;
           return {
             body: {
               id: 'chatcmpl-followup-loop-fail',
@@ -3464,7 +3535,7 @@ describe('stop_message_auto servertool', () => {
         }
       });
       expect(orchestration.executed).toBe(true);
-      adapterContext.__rt = nextLoopState ? { serverToolLoopState: nextLoopState } : undefined;
+      adapterContext.__rt = nextRuntime;
     }
 
     let followupCalled = false;
@@ -3647,7 +3718,7 @@ describe('stop_message_auto servertool', () => {
 
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageStage?: unknown } }>(
         resolveStopStatePath(sessionId),
-        (data) => data?.state?.stopMessageUsed === 1
+        (data) => data?.state?.stopMessageUsed === 0
       );
       expect(injectMeta.clientInjectText).not.toContain('阶段A：先看 BD 状态');
       expect(persisted?.state?.stopMessageStage).toBeUndefined();
@@ -3981,7 +4052,7 @@ describe('stop_message_auto servertool', () => {
       expect(injectMeta.clientInjectText).toBe('继续执行');
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageStage?: unknown } }>(
         resolveStopStatePath(sessionId),
-        (data) => data?.state?.stopMessageUsed === 1
+        (data) => data?.state?.stopMessageUsed === 0
       );
       expect(persisted?.state?.stopMessageStage).toBeUndefined();
     } finally {
@@ -4072,7 +4143,7 @@ describe('stop_message_auto servertool', () => {
       expect(first.mode).toBe('tool_flow');
       await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
         resolveStopStatePath(sessionId),
-        (data) => data?.state?.stopMessageUsed === 1
+        (data) => data?.state?.stopMessageUsed === 0
       );
 
       const second = await runServerSideToolEngine({
@@ -4085,7 +4156,7 @@ describe('stop_message_auto servertool', () => {
       expect(second.mode).toBe('tool_flow');
       await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
         resolveStopStatePath(sessionId),
-        (data) => data?.state?.stopMessageUsed === 2
+        (data) => data?.state?.stopMessageUsed === 0
       );
 
       const third = await runServerSideToolEngine({
@@ -4100,11 +4171,12 @@ describe('stop_message_auto servertool', () => {
       const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown; stopMessageUsed?: number } }>(
         resolveStopStatePath(sessionId),
         (data) =>
-          data?.state?.stopMessageText === '继续推进同一任务' &&
+          typeof data?.state?.stopMessageText === 'string' &&
+          data.state.stopMessageText.includes('Stop schema 校验未通过') &&
           data?.state?.stopMessageMaxRepeats === 10 &&
-          data?.state?.stopMessageUsed === 3
+          data?.state?.stopMessageUsed === 0
       );
-      expect(persisted?.state?.stopMessageText).toBe('继续推进同一任务');
+      expect(String(persisted?.state?.stopMessageText)).toContain('Stop schema 校验未通过');
       expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
     } finally {
       if (prevUserDir === undefined) {

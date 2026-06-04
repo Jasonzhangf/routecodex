@@ -155,7 +155,7 @@ export function resolveRuntimeStopMessageState(runtimeMetadata: unknown): {
   if (maxRepeats === undefined) {
     return null;
   }
-  const used = readPositiveInteger(loopState.repeatCount) ?? 0;
+  const used = readPositiveInteger(state?.stopMessageUsed) ?? 0;
   const text = toNonEmptyText(state?.stopMessageText) || '继续执行';
   return {
     text,
