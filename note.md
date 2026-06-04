@@ -15334,3 +15334,7 @@ Task: investigate stopless stopping on schema missing and servertool log noise.
 - Code update: provider-direct same-protocol direct path no longer rewrites request `model` from providerBinding; provider-direct result no longer writes request model back into upstream response body.
 - Test update: provider-direct readonly response test now asserts no rewrite attempt; response passthrough test asserts converter bypass plus transport-normalized body/status.
 - Green evidence: `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/provider-direct-pipeline.spec.ts tests/server/runtime/http-server/provider-direct-response-passthrough.spec.ts tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts --runInBand --forceExit -t "provider-direct|provider-mode direct streaming"` passed 10/10 selected; `npx tsc --noEmit --pretty false` passed.
+
+## 2026-06-05 error policy center direct route-level passthrough gate
+- Test update: provider-mode keyless chat binding route-level tests now assert client `model` is preserved on direct path instead of rewriting to providerBinding model.
+- Green evidence: `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts tests/server/runtime/http-server/provider-direct-pipeline.spec.ts tests/server/runtime/http-server/provider-direct-response-passthrough.spec.ts --runInBand --forceExit` passed 20/20; `npx tsc --noEmit --pretty false` passed.

@@ -1,7 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 describe('direct passthrough route-level', () => {
-  it('HTTP BLACKBOX: provider-mode keyless chat binding sends bound provider model', async () => {
+  it('HTTP BLACKBOX: provider-mode keyless chat binding preserves client model', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -28,7 +28,7 @@ describe('direct passthrough route-level', () => {
         processIncoming: jest.fn(),
         processIncomingDirect: jest.fn(async (payload: Record<string, unknown>) => {
           sentPayload = payload;
-          if (payload.model !== 'deepseek-v4-flash-free') {
+          if (payload.model !== 'deepseek-v4-flash') {
             return {
               status: 401,
               data: {
@@ -44,7 +44,7 @@ describe('direct passthrough route-level', () => {
             data: {
               id: 'chatcmpl_provider_direct_keyless_model_blackbox',
               object: 'chat.completion',
-              model: 'deepseek-v4-flash-free',
+              model: payload.model,
               choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
             },
           };
@@ -81,7 +81,7 @@ describe('direct passthrough route-level', () => {
         id: 'chatcmpl_provider_direct_keyless_model_blackbox',
         model: 'deepseek-v4-flash',
       }));
-      expect(sentPayload?.model).toBe('deepseek-v4-flash-free');
+      expect(sentPayload?.model).toBe('deepseek-v4-flash');
     } finally {
       await server.stop();
     }
@@ -130,7 +130,7 @@ describe('direct passthrough route-level', () => {
             data: {
               id: 'chatcmpl_provider_direct_stream_options_blackbox',
               object: 'chat.completion',
-              model: 'deepseek-v4-flash-free',
+              model: payload.model,
               choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
             },
           };
@@ -164,7 +164,7 @@ describe('direct passthrough route-level', () => {
 
       expect(response.status).toBe(200);
       expect(bodyText).not.toContain('stream_options should be set along with stream = true');
-      expect(sentPayload?.model).toBe('deepseek-v4-flash-free');
+      expect(sentPayload?.model).toBe('deepseek-v4-flash');
       expect(sentPayload?.stream).toBe(true);
       expect(sentPayload?.stream_options).toEqual({ include_usage: true });
     } finally {
