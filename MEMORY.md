@@ -2153,3 +2153,9 @@ Tags: provider-forwarder, sticky-session, port-10000, minimax-family, red-test
 ## 2026-06-04 Responses historical tool input content guard
 - Responses provider input 中 `function_call` / `function_call_output` 工具历史项不得携带 `content`；工具调用参数在 `arguments`，工具结果在 `output`。历史不规范项携带 `content` 会触发上游 400 `array_above_max_length`。
 - 唯一清理点是 Rust `hub_bridge_actions::filter_bridge_input_for_upstream`；Provider runtime `ResponsesProvider.assertResponsesWireShape` 只做最后 fail-fast 防线，禁止把污染 payload 发上游。
+
+## 2026-06-04 ErrorPolicyCenter unified policy truth
+- Provider/runtime/direct/executor error strategy truth is `src/providers/core/runtime/provider-failure-policy-impl.ts`; `ErrorHandlingCenter` is client/server projection only and must not enter provider retry/reroute/cooldown policy.
+- Active categories are exactly `recoverable | unrecoverable | special_400 | periodic_recovery`; classifier/executor/direct code may expose or consume policy outcomes but must not locally derive `classification/recoverable/affectsHealth/shouldRetry/reroute` branches.
+- Verified closeout gates: classifier/policy/error-chain/retry-execution/reselection focused Jest suites passed 62/62 and `npx tsc --noEmit --pretty false` passed; executor/direct classification comparison scan returned no matches outside provider policy.
+Tags: error-policy-center, ErrorErr-chain, provider-failure-policy, no-fallback, 2026-06-04
