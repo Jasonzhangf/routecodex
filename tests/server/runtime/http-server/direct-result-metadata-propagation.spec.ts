@@ -76,13 +76,13 @@ describe('http-server direct result metadata propagation', () => {
     });
   });
 
-  it('provider-direct result fails fast when model rewrite cannot be applied', async () => {
+  it('provider-direct result does not rewrite readonly response model', async () => {
     const server = Object.create(RouteCodexHttpServer.prototype) as any;
     server.extractProviderModel = () => 'gpt-5.4';
     const readonlyBody: Record<string, unknown> = { id: 'resp_provider_direct_readonly', model: 'gpt-5.4' };
     Object.freeze(readonlyBody);
 
-    await expect(server.buildProviderDirectResult({
+    const result = await server.buildProviderDirectResult({
       response: {
         status: 200,
         data: readonlyBody
@@ -92,7 +92,10 @@ describe('http-server direct result metadata propagation', () => {
     }, {
       body: { model: 'gpt-5.3-codex', stream: false },
       metadata: {}
-    }, {}, 'test.key1')).rejects.toThrow(/read only|Cannot assign|object is not extensible/i);
+    }, {}, 'test.key1');
+
+    expect(result.body).toBe(readonlyBody);
+    expect((result.body as Record<string, unknown>).model).toBe('gpt-5.4');
   });
   it('router-direct responses result records response retention state instead of leaving pending request payload orphaned', async () => {
     captureResponsesRequestContext({

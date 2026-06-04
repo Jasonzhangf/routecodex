@@ -94,7 +94,8 @@ describe('provider-direct response passthrough', () => {
     );
 
     expect(convertSpy).not.toHaveBeenCalled();
-    expect(result.body).toEqual(upstreamResponse);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual(upstreamResponse.body);
     expect(result.usageLogInfo?.routeName).toBe('port.provider-direct');
   });
 });

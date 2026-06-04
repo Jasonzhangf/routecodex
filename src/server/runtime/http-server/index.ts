@@ -1585,9 +1585,6 @@ export class RouteCodexHttpServer {
       normalized.body && typeof normalized.body === 'object'
         ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
-    if (requestModel && normalized.body && typeof normalized.body === 'object' && !Array.isArray(normalized.body)) {
-      (normalized.body as Record<string, unknown>).model = requestModel;
-    }
     return {
       ...normalized,
       metadata:

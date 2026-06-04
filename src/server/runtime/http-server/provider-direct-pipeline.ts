@@ -58,7 +58,7 @@ export async function executeProviderDirectPipeline(
     }
   }
 
-  const payloadToSend = applyProviderDirectBoundModel(requestPayload, providerBinding, inboundProtocol);
+  const payloadToSend = requestPayload;
 
   options.onSnapshotBefore?.(payloadToSend, {
     port: portConfig.port,
@@ -95,36 +95,6 @@ export async function executeProviderDirectPipeline(
     actualBehavior,
     inboundProtocol,
     providerProtocol: providerHandle.providerProtocol,
-  };
-}
-
-function readNonEmptyString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function resolveBoundModelFromProviderBinding(providerBinding: string): string | undefined {
-  const binding = readNonEmptyString(providerBinding);
-  if (!binding) return undefined;
-  const parts = binding.split('.').map((part) => part.trim()).filter(Boolean);
-  if (parts.length < 2) return undefined;
-  return readNonEmptyString(parts[parts.length - 1]);
-}
-
-function applyProviderDirectBoundModel(
-  requestPayload: Record<string, unknown>,
-  providerBinding: string,
-  inboundProtocol: ProviderProtocol,
-): Record<string, unknown> {
-  if (inboundProtocol !== 'openai-chat') {
-    return requestPayload;
-  }
-  const boundModel = resolveBoundModelFromProviderBinding(providerBinding);
-  if (!boundModel || requestPayload.model === boundModel) {
-    return requestPayload;
-  }
-  return {
-    ...requestPayload,
-    model: boundModel,
   };
 }
 
