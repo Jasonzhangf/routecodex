@@ -178,14 +178,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
       retryError: args.retryError,
       status: args.status
     });
-  const recoverableProviderReroute =
-    hasTerminalAlternativeCandidate
-    && classification === 'recoverable'
-    && args.status !== 429;
-  const terminalRecoverableReroute =
-    !eligibilityPlan.shouldRetry
-    && hasTerminalAlternativeCandidate
-    && classification === 'recoverable';
   const terminalProviderFailureReroute =
     !eligibilityPlan.shouldRetry
     && hasTerminalAlternativeCandidate
@@ -193,7 +185,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     && !(args.error as { retryScope?: unknown; providerAccountOwnership?: unknown } | undefined)?.retryScope
     && (args.error as { providerAccountOwnership?: unknown } | undefined)?.providerAccountOwnership !== 'internal';
 
-  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute && !terminalRecoverableReroute && !recoverableProviderReroute && !terminalProviderFailureReroute) {
+  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute && !terminalProviderFailureReroute) {
     const keepTerminalExclusion =
       exclusionPlan.excludedCurrentProvider
       && (args.status === 429 || args.forceExcludeCurrentProviderOnRetry === true);
@@ -207,8 +199,8 @@ export async function resolveProviderRetryExecutionPlan(args: {
     };
   }
 
-  if (terminalQuotaReroute || terminalRecoverableReroute || recoverableProviderReroute || terminalProviderFailureReroute) {
-    const retryBackoffPlan = (terminalRecoverableReroute || recoverableProviderReroute || terminalProviderFailureReroute)
+  if (terminalQuotaReroute || terminalProviderFailureReroute) {
+    const retryBackoffPlan = terminalProviderFailureReroute
       ? {
           blockingRecoverable: false,
           retryBackoffMs: 0,
@@ -288,29 +280,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     retryError: args.retryError,
     backoffScope: retryBackoffPlan.backoffScope
   });
-  const providerOwnsWindsurfAccountRouting =
-    (args.error as { retryScope?: unknown; providerAccountOwnership?: unknown } | undefined)?.retryScope === 'provider-internal-only'
-    || (args.error as { providerAccountOwnership?: unknown } | undefined)?.providerAccountOwnership === 'internal';
-  if (
-    retrySwitchPlan.switchAction === 'retry_same_provider'
-    && !exclusionPlan.excludedCurrentProvider
-    && args.status !== 429
-    && hasAlternativeRouteCandidate({
-      providerKey: args.providerKey,
-      routePool: args.routePool,
-      excludedProviderKeys: args.excludedProviderKeys
-    })
-    && (
-      (typeof args.providerKey === 'string' && args.providerKey.startsWith('windsurf.'))
-      || (typeof args.runtimeKey === 'string' && args.runtimeKey.startsWith('windsurf.'))
-    )
-    && !providerOwnsWindsurfAccountRouting
-  ) {
-    applyRetryExclusionForCurrentProvider({
-      providerKey: args.providerKey,
-      excludedProviderKeys: args.excludedProviderKeys
-    });
-  }
   if (
     classification === 'unrecoverable'
     && retrySwitchPlan.switchAction === 'exclude_and_reroute'

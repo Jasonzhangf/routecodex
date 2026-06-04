@@ -112,19 +112,6 @@ export function resolveProviderRetryExclusionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys
   });
 
-  const providerOwnsInternalRouting =
-    providerKey.startsWith('windsurf.')
-    || (args.error as { retryScope?: unknown; providerAccountOwnership?: unknown } | undefined)?.retryScope === 'provider-internal-only'
-    || (args.error as { providerAccountOwnership?: unknown } | undefined)?.providerAccountOwnership === 'internal';
-  if (args.classification === 'recoverable' && hasAlternativeCandidate && args.status !== 429 && !providerOwnsInternalRouting) {
-    return {
-      excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
-        providerKey,
-        excludedProviderKeys: args.excludedProviderKeys
-      })
-    };
-  }
-
   const exclusionDecision = resolveProviderFailureExclusionDecision({
     promptTooLong: args.promptTooLong,
     classification: args.classification,

@@ -277,7 +277,7 @@ describe('HubRequestExecutor failover', () => {
         decisionLabel: 'recoverable_backoff_same_provider'
       })
     }));
-    expect(Array.from(sameProviderAltKeyExcluded)).toEqual(['windsurf.ws-pro-1.gpt-5.5-medium']);
+    expect(Array.from(sameProviderAltKeyExcluded)).toEqual([]);
 
     const windsurfStreamCancelExcluded = new Set<string>();
     const windsurfStreamCancelExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
@@ -4285,7 +4285,7 @@ describe('HubRequestExecutor failover', () => {
     expect(Array.from(excluded)).toEqual([]);
   });
 
-  test('recoverable 502 excludes current provider immediately when alternative exists', () => {
+  test('recoverable 502 keeps current provider even when alternative exists', () => {
     const excluded = new Set<string>();
     const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
       providerKey: 'fetch.key1.primary',
@@ -4301,8 +4301,8 @@ describe('HubRequestExecutor failover', () => {
       excludedProviderKeys: excluded
     });
 
-    expect(plan.excludedCurrentProvider).toBe(true);
-    expect(Array.from(excluded)).toEqual(['fetch.key1.primary']);
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excluded)).toEqual([]);
   });
 
   test('recoverable 502 keeps current provider when no alternative exists', () => {

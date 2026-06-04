@@ -19,6 +19,7 @@ const PROVIDER_FAILURE_POLICY = 'src/providers/core/runtime/provider-failure-pol
 const PROVIDER_ERROR_REPORTER = 'src/providers/core/utils/provider-error-reporter.ts';
 const EXECUTOR_ERROR_REPORT = 'src/server/runtime/http-server/executor/request-executor-error-report.ts';
 const EXECUTOR_RETRY_DECISION = 'src/server/runtime/http-server/executor/request-executor-retry-decision.ts';
+const EXECUTOR_RETRY_EXECUTION_PLAN = 'src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts';
 const EXECUTOR_PROVIDER_FAILURE = 'src/server/runtime/http-server/executor/request-executor-provider-failure.ts';
 const REQUEST_EXECUTOR = 'src/server/runtime/http-server/request-executor.ts';
 const ERROR_CHAIN_DOCS = [
@@ -144,5 +145,13 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(reporter).toMatch(/explicit recoverable\/affectsHealth is required/);
     expect(reporter).not.toMatch(/recoverable\s*\?\?/);
     expect(reporter).not.toMatch(/affectsHealth\s*\?\?/);
+  });
+
+  it('executor retry path does not locally reroute recoverable failures away from the policy decision', () => {
+    const decision = readSrc(EXECUTOR_RETRY_DECISION);
+    const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
+    expect(decision).not.toMatch(/classification\s*===\s*['"]recoverable['"][\s\S]{0,240}hasAlternativeCandidate/);
+    expect(executionPlan).not.toMatch(/recoverableProviderReroute|terminalRecoverableReroute/);
+    expect(executionPlan).not.toMatch(/providerKey\.startsWith\(['"]windsurf\./);
   });
 });
