@@ -162,9 +162,7 @@ import {
 } from './executor/request-executor-provider-response.js';
 import { processProviderSendFailure } from './executor/request-executor-provider-send-failure.js';
 import {
-  isHealthNeutralProviderError,
   reportRequestExecutorProviderError,
-  resolveReportedProviderErrorRecoverable,
   resolveRequestExecutorProviderErrorClassification,
   resolveRequestExecutorProviderErrorReportPlan,
   shouldApplyProviderTransportBackoff
@@ -1508,7 +1506,6 @@ export const __requestExecutorTestables = {
   readString,
   extractRetryErrorSnapshot,
   truncateReason,
-  isHealthNeutralProviderError,
   isLastAvailableProvider429,
   shouldApplyProviderTransportBackoff,
   buildRecoverableErrorBackoffKey,

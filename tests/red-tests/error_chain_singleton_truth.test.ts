@@ -158,6 +158,18 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(classifier).not.toMatch(/recoverable:\s*rateLimitKind|recoverable:\s*isRateLimit|affectsHealth:\s*rateLimitKind|affectsHealth:\s*isRateLimit/);
   });
 
+  it('request-executor-provider-failure reports provider errors from a single policy outcome', () => {
+    const pf = readSrc(EXECUTOR_PROVIDER_FAILURE);
+    expect(pf).toMatch(/resolveProviderFailureOutcome/);
+    expect(pf).toMatch(/recoverable:\s*outcome\.recoverable/);
+    expect(pf).toMatch(/affectsHealth:\s*outcome\.affectsHealth/);
+    expect(pf).not.toMatch(/isProviderFailureHealthNeutral/);
+    expect(pf).not.toMatch(/function\s+isHealthNeutralProviderError/);
+    expect(pf).not.toMatch(/function\s+resolveReportedProviderErrorRecoverable/);
+    expect(pf).not.toMatch(/classification\s*===\s*['"]special_400['"][\s\S]{0,180}return\s+false/);
+    expect(pf).not.toMatch(/classification\s*===\s*['"]recoverable['"][\s\S]{0,180}return\s+true/);
+  });
+
   it('executor retry path does not locally reroute recoverable failures away from the policy decision', () => {
     const decision = readSrc(EXECUTOR_RETRY_DECISION);
     const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);

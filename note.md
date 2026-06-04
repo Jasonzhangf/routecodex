@@ -15307,3 +15307,9 @@ Task: investigate stopless stopping on schema missing and servertool log noise.
 - Code update: `provider-error-classifier` now exposes `classification` from `resolveProviderFailureOutcome`; `recoverable/affectsHealth` are returned directly from the policy outcome, not locally re-derived.
 - Red evidence: `error_chain_singleton_truth` now locks classifier to `outcome.classification/recoverable/affectsHealth` and rejects local policy-style derivation.
 - Green evidence: `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/provider-error-classifier.spec.ts tests/red-tests/error_chain_singleton_truth.test.ts --runInBand --forceExit` passed 21/21; `npx tsc --noEmit --pretty false` passed.
+
+## 2026-06-04 error policy center goal step9
+- Code update: `request-executor-provider-failure` now resolves one `ProviderFailureOutcome` and reports `recoverable/affectsHealth` directly from it; removed executor-local `isHealthNeutralProviderError` and `resolveReportedProviderErrorRecoverable` helpers/test export.
+- Red evidence: `error_chain_singleton_truth` locks executor reporting to `outcome.recoverable/outcome.affectsHealth` and forbids local classification branches for report fields.
+- Green evidence: `npm run jest:run -- --runTestsByPath tests/red-tests/error_chain_singleton_truth.test.ts tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts --runInBand --forceExit` passed 22/22; `npx tsc --noEmit --pretty false` passed.
+- Non-gate finding: full `tests/server/runtime/http-server/request-executor.error-reporting.spec.ts` still fails on existing response-processing/projection cases (`HTTP_502` remap, timeout, ERR_REQUIRE_ESM host contract paths); not used as this step's commit gate.

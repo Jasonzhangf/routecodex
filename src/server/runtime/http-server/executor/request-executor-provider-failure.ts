@@ -1,8 +1,8 @@
 import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import {
-  isProviderFailureHealthNeutral,
   normalizeProviderFailureCodeKey,
-  resolveProviderFailureClassification
+  resolveProviderFailureOutcome,
+  type ProviderFailureOutcome
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
   isSseDecodeRateLimitError,
@@ -64,7 +64,15 @@ export function resolveRequestExecutorProviderErrorClassification(args: {
   retryError: RetryErrorSnapshot;
   stage?: RequestExecutorProviderErrorStage;
 }): RequestExecutorProviderErrorClassification | undefined {
-  return resolveProviderFailureClassification({
+  return resolveRequestExecutorProviderFailureOutcome(args).classification;
+}
+
+export function resolveRequestExecutorProviderFailureOutcome(args: {
+  error: unknown;
+  retryError: RetryErrorSnapshot;
+  stage?: RequestExecutorProviderErrorStage;
+}): ProviderFailureOutcome {
+  return resolveProviderFailureOutcome({
     error: args.error,
     stage: args.stage,
     statusCode:
@@ -91,11 +99,11 @@ export function shouldApplyProviderTransportBackoff(args: {
   if (stage === 'provider.followup' || isHostRequestExecutorErrorStage(stage)) {
     return false;
   }
-  return resolveRequestExecutorProviderErrorClassification({
+  return resolveRequestExecutorProviderFailureOutcome({
     error: args.error,
     retryError: args.retryError,
     stage
-  }) === 'recoverable';
+  }).recoverable;
 }
 
 export function resolveRequestExecutorProviderErrorReportPlan(args: {
@@ -135,49 +143,6 @@ export function resolveRequestExecutorProviderErrorReportPlan(args: {
   };
 }
 
-export function isHealthNeutralProviderError(args: {
-  stage: RequestExecutorProviderErrorStage;
-  error?: unknown;
-  errorCode?: string;
-  upstreamCode?: string;
-  statusCode?: number;
-  classification?: RequestExecutorProviderErrorClassification;
-}): boolean {
-  return isProviderFailureHealthNeutral({
-    stage: args.stage,
-    error: args.error,
-    errorCode: args.errorCode,
-    upstreamCode: args.upstreamCode,
-    statusCode: args.statusCode,
-    classification: args.classification
-  });
-}
-
-export function resolveReportedProviderErrorRecoverable(args: {
-  stage: RequestExecutorProviderErrorStage;
-  error: unknown;
-  retryError: RetryErrorSnapshot;
-}): boolean {
-  if (args.stage === 'provider.followup') {
-    return false;
-  }
-  const classification = resolveRequestExecutorProviderErrorClassification({
-    error: args.error,
-    retryError: args.retryError,
-    stage: args.stage
-  });
-  if (classification === 'special_400') {
-    return false;
-  }
-  if (classification === 'unrecoverable') {
-    return false;
-  }
-  if (classification === 'recoverable') {
-    return true;
-  }
-  return false;
-}
-
 export async function reportRequestExecutorProviderError(
   args: ReportRequestExecutorProviderErrorArgs
 ): Promise<void> {
@@ -190,19 +155,12 @@ export async function reportRequestExecutorProviderError(
   const upstreamCode = reportPlan.upstreamCode;
   const statusCode = reportPlan.statusCode;
   const stage = reportPlan.stageHint;
-  const classification = resolveRequestExecutorProviderErrorClassification({
+  const outcome = resolveRequestExecutorProviderFailureOutcome({
     error: args.error,
     retryError: args.retryError,
     stage
   });
-  const affectsHealth = !isHealthNeutralProviderError({
-    stage,
-    error: args.error,
-    errorCode,
-    upstreamCode,
-    statusCode,
-    classification
-  });
+  const classification = outcome.classification;
   if (isHostRequestExecutorErrorStage(stage)) {
     args.logStage('host.contract_failure.classified', args.requestId, {
       providerKey: args.providerKey,
@@ -243,12 +201,8 @@ export async function reportRequestExecutorProviderError(
       },
       dependencies: args.dependencies as ModuleDependencies,
       statusCode,
-      recoverable: resolveReportedProviderErrorRecoverable({
-        stage,
-        error: args.error,
-        retryError: args.retryError
-      }),
-      affectsHealth,
+      recoverable: outcome.recoverable,
+      affectsHealth: outcome.affectsHealth,
       details: {
         source: stage,
         ...(classification ? { errorClassification: classification } : {}),

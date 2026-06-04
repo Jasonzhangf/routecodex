@@ -5,7 +5,10 @@
  */
 
 import { isProviderFailureNetworkTransportLike } from '../../../../../src/providers/core/runtime/provider-failure-policy.js';
-import { resolveRequestExecutorProviderErrorClassification } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure.js';
+import {
+  resolveRequestExecutorProviderErrorClassification,
+  resolveRequestExecutorProviderFailureOutcome
+} from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure.js';
 import { buildProviderRetrySwitchPlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-decision.js';
 
 describe('Error chain singleton — runtime binding', () => {
@@ -33,6 +36,28 @@ describe('Error chain singleton — runtime binding', () => {
     });
     // 503 / ECONNREFUSED is recoverable; executor must surface that via policy
     expect(result === 'recoverable' || result === undefined).toBe(true);
+  });
+
+  it('resolveRequestExecutorProviderFailureOutcome exposes policy recoverable and affectsHealth fields', () => {
+    expect(resolveRequestExecutorProviderFailureOutcome({
+      error: Object.assign(new Error('HTTP 502: temporary'), { code: 'HTTP_502', statusCode: 502 }),
+      retryError: { statusCode: 502, errorCode: 'HTTP_502', upstreamCode: undefined, reason: 'HTTP 502: temporary' },
+      stage: 'provider.send'
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      recoverable: true,
+      affectsHealth: true
+    }));
+
+    expect(resolveRequestExecutorProviderFailureOutcome({
+      error: Object.assign(new Error('followup failed'), { code: 'SERVERTOOL_FOLLOWUP_FAILED', statusCode: 502 }),
+      retryError: { statusCode: 502, errorCode: 'SERVERTOOL_FOLLOWUP_FAILED', upstreamCode: undefined, reason: 'followup failed' },
+      stage: 'provider.followup'
+    })).toEqual(expect.objectContaining({
+      classification: undefined,
+      recoverable: false,
+      affectsHealth: false
+    }));
   });
 
   it('buildProviderRetrySwitchPlan uses policy-driven network-transport signal', () => {
