@@ -105,6 +105,57 @@ describe('provider response Rust native plan', () => {
     expect(recordResponsesResponseMock).not.toHaveBeenCalled();
   });
 
+  it('projects servertool followup chatprocess result back to Responses client shape', async () => {
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_stopless_followup_projection',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'anthropic-messages',
+      sessionId: 'provider-response-stopless-followup-projection',
+      __rt: {
+        stopMessageEnabled: true,
+        routecodexPortStopMessageEnabled: true
+      },
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'continue' }]
+      }
+    };
+    const reenterPipeline = jest.fn(async () => ({
+      body: {
+        id: 'chatcmpl_stopless_followup_projection',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'continued' },
+          finish_reason: 'stop'
+        }]
+      }
+    }));
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'anthropic-messages',
+      providerResponse: {
+        id: 'msg_stopless_followup_projection',
+        type: 'message',
+        role: 'assistant',
+        model: 'MiniMax-M3',
+        content: [{ type: 'text', text: 'I stopped without schema.' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 }
+      },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: false,
+      reenterPipeline: reenterPipeline as any
+    });
+
+    expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    expect(result.body?.object).toBe('response');
+    expect(result.body?.output).toEqual(expect.any(Array));
+    expect(JSON.stringify(result.body)).toContain('continued');
+  });
+
 
   it('uses Rust streamPipe effect plan for streaming response path', async () => {
     const recorder = new StubStageRecorder();

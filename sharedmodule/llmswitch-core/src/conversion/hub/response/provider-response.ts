@@ -20,6 +20,7 @@ import {
   type ProviderProtocol
 } from './provider-response-helpers.js';
 import { runServertoolResponseStageOrchestrationShell } from '../../../servertool/response-stage-orchestration-shell.js';
+import { buildResponsesPayloadFromChatWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 
 type HubStageTopEntry = {
   stage: string;
@@ -236,6 +237,21 @@ function readServertoolRuntimeActionChatPayload(effect: Record<string, unknown>)
   return payload as JsonObject;
 }
 
+function projectServertoolChatprocessPayloadToClient(args: {
+  payload: JsonObject;
+  entryEndpoint: string;
+  requestId: string;
+  context: AdapterContext;
+}): JsonObject {
+  if (!String(args.entryEndpoint || '').toLowerCase().includes('/v1/responses')) {
+    return args.payload;
+  }
+  return buildResponsesPayloadFromChatWithNative(args.payload, {
+    requestId: args.requestId,
+    responseSemantics: args.context as Record<string, unknown>
+  }) as JsonObject;
+}
+
 async function executeProviderResponseNativeServertoolEffects(args: {
   effectPlan: { effects: Array<Record<string, unknown>> };
   payload: JsonObject;
@@ -274,7 +290,12 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         clientInjectDispatch: args.clientInjectDispatch as any
       });
       if (orchestration.executed) {
-        payload = orchestration.payload;
+        payload = projectServertoolChatprocessPayloadToClient({
+          payload: orchestration.payload,
+          entryEndpoint: args.entryEndpoint,
+          requestId: args.requestId,
+          context: args.context
+        });
       }
       continue;
     }
@@ -301,7 +322,12 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         clientInjectDispatch: args.clientInjectDispatch as any
       });
       if (orchestration.executed) {
-        payload = orchestration.payload;
+        payload = projectServertoolChatprocessPayloadToClient({
+          payload: orchestration.payload,
+          entryEndpoint: args.entryEndpoint,
+          requestId: args.requestId,
+          context: args.context
+        });
       }
       continue;
     }
