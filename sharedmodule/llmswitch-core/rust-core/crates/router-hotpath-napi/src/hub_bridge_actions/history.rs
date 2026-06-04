@@ -822,6 +822,9 @@ pub(crate) fn filter_bridge_input_for_upstream(
         if item_type == "reasoning" {
             continue;
         }
+        if item_type == "function_call" || item_type == "function_call_output" {
+            row.remove("content");
+        }
         if !allow_tool_call_id {
             row.remove("tool_call_id");
         }

@@ -863,6 +863,35 @@ fn filters_bridge_input_for_upstream_strips_tool_call_id_and_clamps_id() {
 }
 
 #[test]
+fn filters_bridge_input_for_upstream_removes_content_from_responses_tool_items() {
+    let output = filter_bridge_input_for_upstream(FilterBridgeInputForUpstreamInput {
+        input: vec![
+            json!({
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{}",
+                "content": [{ "type": "output_text", "text": "historical leak" }]
+            }),
+            json!({
+                "type": "function_call_output",
+                "id": "out_1",
+                "call_id": "call_1",
+                "output": "ok",
+                "content": [{ "type": "output_text", "text": "historical leak" }]
+            }),
+        ],
+        allow_tool_call_id: Some(false),
+    });
+
+    assert_eq!(output.input.len(), 2);
+    assert!(output.input[0].get("content").is_none());
+    assert!(output.input[1].get("content").is_none());
+    assert_eq!(output.input[1]["output"], "ok");
+}
+
+#[test]
 fn reasoning_prepare_responses_request_envelope_combines_segments_before_instruction() {
     let output = prepare_responses_request_envelope(PrepareResponsesRequestEnvelopeInput {
         request: json!({}),

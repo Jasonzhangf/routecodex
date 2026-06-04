@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   applyMinimalDirectOverrides,
+  assertDirectPayloadContract,
   resolveRawPayloadForDirect,
 } from '../../../../src/server/runtime/http-server/direct-passthrough-payload.js';
 
@@ -50,7 +51,7 @@ describe('direct-passthrough-payload', () => {
     ).toThrow(/metadata is not allowed in direct passthrough provider body/);
   });
 
-  it('uses providerPayload as router-direct outbound truth when provided', () => {
+  it('only applies explicit direct routeParams model override', () => {
     const result = applyMinimalDirectOverrides(
       {
         model: 'gpt-5.4',
@@ -58,17 +59,10 @@ describe('direct-passthrough-payload', () => {
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
       },
       {
-        providerPayload: {
-          model: 'dbittai-gpt.key1.gpt-5.3-codex',
-          thinking: { type: 'enabled', budget_tokens: 2048 },
-          reasoning_effort: 'low',
-          instructions: 'must-not-copy',
-          tools: [{ name: 'must-not-copy' }],
-        },
         routeParams: {
+          model: 'dbittai-gpt.key1.gpt-5.3-codex',
           thinking: { type: 'enabled', budget_tokens: 1024 },
-          reasoningEffort: 'medium',
-          foo: 'must-not-copy',
+          instructions: 'must-not-copy',
         },
       },
     );
@@ -77,11 +71,40 @@ describe('direct-passthrough-payload', () => {
       model: 'dbittai-gpt.key1.gpt-5.3-codex',
       previous_response_id: 'resp_prev',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
-      thinking: { type: 'enabled', budget_tokens: 2048 },
     });
-    expect((result as Record<string, unknown>).foo).toBeUndefined();
     expect((result as Record<string, unknown>).instructions).toBeUndefined();
-    expect((result as Record<string, unknown>).tools).toBeUndefined();
-    expect((result as Record<string, unknown>).reasoning_effort).toBeUndefined();
+    expect((result as Record<string, unknown>).thinking).toBeUndefined();
+  });
+
+  it('rejects historical chat-style function tools on responses direct', () => {
+    expect(() => assertDirectPayloadContract({
+      inboundProtocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.5',
+        input: 'hello',
+        tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
+      },
+    })).toThrow(/missing name/);
+  });
+
+  it('rejects historical chat-style messages on responses direct', () => {
+    expect(() => assertDirectPayloadContract({
+      inboundProtocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.5',
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    })).toThrow(/chat-style messages/);
+  });
+
+  it('allows responses-native hosted tools without name', () => {
+    expect(() => assertDirectPayloadContract({
+      inboundProtocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.5',
+        input: 'hello',
+        tools: [{ type: 'web_search_preview' }],
+      },
+    })).not.toThrow();
   });
 });

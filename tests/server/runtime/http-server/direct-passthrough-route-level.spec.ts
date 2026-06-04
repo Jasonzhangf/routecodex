@@ -244,7 +244,7 @@ describe('direct passthrough route-level', () => {
     expect((sentPayload as Record<string, unknown>).instructions).toBeUndefined();
   });
 
-  it('router same-protocol direct keeps ingress payload transparent and preserves previous_response_id for responses providers', async () => {
+  it('router same-protocol direct does not enter HubPipeline and keeps ingress payload transparent', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -278,24 +278,21 @@ describe('direct passthrough route-level', () => {
       },
     };
 
+    const routerRoute = jest.fn(() => ({
+      target: {
+        providerKey: 'dbittai-gpt.key1.gpt-5.3-codex',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: providerHandle.runtimeKey,
+        modelId: 'gpt-5.3-codex',
+      },
+      decision: { routeName: 'default', pool: ['dbittai-gpt.key1.gpt-5.3-codex'] },
+      diagnostics: {},
+    }));
     (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
     (server as any).hubPipeline = {
-      execute: jest.fn(async () => ({
-        providerPayload: {
-          model: 'gpt-5.3-codex',
-          reasoning: { effort: 'high' },
-          instructions: 'must-not-copy',
-        },
-        target: {
-          providerKey: 'dbittai-gpt.key1.gpt-5.3-codex',
-          providerType: 'responses',
-          outboundProfile: 'openai-responses',
-          runtimeKey: providerHandle.runtimeKey,
-          processMode: 'chat',
-        },
-        routingDecision: { routeName: 'default', pool: ['dbittai-gpt.key1.gpt-5.3-codex'] },
-        metadata: { processMode: 'chat' },
-      })),
+      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
+      getVirtualRouter: jest.fn(() => ({ route: routerRoute })),
     };
     (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
       ['default', (server as any).hubPipeline]
@@ -332,12 +329,86 @@ describe('direct passthrough route-level', () => {
 
     expect(directResult.used).toBe(true);
     expect(sentPayload).toEqual({
-      model: 'gpt-5.3-codex',
+      model: 'raw-model',
       previous_response_id: 'resp_prev_router',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
-      reasoning: { effort: 'high' },
     });
+    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(routerRoute).toHaveBeenCalledTimes(1);
     expect((sentPayload as Record<string, unknown>).instructions).toBeUndefined();
+  });
+
+  it('router same-protocol direct skips to relay when ingress tools are not provider-wire-valid', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const directSend = jest.fn(async () => ({ status: 200, body: { ok: true } }));
+    const providerHandle = {
+      runtimeKey: 'asxs.crsa.gpt-5.5',
+      providerId: 'asxs',
+      providerType: 'responses',
+      providerFamily: 'responses',
+      providerProtocol: 'openai-responses',
+      runtime: {},
+      instance: {
+        initialize: async () => {},
+        cleanup: async () => {},
+        processIncoming: directSend,
+        processIncomingDirect: directSend,
+      },
+    };
+    (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
+      getVirtualRouter: jest.fn(() => ({
+        route: jest.fn(() => ({
+          target: {
+            providerKey: 'asxs.crsa.gpt-5.5',
+            providerType: 'responses',
+            outboundProfile: 'openai-responses',
+            runtimeKey: providerHandle.runtimeKey,
+            modelId: 'gpt-5.5',
+          },
+          decision: { routeName: 'thinking', pool: ['asxs.crsa.gpt-5.5'] },
+          diagnostics: {},
+        })),
+      })),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([['default', (server as any).hubPipeline]]);
+
+    const result = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5520,
+        host: '0.0.0.0',
+        mode: 'router',
+        routingPolicyGroup: 'default',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_bad_tool',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'gpt-5.5',
+          input: 'hello',
+          tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
+        },
+        metadata: {},
+      },
+    );
+    expect(result).toEqual({ used: false, reason: 'direct_payload_not_provider_wire' });
+    expect(directSend).not.toHaveBeenCalled();
+    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
   });
 
   it('router same-protocol direct is skipped when apply_patch servertool mode is enabled', async () => {
@@ -665,24 +736,23 @@ describe('direct passthrough route-level', () => {
       },
     };
     (server as any).hubPipeline = {
-      execute: jest.fn(async () => ({
-        providerPayload: { model: 'gpt-test' },
+      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
+      getVirtualRouter: jest.fn(() => ({ route: jest.fn(() => ({
         target: {
           providerKey,
           providerType: 'openai',
           outboundProfile: 'openai-responses',
           runtimeKey,
-          processMode: 'chat',
+          modelId: 'gpt-test',
         },
-        routingDecision: {
+        decision: {
           routeName: 'thinking',
           pool: [providerKey],
           poolId: 'gateway-priority-5555-thinking',
           reasoning: 'thinking:user-input',
         },
-        processMode: 'chat',
-        metadata: {},
-      })),
+        diagnostics: {},
+      })) })),
       updateVirtualRouterConfig: jest.fn(),
     };
     (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
@@ -730,8 +800,7 @@ describe('direct passthrough route-level', () => {
       expect(response.status).toBe(200);
       expect(body).toEqual(expect.objectContaining({ id: 'resp_direct_log_blackbox' }));
       expect(directSend).toHaveBeenCalledTimes(1);
-      expect(logs.some((line) => line.includes('[router-direct.send]'))).toBe(true);
-      expect(logs.some((line) => line.includes('completed'))).toBe(true);
+      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
     } finally {
       console.log = originalLog;
       console.info = originalInfo;
@@ -779,19 +848,18 @@ describe('direct passthrough route-level', () => {
       },
     };
     (server as any).hubPipeline = {
-      execute: jest.fn(async () => ({
-        providerPayload: { model: 'gpt-5.5' },
+      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
+      getVirtualRouter: jest.fn(() => ({ route: jest.fn(() => ({
         target: {
           providerKey,
           providerType: 'openai',
           outboundProfile: 'openai-responses',
           runtimeKey,
-          processMode: 'chat',
+          modelId: 'gpt-5.5',
         },
-        routingDecision: { routeName: 'coding', pool: [providerKey], reason: 'coding:user-input' },
-        processMode: 'chat',
-        metadata: {},
-      })),
+        decision: { routeName: 'coding', pool: [providerKey], reason: 'coding:user-input' },
+        diagnostics: {},
+      })) })),
       updateVirtualRouterConfig: jest.fn(),
     };
     (server as any).hubPipelinesByRoutingPolicyGroup = new Map([

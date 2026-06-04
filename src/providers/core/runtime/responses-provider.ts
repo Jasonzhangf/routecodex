@@ -178,6 +178,12 @@ export class ResponsesProvider extends HttpTransportProvider {
 
   async processIncomingDirect(request: UnknownObject): Promise<UnknownObject> {
     const directRequest = { ...(request as Record<string, unknown>) };
+    if (Array.isArray(directRequest.messages)) {
+      throw new Error(
+        'provider-runtime-error: responses provider received chat-style "messages". ' +
+        'This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions).'
+      );
+    }
     const endpoint = this.getEffectiveEndpoint();
     const baseHeaders = await this.buildRequestHeaders();
     const headers = await this.finalizeRequestHeaders(baseHeaders, directRequest);
@@ -187,6 +193,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     const builtBody = this.buildPassthroughResponsesBody(directRequest);
     const finalBody = await this.sanitizeResponsesProviderOutboundBody(builtBody, context);
     this.applyDirectProviderOverrides(finalBody, directRequest);
+    this.assertResponsesWireShape(finalBody);
     const explicitStream = extractStreamFlagFromBody(finalBody);
 
     await this.snapshotPhase('provider-request', context, finalBody, headers, targetUrl, entryEndpoint);
@@ -350,6 +357,39 @@ export class ResponsesProvider extends HttpTransportProvider {
       typeof (body as any).instructions === 'string' && String((body as any).instructions).trim().length > 0;
     if (!hasInput && !hasInstructions) {
       throw new Error('provider-runtime-error: responses payload missing "input" or "instructions"');
+    }
+    if (Array.isArray(body.tools)) {
+      body.tools.forEach((tool, index) => {
+        if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+          throw new Error(`provider-runtime-error: responses payload tools[${index}] must be an object`);
+        }
+        const toolRecord = tool as Record<string, unknown>;
+        const type = typeof toolRecord.type === 'string' ? toolRecord.type.trim() : '';
+        if (type === 'function') {
+          const name = typeof toolRecord.name === 'string' ? toolRecord.name.trim() : '';
+          if (!name) {
+            throw new Error(
+              `provider-runtime-error: responses payload tools[${index}] is chat-style function tool; ` +
+              'Responses wire requires top-level tool.name'
+            );
+          }
+        }
+      });
+    }
+    if (Array.isArray(body.input)) {
+      body.input.forEach((item, index) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          return;
+        }
+        const itemRecord = item as Record<string, unknown>;
+        const type = typeof itemRecord.type === 'string' ? itemRecord.type.trim() : '';
+        if ((type === 'function_call' || type === 'function_call_output') && 'content' in itemRecord) {
+          throw new Error(
+            `provider-runtime-error: responses payload input[${index}] ${type} must not carry content; ` +
+            'tool call data belongs in arguments/output fields'
+          );
+        }
+      });
     }
   }
 

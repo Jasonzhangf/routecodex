@@ -87,9 +87,8 @@ describe('router-direct-pipeline', () => {
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'gpt-4', messages: [{ role: 'user', content: 'hello' }], reasoning: { effort: 'medium' } },
         requestPayload: { model: 'gpt-4o', messages: [{ role: 'user', content: 'raw' }] },
-        target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey, processMode: 'chat' },
+        target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey },
         routingDecision: { routeName: 'default', pool: ['openai.gpt-4'] },
-        processMode: 'chat',
         requestInfo: { path: '/v1/chat/completions', headers: {} },
         resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
       };
@@ -123,10 +122,8 @@ describe('router-direct-pipeline', () => {
           providerKey: 'opencode-zen-free.key1.deepseek-v4-flash-free',
           providerType: 'openai',
           runtimeKey: openaiHandle.runtimeKey,
-          processMode: 'chat',
         },
         routingDecision: { routeName: 'thinking', pool: ['opencode-zen-free.key1.deepseek-v4-flash-free'] },
-        processMode: 'chat',
         requestInfo: { path: '/v1/chat/completions', headers: {} },
         resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
       };
@@ -178,9 +175,8 @@ describe('router-direct-pipeline', () => {
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'gpt-4o', messages: [{ role: 'user', content: 'edit a file' }] },
         requestPayload,
-        target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey, processMode: 'chat' },
+        target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey },
         routingDecision: { routeName: 'default', pool: ['openai.gpt-4'] },
-        processMode: 'chat',
         requestInfo: { path: '/v1/chat/completions', headers: {} },
         resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
       };
@@ -203,9 +199,8 @@ describe('router-direct-pipeline', () => {
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'claude-3', messages: [{ role: 'user', content: 'hello' }] },
         requestPayload: { model: 'claude-3', messages: [{ role: 'user', content: 'raw' }] },
-        target: { providerKey: 'anthropic.claude-3', providerType: 'anthropic', runtimeKey: anthropicHandle.runtimeKey, processMode: 'chat' },
+        target: { providerKey: 'anthropic.claude-3', providerType: 'anthropic', runtimeKey: anthropicHandle.runtimeKey },
         routingDecision: { routeName: 'default' },
-        processMode: 'chat',
         requestInfo: { path: '/v1/chat/completions', headers: {} },
         resolveProviderByRuntimeKey: (rt?: string) => rt === anthropicHandle.runtimeKey ? anthropicHandle : undefined,
       };
@@ -220,9 +215,8 @@ describe('router-direct-pipeline', () => {
         portConfig: createRouterPortConfig('relay'),
         providerPayload: { model: 'gpt-4', messages: [{ role: 'user', content: 'hello' }] },
         requestPayload: { model: 'gpt-4', messages: [{ role: 'user', content: 'raw' }] },
-        target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey, processMode: 'chat' },
+        target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey },
         routingDecision: { routeName: 'default' },
-        processMode: 'chat',
         requestInfo: { path: '/v1/chat/completions', headers: {} },
         resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
       };
@@ -242,7 +236,6 @@ describe('router-direct-pipeline', () => {
         requestPayload: { model: 'gpt-4' },
         target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey },
         routingDecision: {},
-        processMode: 'chat',
         requestInfo: { path: '/v1/chat/completions', headers: {} },
         resolveProviderByRuntimeKey: () => openaiHandle,
       };
@@ -260,7 +253,6 @@ describe('router-direct-pipeline', () => {
         requestPayload: { model: 'gpt-4', messages: [{ role: 'user', content: 'raw' }] },
         target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey },
         routingDecision: {},
-        processMode: 'chat',
         requestInfo: { path: '/v1/chat/completions', headers: {} },
         resolveProviderByRuntimeKey: () => openaiHandle,
         onSnapshotBefore: (p: any, ctx: any) => beforeSnapshots.push({ payload: p, ctx }),
@@ -290,7 +282,6 @@ describe('router-direct-pipeline', () => {
         requestId: 'req-router-direct-502',
         target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: handle.runtimeKey },
         routingDecision: { routeName: 'thinking', pool: ['openai.gpt-4', 'backup.gpt-4'] },
-        processMode: 'chat',
         requestInfo: { path: '/v1/chat/completions', headers: {} },
         resolveProviderByRuntimeKey: () => handle,
         onProviderError,
@@ -300,15 +291,7 @@ describe('router-direct-pipeline', () => {
 
       expect(onProviderError).toHaveBeenCalledTimes(1);
       const [source, ctx] = onProviderError.mock.calls[0] as any[];
-      expect(source.error).toBe(error);
-      expect(source.stage).toBe('provider.send');
-      expect(source.statusCode).toBe(502);
-      expect(source.recoverable).toBe(true);
-      expect(source.affectsHealth).toBe(true);
-      expect(source.runtime.requestId).toBe('req-router-direct-502');
-      expect(source.runtime.providerKey).toBe('openai.gpt-4');
-      expect(source.details.errorClassification).toBe('recoverable');
-      expect(source.details.routePoolSize).toBe(2);
+      expect(source).toBe(error);
       expect(ctx.providerKey).toBe('openai.gpt-4');
       expect(handle.instance.processIncomingDirect).toHaveBeenCalledWith(requestPayload);
     });
@@ -328,7 +311,6 @@ describe('router-direct-pipeline', () => {
         requestPayload,
         target: { providerKey: 'tab.gpt-5', providerType: 'responses', runtimeKey: handle.runtimeKey },
         routingDecision: { routeName: 'default' },
-        processMode: 'chat',
         requestInfo: { path: '/v1/responses', headers: {} },
         resolveProviderByRuntimeKey: () => handle,
       };
@@ -346,7 +328,6 @@ describe('router-direct-pipeline', () => {
         requestPayload: { model: 'gpt-5.4' },
         target: { providerKey: 'tab.gpt-5', providerType: 'responses', runtimeKey: handle.runtimeKey },
         routingDecision: {},
-        processMode: 'chat',
         requestInfo: { path: '/v1/chat/completions', headers: {} },
         resolveProviderByRuntimeKey: () => handle,
       };
@@ -367,7 +348,6 @@ describe('router-direct-pipeline', () => {
         requestPayload: { model: 'gpt-5.4-medium', input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }] },
         target: { providerKey: 'windsurf.ws-pro-4.gpt-5.4-medium', providerType: 'openai', runtimeKey: handle.runtimeKey },
         routingDecision: { routeName: 'thinking' },
-        processMode: 'standard',
         requestInfo: { path: '/v1/responses', headers: {} },
         resolveProviderByRuntimeKey: () => handle,
       };

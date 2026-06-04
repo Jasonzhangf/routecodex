@@ -7,7 +7,7 @@
  * to the provider.
  *
  * Design intent: transparent passthrough + audit trail.
- * - The payload from Hub Pipeline is passed through without transformation.
+ * - The entry payload is passed through without transformation.
  * - All observable fields are recorded in appliedOverrides for snapshot/log traceability.
  * - Response is passed through without outbound rewriting.
  * - Fail-fast: no fallback, no silent compensation.
@@ -30,7 +30,6 @@ export interface RouterDirectAuditContext {
   inboundProtocol: ProviderProtocol;
   providerProtocol: ProviderProtocol;
   routingDecision?: { routeName?: string; pool?: string[] };
-  processMode?: string;
 }
 
 export interface RouterDirectInput {
@@ -41,10 +40,8 @@ export interface RouterDirectInput {
     providerKey: string;
     providerType: string;
     runtimeKey?: string;
-    processMode?: string;
   };
   routingDecision?: { routeName?: string; pool?: string[] };
-  processMode: string;
   requestId?: string;
   requestInfo: { path?: string; headers?: Record<string, string | string[] | undefined> };
   resolveProviderByRuntimeKey: (runtimeKey?: string) => ProviderHandle | undefined;
@@ -128,7 +125,6 @@ export async function executeRouterDirectPipeline(
     inboundProtocol,
     providerProtocol,
     routingDecision: input.routingDecision,
-    processMode: input.processMode,
   };
 
   const payloadToSend = recordPayloadAudit(

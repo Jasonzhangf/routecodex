@@ -201,6 +201,100 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(captured.metadata).toBeUndefined();
   });
 
+  test('ResponsesProvider direct passthrough rejects chat-shaped payload before transport', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-chat-shape-reject',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      post: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); },
+      postStream: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); }
+    };
+
+    await expect(provider.processIncomingDirect({
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ type: 'function', function: { name: 'exec_command' } }],
+      stream: false
+    })).rejects.toThrow(/chat-style "messages"/);
+  });
+
+  test('ResponsesProvider direct passthrough rejects chat-style response tools before transport', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-chat-tools-reject',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      post: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); },
+      postStream: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); }
+    };
+
+    await expect(provider.processIncomingDirect({
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      tools: [{ type: 'function', function: { name: 'exec_command' } }],
+      stream: false
+    })).rejects.toThrow(/chat-style function tool/);
+  });
+
+  test('ResponsesProvider rejects historical tool input content before transport', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-historical-tool-content-reject',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      post: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); },
+      postStream: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); }
+    };
+
+    await expect(provider.processIncomingDirect({
+      model: 'gpt-5.5',
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
+        {
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: 'ok',
+          content: [{ type: 'output_text', text: 'historical leak' }]
+        }
+      ],
+      stream: false
+    })).rejects.toThrow(/function_call_output must not carry content/);
+  });
+
   test('ResponsesProvider honors explicit stream=false even when provider streaming preference is always', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-stream-false',
@@ -304,7 +398,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     const body = provider.buildHttpRequestBody({
       data: { model: 'coder-model', uq: 'routecodex', page: 1, rows: 5 }
     });
-    expect(body).toEqual({ model: 'coder-model', uq: 'routecodex', page: 1, rows: 5 });
+    expect(body).toEqual({ model: 'coder-model', uq: 'routecodex', page: 1, rows: 5, max_tokens: 8192 });
 
     provider.lastRuntimeMetadata = {
       qwenWebSearch: true,

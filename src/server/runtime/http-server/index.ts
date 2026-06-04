@@ -56,7 +56,9 @@ import {
   type RouterDirectResult,
 } from './router-direct-pipeline.js';
 import {
+  assertDirectPayloadContract,
   applyMinimalDirectOverrides,
+  checkDirectPayloadContract,
   resolveRawPayloadForDirect,
 } from './direct-passthrough-payload.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
@@ -1211,19 +1213,20 @@ export class RouteCodexHttpServer {
 
 
   /**
-   * Router-Direct Pipeline: runs Hub Pipeline routing, then checks same-protocol
-   * direct eligibility. If the inbound and provider protocols match, bypasses the
-   * full executor pipeline and sends directly via provider.processIncoming.
+   * Router-Direct Pipeline: asks the Virtual Router for target selection, then
+   * checks same-protocol direct eligibility. It must not enter Hub Pipeline
+   * request/response conversion; non provider-wire payloads are direct misses.
    */
   private async executeRouterDirectPipelineForPort(
     portConfig: PortConfig,
     input: PipelineExecutionInput,
     directAttempt = 1,
   ): Promise<RouterDirectOutcome> {
-    const hubPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
-    if (!hubPipeline) {
-      this.logStage('router-direct.skipped', input.requestId, { reason: 'hub-pipeline-not-ready' });
-      return { used: false, reason: 'hub-pipeline-not-ready' };
+    const routingPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
+    const routerEngine = routingPipeline?.getVirtualRouter?.();
+    if (!routerEngine || typeof routerEngine.route !== 'function') {
+      this.logStage('router-direct.skipped', input.requestId, { reason: 'virtual-router-not-ready' });
+      return { used: false, reason: 'virtual-router-not-ready' };
     }
 
     const allowedProviders =
@@ -1250,10 +1253,27 @@ export class RouteCodexHttpServer {
       };
     }
 
-    // Run Hub Pipeline to get routing decision (preserves routing truth source)
-    let pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>;
+    const rawDirectPayload = resolveRawPayloadForDirect(input.body, input.metadata);
+    const inboundProtocol = detectInboundProtocolFromRequest({
+      path: input.entryEndpoint,
+      headers: input.headers as Record<string, string | string[] | undefined>,
+    });
+    const directPayloadContract = checkDirectPayloadContract({ payload: rawDirectPayload, inboundProtocol });
+    if (!directPayloadContract.ok) {
+      this.logStage('router-direct.skipped', input.requestId, {
+        reason: 'direct_payload_not_provider_wire',
+        detail: directPayloadContract.reason,
+      });
+      return { used: false, reason: 'direct_payload_not_provider_wire' };
+    }
+
+    let routeResult: {
+      target?: Record<string, unknown>;
+      decision?: Record<string, unknown>;
+      diagnostics?: Record<string, unknown>;
+    };
     try {
-      pipelineResult = await runHubPipeline(hubPipeline, input, metadataForHub);
+      routeResult = routerEngine.route(rawDirectPayload as never, metadataForHub as never) as typeof routeResult;
     } catch (error) {
       if (isPoolExhaustedPipelineError(error)) {
         this.logStage('router-direct.pool_exhausted', input.requestId, {
@@ -1269,7 +1289,7 @@ export class RouteCodexHttpServer {
             : undefined,
         });
       }
-      this.logStage('router-direct.hub_pipeline_failed', input.requestId, {
+      this.logStage('router-direct.route_failed', input.requestId, {
         error: error instanceof Error ? error.message : String(error),
       });
       await clearResponsesConversationByRequestId(input.requestId).catch(() => {
@@ -1278,20 +1298,26 @@ export class RouteCodexHttpServer {
       throw error;
     }
 
-    const { target, providerPayload, routingDecision, processMode } = pipelineResult;
+    const target = routeResult.target;
+    const routingDecision = routeResult.decision;
+    const providerPayload = {
+      ...(typeof target?.modelId === 'string' && target.modelId.trim() ? { model: target.modelId.trim() } : {}),
+    } as Record<string, unknown>;
 
-    if (!target || !target.providerKey) {
+    if (!target || typeof target.providerKey !== 'string' || !target.providerKey.trim()) {
       this.logStage('router-direct.skipped', input.requestId, { reason: 'no-target-from-router' });
       return { used: false, reason: 'no-target-from-router' };
     }
+    const providerKey = target.providerKey.trim();
+    const runtimeKey = typeof target.runtimeKey === 'string' && target.runtimeKey.trim() ? target.runtimeKey.trim() : providerKey;
+    const providerType = typeof target.providerType === 'string' ? target.providerType : '';
 
     const requestPayload = applyMinimalDirectOverrides(
-      resolveRawPayloadForDirect(input.body, input.metadata),
+      rawDirectPayload,
       {
-        providerPayload,
         routeParams:
-          input.metadata?.routeParams && typeof input.metadata.routeParams === 'object' && !Array.isArray(input.metadata.routeParams)
-            ? (input.metadata.routeParams as Record<string, unknown>)
+          target.routeParams && typeof target.routeParams === 'object' && !Array.isArray(target.routeParams)
+            ? (target.routeParams as Record<string, unknown>)
             : undefined,
       },
     );
@@ -1305,13 +1331,11 @@ export class RouteCodexHttpServer {
       requestPayload,
       requestId: input.requestId,
       target: {
-        providerKey: target.providerKey,
-        providerType: target.providerType,
-        runtimeKey: target.runtimeKey,
-        processMode: target.processMode,
+        providerKey,
+        providerType,
+        runtimeKey,
       },
-      routingDecision,
-      processMode,
+      routingDecision: routingDecision as { routeName?: string; pool?: string[] } | undefined,
       requestInfo: {
         path: input.entryEndpoint,
         headers: input.headers as Record<string, string | string[] | undefined>,
@@ -1337,7 +1361,7 @@ export class RouteCodexHttpServer {
         const responseRecord =
           response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
         const handle = this.resolveProviderHandleForBinding(ctx.providerKey, metadataForHub)
-          ?? this.resolveProviderHandleForBinding(target.runtimeKey ?? target.providerKey, metadataForHub);
+          ?? this.resolveProviderHandleForBinding(runtimeKey, metadataForHub);
         if (handle) {
           const normalized = normalizeProviderResponse(response);
           const usage = extractUsageFromResult(normalized, {
@@ -1383,15 +1407,14 @@ export class RouteCodexHttpServer {
           retryError,
           requestId: input.requestId,
           providerKey: ctx.providerKey,
-          providerType: target.providerType,
+          providerType,
           providerProtocol: ctx.providerProtocol,
           routeName: ctx.routingDecision?.routeName,
-          runtimeKey: target.runtimeKey ?? target.providerKey,
+          runtimeKey,
           target: {
-            providerKey: target.providerKey,
-            providerType: target.providerType,
-            runtimeKey: target.runtimeKey,
-            processMode: target.processMode,
+            providerKey,
+            providerType,
+            runtimeKey,
           },
           dependencies: this.getModuleDependencies(),
           attempt: directAttempt,
@@ -1453,7 +1476,7 @@ export class RouteCodexHttpServer {
         preselectedRoute: {
           target,
           decision: routingDecision,
-          diagnostics: pipelineResult.routingDiagnostics,
+          diagnostics: routeResult.diagnostics,
         },
       };
     }
@@ -1465,17 +1488,7 @@ export class RouteCodexHttpServer {
       auditContext: directOutcome.auditContext,
       capturedUsage,
       providerPayload,
-      standardizedRequest: pipelineResult.standardizedRequest,
-      processedRequest: pipelineResult.processedRequest,
-      requestSemantics: pipelineResult.processedRequest?.semantics && typeof pipelineResult.processedRequest.semantics === 'object' && !Array.isArray(pipelineResult.processedRequest.semantics)
-        ? (pipelineResult.processedRequest.semantics as Record<string, unknown>)
-        : pipelineResult.standardizedRequest?.semantics && typeof pipelineResult.standardizedRequest.semantics === 'object' && !Array.isArray(pipelineResult.standardizedRequest.semantics)
-          ? (pipelineResult.standardizedRequest.semantics as Record<string, unknown>)
-          : undefined,
-      pipelineMetadata: {
-        ...metadataForHub,
-        ...(pipelineResult.metadata ?? {})
-      },
+      pipelineMetadata: metadataForHub,
     };
   }
 
@@ -1605,6 +1618,11 @@ export class RouteCodexHttpServer {
             : undefined,
       },
     );
+    const inboundProtocol = detectInboundProtocolFromRequest({
+      path: input.entryEndpoint,
+      headers: input.headers as Record<string, string | string[] | undefined>,
+    });
+    assertDirectPayloadContract({ payload, inboundProtocol });
     const providerBinding = portConfig.providerBinding;
     const metadata = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
       ? (input.metadata as Record<string, unknown>)
