@@ -3,7 +3,16 @@
  *
  * 定义各个OpenAI兼容服务的预设配置档案
  */
-import { API_ENDPOINTS, API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS, DEFAULT_CONFIG } from "../../../constants/index.js";
+import {
+  API_BASE_URLS,
+  API_ENDPOINTS,
+  API_PATHS,
+  DEFAULT_CONFIG,
+  HTTP_PROTOCOLS,
+  LOCAL_HOSTS,
+  PROVIDER_DEFAULT_MODELS,
+  PROVIDER_TIMEOUTS
+} from "../../../constants/index.js";
 import type { ServiceProfile } from '../api/provider-types.js';
 import { DEEPSEEK_UPSTREAM_USER_AGENT } from '../contracts/deepseek-provider-contract.js';
 import { resolveQwenCodeUserAgent } from '../utils/qwen-client-fingerprint.js';
@@ -31,20 +40,20 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'OpenAI-Beta': 'responses-2024-12-17'
     },
     // 默认 Provider 请求超时时间：240s
-    timeout: 240000,
+    timeout: PROVIDER_TIMEOUTS.OPENAI,
     maxRetries: 3
   },
   openai: {
     defaultBaseUrl: API_ENDPOINTS.OPENAI,
     defaultEndpoint: '/chat/completions',
-    defaultModel: 'gpt-4',
+    defaultModel: PROVIDER_DEFAULT_MODELS.OPENAI_CHAT,
     requiredAuth: ['apikey'],
     optionalAuth: [],
     headers: {
       'Content-Type': 'application/json'
     },
     // 默认 Provider 请求超时时间：240s
-    timeout: 240000,
+    timeout: PROVIDER_TIMEOUTS.OPENAI,
     maxRetries: 3
   },
 
@@ -56,7 +65,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
   anthropic: {
     defaultBaseUrl: API_ENDPOINTS.ANTHROPIC,
     defaultEndpoint: API_PATHS.ANTHROPIC_MESSAGES,
-    defaultModel: 'claude-3-haiku-20240307',
+    defaultModel: PROVIDER_DEFAULT_MODELS.ANTHROPIC,
     requiredAuth: ['apikey'],
     optionalAuth: [],
     headers: {
@@ -64,13 +73,13 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       // 版本标头由上游/配置控制，这里不硬编码 anthropic-version，避免与兼容端点冲突
     },
     // 默认 Provider 请求超时时间：300s（长上下文仍可通过环境变量覆盖）
-    timeout: 300000,
+    timeout: PROVIDER_TIMEOUTS.ANTHROPIC,
     maxRetries: 3
   },
   gemini: {
-    defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    defaultBaseUrl: API_BASE_URLS.GEMINI,
     defaultEndpoint: '/models:generateContent',
-    defaultModel: 'models/gemini-2.0-flash',
+    defaultModel: PROVIDER_DEFAULT_MODELS.GEMINI,
     // 允许 apikey 与 oauth，两者都视为合法
     requiredAuth: [],
     optionalAuth: ['apikey', 'oauth'],
@@ -78,15 +87,15 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'Content-Type': 'application/json'
     },
     // 默认 Provider 请求超时时间：240s
-    timeout: 240000,
+    timeout: PROVIDER_TIMEOUTS.OPENAI,
     maxRetries: 3
   },
 
   glm: {
     // GLM coding 路径（已验证可用）
-    defaultBaseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    defaultBaseUrl: API_BASE_URLS.GLM,
     defaultEndpoint: '/chat/completions',
-    defaultModel: 'glm-4',
+    defaultModel: PROVIDER_DEFAULT_MODELS.GLM,
     requiredAuth: ['apikey'],
     optionalAuth: [],
     headers: {
@@ -94,7 +103,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'User-Agent': 'RouteCodex/2.0'
     },
     // 默认 Provider 请求超时时间：500s
-    timeout: 240000,
+    timeout: PROVIDER_TIMEOUTS.OPENAI,
     maxRetries: 3
   },
 
@@ -103,10 +112,10 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     // 对齐系统 qwen 安装包（@qwen-code/qwen-code）：
     // OAuth 设备码/令牌端点在 chat.qwen.ai 下，由 provider-oauth-configs 提供；
     // 实际推理请求走 DashScope compatible-mode。
-    defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    defaultBaseUrl: API_BASE_URLS.QWEN,
     defaultEndpoint: '/chat/completions',
     // 对齐官方 @qwen-code/qwen-code：Qwen OAuth 默认走 coder-model。
-    defaultModel: 'coder-model',
+    defaultModel: PROVIDER_DEFAULT_MODELS.QWEN,
     requiredAuth: [],
     optionalAuth: ['apikey','oauth'],
     headers: {
@@ -119,14 +128,14 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'X-DashScope-AuthType': 'qwen-oauth'
     },
     // 对齐官方 @qwen-code/qwen-code DEFAULT_TIMEOUT=120000ms
-    timeout: 120000,
+    timeout: PROVIDER_TIMEOUTS.QWEN,
     maxRetries: 3
   },
 
   deepseek: {
-    defaultBaseUrl: 'https://chat.deepseek.com',
+    defaultBaseUrl: API_BASE_URLS.DEEPSEEK,
     defaultEndpoint: '/api/v0/chat/completion',
-    defaultModel: 'deepseek-chat',
+    defaultModel: PROVIDER_DEFAULT_MODELS.DEEPSEEK,
     requiredAuth: ['apikey'],
     optionalAuth: [],
     headers: {
@@ -139,7 +148,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'accept-charset': 'UTF-8',
       'User-Agent': DEEPSEEK_UPSTREAM_USER_AGENT
     },
-    timeout: 240000,
+    timeout: PROVIDER_TIMEOUTS.OPENAI,
     maxRetries: 3
   },
 
@@ -153,7 +162,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'Content-Type': 'application/json'
     },
     // LM Studio 默认请求超时时间：300s（必要时可通过环境变量提升）
-    timeout: 300000,
+    timeout: PROVIDER_TIMEOUTS.ANTHROPIC,
     maxRetries: 3
   }
 };

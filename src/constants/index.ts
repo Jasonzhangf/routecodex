@@ -158,3 +158,39 @@ export const CODEX_IDENTIFIER_MAX_LENGTH = 64;
 export type ApiEndpoint = typeof API_ENDPOINTS[keyof typeof API_ENDPOINTS];
 export type LocalHost = typeof LOCAL_HOSTS[keyof typeof LOCAL_HOSTS];
 export type ApiPath = typeof API_PATHS[keyof typeof API_PATHS];
+
+// SSOT: hardcoded provider base URLs (added 2026-06-05, /goal fallback-arch-audit Phase 1)
+export const API_BASE_URLS = {
+  OPENAI: 'https://api.openai.com/v1',
+  ANTHROPIC: 'https://api.anthropic.com',
+  GEMINI: 'https://generativelanguage.googleapis.com/v1beta',
+  GLM: 'https://open.bigmodel.cn/api/coding/paas/v4',
+  QWEN: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  DEEPSEEK: 'https://chat.deepseek.com'
+} as const;
+
+export const PROVIDER_TIMEOUTS = {
+  OPENAI: 240_000,
+  ANTHROPIC: 300_000,
+  GEMINI: 240_000,
+  GLM: 240_000,
+  QWEN: 120_000,
+  DEEPSEEK: 240_000,
+  RESPONSES: 240_000
+} as const;
+
+export const PROVIDER_DEFAULT_MODELS = {
+  OPENAI_CHAT: 'gpt-4',
+  ANTHROPIC: 'claude-3-haiku-20240307',
+  GEMINI: 'models/gemini-2.0-flash',
+  GLM: 'glm-4',
+  QWEN: 'coder-model',
+  DEEPSEEK: 'deepseek-chat'
+} as const;
+
+export const SSE_DEFAULT_CAPS = {
+  STREAM_HEADERS_CAP_MS: 120_000,
+  STREAM_IDLE_CAP_MS: 300_000,
+  STREAM_NO_CONTENT_TIMEOUT_MS: 120_000,
+  STREAM_CONTENT_IDLE_TIMEOUT_MS: 300_000
+} as const;
