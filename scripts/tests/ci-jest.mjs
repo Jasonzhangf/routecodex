@@ -47,6 +47,8 @@ const routingInstructionTests = [
   'tests/sharedmodule/server-module-help.live.spec.ts',
   'tests/server/runtime/http-server/provider-direct-pipeline.spec.ts',
   'tests/server/runtime/http-server/router-direct-pipeline.spec.ts',
+  'tests/server/runtime/http-server/direct-passthrough-payload.spec.ts',
+  'tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts',
   'tests/server/runtime/http-server/port-config-validator-sameprotocol.spec.ts',
   'tests/server/utils/http-error-mapper-timeout.spec.ts',
   'tests/server/utils/http-error-mapper-malformed-request.spec.ts',

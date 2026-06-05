@@ -168,6 +168,10 @@ describe('HTTP apikey auth (optional)', () => {
       const denied = await getJson(baseUrl, '/config');
       expect(denied.status).toBe(401);
 
+      const models = await getJson(baseUrl, '/v1/models');
+      expect(models.status).toBe(200);
+      expect(Array.isArray(models.body?.data)).toBe(true);
+
       const allowed = await getJson(baseUrl, '/config', { apikey: expected, authHeader: 'authorization' });
       expect(allowed.status).toBe(200);
     } finally {

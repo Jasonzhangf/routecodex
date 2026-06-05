@@ -10,6 +10,16 @@ import {
 } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 import { buildNativeReqOutboundCompatAdapterContext } from './native-adapter-context.js';
 
+// feature_id: responses.request_compat_normalization
+// feature_id: responses.function_tool_normalization
+// feature_id: responses.tool_parameters_normalization
+// feature_id: responses.instructions_to_input_normalization
+// feature_id: responses.token_limit_field_normalization
+// Rust canonical builders: normalize_responses_tool_parameters / normalize_responses_function_tools / apply_responses_instructions_to_input / apply_responses_token_limit_field_normalization / apply_responses_c4m_request_compat / apply_responses_crs_request_compat
+// feature_id: responses.c4m_request_compat
+// feature_id: responses.crs_request_compat
+// Rust aggregate builder: run_req_outbound_stage3_compat_json
+
 const RATE_LIMIT_ERROR = 'ERR_COMPAT_RATE_LIMIT_DETECTED';
 
 function assertCompatNativeBoundary(): void {

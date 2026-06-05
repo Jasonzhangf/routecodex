@@ -1,11 +1,12 @@
-import { jest } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import { PassThrough } from 'node:stream';
+import { runtimeFlags, setRuntimeFlag } from '../../src/runtime/runtime-flags.js';
 
 const writeProviderSnapshot = jest.fn(async () => {});
 const attachProviderSseSnapshotStream = jest.fn((stream: NodeJS.ReadableStream) => stream);
 const shouldCaptureProviderStreamSnapshots = jest.fn(() => true);
 
-jest.mock('../../src/providers/core/utils/snapshot-writer.js', () => ({
+jest.unstable_mockModule('../../src/providers/core/utils/snapshot-writer.js', () => ({
   writeProviderSnapshot,
   attachProviderSseSnapshotStream,
   shouldCaptureProviderStreamSnapshots
@@ -76,14 +77,22 @@ function createExecutorWithPreparedSseResponse() {
 }
 
 describe('HttpRequestExecutor SSE snapshot finalization', () => {
+  const originalSnapshotsEnabled = runtimeFlags.snapshotsEnabled;
+
   beforeAll(async () => {
+    jest.resetModules();
     ({ HttpRequestExecutor } = await import('../../src/providers/core/runtime/http-request-executor.ts'));
   });
 
   beforeEach(() => {
+    setRuntimeFlag('snapshotsEnabled', true);
     writeProviderSnapshot.mockClear();
     attachProviderSseSnapshotStream.mockClear();
     shouldCaptureProviderStreamSnapshots.mockReset();
+  });
+
+  afterAll(() => {
+    setRuntimeFlag('snapshotsEnabled', originalSnapshotsEnabled);
   });
 
   it('writes provider-response marker even when raw SSE capture is enabled', async () => {

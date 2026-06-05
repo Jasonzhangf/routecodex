@@ -563,47 +563,6 @@ fn test_govern_response_apply_patch_hashline_shape_is_converted_to_canonical_pat
 }
 
 #[test]
-fn test_govern_response_apply_patch_new_file_plain_text_with_hashline_shape_repairs_to_add_file_patch(
-) {
-    let input = ToolGovernanceInput {
-        payload: serde_json::json!({
-            "choices": [{
-                "message": {
-                    "tool_calls": [{
-                        "function": {
-                            "name": "apply_patch",
-                            "arguments": serde_json::to_string(&serde_json::json!({
-                                "patch": "hello from 10000",
-                                "filePath": "hello_apply_patch_10000.txt",
-                                "fileContent": ""
-                            })).unwrap()
-                        }
-                    }]
-                }
-            }]
-        }),
-        client_protocol: "openai-chat".to_string(),
-        entry_endpoint: "/v1/chat".to_string(),
-        request_id: "req_hashline_response_apply_patch_new_file_plain_text".to_string(),
-    };
-    let result = govern_response(input).unwrap();
-    let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
-        ["arguments"]
-        .as_str()
-        .unwrap_or("");
-    let parsed: Value = serde_json::from_str(args).unwrap();
-    let patch = parsed["patch"].as_str().unwrap_or("");
-    assert!(patch.contains("*** Begin Patch"));
-    assert!(patch.contains("*** Add File: hello_apply_patch_10000.txt"));
-    assert!(patch.contains("+hello from 10000"));
-    assert_eq!(parsed["input"], parsed["patch"]);
-    assert!(parsed.get("filePath").is_none());
-    assert!(parsed.get("file_path").is_none());
-    assert!(parsed.get("fileContent").is_none());
-    assert!(parsed.get("file_content").is_none());
-}
-
-#[test]
 fn test_govern_response_apply_patch_hashline_missing_file_content_fails_closed_with_guard_patch() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
@@ -742,6 +701,82 @@ fn test_govern_response_apply_patch_raw_string_is_repaired_into_schema() {
     assert!(patch.contains("*** Add File: raw.txt"));
     assert!(patch.contains("+raw"));
     assert_eq!(parsed["input"], parsed["patch"]);
+}
+
+#[test]
+fn test_govern_response_apply_patch_nested_input_patch_is_converted_to_canonical_patch() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "choices": [{
+                "message": {
+                    "tool_calls": [{
+                        "function": {
+                            "name": "apply_patch",
+                            "arguments": serde_json::to_string(&serde_json::json!({
+                                "input": {
+                                    "filePath": "tmp/ap002.txt",
+                                    "patch": "- hello\n- \n- world\n+ new\n+ keep"
+                                }
+                            })).unwrap()
+                        }
+                    }]
+                }
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/chat".to_string(),
+        request_id: "req_nested_input_line_edit_apply_patch".to_string(),
+    };
+    let result = govern_response(input).unwrap();
+    let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+        ["arguments"]
+        .as_str()
+        .unwrap_or("");
+    let parsed: Value = serde_json::from_str(args).unwrap();
+    let patch = parsed["patch"].as_str().unwrap_or("");
+    assert!(patch.contains("*** Begin Patch"));
+    assert!(patch.contains("*** Update File: tmp/ap002.txt"));
+    assert!(patch.contains("- hello"));
+    assert!(patch.contains("- "));
+    assert!(patch.contains("- world"));
+    assert!(patch.contains("+ new"));
+    assert!(patch.contains("+ keep"));
+    assert_eq!(parsed["input"], parsed["patch"]);
+}
+
+#[test]
+fn test_govern_response_apply_patch_text_field_is_accepted_when_information_is_sufficient() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "choices": [{
+                "message": {
+                    "tool_calls": [{
+                        "function": {
+                            "name": "apply_patch",
+                            "arguments": serde_json::to_string(&serde_json::json!({
+                                "filePath": "tmp/ap002.txt",
+                                "text": "- hello\n- \n- world\n+ new\n+ keep"
+                            })).unwrap()
+                        }
+                    }]
+                }
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/chat".to_string(),
+        request_id: "req_text_field_line_edit_apply_patch".to_string(),
+    };
+    let result = govern_response(input).unwrap();
+    let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+        ["arguments"]
+        .as_str()
+        .unwrap_or("");
+    let parsed: Value = serde_json::from_str(args).unwrap();
+    let patch = parsed["patch"].as_str().unwrap_or("");
+    assert!(patch.contains("*** Update File: tmp/ap002.txt"));
+    assert!(patch.contains("+ new"));
+    assert!(patch.contains("+ keep"));
+    assert!(!patch.contains("APPLY_PATCH_ERROR:"));
 }
 
 #[test]

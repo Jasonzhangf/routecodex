@@ -61,6 +61,136 @@ function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | n
   return typeof fn === 'function' ? (fn as (...args: unknown[]) => unknown) : null;
 }
 
+export function validateResponsesDirectToolShapeContractWithNative(
+  payload: Record<string, unknown>
+): { ok: true } | null {
+  // canonical Rust entrypoint: validate_responses_direct_tool_shape_contract_json
+  if (isNativeDisabledByEnv()) {
+    return null;
+  }
+  const fn = readNativeFunction('validateResponsesDirectToolShapeContractJson');
+  if (!fn) {
+    return null;
+  }
+  const payloadJson = safeStringify(payload ?? {});
+  if (!payloadJson) {
+    throw failNativeRequired<Error>('validateResponsesDirectToolShapeContractJson', 'json stringify failed');
+  }
+  let raw: unknown;
+  try {
+    raw = fn(payloadJson);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    throw new Error(reason);
+  }
+  if (raw instanceof Error) {
+    throw raw;
+  }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as { message?: unknown }).message === 'string') {
+    throw new Error(String((raw as { message: unknown }).message));
+  }
+  if (typeof raw !== 'string' || !raw) {
+    throw failNativeRequired<Error>('validateResponsesDirectToolShapeContractJson', 'empty result');
+  }
+  const parsed = parseJson('validateResponsesDirectToolShapeContractWithNative', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object') {
+    throw failNativeRequired<Error>('validateResponsesDirectToolShapeContractJson', 'invalid payload');
+  }
+  return { ok: true };
+}
+
+export function applyResponsesDirectRouteParamsOverrideWithNative(input: {
+  payload: Record<string, unknown>;
+  routeParams?: Record<string, unknown>;
+  providerDefaultModel?: string;
+  requestReasoningEffort?: string;
+}): Record<string, unknown> {
+  const capability = 'applyResponsesDirectRouteParamsOverrideJson';
+  const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [
+    input.payload ?? {},
+    input.routeParams ?? null,
+    input.providerDefaultModel ?? null,
+    input.requestReasoningEffort ?? null,
+  ]);
+  const parsed = parseJson('applyResponsesDirectRouteParamsOverrideWithNative', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw failNativeRequired<Record<string, unknown>>(capability, 'invalid payload');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+export function resolveResponsesDirectPayloadWithNative(input: {
+  body: unknown;
+  rawRequestBody?: Record<string, unknown>;
+  bodyStream?: boolean;
+  metadataStream?: boolean;
+  outboundStream?: boolean;
+}): Record<string, unknown> {
+  const capability = 'resolveResponsesDirectPayloadJson';
+  const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [
+    input.body ?? null,
+    input.rawRequestBody ?? null,
+    input.bodyStream === true,
+    input.metadataStream === true,
+    input.outboundStream === true,
+  ]);
+  const parsed = parseJson('resolveResponsesDirectPayloadWithNative', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw failNativeRequired<Record<string, unknown>>(capability, 'invalid payload');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+export function buildResponsesDirectPassthroughBodyWithNative(
+  payload: unknown
+): Record<string, unknown> {
+  const capability = 'buildResponsesDirectPassthroughBodyJson';
+  const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? null]);
+  const parsed = parseJson('buildResponsesDirectPassthroughBodyWithNative', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw failNativeRequired<Record<string, unknown>>(capability, 'invalid payload');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+export function hasDeclaredApplyPatchToolWithNative(payload: unknown): boolean {
+  const capability = 'hasDeclaredApplyPatchToolJson';
+  const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? null]);
+  const parsed = parseJson('hasDeclaredApplyPatchToolWithNative', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw failNativeRequired<boolean>(capability, 'invalid payload');
+  }
+  return (parsed as { hasDeclaredApplyPatchTool?: unknown }).hasDeclaredApplyPatchTool === true;
+}
+
+export function evaluateResponsesDirectRouteDecisionWithNative(input: {
+  payload: Record<string, unknown>;
+  inboundProtocol: string;
+  applyPatchMode?: string;
+}): {
+  providerWireValid: boolean;
+  requiresHubRelay: boolean;
+  reason?: string;
+  hasDeclaredApplyPatchTool?: boolean;
+} {
+  const capability = 'evaluateResponsesDirectRouteDecisionJson';
+  const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [
+    input.payload ?? {},
+    input.inboundProtocol ?? '',
+    input.applyPatchMode ?? '',
+  ]);
+  const parsed = parseJson('evaluateResponsesDirectRouteDecisionWithNative', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw failNativeRequired<Record<string, unknown>>(capability, 'invalid payload');
+  }
+  return parsed as {
+    providerWireValid: boolean;
+    requiresHubRelay: boolean;
+    reason?: string;
+    hasDeclaredApplyPatchTool?: boolean;
+  };
+}
+
 function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);

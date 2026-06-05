@@ -30,18 +30,30 @@ fn convert_servertool_line_edit_to_canonical_patch(file_path: &str, patch: &str)
     out.join("\n")
 }
 
+fn read_apply_patch_source_from_args(args: &Map<String, Value>) -> Option<String> {
+    let direct = ["patch", "input", "text", "content", "body", "arguments"];
+    for key in direct {
+        if let Some(raw) = args
+            .get(key)
+            .and_then(|value| extract_apply_patch_text(Some(value)))
+            .map(|value| value.replace("\r\n", "\n").replace('\r', "\n"))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            return Some(raw);
+        }
+    }
+    args.get("input")
+        .and_then(Value::as_object)
+        .and_then(read_apply_patch_source_from_args)
+}
+
 fn build_current_apply_patch_schema_args(args: &Map<String, Value>) -> Option<(String, bool)> {
     if args.contains_key("fileContent") || args.contains_key("file_content") {
         return None;
     }
     let file_path = read_hashline_file_path_from_apply_patch_args(args)?;
-    let patch_source = args
-        .get("patch")
-        .or_else(|| args.get("input"))
-        .and_then(Value::as_str)
-        .map(|value| value.replace("\r\n", "\n").replace('\r', "\n"))
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())?;
+    let patch_source = read_apply_patch_source_from_args(args)?;
     if patch_source.trim_start().starts_with("*** Begin Patch")
         || looks_like_native_hashline_header_patch(patch_source.as_str())
     {
@@ -86,6 +98,21 @@ pub(crate) fn detect_apply_patch_invalid_reason(patch: &str) -> Option<&'static 
         line.starts_with("diff --git ") || line.starts_with("--- ") || line.starts_with("+++ ")
     }) {
         return Some("mixed_gnu_diff");
+    }
+    let is_line_edit = trimmed.lines().all(|line| {
+        let current = line.trim_end();
+        current.is_empty()
+            || current.starts_with('+')
+            || current.starts_with('-')
+            || current.starts_with(' ')
+            || current.starts_with("@@")
+    });
+    if is_line_edit
+        && trimmed
+            .lines()
+            .any(|line| line.starts_with('+') || line.starts_with('-'))
+    {
+        return None;
     }
     if !(trimmed.starts_with("*** Begin Patch") && trimmed.contains("*** End Patch")) {
         return Some("unsupported_patch_format");
@@ -193,49 +220,6 @@ fn read_hashline_file_content_preserve_empty_from_apply_patch_args(
         })
 }
 
-fn build_add_file_apply_patch_from_plain_text(file_path: &str, patch_text: &str) -> String {
-    let mut out = vec![
-        "*** Begin Patch".to_string(),
-        format!("*** Add File: {}", file_path),
-    ];
-    for line in split_apply_patch_text_lines(patch_text) {
-        out.push(format!("+{}", line));
-    }
-    out.push("*** End Patch".to_string());
-    out.join("\n")
-}
-
-fn normalize_plain_text_new_file_apply_patch_schema_args(
-    args: &Map<String, Value>,
-) -> Option<(String, bool)> {
-    let file_path = read_hashline_file_path_from_apply_patch_args(args)?;
-    let file_content = read_hashline_file_content_preserve_empty_from_apply_patch_args(args)?;
-    if !file_content.is_empty() {
-        return None;
-    }
-    let patch_source = args
-        .get("patch")
-        .or_else(|| args.get("input"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    if looks_like_hashline_patch(patch_source)
-        || looks_like_patch_instructions(args.get("patch"))
-        || looks_like_patch_instructions(args.get("input"))
-    {
-        return None;
-    }
-    let canonical_patch =
-        build_add_file_apply_patch_from_plain_text(file_path.as_str(), patch_source);
-    let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(canonical_patch.clone()));
-    out.insert("input".to_string(), Value::String(canonical_patch));
-    Some((
-        serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
-        true,
-    ))
-}
-
 enum HashlineApplyPatchNormalization {
     NotHashline,
     Normalized((String, bool)),
@@ -280,13 +264,7 @@ fn find_exact_line_block_once(haystack: &[String], needle: &[String]) -> Option<
 fn normalize_simple_line_edit_apply_patch_schema_args(
     args: &Map<String, Value>,
 ) -> Option<HashlineApplyPatchNormalization> {
-    let patch_source = args
-        .get("patch")
-        .or_else(|| args.get("input"))
-        .and_then(Value::as_str)
-        .map(|value| value.replace("\r\n", "\n").replace('\r', "\n"))
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())?;
+    let patch_source = read_apply_patch_source_from_args(args)?;
     if looks_like_native_hashline_header_patch(patch_source.as_str()) {
         return None;
     }
@@ -371,16 +349,11 @@ fn normalize_simple_line_edit_apply_patch_schema_args(
 fn normalize_hashline_apply_patch_schema_args(
     args: &Map<String, Value>,
 ) -> HashlineApplyPatchNormalization {
-    let patch_source = args
-        .get("patch")
-        .or_else(|| args.get("input"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+    let patch_source = read_apply_patch_source_from_args(args);
     let Some(patch_source) = patch_source else {
         return HashlineApplyPatchNormalization::NotHashline;
     };
-    if !looks_like_hashline_patch(patch_source) {
+    if !looks_like_hashline_patch(patch_source.as_str()) {
         return HashlineApplyPatchNormalization::NotHashline;
     }
     let Some(file_path) = read_hashline_file_path_from_apply_patch_args(args) else {
@@ -396,7 +369,7 @@ fn normalize_hashline_apply_patch_schema_args(
         };
     };
     let result = hashline::run_hashline_native_edit(HashlineNativeEditInput {
-        patch: patch_source.to_string(),
+        patch: patch_source,
         file_path,
         file_content,
     });
@@ -1125,9 +1098,6 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
     if let Some(normalized) = build_current_apply_patch_schema_args(&args) {
         return normalized;
     }
-    if let Some(normalized) = normalize_plain_text_new_file_apply_patch_schema_args(&args) {
-        return normalized;
-    }
     if let Some(normalized) = normalize_simple_line_edit_apply_patch_schema_args(&args) {
         match normalized {
             HashlineApplyPatchNormalization::Normalized(value) => return value,
@@ -1152,13 +1122,7 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
             structured_repaired,
         );
     }
-    let patch_source = args
-        .get("patch")
-        .or_else(|| args.get("input"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string())
+    let patch_source = read_apply_patch_source_from_args(&args)
         .or_else(|| {
             extract_apply_patch_text(Some(raw_args))
                 .map(|value| value.trim().to_string())

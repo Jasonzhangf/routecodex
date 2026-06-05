@@ -1,6 +1,78 @@
 use regex::Regex;
 use serde_json::{Map, Value};
 
+// feature_id: responses.request_compat_normalization
+// feature_id: responses.tool_parameters_normalization
+
+pub(crate) fn normalize_responses_tool_parameters(raw: Option<&Value>) -> Value {
+    let mut candidate = raw.cloned().unwrap_or(Value::Null);
+    if let Value::String(text) = &candidate {
+        candidate = serde_json::from_str::<Value>(text)
+            .ok()
+            .unwrap_or_else(|| Value::Object(Map::new()));
+    }
+    if let Value::Object(_) = candidate {
+        return candidate;
+    }
+    let mut fallback = Map::new();
+    fallback.insert("type".to_string(), Value::String("object".to_string()));
+    fallback.insert("properties".to_string(), Value::Object(Map::new()));
+    fallback.insert("additionalProperties".to_string(), Value::Bool(true));
+    Value::Object(fallback)
+}
+
+// feature_id: responses.function_tool_normalization
+pub(crate) fn normalize_responses_function_tools(root: &mut Map<String, Value>) {
+    let Some(raw_tools) = root.get("tools").and_then(Value::as_array) else {
+        return;
+    };
+    let mut normalized = Vec::new();
+    for entry in raw_tools {
+        let Some(tool_obj) = entry.as_object() else {
+            normalized.push(entry.clone());
+            continue;
+        };
+        let tool_type = tool_obj.get("type").and_then(Value::as_str).map(str::trim);
+        if tool_type != Some("function") {
+            normalized.push(entry.clone());
+            continue;
+        }
+        let function_obj = tool_obj.get("function").and_then(Value::as_object);
+        let name = tool_obj
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| function_obj.and_then(|row| row.get("name")).and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(name) = name else {
+            normalized.push(entry.clone());
+            continue;
+        };
+        let mut normalized_tool = Map::new();
+        normalized_tool.insert("type".to_string(), Value::String("function".to_string()));
+        normalized_tool.insert("name".to_string(), Value::String(name.to_string()));
+        if let Some(description) = tool_obj
+            .get("description")
+            .and_then(Value::as_str)
+            .or_else(|| function_obj.and_then(|row| row.get("description")).and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            normalized_tool.insert("description".to_string(), Value::String(description.to_string()));
+        }
+        normalized_tool.insert(
+            "parameters".to_string(),
+            normalize_responses_tool_parameters(
+                tool_obj.get("parameters").or_else(|| {
+                    function_obj.and_then(|row| row.get("parameters"))
+                }),
+            ),
+        );
+        normalized.push(Value::Object(normalized_tool));
+    }
+    root.insert("tools".to_string(), Value::Array(normalized));
+}
+
 fn strip_html_tags(text: &str) -> String {
     match Regex::new(r"</?[^>]+(>|$)") {
         Ok(re) => re.replace_all(text, "").to_string(),
@@ -32,12 +104,8 @@ fn truncate_by_chars(text: &str, max_len: usize) -> String {
     text.chars().take(max_len).collect::<String>()
 }
 
-pub(crate) fn apply_responses_c4m_request_compat(root: &mut Map<String, Value>) {
-    root.remove("max_tokens");
-    root.remove("maxTokens");
-    root.remove("max_output_tokens");
-    root.remove("maxOutputTokens");
-
+// feature_id: responses.instructions_to_input_normalization
+pub(crate) fn apply_responses_instructions_to_input(root: &mut Map<String, Value>) {
     let instructions = root
         .remove("instructions")
         .and_then(|value| value.as_str().map(|raw| raw.trim().to_string()))
@@ -80,6 +148,23 @@ pub(crate) fn apply_responses_c4m_request_compat(root: &mut Map<String, Value>) 
     input_array.insert(0, Value::Object(message));
 }
 
+// feature_id: responses.token_limit_field_normalization
+pub(crate) fn apply_responses_token_limit_field_normalization(root: &mut Map<String, Value>) {
+    root.remove("max_tokens");
+    root.remove("maxTokens");
+    root.remove("max_output_tokens");
+    root.remove("maxOutputTokens");
+}
+
+// feature_id: responses.c4m_request_compat
+pub(crate) fn apply_responses_c4m_request_compat(root: &mut Map<String, Value>) {
+    normalize_responses_function_tools(root);
+    apply_responses_token_limit_field_normalization(root);
+    apply_responses_instructions_to_input(root);
+}
+
+// feature_id: responses.crs_request_compat
 pub(crate) fn apply_responses_crs_request_compat(root: &mut Map<String, Value>) {
+    normalize_responses_function_tools(root);
     root.remove("temperature");
 }

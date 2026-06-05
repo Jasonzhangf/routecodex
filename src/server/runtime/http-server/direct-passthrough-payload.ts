@@ -1,115 +1,29 @@
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
+import {
+  applyResponsesDirectRouteParamsOverrideNative,
+  evaluateResponsesDirectRouteDecisionNative,
+  resolveResponsesDirectPayloadNative,
+} from '../../../modules/llmswitch/bridge.js';
+import {
+  projectResponsesDirectContractDecision,
+} from '../../../providers/core/runtime/responses-direct-contract-error.js';
 
-function cloneRecord<T extends Record<string, unknown>>(value: T): T {
-  return structuredClone(value);
-}
-
-function cloneWirePayload(value: Record<string, unknown>): Record<string, unknown> {
-  if (Object.prototype.hasOwnProperty.call(value, 'metadata')) {
-    throw new Error('provider-runtime-error: metadata is not allowed in direct passthrough provider body');
-  }
-  const next = cloneRecord(value);
-  return next;
-}
-
-function makeDirectPayloadContractError(message: string, details?: Record<string, unknown>): Error {
-  const error = new Error(message) as Error & { code?: string; status?: number; statusCode?: number; details?: unknown };
-  error.code = 'DIRECT_PAYLOAD_CONTRACT_ERROR';
-  error.status = 400;
-  error.statusCode = 400;
-  if (details) {
-    error.details = details;
-  }
-  return error;
-}
-
-function validateOpenAIResponsesDirectTools(payload: Record<string, unknown>): void {
-  if (Array.isArray(payload.messages)) {
-    throw makeDirectPayloadContractError('Invalid direct Responses payload: chat-style messages are not provider wire', {
-      reason: 'chat_messages',
-    });
-  }
-  if (Array.isArray(payload.input)) {
-    payload.input.forEach((item, index) => {
-      if (!isRecord(item)) {
-        return;
-      }
-      const type = typeof item.type === 'string' ? item.type.trim() : '';
-      if ((type === 'function_call' || type === 'function_call_output') && Object.prototype.hasOwnProperty.call(item, 'content')) {
-        throw makeDirectPayloadContractError(`Invalid direct Responses input at input[${index}]: tool item must not carry content`, {
-          index,
-          reason: 'tool_input_content',
-        });
-      }
-    });
-  }
-  if (!Array.isArray(payload.tools)) {
-    return;
-  }
-  payload.tools.forEach((tool, index) => {
-    if (!isRecord(tool)) {
-      throw makeDirectPayloadContractError(`Invalid direct Responses tool at tools[${index}]`, { index, reason: 'not_object' });
-    }
-    const type = typeof tool.type === 'string' ? tool.type.trim() : '';
-    if (type === 'function') {
-      const name = typeof tool.name === 'string' ? tool.name.trim() : '';
-      if (!name) {
-        throw makeDirectPayloadContractError(`Invalid direct Responses function tool at tools[${index}]: missing name`, { index, reason: 'missing_name' });
-      }
-      return;
-    }
-    if (!type) {
-      throw makeDirectPayloadContractError(`Invalid direct Responses tool at tools[${index}]: missing type`, { index, reason: 'missing_type' });
-    }
-  });
-}
-
-export function assertDirectPayloadContract(args: {
-  payload: Record<string, unknown>;
-  inboundProtocol: string;
-}): void {
-  const result = checkDirectPayloadContract(args);
-  if (!result.ok) {
-    throw makeDirectPayloadContractError(result.message, { reason: result.reason });
-  }
-}
-
-export function checkDirectPayloadContract(args: {
-  payload: Record<string, unknown>;
-  inboundProtocol: string;
-}): { ok: true } | { ok: false; reason: string; message: string } {
-  try {
-    if (args.inboundProtocol === 'openai-responses') {
-      validateOpenAIResponsesDirectTools(args.payload);
-    }
-    return { ok: true };
-  } catch (error) {
-    const reason = error && typeof error === 'object' && typeof (error as { details?: { reason?: unknown } }).details?.reason === 'string'
-      ? (error as { details: { reason: string } }).details.reason
-      : 'invalid_direct_payload';
-    const message = error instanceof Error ? error.message : String(error ?? 'invalid direct payload');
-    return { ok: false, reason, message };
-  }
-}
+// feature_id: responses.direct_tool_shape_contract
 
 export function resolveRawPayloadForDirect(
   body: unknown,
   metadata?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const raw = metadata?.__raw_request_body;
-  if (isRecord(raw)) {
-    const next = cloneWirePayload(raw);
-    if ((isRecord(body) && body.stream === true || metadata?.stream === true || metadata?.outboundStream === true) && next.stream !== true) {
-      next.stream = true;
-    }
-    return next;
-  }
-  if (isRecord(body)) {
-    return cloneWirePayload(body);
-  }
-  return {};
+  return resolveResponsesDirectPayloadNative({
+    body,
+    rawRequestBody:
+      metadata?.__raw_request_body && typeof metadata.__raw_request_body === 'object' && !Array.isArray(metadata.__raw_request_body)
+        ? metadata.__raw_request_body as Record<string, unknown>
+        : undefined,
+    bodyStream:
+      !!body && typeof body === 'object' && !Array.isArray(body) && (body as Record<string, unknown>).stream === true,
+    metadataStream: metadata?.stream === true,
+    outboundStream: metadata?.outboundStream === true,
+  });
 }
 
 export function applyMinimalDirectOverrides(
@@ -118,10 +32,30 @@ export function applyMinimalDirectOverrides(
     routeParams?: Record<string, unknown>;
   }
 ): Record<string, unknown> {
-  const next = cloneRecord(payload);
-  const routeModel = typeof options?.routeParams?.model === 'string' ? options.routeParams.model.trim() : '';
-  if (routeModel) {
-    next.model = routeModel;
-  }
-  return next;
+  return applyResponsesDirectRouteParamsOverrideNative({
+    payload,
+    routeParams: options?.routeParams,
+  });
+}
+
+export function evaluateDirectRouteDecision(args: {
+  payload: Record<string, unknown>;
+  inboundProtocol: string;
+  applyPatchMode?: string;
+}): {
+  providerWireValid: boolean;
+  requiresHubRelay: boolean;
+  reason?: string;
+  hasDeclaredApplyPatchTool?: boolean;
+} {
+  // canonical Rust entrypoint: evaluate_responses_direct_route_decision_json
+  return evaluateResponsesDirectRouteDecisionNative(args);
+}
+
+export function assertDirectRouteDecision(args: {
+  payload: Record<string, unknown>;
+  inboundProtocol: string;
+  applyPatchMode?: string;
+}): void {
+  projectResponsesDirectContractDecision(evaluateDirectRouteDecision(args));
 }

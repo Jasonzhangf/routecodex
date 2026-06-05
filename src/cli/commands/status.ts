@@ -4,6 +4,7 @@ import { LOCAL_HOSTS } from '../../constants/index.js';
 import type { LoadedRouteCodexConfig } from '../../config/routecodex-config-loader.js';
 import type { ManagedZombieProcess } from '../../utils/managed-server-pids.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
+import { buildLocalProbeHostCandidates } from '../../utils/local-connect-host.js';
 
 type LoggerLike = {
   info: (msg: string) => void;
@@ -77,39 +78,46 @@ function pickPortHost(userConfig: Record<string, any>): { port: number | null; h
 }
 
 async function checkServer(ctx: StatusCommandContext, port: number, host: string): Promise<HealthCheckResult> {
-  const startedAt = Date.now();
-  const controller = new AbortController();
-  const t = setTimeout(() => {
-    controller.abort();
-  }, 5000);
+  const probeHosts = buildLocalProbeHostCandidates(host);
+  let lastFailure: HealthCheckResult | null = null;
 
-  try {
-    const url = `http://${host}:${port}/health`;
-    const res = await ctx.fetch(url, { method: 'GET', signal: controller.signal });
-    const responseTime = Date.now() - startedAt;
-    if (!res.ok) {
-      logStatusNonBlocking(ctx, 'health_probe', 'check_server', `bad_status:${res.status}`, { host, port, status: res.status });
-      return { status: 'error', port, host, responseTime };
-    }
-    let data: any = null;
+  for (const probeHost of probeHosts) {
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const t = setTimeout(() => {
+      controller.abort();
+    }, 5000);
+
     try {
-      data = await res.json();
+      const url = `http://${probeHost}:${port}/health`;
+      const res = await ctx.fetch(url, { method: 'GET', signal: controller.signal });
+      const responseTime = Date.now() - startedAt;
+      if (!res.ok) {
+        logStatusNonBlocking(ctx, 'health_probe', 'check_server', `bad_status:${res.status}`, { host: probeHost, port, status: res.status });
+        lastFailure = { status: 'error', port, host: probeHost, responseTime };
+        continue;
+      }
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch (error) {
+        logStatusNonBlocking(ctx, 'health_probe', 'parse_health_json', error, { host: probeHost, port });
+        data = null;
+      }
+      const status = data?.status ? String(data.status) : 'unknown';
+      const version = data?.version ? String(data.version) : undefined;
+      const ready = typeof data?.ready === 'boolean' ? Boolean(data.ready) : undefined;
+      return { status, port, host: probeHost, responseTime, ...(version ? { version } : {}), ...(ready !== undefined ? { ready } : {}) };
     } catch (error) {
-      logStatusNonBlocking(ctx, 'health_probe', 'parse_health_json', error, { host, port });
-      data = null;
+      const responseTime = Date.now() - startedAt;
+      const message = error instanceof Error ? error.message : String(error);
+      const isTimeout = message.toLowerCase().includes('aborted') || message.toLowerCase().includes('timeout');
+      lastFailure = { status: isTimeout ? 'timeout' : 'stopped', port, host: probeHost, responseTime, error: message };
+    } finally {
+      clearTimeout(t);
     }
-    const status = data?.status ? String(data.status) : 'unknown';
-    const version = data?.version ? String(data.version) : undefined;
-    const ready = typeof data?.ready === 'boolean' ? Boolean(data.ready) : undefined;
-    return { status, port, host, responseTime, ...(version ? { version } : {}), ...(ready !== undefined ? { ready } : {}) };
-  } catch (error) {
-    const responseTime = Date.now() - startedAt;
-    const message = error instanceof Error ? error.message : String(error);
-    const isTimeout = message.toLowerCase().includes('aborted') || message.toLowerCase().includes('timeout');
-    return { status: isTimeout ? 'timeout' : 'stopped', port, host, responseTime, error: message };
-  } finally {
-    clearTimeout(t);
   }
+  return lastFailure ?? { status: 'stopped', port, host, error: 'probe candidates exhausted' };
 }
 
 function printHuman(ctx: StatusCommandContext, status: HealthCheckResult): void {

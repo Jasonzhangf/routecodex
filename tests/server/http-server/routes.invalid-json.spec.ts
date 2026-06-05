@@ -107,4 +107,83 @@ describe('http routes invalid json handling', () => {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
+
+  it('exposes Codex advanced model metadata so clients enable apply_patch capabilities', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-models-codex-metadata-'));
+    const providerRoot = path.join(tmp, 'provider');
+    const providerDir = path.join(providerRoot, 'minimax');
+    const restoreRccHome = process.env.RCC_HOME;
+    process.env.RCC_HOME = tmp;
+    await fs.mkdir(providerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.json'),
+      JSON.stringify(
+        {
+          version: '2.0.0',
+          providerId: 'minimax',
+          provider: {
+            id: 'minimax',
+            enabled: true,
+            type: 'openai',
+            baseURL: 'https://api.minimax.io',
+            models: {
+              'MiniMax-M3': {
+                supportsStreaming: true,
+                maxContext: 1000000
+              },
+              'gpt-5.5': {
+                supportsStreaming: true,
+                maxContext: 1000000
+              }
+            }
+          }
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    const app = express();
+    registerDefaultMiddleware(app, { server: { port: 5520, host: '127.0.0.1' } } as any);
+    registerHttpRoutes({
+      app,
+      config: { server: { port: 5520, host: '127.0.0.1' } } as any,
+      buildHandlerContext: () => ({}) as any,
+      getPipelineReady: () => true,
+      handleError: async () => {}
+    });
+
+    try {
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/v1/models`);
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        const data = Array.isArray(body?.data) ? body.data : [];
+        const bareAdvanced = data.find((item: any) => item?.id === 'gpt-5.5');
+        const minimax = data.find((item: any) => item?.id === 'minimax.MiniMax-M3');
+        const advanced = data.find((item: any) => item?.id === 'minimax.gpt-5.5');
+        expect(bareAdvanced).toBeTruthy();
+        expect(minimax).toBeTruthy();
+        expect(advanced).toBeTruthy();
+        expect(bareAdvanced.apply_patch_tool_type).toBe('freeform');
+        expect(bareAdvanced.owned_by).toBe('openai');
+        expect(minimax.apply_patch_tool_type).toBe('freeform');
+        expect(advanced.apply_patch_tool_type).toBe('freeform');
+        expect(minimax.apply_patch_tool_type).not.toBe('schema');
+        expect(minimax.web_search_tool_type).toBe('text_and_image');
+        expect(minimax.supports_search_tool).toBe(true);
+        expect(minimax.supports_parallel_tool_calls).toBe(true);
+        expect(minimax.input_modalities).toEqual(['text', 'image']);
+        expect(minimax.context_window).toBe(1000000);
+      });
+    } finally {
+      if (restoreRccHome === undefined) {
+        delete process.env.RCC_HOME;
+      } else {
+        process.env.RCC_HOME = restoreRccHome;
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 });

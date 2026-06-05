@@ -89,6 +89,251 @@ fn test_req_profile_responses_c4m_native_applied() {
 }
 
 #[test]
+fn test_req_profile_responses_instructions_to_input_trims_html_and_lifts_system_message() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "gpt-4.1",
+            "instructions": "  <b>System</b> instruction  ",
+            "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("responses:c4m".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_c4m_instructions_lift_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.payload.get("instructions").is_none());
+    assert_eq!(result.payload["input"][0]["role"], "system");
+    assert_eq!(result.payload["input"][0]["content"][0]["type"], "input_text");
+    assert_eq!(result.payload["input"][0]["content"][0]["text"], "System instruction");
+}
+
+#[test]
+fn test_req_profile_responses_token_limit_fields_are_removed_for_c4m() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "gpt-4.1",
+            "max_tokens": 200,
+            "maxTokens": 300,
+            "max_output_tokens": 400,
+            "maxOutputTokens": 500,
+            "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("responses:c4m".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_c4m_token_limit_strip_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.payload.get("max_tokens").is_none());
+    assert!(result.payload.get("maxTokens").is_none());
+    assert!(result.payload.get("max_output_tokens").is_none());
+    assert!(result.payload.get("maxOutputTokens").is_none());
+}
+
+#[test]
+fn test_req_profile_responses_crs_normalizes_chat_style_function_tools_for_responses_wire() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "gpt-5.5",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "Run a command",
+                        "parameters": { "type": "object", "properties": { "cmd": { "type": "string" } } }
+                    }
+                },
+                {
+                    "type": "function",
+                    "name": "apply_patch",
+                    "parameters": "{\"type\":\"object\",\"properties\":{}}"
+                }
+            ],
+            "input": [{
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "patch" }]
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("responses:crs".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_responses_crs_tool_schema_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.applied_profile, Some("responses:crs".to_string()));
+    let tools = result.payload["tools"].as_array().cloned().unwrap_or_default();
+    assert_eq!(tools.len(), 2);
+    assert_eq!(tools[0]["type"], "function");
+    assert_eq!(tools[0]["name"], "exec_command");
+    assert_eq!(tools[0]["description"], "Run a command");
+    assert!(tools[0]["parameters"].is_object());
+    assert!(tools[0].get("function").is_none());
+    assert_eq!(tools[1]["name"], "apply_patch");
+    assert!(tools[1]["parameters"].is_object());
+    assert!(tools[1].get("function").is_none());
+}
+
+#[test]
+fn test_req_profile_responses_tool_parameters_normalizes_string_json_to_object() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "gpt-5.5",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "apply_patch",
+                    "parameters": "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}"
+                }
+            ],
+            "input": [{
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "patch" }]
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("responses:crs".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_responses_tool_params_json_string_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let tools = result.payload["tools"].as_array().cloned().unwrap_or_default();
+    assert_eq!(tools[0]["parameters"]["type"], "object");
+    assert_eq!(tools[0]["parameters"]["properties"]["path"]["type"], "string");
+}
+
+#[test]
+fn test_req_profile_responses_tool_parameters_fallback_to_object_schema() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "gpt-5.5",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "exec_command",
+                    "parameters": 123
+                }
+            ],
+            "input": [{
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "run" }]
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("responses:crs".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_responses_tool_params_fallback_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let tools = result.payload["tools"].as_array().cloned().unwrap_or_default();
+    assert_eq!(tools[0]["parameters"]["type"], "object");
+    assert!(tools[0]["parameters"]["properties"].is_object());
+    assert_eq!(tools[0]["parameters"]["additionalProperties"], true);
+}
+
+#[test]
 fn test_req_profile_responses_c4m_protocol_mismatch_native_noop() {
     let input = ReqOutboundCompatInput {
         payload: json!({

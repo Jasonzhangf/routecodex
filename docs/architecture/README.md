@@ -2,6 +2,11 @@
 
 本目录承载“规则下沉”的项目级真源骨架，目标是把全局原则落成可查询、可维护、可逐步 gate 化的项目模板。
 
+- `snapshot-stage-contract.md`
+- `responses-direct-tool-shape-rustification-plan.md`
+- `responses-request-compat-rustification-plan.md`
+  - 定义 `--snap` 默认边界四件套、`--snap-stages` 选择器、模块级 snap 命名族、路径归档与最小测试覆盖
+
 ## 文件职责
 
 - `function-map.yml`
@@ -78,6 +83,17 @@
 - `scripts/architecture/verify-architecture-adjacent-builder-naming.mjs`
   - 检查架构 owner builder/parser/projector 是否显式编码相邻 source/target；除入口 payload、metadata carrier、error chain 特例外，禁止泛化命名与旧 `req_process/resp_process` 退化
 
+- `scripts/architecture/verify-architecture-snapshot-stage-contract.mjs`
+  - 检查 snapshot stage contract 是否完整：默认边界四件套、模块级命名族、CLI 入口、文档引用、最小测试覆盖
+- `scripts/architecture/verify-architecture-snapshot-stage-owners.mjs`
+  - 扫描 snapshot stage 真正使用点，强制只允许批准的边界 stage 与 owner 命名族，防止新增漂移 owner 绕过 contract
+- `scripts/architecture/verify-responses-direct-tool-shape-contract.mjs`
+  - 检查 Responses direct passthrough 的工具协议 contract：禁止 chat-style `tools[].function.name` 混入 Responses wire，且主 CI 必须跑对应 direct regression
+- `scripts/architecture/verify-responses-direct-tool-shape-rust-first.mjs`
+  - 检查 direct/provider 两条入口都显式先调用 Rust validator，防止回到纯 TS 校验
+- `scripts/architecture/verify-responses-request-compat-rust-only.mjs`
+  - 检查 `responses:c4m` / `responses:crs` request compat 与 function normalization 的唯一真源仍在 Rust `req_outbound_stage3_compat`，TS 只能通过 `runReqOutboundStage3CompatJson` 调用
+
 ## 使用规则
 
 1. 新增关键功能或发现定位困难的老功能时，先补 `function-map.yml`。
@@ -88,3 +104,8 @@
    - `npm run verify:architecture-ci`
    - 若需逐项定位，再拆跑各单项 `verify:architecture-*` / `verify:function-map-*`
    - `npm run verify:architecture-adjacent-builder-naming`
+   - `npm run verify:architecture-snapshot-stage-contract`
+   - `npm run verify:architecture-snapshot-stage-owners`
+   - `npm run verify:responses-direct-tool-shape-contract`
+   - `npm run verify:responses-direct-tool-shape-rust-first`
+   - `npm run verify:responses-request-compat-rust-only`

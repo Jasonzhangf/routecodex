@@ -1,5 +1,31 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
+jest.unstable_mockModule('../../../../src/server/runtime/http-server/direct-passthrough-payload.js', () => {
+  const resolveRawPayloadForDirect = (body: unknown, metadata?: Record<string, unknown>) => {
+    const source =
+      metadata?.__raw_request_body && typeof metadata.__raw_request_body === 'object' && !Array.isArray(metadata.__raw_request_body)
+        ? structuredClone(metadata.__raw_request_body as Record<string, unknown>)
+        : (body && typeof body === 'object' && !Array.isArray(body)
+          ? structuredClone(body as Record<string, unknown>)
+          : {});
+    if ((((body as Record<string, unknown> | undefined)?.stream) === true || metadata?.stream === true || metadata?.outboundStream === true) && source.stream !== true) {
+      source.stream = true;
+    }
+    return source;
+  };
+  const applyMinimalDirectOverrides = (payload: Record<string, unknown>) => structuredClone(payload);
+  const evaluateDirectRouteDecision = () => ({
+    providerWireValid: true as const,
+    requiresHubRelay: false as const,
+    reason: undefined,
+  });
+  return {
+    resolveRawPayloadForDirect,
+    applyMinimalDirectOverrides,
+    evaluateDirectRouteDecision,
+  };
+});
+
 describe('provider-direct response passthrough', () => {
   it('provider-mode direct streaming bypasses response converter entirely', async () => {
     jest.resetModules();

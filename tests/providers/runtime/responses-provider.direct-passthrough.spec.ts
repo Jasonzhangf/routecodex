@@ -1,20 +1,79 @@
 import { describe, expect, jest, test } from '@jest/globals';
 
-jest.mock('../../../src/modules/llmswitch/bridge.js', () => ({
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+  reportProviderErrorToRouterPolicy: async () => {},
+  writeSnapshotViaHooks: async () => {},
+  sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => {
+    const next = structuredClone(input.payload);
+    if (Array.isArray(next.input)) {
+      next.input = next.input.map((item: any) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item) || item.type !== 'reasoning') {
+          return item;
+        }
+        const sanitized = { ...item };
+        delete sanitized.content;
+        delete sanitized.encrypted_content;
+        return sanitized;
+      });
+    }
+    return next;
+  },
+  validateResponsesDirectToolShapeContractNative: () => ({ ok: true as const }),
+  applyResponsesDirectRouteParamsOverrideNative: (input: {
+    payload: Record<string, unknown>;
+    routeParams?: Record<string, unknown>;
+    providerDefaultModel?: string;
+    requestReasoningEffort?: string;
+  }) => {
+    const next = structuredClone(input.payload);
+    const routeModel = typeof input.routeParams?.model === 'string' ? input.routeParams.model.trim() : '';
+    const providerDefaultModel = typeof input.providerDefaultModel === 'string' ? input.providerDefaultModel.trim() : '';
+    if (routeModel || providerDefaultModel) {
+      next.model = routeModel || providerDefaultModel;
+    }
+    const routeReasoningEffort =
+      typeof input.routeParams?.reasoningEffort === 'string' ? input.routeParams.reasoningEffort.trim() : '';
+    const topLevelReasoningEffort =
+      typeof input.requestReasoningEffort === 'string' ? input.requestReasoningEffort.trim() : '';
+    if (routeReasoningEffort || topLevelReasoningEffort) {
+      const effort = routeReasoningEffort || topLevelReasoningEffort;
+      next.reasoning_effort = effort;
+      next.reasoning = { effort };
+    }
+    return next;
+  },
+  buildResponsesDirectPassthroughBodyNative: (payload: Record<string, unknown>) => {
+    const next = structuredClone(payload);
+    for (const key of Object.keys(next)) {
+      if (key.startsWith('__')) {
+        delete (next as Record<string, unknown>)[key];
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'metadata')) {
+      throw new Error('provider-runtime-error: metadata is not allowed in direct passthrough responses payload');
+    }
+    const model = typeof next.model === 'string' ? next.model.trim() : '';
+    if (!model) {
+      throw new Error('provider-runtime-error: missing model from direct passthrough responses payload');
+    }
+    next.model = model;
+    return next;
+  },
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ status: 'completed', output: [] })
   })
 }), { virtual: true });
 
-jest.mock('../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} })
 }), { virtual: true });
 
 import type { OpenAIStandardConfig } from '../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
-import { ResponsesProvider } from '../../../src/providers/core/runtime/responses-provider.js';
 import { attachProviderRuntimeMetadata } from '../../../src/providers/core/runtime/provider-runtime-metadata.js';
+
+const { ResponsesProvider } = await import('../../../src/providers/core/runtime/responses-provider.js');
 
 const emptyDeps: ModuleDependencies = {
   logger: {

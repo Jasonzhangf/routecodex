@@ -134,6 +134,7 @@ ServerReqInbound01ClientRaw
 
 - 作用：把 governed Hub request 定型为 provider-neutral outbound semantic。
 - owning module：Rust Hub Pipeline req outbound blocks。
+- Responses compat 约束：`responses:c4m` / `responses:crs` 的 `instructions -> input`、tool normalization、参数删改必须由 Rust `req_outbound_stage3_compat` 完成；TS 只允许桥接 `runReqOutboundStage3CompatJson`。
 - 禁止：生成 provider SDK options；禁止 metadata/debug/error 进入出站语义。
 
 ### 3.6 ProviderReqOutbound06WirePayload

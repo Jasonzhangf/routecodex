@@ -25,4 +25,43 @@ describe('provider outbound native sanitize namespace guard', () => {
       }
     }]);
   });
+
+  test('converts custom apply_patch into provider function tool for openai-chat transport', () => {
+    const output = sanitizeProviderOutboundPayloadWithNative({
+      protocol: 'openai-chat',
+      payload: {
+        model: 'minimax-m3-free',
+        messages: [{ role: 'user', content: 'patch' }],
+        tools: [{
+          type: 'custom',
+          name: 'apply_patch',
+          description: 'Use the `apply_patch` tool to edit files.',
+        }]
+      }
+    });
+
+    expect(output.tools).toEqual([{
+      type: 'function',
+      function: {
+        name: 'apply_patch',
+        description: 'Use the `apply_patch` tool to edit files.',
+        parameters: {
+          type: 'object',
+          properties: {
+            filePath: {
+              type: 'string',
+              description: 'Workspace-relative target path.'
+            },
+            patch: {
+              type: 'string',
+              description: 'Patch payload. Supports line-edit patch, unified diff, or fenced diff block.'
+            }
+          },
+          required: ['filePath', 'patch'],
+          additionalProperties: true
+        },
+        strict: false
+      }
+    }]);
+  });
 });

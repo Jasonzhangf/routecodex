@@ -14,7 +14,6 @@ const LEGACY_DEFAULT_TEXT: &str = "继续执行";
 // non-stop finish_reason lands (handled at the snapshot level).
 const STOP_SCHEMA_PROVIDED_MAX_REPEATS: u32 = 3;
 const STOP_SCHEMA_MISSING_MAX_REPEATS: u32 = 3;
-const STOP_SCHEMA_HISTORY_MAX_ROUNDS: u32 = 3;
 // Kept as a shared alias for callers/tests that intentionally do not
 // distinguish between the two regimes (kept equal to the strict side).
 const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS: u32 = STOP_SCHEMA_PROVIDED_MAX_REPEATS;
@@ -22,7 +21,7 @@ const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS: u32 = STOP_SCHEMA_PROVIDED_MAX_R
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
     "收尾前请先回答：当前用户目标是什么？已经完成了哪些步骤？是否已经完成目标？建议下一步是什么？如果建议下一步不为空，不要询问用户、不要只总结，直接执行下一步并用文件、日志、命令输出或测试结果补证据；如果目标已完成或确实阻塞，请给出面向用户的简洁总结。",
     "请重新检查用户最初输入和后续指令：用户真正意图是什么？目标边界是什么？当前问题卡在哪里？之前的笔记、文件、日志、命令输出或测试结果是否已经看过？如果仅靠重新理解用户意图就能获得信息，请先据此继续执行；否则按目标、已做、证据、问题原因、已排除因素、排查顺序补齐缺口。",
-    "请给出当前工作的执行总结，并判断是否还有明确下一步。若有下一步，不要询问用户、不要只总结，直接执行该下一步；若没有明确下一步，请给出面向用户的简洁总结。",
+    "这是最后一次自动续杯预算。不要再开启新一轮执行，不要复述系统校验过程；请直接给出面向用户的最终收尾 summary，包含：已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步。最后必须附 stop schema；若目标未完成且仍有下一步，也不要继续执行，把下一步写入 next_suggested_path 并以 blocked/continue_needed 说明。",
 ];
 const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"请在回复末尾附这个 JSON 对象，字段名必须一致：{"stopreason":0,"reason":"已完成/已阻塞/仍需继续的具体原因","has_evidence":1,"evidence":"文件/日志/命令输出/测试结果等证据；没有则空字符串","issue_cause":"问题原因；无异常填空字符串","excluded_factors":"已排除因素；无则空字符串","diagnostic_order":"排查顺序/已执行顺序","done_steps":"已经完成的步骤；没有则空字符串","next_step":"立刻继续执行的下一步；若没有则空字符串","next_suggested_path":"建议继续推进的路径；若没有则空字符串","learned":"本轮学到的可复用事实/踩坑/配置结论；无则空字符串"}。stopreason 只能用数字：0=finished，1=blocked，2=continue_needed。"#;
 
@@ -284,7 +283,7 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
         skip_reason: None,
         used: snapshot.used,
         max_repeats: effective_max_repeats,
-        followup_text: Some(normalize_followup_text(snapshot.text, snapshot.used)),
+        followup_text: Some(normalize_followup_text(&snapshot, snapshot.used)),
         provider_pin: ctx.provider_pin.clone(),
     }
 }
@@ -297,11 +296,13 @@ fn default_execution_prompt(used: u32) -> String {
         .to_string()
 }
 
-fn normalize_followup_text(text: String, used: u32) -> String {
-    if text.trim() == LEGACY_DEFAULT_TEXT {
+fn normalize_followup_text(snapshot: &StopMessageSnapshot, used: u32) -> String {
+    if matches!(snapshot.source, SnapshotSource::Default)
+        || snapshot.text.trim() == LEGACY_DEFAULT_TEXT
+    {
         default_execution_prompt(used)
     } else {
-        text
+        snapshot.text.clone()
     }
 }
 
@@ -630,7 +631,14 @@ fn schema_invalid_followup(
             parsed: Some(parsed),
         };
     }
-    schema_followup(reason_code, used, effective_max, message, Some(parsed), true)
+    schema_followup(
+        reason_code,
+        used,
+        effective_max,
+        message,
+        Some(parsed),
+        true,
+    )
 }
 
 fn schema_missing_followup(
@@ -674,50 +682,14 @@ fn stop_schema_consecutive_stop_max_repeats(max_repeats: u32) -> u32 {
 
 /// Build the final allow-stop summary prefix.
 ///
-/// The prefix embeds:
-/// 1. The current stop reason the model just committed to.
-/// 2. The trail of prior `followup_text` injections the gate asked the
-///    model to answer, so the user can see the rounds the system burned
-///    instead of letting them disappear.
-///
-/// Callers pass the most-recent history tail (oldest-first or newest-first
-/// doesn't matter; the helper normalises order) collected across the
-/// consecutive-stop chain. The cap is `STOP_SCHEMA_HISTORY_MAX_ROUNDS`
-/// to keep the prefix bounded even on the 10-round missing-schema path.
 pub fn build_allow_stop_summary_prefix_from_history(
     current_reason: &str,
-    history: &[String],
+    _history: &[String],
 ) -> String {
     let mut out = String::new();
     out.push_str("停止原因：");
     out.push_str(current_reason.trim());
     out.push('\n');
-    out.push('\n');
-    let cap = STOP_SCHEMA_HISTORY_MAX_ROUNDS as usize;
-    let total = history.len();
-    if total > cap {
-        out.push_str("过去 stop 续杯注入（仅保留最近 ");
-        out.push_str(&cap.to_string());
-        out.push_str(" 次 / 共 ");
-        out.push_str(&total.to_string());
-        out.push_str(" 次）：\n");
-    } else if total > 0 {
-        out.push_str("过去 stop 续杯注入（");
-        out.push_str(&total.to_string());
-        out.push_str(" 次）：\n");
-    }
-    let start = total.saturating_sub(cap);
-    for (idx, item) in history.iter().skip(start).enumerate() {
-        let round = start + idx + 1;
-        out.push_str("[round ");
-        out.push_str(&round.to_string());
-        out.push_str("] ");
-        out.push_str(item.trim());
-        out.push('\n');
-    }
-    if total == 0 {
-        out.push_str("（无历史注入）\n");
-    }
     out
 }
 
@@ -736,6 +708,12 @@ fn schema_followup(
     let mut text = String::new();
     if reason_code == "stop_schema_continue_next_step" {
         text.push_str(message);
+    } else if used.saturating_add(1) >= effective_max
+        || (used as usize) >= DEFAULT_EXECUTION_PROMPTS.len().saturating_sub(1)
+    {
+        text.push_str(default_execution_prompt(used).as_str());
+        text.push_str("\n\n最终收尾 schema 缺失：请不要继续执行新动作，不要复述 stopless/校验过程；直接给用户可读 summary，并在末尾附 stop schema。summary 必须包含已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步。");
+        text.push_str(STOP_SCHEMA_JSON_EXAMPLE);
     } else {
         text.push_str(default_execution_prompt(used).as_str());
         text.push_str("\n\nStop schema 校验未通过：");
@@ -778,7 +756,11 @@ fn parse_first_stop_schema_json_object(text: &str) -> Option<Value> {
 fn read_u8(value: Option<&Value>) -> Option<u8> {
     value.and_then(|v| {
         if let Some(n) = v.as_u64() {
-            return if n <= u8::MAX as u64 { Some(n as u8) } else { None };
+            return if n <= u8::MAX as u64 {
+                Some(n as u8)
+            } else {
+                None
+            };
         }
         let text = v.as_str()?.trim().to_lowercase();
         match text.as_str() {
@@ -1057,33 +1039,21 @@ mod tests {
     }
 
     #[test]
-    fn allow_stop_summary_prefix_includes_full_history_trail() {
-        // The final summary must surface ALL the prior followup injections
-        // the gate asked the model to answer, plus the current reason, so
-        // the user can see the rounds the system burned.
+    fn allow_stop_summary_prefix_does_not_expose_internal_followup_history() {
         let history: Vec<String> = (1..=3)
             .map(|i| format!("续杯 #{}: 你需要继续执行", i))
             .collect();
-        let prefix = build_allow_stop_summary_prefix_from_history(
-            "目标已完成，全部轮次均已恢复",
-            &history,
-        );
+        let prefix =
+            build_allow_stop_summary_prefix_from_history("目标已完成，全部轮次均已恢复", &history);
         assert!(prefix.contains("停止原因：目标已完成"));
         for entry in &history {
-            assert!(prefix.contains(entry.as_str()), "missing history entry: {}", entry);
+            assert!(
+                !prefix.contains(entry.as_str()),
+                "leaked history entry: {}",
+                entry
+            );
         }
-        // Last-3 cap: with 5 entries, only the last 3 are kept.
-        let long_history: Vec<String> = (1..=5)
-            .map(|i| format!("续杯 #{}", i))
-            .collect();
-        let trimmed = build_allow_stop_summary_prefix_from_history(
-            "完成",
-            &long_history,
-        );
-        assert!(trimmed.contains("续杯 #3"));
-        assert!(trimmed.contains("续杯 #5"));
-        assert!(!trimmed.contains("续杯 #1"));
-        assert!(!trimmed.contains("续杯 #2"));
+        assert!(!prefix.contains("过去 stop 续杯注入"));
     }
 
     #[test]
@@ -1124,8 +1094,8 @@ mod tests {
         });
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
-        assert!(text.contains("执行总结"));
-        assert!(text.contains("明确下一步"));
+        assert!(text.contains("最终收尾 summary"));
+        assert!(text.contains("建议下一步"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行，不要中断总结".to_string(),
@@ -1138,6 +1108,26 @@ mod tests {
         assert_eq!(
             result.followup_text,
             Some("继续执行，不要中断总结".to_string())
+        );
+    }
+
+    #[test]
+    fn default_source_uses_round_heuristic_instead_of_fixed_text() {
+        let mut ctx = base_ctx();
+        ctx.persisted_snapshot = Some(StopMessageSnapshot {
+            text: "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结。".to_string(),
+            max_repeats: 3,
+            used: 1,
+            source: SnapshotSource::Default,
+            stage_mode: StageMode::On,
+        });
+        let result = decide(&ctx);
+        let text = result.followup_text.expect("followup text");
+        assert!(text.contains("用户真正意图是什么"));
+        assert!(text.contains("排查顺序"));
+        assert_ne!(
+            text,
+            "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结。"
         );
     }
 
@@ -1307,7 +1297,10 @@ mod tests {
         ctx.default_max_repeats = 5;
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Trigger);
-        assert_eq!(result.followup_text.unwrap(), "继续");
+        assert!(result
+            .followup_text
+            .unwrap()
+            .contains("当前用户目标是什么"));
         assert_eq!(result.max_repeats, 5);
     }
 
@@ -1508,7 +1501,10 @@ mod tests {
         assert_eq!(no_next.action, StopSchemaGateAction::Followup);
         assert_eq!(no_next.reason_code, "stop_schema_next_step_missing");
         assert!(no_next.count_budget);
-        assert!(no_next.followup_text.unwrap().contains("当前工作的简洁总结"));
+        assert!(no_next
+            .followup_text
+            .unwrap()
+            .contains("当前工作的简洁总结"));
 
         let no_next_exhausted = evaluate_stop_schema_gate(
             r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"","next_suggested_path":""}"#,

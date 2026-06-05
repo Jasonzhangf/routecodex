@@ -179,11 +179,22 @@ fn validate_tools(
             .unwrap_or(false)
     }
 
-    fn has_builtin_web_search_type(raw: Option<&Value>) -> bool {
+    fn is_custom_tool_type(raw: Option<&Value>) -> bool {
+        raw.and_then(|v| v.as_str())
+            .map(|v| v.trim().eq_ignore_ascii_case("custom"))
+            .unwrap_or(false)
+    }
+
+    fn has_supported_builtin_tool_type(raw: Option<&Value>) -> bool {
         raw.and_then(|v| v.as_str())
             .map(|v| {
                 let lowered = v.trim().to_ascii_lowercase();
-                lowered == "web_search" || lowered.starts_with("web_search")
+                lowered == "web_search"
+                    || lowered.starts_with("web_search")
+                    || lowered == "tool_search"
+                    || lowered == "image_generation"
+                    || lowered == "code_interpreter"
+                    || lowered == "computer_use_preview"
             })
             .unwrap_or(false)
     }
@@ -192,6 +203,13 @@ fn validate_tools(
         row.get("function")
             .and_then(|v| v.as_object())
             .and_then(|fn_row| fn_row.get("name"))
+            .and_then(|v| v.as_str())
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    fn has_custom_tool_name(row: &Map<String, Value>) -> bool {
+        row.get("name")
             .and_then(|v| v.as_str())
             .map(|v| !v.trim().is_empty())
             .unwrap_or(false)
@@ -318,10 +336,12 @@ fn validate_tools(
         )?;
         let raw_type = row.get("type");
         let is_function = is_function_tool_type(raw_type);
-        let is_builtin_web_search = has_builtin_web_search_type(raw_type);
+        let is_custom = is_custom_tool_type(raw_type);
+        let is_supported_builtin = has_supported_builtin_tool_type(raw_type);
         let is_namespace_tool = has_namespace_tool_shape(row);
         if !is_function
-            && !is_builtin_web_search
+            && !is_custom
+            && !is_supported_builtin
             && !is_namespace_tool
             && !has_function_node_with_name(row)
         {
@@ -330,7 +350,7 @@ fn validate_tools(
         direction,
         "tools_type",
         format!(
-          "tools[{index}].type must be \"function\", \"namespace\", or supported builtin tool type (e.g. \"web_search\")"
+          "tools[{index}].type must be \"function\", \"namespace\", or supported builtin tool type (e.g. \"web_search\", \"tool_search\")"
         )
         .as_str(),
         source,
@@ -338,6 +358,18 @@ fn validate_tools(
         }
         if is_namespace_tool {
             validate_namespace_children(row, index, stage, direction, source)?;
+            continue;
+        }
+        if is_custom {
+            if !has_custom_tool_name(row) {
+                return Err(build_validation_error(
+                    stage,
+                    direction,
+                    "tools_custom",
+                    format!("tools[{index}].name must be a string").as_str(),
+                    source,
+                ));
+            }
             continue;
         }
         if !is_function {
@@ -696,5 +728,80 @@ mod tests {
         assert!(result.is_err());
         let reason = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(reason.contains("[tools_type]"));
+    }
+
+    #[test]
+    fn validate_chat_envelope_accepts_responses_custom_tool() {
+        let chat = json!({
+          "messages": [
+            { "role": "user", "content": "edit file" }
+          ],
+          "tools": [
+            {
+              "type": "custom",
+              "name": "apply_patch",
+              "description": "Use apply_patch",
+              "format": {
+                "type": "grammar",
+                "syntax": "lark",
+                "definition": "start: begin_patch hunk+ end_patch"
+              }
+            }
+          ],
+          "parameters": {
+            "model": "gpt-5.5"
+          },
+          "metadata": {
+            "context": {}
+          }
+        });
+        let result = validate_chat_envelope(&chat, "req_inbound", "request", Some("test"));
+        assert!(
+            result.is_ok(),
+            "{}",
+            result
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_chat_envelope_accepts_tool_search_builtin() {
+        let chat = json!({
+          "messages": [
+            { "role": "user", "content": "find tools" }
+          ],
+          "tools": [
+            {
+              "type": "tool_search",
+              "execution": "client",
+              "description": "Search deferred tools",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": { "type": "string" }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+              }
+            }
+          ],
+          "parameters": {
+            "model": "gpt-5.5"
+          },
+          "metadata": {
+            "context": {}
+          }
+        });
+        let result = validate_chat_envelope(&chat, "req_inbound", "request", Some("test"));
+        assert!(
+            result.is_ok(),
+            "{}",
+            result
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        );
     }
 }

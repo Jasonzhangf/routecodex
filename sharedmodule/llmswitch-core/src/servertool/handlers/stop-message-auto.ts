@@ -223,74 +223,6 @@ function stripStopSchemaControlText(payload: JsonObject): JsonObject {
   return payload;
 }
 
-function buildStopSchemaBudgetExhaustedSummary(args: {
-  reasonCode?: string;
-  capturedRequest?: JsonObject | null;
-  currentSummary?: string;
-} = {}): string {
-  const current = typeof args.currentSummary === 'string' ? stripStopSchemaControlBlocks(args.currentSummary).trim() : '';
-  const rounds = extractStoplessRounds(args.capturedRequest, current);
-  const lines = [
-    'Stopless 校验结果：连续 stop 预算已耗尽。',
-    `校验状态：${args.reasonCode ?? 'stop_schema_budget_exhausted'}`,
-    '处理结果：不再继续自动续杯；以下保留三次续杯询问、模型返回内容与最后原始 summary，请完整呈现当前问题、已做事项、未完成事项、阻塞点、问题原因、已排除因素与建议排查顺序。'
-  ];
-  rounds.forEach((round, index) => {
-    lines.push(`\n第 ${index + 1} 次续杯询问：\n${round.question}`);
-    lines.push(`第 ${index + 1} 次模型返回：\n${round.answer || '(空)'}`);
-  });
-  lines.push(`\n最后原始 summary：\n${current || '(空)'}`);
-  return lines.join('\n');
-}
-
-function extractStoplessRounds(capturedRequest: JsonObject | null | undefined, currentSummary?: string): Array<{ question: string; answer: string }> {
-  const messages = capturedRequest && Array.isArray((capturedRequest as { messages?: unknown }).messages)
-    ? (capturedRequest as { messages: unknown[] }).messages
-    : [];
-  const rounds: Array<{ question: string; answer: string }> = [];
-  for (let index = 0; index < messages.length; index += 1) {
-    const row = messages[index] && typeof messages[index] === 'object' && !Array.isArray(messages[index])
-      ? messages[index] as Record<string, unknown>
-      : null;
-    if (row?.role !== 'user') continue;
-    const question = flattenMessageContent(row.content).trim();
-    if (!isStoplessFollowupQuestion(question)) continue;
-    let answer = '';
-    for (let next = index + 1; next < messages.length; next += 1) {
-      const nextRow = messages[next] && typeof messages[next] === 'object' && !Array.isArray(messages[next])
-        ? messages[next] as Record<string, unknown>
-        : null;
-      if (nextRow?.role === 'assistant') {
-        answer = flattenMessageContent(nextRow.content).trim();
-        break;
-      }
-      if (nextRow?.role === 'user') break;
-    }
-    rounds.push({ question, answer });
-  }
-  const last = rounds[rounds.length - 1];
-  const current = typeof currentSummary === 'string' ? currentSummary.trim() : '';
-  if (last && !last.answer && current) {
-    last.answer = current;
-  }
-  return rounds.slice(-3);
-}
-
-function flattenMessageContent(content: unknown): string {
-  const texts: string[] = [];
-  collectTextBlocks(content, texts);
-  return texts.join('\n');
-}
-
-function isStoplessFollowupQuestion(text: string): boolean {
-  return text.includes('Stop schema 校验未通过') ||
-    text.includes('继续完成当前用户目标') ||
-    text.includes('你刚才再次停止') ||
-    text.includes('最后一次续杯预算') ||
-    text.includes('你已经提供 next_step') ||
-    text.includes('按当前目标继续执行');
-}
-
 function buildStopSchemaFinalPlan(chatResponse: JsonObject): ServerToolHandlerPlan {
   const visibleChatResponse = stripStopSchemaControlText({ ...chatResponse } as JsonObject);
   return {
@@ -414,6 +346,21 @@ function clearPersistedStopMessageRuntimeState(keys: string[]): void {
     if (!persistedState) continue;
     clearStopMessageState(persistedState, Date.now());
     persistStopMessageState(key, persistedState);
+  }
+}
+
+function resetPersistedStopMessageUsed(keys: string[]): void {
+  const now = Date.now();
+  for (const key of keys) {
+    if (!isPersistentStickyKey(key)) continue;
+    const persistedState = loadRoutingInstructionStateSync(key) ?? null;
+    if (!persistedState) continue;
+    if (persistedState.stopMessageUsed !== undefined || persistedState.stopMessageLastUsedAt !== undefined) {
+      persistedState.stopMessageUsed = 0;
+      persistedState.stopMessageLastUsedAt = undefined;
+      persistedState.stopMessageUpdatedAt = now;
+      persistStopMessageState(key, persistedState);
+    }
   }
 }
 
@@ -798,21 +745,14 @@ const handler: ServerToolHandler = async (
 
   try {
     if (decision.action !== 'trigger' && decision.skip_reason === 'skip_reached_max_repeats') {
-      const prefixed = applyStopSummaryPrefix(
-        ctx.base,
-        buildStopSchemaBudgetExhaustedSummary({
-          reasonCode: 'stop_schema_budget_exhausted',
-          capturedRequest: captured,
-          currentSummary: extractCurrentAssistantStopText(ctx.base)
-        })
-      );
+      const prefixed = applyStopSummaryPrefix(ctx.base, '');
       clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
       compare.reason = 'stop_schema_budget_exhausted';
       return buildStopSchemaFinalPlan(prefixed);
     }
     if (decision.action !== 'trigger') {
       if (decision.skip_reason === 'skip_not_stop_finish_reason') {
-        clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
+        resetPersistedStopMessageUsed(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
       }
       if (decision.skip_reason === 'skip_no_stopmessage_snapshot' || decision.skip_reason === 'skip_goal_active') {
         const assistantText = assistantStopText;
@@ -851,14 +791,7 @@ const handler: ServerToolHandler = async (
     const schemaUsedBeforeCount = decision.used;
     compare.reason = schemaGate.reason_code || compare.reason;
     if (schemaGate.action === 'fail_fast') {
-      const prefixed = applyStopSummaryPrefix(
-        ctx.base,
-        buildStopSchemaBudgetExhaustedSummary({
-          reasonCode: schemaGate.reason_code,
-          capturedRequest: captured,
-          currentSummary: extractCurrentAssistantStopText(ctx.base)
-        })
-      );
+      const prefixed = applyStopSummaryPrefix(ctx.base, '');
       clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
       return buildStopSchemaFinalPlan(prefixed);
     }

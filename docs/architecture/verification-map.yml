@@ -74,3 +74,147 @@ verification:
       - npm run build:min
     notes:
       - Any provider outbound metadata change must rerun provider metadata boundary suite.
+
+  - feature_id: responses.direct_tool_shape_contract
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/direct-passthrough-payload.ts
+      - src/providers/core/runtime/responses-provider.ts
+    contract:
+      - tests/server/runtime/http-server/direct-passthrough-payload.spec.ts
+      - tests/server/runtime/http-server/direct-passthrough-minimum-overrides.spec.ts
+      - tests/providers/core/runtime/protocol-http-providers.unit.test.ts
+    integration:
+      - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
+      - tests/server/runtime/http-server/provider-direct-pipeline.spec.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - tests/providers/runtime/responses-provider.direct-passthrough.spec.ts
+    smoke:
+      - npm run verify:responses-direct-tool-shape-contract
+      - npm run verify:responses-direct-tool-shape-rust-first
+      - npm run verify:responses-direct-tool-shape-native-availability
+      - npm run verify:responses-direct-tool-shape-no-ts-fallback
+      - npm run test:ci:jest
+    build:
+      - npm run build:min
+    notes:
+      - Rust now owns the contract; direct/provider guards must remain thin shells around the native validator, shared direct passthrough body builder, shared direct route decision helper, shared `apply_patch` relay detector, and shared direct routeParams override helper.
+      - same-protocol direct skip/relay regressions for `apply_patch` servertool mode and Responses custom `apply_patch` declarations must remain in CI, not local-only route tests.
+      - Raw direct replay payload selection and stream lift are part of the same Rust-owned direct contract and must not reappear in TS.
+
+  - feature_id: responses.request_compat_normalization
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.ts
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    integration:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    smoke:
+      - npm run verify:responses-request-compat-rust-only
+    build:
+      - npm run build:min
+    notes:
+      - c4m/crs request compat and chat-style function tool normalization must stay inside Rust stage3 compat; TS bridge may only call the native stage runner.
+
+  - feature_id: responses.function_tool_normalization
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    integration:
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    smoke:
+      - npm run verify:responses-function-tool-normalization-rust-only
+    build:
+      - npm run build:min
+    notes:
+      - Shared chat-style function tool to Responses wire normalization must stay inside Rust request compat; TS bridge may only call the native stage runner.
+
+  - feature_id: responses.tool_parameters_normalization
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    integration:
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    smoke:
+      - npm run verify:responses-tool-parameters-normalization-rust-only
+    build:
+      - npm run build:min
+    notes:
+      - Shared tool parameters normalization must stay inside Rust request compat; TS bridge may only call the native stage runner.
+
+  - feature_id: responses.instructions_to_input_normalization
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    integration:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    smoke:
+      - npm run verify:responses-instructions-to-input-rust-only
+    build:
+      - npm run build:min
+    notes:
+      - Shared instructions-to-input normalization must stay inside Rust request compat; TS bridge may only call the native stage runner.
+
+  - feature_id: responses.token_limit_field_normalization
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    integration:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    smoke:
+      - npm run verify:responses-token-limit-field-normalization-rust-only
+    build:
+      - npm run build:min
+    notes:
+      - Shared token-limit field stripping must stay inside Rust request compat; TS bridge may only call the native stage runner.
+
+  - feature_id: responses.c4m_request_compat
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    integration:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    smoke:
+      - npm run verify:responses-c4m-request-compat-rust-only
+    build:
+      - npm run build:min
+    notes:
+      - c4m closeout is now a thin composition shell over shared token-limit/instructions/tool normalization units.
+      - Shared token-limit stripping is verified under `responses.token_limit_field_normalization`.
+      - Shared instructions lift is verified under `responses.instructions_to_input_normalization`.
+      - Shared tool normalization is verified under `responses.function_tool_normalization`.
+      - Shared parameters normalization is verified under `responses.tool_parameters_normalization`.
+
+  - feature_id: responses.crs_request_compat
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    integration:
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    smoke:
+      - npm run verify:responses-crs-request-compat-rust-only
+    build:
+      - npm run build:min
+    notes:
+      - crs closeout focuses on temperature stripping only.
+      - Shared tool normalization is verified under `responses.function_tool_normalization`.
+      - Shared parameters normalization is verified under `responses.tool_parameters_normalization`.

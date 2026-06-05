@@ -221,6 +221,8 @@ export function readConfigApiKey(fsImpl: typeof fs, configPath: string): string 
   }
 }
 
+import { resolvePreferredLocalConnectHost } from '../../../utils/local-connect-host.js';
+
 /**
  * Normalize connect host.
  *
@@ -228,14 +230,7 @@ export function readConfigApiKey(fsImpl: typeof fs, configPath: string): string 
  * address (typically 127.0.0.1 for local usage).
  */
 export function normalizeConnectHost(host: string): string {
-  const value = String(host || '').trim().toLowerCase();
-  if (!value) {
-    return '127.0.0.1';
-  }
-  if (value === '0.0.0.0' || value === '::' || value === '::1' || value === 'localhost') {
-    return '127.0.0.1';
-  }
-  return host;
+  return resolvePreferredLocalConnectHost(host, '127.0.0.1');
 }
 
 /**

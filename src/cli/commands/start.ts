@@ -8,6 +8,7 @@ import { resolveRccConfigFile, resolveRccUserDir } from '../../config/user-data-
 import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import { detectUserConfigFormat, parseUserConfigText } from '../../config/user-config-codec.js';
 import { describeHealthProbeFailure, probeRouteCodexHealth } from '../../utils/http-health-probe.js';
+import { buildLocalProbeHostCandidates } from '../../utils/local-connect-host.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
@@ -775,20 +776,27 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         };
 
         const isChildHealthy = async (): Promise<boolean> => {
-          const probe = await probeRouteCodexHealth({
-            fetchImpl: ctx.fetch,
-            host: LOCAL_HOSTS.IPV4,
-            port: resolvedPort,
-            timeoutMs: 800
-          });
-          if (!probe.ok) {
-            logStartNonBlocking(ctx, 'child_health_probe', describeHealthProbeFailure(probe), {
+          let lastProbe: Awaited<ReturnType<typeof probeRouteCodexHealth>> | null = null;
+          for (const host of buildLocalProbeHostCandidates(serverHost)) {
+            const probe = await probeRouteCodexHealth({
+              fetchImpl: ctx.fetch,
+              host,
               port: resolvedPort,
-              kind: probe.kind,
-              status: probe.status
+              timeoutMs: 800
+            });
+            lastProbe = probe;
+            if (probe.ok) {
+              return true;
+            }
+          }
+          if (lastProbe && !lastProbe.ok) {
+            logStartNonBlocking(ctx, 'child_health_probe', describeHealthProbeFailure(lastProbe), {
+              port: resolvedPort,
+              kind: lastProbe.kind,
+              status: lastProbe.status
             });
           }
-          return probe.ok;
+          return false;
         };
 
         const waitForServerEntryReady = async (entryPath: string, deadlineMs: number): Promise<boolean> => {

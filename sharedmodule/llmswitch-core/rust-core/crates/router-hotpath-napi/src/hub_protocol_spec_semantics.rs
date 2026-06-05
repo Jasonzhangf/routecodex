@@ -382,6 +382,102 @@ fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
         .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or("");
+    if tool_type.eq_ignore_ascii_case("custom") {
+        let name = row
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if matches!(name, Some("apply_patch")) {
+            let mut function = Map::new();
+            function.insert(
+                "name".to_string(),
+                Value::String("apply_patch".to_string()),
+            );
+            if let Some(description) = row
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                function.insert(
+                    "description".to_string(),
+                    Value::String(description.to_string()),
+                );
+            }
+            function.insert(
+                "parameters".to_string(),
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "filePath": {
+                            "type": "string",
+                            "description": "Workspace-relative target path."
+                        },
+                        "patch": {
+                            "type": "string",
+                            "description": "Patch payload. Supports line-edit patch, unified diff, or fenced diff block."
+                        }
+                    },
+                    "required": ["filePath", "patch"],
+                    "additionalProperties": true
+                }),
+            );
+            function.insert("strict".to_string(), Value::Bool(false));
+
+            let mut out = Map::new();
+            out.insert("type".to_string(), Value::String("function".to_string()));
+            out.insert("function".to_string(), Value::Object(function));
+            return vec![Value::Object(out)];
+        }
+    }
+    if tool_type.eq_ignore_ascii_case("function") {
+        let function_row = row
+            .get("function")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let name = row
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| function_row.get("name").and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(name) = name else {
+            return vec![tool.clone()];
+        };
+
+        let mut function = Map::new();
+        function.insert("name".to_string(), Value::String(name.to_string()));
+        if let Some(description) = row
+            .get("description")
+            .and_then(Value::as_str)
+            .or_else(|| function_row.get("description").and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            function.insert("description".to_string(), Value::String(description.to_string()));
+        }
+        if let Some(parameters) = row
+            .get("parameters")
+            .or_else(|| function_row.get("parameters"))
+            .cloned()
+        {
+            function.insert("parameters".to_string(), parameters);
+        }
+        if let Some(strict) = row
+            .get("strict")
+            .or_else(|| function_row.get("strict"))
+            .cloned()
+        {
+            function.insert("strict".to_string(), strict);
+        }
+
+        let mut out = Map::new();
+        out.insert("type".to_string(), Value::String("function".to_string()));
+        out.insert("function".to_string(), Value::Object(function));
+        return vec![Value::Object(out)];
+    }
     if !tool_type.eq_ignore_ascii_case("namespace") {
         return vec![tool.clone()];
     }
@@ -883,5 +979,77 @@ mod tests {
         assert_eq!(tools[0]["function"]["name"], serde_json::json!("spawn_agent"));
         assert_eq!(tools[0]["function"]["description"], serde_json::json!("spawn"));
         assert_eq!(tools[0]["function"]["parameters"], serde_json::json!({"type":"object"}));
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_flattens_chat_style_function_tools_for_responses() {
+        let input = serde_json::json!({
+            "protocol": "openai-responses",
+            "payload": {
+                "model": "gpt-5.5",
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "apply_patch",
+                        "description": "Edit files through apply_patch",
+                        "parameters": { "type": "object", "properties": { "patch": { "type": "string" } } },
+                        "strict": false
+                    }
+                }],
+                "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "patch" }] }]
+            }
+        });
+
+        let output: Value = serde_json::from_str(
+            &sanitize_provider_outbound_payload_json(input.to_string()).unwrap(),
+        )
+        .unwrap();
+        let tools = output["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], serde_json::json!("function"));
+        assert_eq!(tools[0]["function"]["name"], serde_json::json!("apply_patch"));
+        assert_eq!(
+            tools[0]["function"]["description"],
+            serde_json::json!("Edit files through apply_patch")
+        );
+        assert_eq!(
+            tools[0]["function"]["parameters"],
+            serde_json::json!({ "type": "object", "properties": { "patch": { "type": "string" } } })
+        );
+        assert_eq!(tools[0]["function"]["strict"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_converts_custom_apply_patch_for_openai_chat() {
+        let input = serde_json::json!({
+            "protocol": "openai-chat",
+            "payload": {
+                "model": "minimax-m3-free",
+                "messages": [{ "role": "user", "content": "patch" }],
+                "tools": [{
+                    "type": "custom",
+                    "name": "apply_patch",
+                    "description": "Use the `apply_patch` tool to edit files."
+                }]
+            }
+        });
+
+        let output: Value = serde_json::from_str(
+            &sanitize_provider_outbound_payload_json(input.to_string()).unwrap(),
+        )
+        .unwrap();
+        let tools = output["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], serde_json::json!("function"));
+        assert_eq!(tools[0]["function"]["name"], serde_json::json!("apply_patch"));
+        assert_eq!(
+            tools[0]["function"]["description"],
+            serde_json::json!("Use the `apply_patch` tool to edit files.")
+        );
+        assert_eq!(tools[0]["function"]["strict"], serde_json::json!(false));
+        assert_eq!(
+            tools[0]["function"]["parameters"]["required"],
+            serde_json::json!(["filePath", "patch"])
+        );
     }
 }

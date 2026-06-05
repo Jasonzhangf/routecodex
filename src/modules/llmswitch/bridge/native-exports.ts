@@ -82,6 +82,38 @@ type NativeHubBridgePolicySemantics = {
     compatibilityProfile?: string;
     payload: Record<string, unknown>;
   }) => Record<string, unknown>;
+  validateResponsesDirectToolShapeContractWithNative?: (
+    payload: Record<string, unknown>
+  ) => { ok: true } | null;
+  applyResponsesDirectRouteParamsOverrideWithNative?: (input: {
+    payload: Record<string, unknown>;
+    routeParams?: Record<string, unknown>;
+    providerDefaultModel?: string;
+    requestReasoningEffort?: string;
+  }) => Record<string, unknown>;
+  buildResponsesDirectPassthroughBodyWithNative?: (
+    payload: unknown
+  ) => Record<string, unknown>;
+  hasDeclaredApplyPatchToolWithNative?: (
+    payload: unknown
+  ) => boolean;
+  evaluateResponsesDirectRouteDecisionWithNative?: (input: {
+    payload: Record<string, unknown>;
+    inboundProtocol: string;
+    applyPatchMode?: string;
+  }) => {
+    providerWireValid: boolean;
+    requiresHubRelay: boolean;
+    reason?: string;
+    hasDeclaredApplyPatchTool?: boolean;
+  };
+  resolveResponsesDirectPayloadWithNative?: (input: {
+    body: unknown;
+    rawRequestBody?: Record<string, unknown>;
+    bodyStream?: boolean;
+    metadataStream?: boolean;
+    outboundStream?: boolean;
+  }) => Record<string, unknown>;
 };
 
 type NativeHubVrNodeContracts = {
@@ -101,6 +133,7 @@ let cachedRespSemantics: NativeHubPipelineRespSemantics | null | undefined;
 let cachedFollowupSanitize: FollowupSanitizeModule | null | undefined;
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
 let cachedHubBridgePolicySemantics: NativeHubBridgePolicySemantics | null | undefined;
+let cachedHubBridgePolicySemanticsSync: NativeHubBridgePolicySemantics | null | undefined;
 let cachedHubVrNodeContracts: NativeHubVrNodeContracts | null | undefined;
 let cachedChatProcessNodeResultSemantics: NativeChatProcessNodeResultSemantics | null | undefined;
 let sharedBindingsChecked: boolean | undefined;
@@ -266,6 +299,26 @@ async function getHubBridgePolicySemantics(): Promise<NativeHubBridgePolicySeman
   return cachedHubBridgePolicySemantics;
 }
 
+function getHubBridgePolicySemanticsSync(): NativeHubBridgePolicySemantics {
+  if (cachedHubBridgePolicySemanticsSync !== undefined) {
+    if (!cachedHubBridgePolicySemanticsSync) {
+      throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
+    }
+    return cachedHubBridgePolicySemanticsSync;
+  }
+  try {
+    cachedHubBridgePolicySemanticsSync = requireCoreDist<NativeHubBridgePolicySemantics>(
+      'router/virtual-router/engine-selection/native-hub-bridge-policy-semantics'
+    );
+  } catch {
+    cachedHubBridgePolicySemanticsSync = null;
+  }
+  if (!cachedHubBridgePolicySemanticsSync) {
+    throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
+  }
+  return cachedHubBridgePolicySemanticsSync;
+}
+
 function getChatProcessNodeResultSemantics(): NativeChatProcessNodeResultSemantics {
   if (cachedChatProcessNodeResultSemantics !== undefined) {
     if (!cachedChatProcessNodeResultSemantics) {
@@ -384,6 +437,87 @@ export async function sanitizeProviderOutboundPayload(input: {
   const fn = mod.sanitizeProviderOutboundPayloadWithNative;
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-bridge] sanitizeProviderOutboundPayloadWithNative not available');
+  }
+  return fn(input) as AnyRecord;
+}
+
+export function validateResponsesDirectToolShapeContractNative(
+  payload: Record<string, unknown>
+): { ok: true } | null {
+  let mod: NativeHubBridgePolicySemantics;
+  try {
+    mod = getHubBridgePolicySemanticsSync();
+  } catch {
+    return null;
+  }
+  const fn = mod.validateResponsesDirectToolShapeContractWithNative;
+  if (typeof fn !== 'function') {
+    return null;
+  }
+  return fn(payload) as { ok: true } | null;
+}
+
+export function applyResponsesDirectRouteParamsOverrideNative(input: {
+  payload: Record<string, unknown>;
+  routeParams?: Record<string, unknown>;
+  providerDefaultModel?: string;
+  requestReasoningEffort?: string;
+}): AnyRecord {
+  const mod = getHubBridgePolicySemanticsSync();
+  const fn = mod.applyResponsesDirectRouteParamsOverrideWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] applyResponsesDirectRouteParamsOverrideWithNative not available');
+  }
+  return fn(input) as AnyRecord;
+}
+
+export function buildResponsesDirectPassthroughBodyNative(payload: unknown): AnyRecord {
+  const mod = getHubBridgePolicySemanticsSync();
+  const fn = mod.buildResponsesDirectPassthroughBodyWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] buildResponsesDirectPassthroughBodyWithNative not available');
+  }
+  return fn(payload) as AnyRecord;
+}
+
+export function hasDeclaredApplyPatchToolNative(payload: unknown): boolean {
+  const mod = getHubBridgePolicySemanticsSync();
+  const fn = mod.hasDeclaredApplyPatchToolWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] hasDeclaredApplyPatchToolWithNative not available');
+  }
+  return fn(payload) === true;
+}
+
+export function evaluateResponsesDirectRouteDecisionNative(input: {
+  payload: Record<string, unknown>;
+  inboundProtocol: string;
+  applyPatchMode?: string;
+}): {
+  providerWireValid: boolean;
+  requiresHubRelay: boolean;
+  reason?: string;
+  hasDeclaredApplyPatchTool?: boolean;
+} {
+  const mod = getHubBridgePolicySemanticsSync();
+  const fn = mod.evaluateResponsesDirectRouteDecisionWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] evaluateResponsesDirectRouteDecisionWithNative not available');
+  }
+  return fn(input);
+}
+
+export function resolveResponsesDirectPayloadNative(input: {
+  body: unknown;
+  rawRequestBody?: Record<string, unknown>;
+  bodyStream?: boolean;
+  metadataStream?: boolean;
+  outboundStream?: boolean;
+}): AnyRecord {
+  const mod = getHubBridgePolicySemanticsSync();
+  const fn = mod.resolveResponsesDirectPayloadWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resolveResponsesDirectPayloadWithNative not available');
   }
   return fn(input) as AnyRecord;
 }

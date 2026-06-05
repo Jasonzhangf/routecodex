@@ -21,15 +21,15 @@ function latestOpencodeNamespaceBody(): Record<string, unknown> {
     model: 'minimax-m3-free',
     messages: [{ role: 'user', content: 'hi' }],
     tools: [{
-      type: 'namespace',
-      name: 'multi_agent_v1',
-      tools: [{ type: 'function', name: 'spawn_agent', parameters: { type: 'object' } }],
+      type: 'custom',
+      name: 'apply_patch',
+      description: 'Use the `apply_patch` tool to edit files.',
     }],
   };
 }
 
 describe('HttpRequestExecutor provider wire sanitize', () => {
-  it('uses target outboundProfile openai-chat to flatten namespace tools on live provider body', async () => {
+  it('uses target outboundProfile openai-chat to convert custom apply_patch into provider function tool', async () => {
     const { HttpRequestExecutor } = await import('../../../../src/providers/core/runtime/http-request-executor.js');
     const sentBodies: unknown[] = [];
     const executor = new HttpRequestExecutor({
@@ -74,6 +74,16 @@ describe('HttpRequestExecutor provider wire sanitize', () => {
 
     expect(sentBodies).toHaveLength(1);
     expect(countNamespace(sentBodies[0])).toBe(0);
-    expect((sentBodies[0] as any).tools.some((tool: any) => tool?.function?.name === 'spawn_agent')).toBe(true);
+    expect((sentBodies[0] as any).tools).toEqual([
+      expect.objectContaining({
+        type: 'function',
+        function: expect.objectContaining({
+          name: 'apply_patch',
+          parameters: expect.objectContaining({
+            required: ['filePath', 'patch'],
+          }),
+        }),
+      }),
+    ]);
   });
 });

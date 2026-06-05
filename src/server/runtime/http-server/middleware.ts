@@ -291,6 +291,10 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
       next();
       return;
     }
+    if (path === '/v1/models' || path === '/v1/models/' || path === '/models' || path === '/models/') {
+      next();
+      return;
+    }
     if (path === '/shutdown' || path === '/shutdown/') {
       next();
       return;

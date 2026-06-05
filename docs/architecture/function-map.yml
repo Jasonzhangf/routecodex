@@ -123,3 +123,233 @@ owners:
     migration_target: rust
     notes:
       - Metadata is side-channel only; leak to provider/client payload must fail-fast.
+
+  - feature_id: responses.direct_tool_shape_contract
+    status: active
+    summary: Responses direct passthrough payload must stay Responses-native; chat-style function tools must fail before transport
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    canonical_types:
+      - HubReqOutbound05ProviderSemantic
+      - ProviderReqOutbound06WirePayload
+    canonical_builders:
+      - validate_responses_direct_tool_shape_contract_json
+      - build_responses_direct_passthrough_body_json
+      - evaluate_responses_direct_route_decision_json
+      - has_declared_apply_patch_tool_json
+      - apply_responses_direct_route_params_override_json
+      - resolve_responses_direct_payload_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - src/modules/llmswitch/bridge
+      - src/server/runtime/http-server
+      - src/providers/core/runtime
+    forbidden_paths:
+      - src/client
+      - src/server/handlers
+      - src/providers/profile
+    required_tests:
+      - tests/server/runtime/http-server/direct-passthrough-payload.spec.ts
+      - tests/server/runtime/http-server/direct-passthrough-minimum-overrides.spec.ts
+      - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
+      - tests/providers/core/runtime/protocol-http-providers.unit.test.ts
+      - tests/providers/runtime/responses-provider.direct-passthrough.spec.ts
+    required_gates:
+      - npm run verify:responses-direct-tool-shape-contract
+      - npm run verify:responses-direct-tool-shape-rust-first
+      - npm run verify:responses-direct-tool-shape-native-availability
+      - npm run verify:responses-direct-tool-shape-no-ts-fallback
+      - npm run test:ci:jest
+    migration_target: rust
+    notes:
+      - Rust validator is the only contract truth; TS is now transport/bridge shell only.
+      - Direct provider passthrough body build (`strip __*`, metadata fail-fast, trimmed model required) must stay in Rust, not in provider TS runtime.
+      - Direct route eligibility / relay-required decision (`providerWireValid` + `requiresHubRelay`) must stay in Rust, not split across `index.ts` and local helper branches.
+      - same-protocol direct `apply_patch` declaration detection for servertool-mode relay must stay in Rust, not in `http-server/index.ts`.
+      - `direct-passthrough-payload.ts` should expose one Rust-backed decision surface; avoid parallel TS helper exports for contract-vs-relay split.
+      - Direct routeParams model/reasoning override must use the same Rust owner as provider direct, not duplicate TS mutation logic.
+      - Direct raw `__raw_request_body` replay and stream flag lift must use the same Rust owner instead of local TS selection logic.
+
+  - feature_id: responses.request_compat_normalization
+    status: active
+    summary: Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
+    canonical_types:
+      - HubReqOutbound05ProviderSemantic
+      - ProviderReqOutbound06WirePayload
+    canonical_builders:
+      - run_req_outbound_stage3_compat_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
+      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - src/modules/llmswitch
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    required_gates:
+      - npm run verify:responses-request-compat-rust-only
+      - npm run verify:architecture-ci
+    migration_target: rust
+    notes:
+      - c4m/crs request compat and chat-style function tool normalization must remain in Rust stage3 compat; TS may only invoke `runReqOutboundStage3CompatJson`.
+
+  - feature_id: responses.function_tool_normalization
+    status: active
+    summary: chat-style function tools must normalize to Responses wire top-level name and parameters only in Rust
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+    canonical_types:
+      - HubReqOutbound05ProviderSemantic
+      - ProviderReqOutbound06WirePayload
+    canonical_builders:
+      - normalize_responses_function_tools
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - src/modules/llmswitch
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    required_gates:
+      - npm run verify:responses-function-tool-normalization-rust-only
+    migration_target: rust
+    notes:
+      - chat-style `tools[].function` to Responses wire `tools[].name` normalization is shared Rust truth for c4m/crs and must not reappear in provider/server TS.
+
+  - feature_id: responses.tool_parameters_normalization
+    status: active
+    summary: Responses function tool parameters must normalize to JSON object schema only in Rust
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+    canonical_types:
+      - HubReqOutbound05ProviderSemantic
+      - ProviderReqOutbound06WirePayload
+    canonical_builders:
+      - normalize_responses_tool_parameters
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - src/modules/llmswitch
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    required_gates:
+      - npm run verify:responses-tool-parameters-normalization-rust-only
+    migration_target: rust
+    notes:
+      - String/invalid tool parameter payloads must normalize into Responses wire object schema in Rust only; provider/server TS must not repair them.
+
+  - feature_id: responses.instructions_to_input_normalization
+    status: active
+    summary: Responses instructions must normalize into leading system input_text only in Rust
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+    canonical_types:
+      - HubReqOutbound05ProviderSemantic
+      - ProviderReqOutbound06WirePayload
+    canonical_builders:
+      - apply_responses_instructions_to_input
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - src/modules/llmswitch
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    required_gates:
+      - npm run verify:responses-instructions-to-input-rust-only
+    migration_target: rust
+    notes:
+      - `instructions -> input[0]=system/input_text` plus HTML strip and truncation must stay in Rust only; provider/server TS must not reconstruct it.
+
+  - feature_id: responses.token_limit_field_normalization
+    status: active
+    summary: Responses c4m token-limit compatibility fields must strip in Rust only
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+    canonical_types:
+      - HubReqOutbound05ProviderSemantic
+      - ProviderReqOutbound06WirePayload
+    canonical_builders:
+      - apply_responses_token_limit_field_normalization
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - src/modules/llmswitch
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    required_gates:
+      - npm run verify:responses-token-limit-field-normalization-rust-only
+    migration_target: rust
+    notes:
+      - `max_tokens/maxTokens/max_output_tokens/maxOutputTokens` stripping must stay in Rust only; provider/server TS must not sanitize these fields.
+
+  - feature_id: responses.c4m_request_compat
+    status: active
+    summary: responses:c4m request compat must normalize instructions and token-limit fields only in Rust
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
+    canonical_types:
+      - HubReqOutbound05ProviderSemantic
+      - ProviderReqOutbound06WirePayload
+    canonical_builders:
+      - apply_responses_c4m_request_compat
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
+      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - src/modules/llmswitch
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    required_gates:
+      - npm run verify:responses-c4m-request-compat-rust-only
+    migration_target: rust
+    notes:
+      - Shared token-limit stripping truth lives in `responses.token_limit_field_normalization`.
+      - Shared instructions lift truth lives in `responses.instructions_to_input_normalization`.
+      - Shared function tool normalization truth lives in `responses.function_tool_normalization`.
+      - Shared parameters normalization truth lives in `responses.tool_parameters_normalization`.
+
+  - feature_id: responses.crs_request_compat
+    status: active
+    summary: responses:crs request compat must strip temperature only in Rust
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
+    canonical_types:
+      - HubReqOutbound05ProviderSemantic
+      - ProviderReqOutbound06WirePayload
+    canonical_builders:
+      - apply_responses_crs_request_compat
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
+      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - src/modules/llmswitch
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
+    required_gates:
+      - npm run verify:responses-crs-request-compat-rust-only
+    migration_target: rust
+    notes:
+      - `temperature` stripping for crs is Rust-only.
+      - Shared function tool normalization truth lives in `responses.function_tool_normalization`.
+      - Shared parameters normalization truth lives in `responses.tool_parameters_normalization`.

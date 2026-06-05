@@ -1,10 +1,168 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 
-import {
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
+  resolveResponsesDirectPayloadNative: (input: {
+    body: unknown;
+    rawRequestBody?: Record<string, unknown>;
+    bodyStream?: boolean;
+    metadataStream?: boolean;
+    outboundStream?: boolean;
+  }) => {
+    const source =
+      input.rawRequestBody && typeof input.rawRequestBody === 'object' && !Array.isArray(input.rawRequestBody)
+        ? structuredClone(input.rawRequestBody)
+        : (input.body && typeof input.body === 'object' && !Array.isArray(input.body)
+          ? structuredClone(input.body as Record<string, unknown>)
+          : {});
+    if (Object.prototype.hasOwnProperty.call(source, 'metadata')) {
+      throw new Error('provider-runtime-error: metadata is not allowed in direct passthrough provider body');
+    }
+    if ((input.bodyStream === true || input.metadataStream === true || input.outboundStream === true) && source.stream !== true) {
+      source.stream = true;
+    }
+    return source;
+  },
+  applyResponsesDirectRouteParamsOverrideNative: (input: {
+    payload: Record<string, unknown>;
+    routeParams?: Record<string, unknown>;
+  }) => {
+    const next = structuredClone(input.payload);
+    const routeModel = typeof input.routeParams?.model === 'string' ? input.routeParams.model.trim() : '';
+    if (routeModel) {
+      next.model = routeModel;
+    }
+    return next;
+  },
+  validateResponsesDirectToolShapeContractNative: (payload: Record<string, unknown>) => {
+    if (Array.isArray(payload.messages)) {
+      throw new Error(
+        'provider-runtime-error: responses provider received chat-style "messages". This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions).'
+      );
+    }
+    const hasInput = Array.isArray(payload.input);
+    const hasInstructions = typeof payload.instructions === 'string' && payload.instructions.trim().length > 0;
+    if (!hasInput && !hasInstructions) {
+      throw new Error('provider-runtime-error: responses payload missing "input" or "instructions"');
+    }
+    if (Array.isArray(payload.tools)) {
+      payload.tools.forEach((tool, index) => {
+        if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+          throw new Error(`provider-runtime-error: responses payload tools[${index}] must be an object`);
+        }
+        const type = typeof (tool as { type?: unknown }).type === 'string' ? String((tool as { type?: unknown }).type).trim() : '';
+        if (type === 'function') {
+          const name = typeof (tool as { name?: unknown }).name === 'string' ? String((tool as { name?: unknown }).name).trim() : '';
+          if (!name) {
+            throw new Error(
+              `provider-runtime-error: responses payload tools[${index}] is chat-style function tool; Responses wire requires top-level tool.name`
+            );
+          }
+        }
+      });
+    }
+    if (Array.isArray(payload.input)) {
+      payload.input.forEach((item, index) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          return;
+        }
+        const type = typeof (item as { type?: unknown }).type === 'string' ? String((item as { type?: unknown }).type).trim() : '';
+        if ((type === 'function_call' || type === 'function_call_output') && Object.prototype.hasOwnProperty.call(item, 'content')) {
+          throw new Error(
+            `provider-runtime-error: responses payload input[${index}] ${type} must not carry content; tool call data belongs in arguments/output fields`
+          );
+        }
+      });
+    }
+    return { ok: true as const };
+  },
+  evaluateResponsesDirectRouteDecisionNative: (input: {
+    payload: Record<string, unknown>;
+    inboundProtocol: string;
+    applyPatchMode?: string;
+  }) => {
+    if (input.inboundProtocol === 'openai-responses') {
+      const payload = input.payload;
+      if (Array.isArray(payload.messages)) {
+        throw new Error(
+          'provider-runtime-error: responses provider received chat-style "messages". This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions).'
+        );
+      }
+      const hasInput = Array.isArray(payload.input);
+      const hasInstructions = typeof payload.instructions === 'string' && payload.instructions.trim().length > 0;
+      if (!hasInput && !hasInstructions) {
+        throw new Error('provider-runtime-error: responses payload missing "input" or "instructions"');
+      }
+      if (Array.isArray(payload.tools)) {
+        payload.tools.forEach((tool, index) => {
+          if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+            throw new Error(`provider-runtime-error: responses payload tools[${index}] must be an object`);
+          }
+          const type = typeof (tool as { type?: unknown }).type === 'string' ? String((tool as { type?: unknown }).type).trim() : '';
+          if (type === 'function') {
+            const name = typeof (tool as { name?: unknown }).name === 'string' ? String((tool as { name?: unknown }).name).trim() : '';
+            if (!name) {
+              throw new Error(`provider-runtime-error: responses payload tools[${index}] is chat-style function tool; Responses wire requires top-level tool.name`);
+            }
+          }
+        });
+      }
+      if (Array.isArray(payload.input)) {
+        payload.input.forEach((item, index) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) {
+            return;
+          }
+          const type = typeof (item as { type?: unknown }).type === 'string' ? String((item as { type?: unknown }).type).trim() : '';
+          if ((type === 'function_call' || type === 'function_call_output') && Object.prototype.hasOwnProperty.call(item, 'content')) {
+            throw new Error(
+              `provider-runtime-error: responses payload input[${index}] ${type} must not carry content; tool call data belongs in arguments/output fields`
+            );
+          }
+        });
+      }
+    }
+    const hasDeclaredApplyPatchTool = Array.isArray(input.payload.tools) && input.payload.tools.some((tool) => {
+      if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return false;
+      const row = tool as Record<string, unknown>;
+      const functionName =
+        row.function && typeof row.function === 'object' && !Array.isArray(row.function) && typeof (row.function as Record<string, unknown>).name === 'string'
+          ? String((row.function as Record<string, unknown>).name).trim()
+          : '';
+      const directName = typeof row.name === 'string' ? row.name.trim() : '';
+      return functionName === 'apply_patch' || directName === 'apply_patch';
+    });
+    return {
+      providerWireValid: true,
+      requiresHubRelay: input.applyPatchMode === 'servertool' && hasDeclaredApplyPatchTool,
+      reason: input.applyPatchMode === 'servertool' && hasDeclaredApplyPatchTool
+        ? 'apply_patch_servertool_mode_requires_hub_response_stage'
+        : undefined,
+      hasDeclaredApplyPatchTool,
+    };
+  },
+  hasDeclaredApplyPatchToolNative: (body: unknown) => {
+    const record = body && typeof body === 'object' && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : undefined;
+    const tools = Array.isArray(record?.tools) ? record.tools : [];
+    return tools.some((tool) => {
+      if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return false;
+      const row = tool as Record<string, unknown>;
+      const functionName =
+        row.function && typeof row.function === 'object' && !Array.isArray(row.function) && typeof (row.function as Record<string, unknown>).name === 'string'
+          ? String((row.function as Record<string, unknown>).name).trim()
+          : '';
+      const directName = typeof row.name === 'string' ? row.name.trim() : '';
+      return functionName === 'apply_patch' || directName === 'apply_patch';
+    });
+  }
+}), { virtual: true });
+
+const {
   applyMinimalDirectOverrides,
-  assertDirectPayloadContract,
+  assertDirectRouteDecision,
   resolveRawPayloadForDirect,
-} from '../../../../src/server/runtime/http-server/direct-passthrough-payload.js';
+  evaluateDirectRouteDecision,
+} = await import('../../../../src/server/runtime/http-server/direct-passthrough-payload.js');
 
 describe('direct-passthrough-payload', () => {
   it('prefers metadata.__raw_request_body over mutated body', () => {
@@ -51,6 +209,28 @@ describe('direct-passthrough-payload', () => {
     ).toThrow(/metadata is not allowed in direct passthrough provider body/);
   });
 
+  it('lifts stream=true onto replay raw payload when direct metadata requests streaming', () => {
+    const resolved = resolveRawPayloadForDirect(
+      {
+        model: 'gpt-5.3-codex',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
+      },
+      {
+        stream: true,
+        __raw_request_body: {
+          model: 'gpt-5.4',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+        },
+      },
+    );
+
+    expect(resolved).toEqual({
+      model: 'gpt-5.4',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      stream: true,
+    });
+  });
+
   it('only applies explicit direct routeParams model override', () => {
     const result = applyMinimalDirectOverrides(
       {
@@ -76,29 +256,39 @@ describe('direct-passthrough-payload', () => {
     expect((result as Record<string, unknown>).thinking).toBeUndefined();
   });
 
+  it('keeps ingress payload unchanged when routeParams is absent', () => {
+    const ingress = {
+      model: 'raw-model',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw user' }] }],
+    } as Record<string, unknown>;
+
+    const output = applyMinimalDirectOverrides(ingress, {});
+    expect(output).toEqual(ingress);
+  });
+
   it('rejects historical chat-style function tools on responses direct', () => {
-    expect(() => assertDirectPayloadContract({
+    expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
         model: 'gpt-5.5',
-        input: 'hello',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
         tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
       },
-    })).toThrow(/missing name/);
+    })).toThrow(/Responses wire requires top-level tool\.name/);
   });
 
   it('rejects historical chat-style messages on responses direct', () => {
-    expect(() => assertDirectPayloadContract({
+    expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
         model: 'gpt-5.5',
         messages: [{ role: 'user', content: 'hello' }],
       },
-    })).toThrow(/chat-style messages/);
+    })).toThrow(/chat-style "messages"/);
   });
 
   it('rejects historical responses tool input content on responses direct', () => {
-    expect(() => assertDirectPayloadContract({
+    expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
         model: 'gpt-5.5',
@@ -112,17 +302,35 @@ describe('direct-passthrough-payload', () => {
           },
         ],
       },
-    })).toThrow(/tool item must not carry content/);
+    })).toThrow(/function_call_output must not carry content/);
   });
 
   it('allows responses-native hosted tools without name', () => {
-    expect(() => assertDirectPayloadContract({
+    expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
         model: 'gpt-5.5',
-        input: 'hello',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
         tools: [{ type: 'web_search_preview' }],
       },
     })).not.toThrow();
+  });
+
+  it('marks servertool apply_patch direct requests as relay-required', () => {
+    const result = evaluateDirectRouteDecision({
+      inboundProtocol: 'openai-responses',
+      applyPatchMode: 'servertool',
+      payload: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'edit' }] }],
+        tools: [{ type: 'custom', name: 'apply_patch' }],
+      },
+    });
+    expect(result).toMatchObject({
+      providerWireValid: true,
+      requiresHubRelay: true,
+      reason: 'apply_patch_servertool_mode_requires_hub_response_stage',
+      hasDeclaredApplyPatchTool: true,
+    });
   });
 });

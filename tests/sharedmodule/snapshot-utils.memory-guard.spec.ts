@@ -108,4 +108,24 @@ describe('snapshot-utils memory guard', () => {
     );
   });
 
+  it('captures servertool and hub_followup stages by default', async () => {
+    delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
+    const { createSnapshotWriter } = await import('../../sharedmodule/llmswitch-core/src/conversion/snapshot-utils.js');
+    const writer = createSnapshotWriter({
+      requestId: 'req_snapshot_servertool_default_1',
+      endpoint: '/v1/responses'
+    });
+    expect(writer).toBeTruthy();
+
+    writer?.('servertool.execution', { ok: true, flowId: 'apply_patch_flow' });
+    writer?.('hub_followup.response', { ok: true, id: 'resp_1' });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const stages = writeSnapshotViaHooksWithNativeMock.mock.calls
+      .map((call) => String((call?.[0] as Record<string, unknown>)?.stage ?? ''))
+      .filter(Boolean);
+    expect(stages).toContain('servertool.execution');
+    expect(stages).toContain('hub_followup.response');
+  });
+
 });

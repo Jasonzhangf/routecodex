@@ -1,5 +1,116 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
+jest.unstable_mockModule('../../../../src/server/runtime/http-server/direct-passthrough-payload.js', () => {
+  const resolveRawPayloadForDirect = (body: unknown, metadata?: Record<string, unknown>) => {
+    const source =
+      metadata?.__raw_request_body && typeof metadata.__raw_request_body === 'object' && !Array.isArray(metadata.__raw_request_body)
+        ? structuredClone(metadata.__raw_request_body as Record<string, unknown>)
+        : (body && typeof body === 'object' && !Array.isArray(body)
+          ? structuredClone(body as Record<string, unknown>)
+          : {});
+    if ((((body as Record<string, unknown> | undefined)?.stream) === true || metadata?.stream === true || metadata?.outboundStream === true) && source.stream !== true) {
+      source.stream = true;
+    }
+    return source;
+  };
+  const applyMinimalDirectOverrides = (payload: Record<string, unknown>, options?: { routeParams?: Record<string, unknown> }) => {
+    const next = structuredClone(payload);
+    const routeModel = typeof options?.routeParams?.model === 'string' ? options.routeParams.model.trim() : '';
+    if (routeModel) {
+      next.model = routeModel;
+    }
+    return next;
+  };
+  const providerWireValidForPayload = (args: { payload: Record<string, unknown>; inboundProtocol: string }) => {
+    if (args.inboundProtocol !== 'openai-responses') {
+      return { ok: true as const };
+    }
+    if (Array.isArray(args.payload.messages)) {
+      return { ok: false as const, reason: 'invalid_direct_payload', message: 'messages not allowed' };
+    }
+    if (!Array.isArray(args.payload.input) && !(typeof args.payload.instructions === 'string' && args.payload.instructions.trim().length > 0)) {
+      return { ok: false as const, reason: 'invalid_direct_payload', message: 'missing input or instructions' };
+    }
+    if (Array.isArray(args.payload.tools)) {
+      for (const tool of args.payload.tools) {
+        if (tool && typeof tool === 'object' && !Array.isArray(tool) && (tool as Record<string, unknown>).type === 'function' && !(tool as Record<string, unknown>).name) {
+          return { ok: false as const, reason: 'invalid_direct_payload', message: 'function tool missing name' };
+        }
+      }
+    }
+    if (Array.isArray(args.payload.input)) {
+      for (const item of args.payload.input) {
+        if (item && typeof item === 'object' && !Array.isArray(item)) {
+          const type = (item as Record<string, unknown>).type;
+          if ((type === 'function_call' || type === 'function_call_output') && Object.prototype.hasOwnProperty.call(item, 'content')) {
+            return { ok: false as const, reason: 'invalid_direct_payload', message: 'tool call content leak' };
+          }
+        }
+      }
+    }
+    return { ok: true as const };
+  };
+  const hasDeclaredApplyPatchToolInPayload = (body: unknown) => {
+    const record = body && typeof body === 'object' && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : undefined;
+    const tools = Array.isArray(record?.tools) ? record.tools : [];
+    for (const tool of tools) {
+      if (!tool || typeof tool !== 'object' || Array.isArray(tool)) continue;
+      const toolRow = tool as Record<string, unknown>;
+      const type = typeof toolRow.type === 'string' ? toolRow.type.trim().toLowerCase() : '';
+      const fn = toolRow.function && typeof toolRow.function === 'object' && !Array.isArray(toolRow.function)
+        ? toolRow.function as Record<string, unknown>
+        : undefined;
+      const name = typeof fn?.name === 'string'
+        ? fn.name
+        : (typeof toolRow.name === 'string' ? toolRow.name : '');
+      if (type === 'custom' && name.trim() === 'apply_patch') {
+        return true;
+      }
+      if (name.trim() === 'apply_patch') {
+        return true;
+      }
+    }
+    return false;
+  };
+  const evaluateDirectRouteDecision = (args: {
+    payload: Record<string, unknown>;
+    inboundProtocol: string;
+    applyPatchMode?: string;
+  }) => {
+    const hasDeclaredApplyPatchTool = hasDeclaredApplyPatchToolInPayload(args.payload);
+    if (args.applyPatchMode === 'servertool' && hasDeclaredApplyPatchTool) {
+      return {
+        providerWireValid: true,
+        requiresHubRelay: true,
+        reason: 'apply_patch_servertool_mode_requires_hub_response_stage',
+        hasDeclaredApplyPatchTool,
+      };
+    }
+    const contract = providerWireValidForPayload(args);
+    if (!contract.ok) {
+      return {
+        providerWireValid: false,
+        requiresHubRelay: false,
+        reason: contract.reason,
+        hasDeclaredApplyPatchTool,
+      };
+    }
+    return {
+      providerWireValid: true,
+      requiresHubRelay: false,
+      reason: undefined,
+      hasDeclaredApplyPatchTool,
+    };
+  };
+  return {
+    resolveRawPayloadForDirect,
+    applyMinimalDirectOverrides,
+    evaluateDirectRouteDecision,
+  };
+});
+
 describe('direct passthrough route-level', () => {
   it('HTTP BLACKBOX: provider-mode keyless chat binding preserves client model', async () => {
     jest.resetModules();
@@ -473,6 +584,74 @@ describe('direct passthrough route-level', () => {
     expect(routerDirectSpy).not.toHaveBeenCalled();
     expect(executePipelineSpy).toHaveBeenCalledTimes(1);
     expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay' });
+  });
+
+  it('router same-protocol direct is skipped when apply_patch is declared as Responses custom tool in servertool mode', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { object: 'response', id: 'resp_relay_custom' },
+      metadata: {},
+    } as any);
+    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: true,
+      response: { status: 200, body: { object: 'response', id: 'resp_direct_custom' } },
+      providerHandle: {} as any,
+      auditContext: {} as any,
+    } as any);
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5520,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'default',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['default', (server as any).hubPipeline]
+    ]);
+
+    const result = await (server as any).executePortAwarePipeline(
+      5520,
+      {
+        requestId: 'req_router_skip_direct_apply_patch_custom_servertool',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'gpt-5.5',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'edit file' }] }],
+          tools: [{
+            type: 'custom',
+            name: 'apply_patch',
+            description: 'freeform patch tool',
+            format: { type: 'grammar', syntax: 'lark', definition: 'start: begin_patch' },
+          }],
+        },
+        metadata: {
+          __rt: { applyPatch: { mode: 'servertool' } },
+        },
+      },
+    );
+
+    expect(routerDirectSpy).not.toHaveBeenCalled();
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay_custom' });
   });
 
   it('router same-protocol direct keeps stop_followup on direct path', async () => {

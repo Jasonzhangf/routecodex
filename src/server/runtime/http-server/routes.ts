@@ -118,63 +118,51 @@ const DEFAULT_REASONING_LEVELS = [
   { effort: 'xhigh', description: 'Extra high reasoning depth for complex problems' }
 ] as const;
 
+const CODEX_ADVANCED_MODEL_METADATA: Record<string, unknown> = {
+  description: 'RouteCodex advanced agentic coding model compatible with gpt-5.5 capabilities.',
+  prefer_websockets: false,
+  support_verbosity: true,
+  default_verbosity: 'low',
+  apply_patch_tool_type: 'freeform',
+  web_search_tool_type: 'text_and_image',
+  supports_search_tool: true,
+  input_modalities: ['text', 'image'],
+  supports_image_detail_original: true,
+  truncation_policy: { mode: 'tokens', limit: 10000 },
+  supports_parallel_tool_calls: true,
+  reasoning_summary_format: 'experimental',
+  supports_reasoning_summaries: true,
+  default_reasoning_summary: 'none',
+  default_reasoning_level: 'medium',
+  supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
+  shell_type: 'shell_command',
+  visibility: 'list',
+  minimal_client_version: '0.98.0',
+  supported_in_api: true,
+  priority: 0,
+  experimental_supported_tools: ['apply_patch', 'web_search'],
+  effective_context_window_percent: 95
+};
+
 const CODEX_RESPONSES_MODEL_PRESETS: Record<string, Record<string, unknown>> = {
+  'gpt-5.5': {
+    ...CODEX_ADVANCED_MODEL_METADATA,
+    description: 'Latest advanced agentic coding model.'
+  },
   'gpt-5.4': {
-    description: 'Latest frontier agentic coding model.',
-    prefer_websockets: false,
-    support_verbosity: true,
-    default_verbosity: 'low',
-    apply_patch_tool_type: 'schema',
-    input_modalities: ['text', 'image'],
-    supports_image_detail_original: true,
-    truncation_policy: { mode: 'tokens', limit: 10000 },
-    supports_parallel_tool_calls: true,
-    reasoning_summary_format: 'experimental',
-    supports_reasoning_summaries: true,
-    default_reasoning_summary: 'none',
-    default_reasoning_level: 'medium',
-    supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
-    shell_type: 'shell_command',
-    visibility: 'list',
-    minimal_client_version: '0.98.0',
-    supported_in_api: true,
-    priority: 0
+    ...CODEX_ADVANCED_MODEL_METADATA,
+    description: 'Latest frontier agentic coding model.'
   },
   'gpt-5.3-codex': {
-    description: 'Agentic coding model.',
-    prefer_websockets: false,
-    support_verbosity: true,
-    default_verbosity: 'low',
-    apply_patch_tool_type: 'schema',
-    input_modalities: ['text', 'image'],
-    supports_image_detail_original: true,
-    truncation_policy: { mode: 'tokens', limit: 10000 },
-    supports_parallel_tool_calls: true,
-    reasoning_summary_format: 'experimental',
-    supports_reasoning_summaries: true,
-    default_reasoning_summary: 'none',
-    default_reasoning_level: 'medium',
-    supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
-    shell_type: 'shell_command',
-    visibility: 'list',
-    supported_in_api: true,
-    priority: 0
+    ...CODEX_ADVANCED_MODEL_METADATA,
+    description: 'Agentic coding model.'
   },
   'gpt-5.2-codex': {
+    ...CODEX_ADVANCED_MODEL_METADATA,
     description: 'Agentic coding model.',
-    prefer_websockets: false,
     support_verbosity: false,
-    apply_patch_tool_type: 'schema',
-    input_modalities: ['text', 'image'],
     supports_image_detail_original: false,
-    truncation_policy: { mode: 'tokens', limit: 10000 },
-    supports_parallel_tool_calls: true,
     default_reasoning_summary: 'auto',
-    default_reasoning_level: 'medium',
-    supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
-    shell_type: 'shell_command',
-    visibility: 'list',
-    supported_in_api: true,
     priority: 3
   }
 };
@@ -209,7 +197,7 @@ function buildCodexModelMetadata(
   providerNode: Record<string, unknown>,
   modelNode: Record<string, unknown>
 ): ModelListItem {
-  const preset = CODEX_RESPONSES_MODEL_PRESETS[modelId] ?? {};
+  const preset = CODEX_RESPONSES_MODEL_PRESETS[modelId] ?? CODEX_ADVANCED_MODEL_METADATA;
   const contextWindow = resolveContextWindow(providerNode, modelNode);
   const supportsStreaming = readBoolean(modelNode.supportsStreaming);
   const item: ModelListItem = {
@@ -218,17 +206,10 @@ function buildCodexModelMetadata(
     owned_by: providerId,
     slug: aliasId,
     display_name: aliasId,
+    base_instructions: '',
     supported_in_api: true,
     visibility: 'list',
     priority: 0,
-    input_modalities: ['text'],
-    supports_parallel_tool_calls: true,
-    prefer_websockets: false,
-    truncation_policy: { mode: 'tokens', limit: 10000 },
-    default_reasoning_summary: 'auto',
-    default_reasoning_level: 'medium',
-    supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
-    shell_type: 'shell_command',
     ...preset
   };
   if (contextWindow) {
@@ -242,6 +223,10 @@ function buildCodexModelMetadata(
     item.description = modelDescription;
   }
   return item;
+}
+
+function buildCodexAdvancedModelMetadata(): ModelListItem {
+  return buildCodexModelMetadata('openai', 'gpt-5.5', 'gpt-5.5', {}, {});
 }
 
 function collectArtifactModelAliases(artifacts: unknown): ModelListItem[] {
@@ -333,6 +318,9 @@ export function registerHttpRoutes(options: RouteOptions): void {
     try {
       const items: ModelListItem[] = [];
       const seen = new Set<string>();
+      const codexAdvancedModel = buildCodexAdvancedModelMetadata();
+      seen.add(codexAdvancedModel.id);
+      items.push(codexAdvancedModel);
       for (const item of await collectConfiguredModelItems()) {
         if (seen.has(item.id)) {
           continue;

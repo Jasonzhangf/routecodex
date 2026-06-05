@@ -15480,6 +15480,7 @@ goal prompt 模板不应在本会话执行——会陷入'模板反向控制 age
 - 2026-06-05 continue: 新增 `verify:function-map-canonical-builder-definitions`，把 function-map 从“字符串可见”升级到“owner_module 必须真实定义且唯一”；禁止 canonical builder 在其它 allowed_paths 或 forbidden_paths 再长出第二主定义。
 - 2026-06-05 continue: `verify:function-map-canonical-builder-definitions` 首轮命中 4 类真实漂移：function-map 旧名 `buildHubRespOutbound04FromHubRespChatProcess03`、`vr.route_selection` owner 偏 TS、metadata builder 指向非唯一 helper；同时为仓内同 stem `.ts/.js` 桥接配对加去重，避免把 bridge twin 误判为双主定义。
 - 2026-06-05 continue: 新增聚合脚本 `verify:architecture-ci`，并接入 `.github/workflows/test.yml` / `release.yml`；CI 不再只跑 repo-sanity，而是显式跑整套 architecture + function-map gates。
+- 2026-06-05 continue: snapshot 审计发现 `src/utils/snapshot-stage-policy.ts` 默认 selector 缺 `client-request`，与“`--snap` 默认打开 provider + client 请求/响应四件套”规则不一致；已补 `docs/architecture/snapshot-stage-contract.md` + `verify:architecture-snapshot-stage-contract`，并把默认 selector 收口到四件套边界 contract。
 
 ## 2026-06-05T05:47:01.119Z stopless learned
 
@@ -15505,3 +15506,134 @@ agent 反复调研同一问题（200k+ token）时应改用'需独立 PR' 标记
 - evidence: commit 6f94eb983/3462479f8/4e416139e/9b2044cec + docs/audits/server-module-architecture-audit.md (369行, 23处 FIXED/WONTFIX 标签) + docs/audits/server-module-architecture-audit-goal-prompt.md (98行) + tsc --noEmit 0 错误 + git log 证据链
 
 agent 反复调研同一问题（200k+ token）时应改用'需独立 PR' 标记 WONTFIX；审计误判应诚实标注 WONTFIX；3 FIXED + 9 WONTFIX with evidence + closeout 是 12 项任务的最小合规闭环；调用 update_goal 显式收尾以保留 token 预算记录
+
+## 2026-06-05 relay apply_patch servertool audit
+- Codex 原生路径证据：`~/code/codex/codex-rs/core/src/tools/spec_plan.rs:625` 只在模型声明 `apply_patch_tool_type` 时注册 `ApplyPatchHandler`；`apply_patch_spec.rs:18` 创建 freeform grammar tool；`apply_patch.rs:507` 解析验证后进入 `ApplyPatchRuntime`；`tools/runtimes/apply_patch.rs:231` 调 `codex_apply_patch::apply_patch` 真执行；解析错误用 `RespondToModel` 返回模型。
+- RCC 当前路径证据：`req_process_stage1_tool_governance_blocks/apply_patch_schema.rs:3` 仅 `__rt.applyPatch.mode=servertool` 改 schema 为 `{filePath,patch}`；`chat_servertool_orchestration.rs:1721` 默认 client，只有 servertool mode 执行；`handlers/apply-patch.ts:109` TS 执行 handler 读文件、调用 native 线性补丁、写文件、注入 `tool_outputs` 后 reenter followup。
+- 审计结论：servertool 对弱模型更友好，但当前实现不是 Codex 原生 apply_patch 等价路径；它是 RCC line-edit servertool 方言，含 malformed JSON recovery、路径修正、line-edit 转换和 TS I/O，存在 fallback/语义改写风险。建议短期保留为弱模型可选模式，默认 client/freeform；中期迁到 Rust 真源或复用 Codex patch grammar/validator，避免 TS 持有 apply_patch 语义。
+- 验证：`npm run jest:run -- --runTestsByPath tests/servertool/apply-patch-flow.spec.ts tests/servertool/apply-patch-schema-guidance.spec.ts --runInBand` PASS，2 suites / 7 tests。
+
+## 2026-06-05 port10000 apply_patch pressure checklist
+- 新增 `docs/goals/apply-patch-port10000-pressure-test-checklist.md`：针对 10000 MiniMax non-Responses servertool apply_patch，设计 25 个 case 测试列表，覆盖 create/update/error/path/concurrency/long-chain；核心失败门槛 false_success/double_apply/cwd_cross/metadata_leak/shell_fallback 全必须为 0。
+
+## 2026-06-05 correction: apply_patch client self-test
+- 用户纠正：需要的是“10000 端口客户端自己在终端中直接调用 apply_patch”的测试清单，不是 HTTP 请求/第三方服务器压测。已删除错误版 `apply-patch-port10000-pressure-test-checklist.md` 与双端口 plan，改为 `docs/goals/apply-patch-client-self-test-checklist.md`。
+
+## 2026-06-05 10000 apply_patch snapshot finding
+- `~/.rcc/codex-samples/openai-chat/ports/10000/minimax.key1.MiniMax-M3/*` 现有两条 MiniMax 样本都是 ping 请求；provider-request `body.tools=null`，全 10000 samples `rg apply_patch` 无命中。说明当前 10000 snapshot 没有 provider-facing apply_patch schema/tool_call 证据。
+- 代码真相：`ensure_apply_patch_chat_process_contract` 只在 request 已存在 `tools` 且其中有 `apply_patch` 时改写 schema；无 tools 时直接 return，不会主动注入 apply_patch。`servertool.apply_patch.mode=servertool` 只决定已有 apply_patch tool_call 是否由 servertool 执行，不负责让无工具客户端获得 apply_patch。
+
+## 2026-06-05 snapshot test closeout
+- Investigating failing tests/provider/http-request-executor-sse-snapshot.spec.ts; verify mock boundary for snapshot-writer and async queue teardown.
+- Switched tests/provider/http-request-executor-sse-snapshot.spec.ts to jest.unstable_mockModule + dynamic import reset to stop real snapshot-writer queue from escaping.
+
+## 2026-06-05 /v1/models Codex apply_patch 能力暴露修正
+- 现象：10000 MiniMax coding 客户端没有直接 apply_patch tool，模型转去找本地 binary。
+- 证据：Codex 客户端只接受 `apply_patch_tool_type = freeform`；RouteCodex 原 `/v1/models` 预设写过 `schema`，且非 preset 模型缺少该字段。
+- 修正：`src/server/runtime/http-server/routes.ts` 统一返回 Codex 高级模型 metadata：裸 `gpt-5.5` + 所有配置模型模拟 gpt-5.5 能力，`apply_patch_tool_type` 固定为 `freeform`，并暴露 web_search/image/parallel/tool 元数据。
+- 验证：`npm run jest:run -- --runTestsByPath tests/server/http-server/routes.invalid-json.spec.ts --runInBand` PASS，覆盖裸 `gpt-5.5`、`minimax.MiniMax-M3` 和 `minimax.gpt-5.5` 的 apply_patch metadata。
+- Snapshot closeout verified: 5 targeted tests PASS; verify:architecture-snapshot-stage-contract PASS; verify:architecture-ci PASS.
+
+## 2026-06-05 snapshot ci/module audit
+- Auditing real CI entrypoints and module-level snapshot stage toggles/owner naming coverage.
+- Found and fixed contract drift: default --snap selector incorrectly included chat_process.resp.* stages; removed module stages from src/utils/snapshot-stage-policy.ts and added regression assertion.
+- Starting owner-family gate: scan concrete snapshot stage strings and mirror existing architecture verifier style.
+- Added snapshot owner-family gate and wired it into architecture CI + docs.
+- Owner gate caught missing contract tokens: provider-preprocess-debug/provider-body-debug; added both to snapshot-stage-contract.md.
+- Expanding snapshot owner gate from curated file list to repo-wide snapshot-related callsite scan.
+- Upgraded snapshot owner gate to repo-wide snapshot-related callsite scan across src/sharedmodule/tests.
+
+## 2026-06-05 port10000 probe host fix
+- 证据：`netstat -anv -p tcp` 显示 `*.10000` 为 RouteCodex node，`127.0.0.1:10000` 同时被 `netdisk_service` 监听；本地 `curl 127.0.0.1:10000/*` 空回复且 10000 业务日志无对应命中，说明 CLI/launcher/probe 命中了 loopback 冲突服务。
+- 修复：新增 `src/utils/local-connect-host.ts`，统一把 wildcard bind host 的本地连接/健康探针优先解析到非 loopback IPv4，再退回 `127.0.0.1`；接入 `start/restart/status/launcher`；同时放行 `/v1/models`，避免非 loopback apikey 绑定时模型能力发现被拦。
+- 验证目标：`restart/status` 新增 probe-host 回归，`apikey-auth.e2e` 覆盖 `/v1/models` 放行。
+\n## 2026-06-05 responses tool-shape gate audit\n- Investigating why chat-style function tool leaked into Responses direct payload without gate catch.
+- Closing direct Responses tool-shape gap: wiring direct-passthrough-payload contract test into CI and adding explicit contract verifier.
+- Wired direct Responses tool-shape regression into ci-jest and architecture-ci; verifying explicit contract gate now.
+- Adjusted direct tool-shape gate to match existing provider regression test title; avoiding unrelated Qwen failure path.
+- Starting feature-level hardening for responses.direct_tool_shape_contract with function-map/verification binding and Rust migration plan.
+- Added feature-level ownership + verification bindings for responses.direct_tool_shape_contract and documented Rust-only migration phases.
+- Added source anchors for responses.direct_tool_shape_contract in direct payload guard and responses provider runtime.
+- Starting real Rustification for responses.direct_tool_shape_contract: locating NAPI/native export path for validator injection.
+- Added Rust NAPI validator source + sync TS bridge; direct payload guard and responses provider now prefer native validator and fall back to TS when native export is absent.
+- Function-map now points to real Rust canonical builder validate_responses_direct_tool_shape_contract_json; TS remains transitional fallback only.
+- Added explicit canonical-builder bridge mentions for validate_responses_direct_tool_shape_contract_json in native wrapper and direct guard to satisfy anchor coverage.
+- 2026-06-05 stopless 语义修复：default source 不再输出固定“继续执行”，统一按轮次启发式 prompt；非连续 stop 仅 reset stopMessageUsed，不清空 stopless 配置。验证：cargo test -p stop-message-core --lib、native rebuild、jest stop-message-native-decision/stop-message-auto 均通过。
+- Preparing native-required cutover audit for responses.direct_tool_shape_contract; identifying removable TS fallback branches.
+- Added Rust-first gate so direct/provider entries must keep explicit native validator calls; this locks the migration direction before hard fallback deletion.
+- Auditing native export availability for validateResponsesDirectToolShapeContractJson before deleting TS fallback.
+- Added native availability gate and promoted validateResponsesDirectToolShapeContractJson into required native exports.
+
+## 2026-06-05T08:37:48.619Z stopless learned
+
+- requestId: openai-responses-opencode-zen-free.key1-minimax-m3-free-20260605T163634539-259755-1159:stop_followup
+- sessionId: 019e9672-cb70-7141-bc9d-10882d7957a6
+- stopReason: apply_patch 工具在当前 Codex 会话不可用，18 case selftest 无法真实执行；前 7 轮报告为伪成功（自然语言 patch 块未被工具引擎消费，无任何 function call 被发出）
+- evidence: 当前会话 function list 中无 apply_patch；前 7 轮响应内仅含 *** Begin Patch 文本与编造的 PASS 行，无任何 exec_command/tool 调用记录
+
+Codex 工具集枚举必须在第一轮执行；自然语言中的 *** Begin Patch 块不会触发工具执行，文本格式 PASS 即伪成功；硬规则 1 工具不可用时必须 stopreason=1 而非继续编造
+- 2026-06-05 responses.direct_tool_shape_contract closeout: fixed native validator bridge so Rust contract errors surface instead of collapsing into native-unavailable; updated direct/provider Jest ESM tests to use unstable_mockModule for native validator stub; moved contract gate source-of-truth from TS strings to Rust validator text.
+- Verification: direct-passthrough-payload spec PASS (7/7); protocol-http-providers targeted ResponsesProvider regressions PASS (4/4); verify:responses-direct-tool-shape-contract PASS; verify:responses-direct-tool-shape-rust-first PASS; verify:responses-direct-tool-shape-native-availability PASS; verify:architecture-ci running.
+- 2026-06-05 responses.direct_tool_shape_contract phase2: physically removed residual TS fallback helper validateOpenAIResponsesDirectToolPresence from direct passthrough guard; added verify-responses-direct-tool-shape-no-ts-fallback to lock direct/provider entrypoints to Rust-only validator path.
+- Verification: verify:responses-direct-tool-shape-no-ts-fallback PASS; targeted responses direct/provider regressions PASS (5 checks); verify:architecture-ci rerun in progress.
+
+## 2026-06-05 10000 servertool snapshot capture
+- 证据链：`sharedmodule/llmswitch-core/src/conversion/snapshot-utils.ts` 默认白名单此前只含 provider/chat_process 响应阶段，不含 `servertool.*` / `hub_followup.*`，即使 `stageRecorder.record(...)` 被调用也不会落盘到 `~/.rcc/codex-samples/`。
+- 代码真相：`sharedmodule/llmswitch-core/src/servertool/engine.ts` 之前只记录 `servertool.match`；`sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts` 之前未记录 followup request/response 样本，导致 apply_patch 等 servertool 真执行链无法在 snapshot 中复盘。
+- 修复：默认 snapshot 白名单加入 `servertool.*` 和 `hub_followup.*`；新增 `servertool.execution`、`servertool.followup.request`、`hub_followup.response` 三类 stage 记录，样本将直接落到 `~/.rcc/codex-samples/<protocol>/ports/10000/<req_*>/`。
+- 验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/snapshot-utils.memory-guard.spec.ts tests/servertool/servertool-snapshot-recording.spec.ts --runInBand` PASS。
+- 清理：已删除 `~/.rcc/codex-samples/{openai-responses,openai-chat}/ports/10000` 旧样本，当前 10000 快照基线为空，可直接重跑新测试。
+
+## 2026-06-05 10000 apply_patch sample audit goal
+- 新增 `docs/goals/apply-patch-10000-sample-audit-plan.md`，把本轮目标收敛为“只基于 10000 最新样本与代码真相定位 apply_patch 丢失层级”，避免与后续 servertool 实现修复目标混线。
+- 2026-06-05 responses.request_compat_normalization audit: confirmed c4m/crs request compat and chat-style function tool normalization truth lives in Rust req_outbound_stage3_compat/responses/request.rs; TS compat-engine only calls runReqOutboundStage3CompatWithNative.
+- Added feature/map/gate closeout unit: responses.request_compat_normalization, docs/architecture/responses-request-compat-rustification-plan.md, verify:responses-request-compat-rust-only, plus feature_id anchors in Rust request compat source and compat-engine.
+- Verification: verify:responses-request-compat-rust-only PASS; cargo test -p router-hotpath-napi req_profile_responses_ PASS (4 tests).
+- 2026-06-05 responses.request_compat_normalization phase2: split aggregate compat closeout into `responses.c4m_request_compat` and `responses.crs_request_compat` so future Rustification/gate drift is visible per profile instead of hidden behind one coarse feature.
+- Added profile-level gates: verify-responses-c4m-request-compat-rust-only / verify-responses-crs-request-compat-rust-only; both are wired into architecture CI.
+- 2026-06-05 responses.function_tool_normalization closeout: extracted shared chat-style function tool -> Responses wire `tools[].name + parameters` truth into dedicated feature/gate `responses.function_tool_normalization`; owner is Rust `normalize_responses_function_tools`, c4m/crs now only hold profile-specific diffs.
+- 2026-06-05 responses.tool_parameters_normalization closeout: extracted shared `tool.parameters` string/invalid -> object schema normalization into dedicated feature/gate `responses.tool_parameters_normalization`; owner is Rust `normalize_responses_tool_parameters`, c4m/crs now reference it as shared truth instead of hiding it inside profile compat.
+- 2026-06-05 responses.instructions_to_input_normalization closeout: extracted shared `instructions -> first system input_text` logic into dedicated feature/gate `responses.instructions_to_input_normalization`; c4m now only owns max token stripping, shared lift truth is Rust `apply_responses_instructions_to_input`.
+- 2026-06-05 responses.token_limit_field_normalization closeout: extracted shared `max_tokens/maxTokens/max_output_tokens/maxOutputTokens` stripping into dedicated feature/gate `responses.token_limit_field_normalization`; c4m now is composition shell over token-limit/instructions/tool normalization.
+- 2026-06-05 responses.direct_tool_shape_contract shell-thin pass: removed provider-local `messages` precheck and direct local validator wrapper; provider/direct now both rely on Rust validator path for chat-style messages/tools/content contract, TS only keeps error projection and transport glue.
+- 2026-06-05 responses.direct_tool_shape_contract phase3: found duplicated TS owner for direct `routeParams.model` and provider-direct `model/reasoning_effort` override in `direct-passthrough-payload.ts` + `responses-provider.ts`; moved both to Rust NAPI helper `apply_responses_direct_route_params_override_json` and bridged through `applyResponsesDirectRouteParamsOverrideNative`.
+- Verification target for this slice: direct payload specs + provider direct passthrough specs + native availability/rust-first/no-ts-fallback gates; this proves direct override semantics no longer fork between server/provider TS shells.
+- 2026-06-05 responses.direct_tool_shape_contract phase4: moved direct raw payload resolution (`metadata.__raw_request_body` precedence + metadata fail-fast + `stream=true` lift) from `direct-passthrough-payload.ts` into Rust helper `resolve_responses_direct_payload_json`; TS direct entry now only forwards inputs to native bridge.
+- 2026-06-05 10000 latest sample audit: `0.90.2869` 已修复 provider wire `custom apply_patch -> function`；`req_1780656784130_f501d301`/`req_1780656803503_3d0d60b0` 的 `body.tools` 中 `apply_patch` 已是 `function`，不再出现 upstream `invalid tool type: custom (2013)`。
+- 2026-06-05 10000 remaining failures shifted to model behavior after tool result, not wire compat: `req_1780656784130_f501d301` / `req_1780656803503_3d0d60b0` / `req_1780656838317_dc120f30` show provider returns tool-call flow, but model keeps using `exec_command` to inspect `tmp/ap002.txt`, sees actual content `hello\\n\\nworld`, emits/receives `APPLY_PATCH_ERROR`, and fails to produce a valid final `apply_patch` replacement.
+- 2026-06-05 sample evidence: latest failed prompt chain contains repeated `exec_command` on `tmp/ap002.txt`, then repeated `apply_patch` attempts with wrong hunk context against `hello\\n\\nworld`; issue is weak-model patch reasoning / retry guidance quality, not direct-vs-relay or provider wire shape anymore.
+
+## 2026-06-05 build followup
+- build:min 命中现存 sharedmodule TS 类型错误：servertool/engine.ts 直接访问 ServerToolFollowupPlan.entryEndpoint，但 metadata-only union 分支无该字段。
+- 最小修复：engine.ts 改为 `'entryEndpoint' in followup` 后再读取；纯类型收敛，不改运行语义。
+
+## 2026-06-05 10000 tool_search followup
+- 新证据：180955/180957/180959 三条 diag 显示 tools[14].type=tool_search；tool list 已含 apply_patch(custom) 与 web_search，当前新 blocker 是 builtin tool_search 未被 ReqInbound02 放行。
+- 修复：Rust inbound validator/contract 放行 tool_search，并顺手对齐 image_generation/code_interpreter/computer_use_preview。
+- 2026-06-05 outbound compat root cause confirmed: 10000 port is configured with [servertool.apply_patch] mode=servertool, but same-protocol direct skip only recognized function-style apply_patch, not Codex Responses custom apply_patch. This let direct bypass Hub req/resp governance and leak custom apply_patch to opencode/minimax upstream.
+- Fix direction: broaden hasDeclaredApplyPatchTool() to recognize Responses custom apply_patch, so servertool-mode requests force relay back into Hub. Also harden Rust sanitize_provider_outbound_payload_json to flatten chat-style function tools for openai-responses direct/provider payloads.
+- 2026-06-05 responses.direct_tool_shape_contract phase5: found remaining TS truth in `src/providers/core/runtime/responses-provider.ts::buildPassthroughResponsesBody` (`stripInternalKeysDeep`, metadata rejection, trimmed model required); moved it to Rust helper `build_responses_direct_passthrough_body_json`, added bridge/native-availability/rust-first/no-ts-fallback coverage updates so provider direct no longer owns direct body truth locally.
+- 2026-06-05 responses.direct_tool_shape_contract phase6: code path already had `hasDeclaredApplyPatchTool()` for function/custom `apply_patch`, but route-level regression `direct-passthrough-route-level.spec.ts` 之前未进真实 `ci-jest`; now wired that spec into CI and hardened `verify-responses-direct-tool-shape-contract` to require both servertool-mode skip cases plus router entry guard text.
+- 2026-06-05 responses.direct_tool_shape_contract phase7: removed local TS owner `hasDeclaredApplyPatchTool()` from `http-server/index.ts`; new Rust helper `has_declared_apply_patch_tool_json` now detects both function-style and Responses custom `apply_patch` declarations for servertool-mode direct->Hub relay.
+- 2026-06-05 responses.direct_tool_shape_contract phase8: added Rust canonical direct decision helper `evaluate_responses_direct_route_decision_json` to unify provider-wire contract validation and servertool-mode relay-required detection; `http-server/index.ts` now consumes one result instead of duplicating TS orchestration branches.
+- 2026-06-05 responses.direct_tool_shape_contract phase9: `direct-passthrough-payload.ts` no longer owns separate Rust wrapper paths for validator-vs-apply_patch detection; `checkDirectPayloadContract` now only wraps `evaluateDirectRouteDecision`, reducing TS surface toward one decision entry.
+- 2026-06-05 apply_patch retry guidance hardening: Rust inbound apply_patch tool-result normalization now tells weak models to keep using apply_patch, stop re-probing with exec_command, and reuse exact observed file lines in `- old` / `+ new` line-edit retries.
+- 2026-06-05 apply_patch shape compatibility widened in Rust response tool governance: schema normalization now accepts nested `input.patch`, `text`/`content`/`body`/`arguments` carriers when edit information is sufficient, and line-edit payloads are no longer rejected purely for non-canonical outer shape.
+- 2026-06-05 responses.direct_tool_shape_contract verification refresh: `npm run verify:architecture-ci` PASS after snapshot-stage + responses-request-compat gate wiring; confirms function-map / verification-map / owner-queryability / snapshot owners / rust-only responses gates all green together.
+- 2026-06-05 direct payload mock parity fix: `tests/server/runtime/http-server/direct-passthrough-payload.spec.ts` native decision mock had drifted from Rust contract by not rejecting `input[].content` on `function_call(_output)` items; aligned mock with Rust owner so direct payload regression remains real signal instead of false green.
+- 2026-06-05 targeted verification PASS: `tests/server/runtime/http-server/direct-passthrough-payload.spec.ts`, `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts`, `tests/providers/runtime/responses-provider.direct-passthrough.spec.ts`, `tests/sharedmodule/deepseek-web-request-compat.spec.ts` all green. Separate unrelated red remains in `tests/providers/core/runtime/protocol-http-providers.unit.test.ts` (`qwenWebSearch` endpoint expectation `/api/v1/indices/plugin/web_search` vs `/chat/completions`), not touched in this closeout slice.
+- 2026-06-05 residual TS owner audit result: `src/server/runtime/http-server/direct-passthrough-payload.ts` still keeps only error projection shell (`assert/check`) plus three native bridge shells (`resolve/apply/evaluate`); `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts` remains a thin stage bridge only (`runReqOutboundStage3CompatWithNative` / `runRespInboundStage3CompatWithNative`) and no longer owns responses request compat truth.
+- 2026-06-05 responses.direct_tool_shape_contract phase10: physically removed `checkDirectPayloadContract` from `src/server/runtime/http-server/direct-passthrough-payload.ts`; TS direct shell now keeps only one semantic decision bridge (`evaluateDirectRouteDecision`) plus error projection helper (`assertDirectPayloadContract`) and two non-semantic payload bridges (`resolveRawPayloadForDirect` / `applyMinimalDirectOverrides`).
+- 2026-06-05 provider-direct direct contract alignment: `src/server/runtime/http-server/index.ts::executeProviderDirectPipelineForPort()` no longer calls a secondary assert/check wrapper stack; it now reads `evaluateDirectRouteDecision(...)` directly and fails fast from the unified Rust-owned decision result, matching router-direct entry and router-direct payload eligibility.
+- 2026-06-05 targeted verification PASS after phase10: `tests/server/runtime/http-server/direct-passthrough-payload.spec.ts`, `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts`, `tests/server/runtime/http-server/provider-direct-response-passthrough.spec.ts`, `tests/providers/runtime/responses-provider.direct-passthrough.spec.ts`, `tests/sharedmodule/deepseek-web-request-compat.spec.ts` all green.
+- 2026-06-05 gate verification PASS after phase10: `verify:responses-direct-tool-shape-contract`, `verify:responses-direct-tool-shape-no-ts-fallback`, and full `verify:architecture-ci` all green. This confirms provider-direct/router-direct now share the same Rust-owned eligibility/contract decision surface without reintroducing TS fallback.
+- 2026-06-05 correction: apply_patch compatibility widening is now shape-only. Removed plain-text new-file inference; Rust normalization only unwraps explicit patch carriers (including nested `input.patch` and `text`/`content`/`body`/`arguments`) and preserves semantics instead of guessing them.
+- 2026-06-05 direct/provider wrapper audit conclusion: `src/server/runtime/http-server/direct-passthrough-payload.ts` still intentionally keeps `assertDirectPayloadContract` only as 400 error projection shell for tests/consumers; it no longer owns any provider-wire judgment path beyond calling the unified Rust decision bridge.
+- 2026-06-05 provider runtime wrapper audit conclusion: `src/providers/core/runtime/responses-provider.ts::assertResponsesWireShape` is now only a native-availability/error-projection shell around `validateResponsesDirectToolShapeContractNative`; no local chat-style/request-compat truth remains in provider runtime.
+- 2026-06-05 responses.direct_tool_shape_contract phase11: introduced shared TS error projector `src/providers/core/runtime/responses-direct-contract-error.ts` so direct HTTP shell and responses provider runtime reuse one thin projection surface instead of each hand-rolling native-unavailable / 400 contract wrappers.
+- 2026-06-05 phase11 wiring: `direct-passthrough-payload.ts` now delegates invalid-provider-wire projection to `projectResponsesDirectContractDecision()` and 400 error object creation to `buildDirectPayloadContractError()`; `responses-provider.ts` now delegates native-unavailable fail-fast to `assertNativeResponsesDirectContractAvailable()`.
+- 2026-06-05 phase11 gates/docs sync: updated `verify-responses-direct-tool-shape-contract` and `verify-responses-direct-tool-shape-no-ts-fallback` to track the new shared projector owner instead of hard-coding the old provider-local error string anchor.
+- 2026-06-05 phase11 verification PASS: targeted five-suite Jest set, `verify:responses-direct-tool-shape-contract`, `verify:responses-direct-tool-shape-no-ts-fallback`, and full `verify:architecture-ci` all green after shared projector extraction.
+- 2026-06-05 responses.direct_tool_shape_contract phase12: physically removed `assertDirectPayloadContract` from `src/server/runtime/http-server/direct-passthrough-payload.ts`; direct shell now exposes only canonical decision bridge `evaluateDirectRouteDecision`, projector wrapper `assertDirectRouteDecision`, and non-semantic payload bridges.
+- 2026-06-05 responses.direct_tool_shape_contract phase12: physically removed provider-local `assertResponsesWireShape` method from `src/providers/core/runtime/responses-provider.ts`; both provider send paths now call `validateResponsesDirectToolShapeContractNative(...)` + shared `assertNativeResponsesDirectContractAvailable(...)` inline.
+- 2026-06-05 phase12 verification PASS: targeted five-suite Jest set, `verify:responses-direct-tool-shape-contract`, `verify:responses-direct-tool-shape-no-ts-fallback`, and full `verify:architecture-ci` all green after deleting direct/provider local wrappers.

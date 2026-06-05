@@ -13,6 +13,7 @@ import {
   probeRouteCodexHealth,
   type RouteCodexHealthProbeResult
 } from '../../utils/http-health-probe.js';
+import { buildLocalProbeHostCandidates, resolvePreferredLocalConnectHost } from '../../utils/local-connect-host.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -286,11 +287,7 @@ async function probeRouteCodexServer(
 }
 
 function normalizeHostForHttp(host: string): string {
-  const normalized = String(host || '').trim().toLowerCase();
-  if (!normalized || normalized === '0.0.0.0' || normalized === '::' || normalized === '::0') {
-    return LOCAL_HOSTS.IPV4;
-  }
-  return host;
+  return resolvePreferredLocalConnectHost(host, LOCAL_HOSTS.IPV4);
 }
 
 async function requestProcessRestartViaHttp(
@@ -378,15 +375,17 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
         spinner.fail(`No RouteCodex server found on ${host}:${port}`);
         ctx.exit(1);
       }
-      const primaryProbe = await probeRouteCodexServer(
-        ctx,
-        host === LOCAL_HOSTS.LOCALHOST ? LOCAL_HOSTS.IPV4 : host,
-        port
-      );
-      const secondaryProbe =
-        primaryProbe.ok || host === LOCAL_HOSTS.IPV4
-          ? primaryProbe
-          : await probeRouteCodexServer(ctx, host, port);
+      const probeHosts = buildLocalProbeHostCandidates(host);
+      let secondaryProbe: RouteCodexHealthProbeResult | null = null;
+      for (const probeHost of probeHosts) {
+        secondaryProbe = await probeRouteCodexServer(ctx, probeHost, port);
+        if (secondaryProbe.ok) {
+          break;
+        }
+      }
+      if (!secondaryProbe) {
+        secondaryProbe = await probeRouteCodexServer(ctx, host, port);
+      }
       if (!secondaryProbe.ok) {
         spinner.warn(
           `Health probe degraded on ${host}:${port} (${describeHealthProbeFailure(secondaryProbe)}); sending in-place restart signal to managed pid(s).`
@@ -428,14 +427,16 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
   }
 
   const targets: RestartTarget[] = [];
-  const healthHosts = [explicitHost, LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST].filter(Boolean) as string[];
   for (const port of ports) {
     const pids = ctx.findListeningPids(port);
     if (!pids.length) {
       continue;
     }
     let ok = false;
-    let hostUsed: string = LOCAL_HOSTS.LOCALHOST;
+    let hostUsed: string = explicitHost || LOCAL_HOSTS.LOCALHOST;
+    const healthHosts = explicitHost
+      ? buildLocalProbeHostCandidates(explicitHost)
+      : buildLocalProbeHostCandidates(LOCAL_HOSTS.ANY);
     for (const h of healthHosts) {
       const probe = await probeRouteCodexServer(ctx, h, port);
       if (probe.ok) {
@@ -481,6 +482,7 @@ async function waitForRestart(ctx: RestartCommandContext, host: string, port: nu
   let sawNewPid = false;
   let sawEndpointUnavailable = false;
   let samePidHealthyStreak = 0;
+  const probeHosts = buildLocalProbeHostCandidates(host);
   while (Date.now() < deadline) {
     const current = ctx.findListeningPids(port);
     if (!current.length) {
@@ -492,15 +494,21 @@ async function waitForRestart(ctx: RestartCommandContext, host: string, port: nu
     if (current.some((pid) => !old.has(pid))) {
       sawNewPid = true;
     }
-    const probe = await probeRouteCodexServer(ctx, host, port);
-    if (!probe.ok) {
+    let probe: RouteCodexHealthProbeResult | null = null;
+    for (const probeHost of probeHosts) {
+      probe = await probeRouteCodexServer(ctx, probeHost, port);
+      if (probe.ok) {
+        break;
+      }
+    }
+    if (!probe || !probe.ok) {
       sawEndpointUnavailable = true;
       samePidHealthyStreak = 0;
-      logRestartNonBlocking(ctx, 'wait_for_restart.health_probe', describeHealthProbeFailure(probe), {
-        host,
+      logRestartNonBlocking(ctx, 'wait_for_restart.health_probe', describeHealthProbeFailure(probe || { ok: false, kind: 'network_error' }), {
+        host: probeHosts[0] || host,
         port,
-        kind: probe.kind,
-        status: probe.status
+        kind: probe?.kind,
+        status: probe?.status
       });
       await ctx.sleep(sawNewPid ? 250 : 150);
       continue;

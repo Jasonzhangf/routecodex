@@ -114,7 +114,9 @@ export function baz(opts: Opts) { return nativeBaz(opts); }
   - `npm run verify:architecture-feature-map-growth-discipline`
   - `npm run verify:architecture-forbidden-path-growth`
   - `npm run verify:architecture-adjacent-builder-naming`
+  - `npm run verify:architecture-snapshot-stage-contract`
 - 相关真源：
   - `docs/architecture/README.md`
   - `docs/architecture/function-map.yml`
   - `docs/architecture/verification-map.yml`
+  - `docs/architecture/snapshot-stage-contract.md`

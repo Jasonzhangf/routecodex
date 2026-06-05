@@ -7,6 +7,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
+import { buildLocalProbeHostCandidates } from '../../utils/local-connect-host.js';
 import { resolveRccConfigFileForRead, resolveRccUserDir } from '../../config/user-data-paths.js';
 import {
   encodeSessionClientApiKey,
@@ -377,10 +378,10 @@ function resolveServerProbeTargets(serverUrl: string): string[] {
   pushTarget(serverUrl);
   try {
     const parsed = new URL(serverUrl);
-    if (parsed.hostname === '0.0.0.0' || parsed.hostname === '::' || parsed.hostname === '::1' || parsed.hostname === 'localhost') {
-      const loopback = new URL(serverUrl);
-      loopback.hostname = '127.0.0.1';
-      pushTarget(loopback.toString());
+    for (const host of buildLocalProbeHostCandidates(parsed.hostname)) {
+      const candidate = new URL(serverUrl);
+      candidate.hostname = host;
+      pushTarget(candidate.toString());
     }
   } catch (error) {
     logLauncherNonBlocking('resolve_server_probe_targets_parse_url', error, { serverUrl });

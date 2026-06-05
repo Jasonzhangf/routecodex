@@ -591,6 +591,7 @@ export async function handleResponses(
       fs.writeFileSync(path.join(diagDir, `error-${requestId}.json`), JSON.stringify({
         endpoint: entryEndpoint,
         requestId,
+        requestBody: req.body,
         message: error instanceof Error ? error.message : String(error),
         code: typeof errRec?.code === 'string' ? errRec.code : undefined,
         statusCode: typeof errRec?.statusCode === 'number' ? errRec.statusCode : undefined,

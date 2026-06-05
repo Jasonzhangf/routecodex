@@ -100,6 +100,17 @@ fn validate_tool_definition(
     if is_builtin_tool_type(tool_type) {
         return Ok(());
     }
+    if tool_type.eq_ignore_ascii_case("custom") {
+        let has_name = row
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|name| !name.trim().is_empty())
+            .unwrap_or(false);
+        if !has_name {
+            return Err(format!("{node_name} custom tool at {path}.name must be a string"));
+        }
+        return Ok(());
+    }
     if !tool_type.eq_ignore_ascii_case("function") {
         return Err(format!(
             "{node_name} tool at {path}.type must be function, namespace, or supported builtin"
@@ -252,6 +263,70 @@ fn validate_required_action_tool_calls(
 fn is_builtin_tool_type(tool_type: &str) -> bool {
     matches!(
         tool_type,
-        "web_search" | "web_search_preview" | "code_interpreter" | "computer_use_preview" | "image_generation"
+        "web_search"
+            | "web_search_preview"
+            | "code_interpreter"
+            | "computer_use_preview"
+            | "image_generation"
+            | "tool_search"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{assert_tool_surface_contract, ToolNamespacePolicy};
+    use serde_json::json;
+
+    #[test]
+    fn accepts_responses_custom_tool_definition() {
+        let payload = json!({
+            "tools": [
+                {
+                    "type": "custom",
+                    "name": "apply_patch",
+                    "description": "Use apply_patch",
+                    "format": {
+                        "type": "grammar",
+                        "syntax": "lark",
+                        "definition": "start: begin_patch hunk+ end_patch"
+                    }
+                }
+            ]
+        });
+
+        let result = assert_tool_surface_contract(
+            &payload,
+            "HubReqInbound02Standardized",
+            ToolNamespacePolicy::AllowSemanticNamespace,
+        );
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn accepts_responses_tool_search_builtin_definition() {
+        let payload = json!({
+            "tools": [
+                {
+                    "type": "tool_search",
+                    "execution": "client",
+                    "description": "Search deferred tools",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string" }
+                        },
+                        "required": ["query"],
+                        "additionalProperties": false
+                    }
+                }
+            ]
+        });
+
+        let result = assert_tool_surface_contract(
+            &payload,
+            "HubReqInbound02Standardized",
+            ToolNamespacePolicy::AllowSemanticNamespace,
+        );
+        assert!(result.is_ok(), "{result:?}");
+    }
 }

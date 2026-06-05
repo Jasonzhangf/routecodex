@@ -41,7 +41,7 @@ pub(crate) fn apply_patch_error_message(reason: &str) -> &'static str {
         "empty_patch" => "apply_patch patch must be non-empty.",
         "conflict_markers" => "Conflict markers are not allowed in apply_patch patches; remove <<<<<<<, =======, and >>>>>>> blocks.",
         "mixed_gnu_diff" => "GNU diff headers are not valid apply_patch input; use the *** Begin Patch grammar with file markers.",
-        "unsupported_patch_format" => "Invalid apply_patch grammar. Use *** Begin Patch / *** End Patch with Add/Update/Delete File markers.",
+        "unsupported_patch_format" => "apply_patch shape was not directly executable. If you already have enough edit information, keep the same edit intent and resend it as a workspace-relative `filePath` plus either line-edit entries (`- exact old`, `+ exact new`) or canonical *** Begin Patch grammar.",
         "empty_add_file_block" => "Add File requires + content lines. Use + for every created file line.",
         "empty_update_hunk" => "Update File requires a non-empty @@ hunk with context and/or +/- lines.",
         _ => "Invalid apply_patch schema or patch grammar.",

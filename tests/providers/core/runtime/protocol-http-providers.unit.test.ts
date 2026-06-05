@@ -6,23 +6,109 @@ import { afterEach, describe, expect, test } from '@jest/globals';
 import { jest } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
-import { HttpTransportProvider } from '../../../../src/providers/core/runtime/http-transport-provider.js';
-import { HttpRequestExecutor } from '../../../../src/providers/core/runtime/http-request-executor.js';
-import { ResponsesProvider } from '../../../../src/providers/core/runtime/responses-provider.js';
-import { AnthropicProtocolClient } from '../../../../src/client/anthropic/anthropic-protocol-client.js';
-import { DeepSeekHttpProvider } from '../../../../src/providers/core/runtime/deepseek-http-provider.js';
-import { attachProviderRuntimeMetadata } from '../../../../src/providers/core/runtime/provider-runtime-metadata.js';
 
-jest.mock('../../../../src/modules/llmswitch/bridge.js', () => ({
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+  reportProviderErrorToRouterPolicy: async () => {},
+  writeSnapshotViaHooks: async () => {},
+  applyResponsesDirectRouteParamsOverrideNative: (input: {
+    payload: Record<string, unknown>;
+    routeParams?: Record<string, unknown>;
+    providerDefaultModel?: string;
+    requestReasoningEffort?: string;
+  }) => {
+    const next = structuredClone(input.payload);
+    const routeModel = typeof input.routeParams?.model === 'string' ? input.routeParams.model.trim() : '';
+    const providerDefaultModel = typeof input.providerDefaultModel === 'string' ? input.providerDefaultModel.trim() : '';
+    if (routeModel || providerDefaultModel) {
+      next.model = routeModel || providerDefaultModel;
+    }
+    const routeReasoningEffort =
+      typeof input.routeParams?.reasoningEffort === 'string' ? input.routeParams.reasoningEffort.trim() : '';
+    const topLevelReasoningEffort =
+      typeof input.requestReasoningEffort === 'string' ? input.requestReasoningEffort.trim() : '';
+    if (routeReasoningEffort || topLevelReasoningEffort) {
+      const effort = routeReasoningEffort || topLevelReasoningEffort;
+      next.reasoning_effort = effort;
+      next.reasoning = { ...(typeof next.reasoning === 'object' && next.reasoning && !Array.isArray(next.reasoning) ? next.reasoning as Record<string, unknown> : {}), effort };
+    }
+    return next;
+  },
+  buildResponsesDirectPassthroughBodyNative: (payload: Record<string, unknown>) => {
+    const next = structuredClone(payload);
+    for (const key of Object.keys(next)) {
+      if (key.startsWith('__')) {
+        delete (next as Record<string, unknown>)[key];
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'metadata')) {
+      throw new Error('provider-runtime-error: metadata is not allowed in direct passthrough responses payload');
+    }
+    const model = typeof next.model === 'string' ? next.model.trim() : '';
+    if (!model) {
+      throw new Error('provider-runtime-error: missing model from direct passthrough responses payload');
+    }
+    next.model = model;
+    return next;
+  },
+  sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => input.payload,
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ status: 'completed', output: [] })
-  })
+  }),
+  validateResponsesDirectToolShapeContractNative: (payload: Record<string, unknown>) => {
+    if (Array.isArray(payload.messages)) {
+      throw new Error(
+        'provider-runtime-error: responses provider received chat-style "messages". This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions).'
+      );
+    }
+    const hasInput = Array.isArray(payload.input);
+    const hasInstructions = typeof payload.instructions === 'string' && payload.instructions.trim().length > 0;
+    if (!hasInput && !hasInstructions) {
+      throw new Error('provider-runtime-error: responses payload missing "input" or "instructions"');
+    }
+    if (Array.isArray(payload.tools)) {
+      payload.tools.forEach((tool, index) => {
+        if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+          throw new Error(`provider-runtime-error: responses payload tools[${index}] must be an object`);
+        }
+        const type = typeof (tool as { type?: unknown }).type === 'string' ? String((tool as { type?: unknown }).type).trim() : '';
+        if (type === 'function') {
+          const name = typeof (tool as { name?: unknown }).name === 'string' ? String((tool as { name?: unknown }).name).trim() : '';
+          if (!name) {
+            throw new Error(
+              `provider-runtime-error: responses payload tools[${index}] is chat-style function tool; Responses wire requires top-level tool.name`
+            );
+          }
+        }
+      });
+    }
+    if (Array.isArray(payload.input)) {
+      payload.input.forEach((item, index) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          return;
+        }
+        const type = typeof (item as { type?: unknown }).type === 'string' ? String((item as { type?: unknown }).type).trim() : '';
+        if ((type === 'function_call' || type === 'function_call_output') && Object.prototype.hasOwnProperty.call(item, 'content')) {
+          throw new Error(
+            `provider-runtime-error: responses payload input[${index}] ${type} must not carry content; tool call data belongs in arguments/output fields`
+          );
+        }
+      });
+    }
+    return { ok: true as const };
+  }
 }), { virtual: true });
 
-jest.mock('../../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} })
 }), { virtual: true });
+
+const { HttpTransportProvider } = await import('../../../../src/providers/core/runtime/http-transport-provider.js');
+const { HttpRequestExecutor } = await import('../../../../src/providers/core/runtime/http-request-executor.js');
+const { ResponsesProvider } = await import('../../../../src/providers/core/runtime/responses-provider.js');
+const { AnthropicProtocolClient } = await import('../../../../src/client/anthropic/anthropic-protocol-client.js');
+const { DeepSeekHttpProvider } = await import('../../../../src/providers/core/runtime/deepseek-http-provider.js');
+const { attachProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
 
 const emptyDeps: ModuleDependencies = {} as ModuleDependencies;
 const tempDirs: string[] = [];

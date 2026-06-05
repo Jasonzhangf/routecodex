@@ -54,9 +54,8 @@ import {
   type RouterDirectResult,
 } from './router-direct-pipeline.js';
 import {
-  assertDirectPayloadContract,
   applyMinimalDirectOverrides,
-  checkDirectPayloadContract,
+  evaluateDirectRouteDecision,
   resolveRawPayloadForDirect,
 } from './direct-passthrough-payload.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
@@ -76,6 +75,7 @@ import { isPoolExhaustedPipelineError } from './executor/request-executor-core-u
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
 import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
+import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
 import {
   resolveVirtualRouterInput,
   getModuleDependencies,
@@ -161,26 +161,6 @@ function readStringArray(value: unknown): string[] {
     .map((item) => item.trim());
 }
 
-function hasDeclaredApplyPatchTool(body: unknown): boolean {
-  const record = body && typeof body === 'object' && !Array.isArray(body)
-    ? body as Record<string, unknown>
-    : undefined;
-  const tools = Array.isArray(record?.tools) ? record.tools : [];
-  for (const tool of tools) {
-    if (!tool || typeof tool !== 'object' || Array.isArray(tool)) continue;
-    const toolRow = tool as Record<string, unknown>;
-    const fn = toolRow.function && typeof toolRow.function === 'object' && !Array.isArray(toolRow.function)
-      ? toolRow.function as Record<string, unknown>
-      : undefined;
-    const name = typeof fn?.name === 'string'
-      ? fn.name
-      : (typeof toolRow.name === 'string' ? toolRow.name : '');
-    if (name.trim() === 'apply_patch') {
-      return true;
-    }
-  }
-  return false;
-}
 import {
   initializeHttpServer,
   restartRuntimeFromDisk,
@@ -232,6 +212,7 @@ export class RouteCodexHttpServer {
   private readonly repoRoot: string;
   private currentRouterArtifacts: VirtualRouterArtifacts | null = null;
   private providerProfileIndex: Map<string, ProviderProfile> = new Map();
+  private errorHandling = new QuietErrorHandlingCenter();
   private errorHandlingShim: ModuleDependencies['errorHandlingCenter'] | null = null;
   private routeErrorHub: RouteErrorHub | null = null;
   private readonly coloredLogger = createServerColoredLogger();
@@ -1140,9 +1121,20 @@ export class RouteCodexHttpServer {
         // Router direct bypass skips response conversion/servertool execution,
         // so we must force relay when request declares apply_patch.
         const applyPatchMode = readApplyPatchModeFromMetadata(nextInput.metadata);
-        if (applyPatchMode === 'servertool' && hasDeclaredApplyPatchTool(nextInput.body)) {
+        const directEntryDecision = evaluateDirectRouteDecision({
+          payload:
+            nextInput.body && typeof nextInput.body === 'object' && !Array.isArray(nextInput.body)
+              ? nextInput.body as Record<string, unknown>
+              : {},
+          inboundProtocol: detectInboundProtocolFromRequest({
+            path: nextInput.entryEndpoint,
+            headers: nextInput.headers as Record<string, string | string[] | undefined>,
+          }),
+          applyPatchMode,
+        });
+        if (directEntryDecision.requiresHubRelay === true) {
           this.logStage('router-direct.skipped', input.requestId, {
-            reason: 'apply_patch_servertool_mode_requires_hub_response_stage',
+            reason: directEntryDecision.reason ?? 'apply_patch_servertool_mode_requires_hub_response_stage',
             mode: applyPatchMode,
           });
           return await this.executePipeline(nextInput);
@@ -1259,11 +1251,14 @@ export class RouteCodexHttpServer {
       path: input.entryEndpoint,
       headers: input.headers as Record<string, string | string[] | undefined>,
     });
-    const directPayloadContract = checkDirectPayloadContract({ payload: rawDirectPayload, inboundProtocol });
-    if (!directPayloadContract.ok) {
+    const directPayloadDecision = evaluateDirectRouteDecision({
+      payload: rawDirectPayload,
+      inboundProtocol,
+    });
+    if (!directPayloadDecision.providerWireValid) {
       this.logStage('router-direct.skipped', input.requestId, {
         reason: 'direct_payload_not_provider_wire',
-        detail: directPayloadContract.reason,
+        detail: directPayloadDecision.reason ?? 'invalid_direct_payload',
       });
       return { used: false, reason: 'direct_payload_not_provider_wire' };
     }
@@ -1621,7 +1616,13 @@ export class RouteCodexHttpServer {
       path: input.entryEndpoint,
       headers: input.headers as Record<string, string | string[] | undefined>,
     });
-    assertDirectPayloadContract({ payload, inboundProtocol });
+    const directPayloadDecision = evaluateDirectRouteDecision({
+      payload,
+      inboundProtocol,
+    });
+    if (!directPayloadDecision.providerWireValid) {
+      throw new Error(directPayloadDecision.reason ?? 'invalid direct payload');
+    }
     const providerBinding = portConfig.providerBinding;
     const metadata = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
       ? (input.metadata as Record<string, unknown>)

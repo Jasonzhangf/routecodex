@@ -67,6 +67,22 @@ import {
   saveRoutingInstructionStateSync
 } from '../router/virtual-router/routing-state-store.js';
 
+function recordServertoolFollowupStage(
+  stageRecorder: StageRecorder | undefined,
+  stage: string,
+  payload: Record<string, unknown>,
+  onError: (stage: string, error: unknown) => void
+): void {
+  if (!stageRecorder) {
+    return;
+  }
+  try {
+    stageRecorder.record(stage, payload);
+  } catch (error) {
+    onError(stage, error);
+  }
+}
+
 type OrchestrationResult = {
   chat: JsonObject;
   executed: true;
@@ -337,6 +353,22 @@ export async function runFollowupMainline(args: {
     });
   }
 
+  recordServertoolFollowupStage(
+    args.stageRecorder,
+    'servertool.followup.request',
+    {
+      flowId: args.execution.flowId,
+      requestId: args.requestId,
+      followupRequestId,
+      executionMode,
+      followupEntryEndpoint,
+      metadata,
+      payload: followupPayloadRaw,
+      clientInjectOnly: executionMode === 'client_inject_only'
+    },
+    (stage, error) => args.logNonBlocking('record_' + stage.replace(/[^a-z0-9]+/gi, '_'), error)
+  );
+
   if (executionMode === 'client_inject_only') {
     const clientInjectResult = await runClientInjectOnlyFollowup({
       adapterContext: args.adapterContext,
@@ -375,6 +407,19 @@ export async function runFollowupMainline(args: {
       onLogProgress: (step, total, message, extra) => args.onLogProgress(step, total, message, extra)
     });
     if (clientInjectResult) {
+      recordServertoolFollowupStage(
+        args.stageRecorder,
+        'servertool.followup.result',
+        {
+          flowId: args.execution.flowId,
+          requestId: args.requestId,
+          followupRequestId,
+          executionMode,
+          completed: true,
+          result: clientInjectResult
+        },
+        (stage, error) => args.logNonBlocking('record_' + stage.replace(/[^a-z0-9]+/gi, '_'), error)
+      );
       return clientInjectResult;
     }
   }
@@ -420,9 +465,35 @@ export async function runFollowupMainline(args: {
     onLogProgress: (step, total, message, extra) => args.onLogProgress(step, total, message, extra)
   });
   if (reenterResult.kind === 'completed') {
+    recordServertoolFollowupStage(
+      args.stageRecorder,
+      'servertool.followup.result',
+      {
+        flowId: args.execution.flowId,
+        requestId: args.requestId,
+        followupRequestId,
+        executionMode,
+        completed: true,
+        result: reenterResult.result
+      },
+      (stage, error) => args.logNonBlocking('record_' + stage.replace(/[^a-z0-9]+/gi, '_'), error)
+    );
     return reenterResult.result;
   }
   const followupBody = reenterResult.followupBody;
+  recordServertoolFollowupStage(
+    args.stageRecorder,
+    'hub_followup.response',
+    {
+      flowId: args.execution.flowId,
+      requestId: args.requestId,
+      followupRequestId,
+      executionMode,
+      followupEntryEndpoint,
+      body: followupBody
+    },
+    (stage, error) => args.logNonBlocking('record_' + stage.replace(/[^a-z0-9]+/gi, '_'), error)
+  );
   resetStopMessageBudgetAfterNonStopFollowup({
     adapterContext: args.adapterContext,
     followupBody

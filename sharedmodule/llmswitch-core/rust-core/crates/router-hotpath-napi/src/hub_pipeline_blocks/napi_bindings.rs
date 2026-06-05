@@ -1,5 +1,284 @@
 use serde_json::Value;
 
+fn validate_responses_direct_tool_shape_contract(payload: &Value) -> Result<(), String> {
+    let body = payload
+        .as_object()
+        .ok_or_else(|| "provider-runtime-error: responses payload must be an object".to_string())?;
+
+    if matches!(body.get("messages"), Some(Value::Array(_))) {
+        return Err(
+            "provider-runtime-error: responses provider received chat-style \"messages\". This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions)."
+                .to_string(),
+        );
+    }
+
+    let has_input = matches!(body.get("input"), Some(Value::Array(_)));
+    let has_instructions = body
+        .get("instructions")
+        .and_then(|value| value.as_str())
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    if !has_input && !has_instructions {
+        return Err("provider-runtime-error: responses payload missing \"input\" or \"instructions\"".to_string());
+    }
+
+    if let Some(Value::Array(tools)) = body.get("tools") {
+        for (index, tool) in tools.iter().enumerate() {
+            let tool_record = tool.as_object().ok_or_else(|| {
+                format!("provider-runtime-error: responses payload tools[{index}] must be an object")
+            })?;
+            let tool_type = tool_record
+                .get("type")
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim())
+                .unwrap_or("");
+            if tool_type == "function" {
+                let name = tool_record
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.trim())
+                    .unwrap_or("");
+                if name.is_empty() {
+                    return Err(format!(
+                        "provider-runtime-error: responses payload tools[{index}] is chat-style function tool; Responses wire requires top-level tool.name"
+                    ));
+                }
+            }
+        }
+    }
+
+    if let Some(Value::Array(input_items)) = body.get("input") {
+        for (index, item) in input_items.iter().enumerate() {
+            let Some(item_record) = item.as_object() else {
+                continue;
+            };
+            let item_type = item_record
+                .get("type")
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim())
+                .unwrap_or("");
+            if (item_type == "function_call" || item_type == "function_call_output")
+                && item_record.contains_key("content")
+            {
+                return Err(format!(
+                    "provider-runtime-error: responses payload input[{index}] {item_type} must not carry content; tool call data belongs in arguments/output fields"
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn read_trimmed_string_field(map: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
+    map.get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn apply_responses_direct_route_params_override(
+    payload: &Value,
+    route_params: Option<&Value>,
+    provider_default_model: Option<&str>,
+    request_reasoning_effort: Option<&str>,
+) -> Result<Value, String> {
+    let mut next = payload
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "provider-runtime-error: responses direct payload must be an object".to_string())?;
+
+    let route_params_obj = route_params.and_then(Value::as_object);
+    let route_model = route_params_obj.and_then(|map| read_trimmed_string_field(map, "model"));
+    let provider_default_model = provider_default_model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    if let Some(model) = route_model.or(provider_default_model) {
+        next.insert("model".to_string(), Value::String(model));
+    }
+
+    let route_reasoning_effort =
+        route_params_obj.and_then(|map| read_trimmed_string_field(map, "reasoningEffort"));
+    let top_level_reasoning_effort = request_reasoning_effort
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    if let Some(reasoning_effort) = route_reasoning_effort.or(top_level_reasoning_effort) {
+        next.insert(
+            "reasoning_effort".to_string(),
+            Value::String(reasoning_effort.clone()),
+        );
+        let mut reasoning = next
+            .get("reasoning")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        reasoning.insert("effort".to_string(), Value::String(reasoning_effort));
+        next.insert("reasoning".to_string(), Value::Object(reasoning));
+    }
+
+    Ok(Value::Object(next))
+}
+
+fn clone_direct_wire_payload(value: &Value) -> Result<serde_json::Map<String, Value>, String> {
+    let obj = value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "provider-runtime-error: direct passthrough payload must be an object".to_string())?;
+    if obj.contains_key("metadata") {
+        return Err(
+            "provider-runtime-error: metadata is not allowed in direct passthrough provider body"
+                .to_string(),
+        );
+    }
+    Ok(obj)
+}
+
+fn strip_internal_keys_deep(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(items.iter().map(strip_internal_keys_deep).collect()),
+        Value::Object(map) => {
+            let mut next = serde_json::Map::new();
+            for (key, entry) in map.iter() {
+                if key.starts_with("__") {
+                    continue;
+                }
+                next.insert(key.clone(), strip_internal_keys_deep(entry));
+            }
+            Value::Object(next)
+        }
+        _ => value.clone(),
+    }
+}
+
+fn build_responses_direct_passthrough_body(payload: &Value) -> Result<Value, String> {
+    let stripped = strip_internal_keys_deep(payload);
+    let mut body = stripped
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "provider-runtime-error: direct passthrough payload must be an object".to_string())?;
+    if body.contains_key("metadata") {
+        return Err(
+            "provider-runtime-error: metadata is not allowed in direct passthrough responses payload"
+                .to_string(),
+        );
+    }
+    let inbound_model = body
+        .get("model")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| {
+            "provider-runtime-error: missing model from direct passthrough responses payload"
+                .to_string()
+        })?;
+    body.insert("model".to_string(), Value::String(inbound_model));
+    Ok(Value::Object(body))
+}
+
+fn has_declared_apply_patch_tool(payload: &Value) -> bool {
+    let Some(root) = payload.as_object() else {
+        return false;
+    };
+    let Some(tools) = root.get("tools").and_then(Value::as_array) else {
+        return false;
+    };
+    for tool in tools {
+        let Some(tool_row) = tool.as_object() else {
+            continue;
+        };
+        let tool_type = tool_row
+            .get("type")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .unwrap_or("");
+        let function_name = tool_row
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .unwrap_or("");
+        let direct_name = tool_row
+            .get("name")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .unwrap_or("");
+        let name = if !function_name.is_empty() {
+            function_name
+        } else {
+            direct_name
+        };
+        if name == "apply_patch" {
+            return true;
+        }
+        if tool_type == "custom" && direct_name == "apply_patch" {
+            return true;
+        }
+    }
+    false
+}
+
+fn evaluate_responses_direct_route_decision(
+    payload: &Value,
+    inbound_protocol: &str,
+    apply_patch_mode: &str,
+) -> Result<Value, String> {
+    let has_declared_apply_patch_tool = has_declared_apply_patch_tool(payload);
+    let requires_hub_relay =
+        apply_patch_mode == "servertool" && has_declared_apply_patch_tool;
+    if requires_hub_relay {
+        return Ok(serde_json::json!({
+            "providerWireValid": true,
+            "requiresHubRelay": true,
+            "reason": "apply_patch_servertool_mode_requires_hub_response_stage",
+            "hasDeclaredApplyPatchTool": true
+        }));
+    }
+    if inbound_protocol == "openai-responses" {
+        validate_responses_direct_tool_shape_contract(payload)?;
+    }
+    Ok(serde_json::json!({
+        "providerWireValid": true,
+        "requiresHubRelay": false,
+        "reason": null,
+        "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
+    }))
+}
+
+fn resolve_responses_direct_payload(
+    body: &Value,
+    raw_request_body: Option<&Value>,
+    body_stream: bool,
+    metadata_stream: bool,
+    outbound_stream: bool,
+) -> Result<Value, String> {
+    let mut next = if let Some(raw) = raw_request_body {
+        if raw.is_object() {
+            clone_direct_wire_payload(raw)?
+        } else if body.is_object() {
+            clone_direct_wire_payload(body)?
+        } else {
+            serde_json::Map::new()
+        }
+    } else if body.is_object() {
+        clone_direct_wire_payload(body)?
+    } else {
+        serde_json::Map::new()
+    };
+
+    if (body_stream || metadata_stream || outbound_stream)
+        && !matches!(next.get("stream"), Some(Value::Bool(true)))
+    {
+        next.insert("stream".to_string(), Value::Bool(true));
+    }
+
+    Ok(Value::Object(next))
+}
+
 use crate::hub_pipeline::{
     run_hub_pipeline, run_req_inbound_pipeline, run_req_process_pipeline,
     run_resp_outbound_pipeline, ChatEnvelope, HubPipelineInput, RoutingDecision,
@@ -196,6 +475,151 @@ pub fn extract_model_hint_from_metadata_json(metadata_json: String) -> napi::Res
     let output = extract_model_hint_from_metadata(&metadata);
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize model hint: {}", e)))
+}
+
+#[napi_derive::napi]
+pub fn validate_responses_direct_tool_shape_contract_json(
+    payload_json: String,
+) -> napi::Result<String> {
+    let payload: Value = serde_json::from_str(&payload_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload JSON: {}", e)))?;
+    validate_responses_direct_tool_shape_contract(&payload).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&serde_json::json!({ "ok": true }))
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize validation result: {}", e)))
+}
+
+#[napi_derive::napi]
+pub fn apply_responses_direct_route_params_override_json(
+    payload_json: String,
+    route_params_json: String,
+    provider_default_model_json: String,
+    request_reasoning_effort_json: String,
+) -> napi::Result<String> {
+    let payload: Value = serde_json::from_str(&payload_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload JSON: {}", e)))?;
+    let route_params: Value = serde_json::from_str(&route_params_json).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to parse route params JSON: {}", e))
+    })?;
+    let provider_default_model: Value =
+        serde_json::from_str(&provider_default_model_json).map_err(|e| {
+            napi::Error::from_reason(format!(
+                "Failed to parse provider default model JSON: {}",
+                e
+            ))
+        })?;
+    let request_reasoning_effort: Value =
+        serde_json::from_str(&request_reasoning_effort_json).map_err(|e| {
+            napi::Error::from_reason(format!(
+                "Failed to parse request reasoning effort JSON: {}",
+                e
+            ))
+        })?;
+
+    let output = apply_responses_direct_route_params_override(
+        &payload,
+        Some(&route_params),
+        provider_default_model.as_str(),
+        request_reasoning_effort.as_str(),
+    )
+    .map_err(napi::Error::from_reason)?;
+
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize direct route params override output: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn resolve_responses_direct_payload_json(
+    body_json: String,
+    raw_request_body_json: String,
+    body_stream_json: String,
+    metadata_stream_json: String,
+    outbound_stream_json: String,
+) -> napi::Result<String> {
+    let body: Value = serde_json::from_str(&body_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse body JSON: {}", e)))?;
+    let raw_request_body: Value = serde_json::from_str(&raw_request_body_json).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to parse raw request body JSON: {}", e))
+    })?;
+    let body_stream: Value = serde_json::from_str(&body_stream_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse body stream JSON: {}", e)))?;
+    let metadata_stream: Value = serde_json::from_str(&metadata_stream_json).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to parse metadata stream JSON: {}", e))
+    })?;
+    let outbound_stream: Value = serde_json::from_str(&outbound_stream_json).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to parse outbound stream JSON: {}", e))
+    })?;
+
+    let output = resolve_responses_direct_payload(
+        &body,
+        if raw_request_body.is_null() {
+            None
+        } else {
+            Some(&raw_request_body)
+        },
+        body_stream.as_bool().unwrap_or(false),
+        metadata_stream.as_bool().unwrap_or(false),
+        outbound_stream.as_bool().unwrap_or(false),
+    )
+    .map_err(napi::Error::from_reason)?;
+
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize resolved responses direct payload output: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn build_responses_direct_passthrough_body_json(payload_json: String) -> napi::Result<String> {
+    let payload: Value = serde_json::from_str(&payload_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload JSON: {}", e)))?;
+    let output =
+        build_responses_direct_passthrough_body(&payload).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize direct passthrough body output: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn has_declared_apply_patch_tool_json(payload_json: String) -> napi::Result<String> {
+    let payload: Value = serde_json::from_str(&payload_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload JSON: {}", e)))?;
+    serde_json::to_string(&serde_json::json!({ "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool(&payload) }))
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize apply_patch tool presence: {}", e)))
+}
+
+#[napi_derive::napi]
+pub fn evaluate_responses_direct_route_decision_json(
+    payload_json: String,
+    inbound_protocol_json: String,
+    apply_patch_mode_json: String,
+) -> napi::Result<String> {
+    let payload: Value = serde_json::from_str(&payload_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload JSON: {}", e)))?;
+    let inbound_protocol: Value = serde_json::from_str(&inbound_protocol_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse inbound protocol JSON: {}", e)))?;
+    let apply_patch_mode: Value = serde_json::from_str(&apply_patch_mode_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse apply patch mode JSON: {}", e)))?;
+    let output = evaluate_responses_direct_route_decision(
+        &payload,
+        inbound_protocol.as_str().unwrap_or(""),
+        apply_patch_mode.as_str().unwrap_or(""),
+    )
+    .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize responses direct route decision: {}",
+            e
+        ))
+    })
 }
 
 #[napi_derive::napi]

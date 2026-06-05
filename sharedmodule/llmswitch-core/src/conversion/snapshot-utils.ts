@@ -35,7 +35,9 @@ const DEFAULT_SNAPSHOT_ALLOWED_STAGES = Object.freeze([
   'chat_process.resp.stage4.semantic_map_to_chat.chat',
   'chat_process.resp.stage6.canonicalize_chat_completion',
   'chat_process.resp.stage7.tool_governance',
-  'chat_process.resp.stage8.finalize'
+  'chat_process.resp.stage8.finalize',
+  'servertool.*',
+  'hub_followup.*'
 ]);
 
 type SnapshotStagePolicy = {
@@ -71,16 +73,20 @@ function compileSnapshotStagePolicy(selectorRaw: string): SnapshotStagePolicy {
   if (!selector) {
     return {
       allowAll: false,
-      exact: new Set(DEFAULT_SNAPSHOT_ALLOWED_STAGES),
-      prefixes: []
+      exact: new Set(DEFAULT_SNAPSHOT_ALLOWED_STAGES.filter((token) => !token.endsWith('*'))),
+      prefixes: DEFAULT_SNAPSHOT_ALLOWED_STAGES
+        .filter((token) => token.endsWith('*'))
+        .map((token) => token.slice(0, -1))
     };
   }
   const tokens = splitStageTokens(selector);
   if (!tokens.length) {
     return {
       allowAll: false,
-      exact: new Set(DEFAULT_SNAPSHOT_ALLOWED_STAGES),
-      prefixes: []
+      exact: new Set(DEFAULT_SNAPSHOT_ALLOWED_STAGES.filter((token) => !token.endsWith('*'))),
+      prefixes: DEFAULT_SNAPSHOT_ALLOWED_STAGES
+        .filter((token) => token.endsWith('*'))
+        .map((token) => token.slice(0, -1))
     };
   }
   if (tokens.some((token) => token === '*' || token === 'all')) {

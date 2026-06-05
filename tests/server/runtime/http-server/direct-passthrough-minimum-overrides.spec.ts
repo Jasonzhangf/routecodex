@@ -1,8 +1,35 @@
-import { describe, expect, it } from '@jest/globals';
-import { applyMinimalDirectOverrides } from '../../../../src/server/runtime/http-server/direct-passthrough-payload.js';
+import { describe, expect, it, jest } from '@jest/globals';
+
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
+  resolveResponsesDirectPayloadNative: (input: {
+    body: unknown;
+  }) => (input.body && typeof input.body === 'object' && !Array.isArray(input.body)
+    ? structuredClone(input.body as Record<string, unknown>)
+    : {}),
+  applyResponsesDirectRouteParamsOverrideNative: (input: {
+    payload: Record<string, unknown>;
+    routeParams?: Record<string, unknown>;
+  }) => {
+    const next = structuredClone(input.payload);
+    const routeModel = typeof input.routeParams?.model === 'string' ? input.routeParams.model.trim() : '';
+    if (routeModel) {
+      next.model = routeModel;
+    }
+    const routeReasoningEffort =
+      typeof input.routeParams?.reasoningEffort === 'string' ? input.routeParams.reasoningEffort.trim() : '';
+    if (routeReasoningEffort) {
+      next.reasoning_effort = routeReasoningEffort;
+      next.reasoning = { effort: routeReasoningEffort };
+    }
+    return next;
+  },
+  validateResponsesDirectToolShapeContractNative: () => ({ ok: true as const }),
+}), { virtual: true });
+
+const { applyMinimalDirectOverrides } = await import('../../../../src/server/runtime/http-server/direct-passthrough-payload.js');
 
 describe('direct passthrough minimum overrides', () => {
-  it('only overrides model/reasoning-thinking from providerPayload and preserves ingress payload shape', () => {
+  it('only overrides model/reasoning from routeParams and preserves ingress payload shape', () => {
     const ingress = {
       model: 'raw-model',
       previous_response_id: 'resp_raw_prev',
@@ -12,10 +39,9 @@ describe('direct passthrough minimum overrides', () => {
     } as Record<string, unknown>;
 
     const output = applyMinimalDirectOverrides(ingress, {
-      providerPayload: {
+      routeParams: {
         model: 'route-model',
-        reasoning: { effort: 'high' },
-        thinking: { type: 'enabled' },
+        reasoningEffort: 'high',
         instructions: 'provider-side-guidance-must-not-leak',
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'provider-mutated' }] }],
         tools: [{ type: 'function', function: { name: 'exec_command' } }],
@@ -29,7 +55,7 @@ describe('direct passthrough minimum overrides', () => {
       instructions: 'raw-instructions',
       tools: [{ type: 'function', function: { name: 'update_plan' } }],
       reasoning: { effort: 'high' },
-      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
     });
   });
 

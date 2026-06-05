@@ -231,6 +231,47 @@ describe('stop-message native decision (blackbox)', () => {
     expect(decision.followup_text).toContain('建议下一步是什么');
   });
 
+  test('last default stopless followup asks for final user-facing summary only', () => {
+    const decision = decideStopMessageActionWithNative({
+      ...buildMinimalDecisionContext({
+        stopEligible: true,
+        finishReasons: ['stop'],
+      }),
+      persisted_snapshot: {
+        text: '继续执行',
+        max_repeats: 3,
+        used: 2,
+        source: 'persisted',
+        stage_mode: 'on'
+      }
+    });
+    expect(decision.action).toBe('trigger');
+    expect(decision.followup_text).toContain('最后一次自动续杯预算');
+    expect(decision.followup_text).toContain('最终收尾 summary');
+    expect(decision.followup_text).toContain('不要再开启新一轮执行');
+    expect(decision.followup_text).not.toContain('直接执行下一步');
+  });
+
+  test('default snapshot uses heuristic prompt instead of fixed configured text', () => {
+    const decision = decideStopMessageActionWithNative({
+      ...buildMinimalDecisionContext({
+        stopEligible: true,
+        finishReasons: ['stop'],
+        defaultText: '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结。'
+      }),
+      persisted_snapshot: {
+        text: '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结。',
+        max_repeats: 3,
+        used: 1,
+        source: 'default',
+        stage_mode: 'on'
+      }
+    });
+    expect(decision.action).toBe('trigger');
+    expect(decision.followup_text).toContain('用户真正意图是什么');
+    expect(decision.followup_text).not.toBe('继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结。');
+  });
+
   test('stop schema gate exhausts only invalid schema budget', () => {
     const invalid = evaluateStopSchemaGateWithNative({
       assistantText: '{"stopreason":2,"reason":"未完成","has_evidence":0,"next_step":"运行测试"}',

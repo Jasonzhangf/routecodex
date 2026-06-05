@@ -180,6 +180,15 @@ function buildStopChatResponse(id = 'chatcmpl-stopmessage-double-dispatch'): Jso
 // Inline TS decision fallback for tests (native binding not available).
 // Mirrors the Rust stop-message-core::decide() logic for common test scenarios.
 function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, unknown> {
+  const defaultPrompt = (used: number): string => {
+    const prompts = [
+      '收尾前请先回答：当前用户目标是什么？已经完成了哪些步骤？是否已经完成目标？建议下一步是什么？如果建议下一步不为空，不要询问用户、不要只总结，直接执行下一步并用文件、日志、命令输出或测试结果补证据；如果目标已完成或确实阻塞，请给出面向用户的简洁总结。',
+      '请重新检查用户最初输入和后续指令：用户真正意图是什么？目标边界是什么？当前问题卡在哪里？之前的笔记、文件、日志、命令输出或测试结果是否已经看过？如果仅靠重新理解用户意图就能获得信息，请先据此继续执行；否则按目标、已做、证据、问题原因、已排除因素、排查顺序补齐缺口。',
+      '这是最后一次自动续杯预算。不要再开启新一轮执行，不要复述系统校验过程；请直接给出面向用户的最终收尾 summary，包含：已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步。最后必须附 stop schema；若目标未完成且仍有下一步，也不要继续执行，把下一步写入 next_suggested_path 并以 blocked/continue_needed 说明。'
+    ];
+    return prompts[Math.min(Math.max(used, 0), prompts.length - 1)];
+  };
+
   // Port disabled?
   if (ctx.port_stop_message_disabled) {
     return { action: 'skip', skip_reason: 'skip_port_stopmessage_disabled' };
@@ -228,10 +237,11 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
   // No snapshot → try default.
   if (!snap) {
     if (!goalActive && ctx.default_enabled) {
+      const defaultUsed = 0;
       snap = {
-        text: ctx.default_text || '继续执行',
+        text: defaultPrompt(defaultUsed),
         max_repeats: typeof ctx.default_max_repeats === 'number' ? ctx.default_max_repeats : 3,
-        used: 0,
+        used: defaultUsed,
         source: 'default',
         stage_mode: 'on'
       };
@@ -276,7 +286,7 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
     action: 'trigger',
     used,
     max_repeats: maxRepeats,
-    followup_text: text,
+    followup_text: snap.source === 'default' || text === '继续执行' ? defaultPrompt(used) : text,
   };
 }
 
@@ -906,6 +916,60 @@ describe('stop_message_auto servertool', () => {
     );
     expect(persisted.state?.stopMessageText).toContain('你已经提供 next_step');
     expect(persisted.state?.stopMessageText).toContain('运行 targeted tests');
+  });
+
+  test('stop schema budget exhausted returns clean user summary without leaking internal validation report', async () => {
+    const sessionId = 'stopmessage-budget-exhausted-clean-summary';
+    writeRoutingStateForSession(sessionId, {
+      forcedTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 3,
+      stopMessageUsed: 3,
+      stopMessageStageMode: 'on'
+    });
+
+    const chatResponse = buildStopChatResponse('chatcmpl-budget-exhausted-clean-summary');
+    ((chatResponse.choices as any[])[0].message as any).content = [
+      '最终用户摘要：AP-008 创建完成；AP-013 创建完成。',
+      '<stop_schema>',
+      '{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"任务输出","next_step":""}',
+      '</stop_schema>'
+    ].join('\n');
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext: {
+        requestId: 'req-stopmessage-budget-exhausted-clean-summary',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [
+            { role: 'user', content: 'create AP-008 and AP-013' },
+            { role: 'assistant', content: '继续执行。' },
+            { role: 'user', content: 'Stop schema 校验未通过：继续完成当前用户目标。' }
+          ]
+        }
+      } as any,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-budget-exhausted-clean-summary',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    const content = String(((result.finalChatResponse.choices as any[])[0].message as any).content);
+    expect(content).toContain('最终用户摘要：AP-008 创建完成；AP-013 创建完成。');
+    expect(content).not.toContain('Stopless 校验结果');
+    expect(content).not.toContain('校验状态');
+    expect(content).not.toContain('最后原始 summary');
+    expect(content).not.toContain('第 1 次续杯询问');
+    expect(content).not.toContain('<stop_schema>');
+    expect(content).not.toContain('"stopreason"');
   });
 
   test('ai followup prompt requires stop schema when asking for summary', () => {
@@ -4007,11 +4071,11 @@ describe('stop_message_auto servertool', () => {
         }
       } as any;
 
-      const result = await runServerSideToolEngine({
-        chatResponse,
-        adapterContext,
-        entryEndpoint: '/v1/chat/completions',
-        requestId: 'req-stopmessage-stage-mode-only',
+  const result = await runServerSideToolEngine({
+    chatResponse,
+    adapterContext,
+    entryEndpoint: '/v1/chat/completions',
+    requestId: 'req-stopmessage-stage-mode-only',
         providerProtocol: 'openai-chat'
       });
 
@@ -4044,6 +4108,67 @@ describe('stop_message_auto servertool', () => {
       }
       fs.rmSync(tempUserDir, { recursive: true, force: true });
     }
+  });
+
+  test('non-stop finish_reason resets only stopMessageUsed and preserves config', async () => {
+    const sessionId = 'stopmessage-spec-session-reset-used';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      preferTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 3,
+      stopMessageUsed: 2,
+      stopMessageStageMode: 'on'
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stopmessage-reset-used',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'length'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-reset-used',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '继续执行' }]
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-reset-used',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('passthrough');
+    const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown; stopMessageUsed?: unknown; stopMessageStageMode?: unknown } }>(
+      resolveStopStatePath(sessionId),
+      (data) => data?.state?.stopMessageUsed === 0
+    );
+    expect(persisted?.state?.stopMessageText).toBe('继续执行');
+    expect(persisted?.state?.stopMessageMaxRepeats).toBe(3);
+    expect(persisted?.state?.stopMessageStageMode).toBe('on');
   });
 
   test('mode-only stopMessage remains inactive by default without text', async () => {
@@ -4386,7 +4511,8 @@ describe('stop_message_auto servertool', () => {
         (data) => data?.state?.stopMessageUsed === 4
       );
       expect(typeof persisted?.state?.stopMessageText).toBe('string');
-      expect(String(persisted?.state?.stopMessageText ?? '')).toContain('请给出当前工作的执行总结');
+      expect(String(persisted?.state?.stopMessageText ?? '')).toContain('最终收尾 summary');
+      expect(String(persisted?.state?.stopMessageText ?? '')).not.toContain('直接发出工具调用');
       expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
     } finally {
       if (prevUserDir === undefined) {

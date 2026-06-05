@@ -80,6 +80,88 @@ type ServerToolEngineRunner = (
   overrides: Partial<ServerSideToolEngineOptions>
 ) => Promise<ServerToolEngineResult>;
 
+function summarizeServertoolExecutionForSnapshot(engineResult: ServerToolEngineResult): Record<string, unknown> {
+  const finalChat = engineResult.finalChatResponse as Record<string, unknown>;
+  const toolOutputs = Array.isArray(finalChat.tool_outputs) ? finalChat.tool_outputs : [];
+  const firstToolOutput =
+    toolOutputs.length > 0 && toolOutputs[0] && typeof toolOutputs[0] === 'object' && !Array.isArray(toolOutputs[0])
+      ? (toolOutputs[0] as Record<string, unknown>)
+      : null;
+  const summary: Record<string, unknown> = {
+    mode: engineResult.mode,
+    flowId: engineResult.execution?.flowId,
+    hasFollowup: Boolean(engineResult.execution?.followup),
+    pendingInjection: Boolean(engineResult.pendingInjection),
+    toolOutputCount: toolOutputs.length
+  };
+  if (firstToolOutput) {
+    if (typeof firstToolOutput.tool_name === 'string') {
+      summary.toolName = firstToolOutput.tool_name;
+    }
+    if (typeof firstToolOutput.tool_call_id === 'string') {
+      summary.toolCallId = firstToolOutput.tool_call_id;
+    }
+    if (typeof firstToolOutput.content === 'string') {
+      summary.toolOutputContent = firstToolOutput.content;
+    }
+  }
+  if (engineResult.execution?.context && typeof engineResult.execution.context === 'object') {
+    summary.context = engineResult.execution.context;
+  }
+  const followup = engineResult.execution?.followup;
+  if (followup && typeof followup === 'object' && !Array.isArray(followup)) {
+    const followupEntryEndpoint =
+      'entryEndpoint' in followup && typeof followup.entryEndpoint === 'string'
+        ? followup.entryEndpoint
+        : undefined;
+    const followupSummary: Record<string, unknown> = {
+      requestIdSuffix: typeof followup.requestIdSuffix === 'string' ? followup.requestIdSuffix : undefined,
+      entryEndpoint: followupEntryEndpoint
+    };
+    if ('payload' in followup) {
+      followupSummary.mode = 'payload';
+      const payload = followup.payload;
+      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        const payloadRecord = payload as Record<string, unknown>;
+        if (Array.isArray(payloadRecord.messages)) {
+          followupSummary.messageCount = payloadRecord.messages.length;
+        }
+        if (Array.isArray(payloadRecord.input)) {
+          followupSummary.inputCount = payloadRecord.input.length;
+        }
+      }
+    } else if ('injection' in followup) {
+      followupSummary.mode = 'injection';
+      const ops = Array.isArray(followup.injection?.ops) ? followup.injection.ops : [];
+      followupSummary.injectionOps = ops
+        .map((item) => (item && typeof item === 'object' && 'op' in item ? (item as { op?: unknown }).op : undefined))
+        .filter((value) => typeof value === 'string');
+    } else {
+      followupSummary.mode = 'metadata_only';
+    }
+    summary.followup = followupSummary;
+  }
+  return summary;
+}
+
+function recordServertoolExecutionSnapshot(args: {
+  stageRecorder?: StageRecorder;
+  requestId: string;
+  engineResult: ServerToolEngineResult;
+}): void {
+  if (!args.stageRecorder) {
+    return;
+  }
+  try {
+    args.stageRecorder.record('servertool.execution', summarizeServertoolExecutionForSnapshot(args.engineResult));
+  } catch (error) {
+    logServerToolNonBlocking('record_servertool_execution_snapshot', error, {
+      requestId: args.requestId,
+      flowId: args.engineResult.execution?.flowId
+    });
+  }
+}
+
 function createServerToolEngineRunner(args: {
   engineOptions: ServerSideToolEngineOptions;
   effectiveServerToolTimeoutMs: number;
@@ -214,6 +296,11 @@ export async function runServerToolOrchestration(
   }
   const totalSteps = 5;
   logProgress(1, totalSteps, 'matched', { flowId });
+  recordServertoolExecutionSnapshot({
+    stageRecorder: options.stageRecorder,
+    requestId: options.requestId,
+    engineResult
+  });
 
   // Mixed tools: persist servertool outputs for next request, but return remaining tool_calls to client.
   if (engineResult.pendingInjection) {

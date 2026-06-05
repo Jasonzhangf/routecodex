@@ -10,15 +10,17 @@ import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ServiceProfile, ProviderContext } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
-import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
 import {
   attachProviderSseSnapshotStream,
   shouldCaptureProviderStreamSnapshots,
   writeProviderSnapshot
 } from '../utils/snapshot-writer.js';
 import {
+  applyResponsesDirectRouteParamsOverrideNative,
+  buildResponsesDirectPassthroughBodyNative,
   createResponsesSseToJsonConverter,
-  sanitizeProviderOutboundPayload
+  sanitizeProviderOutboundPayload,
+  validateResponsesDirectToolShapeContractNative
 } from '../../../modules/llmswitch/bridge.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
@@ -39,6 +41,7 @@ import {
   type ResponsesStreamingMode,
   type SubmitToolOutputsPayload
 } from './responses-provider-helpers.js';
+import { assertNativeResponsesDirectContractAvailable } from './responses-direct-contract-error.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
 type ResponsesSseConverter = {
@@ -49,6 +52,9 @@ type ResponsesSseConverter = {
     contentIdleTimeoutMs?: number;
   }): Promise<unknown>;
 };
+
+// feature_id: responses.direct_tool_shape_contract
+
 export class ResponsesProvider extends HttpTransportProvider {
   private readonly responsesClient: ResponsesProtocolClient;
 
@@ -111,7 +117,9 @@ export class ResponsesProvider extends HttpTransportProvider {
       ? this.buildPassthroughResponsesBody(request)
       : this.responsesClient.buildRequestBody(request);
     const finalBody = await this.sanitizeResponsesProviderOutboundBody(builtBody, context);
-    this.assertResponsesWireShape(finalBody);
+    assertNativeResponsesDirectContractAvailable(
+      validateResponsesDirectToolShapeContractNative(finalBody),
+    );
 
     const explicitStream = extractStreamFlagFromBody(finalBody);
     const streamingPreference = this.responsesClient.getStreamingPreference();
@@ -178,12 +186,6 @@ export class ResponsesProvider extends HttpTransportProvider {
 
   async processIncomingDirect(request: UnknownObject): Promise<UnknownObject> {
     const directRequest = { ...(request as Record<string, unknown>) };
-    if (Array.isArray(directRequest.messages)) {
-      throw new Error(
-        'provider-runtime-error: responses provider received chat-style "messages". ' +
-        'This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions).'
-      );
-    }
     const endpoint = this.getEffectiveEndpoint();
     const baseHeaders = await this.buildRequestHeaders();
     const headers = await this.finalizeRequestHeaders(baseHeaders, directRequest);
@@ -192,16 +194,33 @@ export class ResponsesProvider extends HttpTransportProvider {
     const targetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
     const builtBody = this.buildPassthroughResponsesBody(directRequest);
     const finalBody = await this.sanitizeResponsesProviderOutboundBody(builtBody, context);
-    this.applyDirectProviderOverrides(finalBody, directRequest);
-    this.assertResponsesWireShape(finalBody);
-    const explicitStream = extractStreamFlagFromBody(finalBody);
+    const runtimeMetadata = extractProviderRuntimeMetadata(directRequest);
+    const metadata = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
+      ? runtimeMetadata.metadata as Record<string, unknown>
+      : undefined;
+    const routeParams =
+      metadata?.routeParams && typeof metadata.routeParams === 'object' && !Array.isArray(metadata.routeParams)
+        ? (metadata.routeParams as Record<string, unknown>)
+        : undefined;
+    const overriddenBody = applyResponsesDirectRouteParamsOverrideNative({
+      payload: finalBody,
+      routeParams,
+      providerDefaultModel:
+        typeof this.serviceProfile?.defaultModel === 'string' ? this.serviceProfile.defaultModel : undefined,
+      requestReasoningEffort:
+        typeof directRequest.reasoning_effort === 'string' ? directRequest.reasoning_effort : undefined,
+    });
+    assertNativeResponsesDirectContractAvailable(
+      validateResponsesDirectToolShapeContractNative(overriddenBody),
+    );
+    const explicitStream = extractStreamFlagFromBody(overriddenBody);
 
-    await this.snapshotPhase('provider-request', context, finalBody, headers, targetUrl, entryEndpoint);
+    await this.snapshotPhase('provider-request', context, overriddenBody, headers, targetUrl, entryEndpoint);
 
     try {
       if (explicitStream === true) {
         return await this.sendDirectSsePassthroughRequest({
-          body: finalBody,
+          body: overriddenBody,
           headers,
           context,
           targetUrl,
@@ -212,7 +231,7 @@ export class ResponsesProvider extends HttpTransportProvider {
 
       return await this.sendJsonRequest({
         endpoint,
-        body: finalBody,
+        body: overriddenBody,
         headers,
         context,
         targetUrl,
@@ -291,106 +310,8 @@ export class ResponsesProvider extends HttpTransportProvider {
     };
   }
 
-  private applyDirectProviderOverrides(
-    body: Record<string, unknown>,
-    request: Record<string, unknown>
-  ): void {
-    const runtimeMetadata = extractProviderRuntimeMetadata(request);
-    const metadata = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
-      ? runtimeMetadata.metadata as Record<string, unknown>
-      : undefined;
-    const routeParams =
-      metadata?.routeParams && typeof metadata.routeParams === 'object' && !Array.isArray(metadata.routeParams)
-        ? (metadata.routeParams as Record<string, unknown>)
-        : undefined;
-
-    const routeModel = typeof routeParams?.model === 'string' ? routeParams.model.trim() : '';
-    const providerDefaultModel = typeof this.serviceProfile?.defaultModel === 'string'
-      ? this.serviceProfile.defaultModel.trim()
-      : '';
-    const modelOverride = routeModel || providerDefaultModel;
-    if (modelOverride) {
-      body.model = modelOverride;
-    }
-
-    const routeReasoningEffort =
-      typeof routeParams?.reasoningEffort === 'string' ? routeParams.reasoningEffort.trim() : '';
-    const topLevelReasoningEffort =
-      typeof request.reasoning_effort === 'string' ? request.reasoning_effort.trim() : '';
-    const reasoningEffort = routeReasoningEffort || topLevelReasoningEffort;
-    if (reasoningEffort) {
-      body.reasoning_effort = reasoningEffort;
-      const reasoning =
-        body.reasoning && typeof body.reasoning === 'object' && !Array.isArray(body.reasoning)
-          ? { ...(body.reasoning as Record<string, unknown>) }
-          : {};
-      reasoning.effort = reasoningEffort;
-      body.reasoning = reasoning;
-    }
-  }
-
   private buildPassthroughResponsesBody(request: UnknownObject): Record<string, unknown> {
-    const body = stripInternalKeysDeep({ ...(request as Record<string, unknown>) }) as Record<string, unknown>;
-    if (Object.prototype.hasOwnProperty.call(body, 'metadata')) {
-      throw new Error('provider-runtime-error: metadata is not allowed in direct passthrough responses payload');
-    }
-    const inboundModel = typeof body.model === 'string' ? body.model.trim() : '';
-    if (!inboundModel) {
-      throw new Error('provider-runtime-error: missing model from direct passthrough responses payload');
-    }
-    body.model = inboundModel;
-    return body;
-  }
-
-  private assertResponsesWireShape(body: Record<string, unknown>): void {
-    if (!body || typeof body !== 'object') {
-      throw new Error('provider-runtime-error: responses payload must be an object');
-    }
-    if ('messages' in body && Array.isArray((body as any).messages)) {
-      throw new Error(
-        'provider-runtime-error: responses provider received chat-style "messages". ' +
-        'This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions).'
-      );
-    }
-    const hasInput = Array.isArray((body as any).input);
-    const hasInstructions =
-      typeof (body as any).instructions === 'string' && String((body as any).instructions).trim().length > 0;
-    if (!hasInput && !hasInstructions) {
-      throw new Error('provider-runtime-error: responses payload missing "input" or "instructions"');
-    }
-    if (Array.isArray(body.tools)) {
-      body.tools.forEach((tool, index) => {
-        if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
-          throw new Error(`provider-runtime-error: responses payload tools[${index}] must be an object`);
-        }
-        const toolRecord = tool as Record<string, unknown>;
-        const type = typeof toolRecord.type === 'string' ? toolRecord.type.trim() : '';
-        if (type === 'function') {
-          const name = typeof toolRecord.name === 'string' ? toolRecord.name.trim() : '';
-          if (!name) {
-            throw new Error(
-              `provider-runtime-error: responses payload tools[${index}] is chat-style function tool; ` +
-              'Responses wire requires top-level tool.name'
-            );
-          }
-        }
-      });
-    }
-    if (Array.isArray(body.input)) {
-      body.input.forEach((item, index) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) {
-          return;
-        }
-        const itemRecord = item as Record<string, unknown>;
-        const type = typeof itemRecord.type === 'string' ? itemRecord.type.trim() : '';
-        if ((type === 'function_call' || type === 'function_call_output') && 'content' in itemRecord) {
-          throw new Error(
-            `provider-runtime-error: responses payload input[${index}] ${type} must not carry content; ` +
-            'tool call data belongs in arguments/output fields'
-          );
-        }
-      });
-    }
+    return buildResponsesDirectPassthroughBodyNative(request);
   }
 
   private async snapshotPhase(
