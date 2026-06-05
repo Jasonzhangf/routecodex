@@ -164,3 +164,12 @@ client-visible error
 3. 启动排障必须区分：`checkHealth=false`、`VR success hook 不可用`、`success 后再次失败重写冷却` 三个分支；不得混为“路由器错误”。
 4. 本项目该类问题调试先看 `.agents/skills/rcc-dev-skills/SKILL.md` 的“2026-05-27 调试精华（5555 主备/health/stopless）”章节，再执行改动。
 5. 错误处理主链真相：provider/local error 先归一到 `src/providers/core/runtime/provider-error-catalog.ts`，再进入 `provider-failure-policy-impl.ts` 分类；`request-retry-helpers` / `request-executor-retry-decision` / `request-executor-session-storm-backoff` / `retry-engine` 只消费统一码与分类结果，禁止新增 message-only 分叉。
+
+## 2026-06-05 硬编码 + Fallback 架构收口引用
+
+- 本规则的 **执行规范、门禁、白名单** 由 `docs/goals/hardcode-fallback-arch-audit-plan.md` 细化；SSOT 迁移 (constants / 错误码 / provider key 抽象) 必须按 plan §7 阶段顺序推进。
+- 物理删除铁律 (项目级): 迁出后旧 Set / 旧 `if` 块 / 旧常量字符串必须删除；保留必须经 `silent-failure-audit.mjs` + `hardcode-audit.mjs` 报警并写理由；不得用"不接入 / 不调用 / 注释掉 / 闲置"代替删除。
+- Provider 特例唯一允许位置: Provider runtime。Hub Pipeline / Virtual Router / RequestExecutor 禁 `windsurf.managed.` / `windsurf.` / `deepseek` / `qwen` 字符串前缀特判；改用 `isWindsurfRuntimeIdentity` / `isWindsurfManagedProviderIdentity` / `providerFamily` 抽象 (在 `src/providers/core/contracts/windsurf-provider-contract.ts`)。
+- Rust runtime: 不得用 windsurf.managed. 前缀特判 persisted 503 family cleanup；改用 `clear_persisted_503_family_for_provider` (in `health.rs`)。
+- 红测先行: 每个 Phase 必须有红测先红后绿；TS 端参考 `tests/server/runtime/http-server/phase3-provider-family-abstraction.red.spec.ts`；Rust 端参考 `record_success_clears_persisted_503_family_for_non_windsurf_provider` 双向 fixture。
+- 完成标准 5 验证: `pnpm run verify:hardcode` 必须 PASS; `silent-failure-audit.mjs` 命中数 < 488 (基线) 且 < 后续 Phase 4 后的新基线。

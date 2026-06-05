@@ -1893,3 +1893,14 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 - 若 `127.0.0.1:10000` 返回 `Empty reply from server`，先查 `lsof -nP -iTCP:10000 -sTCP:LISTEN`；macOS 上第三方服务可占 `127.0.0.1:10000`，同时 RCC 占 `*:10000`，导致 loopback 命中特定绑定而 LAN/Tailscale IP 正常。
 - 多端口配置下显式 `rcc start --port <port>` 只能检查/启动目标端口，禁止因同组其他端口 healthy 提前退出；用 “requested port only” 红测锁住。
+
+### 2026-06-05 硬编码 + Fallback 架构收口精华
+- SSOT 唯一真源: `src/constants/index.ts` (API base / timeout / model / SSE caps) + `src/providers/core/runtime/provider-error-catalog.ts` (错误码) + `isWindsurfRuntimeIdentity` / `isWindsurfManagedProviderIdentity` (provider key 抽象, in `src/providers/core/contracts/windsurf-provider-contract.ts`)。
+- Provider 特例物理位置: 只允许在 Provider runtime; Hub Pipeline / Virtual Router / RequestExecutor 任何 `windsurf.managed.` / `windsurf.` / `deepseek` / `qwen` 字符串前缀特判均违规; 改用 `providerFamily` 抽象 + helper。
+- Rust `health.rs` 通用化: `clear_windsurf_managed_persisted_503_family` 已重命名为 `clear_persisted_503_family_for_provider`, 按 canonical provider key 匹配, 不特判 `windsurf.managed.` 前缀; 调用方 `record_success` 隐式传播。
+- 物理删除铁律: 迁出后旧 Set / 旧 `if` 块 / 旧常量字符串必须删除; 保留必须经 `silent-failure-audit.mjs` + `hardcode-audit.mjs` 报警并写理由; 不得"不接入 / 不调用 / 注释掉"代替删除。
+- 红测先行契约: TS 端 `tests/server/runtime/http-server/phase3-provider-family-abstraction.red.spec.ts` 锁住 3 个 server-runtime 文件零 `windsurf.managed.` / `windsurf.` 字面; Rust 端 `record_success_clears_persisted_503_family_for_non_windsurf_provider` 锁住 `health.rs` 双向行为 (deepseek.chat 清理 / qwen.turbo 不串台); 后续若新文件引入 provider key 字符串硬编码, 红测应 fail。
+- 后续接手 Phase 4 必读: 静默 catch 清理前先跑 `node scripts/ci/silent-failure-audit.mjs` 拿基线 (488 / 5); 改后命中数 < 基线即合规; 新增 catch 必须满足 HAS_HANDLED_RE (warn/error/logger/report/emit/record)。
+- 后续接手 Phase 5 必读: 新建 `scripts/ci/hardcode-audit.mjs` 扫 `src/` + `sharedmodule/llmswitch-core/src/` 找新增 provider key 字符串硬编码; package.json 加 `verify:hardcode` 串接 silent-failure-audit + hardcode-audit + hub-deterministic-audit + llmswitch-rustification-audit + check-file-line-limit。
+- cargo test 副作用污染模式: 跑 `cargo test` 后会触碰 6-12 个 timestamp/auto-gen 文件, commit 前必须 `git status --porcelain` + 逐个 `git restore -- <path>` 排除; 唯一真实改动在 `health.rs`, 但 cargo 会再次标 M, 需 `git restore -- sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs` 恢复 commit state。
+- plan 真源: `docs/goals/hardcode-fallback-arch-audit-plan.md`; 实施 commit 顺序: `2395b253a` (Phase 1) → `2eac128ef` (Phase 2) → `72a884092` (Phase 3 TS) → `7295f0e4` (Phase 3 Rust) → Phase 4-6 待续。
