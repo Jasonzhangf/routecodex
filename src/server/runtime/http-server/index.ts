@@ -11,7 +11,6 @@
 import express, { type Application, type Request } from 'express';
 import type { Server } from 'http';
 import type { Socket } from 'node:net';
-import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { ModuleDependencies, PipelineDebugLogger } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -34,7 +33,6 @@ import type {
   VirtualRouterArtifacts
 } from './types.js';
 import { createServerColoredLogger } from './colored-logger.js';
-import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
 import { ManagerDaemon } from '../../../manager/index.js';
 import { ensureServerScopedSessionDir, resolvePortScopedSessionDir } from './session-dir.js';
 import { cleanupSessionStorageOnStartup } from './session-storage-cleanup.js';
@@ -210,7 +208,6 @@ export class RouteCodexHttpServer {
   private server?: Server;
   private activeSockets: Set<Socket> = new Set();
   private config: ServerConfigV2;
-  private errorHandling: ErrorHandlingCenter;
   private _isInitialized: boolean = false;
   private _isRunning: boolean = false;
 
@@ -261,7 +258,6 @@ export class RouteCodexHttpServer {
     this.config = config;
     this.app = express();
     (this.app.locals as Record<string, unknown>).routecodexServer = this;
-    this.errorHandling = new QuietErrorHandlingCenter();
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
     this.serverId = canonicalizeServerId(this.config.server.host, this.config.server.port);
@@ -1089,9 +1085,13 @@ export class RouteCodexHttpServer {
       allowedProviders = extractProviderKeysForRoutingGroup(this.userConfig, portConfig.routingPolicyGroup);
     }
 
-    // stopMessage 默认启用（true），除非端口显式配置 enabled=false
+    // stopMessage 默认启用（true），除非端口显式配置 enabled=false。
+    // direct 路径默认排除 stopMessage，只有端口显式 includeDirect=true 才纳入。
     const effectiveStopMessageEnabled = typeof portConfig?.stopMessage?.enabled === 'boolean'
       ? portConfig.stopMessage.enabled
+      : true;
+    const effectiveStopMessageExcludeDirect = portConfig?.stopMessage?.includeDirect === true
+      ? false
       : true;
 
     const metadata: Record<string, unknown> = {
@@ -1103,6 +1103,7 @@ export class RouteCodexHttpServer {
       routecodexServerId: this.resolvePortServerId(portConfig, localPort),
       entryPort: typeof portConfig?.port === 'number' ? portConfig.port : localPort,
       stopMessageEnabled: effectiveStopMessageEnabled,
+      stopMessageExcludeDirect: effectiveStopMessageExcludeDirect,
       routecodexPortStopMessageEnabled: effectiveStopMessageEnabled,
       ...(routeHint ? { routeHint } : {}),
       ...(allowedProviders ? { allowedProviders } : {}),
