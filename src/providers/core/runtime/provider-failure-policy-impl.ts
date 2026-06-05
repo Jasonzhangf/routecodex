@@ -23,54 +23,31 @@ import {
   computeProviderFailureBackoffDelayMsBlock,
   resolveProviderFailureBackoffPlanBlock
 } from './provider-failure-policy-backoff.js';
-import { normalizeKnownProviderError } from './provider-error-catalog.js';
+import {
+  normalizeKnownProviderError,
+  PROVIDER_BLOCKING_RECOVERABLE_CODES,
+  PROVIDER_NETWORK_CODES,
+  PROVIDER_UNRECOVERABLE_CODES
+} from './provider-error-catalog.js';
+import {
+  WINDSURF_BLOCKING_RECOVERABLE_CODES,
+  WINDSURF_UNRECOVERABLE_CODES
+} from '../contracts/windsurf-provider-contract.js';
+import { DEEPSEEK_UNRECOVERABLE_CODES } from '../contracts/deepseek-provider-contract.js';
 
-const UNRECOVERABLE_CODE_SET = new Set([
-  'INVALID_API_KEY',
-  'INVALID_ACCESS_TOKEN',
-  'INSUFFICIENT_QUOTA',
-  'MODEL_NOT_SUPPORTED',
-  'MODEL_DISABLED',
-  'NO_SUCH_MODEL',
-  'ACCOUNT_DISABLED',
-  'ACCOUNT_SUSPENDED',
-  'ACCESS_DENIED',
-  'FORBIDDEN',
-  'DEEPSEEK_SESSION_CREATE_FAILED',
-  'DEEPSEEK_FILE_UPLOAD_FAILED'
+
+
+// Phase 2: SSOT composition - provider-agnostic catalog + provider-specific contracts.
+const UNRECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
+  ...PROVIDER_UNRECOVERABLE_CODES,
+  ...WINDSURF_UNRECOVERABLE_CODES,
+  ...DEEPSEEK_UNRECOVERABLE_CODES
 ]);
-
-const NETWORK_ERROR_CODE_SET = new Set([
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'EHOSTUNREACH',
-  'ENOTFOUND',
-  'EAI_AGAIN',
-  'EPIPE',
-  'ETIMEDOUT',
-  'ECONNABORTED',
-  'ERR_HTTP2_STREAM_CANCEL'
+const NETWORK_ERROR_CODE_SET: ReadonlySet<string> = PROVIDER_NETWORK_CODES;
+const BLOCKING_RECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
+  ...PROVIDER_BLOCKING_RECOVERABLE_CODES,
+  ...WINDSURF_BLOCKING_RECOVERABLE_CODES
 ]);
-
-const BLOCKING_RECOVERABLE_CODE_SET = new Set([
-  'PROVIDER_TRAFFIC_SATURATED',
-  'HTTP_429',
-  'HTTP_500',
-  'HTTP_502',
-  'HTTP_503',
-  'HTTP_504',
-  'SSE_TO_JSON_ERROR',
-  'SSE_DECODE_ERROR',
-  'UPSTREAM_EMPTY_OUTPUT',
-  'WINDSURF_RATE_LIMITED'
-]);
-
-UNRECOVERABLE_CODE_SET.add('WINDSURF_SESSION_TOKEN_NOT_INITIALIZED');
-UNRECOVERABLE_CODE_SET.add('WINDSURF_ACCOUNT_CREDENTIAL_MISSING');
-UNRECOVERABLE_CODE_SET.add('WINDSURF_NO_PASSWORD_SET');
-UNRECOVERABLE_CODE_SET.add('WINDSURF_POSTAUTH_FAILED');
-UNRECOVERABLE_CODE_SET.add('WINDSURF_SESSION_TOKEN_MISSING');
-UNRECOVERABLE_CODE_SET.add('WINDSURF_CASCADE_NO_PROGRESS');
 
 function isWindsurfCanceledMessageLike(value: unknown): boolean {
   if (typeof value !== 'string') {

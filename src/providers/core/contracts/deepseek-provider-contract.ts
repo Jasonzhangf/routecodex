@@ -191,3 +191,10 @@ export function readDeepSeekProviderRuntimeOptions(source: {
 
   return undefined;
 }
+
+// SSOT: DeepSeekProvider-specific unrecoverable error code set (added 2026-06-05, /goal fallback-arch-audit Phase 2).
+// Provider-specific 错误码唯一真源在 provider contract，不允许散落 failure-policy-impl。
+export const DEEPSEEK_UNRECOVERABLE_CODES: ReadonlySet<DeepSeekErrorCode> = new Set<DeepSeekErrorCode>([
+  DEEPSEEK_ERROR_CODES.SESSION_CREATE_FAILED,
+  DEEPSEEK_ERROR_CODES.FILE_UPLOAD_FAILED
+]);

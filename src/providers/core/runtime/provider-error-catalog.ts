@@ -99,3 +99,36 @@ export function normalizeKnownProviderError(input: {
 
   return undefined;
 }
+
+// SSOT: provider-agnostic 公共错误码冻结集合 (added 2026-06-05, /goal fallback-arch-audit Phase 2).
+// 从 ENTRIES 自动聚合 (class === 'unrecoverable' | 'recoverable' 包含网络码 | recoverable 阻断子集)。
+// provider-specific 错误码 (windsurf / deepseek) 必须在各自 contract 暴露，**禁止**进入本 catalog。
+export const PROVIDER_UNRECOVERABLE_CODES: ReadonlySet<string> = new Set<string>(
+  ENTRIES.filter((e) => e.class === 'unrecoverable').flatMap((e) => e.aliases)
+);
+
+export const PROVIDER_NETWORK_CODES: ReadonlySet<string> = new Set<string>([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ECONNABORTED',
+  'ERR_HTTP2_STREAM_CANCEL'
+]);
+
+export const PROVIDER_BLOCKING_RECOVERABLE_CODES: ReadonlySet<string> = new Set<string>(
+  ENTRIES.filter((e) => e.class === 'recoverable' && (
+    e.key === 'HTTP_429' ||
+    e.key === 'HTTP_500' ||
+    e.key === 'HTTP_502' ||
+    e.key === 'HTTP_503' ||
+    e.key === 'HTTP_504' ||
+    e.key === 'PROVIDER_TRAFFIC_SATURATED' ||
+    e.key === 'SSE_DECODE_ERROR' ||
+    e.key === 'SSE_TO_JSON_ERROR' ||
+    e.key === 'UPSTREAM_EMPTY_OUTPUT'
+  )).flatMap((e) => e.aliases)
+);

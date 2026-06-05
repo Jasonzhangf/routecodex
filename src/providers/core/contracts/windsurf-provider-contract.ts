@@ -96,3 +96,32 @@ export function isWindsurfRuntimeIdentity(opts: {
     pf === 'windsurf'
   );
 }
+
+// SSOT: WindsurfProvider-specific error code catalog (added 2026-06-05, /goal fallback-arch-audit Phase 2).
+// Provider-specific 错误码必须在 provider contract 暴露，不允许散落 impl / chat-provider / parse-block。
+export const WINDSURF_ERROR_CODES = Object.freeze({
+  RATE_LIMITED: 'WINDSURF_RATE_LIMITED',
+  SESSION_TOKEN_NOT_INITIALIZED: 'WINDSURF_SESSION_TOKEN_NOT_INITIALIZED',
+  ACCOUNT_CREDENTIAL_MISSING: 'WINDSURF_ACCOUNT_CREDENTIAL_MISSING',
+  NO_PASSWORD_SET: 'WINDSURF_NO_PASSWORD_SET',
+  POSTAUTH_FAILED: 'WINDSURF_POSTAUTH_FAILED',
+  SESSION_TOKEN_MISSING: 'WINDSURF_SESSION_TOKEN_MISSING',
+  CASCADE_NO_PROGRESS: 'WINDSURF_CASCADE_NO_PROGRESS'
+} as const);
+
+export type WindsurfErrorCodeValue = (typeof WINDSURF_ERROR_CODES)[keyof typeof WINDSURF_ERROR_CODES];
+
+// Phase 2: provider-specific 不可恢复错误码集合（被 failure-policy 引用，禁止散落 Set）
+export const WINDSURF_UNRECOVERABLE_CODES: ReadonlySet<WindsurfErrorCodeValue> = new Set<WindsurfErrorCodeValue>([
+  WINDSURF_ERROR_CODES.SESSION_TOKEN_NOT_INITIALIZED,
+  WINDSURF_ERROR_CODES.ACCOUNT_CREDENTIAL_MISSING,
+  WINDSURF_ERROR_CODES.NO_PASSWORD_SET,
+  WINDSURF_ERROR_CODES.POSTAUTH_FAILED,
+  WINDSURF_ERROR_CODES.SESSION_TOKEN_MISSING,
+  WINDSURF_ERROR_CODES.CASCADE_NO_PROGRESS
+]);
+
+// Phase 2: provider-specific 阻断型可恢复错误码集合
+export const WINDSURF_BLOCKING_RECOVERABLE_CODES: ReadonlySet<WindsurfErrorCodeValue> = new Set<WindsurfErrorCodeValue>([
+  WINDSURF_ERROR_CODES.RATE_LIMITED
+]);
