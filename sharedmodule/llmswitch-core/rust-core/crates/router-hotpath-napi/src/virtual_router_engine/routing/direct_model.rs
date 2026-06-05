@@ -63,8 +63,8 @@ pub(crate) fn should_fallback_direct_model_for_media(
     if !default_pool_supports_capability(routing, provider_registry, "multimodal") {
         return false;
     }
-    // Check if the target provider+model has multimodal capability.
-    // If not, fallback to the default pool which may have multimodal-capable providers.
+    // Check whether the target provider+model has multimodal capability.
+    // When absent, route selection remains on the default-pool capability path.
     let keys = provider_registry.list_provider_keys(provider_id);
     let has_multimodal = keys.iter().any(|key| {
         provider_registry

@@ -8,6 +8,7 @@ export type SameProtocolBehavior = 'direct' | 'relay';
 
 export interface PortStopMessageConfig {
   enabled?: boolean;
+  includeDirect?: boolean;
 }
 
 export interface PortConfig {

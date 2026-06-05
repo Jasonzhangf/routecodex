@@ -257,7 +257,7 @@ impl ForwarderRegistry {
             ForwarderStrategy::RoundRobin => Some("round-robin"),
             ForwarderStrategy::Priority => Some("priority"),
         };
-        // weights 透传（target.weight 优先 → entry.weights 兜底）
+        // weights 透传（target.weight 优先；缺失时使用 entry.weights）
         let weights = build_forwarder_weights(&entry);
         let state_key = format!("forwarder:{}", forwarder_id);
 

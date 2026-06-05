@@ -1,4 +1,7 @@
 /**
+ * feature_id: error.provider_failure_policy
+ */
+/**
  * Provider failure policy implementation.
  * Orchestrates classification / action plan blocks as the app-layer truth.
  */

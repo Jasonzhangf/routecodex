@@ -1,0 +1,125 @@
+# RouteCodex function map
+# Purpose:
+# - fast locate unique owner
+# - prevent duplicate implementation
+# - bind feature to canonical types/builders/tests
+
+version: 1
+owners:
+  - feature_id: hub.servertool_followup
+    status: active
+    summary: servertool followup orchestration and governed response truth
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    canonical_types:
+      - HubRespChatProcess03Governed
+      - HubRespOutbound04ClientSemantic
+    canonical_builders:
+      - buildHubRespOutbound04FromHubRespChatProcess03
+      - run_servertool_response_stage_json
+      - plan_servertool_outcome_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - sharedmodule/llmswitch-core/src/conversion/hub/response
+      - src/modules/llmswitch/bridge
+    forbidden_paths:
+      - src/providers
+      - src/server
+    required_tests:
+      - tests/sharedmodule/servertool-pending-session.spec.ts
+      - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
+      - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+    migration_target: rust
+    notes:
+      - Rust owns orchestration semantics; TS only bridge/reentry/IO.
+
+  - feature_id: error.provider_failure_policy
+    status: active
+    summary: provider error cataloging, runtime classification, router policy application
+    owner_module: src/providers/core/runtime
+    canonical_types:
+      - ErrorErr03RuntimeClassified
+      - ErrorErr04RouterPolicyApplied
+    canonical_builders:
+      - normalizeKnownProviderError
+      - resolveProviderFailureOutcome
+      - shouldKeepProviderExcludedForNextAttempt
+    allowed_paths:
+      - src/providers/core/runtime
+      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - src/server/runtime/http-server/executor
+    forbidden_paths:
+      - src/client
+      - src/providers/profile
+      - src/server/handlers
+    required_tests:
+      - tests/red-tests/error_chain_singleton_truth.test.ts
+      - tests/server/runtime/executor-provider.retryable.spec.ts
+      - tests/server/runtime/request-executor.error-snapshot-guard.spec.ts
+    required_gates:
+      - npm run verify:provider-failure-ban-blackbox
+    migration_target: rust
+    notes:
+      - Catalog/classification truth starts in provider runtime, router applies policy, executor consumes decision only.
+
+  - feature_id: vr.route_selection
+    status: active
+    summary: virtual router route classification and selected target truth
+    owner_module: sharedmodule/llmswitch-core/src/router/virtual-router
+    canonical_types:
+      - VrRoute04SelectedTarget
+    canonical_builders:
+      - apply_route_selection
+      - parseRoutingInstructionsWithNative
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/router/virtual-router
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - src/modules/llmswitch/bridge
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/client
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
+      - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
+      - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
+      - tests/servertool/virtual-router-servertool-routing.spec.ts
+    required_gates:
+      - npm run verify:llmswitch-rustification-audit
+      - npm run verify:repo-sanity
+    migration_target: rust
+    notes:
+      - VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.
+
+  - feature_id: hub.metadata_boundary
+    status: active
+    summary: internal metadata carrier isolation from normal request, provider wire, and client response payloads
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    canonical_types:
+      - HubReqInbound02Standardized
+      - HubRespInbound02Parsed
+      - MetaCarrier
+    canonical_builders:
+      - assert_no_inline_metadata
+      - ensure_runtime_metadata
+      - read_runtime_metadata
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - src/providers/core/runtime
+      - src/server/handlers
+    forbidden_paths:
+      - src/client
+      - src/providers/profile
+    required_tests:
+      - tests/red-tests/hub_pipeline_meta_error_carrier_contract.test.ts
+      - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
+      - tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts
+      - tests/providers/core/runtime/provider-runtime-metadata.isolation.spec.ts
+      - tests/server/handlers/handler-metadata-boundary.spec.ts
+    required_gates:
+      - npm run verify:repo-sanity
+    migration_target: rust
+    notes:
+      - Metadata is side-channel only; leak to provider/client payload must fail-fast.

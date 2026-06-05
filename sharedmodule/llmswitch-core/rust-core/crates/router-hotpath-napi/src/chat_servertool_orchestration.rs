@@ -1,3 +1,4 @@
+// feature_id: hub.servertool_followup
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};

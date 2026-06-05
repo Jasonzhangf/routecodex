@@ -7,25 +7,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const LEGACY_DEFAULT_TEXT: &str = "继续执行";
-// Schema gate budget is split by submitted-shape: providing a stop schema
-// (any parsed `stopreason` value) burns the strict 3-round budget because
-// the model already committed to stop intent; failing to provide any schema
-// keeps the lenient 10-round safety net so we never hard-kill a session
-// that simply forgot the marker. Both branches reset the counter the
-// moment a non-stop finish_reason lands (handled at the snapshot level).
+// Schema gate budget is unified to a strict 3-round progression. Whether the
+// model omitted schema entirely or provided an invalid/incomplete schema, the
+// loop should converge within three stop rounds instead of stretching into a
+// long invisible retry chain. Both branches reset the counter the moment a
+// non-stop finish_reason lands (handled at the snapshot level).
 const STOP_SCHEMA_PROVIDED_MAX_REPEATS: u32 = 3;
-const STOP_SCHEMA_MISSING_MAX_REPEATS: u32 = 10;
+const STOP_SCHEMA_MISSING_MAX_REPEATS: u32 = 3;
 const STOP_SCHEMA_HISTORY_MAX_ROUNDS: u32 = 3;
 // Kept as a shared alias for callers/tests that intentionally do not
 // distinguish between the two regimes (kept equal to the strict side).
 const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS: u32 = STOP_SCHEMA_PROVIDED_MAX_REPEATS;
 
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
-    "停止前先核对六件事：1) 目标：当前用户目标是什么，是否逐项完成；2) 过程：你实际做过哪些操作/检查/验证，哪些还没做；3) 证据：完成或阻塞的证据在哪里；4) 问题原因：若出现异常，最可能原因是什么，依据是什么；5) 已排除因素：你已经排除了哪些可能原因，证据是什么；6) 排查顺序：下一步应按什么顺序继续排查。若任一项缺文件、日志、命令输出或测试证据，禁止总结、道歉、解释工具被拒或停下；必须在本轮直接发出工具调用执行最小下一步（优先 exec_command 读取/验证/测试）。只有目标已完成或确实阻塞时，才输出最终结果并给出证据。",
-    "你刚才再次停止。请重新核对：目标是否真的完成？过程是否覆盖用户要求的每一项？证据是否能被日志、文件、命令结果或测试结果验证？异常原因是否已定位？哪些因素已被证据排除？排查顺序是否合理且已执行到当前最小下一步？如果答案不是全部明确，禁止继续总结、复述阻塞、声称工具被拒；必须在本轮直接发出工具调用按排查顺序补齐缺口（优先 exec_command）。如果确实完成/阻塞，必须说明目标、过程、证据、问题原因、已排除因素、排查顺序，并在 stop schema 的 learned 字段写出过去 turns 学到的可复用结论；没有则填空字符串。",
-    "最后一次续杯预算。停止必须同时满足：目标逐项完成或明确阻塞；过程已说明关键操作与验证；证据可核验且对应目标；异常原因有依据；已排除因素有证据；排查顺序清晰且已执行到最小下一步。缺任何一项都不允许停；禁止空泛总结、道歉、计划、复述工具被拒或无证据停止，必须在本轮直接发出工具调用继续执行最小下一步。",
+    "收尾前请先回答：当前用户目标是什么？已经完成了哪些步骤？是否已经完成目标？建议下一步是什么？如果建议下一步不为空，不要询问用户、不要只总结，直接执行下一步并用文件、日志、命令输出或测试结果补证据；如果目标已完成或确实阻塞，请给出面向用户的简洁总结。",
+    "请重新检查用户最初输入和后续指令：用户真正意图是什么？目标边界是什么？当前问题卡在哪里？之前的笔记、文件、日志、命令输出或测试结果是否已经看过？如果仅靠重新理解用户意图就能获得信息，请先据此继续执行；否则按目标、已做、证据、问题原因、已排除因素、排查顺序补齐缺口。",
+    "请给出当前工作的执行总结，并判断是否还有明确下一步。若有下一步，不要询问用户、不要只总结，直接执行该下一步；若没有明确下一步，请给出面向用户的简洁总结。",
 ];
-const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须输出以下 JSON 对象（可包在 <stop_schema>...</stop_schema>，但字段名必须一致）：{"stopreason":0,"reason":"已完成/已阻塞的具体原因","has_evidence":1,"evidence":"文件/日志/命令/测试证据","issue_cause":"问题原因；无异常填空字符串","excluded_factors":"已排除因素；无则空字符串","diagnostic_order":"排查顺序/已执行顺序","next_step":"继续执行的下一步；若 finished/blocked 填空字符串","learned":"过去 turns 学到的可复用事实/踩坑/配置结论；无则空字符串"}。stopreason 只能用数字：0=finished，1=blocked，2=continue_needed。"#;
+const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"请在回复末尾附这个 JSON 对象，字段名必须一致：{"stopreason":0,"reason":"已完成/已阻塞/仍需继续的具体原因","has_evidence":1,"evidence":"文件/日志/命令输出/测试结果等证据；没有则空字符串","issue_cause":"问题原因；无异常填空字符串","excluded_factors":"已排除因素；无则空字符串","diagnostic_order":"排查顺序/已执行顺序","done_steps":"已经完成的步骤；没有则空字符串","next_step":"立刻继续执行的下一步；若没有则空字符串","next_suggested_path":"建议继续推进的路径；若没有则空字符串","learned":"本轮学到的可复用事实/踩坑/配置结论；无则空字符串"}。stopreason 只能用数字：0=finished，1=blocked，2=continue_needed。"#;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -196,6 +195,7 @@ pub struct StopSchemaParsed {
     pub has_evidence: Option<u8>,
     pub reason: Option<String>,
     pub next_step: Option<String>,
+    pub next_suggested_path: Option<String>,
     pub evidence: Option<String>,
     pub learned: Option<String>,
     pub issue_cause: Option<String>,
@@ -369,6 +369,11 @@ pub fn evaluate_stop_schema_gate(
     }
 
     let next_step = parsed.next_step.as_deref().map(str::trim).unwrap_or("");
+    let next_suggested_path = parsed
+        .next_suggested_path
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("");
     if !next_step.is_empty() {
         return schema_invalid_followup(
             "stop_schema_continue_next_step",
@@ -382,11 +387,42 @@ pub fn evaluate_stop_schema_gate(
         );
     }
 
+    if next_suggested_path.is_empty() {
+        if used >= provided_cap {
+            let reason = parsed.reason.as_deref().map(str::trim).unwrap_or("");
+            let summary_prefix = build_allow_stop_summary_prefix(if reason.is_empty() {
+                "任务尚未完成，但已无法给出明确下一步；请输出当前收尾总结并停止"
+            } else {
+                reason
+            });
+            return StopSchemaGateDecision {
+                max_repeats: provided_cap,
+                action: StopSchemaGateAction::AllowStop,
+                reason_code: "stop_schema_continue_without_next_step".to_string(),
+                summary_prefix: Some(summary_prefix),
+                followup_text: None,
+                count_budget: false,
+                parsed: Some(parsed),
+            };
+        }
+        return schema_followup(
+            "stop_schema_next_step_missing",
+            used,
+            provided_cap,
+            &format!(
+                "任务还没完成，但你没有给出明确下一步。请先做两件事：1) 给出当前工作的简洁总结；2) 明确 next_step 或 next_suggested_path。若仍无法给出明确下一步，下一轮允许直接停止。{}",
+                STOP_SCHEMA_JSON_EXAMPLE
+            ),
+            Some(parsed),
+            true,
+        );
+    }
+
     schema_invalid_followup(
         "stop_schema_next_step_missing",
         used,
         provided_cap,
-        "你没有证明 finished/blocked，也没有给 next_step。停止不成立。请按目标、过程、证据、问题原因、已排除因素、排查顺序六项检查：目标是否完成？过程是否验证？证据是否可核验？原因是否有依据？排除了哪些因素？下一步排查顺序是什么？完成/阻塞就给 stopreason=0/1、reason、has_evidence、evidence、issue_cause、excluded_factors、diagnostic_order、learned；否则必须给 next_step 并调用工具执行。learned 是过去 turns 学到的可复用结论，没有则空字符串。",
+        "你没有提供 next_step，但仍给出了建议推进路径。若要继续，必须把当前最小下一步写入 next_step 并立即执行；否则直接停止并输出收尾总结。",
         parsed,
     )
 }
@@ -724,6 +760,7 @@ fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
         has_evidence: read_u8(row.get("has_evidence")),
         reason: read_string(row.get("reason")),
         next_step: read_string(row.get("next_step")),
+        next_suggested_path: read_string(row.get("next_suggested_path")),
         evidence: read_string(row.get("evidence")),
         learned: read_string(row.get("learned")),
         issue_cause: read_string(row.get("issue_cause")),
@@ -832,8 +869,16 @@ fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReas
     if ctx.port_stop_message_disabled {
         return Some(SkipReason::PortDisabled);
     }
+    if let Some(flow_id) = ctx.followup_flow_id.as_deref() {
+        if flow_id != "stop_message_flow" {
+            return Some(SkipReason::ServertoolFollowupHop);
+        }
+    }
     if ctx.has_responses_submit_tool_outputs_resume {
         return Some(SkipReason::ResponsesSubmitToolOutputsResume);
+    }
+    if matches!(ctx.explicit_mode, Some(StageMode::Off)) {
+        return Some(SkipReason::ExplicitModeOff);
     }
     if ctx.plan_mode_active {
         return Some(SkipReason::PlanMode);
@@ -1007,9 +1052,8 @@ mod tests {
         assert_eq!(result.action, Action::Trigger);
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("当前用户目标"));
-        assert!(text.contains("目标"));
-        assert!(text.contains("过程"));
         assert!(text.contains("证据"));
+        assert!(text.contains("建议下一步"));
     }
 
     #[test]
@@ -1055,9 +1099,8 @@ mod tests {
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("当前用户目标"));
-        assert!(text.contains("目标"));
-        assert!(text.contains("过程"));
         assert!(text.contains("证据"));
+        assert!(text.contains("建议下一步"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
@@ -1068,13 +1111,9 @@ mod tests {
         });
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
-        assert!(text.contains("再次停止"));
-        assert!(text.contains("目标"));
-        assert!(text.contains("过程"));
-        assert!(text.contains("证据"));
-        assert!(text.contains("目标"));
-        assert!(text.contains("过程"));
-        assert!(text.contains("证据"));
+        assert!(text.contains("用户真正意图是什么"));
+        assert!(text.contains("之前的笔记"));
+        assert!(text.contains("排查顺序"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
@@ -1085,13 +1124,8 @@ mod tests {
         });
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
-        assert!(text.contains("最后一次续杯预算"));
-        assert!(text.contains("目标"));
-        assert!(text.contains("过程"));
-        assert!(text.contains("证据"));
-        assert!(text.contains("目标"));
-        assert!(text.contains("过程"));
-        assert!(text.contains("证据"));
+        assert!(text.contains("执行总结"));
+        assert!(text.contains("明确下一步"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行，不要中断总结".to_string(),
@@ -1258,16 +1292,12 @@ mod tests {
     }
 
     #[test]
-    fn non_stop_message_followup_flow_no_longer_short_circuits_stop_message() {
-        // Per the strict contract, only /goal active and plan mode may skip
-        // stop-message followup. Generic followup hops (apply_patch_flow, etc.)
-        // must fall through to the standard stop-message path so the gate,
-        // schema and budget logic all still apply.
+    fn non_stop_message_followup_flow_short_circuits_stop_message() {
         let mut ctx = base_ctx();
         ctx.followup_flow_id = Some("apply_patch_flow".to_string());
         let result = decide(&ctx);
-        assert_eq!(result.action, Action::Trigger);
-        assert!(result.skip_reason.is_none());
+        assert_eq!(result.action, Action::Skip);
+        assert_eq!(result.skip_reason.unwrap(), "skip_servertool_followup_hop");
     }
 
     #[test]
@@ -1446,7 +1476,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_schema_missing_invalid_or_no_next_step_follows_up() {
+    fn stop_schema_missing_invalid_or_no_next_step_follows_up_or_stops() {
         let missing = evaluate_stop_schema_gate("普通停止文本", 0, 3);
         assert_eq!(missing.action, StopSchemaGateAction::Followup);
         assert_eq!(missing.reason_code, "stop_schema_missing");
@@ -1478,6 +1508,19 @@ mod tests {
         assert_eq!(no_next.action, StopSchemaGateAction::Followup);
         assert_eq!(no_next.reason_code, "stop_schema_next_step_missing");
         assert!(no_next.count_budget);
+        assert!(no_next.followup_text.unwrap().contains("当前工作的简洁总结"));
+
+        let no_next_exhausted = evaluate_stop_schema_gate(
+            r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"","next_suggested_path":""}"#,
+            3,
+            3,
+        );
+        assert_eq!(no_next_exhausted.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(
+            no_next_exhausted.reason_code,
+            "stop_schema_continue_without_next_step"
+        );
+        assert!(!no_next_exhausted.count_budget);
     }
 
     #[test]
@@ -1499,16 +1542,13 @@ mod tests {
     }
 
     #[test]
-    fn stop_schema_missing_exhausts_after_ten_consecutive_stops() {
-        // 10-round safety net: missing-schema gate keeps following up
-        // through used=9 (so 10 followup injections land) and only
-        // fail-fasts at used=10.
-        let still_followup = evaluate_stop_schema_gate("普通停止文本", 9, 10);
+    fn stop_schema_missing_exhausts_after_three_consecutive_stops() {
+        let still_followup = evaluate_stop_schema_gate("普通停止文本", 2, 3);
         assert_eq!(still_followup.action, StopSchemaGateAction::Followup);
         assert_eq!(still_followup.reason_code, "stop_schema_missing");
         assert!(still_followup.count_budget);
 
-        let exhausted = evaluate_stop_schema_gate("普通停止文本", 10, 10);
+        let exhausted = evaluate_stop_schema_gate("普通停止文本", 3, 3);
         assert_eq!(exhausted.action, StopSchemaGateAction::FailFast);
         assert_eq!(exhausted.reason_code, "stop_schema_budget_exhausted");
         assert!(exhausted.count_budget);

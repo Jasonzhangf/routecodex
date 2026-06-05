@@ -85,3 +85,29 @@ export function baz(opts: Opts) { return nativeBaz(opts); }
 - `docs/ARCHITECTURE.md`
 - `docs/error-handling-v2.md`
 - `docs/routing-instructions.md`
+
+## 架构索引与门禁
+- 关键功能定位先查 `docs/architecture/function-map.yml`
+- 最小验证栈先查 `docs/architecture/verification-map.yml`
+- 架构规则先落模板，再升为门禁；至少保持以下验证栈可用：
+  - `npm run verify:architecture`
+  - `npm run verify:function-map-coverage`
+  - `npm run verify:function-map-paths`
+  - `npm run verify:function-map-boundary-mentions`
+  - `npm run verify:function-map-owner-uniqueness`
+  - `npm run verify:function-map-forbidden-mentions`
+  - `npm run verify:function-map-required-tests`
+  - `npm run verify:architecture-fallback-denylist`
+  - `npm run verify:architecture-feature-id-anchors`
+  - `npm run verify:architecture-nonadjacent-conversion`
+  - `npm run verify:architecture-feature-anchor-coverage`
+  - `npm run verify:architecture-duplicate-dto-patterns`
+  - `npm run verify:architecture-provider-specific-leaks`
+  - `npm run verify:architecture-thin-wrapper-only`
+  - `npm run verify:architecture-metadata-leak-boundary`
+  - `npm run verify:architecture-error-chain-bypass`
+  - `npm run verify:architecture-owner-queryability`
+- 相关真源：
+  - `docs/architecture/README.md`
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/verification-map.yml`

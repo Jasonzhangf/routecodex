@@ -40,8 +40,12 @@ function validateStopMessageConfig(config: PortConfig, errors: PortValidationErr
     return;
   }
   const enabled = (stopMessage as { enabled?: unknown }).enabled;
+  const includeDirect = (stopMessage as { includeDirect?: unknown }).includeDirect;
   if (enabled !== undefined && typeof enabled !== 'boolean') {
     errors.push({ port: config.port ?? 0, field: 'stopMessage.enabled', message: 'stopMessage.enabled must be boolean when provided' });
+  }
+  if (includeDirect !== undefined && typeof includeDirect !== 'boolean') {
+    errors.push({ port: config.port ?? 0, field: 'stopMessage.includeDirect', message: 'stopMessage.includeDirect must be boolean when provided' });
   }
 }
 
@@ -50,7 +54,14 @@ function readStopMessageConfig(value: unknown): PortConfig['stopMessage'] | unde
     return undefined;
   }
   const enabled = (value as { enabled?: unknown }).enabled;
-  return typeof enabled === 'boolean' ? { enabled } : undefined;
+  const includeDirect = (value as { includeDirect?: unknown }).includeDirect;
+  if (typeof enabled !== 'boolean' && typeof includeDirect !== 'boolean') {
+    return undefined;
+  }
+  return {
+    ...(typeof enabled === 'boolean' ? { enabled } : {}),
+    ...(typeof includeDirect === 'boolean' ? { includeDirect } : {}),
+  };
 }
 
 function validatePortConfig(config: PortConfig): PortValidationError[] {

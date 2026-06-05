@@ -86,6 +86,25 @@ describe('port-config-validator: sameProtocolBehavior', () => {
       expect(configs[0].stopMessage).toEqual({ enabled: false });
     });
 
+    it('preserves stopMessage.includeDirect opt-in in ports array', () => {
+      const configs = normalizePortsConfig({
+        ports: [{ port: 5555, host: '0.0.0.0', mode: 'provider', providerBinding: 'openai.gpt-4', protocolBehavior: 'direct', stopMessage: { enabled: true, includeDirect: true } }],
+      } as any);
+      expect(configs[0].stopMessage).toEqual({ enabled: true, includeDirect: true });
+      const result = validatePortConfigs(configs);
+      expect(result.valid).toBe(true);
+    });
+
+    it('rejects invalid stopMessage.includeDirect type', () => {
+      const result = validatePortConfigs([{
+        port: 5555, host: '0.0.0.0', mode: 'provider',
+        providerBinding: 'openai.gpt-4', protocolBehavior: 'direct',
+        stopMessage: { includeDirect: 'yes' as any },
+      }]);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.field === 'stopMessage.includeDirect')).toBe(true);
+    });
+
     it('defaults router mode for legacy configs without ports array', () => {
       const configs = normalizePortsConfig({ port: 8080, host: '0.0.0.0' });
       expect(configs).toHaveLength(1);

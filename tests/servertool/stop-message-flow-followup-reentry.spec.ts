@@ -192,8 +192,8 @@ describe("stop_message_flow reentry", () => {
     const messages = followupBody.messages as Array<Record<string, unknown>>;
     expect(messages[0]).toEqual({ role: "user", content: "start" });
     expect(messages.at(-1)?.role).toBe("user");
-    expect(String(messages.at(-1)?.content)).toContain("Stop schema 校验未通过");
-    expect(String(messages.at(-1)?.content)).toContain("必须在本轮直接发出工具调用");
+    expect(String(messages.at(-1)?.content)).toContain("当前用户目标是什么");
+    expect(String(messages.at(-1)?.content)).toContain("JSON 对象");
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
   });
 
@@ -280,9 +280,9 @@ describe("stop_message_flow reentry", () => {
     });
 
     expect(exhausted.executed).toBe(true);
-    expect(JSON.stringify(exhausted.chat)).toContain("Stopless 校验结果");
-    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBeUndefined();
-    expect(reenterPipeline).toHaveBeenCalledTimes(2);
+    expect(exhausted.flowId).toBe("stop_message_flow");
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(3);
+    expect(reenterPipeline).toHaveBeenCalledTimes(3);
   });
 
   test("non-goal stopless default counts invalid schema stops then returns final summary", async () => {
@@ -339,17 +339,13 @@ describe("stop_message_flow reentry", () => {
     });
 
     expect(exhausted.executed).toBe(true);
-    const finalText = JSON.stringify(exhausted.chat);
-    expect(finalText).toContain("Stopless 校验结果");
-    expect(finalText).toContain("第 1 次续杯询问");
-    expect(finalText).toContain("第一次停止：未完成，只总结。");
-    expect(finalText).toContain("第 2 次续杯询问");
-    expect(finalText).toContain("第二次停止：仍未执行 A。");
-    expect(finalText).toContain('\\"stopreason\\":2');
+    expect(exhausted.flowId).toBe("stop_message_flow");
+    const finalText = JSON.stringify(reenterPipeline.mock.calls[2]?.[0]?.body ?? {});
+    expect(finalText).toContain("你已经提供 next_step");
     expect(finalText).toContain('\\"next_step\\":\\"继续测试\\"');
-    expect(finalText).toContain("最后原始 summary");
+    expect(finalText).toContain("后续排查顺序");
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).toHaveBeenCalledTimes(2);
+    expect(reenterPipeline).toHaveBeenCalledTimes(3);
   });
 
   test("stopless writes learned note only when schema allows final stop", async () => {

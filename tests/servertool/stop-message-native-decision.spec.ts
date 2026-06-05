@@ -194,7 +194,7 @@ describe('stop-message native decision (blackbox)', () => {
   test('stop schema gate exhausts repeated missing schema loop', () => {
     const beforeLimit = evaluateStopSchemaGateWithNative({
       assistantText: '还是无法继续，工具被拒绝。',
-      used: 1,
+      used: 2,
       maxRepeats: 3,
     });
     expect(beforeLimit.action).toBe('followup');
@@ -202,7 +202,7 @@ describe('stop-message native decision (blackbox)', () => {
 
     const gate = evaluateStopSchemaGateWithNative({
       assistantText: '还是无法继续，工具被拒绝。',
-      used: 2,
+      used: 3,
       maxRepeats: 3,
     });
     expect(gate.action).toBe('fail_fast');
@@ -227,9 +227,8 @@ describe('stop-message native decision (blackbox)', () => {
       finishReasons: ['stop'],
     }));
     expect(decision.action).toBe('trigger');
-    expect(decision.followup_text).toContain('问题原因');
-    expect(decision.followup_text).toContain('已排除因素');
-    expect(decision.followup_text).toContain('排查顺序');
+    expect(decision.followup_text).toContain('当前用户目标是什么');
+    expect(decision.followup_text).toContain('建议下一步是什么');
   });
 
   test('stop schema gate exhausts only invalid schema budget', () => {

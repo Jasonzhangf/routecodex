@@ -1,0 +1,38 @@
+{
+  "targetRoots": [
+    "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src",
+    "sharedmodule/llmswitch-core/src/router/virtual-router",
+    "src/providers/core/runtime",
+    "src/server/runtime/http-server/executor"
+  ],
+  "extensions": [".ts", ".rs", ".js", ".mjs", ".cjs"],
+  "denyPatterns": [
+    "\\bfallback to\\b",
+    "\\bfinal fallback\\b",
+    "兜底",
+    "降级",
+    "dual-path"
+  ],
+  "allowlist": [
+    {
+      "pathContains": "src/providers/core/runtime/provider-error-catalog.ts",
+      "textContains": "/goal fallback-arch-audit Phase 2"
+    },
+    {
+      "pathContains": "src/providers/core/runtime/provider-error-classifier.ts",
+      "textContains": "降级与重试"
+    },
+    {
+      "pathContains": "src/providers/core/runtime/provider-failure-policy-impl.ts",
+      "textContains": "Final fallback: consume native Rust failure_policy for generic classification"
+    },
+    {
+      "pathContains": "src/providers/core/runtime/mimoweb/mimoweb-client.ts",
+      "textContains": "fallback to passthrough"
+    },
+    {
+      "pathContains": "src/server/runtime/http-server/executor/sse-error-handler.ts",
+      "textContains": "fallback to raw string"
+    }
+  ]
+}

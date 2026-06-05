@@ -1,3 +1,4 @@
+// feature_id: hub.metadata_boundary
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use std::collections::HashSet;

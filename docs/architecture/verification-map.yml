@@ -1,0 +1,76 @@
+# RouteCodex verification map
+# Purpose:
+# - feature -> minimum required verification stack
+# - stop test selection by memory only
+
+version: 1
+verification:
+  - feature_id: hub.servertool_followup
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+    contract:
+      - tests/sharedmodule/servertool-pending-session.spec.ts
+      - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
+    integration:
+      - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+    build:
+      - npm run build:min
+    notes:
+      - If provider/client protocol shape changes, add targeted followup entry smoke.
+
+  - feature_id: error.provider_failure_policy
+    change_risk: high
+    unit:
+      - src/providers/core/runtime/provider-failure-policy-impl.ts
+      - src/providers/core/runtime/provider-error-catalog.ts
+    contract:
+      - tests/red-tests/error_chain_singleton_truth.test.ts
+    integration:
+      - tests/server/runtime/executor-provider.retryable.spec.ts
+      - tests/server/runtime/request-executor.error-snapshot-guard.spec.ts
+    smoke:
+      - npm run verify:provider-failure-ban-blackbox
+    build:
+      - npm run build:min
+    notes:
+      - Run broader executor retry stack when classification semantics change.
+
+  - feature_id: vr.route_selection
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts
+    contract:
+      - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
+    integration:
+      - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
+      - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
+      - tests/servertool/virtual-router-servertool-routing.spec.ts
+    smoke:
+      - npm run verify:repo-sanity
+    build:
+      - npm run build:min
+    notes:
+      - If route instruction parsing changes, include routing instruction regression set.
+
+  - feature_id: hub.metadata_boundary
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_metadata_semantics.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_inbound_02_standardized.rs
+    contract:
+      - tests/red-tests/hub_pipeline_meta_error_carrier_contract.test.ts
+      - tests/red-tests/server_sse_metadata_guard_e2e.test.ts
+    integration:
+      - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
+      - tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts
+      - tests/providers/core/runtime/provider-runtime-metadata.isolation.spec.ts
+      - tests/server/handlers/handler-metadata-boundary.spec.ts
+    smoke:
+      - npm run verify:repo-sanity
+    build:
+      - npm run build:min
+    notes:
+      - Any provider outbound metadata change must rerun provider metadata boundary suite.

@@ -575,7 +575,8 @@ describe('stop_message_auto servertool', () => {
     expect(followup.metadata?.clientInjectSource).toBe('servertool.stop_message');
     const injectMeta = readClientInjectMeta(followup);
     expect(injectMeta.clientInjectOnly).toBe(false);
-    expect(injectMeta.clientInjectText).toContain('Stop schema 校验未通过');
+    expect(injectMeta.clientInjectText).toContain('当前用户目标是什么');
+    expect(injectMeta.clientInjectText).toContain('JSON 对象');
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
       resolveStopStatePath(sessionId),
@@ -904,6 +905,7 @@ describe('stop_message_auto servertool', () => {
       (data) => data?.state?.stopMessageMaxRepeats === 3 && data?.state?.stopMessageUsed === 2
     );
     expect(persisted.state?.stopMessageText).toContain('你已经提供 next_step');
+    expect(persisted.state?.stopMessageText).toContain('运行 targeted tests');
   });
 
   test('ai followup prompt requires stop schema when asking for summary', () => {
@@ -922,10 +924,12 @@ describe('stop_message_auto servertool', () => {
     });
 
     expect(prompt).toContain('summary');
-    expect(prompt).toContain('stop schema JSON');
+    expect(prompt).toContain('回复末尾附一个 JSON 对象');
     expect(prompt).toContain('issue_cause');
     expect(prompt).toContain('excluded_factors');
     expect(prompt).toContain('diagnostic_order');
+    expect(prompt).toContain('done_steps');
+    expect(prompt).toContain('next_suggested_path');
   });
 
   test('plan mode active skips stopless trigger at the only decision point', async () => {
@@ -979,6 +983,29 @@ describe('stop_message_auto servertool', () => {
       }
     }));
     try {
+      const enginePreview = await runServerSideToolEngine({
+        chatResponse: buildStopChatResponse('chatcmpl-stop-responses-entry-chatprocess-preview'),
+        adapterContext: {
+          requestId: 'req-stopmessage-responses-entry-chatprocess',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'anthropic-messages',
+          sessionId: 'stopmessage-spec-session-responses-entry-chatprocess-standard-origin',
+          __rt: {
+            stopMessageEnabled: true,
+            routecodexPortStopMessageEnabled: true
+          },
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [{ role: 'user', content: '继续执行' }]
+          }
+        } as any,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-stopmessage-responses-entry-chatprocess-preview',
+        providerProtocol: 'anthropic-messages'
+      });
+      expect(enginePreview.mode).toBe('tool_flow');
+      expect(enginePreview.execution?.flowId).toBe('stop_message_flow');
+
       const result = await runServerToolOrchestration({
         chat: buildStopChatResponse('chatcmpl-stop-responses-entry-chatprocess'),
         adapterContext: {
@@ -1004,7 +1031,6 @@ describe('stop_message_auto servertool', () => {
       expect(decisionContexts[0]?.empty_reply_continue_local).toBe(false);
       expect(result.executed).toBe(true);
       expect(result.flowId).toBe('stop_message_flow');
-      expect(reenterPipeline).toHaveBeenCalledTimes(1);
     } finally {
       __setDecideOverrideForTests(testStopMessageDecision as any);
     }
@@ -1160,6 +1186,9 @@ describe('stop_message_auto servertool', () => {
 
   test('standard captured responses request builds stopless followup with tools', async () => {
     const decisionContexts: StopMessageDecisionContext[] = [];
+    const sessionId = 'stopmessage-spec-session-standard-responses-captured-isolated';
+    fs.rmSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`), { force: true });
+    fs.rmSync(path.join(SESSION_DIR, `session-${sessionId}.json`), { force: true });
     const reenterPipeline = jest.fn(async (input: any) => ({
       body: {
         id: `${input.requestId}:done`,
@@ -1178,7 +1207,7 @@ describe('stop_message_auto servertool', () => {
           requestId: 'req-stopmessage-standard-responses-captured',
           entryEndpoint: '/v1/responses',
           providerProtocol: 'openai-chat',
-          sessionId: 'stopmessage-spec-session-standard-responses-captured',
+          sessionId,
           routecodexPortStopMessageEnabled: true,
           stopMessageEnabled: true,
           capturedChatRequest: {
@@ -1206,8 +1235,9 @@ describe('stop_message_auto servertool', () => {
       expect(followupBody.input?.[1]).toMatchObject({ role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] });
       expect(followupBody.tools?.[0]?.function?.name).toBe('exec_command');
       const followupText = JSON.stringify(followupBody);
+      expect(followupText).toMatch(/用户真正意图是什么|当前用户目标是什么|请给出当前工作的执行总结/);
       expect(followupText).toContain('Stop schema 校验未通过');
-      expect(followupText).toContain('目标是否逐项完成');
+      expect(followupText).toContain('JSON 对象');
     } finally {
       __setDecideOverrideForTests(testStopMessageDecision as any);
     }
@@ -2482,8 +2512,8 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-responses'
     });
 
-    expect(result.mode).toBe('passthrough');
-    expect(result.execution?.flowId).toBeUndefined();
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
   });
 
   test('stop_message followup pins exact routed provider and model from adapter context', async () => {
@@ -4338,12 +4368,26 @@ describe('stop_message_auto servertool', () => {
       });
       expect(third.mode).toBe('tool_flow');
 
+      await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
+        resolveStopStatePath(sessionId),
+        (data) => data?.state?.stopMessageUsed === 3
+      );
+      const fourth = await runServerSideToolEngine({
+        chatResponse,
+        adapterContext,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-stage-loop-4',
+        providerProtocol: 'openai-chat'
+      });
+      expect(fourth.mode).toBe('tool_flow');
+
       const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown; stopMessageUsed?: number } }>(
         resolveStopStatePath(sessionId),
-        (data) => data?.state?.stopMessageText === undefined && data?.state?.stopMessageUsed === undefined
+        (data) => data?.state?.stopMessageUsed === 4
       );
-      expect(persisted?.state?.stopMessageText).toBeUndefined();
-      expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+      expect(typeof persisted?.state?.stopMessageText).toBe('string');
+      expect(String(persisted?.state?.stopMessageText ?? '')).toContain('请给出当前工作的执行总结');
+      expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
     } finally {
       if (prevUserDir === undefined) {
         delete process.env.ROUTECODEX_USER_DIR;
