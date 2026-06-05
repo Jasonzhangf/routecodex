@@ -1,5 +1,7 @@
 import type { Application, NextFunction, Request, Response } from 'express';
 import express from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
 import type { ServerConfigV2 } from './types.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import {
@@ -315,6 +317,12 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
 }
 
 export function registerDefaultMiddleware(app: Application, config?: ServerConfigV2): void {
+  try {
+    app.use(helmet({ contentSecurityPolicy: false }));
+    app.use(cors());
+  } catch (error) {
+    console.warn('[RouteCodexHttpServer] Failed to enable helmet/cors; continuing with default express middleware', error);
+  }
   try {
     if (typeof express.json === 'function') {
       const bodyLimit = resolveJsonBodyLimit(config);
