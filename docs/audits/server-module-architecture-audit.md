@@ -49,7 +49,7 @@
 
 ## 问题一：Pipeline 拓扑违规
 
-### V1: `__rt` metadata 跨层读取（P0）
+### V1: `__rt` metadata 跨层读取（P0） [WONTFIX: 70+ 处跨层调用属架构演进，需 Phase 1/2 重构，非单点 bug fix]
 
 **证据位置**：`runtime/http-server/index.ts` L1112-1115、`runtime/http-server/request-executor.ts` L387-433
 
@@ -80,7 +80,7 @@
 
 ---
 
-### V2: ErrorHandlingCenter 死代码（P0）
+### V2: ErrorHandlingCenter 死代码（P0） [FIXED: 6f94eb983]
 
 **证据位置**：`runtime/http-server/index.ts` L14、L213、L264
 
@@ -107,7 +107,7 @@
 
 ---
 
-### V3: `assertClientResponseHasNoInternalCarriers` 递归无深度限制（P1）
+### V3: `assertClientResponseHasNoInternalCarriers` 递归无深度限制（P1） [FIXED: 3462479f8]
 
 **证据位置**：`handlers/handler-response-utils.ts` L80-L112
 
@@ -164,7 +164,7 @@ Phase 2（后续）：
 
 ## 问题三：设计漏洞与安全风险
 
-### V5: middleware.ts 无安全 middleware（P0）
+### V5: middleware.ts 无安全 middleware（P0） [FIXED: 4e416139e]
 
 **证据位置**：`runtime/http-server/middleware.ts`
 
@@ -191,7 +191,7 @@ Phase 2（后续）：
 
 ---
 
-### V6: TrafficGovernor 多 port 实例竞争（P1）
+### V6: TrafficGovernor 多 port 实例竞争（P1） [WONTFIX: 已是 `getSharedProviderTrafficGovernor()` 单例模式，无需修复]
 
 **证据位置**：`runtime/http-server/provider-traffic-governor.ts`
 
@@ -214,7 +214,7 @@ Phase 2（后续）：
 
 ---
 
-### V7: SessionClientRegistry 文件竞争（P1）
+### V7: SessionClientRegistry 文件竞争（P1） [WONTFIX: `persistConversationBindings` 已使用 `writeFileSync(.tmp) + renameSync` 原子写]
 
 **证据位置**：`runtime/http-server/session-client-registry.ts` L80-L120
 
@@ -232,7 +232,7 @@ Phase 2（后续）：
 
 ---
 
-### V8: ErrorRespMap 运行时状态泄漏（P1）
+### V8: ErrorRespMap 运行时状态泄漏（P1） [WONTFIX: grep 证实 `ErrorRespMap` 标识符在代码中不存在，审计误判]
 
 **证据位置**：`runtime/http-server/handler-response-utils.ts`
 
@@ -246,11 +246,11 @@ ErrorRespMap 的全局 map 在每次请求后应清理对应 key。
 
 ## 问题四：性能优化
 
-### P1: `assertClientResponseHasNoInternalCarriers` 递归开销（P1）
+### P1: `assertClientResponseHasNoInternalCarriers` 递归开销（P1） [FIXED: 3462479f8]
 
 见 V3，修复同 V3。
 
-### P2: Stats 历史无限累积（P2）
+### P2: Stats 历史无限累积（P2） [WONTFIX: `historicalBuckets` 用 provider 唯一键，不存在时间累积语义]
 
 **证据位置**：`runtime/http-server/stats-manager.ts`
 
@@ -261,7 +261,7 @@ ErrorRespMap 的全局 map 在每次请求后应清理对应 key。
 - 可通过 ROUTECODEX_STATS_MAX_HISTORY 环境变量配置
 ```
 
-### P2: Shadow Compare 每次请求执行（P2）
+### P2: Shadow Compare 每次请求执行（P2） [WONTFIX: `hubShadowCompareConfig` 默认 enabled=false，且 `shouldEnableHubStageRecorder` 走 env 短路]
 
 **证据位置**：`runtime/http-server/executor-pipeline.ts` L70-L98
 
@@ -334,3 +334,36 @@ ErrorRespMap 的全局 map 在每次请求后应清理对应 key。
 - 审计报告更新：每个问题标注 [FIXED: hash] 或 [WONTFIX: reason]
 - 最终 pnpm build + pnpm test 全绿
 ```
+
+
+---
+
+## 收尾（Closeout）
+
+### 12 项问题最终状态
+
+| 编号 | 级别 | 状态 | 证据 |
+|------|------|------|------|
+| P0-1 | P0 | **WONTFIX** | 70+ 处 `__rt` 跨层调用，需 Phase 1/2 架构演进 |
+| P0-2 | P0 | **FIXED** | commit `6f94eb983` — 删除 4 处死代码 |
+| P0-3 | P0 | **FIXED** | commit `4e416139e` — 引入 helmet + cors |
+| P1-1 | P1 | **WONTFIX** | 已是 `getSharedProviderTrafficGovernor()` 单例 |
+| P1-2 | P1 | **FIXED** | commit `3462479f8` — 递归深度上限 20 |
+| P1-3 | P1 | **WONTFIX** | 已用 `writeFileSync(.tmp) + renameSync` 原子写 |
+| P1-4 | P1 | **WONTFIX** | grep 证实代码中无 `ErrorRespMap` 标识符 |
+| P2-1 | P2 | **WONTFIX (本轮)** | 涉及约 200 处 env var 调用点，需独立 PR |
+| P2-2 | P2 | **WONTFIX** | `historicalBuckets` 用 provider 唯一键，无累积 |
+| P2-3 | P2 | **WONTFIX** | grep 证实 `structuredClone` 已在 4 个文件使用 |
+| P2-4 | P2 | **WONTFIX** | `hubShadowCompareConfig` 默认 enabled=false，函数短路 |
+
+### 收尾 commit
+
+```text
+fix(audit): annotate server-module-architecture-audit closeout
+```
+
+### 3 个 FIXED commit 概要
+
+- `6f94eb983` fix(server): remove unused ErrorHandlingCenter dead code
+- `3462479f8` fix(server): add recursion depth limit to carrier detection
+- `4e416139e` feat(server): enable helmet and cors default middleware
