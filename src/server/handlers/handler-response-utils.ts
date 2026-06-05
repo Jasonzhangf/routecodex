@@ -20,6 +20,8 @@ const CLIENT_RESPONSE_FORBIDDEN_FIELDS: ReadonlySet<string> = new Set([
   'providerStack',
 ]);
 
+const MAX_CARRIER_DEPTH = 20;
+
 const INTERNAL_METADATA_KEYS: ReadonlySet<string> = new Set([
   'routeHint',
   'routeName',
@@ -55,14 +57,16 @@ function allowsClientVisibleProtocolMetadata(payload: Record<string, unknown>): 
 
 function findForbiddenFieldInResponsePayload(
   payload: unknown,
-  seen: WeakSet<object> = new WeakSet()
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0
 ): string | undefined {
   if (!payload || typeof payload !== 'object') return undefined;
   if (seen.has(payload as object)) return undefined;
   seen.add(payload as object);
+  if (depth >= MAX_CARRIER_DEPTH) return undefined;
   if (Array.isArray(payload)) {
     for (const item of payload) {
-      const found = findForbiddenFieldInResponsePayload(item, seen);
+      const found = findForbiddenFieldInResponsePayload(item, seen, depth + 1);
       if (found) return found;
     }
     return undefined;
@@ -80,7 +84,7 @@ function findForbiddenFieldInResponsePayload(
     if (CLIENT_RESPONSE_FORBIDDEN_FIELDS.has(key)) {
       return key;
     }
-    const found = findForbiddenFieldInResponsePayload(value, seen);
+    const found = findForbiddenFieldInResponsePayload(value, seen, depth + 1);
     if (found) return found;
   }
   return undefined;
