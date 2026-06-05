@@ -15338,3 +15338,30 @@ Task: investigate stopless stopping on schema missing and servertool log noise.
 ## 2026-06-05 error policy center direct route-level passthrough gate
 - Test update: provider-mode keyless chat binding route-level tests now assert client `model` is preserved on direct path instead of rewriting to providerBinding model.
 - Green evidence: `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts tests/server/runtime/http-server/provider-direct-pipeline.spec.ts tests/server/runtime/http-server/provider-direct-response-passthrough.spec.ts --runInBand --forceExit` passed 20/20; `npx tsc --noEmit --pretty false` passed.
+
+## 2026-06-04T17:00:00.845Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260605T005934945-257642-1285:stop_followup
+- sessionId: 019e80fe-b4d0-7642-a71c-014b3da22814
+- stopReason: stopless/servertool 三条契约修复已完成并通过在线样本验证
+- evidence: (1) Rust 真源 4 项改动：STOP_SCHEMA_PROVIDED_MAX_REPEATS=3、STOP_SCHEMA_MISSING_MAX_REPEATS=10、stop_schema_uses_provided_budget/已移除 skip_servertool_followup_hop/stop_message_unchanged_exhaustion 分支、StopMessageHistory 三环+summary 注入；cargo test -p stop-message-core 37/37 全过。(2) TS shell 同步：STOP_SCHEMA_PROVIDED_MAX_REPEATS=3、STOP_SCHEMA_MISSING_MAX_REPEATS=10、StopMessageHistory 累加器、resolveStopMessageStopMaxRepeats 优先 napi、SummaryPrefix 注入；npm run build:min 通过，version=0.90.2860。(3) install:global + restart 5555 完成；curl /health 返回 0.90.2860。(4) 在线样本 5537：reason=stop_schema_missing arm=true mode=on allowModeOnly=false max=10 used=0 left=10（确认 missing 路径预算=10）。(5) 在线样本 5538：reason=stop_schema_missing arm=true max=10 used=1 left=9（单次 stop 准确扣减一次预算）
+
+Rust stop-message-core 预算语义要语义化拆为 provided/missing；skip 白名单只能收 goal_active/plan_mode；summary_prefix 注入要带 origin step 累加 history；install:global 会 copy napi 二进制到 /opt/homebrew/lib/node_modules，需 restart server 加载新 .node；5537/5538 origin 同 first stop 后 left=10 → 9 证明单次 stop 准确扣减一次预算
+
+## 2026-06-04T17:05:01.303Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260605T010418465-257657-1300:stop_followup
+- sessionId: 019e80fe-b4d0-7642-a71c-014b3da22814
+- stopReason: stopless/servertool 三条契约修复已完成并通过 Rust 真源 + 在线样本双侧验证
+- evidence: (1) Rust 真源 4 项改动已落盘：STOP_SCHEMA_PROVIDED_MAX_REPEATS=3、STOP_SCHEMA_MISSING_MAX_REPEATS=10、stop_schema_uses_provided_budget/stop_message_unchanged_exhaustion 拆分、skip 分支裁剪只留 goal_active/plan_mode、StopMessageHistory 三环+summary 注入；cargo test -p stop-message-core --lib 37/37 全过。(2) TS shell 同步：STOP_SCHEMA_PROVIDED_MAX_REPEATS=3、STOP_SCHEMA_MISSING_MAX_REPEATS=10、StopMessageHistory 累加器、resolveStopMessageStopMaxRepeats、SummaryPrefix 注入；build:min 升 0.90.2860。(3) install:global 复制新 napi + 重启 5555；curl /health → version=0.90.2860。(4) napi 单元自检：provided 路径 budget=3、missing 路径 budget=10 已确认。(5) TS 单元自检：stop_message_path_resolver.spec.ts 12/12、stop_message_history.spec.ts 17/17、stop_message_skip.spec.ts 2/2、stop_message_trigger.spec.ts 6/6、stop_message_coalesce.spec.ts 6/6 全过
+
+Rust stop-message-core 预算语义要拆 provided/missing；skip 白名单只收 goal_active/plan_mode；summary_prefix 注入要带 origin step 累加 history；install:global 会 copy napi 二进制到 /opt/homebrew/lib/node_modules，需 restart 加载新 .node；TS resolveStopMessageStopMaxRepeats 必须 schemaGate 优先 napi
+
+## 2026-06-04T17:27:44.073Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260605T012717692-257736-1379:stop_followup
+- sessionId: 019e80fe-b4d0-7642-a71c-014b3da22814
+- stopReason: stopless/servertool 三条契约修复已完成并通过 Rust 真源 + 在线样本双侧验证
+- evidence: (1) Rust 真源 4 项改动已落盘：STOP_SCHEMA_PROVIDED_MAX_REPEATS=3、STOP_SCHEMA_MISSING_MAX_REPEATS=10、stop_schema_uses_provided_budget/stop_message_unchanged_exhaustion 拆分、skip 分支裁剪只留 goal_active/plan_mode、StopMessageHistory 三环+summary 注入；cargo test -p stop-message-core --lib 37/37 全过。(2) TS shell 同步：STOP_SCHEMA_PROVIDED_MAX_REPEATS=3、STOP_SCHEMA_MISSING_MAX_REPEATS=10、StopMessageHistory 累加器、resolveStopMessageStopMaxRepeats、SummaryPrefix 注入；build:min 升 0.90.2860。(3) install:global 复制新 napi + 重启 5555；curl /health → version=0.90.2860。(4) napi 单元自检：provided 路径 budget=3、missing 路径 budget=10 已确认。(5) TS 单元自检：stop_message_path_resolver.spec.ts 12/12、stop_message_history.spec.ts 17/17、stop_message_skip.spec.ts 2/2、stop_message_trigger.spec.ts 6/6、stop_message_coalesce.spec.ts 6/6 全过
+
+Rust stop-message-core 预算语义要拆 provided/missing；skip 白名单只收 goal_active/plan_mode；summary_prefix 注入要带 origin step 累加 history；install:global 会 copy napi 二进制到 /opt/homebrew/lib/node_modules，需 restart 加载新 .node；TS resolveStopMessageStopMaxRepeats 必须 schemaGate 优先 napi
