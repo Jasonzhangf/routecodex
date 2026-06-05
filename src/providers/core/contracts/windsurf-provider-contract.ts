@@ -79,12 +79,14 @@ export function isWindsurfRuntimeIdentity(opts: {
   providerFamily?: string;
   providerId?: string;
   providerKey?: string;
+  runtimeKey?: string;
   compatibilityProfile?: string;
 }): boolean {
   const read = (v?: string): string => (typeof v === 'string' ? v.trim().toLowerCase() : '');
   const pf = read(opts.providerFamily);
   const pid = read(opts.providerId);
   const pkey = read(opts.providerKey);
+  const rkey = read(opts.runtimeKey);
   const cp = read(opts.compatibilityProfile);
   return (
     cp === 'chat:windsurf' ||
@@ -93,6 +95,8 @@ export function isWindsurfRuntimeIdentity(opts: {
     pid.startsWith('windsurf.') ||
     pkey === 'windsurf' ||
     pkey.startsWith('windsurf.') ||
+    rkey === 'windsurf' ||
+    rkey.startsWith('windsurf.') ||
     pf === 'windsurf'
   );
 }
@@ -125,3 +129,21 @@ export const WINDSURF_UNRECOVERABLE_CODES: ReadonlySet<WindsurfErrorCodeValue> =
 export const WINDSURF_BLOCKING_RECOVERABLE_CODES: ReadonlySet<WindsurfErrorCodeValue> = new Set<WindsurfErrorCodeValue>([
   WINDSURF_ERROR_CODES.RATE_LIMITED
 ]);
+
+// Phase 3 (2026-06-05, /goal fallback-arch-audit): 专判 windsurf.managed.* provider traffic。
+// executor / http-server-runtime-providers 不再允许直接用 startsWith('windsurf.managed.')。
+// providerKey 或 runtimeKey 任一匹配即视为 managed traffic；其他 windsurf.* 流量不在此范围。
+export function isWindsurfManagedProviderIdentity(opts: {
+  providerKey?: string;
+  runtimeKey?: string;
+}): boolean {
+  const read = (v?: string): string =>
+    typeof v === 'string' ? v.trim().toLowerCase() : '';
+  const pkey = read(opts.providerKey);
+  const rkey = read(opts.runtimeKey);
+  if (pkey === 'windsurf.managed') return true;
+  if (pkey.startsWith('windsurf.managed.')) return true;
+  if (rkey === 'windsurf.managed') return true;
+  if (rkey.startsWith('windsurf.managed.')) return true;
+  return false;
+}

@@ -95,6 +95,7 @@ import {
   isRequiredToolCallTurn,
   isToolResultFollowupTurn
 } from './executor/request-executor-request-semantics.js';
+import { isWindsurfManagedProviderIdentity } from '../../../providers/core/contracts/windsurf-provider-contract.js';
 import {
   extractRequestExecutorProviderErrorStage,
   isHostRequestExecutorErrorStage,
@@ -941,9 +942,10 @@ export class HubRequestExecutor implements RequestExecutor {
           typeof (providerPayload as { stream?: unknown } | undefined)?.stream === 'boolean'
             ? Boolean((providerPayload as { stream?: unknown }).stream)
             : undefined;
-        const providerOwnsWindsurfManagedTraffic =
-          (typeof target.providerKey === 'string' && target.providerKey.startsWith('windsurf.managed.'))
-          || (typeof runtimeKey === 'string' && runtimeKey.startsWith('windsurf.managed.'));
+        const providerOwnsWindsurfManagedTraffic = isWindsurfManagedProviderIdentity({
+          providerKey: typeof target.providerKey === 'string' ? target.providerKey : undefined,
+          runtimeKey: typeof runtimeKey === 'string' ? runtimeKey : undefined,
+        });
         const providerTransportBackoffKey = providerOwnsWindsurfManagedTraffic
           ? undefined
           : buildProviderTransportBackoffKey({

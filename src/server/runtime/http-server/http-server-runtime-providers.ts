@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
+import { isWindsurfRuntimeIdentity } from '../../../providers/core/contracts/windsurf-provider-contract.js';
 import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
 import { enforceWindsurfStartupProbeForHandle } from './windsurf-startup-probe.js';
 import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from './types.js';
@@ -211,7 +212,13 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
     }
     const runtimeProfile = runtime as ProviderRuntimeProfile;
     const runtimeKey = runtimeProfile.runtimeKey || providerKey;
-    if (!runtimeKey.startsWith('windsurf.')) {
+    const isWindsurfIdentity = isWindsurfRuntimeIdentity({
+      providerFamily: runtimeProfile.providerFamily,
+      providerId: runtimeProfile.providerId,
+      providerKey,
+      compatibilityProfile: runtimeProfile.compatibilityProfile
+    });
+    if (!isWindsurfIdentity) {
       continue;
     }
     windsurfRuntimeProviderCounts.set(runtimeKey, (windsurfRuntimeProviderCounts.get(runtimeKey) || 0) + 1);
@@ -230,7 +237,13 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
     }
     const runtimeProfile = runtime as ProviderRuntimeProfile;
     const runtimeKey = runtimeProfile.runtimeKey || providerKey;
-    if (runtimeKey.startsWith('windsurf.') && !windsurfInspectLoggedRuntimeKeys.has(runtimeKey)) {
+    const isWindsurfIdentity = isWindsurfRuntimeIdentity({
+      providerFamily: runtimeProfile.providerFamily,
+      providerId: runtimeProfile.providerId,
+      providerKey,
+      compatibilityProfile: runtimeProfile.compatibilityProfile
+    });
+    if (isWindsurfIdentity && !windsurfInspectLoggedRuntimeKeys.has(runtimeKey)) {
       windsurfInspectLoggedRuntimeKeys.add(runtimeKey);
     }
 
@@ -300,7 +313,7 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
         server.providerRuntimeInitErrors.delete(runtimeKey);
       } catch (error) {
         const credentialMissing = isCredentialMissingInitError(error);
-        if (runtimeKey.startsWith('windsurf.')) {
+        if (isWindsurfRuntimeIdentity({ providerKey, runtimeKey })) {
           try {
             console.warn('[windsurf.runtime.init.fail]', JSON.stringify({
               providerKey,
@@ -428,12 +441,13 @@ export async function createProviderHandle(
 ): Promise<ProviderHandle> {
   const protocolType = normalizeProviderType(runtime.providerType);
   const rawProviderFamily = runtime.providerFamily || protocolType;
-  const providerFamily =
-    String(runtimeKey || '').startsWith('windsurf.')
-    || runtime.providerId === 'windsurf'
-    || rawProviderFamily === 'windsurf'
-      ? 'windsurf'
-      : rawProviderFamily;
+  const providerFamily = isWindsurfRuntimeIdentity({
+    providerFamily: runtime.providerFamily,
+    providerId: runtime.providerId,
+    providerKey: runtimeKey,
+  })
+    ? 'windsurf'
+    : rawProviderFamily;
   const providerProtocol =
     providerFamily === 'windsurf'
       ? mapProviderProtocol(protocolType, providerFamily)
