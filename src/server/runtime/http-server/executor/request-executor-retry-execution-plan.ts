@@ -24,14 +24,14 @@ import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
-export type ErrorErr04RouterPolicyApplied = {
+export type RequestExecutorErrorErr04RouterPolicyEnvelope = {
   retryExecutionPlan: ProviderRetryExecutionPlan;
 };
 
 export type ErrorErr05ExecutionDecision = ProviderRetryExecutionPlan;
 
 export function consume_error_err_05_execution_decision_from_error_err_04_router_policy(
-  applied: ErrorErr04RouterPolicyApplied
+  applied: RequestExecutorErrorErr04RouterPolicyEnvelope
 ): ErrorErr05ExecutionDecision {
   return applied.retryExecutionPlan;
 }

@@ -27,6 +27,9 @@
 - `scripts/architecture/verify-function-map-owner-uniqueness.mjs`
   - 检查 `owner_module` 必须落在 `allowed_paths` 范围内，且同一 `canonical_builders` 不能被多个 feature 重复声明
 
+- `scripts/architecture/verify-function-map-canonical-builder-definitions.mjs`
+  - 检查每个 `canonical_builders` 在 `owner_module` 内必须有且只有一个实体定义；对同 stem 的 `.ts/.js` 配对桥接按单定义去重；禁止在其它 `allowed_paths` 或任意 `forbidden_paths` 重定义
+
 - `scripts/architecture/verify-function-map-forbidden-mentions.mjs`
   - 检查 `canonical_builders` 不得出现在 `forbidden_paths`；若确有合法引用，必须显式写入 `forbidden_mentions_allowlist`
 
@@ -49,7 +52,7 @@
   - 检查每个 feature 在 owner 区至少有 1 个源码锚点文件，且 canonical builders 至少命中 2 个文件
 
 - `scripts/architecture/verify-architecture-duplicate-dto-patterns.mjs`
-  - 扫描 `HubReq* / HubResp* / VrRoute* / ErrorErr*` 的重复定义式声明，先拦真实多 owner 定义，alias-like 情况只告警
+  - 扫描 `HubReq* / HubResp* / VrRoute* / ErrorErr*` 的重复定义式声明，拦截 Rust/TS 双份 shape、alias mirror 与本地 envelope 重名；不允许 warning-only 漂移
 
 - `scripts/architecture/verify-architecture-provider-specific-leaks.mjs`
   - 扫描 Hub Pipeline / Virtual Router 核心层中的 provider-specific 分支与兼容泄漏，阻止通用层承载 provider 特例
@@ -66,6 +69,15 @@
 - `scripts/architecture/verify-architecture-owner-queryability.mjs`
   - 检查每个 feature 是否具备 `feature_id -> owner_module -> source anchor -> canonical builder -> required tests/gates` 的可查询闭环
 
+- `scripts/architecture/verify-architecture-feature-map-growth-discipline.mjs`
+  - 检查源码里的 `feature_id:` 锚点是否都已同步进入 `function-map.yml` 与 `verification-map.yml`，防止新增关键功能重新脱离索引
+
+- `scripts/architecture/verify-architecture-forbidden-path-growth.mjs`
+  - 检查 `canonical_types + canonical_builders` 不得在 `forbidden_paths` 生长，防止错误层重新长出第二份实现
+
+- `scripts/architecture/verify-architecture-adjacent-builder-naming.mjs`
+  - 检查架构 owner builder/parser/projector 是否显式编码相邻 source/target；除入口 payload、metadata carrier、error chain 特例外，禁止泛化命名与旧 `req_process/resp_process` 退化
+
 ## 使用规则
 
 1. 新增关键功能或发现定位困难的老功能时，先补 `function-map.yml`。
@@ -73,20 +85,6 @@
 3. 规则先落模板，再逐步补脚本 gate；不要反过来只靠口头约定。
 4. 模板未补全前，只能宣称“已建立骨架”，不能宣称“全项目已完成架构索引化”。
 5. 每次补 feature 行后，至少运行：
-   - `npm run verify:architecture`
-   - `npm run verify:function-map-coverage`
-   - `npm run verify:function-map-paths`
-   - `npm run verify:function-map-boundary-mentions`
-   - `npm run verify:function-map-owner-uniqueness`
-   - `npm run verify:function-map-forbidden-mentions`
-   - `npm run verify:function-map-required-tests`
-   - `npm run verify:architecture-fallback-denylist`
-   - `npm run verify:architecture-feature-id-anchors`
-   - `npm run verify:architecture-nonadjacent-conversion`
-   - `npm run verify:architecture-feature-anchor-coverage`
-   - `npm run verify:architecture-duplicate-dto-patterns`
-   - `npm run verify:architecture-provider-specific-leaks`
-   - `npm run verify:architecture-thin-wrapper-only`
-   - `npm run verify:architecture-metadata-leak-boundary`
-   - `npm run verify:architecture-error-chain-bypass`
-   - `npm run verify:architecture-owner-queryability`
+   - `npm run verify:architecture-ci`
+   - 若需逐项定位，再拆跑各单项 `verify:architecture-*` / `verify:function-map-*`
+   - `npm run verify:architecture-adjacent-builder-naming`

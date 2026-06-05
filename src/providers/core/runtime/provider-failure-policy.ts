@@ -99,5 +99,3 @@ export type ProviderFailureStage =
   | 'provider.http'
   | 'provider.runtime.init'
   | 'provider.responses';
-
-export type ErrorErr03RuntimeClassified = ProviderFailureOutcome;

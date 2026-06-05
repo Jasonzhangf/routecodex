@@ -69,7 +69,6 @@ for (const relRoot of targetRoots) {
 }
 
 const failures = [];
-const warnings = [];
 
 for (const [name, entries] of definitions.entries()) {
   const rustDefs = entries.filter((entry) => entry.kind === 'rust-struct' || entry.kind === 'rust-enum');
@@ -87,31 +86,23 @@ for (const [name, entries] of definitions.entries()) {
     continue;
   }
   if (rustDefs.length >= 1 && (tsShapeDefs.length >= 1 || tsAliases.length >= 1)) {
-    warnings.push(`${name}: Rust truth mirrored by TS declarations -> ${detail}`);
+    failures.push(`${name}: Rust truth mirrored by TS declarations -> ${detail}`);
     continue;
   }
   if (tsShapeDefs.length === 1 && tsAliases.length >= 1) {
-    warnings.push(`${name}: TS shape plus alias mirrors -> ${detail}`);
+    failures.push(`${name}: TS shape plus alias mirrors -> ${detail}`);
     continue;
   }
   if (tsAliases.length > 1) {
-    warnings.push(`${name}: alias-like duplicate definitions -> ${detail}`);
+    failures.push(`${name}: alias-like duplicate definitions -> ${detail}`);
   }
 }
 
 if (failures.length > 0) {
   console.error('[verify:architecture-duplicate-dto-patterns] failed');
   failures.forEach((failure) => console.error(`- ${failure}`));
-  if (warnings.length > 0) {
-    console.error('[verify:architecture-duplicate-dto-patterns] warnings');
-    warnings.forEach((warning) => console.error(`- ${warning}`));
-  }
   process.exit(1);
 }
 
 console.log('[verify:architecture-duplicate-dto-patterns] ok');
 console.log(`- checked node definitions: ${definitions.size}`);
-if (warnings.length > 0) {
-  console.log(`- warnings: ${warnings.length}`);
-  warnings.forEach((warning) => console.log(`  - ${warning}`));
-}

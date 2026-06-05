@@ -27,6 +27,8 @@ jobs:
       - run: npm ci
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
+      - name: Architecture gates
+        run: npm run verify:architecture-ci
       - name: File line-limit gate (<500)
         run: npm run verify:file-line-limit
       - name: Servertool Rust-only gate
@@ -61,6 +63,8 @@ jobs:
       - run: npm ci
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
+      - name: Architecture gates
+        run: npm run verify:architecture-ci
       - name: File line-limit gate (<500)
         run: npm run verify:file-line-limit
       - name: Servertool Rust-only gate

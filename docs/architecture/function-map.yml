@@ -14,7 +14,7 @@ owners:
       - HubRespChatProcess03Governed
       - HubRespOutbound04ClientSemantic
     canonical_builders:
-      - buildHubRespOutbound04FromHubRespChatProcess03
+      - project_hub_resp_outbound_04_from_hub_resp_chatprocess_03
       - run_servertool_response_stage_json
       - plan_servertool_outcome_json
     allowed_paths:
@@ -66,12 +66,12 @@ owners:
   - feature_id: vr.route_selection
     status: active
     summary: virtual router route classification and selected target truth
-    owner_module: sharedmodule/llmswitch-core/src/router/virtual-router
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - VrRoute04SelectedTarget
     canonical_builders:
       - apply_route_selection
-      - parseRoutingInstructionsWithNative
+      - build_vr_route_04_from_hub_req_chatprocess_03
     allowed_paths:
       - sharedmodule/llmswitch-core/src/router/virtual-router
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
@@ -103,8 +103,8 @@ owners:
       - MetaCarrier
     canonical_builders:
       - assert_no_inline_metadata
-      - ensure_runtime_metadata
-      - read_runtime_metadata
+      - ensure_runtime_metadata_json
+      - read_runtime_metadata_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - src/providers/core/runtime

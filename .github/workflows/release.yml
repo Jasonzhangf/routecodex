@@ -37,6 +37,8 @@ jobs:
 
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
+      - name: Architecture gates
+        run: npm run verify:architecture-ci
 
       - name: Ensure release llms module
         run: BUILD_MODE=release npm run llmswitch:ensure
