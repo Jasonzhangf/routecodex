@@ -8,6 +8,8 @@ const DEFAULT_SNAPSHOT_ALLOWED_STAGES = Object.freeze([
   'client-response.error'
 ]);
 
+export const SNAPSHOT_STAGE_CONTRACT_FEATURE_ID = 'feature_id: snapshot.stage_contract';
+
 type SnapshotStagePolicy = {
   allowAll: boolean;
   exact: Set<string>;

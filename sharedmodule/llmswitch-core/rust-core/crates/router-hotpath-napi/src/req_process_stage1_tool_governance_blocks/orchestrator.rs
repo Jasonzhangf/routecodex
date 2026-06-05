@@ -3,7 +3,6 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::req_process_stage1_tool_governance_blocks::apply_patch_schema::ensure_apply_patch_chat_process_contract;
 use crate::req_process_stage1_tool_governance_blocks::request_result::{
     apply_chat_process_request_sanitizer, build_governed_filter_payload, build_node_result,
     build_processed_request, now_millis,
@@ -78,10 +77,6 @@ pub fn apply_req_process_tool_governance(
 
     let governed = build_governed_filter_payload(&Value::Object(request));
     let mut governed_request = normalize_record(governed);
-    ensure_apply_patch_chat_process_contract(
-        &mut governed_request,
-        &Value::Object(metadata.clone()),
-    );
     maybe_apply_servertool_orchestration(
         &mut governed_request,
         &metadata,

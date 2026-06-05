@@ -10,6 +10,22 @@ type MetadataContainer = {
   stream?: boolean;
 };
 
+function readHeaderCaseInsensitive(
+  headers: Record<string, string> | undefined,
+  target: string
+): string | undefined {
+  if (!headers) {
+    return undefined;
+  }
+  const normalizedTarget = target.trim().toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.trim().toLowerCase() === normalizedTarget) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 export class ProviderRequestPreprocessor {
   static preprocess(request: UnknownObject, runtimeMetadata?: ProviderRuntimeMetadata): UnknownObject {
     const requestMetadata =
@@ -37,9 +53,18 @@ export class ProviderRequestPreprocessor {
       typeof requestMetadata?.entryEndpoint === 'string'
         ? requestMetadata.entryEndpoint
         : requestCarrier?.entryEndpoint;
-    const streamFlag = typeof requestMetadata?.stream === 'boolean'
-      ? requestMetadata.stream
-      : requestCarrier?.stream;
+    const acceptHeader = readHeaderCaseInsensitive(effectiveClientHeaders, 'accept');
+    const streamFromAcceptHeader =
+      typeof acceptHeader === 'string' && acceptHeader.toLowerCase().includes('text/event-stream')
+        ? true
+        : undefined;
+    const streamFlag = typeof streamFromAcceptHeader === 'boolean'
+      ? streamFromAcceptHeader
+      : typeof requestCarrier?.stream === 'boolean'
+        ? requestCarrier.stream
+        : typeof requestMetadata?.stream === 'boolean'
+          ? requestMetadata.stream
+          : undefined;
     const qwenWebSearch = requestMetadata?.qwenWebSearch === true;
     if (runtimeMetadata) {
       if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {

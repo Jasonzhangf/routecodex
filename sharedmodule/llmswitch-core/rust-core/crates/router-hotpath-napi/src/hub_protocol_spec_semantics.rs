@@ -410,16 +410,12 @@ fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
                 serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "filePath": {
-                            "type": "string",
-                            "description": "Workspace-relative target path."
-                        },
                         "patch": {
                             "type": "string",
-                            "description": "Patch payload. Supports line-edit patch, unified diff, or fenced diff block."
+                            "description": "Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. Do not use absolute paths."
                         }
                     },
-                    "required": ["filePath", "patch"],
+                    "required": ["patch"],
                     "additionalProperties": true
                 }),
             );
@@ -1049,7 +1045,7 @@ mod tests {
         assert_eq!(tools[0]["function"]["strict"], serde_json::json!(false));
         assert_eq!(
             tools[0]["function"]["parameters"]["required"],
-            serde_json::json!(["filePath", "patch"])
+            serde_json::json!(["patch"])
         );
     }
 }

@@ -75,6 +75,44 @@ verification:
     notes:
       - Any provider outbound metadata change must rerun provider metadata boundary suite.
 
+  - feature_id: tool.apply_patch_freeform_contract
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/apply_patch_guard.rs
+      - sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts
+    contract:
+      - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
+      - sharedmodule/llmswitch-core/scripts/tests/response-apply-patch-loop-guard.mjs
+    integration:
+      - sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs
+    smoke:
+      - npm run verify:apply-patch-freeform-contract
+      - npm run verify:apply-patch-regressions
+    build:
+      - npm run build:min
+    notes:
+      - If apply_patch guidance, schema, or protocol-history normalization changes, rerun freeform contract plus regression samples together.
+
+  - feature_id: snapshot.stage_contract
+    change_risk: high
+    unit:
+      - src/utils/snapshot-stage-policy.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_snapshot_hooks.rs
+    contract:
+      - tests/utils/snapshot-stage-policy.spec.ts
+      - tests/debug/snapshot-store-port-isolation.red.spec.ts
+    integration:
+      - tests/providers/core/utils/snapshot-writer.release-gating.spec.ts
+      - tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts
+    smoke:
+      - npm run verify:architecture-snapshot-stage-contract
+      - npm run verify:architecture-snapshot-stage-owners
+    build:
+      - npm run build:min
+    notes:
+      - Changes to `--snap` defaults, selector routing, or module-snap naming must rerun both selector tests and snapshot path isolation tests.
+
   - feature_id: responses.direct_tool_shape_contract
     change_risk: high
     unit:

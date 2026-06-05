@@ -72,4 +72,27 @@ describe('provider-request-preprocessor', () => {
     expect((out as any).metadata?.stream).toBeUndefined();
     expect((out as any).metadata?.clientHeaders).toBeUndefined();
   });
+
+  it('prefers client SSE accept header over stale body metadata stream=false', async () => {
+    const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
+    const runtimeMetadata = {
+      metadata: {
+        clientHeaders: {
+          Accept: 'text/event-stream'
+        }
+      }
+    } as any;
+    const req = {
+      model: 'gpt-5.5',
+      metadata: {
+        stream: false
+      }
+    } as any;
+
+    const out = ProviderRequestPreprocessor.preprocess(req, runtimeMetadata);
+    const attached = extractProviderRuntimeMetadata(out as Record<string, unknown>);
+
+    expect(attached?.metadata?.stream).toBe(true);
+    expect((out as any).metadata?.stream).toBeUndefined();
+  });
 });

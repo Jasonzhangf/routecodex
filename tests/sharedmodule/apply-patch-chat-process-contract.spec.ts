@@ -154,20 +154,14 @@ describe('apply_patch chat-process contract', () => {
 
     const tool = (processedRequest as any)?.tools?.[0]?.function;
     expect(tool?.name).toBe('apply_patch');
-    expect(String(tool?.description)).toContain('workspace-relative');
+    expect(String(tool?.description)).toContain('canonical client apply_patch tool');
     const properties = tool?.parameters?.properties ?? {};
     const patchDescription = String(properties.patch?.description);
     const toolJson = JSON.stringify(tool);
-    expect(patchDescription).toContain('+ first line');
-    expect(patchDescription).toContain('- old line');
-    expect(patchDescription).toContain('+ new line');
-    expect(toolJson).not.toContain('*** Begin Patch');
+    expect(patchDescription).toContain('*** Begin Patch');
     expect(toolJson.toLowerCase()).not.toContain('hashline');
-    expect(toolJson).toContain('tmp/example.txt');
-    expect(toolJson).toContain('src/main.ts');
-    expect(Object.keys(properties).sort()).toEqual(['filePath', 'patch']);
-    expect(tool?.parameters?.required).toEqual(['filePath', 'patch']);
-    expect(tool?.strict).toBe(false);
+    expect(Object.keys(properties)).toContain('patch');
+    expect(tool?.parameters?.required).toEqual(['patch']);
   });
   it('executes apply_patch locally only in servertool mode and strips the client tool call', async () => {
     const fs = await import('node:fs');

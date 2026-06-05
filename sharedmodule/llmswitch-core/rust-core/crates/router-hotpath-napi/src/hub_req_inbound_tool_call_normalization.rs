@@ -13,8 +13,8 @@ fn normalize_shell_like_output_text(raw: &str) -> String {
 }
 
 fn normalize_apply_patch_output_text(raw: &str) -> String {
-    const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Do not switch to exec_command just to rediscover the same file. Reuse the exact current file lines you already observed. Send a workspace-relative `filePath` plus a minimal line-edit patch: keep every current target line exact in `- ` entries, then place replacement lines in `+ ` entries; create/append lines use `+ ` only.";
-    const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future servertool apply_patch calls with workspace-relative filePath and line-edit patch entries.";
+    const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Use workspace-relative paths inside patch headers (for example *** Update File: src/main.ts or *** Add File: tmp/example.txt). Do not use absolute paths. Do not switch to exec_command just to rediscover the same file.";
+    const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future apply_patch calls with one raw patch string and workspace-relative paths inside patch headers.";
 
     let text = raw.replace("\r\n", "\n").replace('\r', "\n");
     let trimmed = text.trim();

@@ -273,10 +273,29 @@ fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value>
         let Some(name) = read_trimmed_string(function_row.get("name")) else {
             continue;
         };
-        let input_schema = function_row
-            .get("parameters")
-            .cloned()
-            .unwrap_or_else(|| Value::Object(Map::new()));
+        let tool_type = row
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("");
+        let input_schema = if tool_type.eq_ignore_ascii_case("custom") && name == "apply_patch" {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "patch": {
+                        "type": "string",
+                        "description": "Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. Do not use absolute paths."
+                    }
+                },
+                "required": ["patch"],
+                "additionalProperties": true
+            })
+        } else {
+            function_row
+                .get("parameters")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(Map::new()))
+        };
         let mut tool = Map::<String, Value>::new();
         tool.insert("name".to_string(), Value::String(name));
         tool.insert("input_schema".to_string(), input_schema);
@@ -290,6 +309,35 @@ fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value>
         return None;
     }
     Some(Value::Array(out))
+}
+
+#[cfg(test)]
+mod apply_patch_tool_schema_tests {
+    use super::map_chat_tools_to_anthropic_tools;
+    use serde_json::json;
+
+    #[test]
+    fn map_chat_tools_to_anthropic_tools_repairs_custom_apply_patch_to_patch_schema() {
+        let input = json!([
+            {
+                "type": "custom",
+                "name": "apply_patch",
+                "description": "Use the `apply_patch` tool to edit files."
+            }
+        ]);
+
+        let out = map_chat_tools_to_anthropic_tools(Some(&input)).unwrap();
+        let tools = out.as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], json!("apply_patch"));
+        assert_eq!(tools[0]["input_schema"]["required"], json!(["patch"]));
+        let patch_desc = tools[0]["input_schema"]["properties"]["patch"]["description"]
+            .as_str()
+            .unwrap_or("");
+        assert!(patch_desc.contains("*** Begin Patch"));
+        assert!(patch_desc.contains("workspace-relative"));
+        assert!(!patch_desc.contains("filePath"));
+    }
 }
 
 fn collect_openai_chat_text(value: &Value) -> String {

@@ -139,7 +139,15 @@ async function executeApplyPatch(ctx: ServerToolHandlerContext, toolCall: ToolCa
   }
 
   if (!canonicalArgs.filePath) {
-    return { payload: fail(undefined, 'PATH_MISSING', 'filePath is required.', `Retry with workspace-relative filePath. Create file: ${JSON.stringify({ filePath: 'tmp/example.txt', patch: '+ hello' })}`), canonicalArgs };
+    return {
+      payload: fail(
+        undefined,
+        'PATH_MISSING',
+        'apply_patch requires a workspace-relative path inside the patch header.',
+        'Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Put a workspace-relative path in the patch header such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. Do not use absolute paths.'
+      ),
+      canonicalArgs
+    };
   }
 
   // Phase 2: TS path safety check
@@ -149,7 +157,15 @@ async function executeApplyPatch(ctx: ServerToolHandlerContext, toolCall: ToolCa
   }
 
   if (!canonicalArgs.patch?.trim()) {
-    return { payload: fail(resolved.relPath, 'PATCH_EMPTY', 'patch is required.', `Retry with line-edit patch entries.`), canonicalArgs };
+    return {
+      payload: fail(
+        resolved.relPath,
+        'PATCH_EMPTY',
+        'patch is required.',
+        'Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar.'
+      ),
+      canonicalArgs
+    };
   }
 
   // Phase 3: File I/O
@@ -181,7 +197,9 @@ async function executeApplyPatch(ctx: ServerToolHandlerContext, toolCall: ToolCa
   if (!applyResult.ok) {
     const payload = applyResult.payload as unknown as ApplyPatchPayload;
     if (payload.reason === 'FILE_NOT_FOUND') {
-      payload.nextAction = `Create file: ${JSON.stringify({ filePath: resolved.relPath, patch: '+ hello' })}; Update existing file: ${JSON.stringify({ filePath: resolved.relPath, patch: '- old\\n+ new' })}`;
+      payload.nextAction =
+        `Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. ` +
+        `Use workspace-relative patch headers such as *** Add File: ${resolved.relPath} or *** Update File: ${resolved.relPath}.`;
     }
     return { payload, canonicalArgs };
   }

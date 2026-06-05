@@ -1,5 +1,11 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-05 apply_patch 10000 新样本根因收口
+
+- 新样本已证实 `provider-request.body.tools[*]` 里的 `apply_patch` schema 不是当前阻塞；live 问题改为历史 assistant `tool_calls[].function.arguments` 仍被发成双份 `{"input":"...","patch":"..."}`。
+- 唯一 owner 在 Rust req outbound：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/universal_shape_filter.rs::normalize_assistant_tool_calls`。
+- 共享 normalize helper 当前会产出宽兼容 `patch+input`；这适合校验/兼容，不适合 provider wire history。provider 出站必须再投影成 canonical `{"patch":"..."}`，属于修 shape，不猜语义。
+
 ## 2026-05-26 continuation ownership / meta 收口文档落盘
 
 - 已把新的架构共识正式落盘到：
@@ -15637,3 +15643,21 @@ Codex 工具集枚举必须在第一轮执行；自然语言中的 *** Begin Pat
 - 2026-06-05 responses.direct_tool_shape_contract phase12: physically removed `assertDirectPayloadContract` from `src/server/runtime/http-server/direct-passthrough-payload.ts`; direct shell now exposes only canonical decision bridge `evaluateDirectRouteDecision`, projector wrapper `assertDirectRouteDecision`, and non-semantic payload bridges.
 - 2026-06-05 responses.direct_tool_shape_contract phase12: physically removed provider-local `assertResponsesWireShape` method from `src/providers/core/runtime/responses-provider.ts`; both provider send paths now call `validateResponsesDirectToolShapeContractNative(...)` + shared `assertNativeResponsesDirectContractAvailable(...)` inline.
 - 2026-06-05 phase12 verification PASS: targeted five-suite Jest set, `verify:responses-direct-tool-shape-contract`, `verify:responses-direct-tool-shape-no-ts-fallback`, and full `verify:architecture-ci` all green after deleting direct/provider local wrappers.
+## 2026-06-05 apply_patch screenshot triage
+- Need inspect 10000 samples for conflicting apply_patch contract, relative-vs-absolute path guidance, and SSE stream->non-stream regression.
+## 2026-06-05 freeform convergence decision
+- User decided pause apply_patch servertool path on 10000-style route; converge to single FREEFORM contract.
+- Need remove JSON schema rewrite for apply_patch and align guidance accordingly.
+- Also fix stream intent precedence bug: client SSE intent exists while requestMetadata.stream=false.
+## 2026-06-05 10000 apply_patch sample truth refresh
+- New post-build `10000 -> minimax.key1.MiniMax-M3` sample shows `provider-request.json.body.tools[10]` now advertises freeform `apply_patch` (`name=apply_patch`, `input_schema={}`), so old `filePath+patch` request schema is no longer the live minimax wire after 0.90.2871+.
+- But same sample proves weak-model compatibility gap remains on Anthropic outbound: provider response contains `tool_use{name:"apply_patch", input:{patch:"placeholder"}}`, indicating empty `input_schema` is too weak and model does not author a real patch body.
+- Root cause owner confirmed in Rust `anthropic_openai_codec.rs::map_chat_tools_to_anthropic_tools`: chat/custom `apply_patch` without `parameters` was encoded to Anthropic `input_schema={}`. Fix must repair shape there to single-field `patch` schema with canonical grammar guidance, not guess semantics.
+- Older `10000 -> opencode-zen-free` samples before rebuild still show stale servertool-era `filePath+patch` guidance and exec probing behavior; TS `sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts` still emitted that old guidance and was updated to the freeform canonical-patch wording to prevent future regression/leak.
+
+## 2026-06-05 continue audit
+- resume unfinished task after previous goal completion
+
+## 2026-06-05 gate closeout
+- added apply_patch freeform gate + snapshot/function-map coverage
+- architecture-ci passed; targeted jest passed; full ci-jest still has unrelated pre-existing failures

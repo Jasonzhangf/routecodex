@@ -1,5 +1,6 @@
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tooling::{normalize_standard_chunked_tool_text, normalize_tool_result_value};
+use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{json, Map, Value};
 
@@ -85,6 +86,23 @@ fn to_string_args(value: Option<&Value>) -> String {
     }
 }
 
+fn to_canonical_tool_string_args(tool_name: Option<&str>, value: Option<&Value>) -> String {
+    if matches!(tool_name, Some("apply_patch")) {
+        let normalized = normalize_apply_patch_schema_args(value).0;
+        let normalized_value: Value =
+            serde_json::from_str(&normalized).unwrap_or_else(|_| Value::Object(Map::new()));
+        let patch = normalized_value
+            .as_object()
+            .and_then(|row| row.get("patch"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        return serde_json::to_string(&json!({ "patch": patch }))
+            .unwrap_or_else(|_| "{\"patch\":\"\"}".to_string());
+    }
+    to_string_args(value)
+}
+
 fn contains_serialized_history_image(text: &str) -> bool {
     let normalized = text.trim();
     normalized.contains("data:image/") || normalized.contains("\"image_url\":\"data:image")
@@ -149,6 +167,7 @@ fn normalize_assistant_tool_calls(
         .map(|entry| {
             let row = to_object(Some(&entry));
             let function = to_object(row.get("function"));
+            let function_name = read_trimmed_string(function.get("name"));
             let mut out = Map::new();
             out.insert(
                 "type".to_string(),
@@ -158,13 +177,16 @@ fn normalize_assistant_tool_calls(
             );
 
             let mut out_function = Map::new();
-            if let Some(name) = read_trimmed_string(function.get("name")) {
+            if let Some(name) = function_name.clone() {
                 out_function.insert("name".to_string(), Value::String(name));
             }
             if arguments_type == "string" {
                 out_function.insert(
                     "arguments".to_string(),
-                    Value::String(to_string_args(function.get("arguments"))),
+                    Value::String(to_canonical_tool_string_args(
+                        function_name.as_deref(),
+                        function.get("arguments"),
+                    )),
                 );
             } else {
                 out_function.insert(
@@ -925,5 +947,58 @@ mod tests {
         assert!(content.contains("SyntaxError: invalid syntax"));
         assert!(!content.contains("│····"));
         assert!(!content.contains("Original token count"));
+    }
+
+    #[test]
+    fn universal_shape_filter_request_canonicalizes_apply_patch_history_args_to_patch_only() {
+        std::env::set_var("RCC_COMPAT_FILTER_OFF_RESPONSES", "0");
+        let patch = "*** Begin Patch\n*** Add File: tmp_apply_patch_test.txt\n+hello\n*** End Patch\n";
+        let payload = json!({
+            "model": "gpt-5.5",
+            "messages": [
+                {"role": "user", "content": "apply patch"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_apply_patch",
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": {
+                                    "input": patch,
+                                    "patch": patch
+                                }
+                            }
+                        }
+                    ]
+                }
+            ]
+        });
+        let config = json!({
+            "request": {
+                "allowTopLevel": ["model", "messages"],
+                "messages": {
+                    "allowedRoles": ["system", "user", "assistant", "tool"],
+                    "assistantWithToolCallsContentNull": true
+                },
+                "assistantToolCalls": {
+                    "functionArgumentsType": "string"
+                }
+            },
+            "response": { "allowTopLevel": [], "choices": { "message": {} } }
+        });
+
+        let parsed = apply_request_filter(payload, config);
+        let args = parsed["messages"][1]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("");
+        assert!(args.contains("\"patch\""));
+        assert!(!args.contains("\"input\""));
+        let parsed_args: Value = serde_json::from_str(args).unwrap();
+        assert_eq!(
+            parsed_args,
+            json!({ "patch": "*** Begin Patch\n*** Add File: tmp_apply_patch_test.txt\n+hello\n*** End Patch" })
+        );
     }
 }

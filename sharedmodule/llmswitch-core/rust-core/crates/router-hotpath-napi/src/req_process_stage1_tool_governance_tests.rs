@@ -553,8 +553,7 @@ fn test_servertool_orchestration_uses_explicit_stop_message_flag_instead_of_runt
 }
 
 #[test]
-fn test_chat_process_apply_patch_declared_legacy_fields_rewrites_to_line_edit_contract_in_servertool_mode(
-) {
+fn test_chat_process_apply_patch_declared_legacy_fields_no_longer_rewrite_in_servertool_mode() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "MiniMax-M2.7",
@@ -597,7 +596,7 @@ fn test_chat_process_apply_patch_declared_legacy_fields_rewrites_to_line_edit_co
           "__rt": { "applyPatch": { "mode": "servertool" } }
         }),
         entry_endpoint: "/v1/responses".to_string(),
-        request_id: "req_apply_patch_line_edit_contract".to_string(),
+        request_id: "req_apply_patch_no_rewrite_servertool_mode".to_string(),
         has_active_stop_message_for_continue_execution: None,
     };
 
@@ -605,25 +604,15 @@ fn test_chat_process_apply_patch_declared_legacy_fields_rewrites_to_line_edit_co
     let tool = result.processed_request["tools"][0]["function"]
         .as_object()
         .unwrap();
-    let description = tool["description"].as_str().unwrap_or("");
-    assert!(description.contains("- old"));
-    assert!(!description.contains("fileContent"));
-    assert!(!description.contains("*** Begin Patch"));
     let properties = tool["parameters"]["properties"].as_object().unwrap();
     let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
-    assert!(patch_desc.contains("- old"));
-    assert!(!patch_desc.contains("*** Begin Patch"));
-    assert!(!patch_desc.to_ascii_lowercase().contains("do not"));
+    assert!(patch_desc.contains("*** Begin Patch"));
+    assert!(properties.contains_key("patch"));
+    assert!(properties.contains_key("input"));
     assert!(properties.contains_key("filePath"));
-    assert!(!properties.contains_key("file_path"));
-    assert!(!properties.contains_key("fileContent"));
-    assert!(!properties.contains_key("file_content"));
+    assert!(properties.contains_key("fileContent"));
     let required = tool["parameters"]["required"].as_array().unwrap();
-    assert_eq!(
-        required,
-        &vec![serde_json::json!("filePath"), serde_json::json!("patch")]
-    );
-    assert_eq!(tool["strict"].as_bool(), Some(false));
+    assert_eq!(required, &vec![serde_json::json!("patch")]);
 }
 
 #[test]
@@ -674,8 +663,7 @@ fn test_chat_process_apply_patch_without_internal_fields_keeps_client_contract_b
 }
 
 #[test]
-fn test_chat_process_apply_patch_direct_responses_tool_shape_rewrites_line_edit_contract_in_servertool_mode(
-) {
+fn test_chat_process_apply_patch_direct_responses_tool_shape_no_longer_rewrites_in_servertool_mode() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "glm-4.7",
@@ -717,20 +705,17 @@ fn test_chat_process_apply_patch_direct_responses_tool_shape_rewrites_line_edit_
           "__rt": { "applyPatch": { "mode": "servertool" } }
         }),
         entry_endpoint: "/v1/responses".to_string(),
-        request_id: "req_apply_patch_direct_shape".to_string(),
+        request_id: "req_apply_patch_direct_shape_no_rewrite".to_string(),
         has_active_stop_message_for_continue_execution: None,
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
     let tool = result.processed_request["tools"][0].as_object().unwrap();
-    let description = tool["description"].as_str().unwrap_or("");
-    assert!(description.contains("- old"));
-    assert!(!description.contains("selected by schema"));
     let properties = tool["parameters"]["properties"].as_object().unwrap();
     let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
-    assert!(patch_desc.contains("- old"));
-    assert!(!properties.contains_key("file_path"));
-    assert!(!properties.contains_key("file_content"));
+    assert!(patch_desc.contains("*** Begin Patch"));
+    assert!(properties.contains_key("filePath"));
+    assert!(properties.contains_key("fileContent"));
 }
 
 #[test]

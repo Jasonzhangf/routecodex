@@ -124,6 +124,69 @@ owners:
     notes:
       - Metadata is side-channel only; leak to provider/client payload must fail-fast.
 
+  - feature_id: tool.apply_patch_freeform_contract
+    status: active
+    summary: apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    canonical_types:
+      - HubReqChatProcess03Governed
+      - HubReqOutbound05ProviderSemantic
+      - HubRespChatProcess03Governed
+    canonical_builders:
+      - normalize_apply_patch_schema_args
+      - run_apply_patch_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - sharedmodule/llmswitch-core/src/servertool/handlers
+      - sharedmodule/llmswitch-core/scripts/tests
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - src/providers/profile
+    required_tests:
+      - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
+      - sharedmodule/llmswitch-core/scripts/tests/response-apply-patch-loop-guard.mjs
+      - sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs
+    required_gates:
+      - npm run verify:apply-patch-freeform-contract
+      - npm run verify:apply-patch-regressions
+    migration_target: rust
+    notes:
+      - Rust owns apply_patch grammar, schema normalization, and history/protocol canonicalization; TS servertool handler may only do workspace IO and native invocation.
+      - Provider wire and retry guidance must converge on one raw `patch` string with workspace-relative paths embedded in patch headers.
+
+  - feature_id: snapshot.stage_contract
+    status: active
+    summary: --snap defaults, module snap selectors, and snapshot path naming must stay explicitly gated and queryable
+    owner_module: src/utils
+    canonical_types:
+      - SnapshotStageSelector
+      - SnapshotStageKind
+    canonical_builders:
+      - getDefaultSnapshotStageSelector
+      - shouldCaptureSnapshotStage
+      - stageSelectorNeedsHubSnapshots
+    allowed_paths:
+      - src/utils
+      - src/providers/core/utils
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - docs/architecture
+    forbidden_paths:
+      - src/providers/profile
+      - src/client
+    required_tests:
+      - tests/utils/snapshot-stage-policy.spec.ts
+      - tests/providers/core/utils/snapshot-writer.release-gating.spec.ts
+      - tests/debug/snapshot-store-port-isolation.red.spec.ts
+      - tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts
+    required_gates:
+      - npm run verify:architecture-snapshot-stage-contract
+      - npm run verify:architecture-snapshot-stage-owners
+    migration_target: rust
+    notes:
+      - Default `--snap` must record client/provider request/response boundaries only; module snaps require explicit selector or hub-snapshot switch.
+      - Snapshot metadata stays at snapshot root only and must never leak back into provider/client live payloads.
+
   - feature_id: responses.direct_tool_shape_contract
     status: active
     summary: Responses direct passthrough payload must stay Responses-native; chat-style function tools must fail before transport
