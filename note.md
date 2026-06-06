@@ -16000,3 +16000,7 @@ function-map.yml 16 features 是 project AGENTS.md guard 18（功能定位唯一
 - Intercepted assistant stop text must be mapped to reasoning/reasoning_text; CLI input must always include repeatCount, maxRepeats, continuationPrompt.
 - continuationPrompt must be heuristic status-audit prompt (goal, done steps, completion/block status, next step, evidence, issue cause, excluded factors, diagnostic order, learned), not fixed "继续执行".
 - Local 127.0.0.1:10000 is shadowed by netdisk_service on this Mac; RouteCodex 10000 works via non-loopback 192.168.0.93:10000.
+
+2026-06-06 429 error projection closeout:
+- Client HTTP projection for MiniMax weekly quota 429 is generic: {message:"Rate limited by upstream provider", code:"HTTP_429"}; upstream provider payload must not appear in client body.
+- Primary request failure log must also use the public ErrorErr06 429 summary; raw upstream JSON belongs only to secondary http.error.meta diagnostics.

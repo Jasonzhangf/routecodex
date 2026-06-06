@@ -262,7 +262,8 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
     responseDataShell && isCodeOnlyShellError(responseDataShell) && formatted.text.trim()
       ? formatted.text
       : summaryFromRaw;
-  const fields = extractErrorLogFields(error, summary);
+  const publicSummary = resolvePrimaryErrorLogSummary(error, summary);
+  const fields = extractErrorLogFields(error, publicSummary);
   const fieldSuffix = [
     typeof fields.statusCode === 'number' ? `status=${fields.statusCode}` : undefined,
     fields.errorCode ? `code=${fields.errorCode}` : undefined,
@@ -272,7 +273,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
     .join(' ');
   const timestamp = formatTimestamp();
   const timingSuffix = formatRequestTimingSummary(resolvedId, { terminal: true });
-  const line = `❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${summary}${fieldSuffix ? ` (${fieldSuffix})` : ''}${timingSuffix}`;
+  const line = `❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${publicSummary}${fieldSuffix ? ` (${fieldSuffix})` : ''}${timingSuffix}`;
   console.error(colorizeRequestLog(line, resolvedId) || line);
   if (rawMeta && shouldLogHttpErrorMeta()) {
     const payload = {
@@ -284,6 +285,17 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
     const metaLine = `[http.error.meta] ${JSON.stringify(payload)}`;
     console.error(colorizeRequestLog(metaLine, resolvedId) || metaLine);
   }
+}
+
+function resolvePrimaryErrorLogSummary(error: unknown, fallback: string): string {
+  try {
+    const projected = mapErrorToHttp(error);
+    if (projected.status === 429 && projected.body.error.message) {
+      return projected.body.error.message;
+    }
+  } catch {
+  }
+  return fallback;
 }
 
 function shouldUseRawSnippetAsSummary(rawSnippet: string | undefined, fallbackText: string): boolean {
