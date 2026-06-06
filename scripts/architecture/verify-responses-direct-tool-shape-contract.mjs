@@ -65,8 +65,8 @@ if (!providerSpec.includes('rejects chat-style response tools before transport')
 }
 
 for (const expected of [
-  'router same-protocol direct is skipped when apply_patch servertool mode is enabled',
-  'router same-protocol direct is skipped when apply_patch is declared as Responses custom tool in servertool mode',
+  'router same-protocol direct still skips legacy apply_patch servertool metadata when tool shape is chat-style invalid',
+  'router same-protocol direct validates Responses custom apply_patch instead of forcing servertool relay',
 ]) {
   if (!routeLevelSpec.includes(expected)) {
     failures.push(`route-level direct relay spec missing regression: ${expected}`);
@@ -74,7 +74,6 @@ for (const expected of [
 }
 
 for (const expected of [
-  'apply_patch_servertool_mode_requires_hub_response_stage',
   'evaluateDirectRouteDecision',
 ]) {
   if (!serverIndex.includes(expected) && !directPayloadModule.includes(expected)) {
