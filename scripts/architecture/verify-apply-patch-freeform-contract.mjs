@@ -22,6 +22,12 @@ function requireExcludes(relPath, unexpected, label = unexpected) {
   }
 }
 
+function requireMissing(relPath, label = relPath) {
+  if (fs.existsSync(path.join(root, relPath))) {
+    failures.push(`${relPath} must not exist: ${label}`);
+  }
+}
+
 requireIncludes(
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_protocol_spec_semantics.rs',
   'serde_json::json!(["patch"])',
@@ -42,20 +48,14 @@ requireIncludes(
   'resend one raw patch string in canonical *** Begin Patch / *** End Patch grammar.',
   'response-side apply_patch guard must use raw patch grammar'
 );
-requireIncludes(
-  'sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts',
-  'apply_patch requires a workspace-relative path inside the patch header.',
-  'servertool apply_patch must instruct patch-header path'
-);
-requireIncludes(
-  'sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts',
-  'Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar.',
-  'servertool apply_patch retry guidance must be freeform-only'
-);
 requireExcludes(
+  'sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts',
+  './handlers/apply-patch.js',
+  'apply_patch servertool handler import'
+);
+requireMissing(
   'sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts',
-  'Retry with workspace-relative filePath. Create file:',
-  'legacy filePath+patch retry example'
+  'apply_patch must remain native/freeform client tooling, not servertool'
 );
 requireIncludes(
   'sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs',
