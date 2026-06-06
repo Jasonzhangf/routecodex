@@ -133,7 +133,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/apply_patch_guard.rs
-      - sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts
     contract:
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
       - sharedmodule/llmswitch-core/scripts/tests/response-apply-patch-loop-guard.mjs
@@ -146,6 +145,7 @@ verification:
       - npm run build:min
     notes:
       - If apply_patch guidance, schema, or protocol-history normalization changes, rerun freeform contract plus regression samples together.
+      - apply_patch must not have a servertool handler; it remains native/freeform client tooling.
 
   - feature_id: snapshot.stage_contract
     change_risk: high
