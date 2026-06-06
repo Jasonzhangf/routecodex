@@ -4,6 +4,9 @@ import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 
+export const SERVERTOOL_CLI_RESULT_CAPTURE_BUILDER = 'capture_servertool_cli_result_02_from_submit_tool_outputs';
+export const SERVERTOOL_CLI_RESULT_RESTORE_BUILDER = 'restore_servertool_cli_result_03_to_model_tool_result';
+
 export interface ServertoolCliTicket {
   ticketVersion: 1;
   ticketId: string;
