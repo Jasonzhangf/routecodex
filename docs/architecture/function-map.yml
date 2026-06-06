@@ -238,7 +238,6 @@ owners:
       - run_apply_patch_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
-      - sharedmodule/llmswitch-core/src/servertool/handlers
       - sharedmodule/llmswitch-core/scripts/tests
     forbidden_paths:
       - src/providers/core/runtime
@@ -253,7 +252,7 @@ owners:
       - npm run verify:apply-patch-regressions
     migration_target: rust
     notes:
-      - Rust owns apply_patch grammar, schema normalization, and history/protocol canonicalization; TS servertool handler may only do workspace IO and native invocation.
+      - Rust owns apply_patch grammar, schema normalization, and history/protocol canonicalization; no TS servertool handler may own apply_patch execution.
       - Provider wire and retry guidance must converge on one raw `patch` string with workspace-relative paths embedded in patch headers.
 
   - feature_id: snapshot.stage_contract
