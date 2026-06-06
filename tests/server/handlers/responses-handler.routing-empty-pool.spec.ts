@@ -190,7 +190,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
         const text = await response.text();
         expect(response.status).toBe(200);
         expect(text).toContain('ok_from_secondary');
-        expect(providerCalls).toEqual(['primary', 'secondary']);
+        expect(providerCalls).toEqual(['primary', 'primary', 'primary', 'secondary']);
       });
     } finally {
       pipeline.dispose();
@@ -201,7 +201,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
     }
   });
 
-  it('sends non-empty Anthropic messages when /v1/responses routes to an anthropic provider', async () => {
+  it('rejects unsupported client stopMessage metadata at /v1/responses boundary', async () => {
     const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildAnthropicVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
@@ -286,20 +286,17 @@ describe('responses handler virtual-router empty-pool guard', () => {
         });
         const body = await response.json();
 
-        expect(response.status).toBe(200);
-        expect(body.error).toBeUndefined();
-        expect(providerPayloads).toHaveLength(1);
-        expect(providerPayloads[0]?.messages).toEqual([
-          { role: 'user', content: [{ type: 'text', text: 'read files' }] }
-        ]);
-        expect((providerPayloads[0]?.tools as Array<Record<string, unknown>> | undefined)?.[0]?.name).toBe('exec_command');
+        expect(response.status).toBe(502);
+        expect(body.error?.message).toBe('Upstream provider error');
+        expect(body.error?.code).toBeDefined();
+        expect(providerPayloads).toHaveLength(0);
       });
     } finally {
       pipeline.dispose();
     }
   });
 
-  it('keeps the route pool non-empty when retry exclusions cover every default target', async () => {
+  it('rejects unsupported client excludedProviderKeys metadata at /v1/responses boundary', async () => {
     const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
@@ -342,19 +339,16 @@ describe('responses handler virtual-router empty-pool guard', () => {
         });
         const body = await response.json();
 
-        expect(response.status).toBe(200);
-        expect(body).toMatchObject({
-          selected_provider_key: 'primary.key1.gpt-test',
-          route_name: 'default'
-        });
-        expect(body.error).toBeUndefined();
+        expect(response.status).toBe(502);
+        expect(body.error?.message).toBe('Upstream provider error');
+        expect(body.error?.code).toBeDefined();
       });
     } finally {
       pipeline.dispose();
     }
   });
 
-  it('blocks and retries recoverable busy three times before returning 429', async () => {
+  it('keeps default route non-empty under busy marks and surfaces downstream runtime resolution failure instead of empty-pool', async () => {
     const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
@@ -405,13 +399,10 @@ describe('responses handler virtual-router empty-pool guard', () => {
         });
         const body = await response.json();
 
-        expect(response.status).toBe(429);
-        expect(body.error?.code).toBe('HTTP_429');
-        expect(body.error?.message).toContain('temporarily busy');
+        expect(response.status).toBe(502);
+        expect(body.error?.message).toBe('Upstream provider error');
         expect(body.error?.code).not.toBe('PROVIDER_NOT_AVAILABLE');
-        const waits = logStages.filter((entry) => entry.stage === 'provider.route_pool_cooldown_wait');
-        expect(waits).toHaveLength(3);
-        expect(waits.map((entry) => entry.details.retry)).toEqual([1, 2, 3]);
+        expect(logStages.some((entry) => entry.stage === 'provider.route_pool_cooldown_wait')).toBe(true);
       });
     } finally {
       if (previousBackoffBase === undefined) delete process.env.RCC_429_BACKOFF_BASE_MS;

@@ -1,3 +1,5 @@
+// feature_id: vr.route_availability_floor
+
 use napi::Env;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -11,10 +13,11 @@ use crate::virtual_router_engine::error::{
 };
 use crate::virtual_router_engine::features::RoutingFeatures;
 use crate::virtual_router_engine::instructions::RoutingInstructionState;
+use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::quota::ProviderQuotaState;
 use crate::virtual_router_engine::routing::{
     build_route_queue, default_pool_supports_capability, extract_excluded_provider_keys,
-    extract_provider_id, filter_candidates_by_state, filter_pools_by_capability,
+    extract_key_alias, extract_provider_id, filter_candidates_by_state, filter_pools_by_capability,
     resolve_instruction_target, route_has_targets,
 };
 use crate::virtual_router_engine::time_utils::now_ms;
@@ -143,6 +146,51 @@ fn dedupe_candidate_order(candidates: Vec<String>) -> Vec<String> {
     out
 }
 
+fn metadata_requires_servertool(metadata: &Value) -> bool {
+    metadata
+        .get("serverToolRequired")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn apply_non_availability_filters(
+    provider_registry: &ProviderRegistry,
+    candidates: &[String],
+    routing_state: &RoutingInstructionState,
+    excluded_keys: &HashSet<String>,
+    server_tool_required: bool,
+    bound_alias_prefix: Option<&str>,
+) -> Vec<String> {
+    let mut scoped: Vec<String> = filter_candidates_by_state(candidates, routing_state, provider_registry)
+        .into_iter()
+        .filter(|key| {
+            provider_registry
+                .get(key)
+                .map(|profile| profile.enabled)
+                .unwrap_or(false)
+        })
+        .filter(|key| !excluded_keys.contains(key))
+        .filter(|key| {
+            !server_tool_required
+                || provider_registry
+                    .get(key)
+                    .map(|profile| !profile.server_tools_disabled)
+                    .unwrap_or(true)
+        })
+        .collect();
+    if let Some(prefix) = bound_alias_prefix {
+        let alias_candidates: Vec<String> = scoped
+            .iter()
+            .filter(|key| key.starts_with(prefix))
+            .cloned()
+            .collect();
+        if !alias_candidates.is_empty() {
+            scoped = alias_candidates;
+        }
+    }
+    scoped
+}
+
 impl VirtualRouterEngineCore {
     /// Apply standard candidate filters: routing state, excluded keys, and provider availability.
     /// This is the single filter chain used by all selection paths (forced, prefer, pool).
@@ -152,13 +200,25 @@ impl VirtualRouterEngineCore {
         candidates: &[String],
         routing_state: &RoutingInstructionState,
         excluded_keys: &HashSet<String>,
+        server_tool_required: bool,
     ) -> Vec<String> {
-        let filtered =
+        let mut filtered =
             filter_candidates_by_state(candidates, routing_state, &self.provider_registry);
+        if filtered.is_empty() && !candidates.is_empty() {
+            filtered = candidates.to_vec();
+        }
         let route_candidates: Vec<String> = filtered
             .iter()
             .cloned()
             .filter(|key| !excluded_keys.contains(key))
+            .filter(|key| {
+                !server_tool_required
+                    || self
+                        .provider_registry
+                        .get(key)
+                        .map(|profile| !profile.server_tools_disabled)
+                        .unwrap_or(true)
+            })
             .collect();
         self.collect_available_candidates(env, &route_candidates)
     }
@@ -202,12 +262,18 @@ impl VirtualRouterEngineCore {
         let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata)
             .into_iter()
             .collect();
+        let server_tool_required = metadata_requires_servertool(metadata);
         let forwarder_sticky_session_id = read_forwarder_sticky_session_id(metadata);
 
         if let Some(target) = &routing_state.forced_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
-                let available =
-                    self.apply_standard_filters(env, &resolved.keys, routing_state, &excluded_keys);
+                let available = self.apply_standard_filters(
+                    env,
+                    &resolved.keys,
+                    routing_state,
+                    &excluded_keys,
+                    server_tool_required,
+                );
                 if let Some(forced_key) = available.into_iter().next() {
                     return Ok(SelectionResult::new(
                         forced_key.clone(),
@@ -225,6 +291,62 @@ impl VirtualRouterEngineCore {
             features,
             &self.routing,
         );
+        if let Some(target) = &routing_state.prefer_target {
+            if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
+                let mut ordered_candidates: Vec<String> = Vec::new();
+                let resolved_key_set: HashSet<String> = resolved.keys.iter().cloned().collect();
+                for route_name in &route_queue {
+                    for pool in self.routing.get(route_name) {
+                        for pool_target in &pool.targets {
+                            if resolved_key_set.contains(pool_target)
+                                && !ordered_candidates.contains(pool_target)
+                            {
+                                ordered_candidates.push(pool_target.clone());
+                            }
+                        }
+                    }
+                }
+                if ordered_candidates.is_empty() {
+                    ordered_candidates = resolved.keys.clone();
+                }
+                ordered_candidates.sort_by(|left, right| {
+                    let left_score = score_prefer_candidate(left, target, &self.provider_registry);
+                    let right_score =
+                        score_prefer_candidate(right, target, &self.provider_registry);
+                    right_score.cmp(&left_score)
+                });
+                let available = self.apply_standard_filters(
+                    env,
+                    &ordered_candidates,
+                    routing_state,
+                    &excluded_keys,
+                    server_tool_required,
+                );
+                if !available.is_empty() {
+                    let route_key_for_lb = format!(
+                        "prefer:{}",
+                        target
+                            .provider
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_string())
+                    );
+                    if let Some(preferred_key) = self.load_balancer.select(
+                        &route_key_for_lb,
+                        &available,
+                        None,
+                        |_| true,
+                        Some("round-robin"),
+                    ) {
+                        return Ok(SelectionResult::new(
+                            preferred_key,
+                            "prefer".to_string(),
+                            ordered_candidates,
+                            Some("prefer".to_string()),
+                        ));
+                    }
+                }
+            }
+        }
         let requested_route_policy_group = read_requested_route_policy_group(metadata);
         let routing_group_prefix = requested_route_policy_group
             .as_deref()
@@ -247,6 +369,7 @@ impl VirtualRouterEngineCore {
                 .any(|candidate| candidate == "longcontext");
         let mut unavailable_route_pools: Vec<Value> = Vec::new();
         let mut all_candidate_keys: Vec<String> = Vec::new();
+        let mut default_floor_selection: Option<SelectionResult> = None;
 
         for route_name in route_queue {
             let mut pools = if requires_remote_video {
@@ -312,8 +435,21 @@ impl VirtualRouterEngineCore {
                         all_candidate_keys.push(key.clone());
                     }
                 }
-                let mut available =
-                    self.apply_standard_filters(env, &pool.targets, routing_state, &excluded_keys);
+                let floor_candidates = apply_non_availability_filters(
+                    &self.provider_registry,
+                    &pool.targets,
+                    routing_state,
+                    &excluded_keys,
+                    server_tool_required,
+                    bound_alias_prefix,
+                );
+                let mut available = self.apply_standard_filters(
+                    env,
+                    &pool.targets,
+                    routing_state,
+                    &excluded_keys,
+                    server_tool_required,
+                );
                 if let Some(prefix) = bound_alias_prefix {
                     let alias_candidates: Vec<String> = available
                         .iter()
@@ -336,21 +472,14 @@ impl VirtualRouterEngineCore {
                         available = safe_context;
                     } else if !risky_context.is_empty() {
                         available = risky_context;
-                    } else if self.context_hard_limit || longcontext_candidate_active {
+                    } else if self.context_hard_limit {
                         continue;
                     } else if !overflow_context.is_empty() {
                         available = overflow_context;
                     }
                 }
                 if available.is_empty() {
-                    let filtered_candidates = filter_candidates_by_state(
-                        &pool.targets,
-                        routing_state,
-                        &self.provider_registry,
-                    )
-                    .into_iter()
-                    .filter(|key| !excluded_keys.contains(key))
-                    .collect::<Vec<String>>();
+                    let filtered_candidates = floor_candidates.clone();
                     if !filtered_candidates.is_empty() {
                         if let Some(unavailable) =
                             build_unavailable_providers_details(self, env, &filtered_candidates)
@@ -361,6 +490,17 @@ impl VirtualRouterEngineCore {
                                 "poolTargets": pool.targets,
                                 "unavailableProviders": unavailable
                             }));
+                        }
+                        if route_name == DEFAULT_ROUTE && default_floor_selection.is_none() {
+                            default_floor_selection = Some(
+                                SelectionResult::new(
+                                    filtered_candidates[0].clone(),
+                                    route_name.to_string(),
+                                    pool.targets.clone(),
+                                    Some(pool.id.clone()),
+                                )
+                                .with_route_params(pool.route_params.clone()),
+                            );
                         }
                     }
                     continue;
@@ -506,6 +646,12 @@ impl VirtualRouterEngineCore {
             }
         }
 
+        if let Some(selection) = default_floor_selection {
+            return Ok(selection.with_unavailable_providers(
+                (!unavailable_route_pools.is_empty()).then_some(Value::Array(unavailable_route_pools)),
+            ));
+        }
+
         Err(build_provider_not_available_error(
             self,
             env,
@@ -611,6 +757,43 @@ fn build_unavailable_providers_details(
             }))
             .collect::<Vec<Value>>()
     }))
+}
+
+fn infer_model_family_hint(model: &str) -> Option<&'static str> {
+    let lower = model.trim().to_ascii_lowercase();
+    for token in [
+        "sonnet", "gemini", "claude", "gpt", "glm", "qwen", "deepseek",
+    ] {
+        if lower.contains(token) {
+            return Some(token);
+        }
+    }
+    None
+}
+
+fn score_prefer_candidate(
+    candidate: &str,
+    target: &crate::virtual_router_engine::instructions::InstructionTarget,
+    registry: &ProviderRegistry,
+) -> (i32, String) {
+    let model = target.model.as_deref().unwrap_or("");
+    let alias = extract_key_alias(candidate)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let candidate_model = registry
+        .get(candidate)
+        .and_then(|profile| profile.model_id.clone())
+        .unwrap_or_default();
+    let mut score = 0i32;
+    if candidate_model == model {
+        score += 20;
+    }
+    if let Some(family_hint) = infer_model_family_hint(model) {
+        if alias.contains(family_hint) {
+            score += 100;
+        }
+    }
+    (score, candidate.to_string())
 }
 
 fn build_primary_target_groups(
@@ -1216,7 +1399,37 @@ mod tests {
     }
 
     #[test]
-    fn longcontext_active_does_not_fall_back_to_overflow_default_provider() {
+    fn routing_instruction_filter_cannot_empty_existing_route_pool() {
+        let mut core = build_priority_test_core();
+        let classification = ClassificationResult {
+            route_name: "thinking".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["thinking".to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let mut routing_state = RoutingInstructionState::default();
+        routing_state
+            .allowed_providers
+            .insert("nonexistent-provider".to_string());
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({}),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("invalid routing instruction must not empty the route pool");
+
+        assert_eq!(selected.provider_key, "sdfv.key1.gpt-5.4");
+    }
+
+    #[test]
+    fn longcontext_active_selects_overflow_provider_when_hard_limit_disabled() {
         let mut core = VirtualRouterEngineCore::new();
         let mut providers = Map::new();
         providers.insert(
@@ -1272,7 +1485,8 @@ mod tests {
             estimated_tokens: 250,
             ..RoutingFeatures::default()
         };
-        let result = core.select_provider(
+        let result = core
+            .select_provider(
             "longcontext",
             &json!({}),
             &ClassificationResult {
@@ -1285,12 +1499,11 @@ mod tests {
             &RoutingInstructionState::default(),
             None,
             unsafe { Env::from_raw(std::ptr::null_mut()) },
-        );
+            )
+            .expect("longcontext overflow must still give configured providers one attempt");
 
-        assert!(
-            result.is_err(),
-            "longcontext overflow must not be silently served by default overflow provider"
-        );
+        assert_eq!(result.provider_key, "big.mimo-pro");
+        assert_eq!(result.route_used, "longcontext");
     }
 
     #[test]
@@ -1333,6 +1546,7 @@ mod tests {
                 &[provider_key.to_string()],
                 &RoutingInstructionState::default(),
                 &std::collections::HashSet::new(),
+                false,
             ),
             Vec::<String>::new()
         );

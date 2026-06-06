@@ -6,6 +6,18 @@
 - 唯一 owner 在 Rust req outbound：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/universal_shape_filter.rs::normalize_assistant_tool_calls`。
 - 共享 normalize helper 当前会产出宽兼容 `patch+input`；这适合校验/兼容，不适合 provider wire history。provider 出站必须再投影成 canonical `{"patch":"..."}`，属于修 shape，不猜语义。
 
+## 2026-06-05 provider business error 2013 分类真因
+
+- 最新 `internal error` 真因之一已钉死：`src/providers/core/runtime/provider-failure-policy-impl.ts` 顶部存在“任意 2013 信号一律 `special_400`”的过早分支，导致后面的 `MALFORMED_RESPONSE + PROVIDER_STATUS_2013` 细分逻辑永远无法命中。
+- 正确边界：`2013` 只能在“context overflow / prompt too long”语义下判 `special_400`；像 `Token Plan 当前请求量较高，请稍后重试` 这种业务拥塞必须走 `recoverable + affectsHealth + shouldRetry`，由统一错误中心进入 retry/cooldown/pool 切换。
+
+## 2026-06-05 responses SSE 不得退化为 JSON
+
+- 之前已有 `stream=true without Accept` 的 SSE 正常路径锁，但缺少错误路径专门门禁。
+- 已新增 `tests/server/handlers/responses-handler.started-sse-error.spec.ts`，锁两条 live 关键路径：
+  1. `stream=true` 且未声明 `Accept: text/event-stream` 时，若 pipeline 直接报错，仍必须返回 `text/event-stream + event:error`，不能退化成 JSON error body。
+  2. Responses SSE 头已发出后再出错时，必须继续在已开始的 SSE 流里返回 `event:error`，不能切换到 JSON。
+
 ## 2026-05-26 continuation ownership / meta 收口文档落盘
 
 - 已把新的架构共识正式落盘到：
@@ -15661,3 +15673,211 @@ Codex 工具集枚举必须在第一轮执行；自然语言中的 *** Begin Pat
 ## 2026-06-05 gate closeout
 - added apply_patch freeform gate + snapshot/function-map coverage
 - architecture-ci passed; targeted jest passed; full ci-jest still has unrelated pre-existing failures
+
+## 2026-06-05 ci-jest followup
+- continue from apply_patch gate closeout
+- target: fix current test:ci:jest historical failures without widening scope
+
+## 2026-06-05 bridge mock baseline
+- next cut: unify stale bridge mocks for http-server tests
+## 2026-06-05 apply_patch full-chain GAP audit
+- 目标真源仍是 `docs/design/apply-patch-config-gated-servertool.md`：`client` 与 `servertool` 两种明确模式，不允许 fallback；但 10000 live config 仍是 `[servertool.apply_patch] mode = "servertool"` + `sameProtocolBehavior = "direct"`，因此 apply_patch 请求必须先命中 relay gate，再进入 Hub response-stage tool governance。
+- 10000 最新 live 样本表明 direct/relay 与 provider wire 主问题已基本收口：`src/server/runtime/http-server/index.ts:1120-1140` 已在 servertool mode 下通过 `evaluateDirectRouteDecision(...)` 强制 relay；provider-request tool schema 也已是 freeform/patch-only（见 `~/.rcc/codex-samples/openai-responses/ports/10000/opencode-zen-free.key1.minimax-m3-free/req_1780661531599_33923c16/provider-request.json:1515-1533` 与 `.../minimax.key1.MiniMax-M3/req_1780661543135_ec4a001b/provider-request.json:1588-1602`）。
+- 当前 live 主失败不再是 direct 误走或 upstream `custom` tool type，而是“声明 schema 已 patch-only，但历史/tool-result 契约仍混入旧 servertool 语义”导致弱模型继续生成双字段/错形参数：样本 `req_1780661531599_33923c16/provider-request.json:1127-1168` 明确显示 assistant tool_calls.arguments 仍是 `{"input":"*** Begin Patch...","patch":"*** Begin Patch..."}`，而不是单一 canonical `{"patch": ...}`。
+- 根因 owner 1（Rust response-side normalization）: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/apply_patch_schema_args.rs:51-85` 仍会把 line-edit 或兼容输入输出成 `{patch,input}`，并在 fallback 路径保留 `{filePath,patch}`；这与当前 freeform canonical patch-only 目标不一致，属于历史兼容逻辑仍在 live 路径内泄漏。
+- 根因 owner 2（TS servertool handler contract leak）: `sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts:21-54,122-205,240-252` 仍以 `{filePath,patch}` 作为 canonicalArgs 与 followup injected arguments 真相；即便对模型暴露的是 freeform patch-only schema，servertool 成功/失败回灌给下一轮的 tool output arguments 仍是内部 `{filePath,patch}` 契约，形成 client-facing / provider-facing / servertool-internal 三套 shape 混杂。
+- Rust outbound filter `universal_shape_filter.rs:89-102` 已把 assistant tool_call string args 收口成 `{"patch": ...}` 用于 provider wire；但它只能修 outbound provider wire，不能清除 response-side / followup history 中旧 `{input,patch}` 与 `{filePath,patch}` 历史语义，所以 live 样本仍看到旧双字段 arguments。
+- Anthropic provider tool schema owner `anthropic_openai_codec.rs:281-292` 已把 custom `apply_patch` 修成 patch-only input_schema；说明“入口工具声明”已经对，但“中间历史/tool_result/followup 契约”还没统一到同一 canonical shape。这是当前 apply_patch 兼容性没有真正闭环的最大 GAP。
+- 影响：弱模型虽然收到正确工具描述，但读取到历史 tool call / tool result 时仍被旧双字段和旧失败文案污染，倾向于重复 `input+patch` 双传、误判为空执行、甚至转去 `exec_command` 复查文件；这解释了 10000 样本里“工具已执行但结果空/继续乱试”的现象。
+- 审计结论：apply_patch 主问题“未彻底解决”。已解决的是 direct gate / provider wire custom tool type / freeform schema 暴露；未解决的是 canonical shape 单一化、servertool followup/tool_result 的单真源化、以及弱模型在失败后的低歧义 guidance 闭环。
+
+- 2026-06-05 apply_patch canonical add-file fix: `convert_servertool_line_edit_to_canonical_patch` wrongly injected `@@` into plus-only Add File canonical patch; this polluted tool_outputs/followup history with non-SSOT shape. Removed `@@` for add-file branch; keep `@@` only for update branch. Evidence owner: Rust source + targeted Jest expectation mismatch.
+
+- 2026-06-05 goal-followup-http400: root cause is stale bridge mock deriveFinishReasonNative=undefined; no-progress ledger never increments for completed responses. Fixed shared tests/helpers/bridge-http-server-mock.ts and switched goal-followup suite to reuse it.
+- 2026-06-05 apply_patch canonical patch-only closeout: removed remaining Rust response/hashline normalization `input` mirrors at `apply_patch_schema_args.rs` so govern_response tool_call arguments are now single-carrier `{patch}` across simple line-edit and hashline paths.
+- 2026-06-05 apply_patch guard closeout: `make_apply_patch_guard_args` also leaked legacy `input`; removed it so normal patch, hashline guard, and failed-closed guard all share one model-visible carrier `{patch}`.
+- 2026-06-05 5555 direct-entry bug: router-mode entry gate checked only `requiresHubRelay`, not `providerWireValid`; responses chat-style function tools could still enter provider direct and explode at provider runtime. Fixed by relaying to Hub pipeline when direct payload is not provider-wire-valid.
+- 2026-06-05 added route-level red test for 5555 responses direct-entry bug: invalid chat-style function tools on /v1/responses must relay to Hub pipeline before any provider-direct attempt.
+- 2026-06-05 aligned two pre-existing route-level tests with actual Responses direct wire contract (`input` array + `instructions`) so the new entry-gate regression checks real provider-wire-valid payloads only.
+
+## 2026-06-05 10000 live apply_patch refusal audit
+- Live 10000 samples still show assistant tool history emitting apply_patch args as {input,patch}; this contaminates weak-model retries even though tool declaration is already patch-only.
+- Active TS owner confirmed at src/server/runtime/http-server/executor/provider-response-tool-validation-blocks.ts: apply_patch normalization mirrors patch<->input and returns both fields, re-leaking old alias into normalized client tool history.
+- Fix direction: accept legacy input for ingress compatibility, but normalize outbound/client-visible args to patch-only; keep no semantic guessing beyond alias coalescing.
+2026-06-05 Jason: live 10000/5555 issue currently not apply_patch shape anymore; latest failure is anthropic-profile false MALFORMED_RESPONSE on valid SSE wrappers because resolveBusinessResponseError only exempts __sse_responses and ignores mode:sse/bodyText/__sse_stream. Need red tests + patch + restart verify.
+2026-06-05 Jason: patched src/providers/profile/families/anthropic-profile.ts to treat mode:sse/bodyText/__sse_stream as valid SSE wrappers before content-array validation. owner tests green; unrelated existing SSE projection regressions still red in handler-response-utils/responses-handler specs.
+2026-06-05 Jason: live log after 0.90.2878 still shows MALFORMED_RESPONSE on 10000->MiniMax-M3 at 21:41:35. Need inspect fresh sample + runtime path; prior anthropic-profile patch did not hit live owner.
+2026-06-05 Jason: real live fix is provider pre-stream business check in anthropic-profile. Added anthropic SSE event payload allowlist (ping/message_start/content_block_*/message_*) so first SSE frame is not misclassified as malformed full response.
+2026-06-05 Jason: apply_patch path-guidance / failure-guidance closeout in Rust inbound owner `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs`. `APPLY_PATCH_ERROR` now explicitly locks `apply_patch only`, `workspace-relative` patch headers, `Do not use absolute paths`, and `Do not switch to exec_command`; it also tells the model to reuse exact current file lines already observed instead of re-probing.
+2026-06-05 Jason: added red tests for the above contract and fixed stale assertions that still expected legacy `line-edit/filePath` wording. Evidence: `cargo test -p router-hotpath-napi apply_patch_ -- --nocapture` => `81 passed; 0 failed; 1 ignored`; `cargo test -p router-hotpath-napi req_profile -- --nocapture` => `59 passed; 0 failed`.
+
+## 2026-06-05T14:18:32.265Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260605T221723527-261214-2618:stop_followup
+- sessionId: 019e97a2-3a66-72a2-866a-3200c1c7afb7
+- stopReason: apply_patch 工具在当前 session 全部调用返回 internal error，无法产出成功写入证据，functional test 阻塞
+- evidence: 连续 5+ 次 apply_patch 调用（Add tmp/apply_patch_test.txt、Add tmp/ap-nested/、Update tmp/ap-append.txt、Delete tmp/ap-del.txt、多种 * Begin Patch / *** Add File header 变体）全部返回 'Tool result missing due to internal error'；ls 确认 cwd 可写
+
+本 session apply_patch 对所有 patch 类型/路径/header 均返回 internal error，header 格式与文件存在性非根因；fallback 授权缺失时无法产出功能测试证据
+## 2026-06-05 apply_patch 10000 失败样本复测闭环
+
+- 最新坏样本：`~/.rcc/codex-samples/openai-responses/ports/10000/opencode-zen-free.key1.minimax-m3-free/req_1780669000929_4909c576/provider-response.json`；模型文本宣称 `Patch tool is non-functional`，随后用 `exec_command` 执行 `cat > tmp/ap_probe5.txt <<'EOF'...` shell 写文件。
+- 修复点：Rust `resp_process_stage1_tool_governance` 在响应侧识别“apply_patch/patch tool 失败后改用 shell 写文件”的明确形态，只剥离 shell 写文件 tool_call，不猜业务语义；返回 `APPLY_PATCH_ERROR`，要求继续只用 `apply_patch`，路径使用 workspace-relative `tmp/...`，禁止 `/tmp/...` 和 shell writes。
+- 红测：新增 live MiniMax shape 复刻测试，锁 `disallowed_tool_calls_dropped=1`、`finish_reason=stop`、无 `tool_calls`、引导包含 `Retry with apply_patch only` / `tmp/...` / `never /tmp/` / `Do not switch to exec_command`；另加只读 `exec_command cat tmp/...` 控制测试，防止误杀读操作。
+- 验证：`cargo test -p router-hotpath-napi apply_patch_ -- --nocapture` 通过 `83 passed; 0 failed; 1 ignored`；`cargo test -p router-hotpath-napi req_profile -- --nocapture` 通过 `59 passed; 0 failed`。
+- 线上复放：构建安装 `0.90.2881` 后，用全局 `/opt/homebrew/lib/node_modules/routecodex/node_modules/rcc-llmswitch-core/dist/native/router_hotpath_napi.node` 复放同一坏样本，结果 `disallowed_tool_calls_dropped=1`、`finish_reason=stop`、`has_tool_calls=false`；`curl localhost:5520/health` 返回 `ready=true`、`pipelineReady=true`、`version=0.90.2881`。
+
+## 2026-06-05 prefer-instruction gate
+- Continue from handoff: focus tests/servertool/virtual-router-routing-instructions.spec.ts, symptom=marker:invalid-stripped route falls back to default.
+
+- Fixed prefer parsing/session persistence and routing-instructions gate; targeted spec green after native rebuild.
+- 2026-06-05 vision-flow gate: confirmed current failure is stop_message_auto preempting vision path, not missing test wiring. Evidence: tests/servertool/vision-flow.spec.ts logs show every case hit trigger_stop_schema_missing before vision_flow; vision handler is registered/imported and queue config already inserts vision_auto before stop_message_auto. Next fix: add shared vision eligibility guard so stop_message_auto yields when legacy vision two-hop should own the request.
+- 2026-06-05 vision-flow gate: stop_message_auto now yields for media contexts; vision_flow followup switched from generic injection rebuild to explicit payload SSOT (`messages` + `stream=false` + metadata.stream=false), matching spec and avoiding input/messages drift.
+- 2026-06-05 vision-flow gate: vision followup empty-body contract now treated as accepted request for `vision_flow`; generic stop_message empty followup still fails closed. Also force followup metadata.stream=false in runtime metadata bridge.
+- 2026-06-05 vision-flow gate: final shape drift owner found in followup endpoint selection. `vision_followup` must target `/v1/chat/completions`; keeping `/v1/responses` causes normalizer to rewrite canonical `messages` into `input`, breaking gate contract.
+- 2026-06-05 vision-flow gate: Jest path loads existing `src/servertool/handlers/vision.js`; updated that runtime thin-shell to match `vision.ts`, otherwise tests keep exercising stale injection-based followup semantics.
+- 2026-06-05 vision-flow gate: runtime JS shells exist beside TS sources in `src/servertool/handlers/`; gate fixes must update both or tests keep exercising stale JS semantics.
+- 2026-06-05 vision-flow gate: remaining deltas were single-image summary prefix and backend model pin. Followup summary now auto-wraps plain summary into `[Image]:` block, and vision analysis hop now overwrites payload.model from pinned metadata assignedModelId/modelId.
+- 2026-06-05 vision-flow gate: final cleanup strips first-level bullets from vision summaries before building followup text, so single-image and multi-image summaries normalize to the expected canonical chat-style string.
+- 2026-06-05 vision-flow gate: rewrote `src/servertool/handlers/vision.js` as a clean runtime-aligned thin shell after partial string replacements corrupted regex/template syntax and blocked Jest from loading the live module.
+- 2026-06-05 vision-flow gate: multi-image summaries retain their per-image bullet lines; only single-image header-adjacent bullet noise is stripped.
+- 2026-06-05 vision-flow gate: removed over-broad global bullet stripping from runtime `vision.js`; only image-header-adjacent normalization remains so multi-image bullet details stay intact.
+- 2026-06-05 vision-flow gate: runtime `vision.js` now fully rewritten with explicit multimodal guard, model pin, chat followup payload, and per-shape summary normalization; avoids partial patch drift between TS and adjacent JS runtime shells.
+2026-06-06 Jason: responses direct gate closeout switched from single bad sample to whole-shape lock. Any `/v1/responses` direct payload whose `tools[*]` contains `type:function` + nested `function.name` but no top-level `name` must be rejected before router-direct send, and rechecked again on final requestPayload after route overrides. Added family tests covering invalid indices 0/3/11 and aligned legacy apply_patch metadata route-level expectation to skip direct when tool shape stays chat-style invalid.
+2026-06-06 Jason: live closeout on 5555 completed with global install 0.90.2891 + managed restart. Evidence: /opt/homebrew/lib/node_modules/routecodex/dist/server/runtime/http-server/index.js now contains final_request_payload gate. After restart, new 5555 `/v1/responses` traffic no longer emits `router-direct.send ... chat-style function tool`; same-period requests route to minimax/mimo and complete normally. Remaining `provider.send ... tools[0]` retries observed at 00:09:13 are standard pipeline/provider-send failures (no router-direct.send line), so they are a separate gate family from router-direct preflight.
+
+## 2026-06-06 responses standard pipeline pre-send shape gate
+
+- 已把与 direct 同类的 Responses tool shape gate 下沉到标准主链路 `request-executor` 的 provider.send 前。
+- 对 `assertDirectRouteDecision(...)` 的错误新增 host contract 标记：`requestExecutorProviderErrorStage=host.response_contract`、`retryable=false`，避免被 provider.send 重试/绕过。
+- 新增 `request-executor.spec.ts` 覆盖：标准主链路遇到 chat-style function tool（缺顶层 `tool.name`）时，必须在 send 前 reject，且任一 provider `processIncoming` 不得被调用。
+
+## 2026-06-06 apply_patch freeform projection closeout
+- Root cause: Codex apply_patch is a freeform/grammar tool. Provider-side structured `{patch}` was valid, but client projection wrapped arguments as JSON instead of raw patch text for freeform tools.
+- Fix: Rust `client_tool_args` recognizes `format:{type:"grammar"}` and returns raw patch for freeform apply_patch; HTTP response layer now passes original `toolsRaw` into native normalization and applies the same projection to live `__sse_responses` function_call frames before client write.
+- Validation: Jest apply_patch matrix 5 suites/17 tests passed; Rust `cargo test -p router-hotpath-napi apply_patch` passed 87/1 ignored; online `node scripts/tests/apply-patch-freeform-10000-online.mjs` passed against `http://172.30.215.14:10000/v1/responses` on RouteCodex 0.90.2894.
+- Online sample evidence: `~/.rcc/codex-samples/openai-responses/ports/10000/minimax.key1.MiniMax-M3/req_1780706590708_bdea5268`, request `openai-responses-minimax.key1-MiniMax-M3-20260606T084310708-271328-12732`.
+
+## 2026-06-06 apply_patch freeform SSE projection closeout
+
+- Root cause: `/v1/responses` client-visible SSE projection only normalized `response.function_call_arguments.done`; live `response.function_call_arguments.delta` without `name`, `response.output_item.*`, nested `response.required_action`, `response.done`, and terminal probe repair frames could still leak JSON-wrapped `{"patch":"..."}` for freeform `apply_patch`.
+- Fix: `src/server/handlers/handler-response-utils.ts` now tracks apply_patch `call_id` from output item frames, suppresses JSON-wrapper deltas, emits one raw freeform delta before done, recursively normalizes nested Responses payloads via native `normalizeResponsesToolCallArgumentsForClientWithNative`, and normalizes terminal probe repair frames before writing to client.
+- Red tests: `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts` covers live done, nested output/required_action, nameless delta stream, and no `{"patch"}` leakage.
+- Online blackbox: `scripts/tests/apply-patch-freeform-10000-online.mjs` now fails if any client-visible SSE frame leaks JSON-wrapped apply_patch args or delta stream, not just first argument candidate.
+- Verification: related Jest 5 suites/19 tests PASS; Rust `cargo test -p router-hotpath-napi apply_patch -- --nocapture` PASS 87/0/1 ignored; `npm run build:min`; global install `0.90.2898`; `routecodex restart --port 5520` PASS; online 10000 script PASS with eventCount=32 argumentCount=14 deltaStreamCount=1 raw patch.
+
+## 2026-06-06 apply_patch provider history empty input fix
+
+- User live failure showed Codex model repeatedly reporting empty apply_patch calls. Latest 10000 samples at 09:17-09:19 (`req_1780708740309_fb6a31c1`) proved client request history had raw `function_call.arguments`, but provider Anthropic wire history converted those apply_patch calls to `tool_use.input: {}`.
+- Root cause: `anthropic_openai_codec.rs` parsed OpenAI chat `tool_calls[].function.arguments` as JSON only; freeform apply_patch raw patch is not JSON, so parse failed and defaulted to `{}`.
+- Fix: for `name == apply_patch`, request outbound now uses Rust apply_patch schema normalizer to wrap raw freeform patch into provider-side `{ "patch": rawPatch }` while keeping client-facing freeform raw patch unchanged.
+- Red test: `build_anthropic_from_openai_chat_wraps_freeform_apply_patch_history_as_patch_input` locks provider wire `tool_use.input.patch` and rejects `{}`.
+- Verification: targeted Rust red test PASS; `cargo test -p router-hotpath-napi apply_patch -- --nocapture` PASS 88/0/1 ignored; built and globally installed `0.90.2899`; scoped restart `routecodex restart --port 5520` PASS; replayed captured failing client request to 10000 and provider-request sample `req_1780710195228_78afb3f5` shows `bad=[]`, `goodCount=9` apply_patch history entries with non-empty `input.patch`.
+
+2026-06-06 apply_patch freeform client projection audit:
+- Root cause from Codex source: freeform apply_patch is `custom_tool_call.input`; `function_call.arguments` enters Function payload and ApplyPatchHandler rejects unsupported payload.
+- Fixed RouteCodex `/v1/responses` client SSE/JSON projection to convert apply_patch function_call frames to `custom_tool_call` and unwrap JSON `{patch|input}` to raw patch string without semantic guessing.
+- Online 10000 smoke after 0.90.2901 restart: `scripts/tests/apply-patch-freeform-10000-online.mjs` PASS; latest client-response sample has custom_tool_call=7, function_call_apply_patch=0, wrappedInput=false.
+
+## 2026-06-06 quota 生命周期 / 路由空集审计
+
+- 当前 quota live 真源已基本收敛到 Rust Virtual Router host snapshot + mutator：`sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts` 只暴露 `reset/recover/disable/applyKeepPoolCooldownQuota/getStatus`，TS `QuotaManagerModule` 主要负责 store hydration/persist 与 admin 只读投影。
+- 仍存在明显“重复壳层实现”风险：`src/server/runtime/http-server/daemon-admin/quota-handler.ts` 与 `src/server/runtime/http-server/daemon-admin/control-handler.ts` 都各自重新 `createQuotaManagerAdapter(...)`，绕过 `QuotaManagerModule` 形成第二入口；虽然当前都指向同一个 Rust mutator，但入口重复、命名重复、生命周期不统一。
+- `src/manager/modules/quota/quota-adapter.ts` 仍承担过多伪 owner 语义：`setQuota/registerProviderStaticConfig/recordProviderUsage/refreshNow/getQuotaView` 都像 manager，但其中多项已是 no-op/投影，容易误导后续继续往 TS 塞 quota 逻辑。
+- provider runtime ingress 仍保留多 owner hook map：`runtimeQuotaHooks` + `runtimeProviderQuotaHooks` + `runtimeRouterHooks`；虽然不再有 TS core quota manager，但“多订阅者并发消费 quota event”仍是架构风险，后续应收敛为单一 quota observer contract。
+- “任何情况下不能让路由空”当前尚未达成：Rust `selection.rs` 在全部 candidate 被 quota/health/blocker 过滤后，仍会抛 `PROVIDER_NOT_AVAILABLE`；现有仅对 singleton quota cooldown 做 recoverable hint / softenedForSingleton，不是全局 non-empty route invariant。
+- 现状更准确表述：系统已能在“单 provider quota 冷却”场景保留 recoverable cooldown hint，但没有全局保证“每条 route 任何时刻都至少保留一个可选 target”。如果要满足该约束，必须在 Rust Virtual Router 单点建立“route candidate floor / last-resort reserved target”语义，而不能在 TS handler/executor/adapter 层各自补兜底。
+
+## 2026-06-06T02:42:14.752Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260606T104138262-276771-18175:stop_followup
+- sessionId: 019e97a2-3a66-72a2-866a-3200c1c7afb7
+- stopReason: apply_patch 工具功能测试目标已完成：add/update/delete/multi-op/verify 五项均通过，negative case 正确失败并保持状态不变。
+- evidence: ls tmp/apply_patch_test/ 仅余 pre-existing header.md；add/update/delete/multi-op 步骤均见 apply_patch success: true；行号 @@ 失败 + bare @@ 成功 验证补丁头格式；missing file 触发干净失败未污染 workspace。
+
+apply_patch 接受 bare @@ (无行号) 作为 hunk header；带 -1,3 +1,3 形式触发 verification 失败。同一 patch 可混合 Add+Add+Update，操作按出现顺序应用。
+
+## 2026-06-06 quota 统一控制面收口 / function-map 补点
+- 已把 daemon-admin quota/control 的 quota mutate 入口统一收口到 `QuotaManagerModule.getControlSurface()`；`quota-handler.ts` 与 `control-handler.ts` 不再自建 adapter，也不再直连 virtual router mutator。
+- `QuotaManagerModule` 新增 module-owned `controlAdapter` 缓存，并提供 `getControlSurface()` / `clearCooldown()` / `restoreNow()` / `setQuota()` 统一出口；重新 init 时清空缓存，避免跨 runtime 污染。
+- 统一模式下，quota handler 与 control handler 现在会把 `rust_quota_host_mutator_unavailable` 与 `no_quota_manager_available` 一并投影为 `503 not_ready`，避免假成功。
+- 已新增 function-map / verification-map feature：`quota.unified_control_surface`、`vr.route_availability_floor`；并在技能与 quota 文档中明确：route non-empty 的 owner 只能在 Rust VR selection，禁止在 TS handler/executor/adapter 层补 fallback。
+- 定向门禁已绿：`tests/manager/quota/quota-manager-module.spec.ts`、`tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts`、`tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts`。
+- 全量 `verify:architecture-ci` 仍被现存无关 gate 阻断：`verify:apply-patch-freeform-contract` 读取不存在的 `sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts`；该失败与本次 quota 改动无直接关系。
+- 2026-06-06 function-map 审计
+  - 真源：`docs/architecture/function-map.yml`（16 active/proposed），`docs/architecture/verification-map.yml`（16 对齐）。
+  - 全量 `verify:architecture-ci` 阻断汇总：
+    - `verify:architecture-feature-anchor-coverage` 失败：`vr.route_availability_floor` 缺 canonical builder `select_weighted_route`（status=proposed，源码中无定义，仅 selection.rs 中放了一个 anchor 注释占位）。
+    - `verify:architecture-owner-queryability` 失败：同上，canonical builder 在 owner/allowed 路径下不存在。
+    - `verify:architecture-forbidden-path-growth` 失败：`quota.unified_control_surface` 三个 builder `resetProvider`/`recoverProvider`/`disableProvider` 在 forbidden `sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts` 命中（这些是 TS 端 forwarder to nativeProxy.resetProviderQuota 等；语义/命名接近易混）。
+    - `verify:function-map-forbidden-mentions` 失败：同上三处。
+    - `verify:function-map-boundary-mentions` 警告：同上三处（warning 而非 fail，但提示需 allowlist 或改名）。
+    - `verify:apply-patch-freeform-contract` 失败（`required_gates` 指向）：硬编码引用了 `sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts`，该文件已被删除（仅残留 `apply-patch-guard.d.ts` 空壳）。map 中 `tool.apply_patch_freeform_contract.allowed_paths` 目录仍存在但相关文件漂移未更新。
+  - 总结：map **不是缺登记**，而是 **漂移 / 错登记**：
+    - 1 个 `proposed` 特性只声明未实现：`vr.route_availability_floor`。
+    - 1 个 `active` 特性 builder 命名与 Rust 实际 native 名冲突：`quota.unified_control_surface`（native 实为 `resetProviderQuota/recoverProviderQuota/disableProviderQuota`）。
+    - 1 个 `active` 特性的依赖 gate 已因源码移除而 broken：`tool.apply_patch_freeform_contract`。
+  - 其余 14 个特性门禁均绿。
+  - **缺失登记面**（AGENTS.md guard 18）：CLI、daemon、monitoring、manager/{health,routing,token}、token-daemon/portal、v2、message-center、config、runtime、constants、types、error-handling、provider-sdk、cli/commands、bootstrap、app、server-lifecycle、cli.ts、server-factory.ts、build-info.ts 等模块均无 owner_registry 索引，**不算不合格但未完成索引**。本次审计目标外，不动。
+
+## 2026-06-06T02:58:44.847Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260606T105710673-276835-18239:stop_followup
+- sessionId: 019e97a2-3a66-72a2-866a-3200c1c7afb7
+- stopReason: 审计目标已完成：map 真源已读、3 个 gate 已跑、3 个不合格项已分类、长尾未登记模块已列出，note.md 已落档
+- evidence: docs/architecture/function-map.yml (16 features) / docs/architecture/verification-map.yml (16 matching) / pnpm run verify:architecture-feature-map-growth-discipline 报 vr.route_availability_floor (builder select_weighted_route 不存在) + quota.unified_control_surface (3 builder 撞 native 名) / pnpm run verify:apply-patch-freeform-contract 报 sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts 不存在 / note.md 2026-06-06 function-map 审计章节已追加
+
+function-map 表面 16 项看着齐, 实际 3 项已漂移: (a) quota builder 命名与 native 重名导致 forbidden path 检测误报 (b) route_availability_floor 是纸面 proposed 缺实现 (c) apply-patch gate 硬编码已删文件; 后续补长尾应先 manager/routing (与 vr.route_selection 潜在重复实现信号) 再 daemon-admin handlers 再 CLI commands
+
+## 2026-06-06 5555 route_failed / health audit closeout
+- Symptom: 5555 live log showed repeated `No available providers after applying routing instructions` on 0.90.2903, then later shifted to `HubRespInbound02Parsed must not carry inline metadata; use Meta* carrier`.
+- Health evidence: `~/.rcc/sessions/provider-health.json` and `~/.rcc/sessions/127.0.0.1_5555/provider-health.json` both contained `{"providerCooldowns":[],"version":1}`; `/v1/models` and `~/.rcc/config.toml` had non-empty 5555 provider pools. Health persistence was not the active blocker.
+- Root cause fixed: OpenAI Responses provider response can legally include top-level `metadata`; Hub response normal payload guard rejects internal metadata shape. Rust response path now moves provider response top-level `metadata` into `normalized_metadata.providerResponseMetadata` before `HubRespInbound02Parsed`.
+- Red/green evidence: `cargo test -p router-hotpath-napi response_path_moves_provider_top_level_metadata_out_of_normal_payload -- --nocapture` PASS; `cargo test -p router-hotpath-napi response_path -- --nocapture` PASS; `npm run build:min` PASS.
+- Install blocker fixed: `scripts/lib/build-core-utils.mjs` still required stale `dist/bridge/routecodex-adapter.js` although `sharedmodule/llmswitch-core/src/bridge/routecodex-adapter.ts` no longer exists. Removed stale required output; isolated install build now validates existing Hub/VR outputs.
+- Online evidence after global install `0.90.2904` and `routecodex restart --port 5555`: `/health` reports `version":"0.90.2904"`; `/v1/responses` SSE with `Accept: text/event-stream` returns HTTP 200, `Content-Type: text/event-stream`, logs `acceptsSse=true`, VR hit `asxs.crsa.gpt-5.5.gpt-5.5`, completed status 200; no new metadata guard error.
+
+## 2026-06-06 quota rust化约束 / default池保底 closeout
+- quota 启动初始化已加 config-scoped 过滤：`QuotaManagerModule` 先读取当前 `config.toml` materialized `virtualrouter.providers`，仅对当前配置内 provider 做 hydrate/persist/admin snapshot；历史 store 里的 stale provider 不再灌回 Rust quota host。
+- quota 控制面仍经 `QuotaManagerModule.getControlSurface()` 统一出口，但 runtime quota 真状态继续收口在 Rust host；TS 仅保留 lifecycle/persist/admin bridge。
+- Rust `selection.rs` 已加 default pool route availability floor：高优先级池 -> 低优先级池 -> default 池顺序不变；当 default 池候选因 health/quota/concurrency 过滤后为空时，仍保留 default 最后一跳，不返回空池。
+- 新门禁：`tests/manager/quota/quota-manager-module.spec.ts` 增加“未配置 provider 不 hydrate”验证；`tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts` 改为锁 default 池不空的新 contract。
+- 验证通过：`npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts tests/manager/quota/quota-manager-module.spec.ts`、`npx tsc --noEmit --pretty false`、`npm run verify:function-map-coverage`、`npm run verify:function-map-paths`、`npm run verify:architecture-feature-id-anchors`。
+- 2026-06-06 未登记模块改造清单（审核中，用户认领 3 个不合格项，停止改动）
+  - 审计范围：function-map.yml 当前登记 16 项（active 14 + proposed 1 + quota.active 1）。
+  - 缺登记面：以下子系统/模块尚未在 function-map 拥有 `feature_id -> owner_module -> allowed_paths -> forbidden_paths -> required_tests -> required_gates` 闭环。
+  - 改造策略（统一）：
+    1. 每个子系统先在 `docs/architecture/function-map.yml` 落 1 个 `feature_id`；owner_module 优先 Rust/Hub/Provider 真源层；TS 端仅当独立子系统时落 `src/<dir>`。
+    2. 同时在 `docs/architecture/verification-map.yml` 落 `change_risk: medium/high`、`unit/contract/integration/smoke/build` 五件套。
+    3. 在 owner/allowed 目录至少 1 个源码文件加 `// feature_id: <id>` 锚点；canonical_builders 至少 2 个文件命中。
+    4. 新增一个 gate：`verify:architecture-feature-map-growth-discipline` 已经在做这件事；现有 `scripts/architecture/verify-architecture-feature-anchor-coverage.mjs` 同时拦截。
+    5. 不在本轮清理的"以防万一"死代码（如 v2/、src/core/ 空目录、src/cli/runtime/ 空目录、src/sharedmodule/process-snapshot.ts 仅 1 文件）由后续硬编码/Fallback plan 单独收口。
+
+## 2026-06-06T03:06:21.988Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260606T110410990-276855-18259:stop_followup
+- sessionId: 019e97a2-3a66-72a2-866a-3200c1c7afb7
+- stopReason: 36 条未登记模块改造清单已交付审核（feature_id/owner/allowed_paths/canonical_builders/现有 gate/落盘顺序/边界条件均列出），3 个不合格项已确认由用户自修，apply_patch 工具测试 5 项均已验证
+- evidence: 本轮回复中的 36 条改造清单（A 跨子 8 条 / B manager 6 条 / C CLI 6 条 / D token 2 条 / E monitoring+SDK+message 3 条 / F tools+config+constants+bootstrap 11 条 + G 暂不登记 1 段）；前序审计中跑通的 verify:architecture-feature-map-growth-discipline / verify:architecture-feature-anchor-coverage / verify:apply-patch-freeform-contract 三条 gate 的红点；apply_patch 5 项操作的成功/失败回执（add: ok / update with @@: ok / delete: ok / multi-op: ok / negative: clean fail）
+
+function-map.yml 16 features 是 project AGENTS.md guard 18（功能定位唯一真源）要求的最小集合；当前不合规集中在 builder 撞名（quota）和 gate 路径漂移（apply-patch.ts 已删但 map 仍引用），不属于数量缺失问题；其余 36 个登记空白是 project 体量与 map 维护频次的差距，登记后须 ≥2 文件命中 canonical_builders 才能过 anchor-coverage gate；纯 d.ts 模块（如 src/types）建议改走 (a) 不登记 + 仅 doc 索引，而不是改 gate 加豁免
+
+## 2026-06-06 apply_patch / routing / SSE closeout notes
+- 5555 `PROVIDER_NOT_AVAILABLE` empty-pool root cause: Rust virtual router `selection.rs` skipped overflow-context providers during longcontext token-threshold even when `context_hard_limit=false`; fix must keep configured overflow provider selectable and let upstream attempt/fail explicitly.
+- 5555 post-fix SSE projection error root cause: `assertClientResponseHasNoInternalCarriers` treated any top-level SSE `metadata` as internal; OpenAI Responses stream events may carry public `metadata:{}`. Guard must reject only metadata values containing RCC internal keys/carriers.
+- 10000 local verification caveat: current machine has `netdisk_s` listening on `127.0.0.1:10000`; curl/client to localhost/127.0.0.1:10000 hits that process and returns empty reply, while RouteCodex 0.90.2906 is healthy on child port 5520. Do not misread this as build not installed.
+
+## 2026-06-06
+- 收紧 vr.route_availability_floor：default 保底从\"pool 内即时回退\"改为\"整轮选路无真实可用后统一回退\"，避免 dual-provider 中 quota/health 已挡住 A 时错误抢回 A；保持 default 池非空合同。
+
+- 2026-06-06 handler empty-pool gate 已按新契约收口：/v1/responses 不再接受 client 注入 stopMessageEnabled/excludedProviderKeys；default route non-empty 保底后，黑盒可能继续进入 runtime resolve/retry/cooldown，但不得再以 PROVIDER_NOT_AVAILABLE 空池错误作为主链路结果。
+
+## 2026-06-06 servertool CLI projection design
+- Servertool migration target: keep injection/interception in Phase 1, but intercepted execution must project to real client `exec_command` CLI (`routecodex servertool run --ticket <id>`) instead of server-side handler execution + followup.
+- Protocol gap: client executes `exec_command`, while model may have emitted internal servertool name; submit output therefore needs ticket-backed result restoration (`client exec call_id -> original model tool call_id/name`) before provider outbound. This is result remap, not followup.
+- Full stop/analysis summary belongs in client-visible reasoning; CLI stdout must stay short/structured. `apply_patch` is excluded from servertool CLI and remains native/freeform.
+
+## 2026-06-06 servertool CLI projection design GAP review
+
+- 已落盘 `docs/design/servertool-cli-projection-migration.md`：Phase 1 保留工具注入/拦截，但执行改为客户端可见 `exec_command` CLI；`submit_tool_outputs` 用 ticket 恢复原模型 tool_call identity，不走 followup。
+- 关键 GAP：旧 server-side handler execution/followup 仍是现有代码主路径；需新增 Rust contract 类型 `ServertoolCliProjection01Planned` / `ServertoolCliResult02Captured` / `ServertoolCliResult03RestoredToolResult`，并用红测锁住 no-reenter/no-providerInvoker、SSE 不变 JSON、ticket single-use、apply_patch 排除 servertool。
