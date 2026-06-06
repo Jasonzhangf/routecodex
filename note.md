@@ -16004,3 +16004,9 @@ function-map.yml 16 features 是 project AGENTS.md guard 18（功能定位唯一
 2026-06-06 429 error projection closeout:
 - Client HTTP projection for MiniMax weekly quota 429 is generic: {message:"Rate limited by upstream provider", code:"HTTP_429"}; upstream provider payload must not appear in client body.
 - Primary request failure log must also use the public ErrorErr06 429 summary; raw upstream JSON belongs only to secondary http.error.meta diagnostics.
+
+## 2026-06-06 stopless 10000 未激活根因
+- 线上样本 `openai-responses-opencode-zen-free.key1-minimax-m3-free-20260606T194642676-277888-799` 是正常 200 `finish_reason=stop`，不是异常响应；provider sample 在 `~/.rcc/codex-samples/openai-responses/ports/10000/opencode-zen-free.key1.minimax-m3-free/req_1780746402676_f23ecbdf/provider-response.json`。
+- 根因：`stop-message-auto.ts` 用 `goalLoopContext.goalContextCount > 0` 直接把 `goal_status` 设为 active，导致 `/goal achieved/completed` 场景只要 captured request 仍含 active goal 文案就误跳过 stopless。
+- 修复：goal active 只看显式 request-scoped active；persisted active 和 completed/paused/stopped 不覆盖为 active。`goalLoopContext` 只保留重复 stop loop 检测用途。
+- 验证：`npm run build:min` PASS；定向 Jest PASS；线上 `192.168.0.93:10000/v1/responses` stream=true 返回 reasoning + `exec_command routecodex servertool run stop_message_auto`，SSE 保存 `tmp/stopless-live-10000.sse`。

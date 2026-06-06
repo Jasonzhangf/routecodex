@@ -1148,6 +1148,66 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
+  test('completed goal with current goal context does not skip stopless as active', async () => {
+    const decisionContexts: StopMessageDecisionContext[] = [];
+    __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {
+      decisionContexts.push(ctx);
+      return testStopMessageDecision(ctx as any) as StopMessageDecision;
+    });
+    try {
+      const result = await runServerToolOrchestration({
+        chat: buildStopChatResponse('chatcmpl-stop-completed-goal-current-context'),
+        adapterContext: {
+          requestId: 'req-stopmessage-completed-goal-current-context',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses',
+          sessionId: 'stopmessage-spec-session-completed-goal-current-context',
+          stoplessGoalState: {
+            status: 'completed',
+            objective: '已完成目标',
+            createdAt: 1,
+            updatedAt: 2
+          },
+          __rt: {
+            stoplessGoalStateSource: 'request'
+          },
+          capturedEntryRequest: {
+            model: 'gpt-5.5',
+            input: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'input_text',
+                    text: '<codex_internal_context source="goal">\\nContinue working toward the active thread goal.\\n<objective>已完成目标</objective>'
+                  }
+                ]
+              }
+            ],
+            stream: true
+          }
+        } as any,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-stopmessage-completed-goal-current-context',
+        providerProtocol: 'openai-responses',
+        reenterPipeline: jest.fn(async (input: any) => ({
+          body: {
+            id: `${input.requestId}:done`,
+            object: 'response',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'continued' }] }]
+          }
+        }))
+      });
+
+      expect(decisionContexts[0]?.goal_status).toBe('completed');
+      expect(result.executed).toBe(true);
+      expect(result.flowId).toBe('stop_message_flow');
+    } finally {
+      __setDecideOverrideForTests(testStopMessageDecision as any);
+    }
+  });
+
   test('historical goal context without current goal turn does not skip stopless', async () => {
     const decisionContexts: StopMessageDecisionContext[] = [];
     __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {

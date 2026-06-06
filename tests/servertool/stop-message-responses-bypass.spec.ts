@@ -68,4 +68,25 @@ describe('responses stopless conversion bypass gate', () => {
 
     expect(bypass).toBe(false);
   });
+
+  test('/v1/responses provider error status bypasses stopless conversion even when servertool is enabled', () => {
+    const bypass = shouldBypassProviderResponseConversion(
+      {
+        status: 429,
+        body: {
+          error: {
+            code: 'HTTP_429',
+            message: 'Rate limited by upstream provider'
+          }
+        }
+      } as any,
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        serverToolsEnabled: true
+      }
+    );
+
+    expect(bypass).toBe(true);
+  });
 });
