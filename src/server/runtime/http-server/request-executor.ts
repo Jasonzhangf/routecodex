@@ -64,8 +64,6 @@ import {
 import {
   isPoolExhaustedPipelineError,
   mergeMetadataPreservingDefined,
-  resolvePoolCooldownCandidateProviderCount,
-  resolvePoolCooldownWaitMs,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
 import {
@@ -137,8 +135,7 @@ function resolvePipelineRouteName(pipelineResult: Awaited<ReturnType<typeof runH
     || readString(target?.routeId);
 }
 import {
-  throwIfClientAbortSignalAborted,
-  waitWithClientAbortSignal
+  throwIfClientAbortSignalAborted
 } from './executor/request-executor-abort.js';
 import { resolveClientAbortSignalFromCarrier } from './executor/request-executor-client-abort-block.js';
 import {
@@ -454,7 +451,7 @@ export class HubRequestExecutor implements RequestExecutor {
     errorCode?: string;
     upstreamCode?: string;
     upstreamStatus?: number;
-    switchAction: 'exclude_and_reroute' | 'retry_same_provider';
+    switchAction: 'exclude_and_reroute';
     backoffScope?: 'provider' | 'recoverable' | 'attempt';
     decisionLabel?: string;
     stage?: 'provider.runtime_resolve' | 'provider.send';
@@ -556,9 +553,6 @@ export class HubRequestExecutor implements RequestExecutor {
         let allowBlockingRecoverableRetryBeyondAttemptBudget = false;
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;
-        let poolCooldownWaitBudgetMs = 60 * 1000;
-        let recoverableRoutePoolRetries = 0;
-        let blockingSingletonRecoverablePoolCooldown = false;
         let forcedRouteHint: string | undefined;
         let contextOverflowRetries = 0;
         let blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null = null;
@@ -596,117 +590,12 @@ export class HubRequestExecutor implements RequestExecutor {
           pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
         } catch (pipelineError) {
           if (isPoolExhaustedPipelineError(pipelineError)) {
-            const cooldownWaitMs = resolvePoolCooldownWaitMs(pipelineError);
-            const candidateProviderCount = resolvePoolCooldownCandidateProviderCount(pipelineError);
-            const singletonRecoverablePoolCandidate =
-              cooldownWaitMs !== undefined && candidateProviderCount === 1;
-            const holdStateForPoolCooldown = blockingRecoverableRouteHoldState as BlockingRecoverableRouteHoldState | null;
-            if (
-              holdStateForPoolCooldown?.holdOnLastAvailable429
-              && holdStateForPoolCooldown.explicitSingletonPool
-            ) {
-              const blockingRetryBackoffMs =
-                cooldownWaitMs
-                ?? consumeRecoverableErrorBackoffMs(
-                  buildRecoverableErrorBackoffKey({
-                    providerKey: holdStateForPoolCooldown.providerKey,
-                    runtimeKey: holdStateForPoolCooldown.runtimeKey,
-                    statusCode: holdStateForPoolCooldown.retryError.statusCode,
-                    errorCode: holdStateForPoolCooldown.retryError.errorCode,
-                    upstreamCode: holdStateForPoolCooldown.retryError.upstreamCode,
-                    reason: holdStateForPoolCooldown.retryError.reason
-                  }),
-                  {
-                    statusCode: holdStateForPoolCooldown.retryError.statusCode,
-                    errorCode: holdStateForPoolCooldown.retryError.errorCode,
-                    upstreamCode: holdStateForPoolCooldown.retryError.upstreamCode,
-                    reason: holdStateForPoolCooldown.retryError.reason
-                  }
-                );
-              logStage('provider.route_pool_cooldown_wait', providerRequestId, {
-                attempt,
-                waitMs: blockingRetryBackoffMs,
-                holdOnLastAvailable429: true,
-                reason: 'last_available_provider_429'
-              });
-              await waitWithClientAbortSignal(
-                blockingRetryBackoffMs,
-                clientAbortSignal,
-                logRequestExecutorNonBlockingError
-              );
-              attempt = Math.max(0, attempt - 1);
-              continue;
-            }
-            if (singletonRecoverablePoolCandidate) {
-              blockingSingletonRecoverablePoolCooldown = true;
-              logStage('provider.route_pool_cooldown_wait', providerRequestId, {
-                attempt,
-                waitMs: cooldownWaitMs,
-                reason: 'single_provider_pool_recoverable'
-              });
-              await waitWithClientAbortSignal(
-                cooldownWaitMs,
-                clientAbortSignal,
-                logRequestExecutorNonBlockingError
-              );
-              attempt = Math.max(0, attempt - 1);
-              continue;
-            }
-            if (
-              cooldownWaitMs &&
-              recoverableRoutePoolRetries < 3
-            ) {
-              const routePoolBackoffMs = consumeRecoverableErrorBackoffMs(
-                buildRecoverableErrorBackoffKey({
-                  providerKey: `route_pool:${portScope}`,
-                  statusCode: extractStatusCodeFromError(pipelineError),
-                  errorCode: readString(asFlatRecord(pipelineError)?.code),
-                  upstreamCode: readString(asFlatRecord(pipelineError)?.upstreamCode),
-                  reason: pipelineError instanceof Error ? pipelineError.message : String(pipelineError ?? '')
-                }),
-                {
-                  statusCode: extractStatusCodeFromError(pipelineError),
-                  errorCode: readString(asFlatRecord(pipelineError)?.code),
-                  upstreamCode: readString(asFlatRecord(pipelineError)?.upstreamCode),
-                  reason: pipelineError instanceof Error ? pipelineError.message : String(pipelineError ?? '')
-                }
-              );
-              logStage(`${pipelineLabel}.completed`, providerRequestId, {
-                route: undefined,
-                target: undefined,
-                elapsedMs: Date.now() - hubStartedAtMs,
-                attempt,
-                recoverablePoolCooldown: true
-              });
-              logStage('provider.route_pool_cooldown_wait', providerRequestId, {
-                attempt,
-                retry: recoverableRoutePoolRetries + 1,
-                maxRetries: 3,
-                waitMs: routePoolBackoffMs,
-                recoverableCooldownWaitMs: cooldownWaitMs,
-                waitBudgetMs: poolCooldownWaitBudgetMs,
-                reason: 'provider_pool_cooling_down'
-              });
-              recoverableRoutePoolRetries += 1;
-              poolCooldownWaitBudgetMs -= routePoolBackoffMs;
-              await waitWithClientAbortSignal(
-                routePoolBackoffMs,
-                clientAbortSignal,
-                logRequestExecutorNonBlockingError
-              );
-              attempt = Math.max(0, attempt - 1);
-              continue;
-            }
-            if (blockingSingletonRecoverablePoolCooldown && lastError) {
-              throw lastError;
-            }
             if (lastError) {
               throw lastError;
             }
           }
           throw pipelineError;
         }
-        blockingSingletonRecoverablePoolCooldown = false;
         const resolvedPipelineAttempt = resolveRequestExecutorPipelineAttempt({
           inputRequestId: input.requestId,
           providerRequestId,

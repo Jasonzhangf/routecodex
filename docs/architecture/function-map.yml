@@ -3,7 +3,6 @@
 # - fast locate unique owner
 # - prevent duplicate implementation
 # - bind feature to canonical types/builders/tests
-
 version: 1
 owners:
   - feature_id: hub.servertool_followup
@@ -36,21 +35,18 @@ owners:
 
   - feature_id: hub.servertool_cli_projection
     status: planned
-    summary: servertool execution migrates to client-visible exec_command CLI projection with ticket-backed result restoration
+    summary: servertool execution migrates to client-visible exec_command CLI projection with direct CLI input
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - ServertoolCliProjection01Planned
-      - ServertoolCliResult02Captured
-      - ServertoolCliResult03RestoredToolResult
     canonical_builders:
       - build_servertool_cli_projection_01_from_hub_resp_chatprocess_03
-      - capture_servertool_cli_result_02_from_submit_tool_outputs
-      - restore_servertool_cli_result_03_to_model_tool_result
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - sharedmodule/llmswitch-core/src/servertool
-      - src/commands
+      - src/cli/commands
       - src/server/handlers
+      - docs/design/servertool-cli-lifecycle.md
       - docs/design/servertool-cli-projection-migration.md
     forbidden_paths:
       - src/providers
@@ -60,13 +56,17 @@ owners:
       - tests/servertool/servertool-cli-projection.spec.ts
       - tests/servertool/servertool-cli-execution.spec.ts
       - tests/servertool/servertool-cli-result-restore.spec.ts
+      - tests/cli/servertool-command.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
+      - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
     required_gates:
       - npm run build:min
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
       - Phase 1 keeps existing injection/interception but projects execution to real client exec_command.
+      - CLI command is `routecodex servertool run <toolName> --input-json <json>`; no opaque state handle is used.
+      - stop_message_auto CLI input must include continuationPrompt, repeatCount, and maxRepeats when stopless state is available.
       - CLI execution path must not call server-side followup/reenter for migrated flows.
       - `apply_patch` is excluded; it remains native/freeform client tooling.
 
@@ -131,19 +131,13 @@ owners:
 
   - feature_id: quota.unified_control_surface
     status: active
-    summary: quota admin/control and startup hydration must stay config-scoped and enter one module-owned control surface only
+    summary: quota mutation surface and startup hydration must stay config-scoped and enter one module-owned surface only
     owner_module: src/manager/modules/quota
     canonical_types:
       - QuotaManagerModule
       - QuotaManagerAdapter
     canonical_builders:
       - getControlSurface
-      - clearCooldown
-      - restoreNow
-      - setQuota
-      - resetProvider
-      - recoverProvider
-      - disableProvider
     allowed_paths:
       - src/manager/modules/quota
       - src/server/runtime/http-server/daemon-admin
@@ -173,7 +167,7 @@ owners:
       - build_unavailable_providers_details
       - collect_recoverable_cooldown_for_key
     allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine
       - sharedmodule/llmswitch-core/src/router/virtual-router
       - docs
     forbidden_paths:
@@ -277,6 +271,7 @@ owners:
     required_tests:
       - tests/utils/snapshot-stage-policy.spec.ts
       - tests/providers/core/utils/snapshot-writer.release-gating.spec.ts
+      - tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts
       - tests/debug/snapshot-store-port-isolation.red.spec.ts
       - tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts
     required_gates:
@@ -285,7 +280,7 @@ owners:
     migration_target: rust
     notes:
       - Default `--snap` must record client/provider request/response boundaries only; module snaps require explicit selector or hub-snapshot switch.
-      - Snapshot metadata stays at snapshot root only and must never leak back into provider/client live payloads.
+      - Provider samples must not persist request metadata/internal carriers; only explicit non-sensitive meta fields may be written.
 
   - feature_id: responses.direct_tool_shape_contract
     status: active
@@ -489,7 +484,6 @@ owners:
       - Shared instructions lift truth lives in `responses.instructions_to_input_normalization`.
       - Shared function tool normalization truth lives in `responses.function_tool_normalization`.
       - Shared parameters normalization truth lives in `responses.tool_parameters_normalization`.
-
   - feature_id: responses.crs_request_compat
     status: active
     summary: responses:crs request compat must strip temperature only in Rust
@@ -516,3 +510,256 @@ owners:
       - `temperature` stripping for crs is Rust-only.
       - Shared function tool normalization truth lives in `responses.function_tool_normalization`.
       - Shared parameters normalization truth lives in `responses.tool_parameters_normalization`.
+
+  - feature_id: manager.routing_control_surface
+    status: active
+    summary: routing instruction / provider health state store managed through Rust VR state store; TS modules/routing is bridge only
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
+    canonical_types:
+      - RoutingInstructionState
+      - RoutingManagerStateStore
+    canonical_builders:
+      - load_routing_instruction_state
+      - persist_routing_instruction_state
+      - load_provider_health_state
+      - persist_provider_health_state
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
+      - src/manager/modules/routing
+      - src/modules/llmswitch/bridge
+    forbidden_paths:
+      - src/server/runtime/http-server/daemon-admin
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - src/manager/modules/quota
+    required_tests:
+      - tests/sharedmodule/routing-state-store-observability.spec.ts
+      - tests/sharedmodule/routing-state-continuation-matrix.spec.ts
+      - tests/manager/storage/jsonl-file-store.spec.ts
+    required_gates:
+      - npm run verify:architecture-ci
+    migration_target: rust
+    notes:
+      - Routing state persistence truth lives in Rust routing_state_store.rs; TS RoutingStateManagerModule is bridge.
+      - Must not duplicate vr.route_selection / vr.route_availability_floor semantics; selection floor stays in Rust.
+  - feature_id: manager.health_runtime
+    status: active
+    summary: provider health / cooldown / persisted 503 family managed by Rust Virtual Router health; TS modules/health is persistence bridge
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
+    canonical_types:
+      - ProviderHealthState
+      - ProviderInternalState
+    canonical_builders:
+      - record_failure
+      - cooldown_provider
+      - cooldown_provider_until_midnight_persisted
+      - clear_windsurf_managed_persisted_503_family
+      - consume_persisted_503_reprobe_if_available
+      - trip_provider
+      - is_available
+      - is_persisted_503_daily_cooldown_active
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
+      - src/manager/modules/health
+      - src/modules/llmswitch/bridge
+    forbidden_paths:
+      - src/server/runtime/http-server/daemon-admin
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - src/manager/modules/routing
+      - src/manager/modules/quota
+    required_tests:
+      - tests/manager/storage/jsonl-file-store.spec.ts
+      - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
+    required_gates:
+      - npm run verify:architecture-ci
+    migration_target: rust
+    notes:
+      - Health truth (success/failure/cooldown/persisted 503 family) lives in Rust health.rs.
+      - TS HealthManagerModule is jsonl persistence bridge only; must not redefine cooldown/persisted semantics.
+  - feature_id: manager.token_runtime
+    status: active
+    summary: OAuth token daemon lifecycle / leader-lock / history-store managed by TS token-daemon as the unique owner; no Rust twin
+    owner_module: src/token-daemon
+    canonical_types:
+      - TokenManagerLeaderInfo
+      - TokenHistoryStore
+    canonical_builders:
+      - tryAcquireTokenManagerLeader
+      - releaseTokenManagerLeader
+    allowed_paths:
+      - src/token-daemon
+      - src/manager/modules/token
+    forbidden_paths:
+      - src/server/runtime/http-server/daemon-admin
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - src/manager/modules/routing
+      - src/manager/modules/health
+      - src/manager/modules/quota
+    required_tests:
+      - tests/token-daemon/leader-lock.spec.ts
+      - tests/token-daemon/token-daemon.refresh-ahead.spec.ts
+    required_gates:
+      - npm run verify:architecture-ci
+    migration_target: ts
+    notes:
+      - token-daemon is the unique owner of token leader-lock + history-store semantics.
+      - Must not be co-located with quota/health/routing; forbids cross-module mutation.
+  - feature_id: manager.quota_lifecycle
+    status: active
+    summary: provider quota lifecycle (startup hydration, persist, prune) lives in TS provider-quota-center; the mutation surface is delegated to quota.unified_control_surface
+    owner_module: src/manager/quota
+    canonical_types:
+      - ProviderQuotaCenter
+      - ProviderQuotaStore
+    canonical_builders:
+      - loadProviderQuotaSnapshot
+      - saveProviderQuotaSnapshot
+    allowed_paths:
+      - src/manager/quota
+      - src/manager/modules/quota
+    forbidden_paths:
+      - src/server/runtime/http-server/daemon-admin
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+    required_tests:
+      - tests/manager/quota/provider-quota-center.spec.ts
+      - tests/manager/quota/provider-quota-store.spec.ts
+      - tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts
+    required_gates:
+      - npm run verify:architecture-ci
+    migration_target: rust
+    notes:
+      - lifecycle axis (hydration/persist/prune) != control axis (mutate quotas) of quota.unified_control_surface.
+      - Quota control mutations must still go through quota.unified_control_surface; this feature owns the persist side.
+  - feature_id: daemon_admin.command_handlers
+    status: active
+    summary: daemon-admin HTTP surface (auth/credentials/ports/providers/quota/restart/stats/status) is projection shell over manager/llmswitch-core truth
+    owner_module: src/server/runtime/http-server/daemon-admin
+    canonical_types:
+      - DaemonAdminRouteOptions
+      - DaemonAdminRouteRegistrar
+    canonical_builders:
+      - registerDaemonAuthRoutes
+      - registerQuotaRoutes
+      - registerProviderRoutes
+      - registerControlRoutes
+      - registerRestartRoutes
+      - registerStatsRoutes
+      - registerStatusRoutes
+      - registerPortsRoutes
+      - registerCredentialRoutes
+    allowed_paths:
+      - src/server/runtime/http-server/daemon-admin
+      - src/server/runtime/http-server/daemon-admin-routes.ts
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server/executor
+      - src/manager/modules/quota
+    required_tests:
+      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
+      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
+      - tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts
+      - tests/server/daemon-admin/providers-handler-utils.spec.ts
+    required_gates:
+      - npm run verify:architecture-ci
+    migration_target: ts
+    notes:
+      - daemon-admin is handler-family projection; it must not own quota/health/routing state.
+      - state mutators call into manager/* or llmswitch-core; daemon-admin only projects HTTP and auth.
+  - feature_id: server.http_runtime_entry
+    status: active
+    summary: HTTP server entry / lifecycle / port registry / route wiring is a thin shell over handlers and manager modules
+    owner_module: src/server/runtime/http-server
+    canonical_types:
+      - RouteCodexHttpServer
+      - PortRegistry
+    canonical_builders:
+      - initializeHttpServer
+      - registerHttpRoutes
+      - getPortRegistry
+      - canonicalizeServerId
+    allowed_paths:
+      - src/server/runtime/http-server
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/manager/modules/quota
+      - src/manager/modules/routing
+    required_tests:
+      - tests/server/runtime/http-server/direct-passthrough-payload.spec.ts
+      - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
+    required_gates:
+      - npm run verify:architecture-ci
+    migration_target: ts
+    notes:
+      - entry shell only: lifecycle, port registry, route wiring, restart runtime. No tool governance semantics.
+  - feature_id: server.responses_handler_family
+    status: active
+    summary: handlers/chat/config-admin/images/messages/responses project client protocol; Hub tool governance must stay out
+    owner_module: src/server/handlers
+    canonical_types:
+      - HandlerContext
+      - PipelineExecutionInput
+      - PipelineExecutionResult
+    canonical_builders:
+      - handleChatCompletions
+      - handleImageGenerations
+      - handleMessages
+      - handleResponses
+      - handleGetUserConfig
+      - handleListProviderTemplates
+      - handleValidateUserConfig
+      - handleSaveUserConfig
+    allowed_paths:
+      - src/server/handlers
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - src/providers/core/runtime
+    required_tests:
+      - tests/server/handlers/handler-metadata-boundary.spec.ts
+      - tests/server/handlers/chat-handler.started-sse-error.spec.ts
+      - tests/server/handlers/messages-handler.started-sse-error.spec.ts
+    required_gates:
+      - npm run verify:architecture-ci
+    migration_target: ts
+    notes:
+      - handler family is protocol projection; must delegate tool governance to llmswitch-core and never own it.
+  - feature_id: cli.command_surface
+    status: active
+    summary: CLI command surface is entry shell: arg parse + dispatch to http-server / manager / command runtime; no business semantics
+    owner_module: src/cli/commands
+    canonical_types:
+      - CliCommandRegistrar
+    canonical_builders:
+      - createStartCommand
+      - createStopCommand
+      - createStatusCommand
+      - createConfigCommand
+      - createCodeCommand
+      - createCodexCommand
+      - createClaudeCommand
+      - createCamoufoxCommand
+      - createGuardianDaemonCommand
+      - createInitCommand
+      - createRestartCommand
+      - createSessionAdminCommand
+      - createSessionInjectCommand
+    allowed_paths:
+      - src/cli/commands
+      - src/cli/register
+    forbidden_paths:
+      - src/server/runtime/http-server/daemon-admin
+      - src/providers/core/runtime
+      - src/manager/modules/quota
+      - src/manager/modules/routing
+    required_tests:
+      - tests/cli/start-command.spec.ts
+      - tests/cli/stop-command.spec.ts
+      - tests/cli/port-command.spec.ts
+      - tests/cli/status-command.spec.ts
+    required_gates:
+      - npm run verify:architecture-ci
+    migration_target: ts
+    notes:
+      - CLI surface is dispatch only; must not own business logic. All actions go through http-server or manager modules.

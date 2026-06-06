@@ -110,7 +110,7 @@ describe('provider snapshot writer local mirror', () => {
     expect(runtimeParsed.matchedPort).toBe(5555);
   });
 
-  it('does not write raw request/context tool carriers into provider snapshot requestMetadata', async () => {
+  it('does not write request metadata or internal carriers into provider snapshots', async () => {
     const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
     const requestId = 'req_provider_snapshot_metadata_sanitize';
     const providerKey = 'minimax.key1.MiniMax-M3';
@@ -132,6 +132,8 @@ describe('provider snapshot writer local mirror', () => {
         },
         responsesContext: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
         contextSnapshot: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
+        __rt: { sessionDir: '/tmp/rcc-internal-session' },
+        metadata: { __rt: { nested: true }, snapshot: { debug: true } },
         portContext: { logNamespace: 'server-5555' }
       },
       data: { model: 'minimax-m3-free', messages: [{ role: 'user', content: 'ok' }] }
@@ -147,14 +149,20 @@ describe('provider snapshot writer local mirror', () => {
       requestId,
       'provider-request.json'
     );
-    const parsed = JSON.parse(await fs.readFile(filePath, 'utf-8')) as { meta?: Record<string, any> };
-    const serializedMeta = JSON.stringify(parsed.meta?.requestMetadata ?? {});
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = JSON.parse(raw) as { meta?: Record<string, any>; body?: Record<string, any> };
 
-    expect(parsed.meta?.requestMetadata?.matchedPort).toBe(5555);
-    expect(parsed.meta?.requestMetadata?.portContext?.logNamespace).toBe('server-5555');
-    expect(serializedMeta).not.toContain('__raw_request_body');
-    expect(serializedMeta).not.toContain('responsesRequestContext');
-    expect(serializedMeta).not.toContain('toolsRaw');
-    expect(serializedMeta).not.toContain('"type":"namespace"');
+    expect(parsed.meta?.matchedPort).toBe(5555);
+    expect(parsed.meta?.entryPort).toBe(5555);
+    expect(parsed.meta?.requestMetadata).toBeUndefined();
+    expect(raw).not.toContain('requestMetadata');
+    expect(raw).not.toContain('__raw_request_body');
+    expect(raw).not.toContain('responsesRequestContext');
+    expect(raw).not.toContain('toolsRaw');
+    expect(raw).not.toContain('"type":"namespace"');
+    expect(raw).not.toContain('__rt');
+    expect(raw).not.toContain('"metadata"');
+    expect(raw).not.toContain('sessionDir');
+    expect(raw).not.toContain('"snapshot"');
   });
 });

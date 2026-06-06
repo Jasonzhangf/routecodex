@@ -38,7 +38,7 @@ export async function resolveProviderRetryBackoffPlan(args: {
     reason: args.retryError.reason,
     forceProviderScopedBackoff: args.forceProviderScopedBackoff,
     forceAttemptScopedBackoff: args.forceAttemptScopedBackoff,
-    retryAction: args.forceProviderScopedBackoff ? 'reroute_explicit_alternative' : 'retry_same_provider'
+    retryAction: 'reroute_explicit_alternative'
   });
   const blockingRecoverable = actionPlan.blockingRecoverable;
   if (actionPlan.backoff.scope === 'attempt') {

@@ -107,27 +107,35 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
   });
-  await reportRequestExecutorProviderError({
-    error: cloneErrorForReporting(args.error),
-    retryError: args.retryError,
-    requestId: args.requestId,
-    providerKey: args.providerKey,
-    providerId: args.providerId,
-    providerType: args.providerType,
-    providerFamily: args.providerFamily,
-    providerProtocol: args.providerProtocol,
-    routeName: args.routeName,
-    runtimeKey: args.runtimeKey,
-    target: args.target,
-    dependencies: args.dependencies,
-    attempt: args.attempt,
-    logStage: args.logStage,
-    stageHint: reportPlan.stageHint,
-    metadata: args.metadata,
-    extraDetails: {
-      routePoolSize: Array.isArray(args.routePool) ? args.routePool.length : 0
-    }
-  });
+  try {
+    await reportRequestExecutorProviderError({
+      error: cloneErrorForReporting(args.error),
+      retryError: args.retryError,
+      requestId: args.requestId,
+      providerKey: args.providerKey,
+      providerId: args.providerId,
+      providerType: args.providerType,
+      providerFamily: args.providerFamily,
+      providerProtocol: args.providerProtocol,
+      routeName: args.routeName,
+      runtimeKey: args.runtimeKey,
+      target: args.target,
+      dependencies: args.dependencies,
+      attempt: args.attempt,
+      logStage: args.logStage,
+      stageHint: reportPlan.stageHint,
+      metadata: args.metadata,
+      extraDetails: {
+        routePoolSize: Array.isArray(args.routePool) ? args.routePool.length : 0
+      }
+    });
+  } catch (reportError) {
+    args.logNonBlockingError('request_executor.provider_error_report.failed', reportError, {
+      requestId: args.requestId,
+      providerKey: args.providerKey,
+      stageHint: reportPlan.stageHint
+    });
+  }
   const retryTelemetryPlan =
     retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan && retryExecutionPlan.backoffScope
       ? buildProviderRetryTelemetryPlan({

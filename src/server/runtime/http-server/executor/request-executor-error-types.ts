@@ -26,7 +26,7 @@ export type ProviderRetryBackoffPlan = {
   backoffScope: 'provider' | 'recoverable' | 'attempt';
 };
 
-export type ProviderRetrySwitchAction = 'exclude_and_reroute' | 'retry_same_provider';
+export type ProviderRetrySwitchAction = 'exclude_and_reroute';
 
 export type ProviderRetryBackoffScope = ProviderRetryBackoffPlan['backoffScope'];
 

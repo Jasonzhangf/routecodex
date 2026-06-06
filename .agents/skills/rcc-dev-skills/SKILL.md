@@ -1049,7 +1049,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 | `finish_reason=stop` 无 tool_calls | heredoc 未被收割 | `resp_process_stage1_tool_governance.json` |
 | 工具列表缺失 | snapshot summary 压缩了 tools | 检查 `req_process_stage1` 的原始 payload |
 | qwen `invalid_parameter_error: bad request` | qwen-oauth 缺少首条 system envelope（`content:[{type:text,cache_control:ephemeral}]`） | provider `qwen-profile.buildRequestBody` 是否注入并合并 system messages |
-| 路由池未耗尽却直接把 `429` 漏给客户端 | `request-executor` 把 `routingDecision.pool`（当前命中 tier）误当成整条 route 已耗尽，错误触发 `retry_same_provider` | 先看 `request-executor` 的 `singleProviderPool/holdOnLastAvailable429`；**singleton pool 不能证明没有低优先级 fallback pool** |
+| 路由池未耗尽却直接把 `429` 漏给客户端 | `request-executor` 把 `routingDecision.pool`（当前命中 tier）误当成整条 route 已耗尽，错误未进入 `exclude_and_reroute` | 先看 `request-executor` 的 `excludedProviderKeys` 是否累计当前 provider；**singleton pool 不能证明没有低优先级 fallback pool** |
 | 想做“全局错误中心”收口 | 独立 center/event bus 只会形成第二中心，真正策略真源应在 Router | 先看 `docs/error-handling-v2.md` 与 `Virtual Router policy`；若某层只有 `emit/subscribe/normalize` 而不掌握 retry/reroute/backoff/fail，就应删除而不是升格 |
 
 ## 禁止事项
@@ -1124,7 +1124,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 错误收口主链（2026-04-16）：排查 provider 执行期错误时，先确认主路径是否仍是 **`provider-error-reporter -> reportProviderErrorToRouterPolicy -> Virtual Router policy`**；如果又看到 `providerErrorCenter` + `RouteErrorHub` 双上报、或 HubPipeline 重新直接订阅 legacy center，优先判定为“第二中心回流”。
 - stopless 硬校验（2026-04-16）：若 `stopless=on/endless` 但响应已 `completed/stop` 且缺 `[app.finished:reasoning.stop]` finalized marker，Host `RequestExecutor` 必须抛 `STOPLESS_FINALIZATION_MISSING`；不要把这种“完成但未 finalize”的响应当成功，避免客户端静默停住。
 - provider-switch 退避边界（2026-04-16）：若 retry 已经决定 `exclude_and_reroute`，generic 401/403/非 blocking 错误的 backoff 也必须按 **provider 维度**计数，不能沿用全请求 `attempt` 指数增长；否则不同 provider 会被无端抬高 backoff，看起来像调度在“全局连坐”。
-- provider-switch 观测口径（2026-04-16）：当你在日志里看不清“到底是在同 provider 等待，还是已决定换 provider”时，先补齐 `decisionLabel + backoffScope + stage`。最少要区分：`provider_backoff_then_reroute`、`recoverable_backoff_same_provider`、`attempt_backoff_same_provider`。
+- provider-switch 观测口径（2026-04-16，2026-06-06 修订）：provider 错误不得同 provider retry；日志只允许 `switch=exclude_and_reroute`，`decisionLabel + backoffScope + stage` 至少要能证明是 `provider_backoff_then_reroute`，不得再出现 `retry_same_provider` / `*_same_provider` 标签。
+- provider-switch 执行边界（2026-06-06）：`exclude_and_reroute` 后若路由池已耗尽，必须 fail-fast 返回最后一个 provider error；禁止在同一请求内 `provider.route_pool_cooldown_wait` 等待冷却，否则会表现为客户端 60s 超时 / `CLIENT_RESPONSE_CLOSED`。
 - provider-switch 装配真源（2026-04-16）：`switchAction + decisionLabel + runtimeScopeExcludedCount` 不要在 `runtime_resolve`、`provider.send`、followup 各自手拼；优先收口到单点 helper（当前 `resolveProviderRetrySwitchPlan(...)`），否则日志口径和 reroute 排除策略会再次分叉。
 - provider exclusion 真源（2026-04-16）：`promptTooLong`、Antigravity `verify/429`、`reauth`、alias rotate 这些“是否排除当前 provider / 是否把 antigravity 标成 `avoidAllOnRetry`”的规则，也要单点 helper 化（当前 `resolveProviderRetryExclusionPlan(...)`）；否则 reroute 行为会在 send/followup 边界重新分叉。
 - provider retry 资格真源（2026-04-16）：`attempt/maxAttempts`、blocking recoverable、`promptTooLong` budget、Antigravity `verify/reauth` 的 retry 条件，也要单点 helper 化（当前 `resolveProviderRetryEligibilityPlan(...)`）；不要让 `runtime_resolve` 和 `provider.send` 各自维护一份 shouldRetry 分支。
@@ -1670,7 +1671,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-30 Windsurf Cascade poll / retry 精华
 - Windsurf provider 内的 Cascade 状态机错误必须显式终止：`WINDSURF_CASCADE_BUSY` / `WINDSURF_CASCADE_NO_PROGRESS` 是本地 Cascade executor 状态，不是上游 503；retry policy 必须视为 unrecoverable，禁止 provider-switch 再次 Send 导致 `executor is not idle` 风暴。
-- 审计卡死时同时看 provider poll 状态和请求层 retry 分类：若 provider 已抛 `retryable:false` 但仍出现 `provider-switch retry_same_provider`，根因在 failure-policy 分类，不在 Windsurf payload shape。
+- 审计卡死时同时看 provider poll 状态和请求层 retry 分类：若 provider 已抛 `retryable:false` 但仍出现重复 provider send，根因在 failure-policy / request-executor exclusion 执行链，不在 Windsurf payload shape。
 
 - 2026-05-30 chat stream_options 400 精华：若上游报 `stream_options should be set along with stream = true`，必须查最终 `provider-request.json`，不要只看 direct payload mock。OpenAI-chat 通用真源在 `provider-request-shaping-utils`：从 request/data/metadata/runtime metadata 读取 stream intent，并在最终 provider HTTP body 保留 `stream:true`；禁止 DeepSeek/provider 硬编码。
 
@@ -1916,4 +1917,46 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - SSE 线上复测必须显式带 `Accept: text/event-stream`；否则日志 `acceptsSse=false` 只能证明客户端未声明 SSE，不可当作 SSE 回归。
 - longcontext token-threshold 不能把非空 configured pool 筛成 `PROVIDER_NOT_AVAILABLE`：当 `context_hard_limit=false` 时，overflow-context provider 仍必须可被选中，由上游真实尝试/失败显式暴露；修点在 Rust Virtual Router selection，不在 TS executor/handler 补 provider。
 - Client SSE guard 禁止按字段名裸拦 `metadata`：OpenAI Responses SSE event 顶层 `metadata:{}` 和 `response.metadata` 是公开协议字段；只在 metadata 值含 `routeHint/providerKey/__routecodex*/__rt*` 等内部 carrier shape 时 fail-fast。
-- Servertool 执行迁移方向：Phase 1 保留注入/拦截，但拦截后必须投影为真实客户端 `exec_command` CLI (`routecodex servertool run --ticket <id>`)，submit 回来后按 ticket 恢复原 model tool identity；这是 result restoration，不是 followup。详细设计见 `docs/design/servertool-cli-projection-migration.md`。
+- Servertool 执行迁移方向：Phase 1 保留注入/拦截，但拦截后必须投影为真实客户端 `exec_command` CLI (`routecodex servertool run <toolName> --input-json <json>`)，结果按普通客户端 `exec_command` 工具结果回传；不使用旧 restoration 机制，不恢复内部 model tool identity。详细设计见 `docs/design/servertool-cli-projection-migration.md`。
+
+## 2026-06-06 servertool CLI projection Phase 1 精华
+
+- servertool CLI projection 的最小闭环必须锁三件事：response-side 投影 `exec_command` + CLI dispatcher 执行 + 普通客户端工具结果回传；任何 old restoration or single-use result remapping 设计均为旧方案污染。
+- `apply_patch` 已从 servertool 语义中排除，相关 architecture verifier / function map 必须检查“servertool handler 不存在”，不能继续引用旧 `handlers/apply-patch.ts`。
+- stopless CLI 生命周期必须把原 followup 注入文本、连续 stop 次数、最大次数写入 `--input-json`，CLI stdout 原样返回这些字段；下一轮只根据普通 `exec_command` 工具结果继续，禁止再次投影同一个 `stop_message_auto` 造成循环。
+- stopless CLI projection 必须先判定“需要续杯”：普通 `finish_reason=stop` 且已有可见正文、无显式 stopless/goal 状态时必须 passthrough；红测要断无 `exec_command`、无 `required_action`、SSE 仍输出 `output_text`。
+
+## 2026-06-06 provider switch / retry 经验
+- 若线上日志出现同一 provider 错误反复打或 `No available providers`，先用同一 `clientRequestId` 查 `~/.rcc/codex-samples/.../ports/<port>/**`：必须看到失败 provider request 后有另一个 provider response；没有第二 provider 样本，优先查 executor 是否把 provider-switch 预算错误绑定到 `maxAttempts`。
+- provider 切换不是同 provider retry：任意 provider 错误只要 route pool 有未排除候选，就应写入 `excludedProviderKeys` 并 `exclude_and_reroute`；日志应包含 `[provider-switch] ... decision=provider_backoff_then_reroute`，避免模型/用户看到无反馈循环。
+
+### 2026-06-06 direct retry wrapper 红线
+- router-direct 只能做 same-protocol provider passthrough + hooks；禁止在 `index.ts` direct live path 调 `resolveRequestExecutorProviderFailurePlan`、生成 `retryMetadata`、写 `__routecodexProviderFailureAttemptOffset` 或本地重入标准 pipeline。provider 错误必须进入 executor/error 唯一链，direct 本地只记录 `router-direct.send.error` 并抛出。
+- `/v1/responses` 出现 `Responses wire requires top-level tool.name` 时先查 direct 入口：chat-style `{type:"function", function:{...}}` 工具必须让 `evaluateDirectRouteDecision` 返回 `providerWireValid=false` 并走 relay；线上复测要看 provider-request tool shape 和 `router-direct.send.error` 是否消失。
+
+## 2026-06-06 apply_patch 高效编辑法（沉淀）
+- 想在 yml/JSON/MD 末尾追加大块内容时，先用空行 sentinel 单独 patch 一行（如 `__LONGTAIL_TAIL_SENTINEL__`），然后第二次 patch 用 sentinel 作为 find-context 并把 `+` 行接在它后面，sentinel 行用 `-` 删掉；这样 verifier 的 find-context 短、匹配稳。
+- JSON / TS / Rust 文件中插入 anchor 注释（`// feature_id: <id>`）时 find-context 必须包含"原始完整行"：原文件首行如 `import { Command } from 'commander';` 后有空行，patch 的 find-context 也必须保留该空行；空行被吃会导致 verifier 失败。务必用 `head -3` 先打印精确字节。
+- 长行（`package.json` `verify:architecture-ci` 链动辄 1800+ 字符）不要做单 patch 的 find+replace；分两步：(1) 用 `+` 在该行下面注入新行（短小 find-context）；(2) 在 file 末尾另开新 script 名称独立追加，不要尝试在 ci 链尾部接 `&&`。
+- 修改 function-map 的 `canonical_builders` 前先 `grep -nE "^pub fn|^export (async )?function"` 真源文件，确保 builder 名在 owner_module 内真有定义；否则 `verify:function-map-canonical-builder-definitions` 会 fail。Rust 端前缀 `clear_/consume_/is_/cooldown_` 等必须 1:1 匹配函数名。
+- 修改 `canonical_types` 前先 `grep` 全仓库同名字面量；与 `forbidden_paths` 下任何文件命中的字面量（哪怕只是字符串字面量提及或测试 fixture）都会被 `verify:architecture-forbidden-path-growth` 拦截。改用不会冲突的同义名。
+
+## 2026-06-06 function-map longtail closeout 精华
+- 8 个新 feature 全部以 Rust 真源为 owner_module（P1-1/2/4/5/6/7）；唯一 TS owner 仅 `manager.token_runtime`（src/token-daemon，无 Rust twin）和 `quota.unified_control_surface` 的 TS 桥接；`error.provider_failure_policy` 显式列入 `verify-architecture-ts-owner-ban` 的白名单。
+- `verify:architecture-duplicate-owner` 规则：leaf-file owner（`.rs/.ts`）被多 feature 共享时，仅当 canonical_builder 集合存在交集才视为真冲突；这是 `req_outbound_stage3_compat/responses/request.rs` 4 feature 共享的合法模型（每个 feature 描述一个独立 builder）。
+- 3 个新 gate：deleted-path（拦截 `required_tests/required_gates/allowed_paths` 指向已删文件）、duplicate-owner（owner 唯一性 + keyword 动作对跨 family 检测）、ts-owner-ban（除白名单外 TS 壳不得作为 owner）。注册为独立 `verify:architecture-ci-longtail` 链，不并入长 `verify:architecture-ci`（避免 1800+ 字符 find context 死循环）。
+- 完成标准：25 features（17 旧 + 8 新），全套 `verify:architecture-ci` 与 3 个新 gate 全绿。
+
+## 2026-06-06 direct tools leak 复测精华
+
+- 若 `/v1/responses` + `tools[]` 仍出现 `router-direct.send` 或 `Responses wire requires top-level tool.name`，先查 `router-direct-pipeline.ts` 核心函数是否自守卫 `openai-responses tools[] -> direct_requires_hub_relay`；不能只依赖 `index.ts` 外层入口判定。
+- 复测 10000 时若 `127.0.0.1:10000` 返回 `Empty reply from server`，先用 `lsof -nP -iTCP:10000 -sTCP:LISTEN` 查端口冲突；本机 BaiduNetdisk 可能占用 `127.0.0.1:10000`，可用本机 LAN IP 命中 RCC 的 `0.0.0.0:10000` 监听做对照。
+
+## 2026-06-06 direct provider error leak / relay reselection lesson
+- Symptom: `router-direct.send.error` provider runtime errors reached client instead of switching providers. Fix owner is `RouteCodexHttpServer.executeRouterDirectPipelineForPort` + `executePortAwarePipeline`: report through `reportRequestExecutorProviderError`, return `excludedProviderKey`, then relay executor runs with `excludedProviderKeys`; do not add local retry/classification in `router-direct-pipeline.ts`.
+- Required red test: `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts` must include `router same-protocol direct provider error reroutes through relay with provider excluded`, and online smoke must check 5555/10000 SSE contains no direct provider error marker.
+
+## 2026-06-06 调试精华（10000 loopback shadow / stopless metadata）
+
+- 10000 若 `LAN /health` 正常但 `127.0.0.1 /health` empty reply，优先查 loopback-only shadow listener；macOS 可同时存在 `127.0.0.1:PORT` 与 `*.PORT`，必须启动前 fail-fast，禁止按 IP 做端口特例或把它误判为 RouteCodex block IP。
+- stopless/session metadata owner 只解析并绑定 scope：header/body/user metadata 的 tmux/session/workdir 是请求事实，不能在 metadata builder 阶段因 tmux liveness 抹掉；tmux alive 检查属于后续注入/cleanup owner。

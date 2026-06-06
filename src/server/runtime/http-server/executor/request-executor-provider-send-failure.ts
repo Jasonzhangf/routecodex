@@ -55,7 +55,7 @@ type RequestExecutorProviderSendFailureArgs = {
     statusCode?: number;
     errorCode?: string;
     upstreamCode?: string;
-    switchAction: 'exclude_and_reroute' | 'retry_same_provider';
+    switchAction: 'exclude_and_reroute';
     backoffScope?: 'provider' | 'recoverable' | 'attempt';
     decisionLabel?: string;
     stage?: 'provider.runtime_resolve' | 'provider.send';
@@ -281,7 +281,6 @@ export async function processProviderSendFailure(
   const contextOverflowRetries = promptTooLong
     ? args.contextOverflowRetries + 1
     : args.contextOverflowRetries;
-
   const providerFailurePlan = await resolveRequestExecutorProviderFailurePlan({
     error: args.error,
     retryError,
@@ -322,22 +321,22 @@ export async function processProviderSendFailure(
     throw args.error;
   }
 
-  const shouldPreserveSameProviderRetry = retryExecutionPlan.retrySwitchPlan?.switchAction === 'retry_same_provider';
   const blockingRecoverableRouteHoldState =
-    (retryExecutionPlan.blockingRecoverable || shouldPreserveSameProviderRetry)
+    retryExecutionPlan.blockingRecoverable
       ? {
         providerKey: args.providerKey,
         runtimeKey: args.runtimeKey,
         retryError,
         holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
         explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1,
-        preserveSameProviderRetry: shouldPreserveSameProviderRetry,
-        routePoolForSameProviderRetry: Array.isArray(args.routePoolForAttempt) ? [...args.routePoolForAttempt] : undefined
+        preserveSameProviderRetry: false,
+        routePoolForSameProviderRetry: undefined
       }
       : null;
   const allowBlockingRecoverableRetryBeyondAttemptBudget =
-    args.attempt >= args.maxAttempts
-    && retryExecutionPlan.blockingRecoverable;
+    args.maxAttempts <= 1
+    && args.attempt >= args.maxAttempts
+    && retryExecutionPlan.retrySwitchPlan.switchAction === 'exclude_and_reroute';
 
   emitRequestExecutorProviderRetryTelemetry({
     requestId: args.requestId,

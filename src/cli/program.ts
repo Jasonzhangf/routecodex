@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 
+// feature_id: cli.command_surface
 import type { CliRuntime } from './runtime.js';
 
 export type CliProgramContext = {
@@ -26,4 +27,3 @@ export function createCliProgram(ctx: CliProgramContext): Command {
 
   return program;
 }
-

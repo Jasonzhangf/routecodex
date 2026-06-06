@@ -1,5 +1,6 @@
 /**
  * RouteCodex-X7E Phase 1: Quota State Types & Utilities
+ * feature_id: manager.quota_lifecycle
  *
  * This file now serves as the pure type definitions and utility library for quota operations.
  * All state mutations are performed through QuotaManagerAdapter (SSOT).

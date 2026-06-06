@@ -30,15 +30,18 @@ verification:
       - tests/servertool/servertool-cli-projection.spec.ts
       - tests/servertool/servertool-cli-execution.spec.ts
       - tests/servertool/servertool-cli-result-restore.spec.ts
+      - tests/cli/servertool-command.spec.ts
     integration:
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
+      - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
     smoke:
       - npm run verify:architecture-ci
     build:
       - npm run build:min
     notes:
       - Phase 1 must prove intercepted servertools return reasoning + exec_command CLI call and do not invoke server-side followup/reenter.
-      - Submit-tool-output restoration must preserve original model tool call identity for protocol symmetry.
+      - Ticket-backed submit restoration is removed; submitted exec_command results remain standard client tool outputs.
+      - stop_message_auto lifecycle must prove CLI input/output carries continuationPrompt, repeatCount, maxRepeats, and does not re-project after CLI output returns.
 
   - feature_id: error.provider_failure_policy
     change_risk: high
@@ -157,6 +160,7 @@ verification:
       - tests/debug/snapshot-store-port-isolation.red.spec.ts
     integration:
       - tests/providers/core/utils/snapshot-writer.release-gating.spec.ts
+      - tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts
       - tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts
     smoke:
       - npm run verify:architecture-snapshot-stage-contract
@@ -292,6 +296,135 @@ verification:
       - Shared instructions lift is verified under `responses.instructions_to_input_normalization`.
       - Shared tool normalization is verified under `responses.function_tool_normalization`.
       - Shared parameters normalization is verified under `responses.tool_parameters_normalization`.
+
+  - feature_id: manager.routing_control_surface
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
+    contract:
+      - tests/sharedmodule/routing-state-store-observability.spec.ts
+      - tests/sharedmodule/routing-state-continuation-matrix.spec.ts
+    integration:
+      - tests/manager/storage/jsonl-file-store.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - Routing state store truth lives in Rust; TS RoutingStateManagerModule is bridge only.
+
+  - feature_id: manager.health_runtime
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
+    contract:
+      - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
+    integration:
+      - tests/manager/storage/jsonl-file-store.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - Provider health / cooldown / persisted 503 family must stay in Rust; TS is persistence bridge.
+
+  - feature_id: manager.token_runtime
+    change_risk: medium
+    unit:
+      - src/token-daemon/token-daemon.ts
+    contract:
+      - tests/token-daemon/leader-lock.spec.ts
+      - tests/token-daemon/token-daemon.refresh-ahead.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - token-daemon is the unique owner; no Rust twin.
+
+  - feature_id: manager.quota_lifecycle
+    change_risk: high
+    unit:
+      - src/manager/quota/provider-quota-center.ts
+      - src/manager/quota/provider-quota-store.ts
+    contract:
+      - tests/manager/quota/provider-quota-center.spec.ts
+      - tests/manager/quota/provider-quota-store.spec.ts
+    integration:
+      - tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - lifecycle axis (hydration/persist/prune); control axis is quota.unified_control_surface.
+
+  - feature_id: daemon_admin.command_handlers
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/daemon-admin-routes.ts
+    contract:
+      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
+      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
+      - tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts
+    integration:
+      - tests/server/daemon-admin/providers-handler-utils.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - handler family must not own quota/health/routing state; calls into manager or llmswitch-core.
+
+  - feature_id: server.http_runtime_entry
+    change_risk: medium
+    unit:
+      - src/server/runtime/http-server/index.ts
+    contract:
+      - tests/server/runtime/http-server/direct-passthrough-payload.spec.ts
+    integration:
+      - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - entry shell only: lifecycle, port registry, route wiring, restart runtime.
+
+  - feature_id: server.responses_handler_family
+    change_risk: high
+    unit:
+      - src/server/handlers/responses-handler.ts
+      - src/server/handlers/chat-handler.ts
+    contract:
+      - tests/server/handlers/handler-metadata-boundary.spec.ts
+    integration:
+      - tests/server/handlers/chat-handler.started-sse-error.spec.ts
+      - tests/server/handlers/messages-handler.started-sse-error.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - handler family is protocol projection; must delegate tool governance to llmswitch-core.
+
+  - feature_id: cli.command_surface
+    change_risk: medium
+    unit:
+      - src/cli/program.ts
+    contract:
+      - tests/cli/start-command.spec.ts
+      - tests/cli/stop-command.spec.ts
+    integration:
+      - tests/cli/port-command.spec.ts
+      - tests/cli/status-command.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - CLI surface is dispatch only; all actions go through http-server or manager modules.
 
   - feature_id: responses.crs_request_compat
     change_risk: high

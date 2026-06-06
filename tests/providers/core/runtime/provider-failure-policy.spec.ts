@@ -524,8 +524,8 @@ describe('provider failure policy ssot', () => {
       affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
-      action: 'retry_same_provider',
-      decisionLabel: 'recoverable_backoff_same_provider',
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'recoverable_backoff_then_reroute',
       backoff: expect.objectContaining({
         scope: 'recoverable'
       })
@@ -561,8 +561,8 @@ describe('provider failure policy ssot', () => {
       affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
-      action: 'retry_same_provider',
-      decisionLabel: 'recoverable_backoff_same_provider',
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'recoverable_backoff_then_reroute',
       backoff: expect.objectContaining({
         scope: 'recoverable'
       })
@@ -588,8 +588,8 @@ describe('provider failure policy ssot', () => {
       affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
-      action: 'retry_same_provider',
-      decisionLabel: 'recoverable_backoff_same_provider',
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'recoverable_backoff_then_reroute',
       backoff: expect.objectContaining({
         scope: 'recoverable'
       })
@@ -616,8 +616,8 @@ describe('provider failure policy ssot', () => {
       affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
-      action: 'retry_same_provider',
-      decisionLabel: 'recoverable_backoff_same_provider',
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'recoverable_backoff_then_reroute',
       backoff: expect.objectContaining({
         scope: 'recoverable'
       })
@@ -644,7 +644,7 @@ describe('provider failure policy ssot', () => {
       affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
-      action: 'retry_same_provider'
+      action: 'reroute_explicit_alternative'
     }));
   });
 
@@ -686,8 +686,8 @@ describe('provider failure policy ssot', () => {
       affectsHealth: true,
       blockingRecoverable: true,
       shouldRetry: true,
-      action: 'retry_same_provider',
-      decisionLabel: 'recoverable_backoff_same_provider',
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'recoverable_backoff_then_reroute',
       backoff: expect.objectContaining({
         scope: 'recoverable'
       })

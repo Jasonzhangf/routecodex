@@ -130,10 +130,11 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
       const directName = typeof row.name === 'string' ? row.name.trim() : '';
       return functionName === 'apply_patch' || directName === 'apply_patch';
     });
+    const hasDeclaredToolArray = Array.isArray(input.payload.tools) && input.payload.tools.length > 0;
     return {
       providerWireValid: true,
-      requiresHubRelay: false,
-      reason: undefined,
+      requiresHubRelay: hasDeclaredToolArray,
+      reason: hasDeclaredToolArray ? 'responses tools require Hub relay tool governance' : undefined,
       hasDeclaredApplyPatchTool,
     };
   },
@@ -264,6 +265,21 @@ describe('direct-passthrough-payload', () => {
     expect(output).toEqual(ingress);
   });
 
+  it('routes valid responses tool declarations through Hub relay instead of router-direct', () => {
+    const decision = evaluateDirectRouteDecision({
+      inboundProtocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+        tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object' } }],
+      },
+    });
+
+    expect(decision.providerWireValid).toBe(true);
+    expect(decision.requiresHubRelay).toBe(true);
+    expect(decision.reason).toMatch(/tools require Hub relay/);
+  });
+
   it('rejects historical chat-style function tools on responses direct', () => {
     expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
@@ -332,7 +348,7 @@ describe('direct-passthrough-payload', () => {
     })).not.toThrow();
   });
 
-  it('does not force relay for legacy servertool apply_patch metadata', () => {
+  it('routes legacy servertool apply_patch metadata through Hub relay', () => {
     const result = evaluateDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       applyPatchMode: 'servertool',
@@ -344,8 +360,8 @@ describe('direct-passthrough-payload', () => {
     });
     expect(result).toMatchObject({
       providerWireValid: true,
-      requiresHubRelay: false,
-      reason: undefined,
+      requiresHubRelay: true,
+      reason: 'responses tools require Hub relay tool governance',
       hasDeclaredApplyPatchTool: true,
     });
   });

@@ -115,7 +115,6 @@ provider/runtime/send/convert/direct error
 2. `affectsHealth`: `true | false`
 3. `action`:
    - `direct_return`
-   - `retry_same_provider`
    - `reroute_explicit_alternative`
 4. `backoff`:
    - `none`
@@ -143,14 +142,12 @@ provider/runtime/send/convert/direct error
 - 不高频重放
 
 ### Rule 2: 可恢复错误
-- 只能 **block + 指数 backoff**
-- 默认 `retry_same_provider`
-- 不能先 exclude 当前 provider 再制造 `PROVIDER_NOT_AVAILABLE`
+- 必须先 exclude 当前 provider，再显式 reroute 到未排除候选
+- 如果没有未排除候选，必须 fail-fast 返回最后一个 provider error
+- 禁止同请求内等待冷却或重打同 provider
 
-### Rule 3: reroute 不是默认恢复手段
-只有在 **policy 明确证明存在显式替代候选** 且属于允许 reroute 的语义时，才允许 `reroute_explicit_alternative`。
-
-没有证据，就不能把 reroute 当“试试看”。
+### Rule 3: reroute 是唯一恢复执行动作
+只允许 `reroute_explicit_alternative`；无候选时不能通过等待冷却、same-provider retry 或 `PROVIDER_NOT_AVAILABLE` 循环伪造恢复。
 
 ### Rule 4: recoverable 默认 health-neutral
 只要是 recoverable provider 执行期错误，默认不毒化 provider health。
@@ -208,6 +205,6 @@ reporter 只能透传，不得 fallback 成另一套语义。
 4. `provider-error-reporter` 不再含 policy fallback 语义。
 5. 429 / `fetch failed` / `SQLITE_BUSY` / 5xx 不再触发 storm / `PROVIDER_NOT_AVAILABLE` 连锁。
 6. 在线日志里 recoverable 错误统一表现为：
-   - `switch=retry_same_provider`
-   - `decision=recoverable_backoff_same_provider` 或 `provider_backoff_same_provider`
+   - `switch=exclude_and_reroute`
+   - `decision=provider_backoff_then_reroute`
    - 无匿名风暴式 sibling 冲击。

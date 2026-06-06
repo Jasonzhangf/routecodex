@@ -245,8 +245,7 @@ export function buildProviderRetrySwitchPlan(args: {
   retryError?: RetryErrorSnapshot;
   backoffScope: ProviderRetryExecutionPlan['backoffScope'];
 }): ProviderRetrySwitchPlan {
-  const switchAction =
-    args.excludedCurrentProvider ? 'exclude_and_reroute' : 'retry_same_provider';
+  const switchAction = 'exclude_and_reroute';
   let runtimeScopeExcluded: string[] = [];
   const isProviderTrafficSaturated =
     args.retryError?.errorCode === 'PROVIDER_TRAFFIC_SATURATED'
@@ -270,7 +269,7 @@ export function buildProviderRetrySwitchPlan(args: {
   return {
     switchAction,
     decisionLabel: describeProviderFailureDecision({
-      action: switchAction === 'exclude_and_reroute' ? 'reroute_explicit_alternative' : 'retry_same_provider',
+      action: 'reroute_explicit_alternative',
       backoffScope: args.backoffScope ?? 'attempt'
     }),
     runtimeScopeExcluded,

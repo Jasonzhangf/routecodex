@@ -208,6 +208,8 @@ export function resetProviderRuntimeIngressForTests(): void {
   runtimeProviderQuotaHooks.clear();
   runtimeObserverHooks.clear();
 }
+// feature_id: vr.route_availability_floor
+// canonical_builders: build_unavailable_providers_details, collect_recoverable_cooldown_for_key
 // vr.route_availability_floor references:
 // - build_unavailable_providers_details
 // - collect_recoverable_cooldown_for_key

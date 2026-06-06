@@ -221,7 +221,7 @@ impl ProviderHealthManager {
         self.clear_windsurf_managed_persisted_503_family(provider_key);
     }
 
-    fn clear_windsurf_managed_persisted_503_family(&mut self, provider_key: &str) {
+    pub(crate) fn clear_windsurf_managed_persisted_503_family(&mut self, provider_key: &str) {
         let canonical = Self::canonicalize_provider_key(provider_key);
         if !canonical.starts_with("windsurf.managed.") {
             return;

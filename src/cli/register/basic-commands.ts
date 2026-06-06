@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 
+// feature_id: cli.command_surface
 import type { Spinner } from '../spinner.js';
 import type { CliLogger } from '../logger.js';
 import { createCleanCommand } from '../commands/clean.js';

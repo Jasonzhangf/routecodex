@@ -1,4 +1,5 @@
 import type { Request } from 'express';
+// feature_id: server.http_runtime_entry
 import type { PortConfig } from './port-config-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext } from '../../handlers/types.js';

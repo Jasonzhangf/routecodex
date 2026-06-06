@@ -190,7 +190,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
         const text = await response.text();
         expect(response.status).toBe(200);
         expect(text).toContain('ok_from_secondary');
-        expect(providerCalls).toEqual(['primary', 'primary', 'primary', 'secondary']);
+        expect(providerCalls).toEqual(['primary', 'secondary']);
       });
     } finally {
       pipeline.dispose();
@@ -402,7 +402,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
         expect(response.status).toBe(502);
         expect(body.error?.message).toBe('Upstream provider error');
         expect(body.error?.code).not.toBe('PROVIDER_NOT_AVAILABLE');
-        expect(logStages.some((entry) => entry.stage === 'provider.route_pool_cooldown_wait')).toBe(true);
+        expect(logStages.some((entry) => entry.stage === 'provider.route_pool_cooldown_wait')).toBe(false);
       });
     } finally {
       if (previousBackoffBase === undefined) delete process.env.RCC_429_BACKOFF_BASE_MS;

@@ -63,6 +63,9 @@ const config = {
 
     return {
       ...(useNpmLlms ? sharedmoduleToNpm : {}),
+      '^rcc-llmswitch-core/v2/(.*)$': useNpmLlms
+        ? '<rootDir>/node_modules/@jsonstudio/llms/dist/$1'
+        : '<rootDir>/sharedmodule/llmswitch-core/src/$1',
       // Keep existing .js stripping for ESM relative imports.
       '^(\\.{1,2}/.*)\\.js$': '$1'
     };

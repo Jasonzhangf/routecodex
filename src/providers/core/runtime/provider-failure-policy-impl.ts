@@ -685,22 +685,16 @@ export function describeProviderFailureDecision(args: {
   action: ProviderFailureAction;
   backoffScope: Exclude<ProviderFailureBackoffScope, 'none'>;
 }): Exclude<ProviderFailureDecisionLabel, 'direct_return'> {
-  if (args.action === 'reroute_explicit_alternative') {
-    if (args.backoffScope === 'provider') {
-      return 'provider_backoff_then_reroute';
-    }
-    if (args.backoffScope === 'recoverable') {
-      return 'recoverable_backoff_then_reroute';
-    }
-    return 'attempt_backoff_then_reroute';
+  if (args.action !== 'reroute_explicit_alternative') {
+    throw new Error(`unsupported provider failure retry action: ${String(args.action)}`);
   }
   if (args.backoffScope === 'provider') {
-    return 'provider_backoff_same_provider';
+    return 'provider_backoff_then_reroute';
   }
   if (args.backoffScope === 'recoverable') {
-    return 'recoverable_backoff_same_provider';
+    return 'recoverable_backoff_then_reroute';
   }
-  return 'attempt_backoff_same_provider';
+  return 'attempt_backoff_then_reroute';
 }
 
 export function resolveProviderFailureBackoffPlan(args: {
@@ -787,7 +781,7 @@ export function resolveProviderFailureActionPlan(args: {
     };
   }
 
-  const action = args.retryAction ?? 'retry_same_provider';
+  const action = args.retryAction ?? 'reroute_explicit_alternative';
   const backoffScope =
     args.forceAttemptScopedBackoff
       ? 'attempt'
@@ -936,8 +930,8 @@ export function resolveProviderFailureExclusionDecision(args: {
     || normalizedUpstreamCode === 'HTTP_503';
   if (isHttp503) {
     return {
-      excludeCurrentProvider: false,
-      retryAction: 'retry_same_provider'
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative'
     };
   }
   if (args.promptTooLong) {
@@ -948,32 +942,32 @@ export function resolveProviderFailureExclusionDecision(args: {
   }
   if (args.classification === 'special_400') {
     return {
-      excludeCurrentProvider: false,
-      retryAction: 'retry_same_provider'
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative'
     };
   }
   if (args.classification === 'unrecoverable') {
     return {
-      excludeCurrentProvider: false,
-      retryAction: 'retry_same_provider'
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative'
     };
   }
   if (args.classification === 'recoverable') {
     return {
-      excludeCurrentProvider: false,
-      retryAction: 'retry_same_provider'
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative'
     };
   }
   if (args.isProviderTrafficSaturated || args.isNetworkTransport) {
     return {
-      excludeCurrentProvider: false,
-      retryAction: 'retry_same_provider'
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative'
     };
   }
   if (!args.hasAlternativeCandidate) {
     return {
-      excludeCurrentProvider: false,
-      retryAction: 'retry_same_provider'
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative'
     };
   }
   if (args.isVerify || args.is429 || args.isReauth) {

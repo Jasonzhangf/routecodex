@@ -72,7 +72,6 @@ describe('Error chain singleton — runtime binding', () => {
       retryError: { statusCode: 502, errorCode: 'HTTP_502', upstreamCode: undefined, reason: 'bad gateway' },
       backoffScope: 'attempt'
     });
-    // If provider not excluded, retry_same_provider; either way the helper must not throw
-    expect(['retry_same_provider', 'exclude_and_reroute']).toContain(switchPlan.switchAction);
+    expect(switchPlan.switchAction).toBe('exclude_and_reroute');
   });
 });

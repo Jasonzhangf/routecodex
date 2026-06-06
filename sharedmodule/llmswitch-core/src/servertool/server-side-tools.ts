@@ -30,6 +30,7 @@ import {
   buildServertoolCliProjectionForAutoFlow,
   buildServertoolCliProjectionForToolCall
 } from './cli-projection.js';
+import { hasStopMessageAutoCliResultInRequest } from './cli-result-guard.js';
 import {
   appendToolOutput,
   buildAutoHookQueuesFromConfig,
@@ -188,6 +189,9 @@ export async function runServerSideToolEngine(
   if (payloadContractSignal && !isStopEligibleForServerTool(base, options.adapterContext)) {
     return { mode: 'passthrough', finalChatResponse: base };
   }
+  if (hasStopMessageAutoCliResultInRequest({ adapterContext: options.adapterContext, runtimeMetadata })) {
+    return { mode: 'passthrough', finalChatResponse: base };
+  }
 
   const autoHookExecutionList = listAutoServerToolHooks();
   const { optionalQueue, mandatoryQueue } = buildAutoHookQueuesFromConfig({
@@ -204,11 +208,13 @@ export async function runServerSideToolEngine(
   });
   if (optionalResult) {
     if (optionalResult.execution.flowId === 'stop_message_flow') {
+      const cliInput = buildStopMessageAutoCliInput(optionalResult.execution.context, optionalResult.execution.followup);
       const projection = buildServertoolCliProjectionForAutoFlow({
         options,
         flowId: optionalResult.execution.flowId,
         reasoningText: extractTextFromChatLike(optionalResult.chatResponse) || 'RouteCodex stopless continuation is projected to client CLI execution.',
-        stdoutPreview: 'stopless continuation ready'
+        stdoutPreview: 'stopless continuation ready',
+        input: cliInput
       });
       return {
         mode: 'tool_flow',
@@ -236,11 +242,13 @@ export async function runServerSideToolEngine(
   });
   if (mandatoryResult) {
     if (mandatoryResult.execution.flowId === 'stop_message_flow') {
+      const cliInput = buildStopMessageAutoCliInput(mandatoryResult.execution.context, mandatoryResult.execution.followup);
       const projection = buildServertoolCliProjectionForAutoFlow({
         options,
         flowId: mandatoryResult.execution.flowId,
         reasoningText: extractTextFromChatLike(mandatoryResult.chatResponse) || 'RouteCodex stopless continuation is projected to client CLI execution.',
-        stdoutPreview: 'stopless continuation ready'
+        stdoutPreview: 'stopless continuation ready',
+        input: cliInput
       });
       return {
         mode: 'tool_flow',
@@ -261,6 +269,60 @@ export async function runServerSideToolEngine(
   }
 
   return { mode: 'passthrough', finalChatResponse: base };
+}
+
+function buildStopMessageAutoCliInput(context: unknown, followup: unknown): JsonObject {
+  const out: JsonObject = {};
+  const prompt = extractContinuationPromptFromFollowup(followup);
+  if (prompt) {
+    out.continuationPrompt = prompt;
+  }
+  const metadata = asObject(asObject(followup)?.metadata);
+  const rt = asObject(metadata?.__rt);
+  const stopState = asObject(rt?.stopMessageState);
+  const loopState = asObject(rt?.serverToolLoopState);
+  const used = readNonNegativeInteger(stopState?.stopMessageUsed);
+  const maxRepeats =
+    readNonNegativeInteger(stopState?.stopMessageMaxRepeats) ??
+    readNonNegativeInteger(loopState?.maxRepeats);
+  if (used !== undefined) {
+    out.repeatCount = used;
+  }
+  if (maxRepeats !== undefined) {
+    out.maxRepeats = maxRepeats;
+  }
+  const contextRecord = asObject(context);
+  if (contextRecord?.stopMessageCliInput && typeof contextRecord.stopMessageCliInput === 'object' && !Array.isArray(contextRecord.stopMessageCliInput)) {
+    Object.assign(out, contextRecord.stopMessageCliInput as JsonObject);
+  }
+  return out;
+}
+
+function extractContinuationPromptFromFollowup(followup: unknown): string {
+  const row = asObject(followup);
+  const metadata = asObject(row?.metadata);
+  const metadataText = typeof metadata?.clientInjectText === 'string' ? metadata.clientInjectText.trim() : '';
+  if (metadataText) {
+    return metadataText;
+  }
+  const injection = asObject(row?.injection);
+  const ops = Array.isArray(injection?.ops) ? injection.ops : [];
+  const texts: string[] = [];
+  for (const op of ops) {
+    const opRecord = asObject(op);
+    if (opRecord?.op === 'append_user_text' && typeof opRecord.text === 'string' && opRecord.text.trim()) {
+      texts.push(opRecord.text.trim());
+    }
+  }
+  return texts.join('\n').trim();
+}
+
+function readNonNegativeInteger(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  const normalized = Math.floor(value);
+  return normalized >= 0 ? normalized : undefined;
 }
 
 export function extractToolCalls(chatResponse: JsonObject, requestId = ''): ToolCall[] {

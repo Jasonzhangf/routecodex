@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+// feature_id: manager.health_runtime
+// canonical_builders: record_failure, cooldown_provider, cooldown_provider_until_midnight_persisted, clear_windsurf_managed_persisted_503_family, consume_persisted_503_reprobe_if_available, trip_provider, is_available, is_persisted_503_daily_cooldown_active
 import path from 'node:path';
 import type { ManagerContext, ManagerModule } from '../../types.js';
 import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';

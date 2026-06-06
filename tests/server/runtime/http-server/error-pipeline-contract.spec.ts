@@ -77,13 +77,14 @@ describe('Error Pipeline contract', () => {
     expect(source).toContain('throw error;');
   });
 
-  it('router-direct live path consumes unified ErrorErr04/05 before standard reentry', () => {
+  it('router-direct live path does not classify or retry provider errors locally', () => {
     const filePath = path.join(ROOT, 'src/server/runtime/http-server/index.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    expect(source).toContain('resolveRequestExecutorProviderFailurePlan');
-    expect(source).toContain('providerFailurePlan.retryExecutionPlan');
-    expect(source).toContain("reason: 'router-direct-provider-failure-standard-retry'");
-    expect(source).toContain('return await this.executePipeline({');
+    expect(source).toContain('router-direct.send.error');
+    expect(source).not.toContain('resolveRequestExecutorProviderFailurePlan');
+    expect(source).not.toContain('providerFailurePlan.retryExecutionPlan');
+    expect(source).not.toContain("reason: 'router-direct-provider-failure-standard-retry'");
+    expect(source).not.toContain('__routecodexProviderFailureAttemptOffset');
     expect(source).not.toContain('__routerDirectFailedProviderKey');
     expect(source).not.toContain('__routerDirectRecoverable');
   });

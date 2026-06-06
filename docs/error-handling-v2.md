@@ -72,11 +72,9 @@
 
 1. **HubPipeline** 做编排与向上抛错，不定义最终错误策略。
 2. **Virtual Router policy** 接收执行期错误输入，产出统一 decision：
-   - `retry_same_provider`
    - `exclude_and_reroute`
-   - `wait_for_cooldown`
    - `fail`
-3. **RequestExecutor** 消费该 decision 并执行实际 retry / reroute / sleep / fail。
+3. **RequestExecutor** 消费该 decision 并执行实际 reroute / fail；禁止同请求内等待冷却或重打同 provider。
 4. **servertool followup** 的 provider 类错误也走同一套 Router policy；只有 payload 缺失、reenter 不可用、client inject dispatcher 缺失等编排前/internal error 保留在 servertool 自身边界。
 
 ## 1.1 三分类硬约束（2026-05-28）

@@ -1,25 +1,10 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import {
   buildServertoolCliProjectionForAutoFlow,
   buildServertoolCliProjectionForToolCall
 } from '../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js';
 
 describe('servertool CLI projection', () => {
-  let tempHome: string;
-
-  beforeEach(() => {
-    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-stcli-projection-'));
-    process.env.RCC_HOME = tempHome;
-  });
-
-  afterEach(() => {
-    delete process.env.RCC_HOME;
-    fs.rmSync(tempHome, { recursive: true, force: true });
-  });
-
-  it('projects stopless auto flow to exec_command with reasoning and ticket', () => {
+  it('projects stopless auto flow to exec_command with reasoning and direct CLI input', () => {
     const projection = buildServertoolCliProjectionForAutoFlow({
       options: {
         chatResponse: {},
@@ -30,19 +15,27 @@ describe('servertool CLI projection', () => {
       },
       flowId: 'stop_message_flow',
       reasoningText: 'full stop summary',
-      stdoutPreview: 'continue'
+      stdoutPreview: 'continue',
+      input: {
+        continuationPrompt: '继续执行原任务',
+        repeatCount: 2,
+        maxRepeats: 3
+      }
     });
 
     const message = (projection.chatResponse as any).choices[0].message;
+    const command = JSON.parse(message.tool_calls[0].function.arguments).cmd;
+
     expect(message.reasoning_content).toBe('full stop summary');
     expect(message.tool_calls[0].function.name).toBe('exec_command');
-    expect(JSON.parse(message.tool_calls[0].function.arguments).cmd).toBe(
-      `routecodex servertool run --ticket ${projection.ticket.ticketId}`
-    );
-    expect(fs.existsSync(path.join(tempHome, 'servertool', 'tickets', `${projection.ticket.ticketId}.json`))).toBe(true);
+    expect(command).toBe("routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续执行原任务\",\"repeatCount\":2,\"maxRepeats\":3,\"stdoutPreview\":\"continue\"}'");
+    expect(command).not.toContain(['--', 'tic', 'ket'].join(''));
+    expect(command).not.toContain(['st', 'cli_'].join(''));
+    expect(command).not.toContain(['rcc', '_cli_'].join(''));
+    expect((projection as any)[['tick', 'et'].join('')]).toBeUndefined();
   });
 
-  it('projects basic servertool tool call without executing handler', () => {
+  it('projects basic servertool tool call without executing handler or restoring model identity', () => {
     const projection = buildServertoolCliProjectionForToolCall({
       options: {
         chatResponse: {},
@@ -58,8 +51,16 @@ describe('servertool CLI projection', () => {
       }
     });
 
-    expect(projection.ticket.modelTool).toMatchObject({ name: 'servertool_fixture', callId: 'call_model_1' });
-    expect(projection.ticket.executor.kind).toBe('fixture');
-    expect((projection.chatResponse as any).__servertool_cli_projection.clientCallId).toBe(projection.ticket.clientTool.callId);
+    const toolCall = (projection.chatResponse as any).choices[0].message.tool_calls[0];
+    const command = JSON.parse(toolCall.function.arguments).cmd;
+
+    expect(toolCall.function.name).toBe('exec_command');
+    expect(command).toBe("routecodex servertool run servertool_fixture --input-json '{\"value\":1}'");
+    expect(projection.toolName).toBe('servertool_fixture');
+    expect((projection.chatResponse as any).__servertool_cli_projection).toMatchObject({
+      toolName: 'servertool_fixture',
+      requestId: 'req_tool_1'
+    });
+    expect((projection as any)[['tick', 'et'].join('')]).toBeUndefined();
   });
 });

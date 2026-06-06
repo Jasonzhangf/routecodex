@@ -21,11 +21,11 @@
 已确认线上日志同时存在以下现象：
 
 1. **当前请求主链已部分修正**
-- `switch=retry_same_provider`
-- `decision=recoverable_backoff_same_provider`
-- `backoffScope=recoverable`
+- `switch=exclude_and_reroute`
+- `decision=provider_backoff_then_reroute`
+- `backoffScope=provider`
 
-说明 `request-executor` 对 `provider.send` 上的 `SQLITE_BUSY / new_api_error` 已不再默认走 `exclude_and_reroute`。
+说明 `request-executor` 对 `provider.send` 上的 provider error 必须排除当前 provider 后 reroute；不得再同 provider retry。
 
 2. **并发 sibling 请求仍被毒化**
 - 在 recoverable same-provider backoff 之后，仍立即出现多个：

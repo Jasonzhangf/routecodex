@@ -1,0 +1,93 @@
+# Servertool CLI Lifecycle
+
+## Scope
+
+`servertool CLI` is the client-visible execution path for RouteCodex servertools that should run through the normal client tool loop. `apply_patch` is excluded and remains native/freeform client tooling.
+
+## State Machine
+
+```text
+model response
+  |
+  v
+[S0 candidate]
+  - resp_chatprocess detects servertool tool_call or stopless auto hook
+  |
+  v
+[S1 projected]
+  - response is projected to assistant tool_call:
+    tool: exec_command
+    cmd: routecodex servertool run <toolName> --input-json '<json>'
+  - reasoning carries the full stop/servertool summary
+  - content remains empty
+  |
+  v
+[S2 client executed]
+  - Codex client executes exec_command normally
+  - routecodex CLI prints one JSON object to stdout
+  |
+  v
+[S3 tool result returned]
+  - client sends stdout back as ordinary exec_command tool result
+  - RouteCodex does not rename, restore, or ticket-match the result
+  |
+  v
+[S4 next model turn]
+  - model consumes normal tool result
+  - stopless CLI result must not trigger another stop_message_auto projection in the same lifecycle
+```
+
+## CLI Input Contract
+
+Command:
+
+```text
+routecodex servertool run <toolName> --input-json '<json-object>'
+```
+
+Common fields:
+
+- `flowId`: servertool flow id when invoked from an auto flow.
+- Tool-specific fields are passed as JSON object fields; no ticket, hidden handle, or metadata lookup is allowed.
+
+`stop_message_auto` fields:
+
+- `flowId`: must be `stop_message_flow`.
+- `stdoutPreview`: short folded display text.
+- `continuationPrompt`: exact prompt text extracted from the existing stopless followup injection plan.
+- `repeatCount`: current consecutive stop count after this projection is consumed.
+- `maxRepeats`: active stopless repeat cap.
+
+## CLI Output Contract
+
+CLI stdout is a single JSON object:
+
+```json
+{
+  "ok": true,
+  "kind": "stop_message_auto",
+  "tool": "stop_message_auto",
+  "summary": "stopless continuation ready",
+  "continuationPrompt": "...",
+  "repeatCount": 1,
+  "maxRepeats": 3,
+  "injectedPromptPreview": "..."
+}
+```
+
+The stdout object is intentionally ordinary `exec_command` output. It is not remapped to private servertool metadata.
+
+## Guards
+
+- If current request history already contains a `stop_message_auto` CLI tool result, stopless must not project another `stop_message_auto` call for that same lifecycle.
+- The guard only scans tool-result-like records (`function_call_output`, `tool_result`, `tool_message`, or `role=tool`) and must not trigger on tool declarations or ordinary JSON fields.
+- Unsupported CLI tool names fail fast.
+- CLI input must be a JSON object.
+
+## Verification
+
+- Projection contract: `tests/servertool/servertool-cli-projection.spec.ts`
+- CLI execution contract: `tests/servertool/servertool-cli-execution.spec.ts`
+- CLI command contract: `tests/cli/servertool-command.spec.ts`
+- Lifecycle blackbox: `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+- Old restoration removal: `tests/servertool/servertool-cli-result-restore.spec.ts`

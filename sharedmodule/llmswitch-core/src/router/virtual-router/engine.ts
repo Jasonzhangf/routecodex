@@ -19,6 +19,8 @@ import {
   VirtualRouterErrorCode,
 } from './types.js';
 import { createVirtualRouterEngineProxy, type NativeVirtualRouterEngineProxy } from './engine-selection/native-virtual-router-engine-proxy.js';
+// feature_id: vr.route_availability_floor
+// canonical_builders: build_unavailable_providers_details, collect_recoverable_cooldown_for_key
 import {
   extractVirtualRouterNativeErrorMessage,
   parseVirtualRouterNativeError,

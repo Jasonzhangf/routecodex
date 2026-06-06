@@ -40,4 +40,53 @@ describe('servertool active js shadow audit', () => {
 
     expect(findings).toEqual([]);
   });
+
+  it('servertool direct CLI path must not restore legacy CLI identities', () => {
+    const forbidden = [
+      ['--', 'tic', 'ket'].join(''),
+      ['st', 'cli_'].join(''),
+      ['rcc', '_cli_'].join(''),
+      ['cli', '-', 'tic', 'ket'].join(''),
+      ['executeServertoolCli', 'Tic', 'ket'].join(''),
+      ['buildServertoolCli', 'Tic', 'ket'].join(''),
+      ['tryRestoreServertoolCli', 'ToolOutputs'].join('')
+    ];
+    const scannedRoots = [
+      'sharedmodule/llmswitch-core/src/servertool',
+      'src/cli/commands/servertool.ts',
+      'tests/servertool',
+      'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts'
+    ];
+    const findings: string[] = [];
+
+    const scanFile = (filePath: string) => {
+      const source = fs.readFileSync(filePath, 'utf8');
+      for (const marker of forbidden) {
+        if (source.includes(marker)) {
+          findings.push(`${path.relative(process.cwd(), filePath)} contains ${marker}`);
+        }
+      }
+    };
+
+    const walk = (target: string) => {
+      const abs = repoPath(target);
+      if (!fs.existsSync(abs)) return;
+      const stat = fs.statSync(abs);
+      if (stat.isFile()) {
+        scanFile(abs);
+        return;
+      }
+      for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+        const next = path.join(abs, entry.name);
+        if (entry.isDirectory()) {
+          walk(path.relative(process.cwd(), next));
+        } else if (/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name)) {
+          scanFile(next);
+        }
+      }
+    };
+
+    for (const root of scannedRoots) walk(root);
+    expect(findings).toEqual([]);
+  });
 });

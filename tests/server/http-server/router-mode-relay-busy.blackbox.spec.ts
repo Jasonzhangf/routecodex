@@ -96,7 +96,7 @@ function buildServerConfig(configPath: string): ServerConfigV2 {
 describe('router-mode relay recoverable busy blackbox', () => {
   jest.setTimeout(30000);
 
-  it('returns HTTP 429 after executor retries instead of PROVIDER_NOT_AVAILABLE when relay route pool is busy', async () => {
+  it('fails fast without in-request cooldown wait when relay route pool is busy', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-router-relay-busy-'));
     const configPath = path.join(tmp, 'config.json');
     const userConfig = buildUserConfig();
@@ -132,15 +132,14 @@ describe('router-mode relay recoverable busy blackbox', () => {
           model: 'gpt-5.5',
           input: 'Search once, then answer ping.',
           stream: false,
-          tools: [{ type: 'web_search_preview' }],
-          metadata: { routeHint: 'search', sessionId: 'router-relay-busy-blackbox' }
+          tools: [{ type: 'web_search_preview' }]
         })
       });
       const body = await response.json();
-      expect(response.status).toBe(429);
-      expect(body.error?.code).toBe('HTTP_429');
+      expect(response.status).toBe(502);
+      expect(body.error?.code).toBe('HTTP_HANDLER_ERROR');
       expect(body.error?.code).not.toBe('PROVIDER_NOT_AVAILABLE');
-      expect(logStages.filter((entry) => entry.stage === 'provider.route_pool_cooldown_wait')).toHaveLength(3);
+      expect(logStages.filter((entry) => entry.stage === 'provider.route_pool_cooldown_wait')).toHaveLength(0);
       expect(logStages.some((entry) => entry.stage === 'router-direct.hub_pipeline_failed')).toBe(false);
     } finally {
       await server.stop().catch(() => undefined);

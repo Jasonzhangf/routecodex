@@ -1,4 +1,6 @@
 import type { ManagerContext, ManagerModule } from '../../types.js';
+// feature_id: manager.routing_control_surface
+// canonical_builders: load_routing_instruction_state, persist_routing_instruction_state, load_provider_health_state, persist_provider_health_state
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateAsync,

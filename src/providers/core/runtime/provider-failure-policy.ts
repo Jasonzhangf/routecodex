@@ -34,7 +34,6 @@ export type ProviderFailureRateLimitKind =
   | 'short_lived';
 
 export type ProviderFailureRetryAction =
-  | 'retry_same_provider'
   | 'reroute_explicit_alternative';
 
 export type ProviderFailureAction =
@@ -49,9 +48,6 @@ export type ProviderFailureBackoffScope =
 
 export type ProviderFailureDecisionLabel =
   | 'direct_return'
-  | 'attempt_backoff_same_provider'
-  | 'recoverable_backoff_same_provider'
-  | 'provider_backoff_same_provider'
   | 'attempt_backoff_then_reroute'
   | 'recoverable_backoff_then_reroute'
   | 'provider_backoff_then_reroute';

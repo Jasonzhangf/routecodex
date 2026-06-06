@@ -318,29 +318,8 @@ function collectBindingSessionScopeCandidates(args: SessionScopeResolutionArgs):
   return candidates;
 }
 
-function isTmuxCandidateAlive(args: SessionScopeResolutionArgs, tmuxSessionId: string): boolean {
-  if (typeof args.isTmuxSessionAlive !== 'function') {
-    return true;
-  }
-  try {
-    return args.isTmuxSessionAlive(tmuxSessionId);
-  } catch (error: unknown) {
-    logSessionScopeResolutionNonBlockingError('isTmuxCandidateAlive', error, { tmuxSessionId });
-    return false;
-  }
-}
-
-function resolveIfAlive(args: SessionScopeResolutionArgs, candidate: string | undefined): string | undefined {
-  const token = readToken(candidate);
-  if (!token) {
-    return undefined;
-  }
-  return isTmuxCandidateAlive(args, token) ? token : undefined;
-}
-
 export function resolveTmuxSessionIdAndSource(args: SessionScopeResolutionArgs): TmuxSessionResolution {
-  const tmuxFromHeaders = resolveIfAlive(
-    args,
+  const tmuxFromHeaders = readToken(
     readTmuxFromHeaderSource(args.headers)
       || readTmuxFromHeaderSource(args.clientHeaders as unknown as Record<string, unknown> | undefined)
   );
@@ -348,25 +327,20 @@ export function resolveTmuxSessionIdAndSource(args: SessionScopeResolutionArgs):
     return { tmuxSessionId: tmuxFromHeaders, source: 'headers_or_api_key' };
   }
 
-  const tmuxFromMeta = resolveIfAlive(args, readToken(args.userMeta.tmuxSessionId) || readToken(args.userMeta.tmux_session_id));
+  const tmuxFromMeta = readToken(args.userMeta.tmuxSessionId) || readToken(args.userMeta.tmux_session_id);
   if (tmuxFromMeta) {
     return { tmuxSessionId: tmuxFromMeta, source: 'metadata' };
   }
 
-  const tmuxFromBody = resolveIfAlive(args, readToken(args.bodyMeta.tmuxSessionId) || readToken(args.bodyMeta.tmux_session_id));
+  const tmuxFromBody = readToken(args.bodyMeta.tmuxSessionId) || readToken(args.bodyMeta.tmux_session_id);
   if (tmuxFromBody) {
     return { tmuxSessionId: tmuxFromBody, source: 'body_metadata' };
-  }
-
-  const tmuxFromDaemon = resolveIfAlive(args, readToken(args.resolveTmuxSessionIdFromDaemon?.(args.daemonId)));
-  if (tmuxFromDaemon) {
-    return { tmuxSessionId: tmuxFromDaemon, source: 'registry_by_daemon' };
   }
 
   if (typeof args.resolveTmuxSessionIdFromBinding === 'function') {
     const bindingCandidates = collectBindingSessionScopeCandidates(args);
     for (const scope of bindingCandidates) {
-      const tmuxFromBinding = resolveIfAlive(args, readToken(args.resolveTmuxSessionIdFromBinding(scope)));
+      const tmuxFromBinding = readToken(args.resolveTmuxSessionIdFromBinding(scope));
       if (tmuxFromBinding) {
         return { tmuxSessionId: tmuxFromBinding, source: 'registry_by_binding' };
       }

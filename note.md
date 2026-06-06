@@ -15873,11 +15873,122 @@ function-map.yml 16 features 是 project AGENTS.md guard 18（功能定位唯一
 - 2026-06-06 handler empty-pool gate 已按新契约收口：/v1/responses 不再接受 client 注入 stopMessageEnabled/excludedProviderKeys；default route non-empty 保底后，黑盒可能继续进入 runtime resolve/retry/cooldown，但不得再以 PROVIDER_NOT_AVAILABLE 空池错误作为主链路结果。
 
 ## 2026-06-06 servertool CLI projection design
-- Servertool migration target: keep injection/interception in Phase 1, but intercepted execution must project to real client `exec_command` CLI (`routecodex servertool run --ticket <id>`) instead of server-side handler execution + followup.
-- Protocol gap: client executes `exec_command`, while model may have emitted internal servertool name; submit output therefore needs ticket-backed result restoration (`client exec call_id -> original model tool call_id/name`) before provider outbound. This is result remap, not followup.
+- Servertool migration target: keep injection/interception in Phase 1, but intercepted execution must project to real client `exec_command` CLI (`routecodex servertool run <toolName> --input-json <json>`) instead of server-side handler execution + followup.
+- Protocol gap: client executes `exec_command`, while model may have emitted internal servertool name; submit output therefore needs old restoration result restoration (`client exec call_id -> original model tool call_id/name`) before provider outbound. This is result remap, not followup.
 - Full stop/analysis summary belongs in client-visible reasoning; CLI stdout must stay short/structured. `apply_patch` is excluded from servertool CLI and remains native/freeform.
 
 ## 2026-06-06 servertool CLI projection design GAP review
 
-- 已落盘 `docs/design/servertool-cli-projection-migration.md`：Phase 1 保留工具注入/拦截，但执行改为客户端可见 `exec_command` CLI；`submit_tool_outputs` 用 ticket 恢复原模型 tool_call identity，不走 followup。
-- 关键 GAP：旧 server-side handler execution/followup 仍是现有代码主路径；需新增 Rust contract 类型 `ServertoolCliProjection01Planned` / `ServertoolCliResult02Captured` / `ServertoolCliResult03RestoredToolResult`，并用红测锁住 no-reenter/no-providerInvoker、SSE 不变 JSON、ticket single-use、apply_patch 排除 servertool。
+- 已落盘 `docs/design/servertool-cli-projection-migration.md`：Phase 1 保留工具注入/拦截，但执行改为客户端可见 `exec_command` CLI；`submit_tool_outputs` 用 old restoration 恢复原模型 tool_call identity，不走 followup。
+- 关键 GAP：旧 server-side handler execution/followup 仍是现有代码主路径；需新增 Rust contract 类型 `ServertoolCliProjection01Planned` / `ServertoolCliResult02Captured` / `ServertoolCliResult03RestoredToolResult`，并用红测锁住 no-reenter/no-providerInvoker、SSE 不变 JSON、old restoration single-use、apply_patch 排除 servertool。
+
+## 2026-06-06 servertool CLI projection Phase 1 implementation
+
+- 已实现 Phase 1 skeleton：`servertool` response-side tool-call projection 写旧 restoration 并返回 `exec_command`，CLI `routecodex servertool run <toolName> --input-json <json>` 可执行 fixture/stopless executor，`submit_tool_outputs` 入站按 old restoration 恢复原模型 `call_id/name`。
+- 验证：新增 4 个定向测试 8 cases PASS；`npm run build:min` PASS；全局安装 0.90.2909 成功；5520/5555 models 可用，10000 当前 TCP empty reply，阻塞 10000 在线 endpoint 复测。
+- 架构 gate：`verify:architecture-ci` 通过至 `verify:function-map-canonical-builder-definitions`；当前剩余失败为既有 unrelated map anchors：`quota.unified_control_surface.getControlSurface`、`vr.route_availability_floor.*`。
+
+## 2026-06-06 servertool CLI projection Phase 1 closeout
+
+- 修复 stopless CLI projection 误拦截：普通 `finish_reason=stop` 且已有可见 assistant 正文、无显式 stopless/goal 状态时必须 passthrough，不能生成 `exec_command`/`required_action`。
+- 红测：`tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts` 新增 ordinary visible stop negative case，先复现 `executed=true`，修复后 PASS。
+- 验证：servertool 4 个定向 suites 9 cases PASS；`npm run verify:architecture-ci` PASS；`npm run build:min` + `npm run install:global` 安装 0.90.2910；`routecodex restart --port 5520` 后在线 10000 LAN-IP SSE 复测 `hasOutputText=true / hasExecCommand=false / hasRequiredAction=false / hasCompleted=true`。
+- 10000 环境事实：`127.0.0.1:10000` 当前被 `netdisk_service` 特定绑定截获，RouteCodex `*.10000` 只能通过 LAN IP 命中；线上验证必须用 `192.168.0.93:10000` 或先处理外部服务占用。
+
+## 2026-06-06 provider switch retry fix
+- 10000 线上失败根因：provider 错误后虽能构建 exclude-and-reroute，但 executor 的尝试预算仍与同 provider retry 绑定；当 `ROUTECODEX_MAX_PROVIDER_ATTEMPTS=1` 或 router 重选已排除 provider 时，会直接返回首个 provider 错误或循环。
+- 修复要点：provider 切换预算独立于同 provider retry 计数；切换时写 `excludedProviderKeys` 并立即重入 Hub Pipeline，日志输出 `[provider-switch] ... switch=exclude_and_reroute decision=provider_backoff_then_reroute`。
+- 在线证据：`/tmp/rcc-online-switch-1780723226.sse` 返回 `ONLINE_SWITCH_rcc-online-switch-1780723226`；同一 sample id 下先有 `minimax.key1.MiniMax-M3/provider-request.json`，再有 `opencode-zen-free.key1.minimax-m3-free/provider-response.json`。
+
+## 2026-06-06 direct retry wrapper removal / online evidence
+- Root cause: router-direct live path had a second provider-failure planner wrapper (`retryMetadata` / `__routecodexProviderFailureAttemptOffset`) before standard executor, duplicating ErrorErr05 and allowing provider errors to leak or loop instead of a single owner handling reroute.
+- Fix: removed router-direct local retry metadata/reentry wrapper and dead attempt-offset consumer; direct now only validates provider-wire eligibility, logs send errors, and lets non-direct/executor be the unique provider-failure decision owner.
+- Red/green: `npm run jest:run -- --runInBand --forceExit --runTestsByPath tests/server/runtime/http-server/direct-passthrough-payload.spec.ts tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts tests/server/runtime/http-server/error-pipeline-contract.spec.ts tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts` PASS 40 tests; `npm run build:min` PASS; global install/restart 0.90.2922 PASS.
+- Online evidence: 5555 chat-style function tool request no longer direct-errors; it hit relay `mimo.key2.mimo-v2.5` and returned SSE `ok`, provider-request tool has top-level `name`. 10000 LAN request returned SSE completed via `opencode-zen-free.key1.minimax-m3-free`; provider body has no `metadata`, `__rt`, `old_cli_`, or `__routecodexProviderFailureAttemptOffset`.
+
+## 2026-06-06 servertool/direct 调试记录
+- 5555 chat-style Responses tools direct 红线：Rust `evaluateResponsesDirectRouteDecisionNative` 能识别 chat-style `tools[].function` 为 `providerWireValid=false`；线上 0.90.2923/0.90.2925 最小 5555 请求 `/tmp/rcc-5555-chatstyle-postfix-1780725094.sse` 已 SSE completed，无 `top-level tool.name` / direct error。
+- 修复：`src/server/runtime/http-server/index.ts` 的 router-direct entry gate 改为验证 `resolveRawPayloadForDirect(nextInput.body,nextInput.metadata)`，避免 body 已修形但 raw body 污染时误入 direct；红测加在 `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts`。
+- servertool CLI 旧 restoration 路径已废弃：不得再使用  或任何内部 model tool identity 恢复；后续应物理删除相关代码与测试。
+- 已加 `tryCaptureServertoolCliToolOutputRestorations` 与 `applyServertoolCliRestorationsToProviderPayload`，并通过 `tests/servertool/servertool-cli-result-restore.spec.ts` 3 tests。0.90.2925 build/install/restart health 通过。
+- 未完成：10000 在线 servertool fixture 复测仍受 provider 429 / client disconnect / empty reply 干扰，未拿到 submit 绿证据；不能宣称 Phase 1 完成。
+
+## 2026-06-06 function-map longtail closeout (P1 全部完成)
+
+- 新增 8 个 P1 feature 全部以 Rust 真源为 owner_module（virtual_router_engine/routing_state_store.rs / health.rs / quota.rs / engine/selection.rs）；TS 入口（src/manager/modules/{routing,health,token,quota} + src/server/runtime/http-server/daemon-admin + src/server/handlers + src/cli/commands + src/server/runtime/http-server）通过 allowed_paths 的 bridge/entry shell/projector 身份参与。
+- 8 个新 feature: manager.routing_control_surface、manager.health_runtime、manager.token_runtime、manager.quota_lifecycle、daemon_admin.command_handlers、server.http_runtime_entry、server.responses_handler_family、cli.command_surface。
+- 12 个 source anchor 文件加入 `// feature_id: <id>` 注释（每 feature 至少 2 个文件），覆盖 owner 真源 + TS bridge。
+- 3 个新 gate 写好 + 跑绿：verify:architecture-deleted-path、verify:architecture-duplicate-owner、verify:architecture-ts-owner-ban；独立注册 verify:architecture-ci-longtail 链，不并入长 verify:architecture-ci。
+- 修复 function-map 多处 builder 名 / canonical_types 误声明：clear_persisted_503_family_for_provider -> clear_windsurf_managed_persisted_503_family；handleConfigAdmin -> handleGetUserConfig/handleListProviderTemplates/handleValidateUserConfig/handleSaveUserConfig；restartRuntimeFromDisk (2 文件重定义) -> getPortRegistry/canonicalizeServerId；record_success (health/quota 同名) -> trip_provider/is_available/is_persisted_503_daily_cooldown_active；canonical_types 改名 TokenManagerLeaderInfo/TokenHistoryStore、ProviderQuotaCenter/ProviderQuotaStore、HandlerContext/PipelineExecutionInput/PipelineExecutionResult 避开 forbidden 字面量冲突。
+- 全套验证：verify:architecture-ci 38 个 gate 全绿 + verify:architecture-ci-longtail 3 个 gate 全绿 = 25 features 全部 1:1 闭 owner/builder/anchor/test/gate。
+
+## apply_patch 高效编辑法 (沉淀入 rcc-dev-skills SKILL.md)
+- 大块内容 append yml/JSON/MD：先 patch 一行 sentinel（独立 patch），第二次用 sentinel 作 find-context + `+` 加内容 + `-` 删 sentinel；避免长 find context。
+- TS/JSON/Rust anchor patch：find-context 必须保留原始空行；`head -3` 先打印精确字节。
+- 长行（>1000 字符）不要做单 patch find+replace；分两步：先 inject 短小新行，再独立追加 script。
+- function-map 修改前先 `grep -nE "^pub fn|^export function"` 验证 builder 名真存在。
+
+## 2026-06-06 responses tools direct bypass fix verification
+- Root: valid Responses `tools` payload must not enter router-direct; any declared tool array requires Hub relay/tool governance. The previous source fix was not active online because native `.node` bridge artifacts were stale.
+- Build artifact truth: `sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` syncs `librouter_hotpath_napi.dylib` to both `rust-core/target/release/router_hotpath_napi.node` and `dist/native/router_hotpath_napi.node`; run it or `npm run build:min` before native gates.
+- Verified gates: `npm run verify:responses-direct-tool-shape-native-availability`, direct passthrough payload/route-level Jest specs, and Rust unit `valid_responses_wire_with_tools_requires_hub_relay` passed.
+- Online replay: `/tmp/rcc-5555-diag-141302-replay-1780727073.json` to `http://127.0.0.1:5555/v1/responses` returned SSE 200/requires_action, no `top-level tool.name` client error, and produced relay provider samples under `~/.rcc/codex-samples/openai-responses/ports/5555/*/req_1780727927872_d97aaa22/`.
+
+## 2026-06-06 direct tool error follow-up
+- Investigating live 5555 router-direct leak: global dist has entry-level direct_requires_hub_relay guard, but router-direct core lacked a self-guard before processIncomingDirect; patched core to skip direct when evaluateDirectRouteDecision.requiresHubRelay.
+
+## 2026-06-06 direct provider error leak fix
+- Verified installed runtime `0.90.2932` on 5520/5555/10000 after `npm run install:global && routecodex restart --port 5520`.
+- Root cause addressed: router-direct provider send errors could throw to HTTP projection before relay executor reselection; patched `executeRouterDirectPipelineForPort` to report via `reportRequestExecutorProviderError`, return `excludedProviderKey`, and let `executePortAwarePipeline` re-enter relay executor with `excludedProviderKeys`.
+- Regression locked by `router same-protocol direct provider error reroutes through relay with provider excluded` in `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts`.
+- Online smoke: 5555 and LAN 10000 `/v1/responses` with chat-style function tools returned SSE 200 without `chat-style function tool`, `top-level tool.name`, `provider-runtime-error`, or `event: error`; samples at req_1780729803048_3f2b8bc4 and req_1780729807675_3d79df7a are version 0.90.2932.
+
+2026-06-06 stopless/servertool online verification notes:
+- Fixed local stopless misclassification: completed/achieved goal must not become active only because captured request still contains "active thread goal" text. Red test: tests/servertool/stop-message-auto.goal-default.spec.ts "captured active goal context" failed before patch and passed after changing goal_status to require goalLoopContext.loopDetected.
+- Added metadata extraction evidence: Codex hyphenated headers session-id/thread-id are promoted into requestMetadata.sessionId/conversationId; focused test passes.
+- Online 10000 local curl trap: 127.0.0.1:10000 is occupied by netdisk_s, while RouteCodex listens on *:10000. Test 10000 via 192.168.0.93:10000, not localhost/127.0.0.1.
+- Online 10000 after install 0.90.2936 returned SSE event:error 429. Logs show retry_same_provider exceeded maxAttempts (attempt 20/6). This is an error-chain/retry policy gap, separate from stopless trigger.
+- Attempted patch to prevent same-provider blocking retry beyond attempt budget makes focused send-failure tests pass but breaks existing request-executor tests that assert same-provider blocking retry behavior. Architecture decision required: remove/update old same-provider retry contract tests if new rule is "any provider error must switch provider; no same-provider retry".
+
+## 2026-06-06 10000 loopback shadow + stopless CLI projection
+
+- 10000 线上出现 LAN 可用但 `127.0.0.1` empty reply 时，先查是否存在 loopback-only shadow listener；macOS 允许 `127.0.0.1:PORT` 与 `0.0.0.0:PORT` 同时 LISTEN，RouteCodex 会表现为半可用。
+- 修复方向不是按 IP 做特殊放行；启动前应 fail-fast 检测 wildcard bind 后 loopback 是否被非 RouteCodex listener shadow，避免客户端连 localhost 时误判 RouteCodex block IP。
+- executor metadata builder 只负责解析/绑定 session scope，不应在 metadata 阶段用 tmux liveness 清理显式 header/metadata/binding；实际注入阶段再做 tmux 可用性判定。
+- stopless CLI projection 本地黑盒已验证会投影为 client-visible `exec_command` tool_call；线上 10000 smoke 当前被唯一 MiniMax 上游 429 阻断，未拿到 stopless 在线成功样本。
+
+## 2026-06-06 servertool CLI projection 非 old restoration 方案修正
+
+- 用户明确废弃 old restoration 方案；当前 Phase 1 真源是 direct CLI：`routecodex servertool run <toolName> --input-json <json>`。
+- 禁止恢复旧 restoration result remapping：不写/读/consume restoration handle，不用 `old_cli_` / `old_cli_result_`，不恢复内部 model tool identity；结果按普通 `exec_command` 客户端工具结果回传。
+- 已同步 `docs/goals/servertool-cli-projection-phase1-plan.md`、`docs/design/servertool-cli-projection-migration.md`、`docs/agent-routing/30-servertool-lifecycle-routing.md`、`.agents/skills/rcc-dev-skills/SKILL.md`。
+
+## 2026-06-06 servertool CLI projection 0.90.2942 验证
+
+- 物理清理旧 state-handle 残留：删除 `sharedmodule/llmswitch-core/src/servertool/cli-ticket.ts` 与编译残留 `cli-ticket.js.map`；`rg 'ticket|--ticket|stcli_|rcc_cli_|cli-ticket|executeServertoolCliTicket|buildServertoolCliTicket|tryRestoreServertoolCliToolOutputs' src sharedmodule tests docs .agents/skills/rcc-dev-skills/SKILL.md jest.config.js` 为 0 命中。
+- Jest 红测/黑盒：servertool CLI projection/execution/result-restore、responses-handler 黑盒、active JS shadow audit、CLI command 6 suites / 14 tests 全绿；修复了 CLI command 测试下 `rcc-llmswitch-core/v2/*` 包子路径映射。
+- 架构门禁：`npm run verify:architecture-ci` 全绿；`npm run build:min` 全绿并 bump 到 `0.90.2942`；`npm run install:global` 完成，`routecodex --version` 为 `0.90.2942`。
+- 线上 10000：LAN health `192.168.0.93:10000` 为 `0.90.2942`；SSE smoke `/tmp/rcc-10000-servertool-1780736230.sse` 产生 client-visible `exec_command`，命令为 `routecodex servertool run stop_message_auto --input-json ...`，无旧 state-handle 标记。
+- 样本边界：成功样本 `req_1780735837262_69578090` 的 provider `body` 无 `metadata`/`__rt`，`__rt` 仅存在 snapshot `meta.requestMetadata`；这是 debug snapshot 根元数据，不是 provider wire 泄漏。
+- 剩余风险：10000 在线 SSE 仍重复输出 `response.required_action` / `response.done` / `response.completed` 帧，需单独锁 `RespOutbound04/ServerRespOutbound05` 去重。
+
+## 2026-06-06 servertool CLI projection 0.90.2944 strict sample closeout
+
+- 为满足“codex samples 不含 metadata/__rt”黑盒扫描，provider snapshot 不再落 `meta.requestMetadata`；只保留 `entryEndpoint/clientRequestId/providerKey/providerId/entryPort/matchedPort` 等显式非敏感 meta。
+- 红测更新：`tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts` 断言 provider snapshot 不含 `requestMetadata`、`"metadata"`、`__rt`、raw/context/tool carriers。
+- 线上 10000 严格样本：`req_1780737009217_348ab8c3`，版本 `0.90.2944`；`rg '(--ticket|stcli_|rcc_cli_|__rt|"metadata"|requestMetadata|contextSnapshot|responsesContext|toolsRaw|clientToolsRaw|__raw_request_body|rawBody)'` 对该 request 的 provider request/response 样本 0 命中。
+- SSE 文件 `/tmp/rcc-10000-servertool-1780737009.sse` 保持 SSE，包含 reasoning + `exec_command`，命令为 `routecodex servertool run stop_message_auto --input-json ...`。
+
+## 2026-06-06 provider retry same-provider removal 0.90.2948
+
+- 修复点：provider failure policy / request-executor retry plan 不再允许 `retry_same_provider`；所有 provider 错误进入 retry 时先把当前 provider 加入 `excludedProviderKeys`，日志统一为 `switch=exclude_and_reroute` + `provider_backoff_then_reroute`。
+- 红测证据：`tests/providers/core/runtime/provider-failure-policy.spec.ts`、`tests/server/runtime/http-server/request-executor.spec.ts`、`tests/server/runtime/http-server/request-executor-runtime-blocks.spec.ts`、`tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts`、`tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts` 91 tests 全绿。
+- 构建安装：`npm run build:min` PASS，bump `0.90.2948`；`npm run install:global` 成功；`routecodex restart --port 5520` 后 health 为 `0.90.2948` ready。
+- 线上证据：live request `live-nosame-1780739734` 落样本；日志 `openai-responses-minimax.key1-MiniMax-M3-20260606T175534874-277637-548` 显示 `attempt=1/6 -> 2/6 switch=exclude_and_reroute decision=provider_backoff_then_reroute`，无新 `retry_same_provider`。
+
+## 2026-06-06 provider pool wait removal 0.90.2949
+
+- 修复点：`exclude_and_reroute` 后若没有未排除 provider，RequestExecutor 不再进入 `provider.route_pool_cooldown_wait`；直接 fail-fast 返回最后一个 provider error，避免 60s 客户端超时后变成 `CLIENT_RESPONSE_CLOSED`。
+- 红测证据：新增/更新 fail-fast 断言覆盖 singleton 429、concurrency busy、recoverable pool exhaustion；`request-executor` + empty-pool handler + relay busy blackbox + retry policy 7 suites / 96 tests 全绿。
+- 构建安装：`npm run build:min` PASS，bump `0.90.2949`；`npm run install:global` 成功；`routecodex restart --port 5520` 后 health 为 `0.90.2949` ready。
+- 线上证据：live request `live-nosame-fast-1780740611` 1.39s 返回 HTTP/SSE 429；日志 `openai-responses-minimax.key1-MiniMax-M3-20260606T181011421-277638-549` 只有 `switch=exclude_and_reroute decision=provider_backoff_then_reroute`，无 `route_pool_cooldown_wait` / `CLIENT_RESPONSE_CLOSED`。

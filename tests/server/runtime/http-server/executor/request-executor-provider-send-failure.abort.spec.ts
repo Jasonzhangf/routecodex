@@ -125,7 +125,7 @@ describe('request executor provider send failure abort handling', () => {
 
     expect(recordAttempt).toHaveBeenCalledWith({ error: true });
     expect(logProviderRetrySwitch).toHaveBeenCalledWith(expect.objectContaining({
-      switchAction: 'retry_same_provider',
+      switchAction: 'exclude_and_reroute',
       stage: 'provider.send'
     }));
   });
@@ -186,7 +186,7 @@ describe('request executor provider send failure abort handling', () => {
 
     expect(recordAttempt).toHaveBeenCalledWith({ error: true });
     expect(logProviderRetrySwitch).toHaveBeenCalledWith(expect.objectContaining({
-      switchAction: 'retry_same_provider',
+      switchAction: 'exclude_and_reroute',
       stage: 'provider.send'
     }));
   });

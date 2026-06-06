@@ -1,4 +1,5 @@
 import type { Application, Request, Response } from 'express';
+// feature_id: daemon_admin.command_handlers
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import { x7eGate, getGateState } from './routecodex-x7e-gate.js';

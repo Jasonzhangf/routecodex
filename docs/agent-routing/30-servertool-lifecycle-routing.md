@@ -13,7 +13,7 @@
 ## 当前迁移方向（2026-06-06）
 1. 新 servertool 改造方向以 `docs/design/servertool-cli-projection-migration.md` 为准。
 2. Phase 1 暂不取消工具注入和拦截，但被拦截的 servertool 不再走私有 server-side execution + followup；改为投影成客户端可见的 `exec_command` CLI 调用。
-3. 客户端执行 `routecodex servertool run --ticket <ticketId>` 后，通过正常 `submit_tool_outputs` 回传；RouteCodex 按 ticket 恢复原模型 tool call identity，再进入正常 provider request 链。
+3. 客户端执行 `routecodex servertool run <toolName> --input-json <json>` 后，通过正常 `submit_tool_outputs` 回传；RouteCodex 按普通 exec_command 工具结果进入正常请求链，不恢复内部 tool identity。
 4. stop summary / servertool explanation 必须映射到 reasoning；CLI stdout 只承载短工具结果。
 5. `apply_patch` 不属于 servertool CLI migration；保持原生/freeform 客户端工具链。
 

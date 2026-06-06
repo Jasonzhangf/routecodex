@@ -1,4 +1,6 @@
 // feature_id: hub.servertool_followup
+// feature_id: hub.servertool_cli_projection
+// canonical_builder: build_servertool_cli_projection_01_from_hub_resp_chatprocess_03
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
@@ -16,6 +18,10 @@ use crate::virtual_router_engine::routing::{
     resolve_routing_state_key, resolve_session_scope, resolve_stop_message_scope,
 };
 use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
+
+pub(crate) fn build_servertool_cli_projection_01_from_hub_resp_chatprocess_03() -> &'static str {
+    "routecodex servertool run <toolName> --input-json <json>"
+}
 
 /// Tool names treated as pure noop — acknowledged and auto-continued without handler execution.
 /// Outcome is a standard delta: tool_outputs entry + clientInjectOnly followup.

@@ -1,15 +1,15 @@
+import { randomUUID } from 'crypto';
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import {
-  buildServertoolCliTicket,
-  writeServertoolCliTicket,
-  type ServertoolCliTicket
-} from './cli-ticket.js';
 import type { ServerSideToolEngineOptions, ToolCall } from './types.js';
 
 export const SERVERTOOL_CLI_PROJECTION_FEATURE_ID = 'feature_id: hub.servertool_cli_projection';
+export const SERVERTOOL_CLI_PROJECTION_CANONICAL_BUILDER =
+  'build_servertool_cli_projection_01_from_hub_resp_chatprocess_03';
 
 export interface ServertoolCliProjectionPlan {
-  ticket: ServertoolCliTicket;
+  clientCallId: string;
+  toolName: string;
+  command: string;
   chatResponse: JsonObject;
 }
 
@@ -18,34 +18,15 @@ export function buildServertoolCliProjectionForToolCall(args: {
   toolCall: ToolCall;
   reasoningText?: string;
 }): ServertoolCliProjectionPlan {
-  const ticket = buildServertoolCliTicket({
-    entryEndpoint: args.options.entryEndpoint,
+  const toolName = args.toolCall.name;
+  const input = parseArguments(args.toolCall.arguments);
+  const reasoningText = args.reasoningText || `RouteCodex will execute servertool ${toolName} through client CLI.`;
+  return buildProjection({
     requestId: args.options.requestId,
-    ...readScope(args.options.adapterContext),
-    modelTool: {
-      name: args.toolCall.name,
-      callId: args.toolCall.id
-    },
-    executor: {
-      kind: args.toolCall.name === 'servertool_fixture' ? 'fixture' : args.toolCall.name,
-      toolName: args.toolCall.name,
-      arguments: parseArguments(args.toolCall.arguments),
-      capabilities: []
-    },
-    presentation: {
-      reasoningText: args.reasoningText || `RouteCodex will execute servertool ${args.toolCall.name} through client CLI.`,
-      stdoutPreview: `${args.toolCall.name} execution requested`
-    }
+    toolName,
+    input,
+    reasoningText
   });
-  writeServertoolCliTicket(ticket);
-  return {
-    ticket,
-    chatResponse: buildExecCommandChatResponse({
-      requestId: args.options.requestId,
-      ticket,
-      reasoningText: ticket.presentation.reasoningText
-    })
-  };
 }
 
 export function buildServertoolCliProjectionForAutoFlow(args: {
@@ -53,49 +34,32 @@ export function buildServertoolCliProjectionForAutoFlow(args: {
   flowId: string;
   reasoningText: string;
   stdoutPreview?: string;
+  input?: JsonObject;
 }): ServertoolCliProjectionPlan {
-  const syntheticCallId = `call_${args.flowId}_${args.options.requestId}`.replace(/[^A-Za-z0-9_-]/g, '_');
-  const ticket = buildServertoolCliTicket({
-    entryEndpoint: args.options.entryEndpoint,
+  const toolName = args.flowId === 'stop_message_flow' ? 'stop_message_auto' : args.flowId;
+  return buildProjection({
     requestId: args.options.requestId,
-    ...readScope(args.options.adapterContext),
-    modelTool: {
-      name: args.flowId,
-      callId: syntheticCallId,
-      synthetic: true
+    toolName,
+    input: {
+      flowId: args.flowId,
+      ...(args.input ?? {}),
+      ...(args.stdoutPreview ? { stdoutPreview: args.stdoutPreview } : {})
     },
-    executor: {
-      kind: args.flowId === 'stop_message_flow' ? 'stop_message_auto' : args.flowId,
-      toolName: args.flowId,
-      arguments: {
-        flowId: args.flowId
-      },
-      capabilities: []
-    },
-    presentation: {
-      reasoningText: args.reasoningText,
-      stdoutPreview: args.stdoutPreview || `${args.flowId} projected to CLI`
-    }
+    reasoningText: args.reasoningText
   });
-  writeServertoolCliTicket(ticket);
-  return {
-    ticket,
-    chatResponse: buildExecCommandChatResponse({
-      requestId: args.options.requestId,
-      ticket,
-      reasoningText: ticket.presentation.reasoningText
-    })
-  };
 }
 
-function buildExecCommandChatResponse(args: {
+function buildProjection(args: {
   requestId: string;
-  ticket: ServertoolCliTicket;
+  toolName: string;
+  input: JsonObject;
   reasoningText: string;
-}): JsonObject {
-  const command = `routecodex servertool run --ticket ${args.ticket.ticketId}`;
-  return {
-    id: `chatcmpl_${args.ticket.ticketId}`,
+}): ServertoolCliProjectionPlan {
+  const toolName = formatServertoolCliToolName(args.toolName);
+  const clientCallId = `call_servertool_cli_${randomUUID().replace(/-/g, '')}`;
+  const command = `routecodex servertool run ${toolName} --input-json ${shellQuoteJson(args.input)}`;
+  const chatResponse: JsonObject = {
+    id: `chatcmpl_${clientCallId}`,
     object: 'chat.completion',
     created: Math.floor(Date.now() / 1000),
     model: 'routecodex-servertool-cli',
@@ -111,7 +75,7 @@ function buildExecCommandChatResponse(args: {
           },
           tool_calls: [
             {
-              id: args.ticket.clientTool.callId,
+              id: clientCallId,
               type: 'function',
               function: {
                 name: 'exec_command',
@@ -124,12 +88,16 @@ function buildExecCommandChatResponse(args: {
       }
     ],
     __servertool_cli_projection: {
-      ticketId: args.ticket.ticketId,
-      clientCallId: args.ticket.clientTool.callId,
-      modelToolName: args.ticket.modelTool.name,
-      modelToolCallId: args.ticket.modelTool.callId,
+      clientCallId,
+      toolName,
       requestId: args.requestId
     }
+  };
+  return {
+    clientCallId,
+    toolName,
+    command,
+    chatResponse
   };
 }
 
@@ -148,17 +116,13 @@ function parseArguments(value: string): JsonObject {
   throw new Error('[servertool.cli] tool arguments must be JSON object');
 }
 
-function readScope(adapterContext: unknown): {
-  sessionId?: string;
-  conversationId?: string;
-} {
-  const record = adapterContext && typeof adapterContext === 'object' && !Array.isArray(adapterContext)
-    ? adapterContext as Record<string, unknown>
-    : {};
-  const sessionId = typeof record.sessionId === 'string' && record.sessionId.trim() ? record.sessionId.trim() : undefined;
-  const conversationId = typeof record.conversationId === 'string' && record.conversationId.trim() ? record.conversationId.trim() : undefined;
-  return {
-    ...(sessionId ? { sessionId } : {}),
-    ...(conversationId ? { conversationId } : {})
-  };
+function formatServertoolCliToolName(toolName: string): string {
+  if (!/^[A-Za-z0-9_.-]+$/.test(toolName)) {
+    throw new Error(`[servertool.cli] unsafe tool name for CLI projection: ${toolName}`);
+  }
+  return toolName;
+}
+
+function shellQuoteJson(value: JsonObject): string {
+  return `'${JSON.stringify(value).replace(/'/g, `'\\''`)}'`;
 }

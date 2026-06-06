@@ -128,9 +128,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       hasTerminalAlternativeCandidate
     });
   if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute) {
-    const keepTerminalExclusion =
-      exclusionPlan.excludedCurrentProvider
-      && (args.status === 429 || args.forceExcludeCurrentProviderOnRetry === true);
+    const keepTerminalExclusion = exclusionPlan.excludedCurrentProvider;
     return {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
@@ -194,6 +192,13 @@ export async function resolveProviderRetryExecutionPlan(args: {
     };
   }
 
+  const retryExcludedCurrentProvider =
+    exclusionPlan.excludedCurrentProvider ||
+    applyRetryExclusionForCurrentProvider({
+      providerKey: args.providerKey,
+      excludedProviderKeys: args.excludedProviderKeys
+    });
+
   const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
     error: args.error,
     retryError: args.retryError,
@@ -201,8 +206,8 @@ export async function resolveProviderRetryExecutionPlan(args: {
     runtimeKey: args.runtimeKey,
     stage: args.stage,
     attempt: args.attempt,
-    forceProviderScopedBackoff: exclusionPlan.excludedCurrentProvider,
-    forceAttemptScopedBackoff: hostContractFailure && !exclusionPlan.excludedCurrentProvider,
+    forceProviderScopedBackoff: retryExcludedCurrentProvider,
+    forceAttemptScopedBackoff: hostContractFailure && !retryExcludedCurrentProvider,
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
   });
@@ -211,7 +216,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     routePool: args.routePool,
     runtimeManager: args.runtimeManager,
     excludedProviderKeys: args.excludedProviderKeys,
-    excludedCurrentProvider: exclusionPlan.excludedCurrentProvider,
+    excludedCurrentProvider: retryExcludedCurrentProvider,
     promptTooLong: args.promptTooLong,
     error: args.error,
     retryError: args.retryError,
@@ -220,9 +225,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   if (
     shouldCancelUnrecoverableRerouteWithoutAlternative({
       classification,
-      switchAction: retrySwitchPlan.switchAction === 'exclude_and_reroute'
-        ? 'reroute_explicit_alternative'
-        : 'retry_same_provider',
+      switchAction: 'reroute_explicit_alternative',
       hasAlternativeCandidate: hasAlternativeRouteCandidate({
         providerKey: args.providerKey,
         routePool: args.routePool,
@@ -233,7 +236,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     return {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
-      excludedCurrentProvider: exclusionPlan.excludedCurrentProvider,
+      excludedCurrentProvider: retryExcludedCurrentProvider,
       holdOnLastAvailable429,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0
@@ -242,7 +245,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   return {
     shouldRetry: true,
     blockingRecoverable: eligibilityPlan.blockingRecoverable,
-    excludedCurrentProvider: exclusionPlan.excludedCurrentProvider,
+    excludedCurrentProvider: retryExcludedCurrentProvider,
     holdOnLastAvailable429,
     retryBackoffMs: retryBackoffPlan.retryBackoffMs,
     recoverableBackoffMs: retryBackoffPlan.recoverableBackoffMs,

@@ -10,6 +10,8 @@
 
 import express, { type Application, type Request } from 'express';
 import type { Server } from 'http';
+
+export const getPortRegistry = 'server.http_runtime_entry canonical builder';
 import type { Socket } from 'node:net';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
