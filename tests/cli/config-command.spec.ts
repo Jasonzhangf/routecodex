@@ -264,7 +264,9 @@ describe('cli config command', () => {
     expect(writes.has('/tmp/config.json')).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed?.virtualrouterMode).toBe('v2');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
+    expect(
+      Object.keys(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.loadBalancing?.weights || {})[0]
+    ).toContain('openai.');
   });
 
   it('edit spawns editor with config path', async () => {
@@ -354,7 +356,9 @@ describe('cli config command', () => {
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed?.virtualrouterMode).toBe('v2');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
+    expect(
+      Object.keys(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.loadBalancing?.weights || {})[0]
+    ).toContain('openai.');
   });
 
   it('switch-group persists active group and sends reload signal', async () => {
@@ -669,7 +673,9 @@ describe('cli init command', () => {
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed?.virtualrouterMode).toBe('v2');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.targets?.[0]).toBe('my-openai.gpt-4.1-mini');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.loadBalancing?.weights).toMatchObject({
+      'my-openai.gpt-4.1-mini': 1
+    });
 
     const providerV2 = JSON.parse(writes.get('/tmp/.rcc/provider/my-openai/config.v2.json') || '{}');
     expect(providerV2?.providerId).toBe('my-openai');
@@ -770,14 +776,16 @@ describe('cli init command', () => {
     expect(writes.has('/tmp/config.json')).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed?.virtualrouterMode).toBe('v2');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
+    expect(
+      Object.keys(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.loadBalancing?.weights || {})[0]
+    ).toContain('openai.');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search).toBeUndefined();
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch).toBeUndefined();
     const providerV2 = JSON.parse(writes.get('/tmp/.rcc/provider/openai/config.v2.json') || '{}');
     expect(providerV2?.providerId).toBe('openai');
   });
 
-  it('init (non-interactive) injects model-less glm webSearch defaults when glm is selected', async () => {
+  it('init (non-interactive) does not inject webSearch defaults when glm has no webSearch binding', async () => {
     const writes = new Map<string, string>();
     const program = new Command();
     createInitCommand(program, {
@@ -815,13 +823,11 @@ describe('cli init command', () => {
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets?.[0]).toContain('glm.');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('glm:web_search');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.providerKey).toBe('glm');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['glm:web_search']?.providerKey).toBe('glm');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search).toBeUndefined();
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch).toBeUndefined();
   });
 
-  it('init (non-interactive) injects qwen as fallback engine when glm and qwen are selected', async () => {
+  it('init (non-interactive) ignores unknown qwen and still avoids webSearch injection for glm', async () => {
     const writes = new Map<string, string>();
     const program = new Command();
     createInitCommand(program, {
@@ -854,18 +860,13 @@ describe('cli init command', () => {
     });
 
     await program.parseAsync(
-      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '  --providers', 'glm,qwen', '--force'],
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'glm,qwen', '--force'],
       { from: 'node' }
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets).toEqual([
-      expect.stringContaining('glm.'),
-      'qwen.qwen3.5-plus'
-    ]);
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('glm:web_search');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[1]?.id).toBe('qwen:web_search');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['qwen:web_search']?.providerKey).toBe('qwen.qwen3.5-plus');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search).toBeUndefined();
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch).toBeUndefined();
   });
 
   it('init (non-interactive) injects deepseek webSearch defaults when deepseek-web is selected', async () => {
@@ -1112,7 +1113,9 @@ describe('cli init command', () => {
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.virtualrouterMode).toBe('v2');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].targets[0]).toContain('openai.');
+    expect(
+      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].loadBalancing.weights)[0]
+    ).toContain('openai.');
     expect(writes.get('/tmp/.rcc/provider/openai/config.v2.json')).toContain('"providerId": "openai"');
     expect(infos.join('\n')).toContain('Created a minimal V2 config');
     expect(warnings.length).toBe(0);
@@ -2189,10 +2192,12 @@ describe('init-config', () => {
     expect(parsed.httpserver.port).toBe(7777);
     expect(writes.get('/tmp/.rcc/provider/openai/config.v2.json')).toContain('\"providerId\": \"openai\"');
     expect(writes.get('/tmp/.rcc/provider/responses/config.v2.json')).toContain('\"providerId\": \"responses\"');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].targets[0]).toContain('responses.');
+    expect(
+      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].loadBalancing.weights)[0]
+    ).toContain('responses.');
   });
 
-  it('writes model-less glm webSearch defaults when glm is selected', async () => {
+  it('returns invalid_selection when initializeConfigV1 receives non-bootstrap glm', async () => {
     const writes = new Map<string, string>();
     const result = await initializeConfigV1(
       {
@@ -2207,17 +2212,14 @@ describe('init-config', () => {
       { configPath: '/tmp/config.json', force: true, providers: ['glm'] }
     );
 
-    expect(result.ok).toBe(true);
-    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('glm:web_search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('glm');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['glm:web_search'].providerKey).toBe('glm');
-    expect(
-      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)[0]
-    ).toContain('glm.');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('invalid_selection');
+    }
+    expect(writes.has('/tmp/config.json')).toBe(false);
   });
 
-  it('writes qwen as fallback webSearch engine when glm and qwen are selected', async () => {
+  it('returns invalid_selection when initializeConfigV1 receives glm plus unknown qwen', async () => {
     const writes = new Map<string, string>();
     const result = await initializeConfigV1(
       {
@@ -2232,21 +2234,11 @@ describe('init-config', () => {
       { configPath: '/tmp/config.json', force: true, providers: ['glm', 'qwen'] }
     );
 
-    expect(result.ok).toBe(true);
-    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('glm:web_search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[1].id).toBe('qwen:web_search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['glm:web_search'].providerKey).toBe('glm');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['qwen:web_search'].providerKey).toBe('qwen.qwen3.5-plus');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights).toMatchObject({
-      'qwen.qwen3.5-plus': 1
-    });
-    expect(
-      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)
-    ).toEqual([
-      expect.stringContaining('glm.'),
-      'qwen.qwen3.5-plus'
-    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('invalid_selection');
+    }
+    expect(writes.has('/tmp/config.json')).toBe(false);
   });
 
   it('writes deepseek webSearch defaults when deepseek-web is selected', async () => {

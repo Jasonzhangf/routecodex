@@ -10,7 +10,7 @@ function mustOk(label, args) {
   assert.equal(typeof res.normalizedArgs, 'string', `${label}: expected normalizedArgs string`);
   const parsed = JSON.parse(res.normalizedArgs);
   assert.equal(typeof parsed.patch, 'string', `${label}: normalizedArgs.patch must be string`);
-  assert.equal(typeof parsed.input, 'string', `${label}: normalizedArgs.input must be string`);
+  assert.equal(parsed.input, undefined, `${label}: normalizedArgs.input must stay undefined`);
   assert.ok(parsed.patch.includes('*** Begin Patch'), `${label}: patch must include Begin Patch`);
   assert.ok(parsed.patch.includes('*** End Patch'), `${label}: patch must include End Patch`);
   return parsed.patch;
@@ -84,4 +84,3 @@ function main() {
 }
 
 main();
-

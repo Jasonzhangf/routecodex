@@ -135,7 +135,7 @@ describe('TokenFileAuthProvider (qwen) resolves tokenFile alias and auth dir fal
     }
   });
 
-  test('explicit legacy tokenFile qwen-oauth.json falls back to latest qwen-oauth-*.json when missing', async () => {
+  test('explicit legacy tokenFile qwen-oauth.json does not fall back to alias scan when missing', async () => {
     const prevHome = process.env.HOME;
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-tokenfile-qwen-'));
     process.env.HOME = tmpHome;
@@ -153,8 +153,8 @@ describe('TokenFileAuthProvider (qwen) resolves tokenFile alias and auth dir fal
       oauthProviderId: 'qwen'
     } as any);
     await provider.initialize();
-    expect(provider.getStatus().isValid).toBe(true);
-    expect(provider.buildHeaders()).toHaveProperty('Authorization', 'Bearer access-fallback');
+    expect(provider.getStatus().isValid).toBe(false);
+    expect(() => provider.buildHeaders()).toThrow();
 
     process.env.HOME = prevHome;
     try {

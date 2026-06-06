@@ -14,9 +14,14 @@ pub(crate) fn resolve_tier_load_balancing(
     global_policy: &LoadBalancingPolicy,
 ) -> ResolvedTierLoadBalancing {
     let strategy = tier
-        .load_balancing
-        .as_ref()
-        .and_then(|cfg| cfg.strategy.clone())
+        .mode
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            tier.load_balancing
+                .as_ref()
+                .and_then(|cfg| cfg.strategy.clone())
+        })
         .or_else(|| global_policy.strategy.clone())
         .unwrap_or_else(|| "round-robin".to_string());
     let weights = tier

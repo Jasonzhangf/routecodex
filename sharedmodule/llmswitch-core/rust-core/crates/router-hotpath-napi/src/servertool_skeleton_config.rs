@@ -60,15 +60,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "trigger": { "type": "tool_call", "canonicalName": "exec_command" },
                     "execution": { "mode": "guarded", "stripAfterExecute": true }
                 },
-
-                "apply_patch": {
-                    "name": "apply_patch",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "tool_call", "canonicalName": "apply_patch" },
-                    "execution": { "mode": "reenter", "stripAfterExecute": true }
-                },
-
             },
             "skeleton": {
                 "finalizeStrip": { "enabled": true, "requireFinalizedMarker": true },
@@ -222,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn skeleton_registers_apply_patch_servertool_for_runtime_gated_dispatch() {
+    fn skeleton_does_not_register_apply_patch_servertool() {
         let raw = get_default_servertool_skeleton_document_json().expect("skeleton json");
         let parsed: Value = serde_json::from_str(&raw).expect("parse skeleton");
         let internal_tools = parsed
@@ -230,7 +221,7 @@ mod tests {
             .and_then(|v| v.get("internalTools"))
             .and_then(|v| v.as_object())
             .expect("internal tools object");
-        assert!(internal_tools.contains_key("apply_patch"));
+        assert!(!internal_tools.contains_key("apply_patch"));
 
         let progress = parsed
             .get("servertool")

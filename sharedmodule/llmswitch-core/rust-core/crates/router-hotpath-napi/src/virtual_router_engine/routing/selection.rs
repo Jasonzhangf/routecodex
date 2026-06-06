@@ -225,6 +225,14 @@ pub(crate) fn resolve_instruction_process_mode_for_selection(
             return process_mode;
         }
     }
+    if let Some(target) = &routing_state.prefer_target {
+        let process_mode = target.process_mode.clone();
+        if process_mode.is_some()
+            && instruction_target_matches_provider_key(target, provider_key, registry)
+        {
+            return process_mode;
+        }
+    }
     None
 }
 

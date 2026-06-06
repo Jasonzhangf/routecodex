@@ -2,6 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 
+use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
 use crate::shared_tooling::split_provider_tool_sentinel_text;
 
 fn as_object(value: &Value) -> Option<&Map<String, Value>> {
@@ -122,7 +123,9 @@ fn messages_from_payload(payload: &Map<String, Value>) -> Vec<Value> {
 fn messages_to_responses_input(messages: &[Value]) -> Value {
     let mut input = Vec::new();
     for message in messages {
-        let Some(row) = message.as_object() else { continue; };
+        let Some(row) = message.as_object() else {
+            continue;
+        };
         let role = row.get("role").and_then(Value::as_str).unwrap_or("user");
         if role == "tool" {
             let call_id = row
@@ -132,11 +135,16 @@ fn messages_to_responses_input(messages: &[Value]) -> Value {
                 .unwrap_or("");
             if !call_id.is_empty() {
                 input.push(Value::Object(Map::from_iter([
-                    ("type".to_string(), Value::String("function_call_output".to_string())),
+                    (
+                        "type".to_string(),
+                        Value::String("function_call_output".to_string()),
+                    ),
                     ("call_id".to_string(), Value::String(call_id.to_string())),
                     (
                         "output".to_string(),
-                        Value::String(extract_responses_message_text(row.get("content").unwrap_or(&Value::Null))),
+                        Value::String(extract_responses_message_text(
+                            row.get("content").unwrap_or(&Value::Null),
+                        )),
                     ),
                 ])));
             }
@@ -144,21 +152,43 @@ fn messages_to_responses_input(messages: &[Value]) -> Value {
         }
         if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
             for tool_call in tool_calls {
-                let Some(call) = tool_call.as_object() else { continue; };
+                let Some(call) = tool_call.as_object() else {
+                    continue;
+                };
                 let function = call.get("function").and_then(Value::as_object);
                 input.push(Value::Object(Map::from_iter([
-                    ("type".to_string(), Value::String("function_call".to_string())),
+                    (
+                        "type".to_string(),
+                        Value::String("function_call".to_string()),
+                    ),
                     (
                         "call_id".to_string(),
-                        Value::String(call.get("id").and_then(Value::as_str).unwrap_or("").to_string()),
+                        Value::String(
+                            call.get("id")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string(),
+                        ),
                     ),
                     (
                         "name".to_string(),
-                        Value::String(function.and_then(|f| f.get("name")).and_then(Value::as_str).unwrap_or("").to_string()),
+                        Value::String(
+                            function
+                                .and_then(|f| f.get("name"))
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string(),
+                        ),
                     ),
                     (
                         "arguments".to_string(),
-                        Value::String(function.and_then(|f| f.get("arguments")).and_then(Value::as_str).unwrap_or("{}").to_string()),
+                        Value::String(
+                            function
+                                .and_then(|f| f.get("arguments"))
+                                .and_then(Value::as_str)
+                                .unwrap_or("{}")
+                                .to_string(),
+                        ),
                     ),
                 ])));
             }
@@ -167,7 +197,11 @@ fn messages_to_responses_input(messages: &[Value]) -> Value {
         if text.trim().is_empty() {
             continue;
         }
-        let content_type = if role == "assistant" { "output_text" } else { "input_text" };
+        let content_type = if role == "assistant" {
+            "output_text"
+        } else {
+            "input_text"
+        };
         input.push(Value::Object(Map::from_iter([
             ("type".to_string(), Value::String("message".to_string())),
             ("role".to_string(), Value::String(role.to_string())),
@@ -321,6 +355,9 @@ fn extract_captured_tool_outputs(responses_context: Option<&Map<String, Value>>)
             "output".to_string(),
             row.get("output").cloned().unwrap_or(Value::Null),
         );
+        if let Some(arguments) = row.get("arguments").cloned() {
+            next.insert("arguments".to_string(), arguments);
+        }
         if let Some(name) = read_trimmed_string(Some(row), &["name"]) {
             next.insert("name".to_string(), Value::String(name));
         }
@@ -526,11 +563,16 @@ fn append_tool_messages_from_tool_outputs(
             let tool_call_id = read_trimmed_string(Some(row), &["tool_call_id"])?;
             let name =
                 read_trimmed_string(Some(row), &["name"]).unwrap_or_else(|| "tool".to_string());
-            let arguments = row
+            let raw_arguments = row
                 .get("arguments")
                 .and_then(Value::as_str)
                 .unwrap_or("{}")
                 .to_string();
+            let arguments = if name.eq_ignore_ascii_case("apply_patch") {
+                normalize_apply_patch_schema_args(Some(&Value::String(raw_arguments))).0
+            } else {
+                raw_arguments
+            };
             Some(Value::Object(Map::from_iter([
                 ("id".to_string(), Value::String(tool_call_id)),
                 ("type".to_string(), Value::String("function".to_string())),
@@ -796,7 +838,10 @@ pub(crate) fn apply_followup_delta_plan(input: &Value) -> Option<Value> {
     let mut payload = seed.clone();
     let use_responses_input = payload.contains_key("input") && !payload.contains_key("messages");
     if use_responses_input {
-        payload.insert("messages".to_string(), Value::Array(messages_from_payload(&payload)));
+        payload.insert(
+            "messages".to_string(),
+            Value::Array(messages_from_payload(&payload)),
+        );
     }
     let ops = injection
         .get("ops")
@@ -831,7 +876,9 @@ pub fn extract_captured_chat_seed_json(captured_json: String) -> NapiResult<Stri
 }
 
 #[napi]
-pub fn build_servertool_req04_followup_payload_json(adapter_context_json: String) -> NapiResult<String> {
+pub fn build_servertool_req04_followup_payload_json(
+    adapter_context_json: String,
+) -> NapiResult<String> {
     let adapter_context: Value = serde_json::from_str(&adapter_context_json)
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
     serde_json::to_string(

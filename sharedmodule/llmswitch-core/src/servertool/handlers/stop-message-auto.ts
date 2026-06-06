@@ -7,6 +7,10 @@ import type {
 import { registerServerToolHandler } from '../registry.js';
 import type { ServerToolFollowupPlan } from '../types.js';
 import { isCompactionRequest } from './compaction-detect.js';
+import {
+  shouldBypassStopMessageForMediaContext,
+  shouldRunVisionFlowForAdapterContext
+} from './vision-eligibility.js';
 import { extractCapturedChatSeed } from '../followup-seed.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 import { isStopEligibleForServerTool, resolveStopGatewayContext } from '../stop-gateway-context.js';
@@ -627,6 +631,12 @@ function isPlanModeActiveFromCapturedRequest(adapterContext: unknown): boolean {
 const handler: ServerToolHandler = async (
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerPlan | null> => {
+  if (
+    shouldRunVisionFlowForAdapterContext(ctx.adapterContext) ||
+    shouldBypassStopMessageForMediaContext(ctx.adapterContext)
+  ) {
+    return null;
+  }
   const record = ctx.adapterContext as unknown as Record<string, unknown>;
   const rt = readRuntimeMetadata(ctx.adapterContext as unknown as Record<string, unknown>) ?? {};
 

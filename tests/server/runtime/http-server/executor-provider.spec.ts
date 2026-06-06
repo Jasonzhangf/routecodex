@@ -46,7 +46,7 @@ describe('executor-provider retry policy', () => {
     expect(shouldRetryProviderError(unauthorized)).toBe(false);
   });
 
-  it('does not retry provider-declared non-retryable Windsurf Cascade state errors', () => {
+  it('does not retry no-progress errors but retries busy Windsurf Cascade state errors', () => {
     const noProgress = Object.assign(new Error('[windsurf] Cascade stayed active with thinking only'), {
       statusCode: 409,
       code: 'WINDSURF_CASCADE_NO_PROGRESS',
@@ -58,7 +58,7 @@ describe('executor-provider retry policy', () => {
       retryable: false
     });
     expect(shouldRetryProviderError(noProgress)).toBe(false);
-    expect(shouldRetryProviderError(busy)).toBe(false);
+    expect(shouldRetryProviderError(busy)).toBe(true);
   });
 
   it('treats glm business 514 model error as retryable', () => {

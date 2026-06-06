@@ -1297,10 +1297,7 @@ mod tests {
         ctx.default_max_repeats = 5;
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Trigger);
-        assert!(result
-            .followup_text
-            .unwrap()
-            .contains("当前用户目标是什么"));
+        assert!(result.followup_text.unwrap().contains("当前用户目标是什么"));
         assert_eq!(result.max_repeats, 5);
     }
 

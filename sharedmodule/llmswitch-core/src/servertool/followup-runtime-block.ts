@@ -223,6 +223,7 @@ export function applyFollowupRuntimeMetadata(args: {
     (typeof adapterRecord?.routeName === 'string' ? String(adapterRecord.routeName).trim() : '') ||
     (typeof adapterTarget?.routeName === 'string' ? String(adapterTarget.routeName).trim() : '');
   const rt = ensureRuntimeMetadata(args.metadata as unknown as Record<string, unknown>);
+  (args.metadata as Record<string, unknown>).stream = false;
   (rt as Record<string, unknown>).serverToolFollowup = true;
   if (args.loopState) {
     const rootLoopState = (args.metadata as Record<string, unknown>).serverToolLoopState;

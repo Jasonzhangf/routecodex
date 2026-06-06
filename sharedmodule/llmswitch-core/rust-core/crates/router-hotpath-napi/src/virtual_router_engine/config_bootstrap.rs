@@ -230,14 +230,11 @@ fn normalize_apply_patch_config(
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "client".to_string());
     match mode_raw.as_str() {
-        "client" => Ok(Some(ApplyPatchConfigOutput {
+        "client" | "freeform" => Ok(Some(ApplyPatchConfigOutput {
             mode: "client".to_string(),
         })),
-        "servertool" => Ok(Some(ApplyPatchConfigOutput {
-            mode: "servertool".to_string(),
-        })),
         other => Err(format!(
-            "servertool.apply_patch.mode must be client or servertool, got {}",
+            "servertool.apply_patch.mode must be client/freeform, got {}",
             other
         )),
     }

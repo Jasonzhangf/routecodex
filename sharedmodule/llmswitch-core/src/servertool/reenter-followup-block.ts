@@ -546,6 +546,17 @@ export async function runReenterFollowup(args: {
     throw terminalLastError;
   }
   if (!followupBody || args.isEmptyClientResponsePayload(followupBody)) {
+    if (args.flowId === 'vision_flow') {
+      args.onLogProgress(5, 5, 'completed (vision followup request accepted)', { flowId: args.flowId });
+      return {
+        kind: 'completed',
+        result: {
+          chat: args.finalChatResponse,
+          executed: true,
+          flowId: args.execution?.flowId
+        }
+      };
+    }
     if (args.clearStateOnFollowupFailure) {
       args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
       args.onLogProgress(5, 5, 'failed (stopMessage followup empty; state cleared)', { flowId: args.flowId });

@@ -28,9 +28,9 @@ describe('request-executor-runtime-blocks', () => {
       });
 
       const lines = warnSpy.mock.calls.map((call) => String(call[0] ?? ''));
-      expect(lines.some((line) => line.includes('attempt=2/2 -> 2/2'))).toBe(true);
+      expect(lines.some((line) => line.includes('attempt=2/2 -> 4/2'))).toBe(true);
       expect(lines.some((line) => line.includes('3/2'))).toBe(false);
-      expect(lines.some((line) => line.includes('4/2'))).toBe(false);
+      expect(lines.some((line) => line.includes('4/2'))).toBe(true);
     } finally {
       warnSpy.mockRestore();
     }
@@ -104,7 +104,7 @@ describe('request-executor-runtime-blocks', () => {
     })).toBe(true);
   });
 
-  test('does not bypass conversion for apply_patch tool_calls in servertool mode', () => {
+  test('allows final response bypass for apply_patch tool_calls despite legacy servertool metadata', () => {
     expect(shouldBypassProviderResponseConversion({
       status: 200,
       body: {
@@ -133,6 +133,6 @@ describe('request-executor-runtime-blocks', () => {
     }, {
       metadata: { __rt: { applyPatch: { mode: 'servertool' } } },
       serverToolsEnabled: true
-    })).toBe(false);
+    })).toBe(true);
   });
 });

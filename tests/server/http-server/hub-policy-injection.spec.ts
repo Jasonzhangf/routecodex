@@ -27,6 +27,9 @@ describe('RouteCodexHttpServer hub policy injection', () => {
     const config = {
       virtualrouterMode: 'v1',
       virtualrouter: {
+        routingPolicyGroups: {
+          default: { routing: { default: [{ id: 'default', targets: ['mock.dummy'] }] } }
+        },
         providers: {
           mock: {
             type: 'mock',
@@ -52,6 +55,8 @@ describe('RouteCodexHttpServer hub policy injection', () => {
 
     jest.resetModules();
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({}),
       getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
       extractSessionIdentifiersFromMetadata: () => ({}),
       extractAntigravityGeminiSessionId: () => undefined,
@@ -61,6 +66,9 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       resetAntigravitySessionSignatureCachesForTests: () => {},
       warmupAntigravitySessionSignatureModule: async () => {},
       loadRoutingInstructionStateSync: () => null,
+      syncStoplessGoalStateFromRequest: () => {},
+      persistStoplessGoalStateSnapshot: async () => {},
+      readStoplessGoalState: () => null,
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
       syncReasoningStopModeFromRequest: () => {},
@@ -79,7 +87,34 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       }),
       bootstrapVirtualRouterConfig: async (input: any) => ({ config: input, targetRuntime: {} }),
       convertProviderResponse: async (value: any) => value,
+      createCoreQuotaManager: async () => null,
+      preloadCriticalBridgeRuntimeModules: async () => {},
+      captureResponsesRequestContextForRequest: async () => {},
+      recordResponsesResponseForRequest: async () => {},
+      clearResponsesConversationByRequestId: async () => {},
+      finalizeResponsesConversationRequestRetention: async () => {},
+      resumeLatestResponsesContinuationByScope: async () => null,
+      materializeLatestResponsesContinuationByScope: async () => null,
+      clearAllResponsesConversationState: async () => {},
+      clearUnresolvedResponsesConversationRequests: async () => {},
       createSnapshotRecorder: () => ({}) as any,
+      deriveFinishReasonNative: () => undefined,
+      mapChatToolsToBridgeJson: async () => [],
+      planResponsesHandlerEntry: async () => ({ mode: 'passthrough' }),
+      normalizeAssistantTextToToolCallsJson: async () => ({ toolCalls: [] }),
+      buildAnthropicResponseFromChatJson: async (payload: unknown) => payload,
+      injectMcpToolsForChatJson: async (payload: unknown) => payload,
+      injectMcpToolsForResponsesJson: async (payload: unknown) => payload,
+      sanitizeProviderOutboundPayload: async (payload: unknown) => payload,
+      applyResponsesDirectRouteParamsOverrideNative: async (payload: unknown) => payload,
+      buildResponsesDirectPassthroughBodyNative: async (payload: unknown) => payload,
+      evaluateResponsesDirectRouteDecisionNative: async () => ({ mode: 'passthrough' }),
+      hasDeclaredApplyPatchToolNative: () => false,
+      resolveResponsesDirectPayloadNative: async (payload: unknown) => payload,
+      validateResponsesDirectToolShapeContractNative: async () => ({ ok: true }),
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: () => ({}),
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
       rebindResponsesConversationRequestId: async () => {},
       resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
       writeSnapshotViaHooks: async () => {},
@@ -87,6 +122,9 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       ensureResponsesInstructions: async () => {},
       createResponsesSseToJsonConverter: async () => ({
         convertSseToJson: async () => ({})
+      }),
+      createResponsesJsonToSseConverter: async () => ({
+        convertResponseToJsonToSse: async () => ({})
       }),
       getHubPipelineCtor: async () =>
         class HubPipelineMock {
@@ -138,6 +176,8 @@ describe('RouteCodexHttpServer hub policy injection', () => {
 
     jest.resetModules();
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({}),
       getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
       extractSessionIdentifiersFromMetadata: () => ({}),
       extractAntigravityGeminiSessionId: () => undefined,
@@ -147,6 +187,9 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       resetAntigravitySessionSignatureCachesForTests: () => {},
       warmupAntigravitySessionSignatureModule: async () => {},
       loadRoutingInstructionStateSync: () => null,
+      syncStoplessGoalStateFromRequest: () => {},
+      persistStoplessGoalStateSnapshot: async () => {},
+      readStoplessGoalState: () => null,
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
       syncReasoningStopModeFromRequest: () => {},
@@ -165,7 +208,34 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       }),
       bootstrapVirtualRouterConfig: async (input: any) => ({ config: input, targetRuntime: {} }),
       convertProviderResponse: async (value: any) => value,
+      createCoreQuotaManager: async () => null,
+      preloadCriticalBridgeRuntimeModules: async () => {},
+      captureResponsesRequestContextForRequest: async () => {},
+      recordResponsesResponseForRequest: async () => {},
+      clearResponsesConversationByRequestId: async () => {},
+      finalizeResponsesConversationRequestRetention: async () => {},
+      resumeLatestResponsesContinuationByScope: async () => null,
+      materializeLatestResponsesContinuationByScope: async () => null,
+      clearAllResponsesConversationState: async () => {},
+      clearUnresolvedResponsesConversationRequests: async () => {},
       createSnapshotRecorder: () => ({}) as any,
+      deriveFinishReasonNative: () => undefined,
+      mapChatToolsToBridgeJson: async () => [],
+      planResponsesHandlerEntry: async () => ({ mode: 'passthrough' }),
+      normalizeAssistantTextToToolCallsJson: async () => ({ toolCalls: [] }),
+      buildAnthropicResponseFromChatJson: async (payload: unknown) => payload,
+      injectMcpToolsForChatJson: async (payload: unknown) => payload,
+      injectMcpToolsForResponsesJson: async (payload: unknown) => payload,
+      sanitizeProviderOutboundPayload: async (payload: unknown) => payload,
+      applyResponsesDirectRouteParamsOverrideNative: async (payload: unknown) => payload,
+      buildResponsesDirectPassthroughBodyNative: async (payload: unknown) => payload,
+      evaluateResponsesDirectRouteDecisionNative: async () => ({ mode: 'passthrough' }),
+      hasDeclaredApplyPatchToolNative: () => false,
+      resolveResponsesDirectPayloadNative: async (payload: unknown) => payload,
+      validateResponsesDirectToolShapeContractNative: async () => ({ ok: true }),
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: () => ({}),
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
       rebindResponsesConversationRequestId: async () => {},
       resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
       writeSnapshotViaHooks: async () => {},
@@ -173,6 +243,9 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       ensureResponsesInstructions: async () => {},
       createResponsesSseToJsonConverter: async () => ({
         convertSseToJson: async () => ({})
+      }),
+      createResponsesJsonToSseConverter: async () => ({
+        convertResponseToJsonToSse: async () => ({})
       }),
       getHubPipelineCtor: async () =>
         class HubPipelineMock {
@@ -225,6 +298,8 @@ describe('RouteCodexHttpServer hub policy injection', () => {
 
     jest.resetModules();
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({}),
       getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
       extractSessionIdentifiersFromMetadata: () => ({}),
       extractAntigravityGeminiSessionId: () => undefined,
@@ -234,6 +309,9 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       resetAntigravitySessionSignatureCachesForTests: () => {},
       warmupAntigravitySessionSignatureModule: async () => {},
       loadRoutingInstructionStateSync: () => null,
+      syncStoplessGoalStateFromRequest: () => {},
+      persistStoplessGoalStateSnapshot: async () => {},
+      readStoplessGoalState: () => null,
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
       syncReasoningStopModeFromRequest: () => {},
@@ -252,7 +330,34 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       }),
       bootstrapVirtualRouterConfig: async (input: any) => ({ config: input, targetRuntime: {} }),
       convertProviderResponse: async (value: any) => value,
+      createCoreQuotaManager: async () => null,
+      preloadCriticalBridgeRuntimeModules: async () => {},
+      captureResponsesRequestContextForRequest: async () => {},
+      recordResponsesResponseForRequest: async () => {},
+      clearResponsesConversationByRequestId: async () => {},
+      finalizeResponsesConversationRequestRetention: async () => {},
+      resumeLatestResponsesContinuationByScope: async () => null,
+      materializeLatestResponsesContinuationByScope: async () => null,
+      clearAllResponsesConversationState: async () => {},
+      clearUnresolvedResponsesConversationRequests: async () => {},
       createSnapshotRecorder: () => ({}) as any,
+      deriveFinishReasonNative: () => undefined,
+      mapChatToolsToBridgeJson: async () => [],
+      planResponsesHandlerEntry: async () => ({ mode: 'passthrough' }),
+      normalizeAssistantTextToToolCallsJson: async () => ({ toolCalls: [] }),
+      buildAnthropicResponseFromChatJson: async (payload: unknown) => payload,
+      injectMcpToolsForChatJson: async (payload: unknown) => payload,
+      injectMcpToolsForResponsesJson: async (payload: unknown) => payload,
+      sanitizeProviderOutboundPayload: async (payload: unknown) => payload,
+      applyResponsesDirectRouteParamsOverrideNative: async (payload: unknown) => payload,
+      buildResponsesDirectPassthroughBodyNative: async (payload: unknown) => payload,
+      evaluateResponsesDirectRouteDecisionNative: async () => ({ mode: 'passthrough' }),
+      hasDeclaredApplyPatchToolNative: () => false,
+      resolveResponsesDirectPayloadNative: async (payload: unknown) => payload,
+      validateResponsesDirectToolShapeContractNative: async () => ({ ok: true }),
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: () => ({}),
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
       rebindResponsesConversationRequestId: async () => {},
       resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
       writeSnapshotViaHooks: async () => {},
@@ -260,6 +365,9 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       ensureResponsesInstructions: async () => {},
       createResponsesSseToJsonConverter: async () => ({
         convertSseToJson: async () => ({})
+      }),
+      createResponsesJsonToSseConverter: async () => ({
+        convertResponseToJsonToSse: async () => ({})
       }),
       getHubPipelineCtor: async () =>
         class HubPipelineMock {

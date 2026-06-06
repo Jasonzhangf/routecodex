@@ -8,7 +8,14 @@
 - L33-L38 `authoritative-docs`：权威文档。
 
 ## 覆盖范围
-适用于：servertool stopless 自动续轮、stop followup 重建、tmux 注入边界。
+适用于：servertool stopless 自动续轮、stop followup 重建、CLI projection 迁移、tmux 注入边界。
+
+## 当前迁移方向（2026-06-06）
+1. 新 servertool 改造方向以 `docs/design/servertool-cli-projection-migration.md` 为准。
+2. Phase 1 暂不取消工具注入和拦截，但被拦截的 servertool 不再走私有 server-side execution + followup；改为投影成客户端可见的 `exec_command` CLI 调用。
+3. 客户端执行 `routecodex servertool run --ticket <ticketId>` 后，通过正常 `submit_tool_outputs` 回传；RouteCodex 按 ticket 恢复原模型 tool call identity，再进入正常 provider request 链。
+4. stop summary / servertool explanation 必须映射到 reasoning；CLI stdout 只承载短工具结果。
+5. `apply_patch` 不属于 servertool CLI migration；保持原生/freeform 客户端工具链。
 
 ## stopless 生命周期
 1. 当前 stopless 默认开启，默认注入三轮递进六项排查检查提示：目标、过程、证据、问题原因、已排除因素、排查顺序；默认次数 3；旧默认 `继续执行` 只作为 legacy exact-match 输入并在 Rust 中升级。
@@ -23,6 +30,7 @@
 10. 注入失败必须清理状态，防止循环。
 
 ## followup 边界
+0. CLI projection 已迁移的 servertool 不得再进入 followup；旧 followup 规则只适用于尚未迁移的 legacy servertool flow。
 1. followup 只能基于 origin snapshot 重建。
 2. 不得从当前污染 payload 猜测补偿。
 3. 不得绕过 Hub Pipeline req/resp process 的 Rust 工具治理。
@@ -40,6 +48,7 @@
 - 新需求不得通过 TS 或 servertool 旁路恢复上述功能。
 
 ## 权威文档
+- `docs/design/servertool-cli-projection-migration.md`
 - `docs/stop-message-auto.md`
 - `docs/design/servertool-stopmessage-lifecycle.md`
 - `docs/design/servertool-followup-rebuild-from-origin.md`

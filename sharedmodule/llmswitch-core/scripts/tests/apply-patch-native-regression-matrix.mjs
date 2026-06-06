@@ -85,7 +85,7 @@ async function main() {
       assert.ok(parsed.patch.includes('*** Begin Patch'));
       assert.ok(parsed.patch.includes('*** Update File: demo.txt'));
       assert.ok(parsed.patch.includes('@@ -1 +1 @@'));
-      assert.equal(parsed.input, parsed.patch);
+      assert.equal(parsed.input, undefined);
     }
 
     // 4) raw / wrapped / json envelope
@@ -101,7 +101,7 @@ async function main() {
       ]) {
         const parsed = parseNormalizedArgs(result);
         assert.equal(parsed.patch, patch, `${label} patch must normalize to canonical patch field`);
-        assert.equal(parsed.input, patch, `${label} input alias must mirror patch`);
+        assert.equal(parsed.input, undefined, `${label} input alias must not leak back into canonical args`);
       }
     }
 
@@ -118,7 +118,7 @@ PATCH"`;
       assert.ok(parsed.patch.includes('*** Begin Patch'), 'shell-wrapped apply_patch must preserve canonical patch');
       assert.ok(parsed.patch.includes('*** Add File: src/nope.ts'), 'shell-wrapped apply_patch must preserve target file');
       assert.ok(parsed.patch.includes("+console.log('nope');"), 'shell-wrapped apply_patch must preserve add-file content');
-      assert.equal(parsed.input, parsed.patch, 'shell-wrapped apply_patch input alias must mirror patch');
+      assert.equal(parsed.input, undefined, 'shell-wrapped apply_patch input alias must not leak back into canonical args');
     }
 
     // 4.2) hashline shape missing fileContent must fail-fast instead of silently normalizing to empty patch
@@ -143,7 +143,7 @@ PATCH"`;
         '*** Begin Patch\n*** Add File: demo.txt\n+hello\n*** End Patch',
         'native verdict must plus-prefix add-file content'
       );
-      assert.equal(parsed.input, parsed.patch);
+      assert.equal(parsed.input, undefined);
     }
 
     // 6) file changed -> context mismatch

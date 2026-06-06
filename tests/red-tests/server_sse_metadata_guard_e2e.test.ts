@@ -99,6 +99,42 @@ describe('server_sse_metadata_guard_e2e', () => {
       ).not.toThrow();
     });
 
+    it('ACCEPTS OpenAI Responses SSE event metadata when it has no internal carrier keys', () => {
+      const sseFrameData = {
+        sequence_number: 1,
+        type: 'response.in_progress',
+        response: {
+          id: 'resp_003_in_progress',
+          object: 'response',
+          status: 'in_progress',
+          metadata: {},
+        },
+        metadata: {},
+      };
+
+      expect(() =>
+        assertClientResponseHasNoInternalCarriers(sseFrameData, 'sse-metadata-guard')
+      ).not.toThrow();
+    });
+
+    it('REJECTS OpenAI Responses SSE event metadata when it carries internal keys', () => {
+      const sseFrameData = {
+        sequence_number: 1,
+        type: 'response.in_progress',
+        response: {
+          id: 'resp_003_in_progress',
+          object: 'response',
+          status: 'in_progress',
+          metadata: {},
+        },
+        metadata: { providerKey: 'internal-provider' },
+      };
+
+      expect(() =>
+        assertClientResponseHasNoInternalCarriers(sseFrameData, 'sse-metadata-guard')
+      ).toThrow(/metadata/);
+    });
+
     it('ACCEPTS SSE frame data with no forbidden carriers (clean SSE)', () => {
       // A clean SSE frame must not throw.
       const cleanFrame = {

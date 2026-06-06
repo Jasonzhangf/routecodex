@@ -10,8 +10,8 @@ use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, is_synthetic_routecodex_control_text,
     is_synthetic_routecodex_tool_call_id,
 };
-use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 use crate::shared_json_utils::read_trimmed_string as read_optional_trimmed_string;
+use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 use crate::virtual_router_engine::routing::{
     resolve_routing_state_key, resolve_session_scope, resolve_stop_message_scope,
 };
@@ -969,7 +969,9 @@ fn value_has_visible_assistant_text(value: &Value) -> bool {
         Value::String(text) => !text.trim().is_empty(),
         Value::Array(items) => items.iter().any(value_has_visible_assistant_text),
         Value::Object(row) => {
-            let entry_type = read_optional_trimmed_string(row.get("type")).unwrap_or_default().to_ascii_lowercase();
+            let entry_type = read_optional_trimmed_string(row.get("type"))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
             if entry_type == "thinking" || entry_type == "reasoning" {
                 return false;
             }
@@ -998,7 +1000,9 @@ fn has_output_function_calls(value: Option<&Value>) -> bool {
             Some(v) => v,
             None => return false,
         };
-        let item_type = read_optional_trimmed_string(row.get("type")).unwrap_or_default().to_ascii_lowercase();
+        let item_type = read_optional_trimmed_string(row.get("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
         item_type == "function_call"
             || item_type == "function"
             || has_non_empty_tool_calls(row.get("tool_calls"))
@@ -1015,8 +1019,9 @@ fn detect_empty_assistant_payload_contract_signal(
 
     if let Some(choices) = row.get("choices").and_then(|v| v.as_array()) {
         if let Some(first_choice) = choices.first().and_then(|v| v.as_object()) {
-            let finish_reason =
-                read_optional_trimmed_string(first_choice.get("finish_reason")).unwrap_or_default().to_ascii_lowercase();
+            let finish_reason = read_optional_trimmed_string(first_choice.get("finish_reason"))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
             let message = first_choice.get("message").and_then(|v| v.as_object());
             let has_tool_calls =
                 has_non_empty_tool_calls(message.and_then(|msg| msg.get("tool_calls")));
@@ -1046,7 +1051,9 @@ fn detect_empty_assistant_payload_contract_signal(
         }
     }
 
-    let status = read_optional_trimmed_string(row.get("status")).unwrap_or_default().to_ascii_lowercase();
+    let status = read_optional_trimmed_string(row.get("status"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     if status == "completed" || status == "stop" {
         let required_action = row.get("required_action").and_then(|v| v.as_object());
         let submit_tool_outputs = required_action
@@ -1520,8 +1527,9 @@ fn resolve_chat_web_search_plan(
                 let id = read_optional_trimmed_string(engine.get("id"))
                     .unwrap_or_default()
                     .to_ascii_lowercase();
-                let provider_key =
-                    read_optional_trimmed_string(engine.get("providerKey")).unwrap_or_default().to_ascii_lowercase();
+                let provider_key = read_optional_trimmed_string(engine.get("providerKey"))
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
                 if id.contains("google") {
                     return Some(*idx);
                 }
@@ -1740,8 +1748,8 @@ fn can_dispatch_apply_patch_servertool(
     normalized_name: &str,
     runtime_metadata: Option<&Value>,
 ) -> bool {
+    let _ = runtime_metadata;
     normalized_name != "apply_patch"
-        || resolve_apply_patch_dispatch_mode(runtime_metadata) == "servertool"
 }
 
 #[napi]
@@ -2778,7 +2786,6 @@ mod tests {
         ));
     }
 
-
     #[test]
     fn test_extract_runtime_reads_runtime_carrier() {
         let context = json!({
@@ -2811,7 +2818,6 @@ mod tests {
             Some(3)
         );
     }
-
 
     #[test]
     fn test_resolve_provider_response_request_semantics_merges_followup_tools() {
@@ -3318,7 +3324,7 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_servertool_dispatch_apply_patch_gated_by_runtime_mode() {
+    fn test_plan_servertool_dispatch_never_executes_apply_patch() {
         let base = serde_json::json!({
             "toolCalls": [
                 { "id": "call_patch", "name": "apply_patch", "arguments": "{}" }
@@ -3366,10 +3372,17 @@ mod tests {
             servertool_parsed
                 .get("executableToolCalls")
                 .and_then(|v| v.as_array())
+                .map(|v| v.len()),
+            Some(0)
+        );
+        assert_eq!(
+            servertool_parsed
+                .get("skippedToolCalls")
+                .and_then(|v| v.as_array())
                 .and_then(|rows| rows.first())
-                .and_then(|row| row.get("name"))
+                .and_then(|row| row.get("reason"))
                 .and_then(|v| v.as_str()),
-            Some("apply_patch")
+            Some("apply_patch_client_mode")
         );
     }
 
@@ -3684,9 +3697,7 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_servertool_dispatch_and_outcome_for_apply_patch_servertool_mode() {
-        // Red test: verify servertool apply_patch dispatch + outcome + followup
-        // Part 1: dispatch - apply_patch should be executable
+    fn test_plan_servertool_dispatch_skips_apply_patch_legacy_servertool_mode() {
         let dispatch_input = serde_json::json!({
             "toolCalls": [
                 { "id": "ap_1", "name": "apply_patch", "arguments": "{\"filePath\":\"src/main.ts\",\"patch\":\"+new line\"}" }
@@ -3709,68 +3720,20 @@ mod tests {
         let dispatch_parsed: serde_json::Value =
             serde_json::from_str(dispatch_out.as_str()).unwrap();
         assert_eq!(
-            dispatch_parsed["executableToolCalls"][0]["name"], "apply_patch",
-            "apply_patch should be executable when mode=servertool"
+            dispatch_parsed
+                .get("executableToolCalls")
+                .and_then(|v| v.as_array())
+                .map(|v| v.len()),
+            Some(0)
         );
         assert_eq!(
-            dispatch_parsed["executableToolCalls"][0]["executionMode"], "reenter",
-            "apply_patch should use reenter execution mode"
-        );
-        assert_eq!(
-            dispatch_parsed["executableToolCalls"][0]["stripAfterExecute"], true,
-            "apply_patch should be stripped after execute"
-        );
-
-        // Part 2: outcome - after execution, outcomeMode should be servertool_only
-        let outcome_input = serde_json::json!({
-            "toolCalls": [
-                { "id": "ap_1", "name": "apply_patch", "arguments": "{}" }
-            ],
-            "executedToolCalls": [
-                {
-                    "id": "ap_1",
-                    "name": "apply_patch",
-                    "arguments": "{\"filePath\":\"src/main.ts\",\"patch\":\"+new line\"}",
-                    "executionMode": "reenter",
-                    "stripAfterExecute": true
-                }
-            ],
-            "executedFlowIds": [],
-            "lastExecutionFlowId": "",
-            "hasLastExecutionFollowup": false,
-            "toolOutputs": [{
-                "tool_call_id": "ap_1",
-                "name": "apply_patch",
-                "content": "{\"ok\":true,\"summary\":\"Applied patch\"}"
-            }],
-            "sessionId": "sess_1",
-            "conversationId": "conv_1"
-        });
-        let outcome_out = plan_servertool_outcome_json(outcome_input.to_string()).unwrap();
-        let outcome_parsed: serde_json::Value = serde_json::from_str(outcome_out.as_str()).unwrap();
-
-        // All tool_calls were consumed → servertool_only
-        assert_eq!(
-            outcome_parsed["outcomeMode"], "servertool_only",
-            "single servertool-only call should produce servertool_only outcome"
-        );
-        // remining_tool_call_ids should be empty
-        assert!(
-            outcome_parsed["remainingToolCallIds"]
-                .as_array()
-                .map(|a| a.is_empty())
-                .unwrap_or(false),
-            "all tool calls were executed → no remaining"
-        );
-        // followup should be via generic_tool_outputs (no last execution followup)
-        assert_eq!(
-            outcome_parsed["followupStrategy"], "generic_tool_outputs",
-            "no last followup → generic_tool_outputs strategy"
-        );
-        // pending_injection should NOT be needed for servertool_only mode
-        assert_eq!(
-            outcome_parsed["requiresPendingInjection"], false,
-            "servertool_only mode should not require pending injection"
+            dispatch_parsed
+                .get("skippedToolCalls")
+                .and_then(|v| v.as_array())
+                .and_then(|rows| rows.first())
+                .and_then(|row| row.get("reason"))
+                .and_then(|v| v.as_str()),
+            Some("apply_patch_client_mode")
         );
     }
 
@@ -3815,6 +3778,34 @@ mod tests {
                 .map(|v| v.len()),
             Some(1)
         );
+    }
+
+    #[test]
+    fn run_apply_patch_extracts_file_path_from_canonical_add_file_patch_only_args() {
+        let patch = "*** Begin Patch\n*** Add File: tmp/apply-patch-test/hello.txt\n+hello from apply_patch\n*** End Patch";
+        let input = serde_json::json!({
+            "toolCallId": "call_apply_patch_add_only",
+            "toolCallArguments": serde_json::to_string(&serde_json::json!({ "patch": patch })).unwrap(),
+            "workspace": "/Users/fanzhang/Documents/github/routecodex",
+            "fileContent": ""
+        });
+
+        let output = run_apply_patch_json(input.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(
+            parsed["canonicalArgs"]["filePath"],
+            "tmp/apply-patch-test/hello.txt"
+        );
+        assert_eq!(
+            parsed["payload"]["filePath"],
+            "tmp/apply-patch-test/hello.txt"
+        );
+        assert_eq!(parsed["payload"]["status"], "APPLY_PATCH_APPLIED");
+        assert!(parsed["patchedContent"]
+            .as_str()
+            .unwrap_or("")
+            .contains("hello from apply_patch"));
     }
 }
 
@@ -4046,6 +4037,36 @@ fn strip_outer_quotes(s: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn extract_file_path_from_canonical_patch_header(raw_patch: &str) -> Option<String> {
+    for line in raw_patch.replace("\r\n", "\n").replace('\r', "\n").lines() {
+        let trimmed = line.trim();
+        for marker in ["*** Add File:", "*** Update File:", "*** Delete File:"] {
+            if let Some(rest) = trimmed.strip_prefix(marker) {
+                let path = strip_outer_quotes(rest.trim());
+                if !path.is_empty() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn canonical_patch_declares_delete_for_path(raw_patch: &str, target_path: &str) -> bool {
+    let target = target_path.trim();
+    if target.is_empty() {
+        return false;
+    }
+    for line in raw_patch.replace("\r\n", "\n").replace('\r', "\n").lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("*** Delete File:") {
+            let path = strip_outer_quotes(rest.trim());
+            return path == target || path.ends_with(&format!("/{}", target));
+        }
+    }
+    false
 }
 
 /// Normalize a patch line: ensure `+` or `-` prefix is followed by space.
@@ -4300,12 +4321,15 @@ fn find_subsequence(source: &[String], needle: &[String]) -> Option<usize> {
 
 /// Apply line-edit hunks to target content.
 fn apply_line_edit_patch(target_content: &str, hunks: &[LineEditHunk]) -> Result<String, String> {
-    let lines: Vec<String> = target_content
+    let mut lines: Vec<String> = target_content
         .replace("\r\n", "\n")
         .replace('\r', "\n")
         .split('\n')
         .map(|s| s.to_string())
         .collect();
+    if target_content.ends_with('\n') && lines.last().map(|s| s.is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
 
     let mut result = lines;
 
@@ -4327,11 +4351,12 @@ fn apply_line_edit_patch(target_content: &str, hunks: &[LineEditHunk]) -> Result
     }
 
     let body = result.join("\n");
-    let final_content = if target_content.is_empty() || target_content.ends_with('\n') {
-        format!("{}\n", body)
-    } else {
-        body
-    };
+    let final_content =
+        if (target_content.is_empty() || target_content.ends_with('\n')) && !body.ends_with('\n') {
+            format!("{}\n", body)
+        } else {
+            body
+        };
 
     Ok(final_content)
 }
@@ -4381,6 +4406,7 @@ pub fn run_apply_patch_json(input_json: String) -> NapiResult<String> {
         .and_then(|v| v.as_str())
         .map(|s| strip_outer_quotes(s))
         .filter(|s| !s.is_empty())
+        .or_else(|| extract_file_path_from_canonical_patch_header(&raw_patch))
         .unwrap_or_default();
 
     let normalized_path = if file_path.starts_with('/') || file_path.starts_with("\\\\") {
@@ -4397,10 +4423,35 @@ pub fn run_apply_patch_json(input_json: String) -> NapiResult<String> {
     };
 
     canonical_args["filePath"] = serde_json::json!(normalized_path);
+    let delete_file = canonical_patch_declares_delete_for_path(&raw_patch, &normalized_path);
 
     // 4. Convert native patch to line-edit format
     let line_edit_patch = convert_native_patch_to_line_edit(&raw_patch, &normalized_path);
-    canonical_args["patch"] = serde_json::json!(line_edit_patch);
+    canonical_args["patch"] = serde_json::json!(if delete_file {
+        format!(
+            "*** Begin Patch\n*** Delete File: {}\n*** End Patch",
+            normalized_path
+        )
+    } else {
+        line_edit_patch.clone()
+    });
+
+    if delete_file {
+        let payload = serde_json::json!({
+            "status": "APPLY_PATCH_APPLIED",
+            "ok": true,
+            "filePath": normalized_path,
+            "operation": "delete",
+            "summary": "File deleted."
+        });
+        let output = ApplyPatchOutput {
+            ok: true,
+            payload,
+            patched_content: None,
+            canonical_args,
+        };
+        return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
+    }
 
     // 5. If no patch text — return error
     if line_edit_patch.trim().is_empty() {

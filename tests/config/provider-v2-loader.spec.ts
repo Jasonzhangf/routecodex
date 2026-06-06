@@ -279,7 +279,7 @@ describe('buildVirtualRouterInputV2', () => {
   });
 
 
-  it('carries top-level servertool.apply_patch mode into virtual router input', async () => {
+  it('normalizes top-level servertool.apply_patch freeform mode into client virtual router input', async () => {
     const root = await createTempDir('provider-v2-');
     const providerDir = path.join(root, 'demo');
     await fs.mkdir(providerDir, { recursive: true });
@@ -295,7 +295,7 @@ describe('buildVirtualRouterInputV2', () => {
     );
 
     const input = await buildVirtualRouterInputV2({
-      servertool: { apply_patch: { mode: 'servertool' } },
+      servertool: { apply_patch: { mode: 'freeform' } },
       virtualrouter: {
         routingPolicyGroups: {
           default: { routing: { default: [{ id: 'primary', targets: ['demo.mock-1'] }] } }
@@ -303,12 +303,12 @@ describe('buildVirtualRouterInputV2', () => {
       }
     }, root);
 
-    expect(input.applyPatch).toEqual({ mode: 'servertool' });
+    expect(input.applyPatch).toEqual({ mode: 'client' });
   });
 
 
 
-  it('materializes servertool.apply_patch mode into userConfig.virtualrouter for runtime bootstrap', async () => {
+  it('materializes servertool.apply_patch freeform mode into client runtime bootstrap config', async () => {
     const root = await createTempDir('provider-v2-');
     const providerDir = path.join(root, 'demo');
     await fs.mkdir(providerDir, { recursive: true });
@@ -326,7 +326,7 @@ describe('buildVirtualRouterInputV2', () => {
     const materialized = await materializeRouteCodexConfig({
       version: '2.0.0',
       virtualrouterMode: 'v2',
-      servertool: { apply_patch: { mode: 'servertool' } },
+      servertool: { apply_patch: { mode: 'freeform' } },
       httpserver: { port: 10000, host: '127.0.0.1' },
       virtualrouter: {
         routingPolicyGroups: {
@@ -335,7 +335,7 @@ describe('buildVirtualRouterInputV2', () => {
       }
     }, root);
 
-    expect((materialized.userConfig.virtualrouter as any).applyPatch).toEqual({ mode: 'servertool' });
+    expect((materialized.userConfig.virtualrouter as any).applyPatch).toEqual({ mode: 'client' });
   });
 
   it('materializes only the primary router port routing policy group', async () => {

@@ -252,7 +252,30 @@ pub(super) fn parse_single_instruction(
     if let Some(force) = parse_named_target_instruction(instruction, "force") {
         return Ok(Some(force));
     }
-    if instruction.starts_with('#') {
+    if instruction.starts_with('!') {
+        let target = instruction[1..].trim();
+        if let Some(parsed) = parse_target(target) {
+            if parsed.path_length == Some(1) {
+                if let Some(provider) = parsed.provider.clone() {
+                    return Ok(Some(RoutingInstruction {
+                        kind: "allow".to_string(),
+                        target: None,
+                        provider: Some(provider),
+                        stop_message: None,
+                        pre_command: None,
+                    }));
+                }
+                return Ok(None);
+            }
+            return Ok(Some(RoutingInstruction {
+                kind: "prefer".to_string(),
+                target: Some(parsed),
+                provider: None,
+                stop_message: None,
+                pre_command: None,
+            }));
+        }
+    } else if instruction.starts_with('#') {
         let target = instruction[1..].trim();
         if let Some(parsed) = parse_target(target) {
             return Ok(Some(RoutingInstruction {

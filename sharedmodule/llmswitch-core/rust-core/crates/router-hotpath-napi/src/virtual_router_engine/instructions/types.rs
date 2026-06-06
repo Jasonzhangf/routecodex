@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 pub(crate) struct RoutingInstructionState {
     pub stopless_goal_state: Option<StoplessGoalState>,
     pub forced_target: Option<InstructionTarget>,
+    pub prefer_target: Option<InstructionTarget>,
     pub allowed_providers: HashSet<String>,
     pub disabled_providers: HashSet<String>,
     pub disabled_keys: HashMap<String, HashSet<String>>,

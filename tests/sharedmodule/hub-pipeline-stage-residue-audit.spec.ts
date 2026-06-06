@@ -857,7 +857,6 @@ describe('hub pipeline stage residue audit', () => {
 
   it('servertool handlers must not inject or strip tool protocol payloads in TS', () => {
     const files = [
-      'sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts',
       'sharedmodule/llmswitch-core/src/servertool/handlers/web-search.ts',
     ];
     const findings = files.flatMap((relativePath) => {

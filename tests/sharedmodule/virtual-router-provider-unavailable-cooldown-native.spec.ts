@@ -1,5 +1,4 @@
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
-import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
 function buildConfig(providerKeys = ['deepseek.key1.deepseek-v4-pro']): any {
   const providers = Object.fromEntries(
@@ -39,7 +38,24 @@ function buildConfig(providerKeys = ['deepseek.key1.deepseek-v4-pro']): any {
 }
 
 describe('virtual router native provider unavailable cooldown details', () => {
-  it('fails with recoverable health.cooldown hints when every candidate is manually marked health.cooldown', () => {
+  it('keeps the last default-pool provider selectable instead of returning empty pool', () => {
+    const providerKey = 'deepseek.key1.deepseek-v4-pro';
+    const engine = new VirtualRouterEngine();
+    engine.initialize(buildConfig([providerKey]));
+    engine.markProviderCooldown(providerKey, 1500);
+
+    const result = engine.route(
+      {
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any,
+      { requestId: 'req-native-default-floor' } as any
+    );
+
+    expect(result.target.providerKey).toBe(providerKey);
+    expect(result.decision.routeName).toBe('default');
+  });
+
+  it('keeps default route non-empty even when every candidate is manually marked health.cooldown', () => {
     const providerA = 'deepseek.key1.deepseek-v4-pro';
     const providerB = 'deepseek.key2.deepseek-v4-pro';
     const engine = new VirtualRouterEngine();
@@ -53,33 +69,17 @@ describe('virtual router native provider unavailable cooldown details', () => {
     expect(healthA?.state).toBe('tripped');
     expect(healthB?.state).toBe('tripped');
 
-    try {
-      engine.route(
-        {
-          messages: [{ role: 'user', content: 'hello' }]
-        } as any,
-        { requestId: 'req-native-cooldown' } as any
-      );
-      throw new Error('expected route to fail');
-    } catch (error) {
-      expect(error).toBeInstanceOf(VirtualRouterError);
-      const err = error as VirtualRouterError & { details?: Record<string, unknown> };
-      expect(err.code).toBe('PROVIDER_NOT_AVAILABLE');
-      expect(typeof err.details?.minRecoverableCooldownMs).toBe('number');
-      expect((err.details?.minRecoverableCooldownMs as number) > 0).toBe(true);
-      expect((err.details?.minRecoverableCooldownMs as number) <= 1500).toBe(true);
-      expect(Array.isArray(err.details?.recoverableCooldownHints)).toBe(true);
-      expect(err.details?.candidateProviderCount).toBe(2);
-      const hints = err.details?.recoverableCooldownHints as Array<Record<string, unknown>>;
-      expect(hints[0]).toMatchObject({
-        providerKey: providerA,
-        source: 'health.cooldown'
-      });
-      expect(hints.some((item) => item.providerKey === providerB && item.source === 'health.cooldown')).toBe(true);
-    }
+    const result = engine.route(
+      {
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any,
+      { requestId: 'req-native-cooldown' } as any
+    );
+    expect([providerA, providerB]).toContain(result.target.providerKey);
+    expect(result.decision.routeName).toBe('default');
   });
 
-  it('surfaces concurrency.busy cooldown when busy state is keyed by runtimeKey instead of providerKey', () => {
+  it('keeps default route non-empty when concurrency.busy is keyed by runtimeKey instead of providerKey', () => {
     const providerKey = 'dbittai.key1.MiniMax-M2.7';
     const runtimeKey = 'dbittai.key1';
     const engine = new VirtualRouterEngine();
@@ -115,25 +115,13 @@ describe('virtual router native provider unavailable cooldown details', () => {
     } as any);
     engine.markConcurrencyScopeBusy(runtimeKey);
 
-    try {
-      engine.route(
-        {
-          messages: [{ role: 'user', content: 'hello' }]
-        } as any,
-        { requestId: 'req-native-concurrency-runtime-key' } as any
-      );
-      throw new Error('expected route to fail');
-    } catch (error) {
-      expect(error).toBeInstanceOf(VirtualRouterError);
-      const err = error as VirtualRouterError & { details?: Record<string, unknown> };
-      expect(err.code).toBe('PROVIDER_NOT_AVAILABLE');
-      expect(typeof err.details?.minRecoverableCooldownMs).toBe('number');
-      expect((err.details?.minRecoverableCooldownMs as number) > 0).toBe(true);
-      expect(Array.isArray(err.details?.recoverableCooldownHints)).toBe(true);
-      expect((err.details?.recoverableCooldownHints as Array<Record<string, unknown>>)[0]).toMatchObject({
-        providerKey,
-        source: 'concurrency.busy'
-      });
-    }
+    const result = engine.route(
+      {
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any,
+      { requestId: 'req-native-concurrency-runtime-key' } as any
+    );
+    expect(result.target.providerKey).toBe(providerKey);
+    expect(result.decision.routeName).toBe('default');
   });
 });

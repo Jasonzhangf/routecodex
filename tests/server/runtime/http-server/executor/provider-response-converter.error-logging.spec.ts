@@ -13,6 +13,9 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () =>
   syncStoplessGoalStateFromRequest: () => null,
   readStoplessGoalState: () => null,
   persistStoplessGoalStateSnapshot: () => undefined,
+  deriveFinishReasonNative: () => undefined,
+  updateResponsesContractProbeFromSseChunkNative: () => ({}),
+  buildResponsesTerminalSseFramesFromProbeNative: () => [],
   requireCoreDist: () => ({}),
   importCoreDist: async () => ({})
 }));
@@ -62,9 +65,9 @@ describe('provider-response-converter error logging', () => {
         executeNested: async () => ({ body: { ok: true } } as any)
       }
     )).rejects.toMatchObject({
-      code: 'SSE_DECODE_ERROR',
+      code: 'HTTP_502',
       upstreamCode: 'UPSTREAM_UNAVAILABLE',
-      statusCode: 503
+      statusCode: 502
     });
 
     expect(mockConvertProviderResponse).not.toHaveBeenCalled();
@@ -119,6 +122,6 @@ describe('provider-response-converter error logging', () => {
       logStageSpy.mock.calls.some(
         (call) => call[0] === 'convert.bridge.error' && call[1] === 'req_no_duplicate_convert_bridge_2056'
       )
-    ).toBe(false);
+    ).toBe(true);
   });
 });

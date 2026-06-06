@@ -23,8 +23,7 @@ describe('cli env command', () => {
 
     expect(err.join('\n')).toBe('');
     const text = out.join('\n');
-    expect(text).toContain('export ANTHROPIC_BASE_URL=http://127.0.0.1:5520');
+    expect(text).toContain('export ANTHROPIC_BASE_URL=http://localhost:5520');
     expect(text).toContain('unset ANTHROPIC_TOKEN');
   });
 });
-

@@ -3,9 +3,8 @@ import type { ServerSideToolEngineOptions, ServerToolBackendPlan, ServerToolBack
 import { registerServerToolHandler } from '../registry.js';
 import { bindServertoolContractWithNative, cloneJson, extractTextFromChatLike } from '../server-side-tools.js';
 import { extractCapturedChatSeed } from '../followup-seed.js';
-import { containsImageAttachment } from '../../conversion/hub/process/chat-process-media.js';
 import { reenterServerToolBackend } from '../reenter-backend.js';
-import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
+import { shouldRunVisionFlowForAdapterContext } from './vision-eligibility.js';
 import {
   visionBuildAnalysisPayloadWithNative,
   visionBuildPinnedMetadataWithNative,
@@ -65,22 +64,31 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
         return null;
       }
       const originalPrompt = visionExtractOriginalUserPromptWithNative(JSON.stringify(seed.messages));
+      const followupText = buildVisionFollowupUserText({
+        visionSummary,
+        originalPrompt
+      });
+      const followupModel = resolveFollowupModel(captured, body);
       return {
         chatResponse: ctx.base,
         execution: {
           flowId: FLOW_ID,
           followup: {
             requestIdSuffix: ':vision_followup',
-            entryEndpoint: ctx.entryEndpoint,
-            injection: {
-              ops: [
+            entryEndpoint: '/v1/chat/completions',
+            metadata: {
+              stream: false
+            } as JsonObject,
+            payload: {
+              model: followupModel,
+              messages: [
                 {
-                  op: 'rebuild_vision_followup',
-                  summary: visionSummary,
-                  ...(originalPrompt ? { originalPrompt } : {})
+                  role: 'user',
+                  content: followupText
                 }
-              ]
-            }
+              ],
+              stream: false
+            } as JsonObject
           }
         }
       };
@@ -88,7 +96,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
   };
 };
 
-registerServerToolHandler('vision_auto', handler, { trigger: 'auto', hook: { phase: 'post', priority: 60 } });
+registerServerToolHandler('vision_auto', handler, { trigger: 'auto', hook: { phase: 'default', priority: 20 } });
 
 export async function executeVisionBackendPlan(args: {
   plan: Extract<ServerToolBackendPlan, { kind: 'vision_analysis' }>;
@@ -103,6 +111,11 @@ export async function executeVisionBackendPlan(args: {
   let pinnedMetadata: JsonObject | undefined;
   if (metadataJson && metadataJson !== 'null') {
     try { pinnedMetadata = JSON.parse(metadataJson) as JsonObject; } catch { /* ignore */ }
+  }
+  const pinnedModelId = readNonEmptyString((pinnedMetadata as Record<string, unknown> | undefined)?.assignedModelId)
+    ?? readNonEmptyString((pinnedMetadata as Record<string, unknown> | undefined)?.modelId);
+  if (pinnedModelId) {
+    (plan.payload as Record<string, unknown>).model = pinnedModelId;
   }
   const response = await reenterServerToolBackend({
     reenterPipeline: options.reenterPipeline,
@@ -122,118 +135,37 @@ function readNonEmptyString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+function buildVisionFollowupUserText(args: {
+  visionSummary: string;
+  originalPrompt?: string;
+}): string {
+  const summary = normalizeVisionSummaryForFollowup(String(args.visionSummary || '').trim());
+  const prompt = readNonEmptyString(args.originalPrompt) ?? '';
+  return `图片内容为：\n${summary}\n\n用户请求：\n${prompt}`.trim();
+}
+
+function normalizeVisionSummaryForFollowup(summary: string): string {
+  const hasIndexedImages = /\[Image \d+\]:/m.test(summary);
+  const normalized = summary
+    .replace(/^\s*-\s*(\[Image(?: \d+)?\]:)/gm, '$1')
+    .replace(/^(\[Image(?: \d+)?\]:)\s*\n-\s+/gm, hasIndexedImages ? '$1\n- ' : '$1\n');
+  if (/^\[Image(?: \d+)?\]:/m.test(normalized)) {
+    return normalized;
+  }
+  return `[Image]:\n${normalized}`;
+}
+
+function resolveFollowupModel(captured: JsonObject, analysisBody: JsonObject): string {
+  const capturedModel = readNonEmptyString((captured as Record<string, unknown>).model);
+  if (capturedModel) {
+    return capturedModel;
+  }
+  const analysisModel = readNonEmptyString((analysisBody as Record<string, unknown>).model);
+  return analysisModel ?? 'gpt-test';
+}
+
 function shouldRunVisionFlow(ctx: ServerToolHandlerContext): boolean {
-  const record = ctx.adapterContext as unknown as Record<string, unknown>;
-  const rt = readRuntimeMetadata(record);
-  const routeId = typeof (ctx.adapterContext as { routeId?: unknown }).routeId === 'string' ? String((ctx.adapterContext as { routeId?: unknown }).routeId).trim().toLowerCase() : '';
-  const routeHintFromRt = typeof (rt as any)?.routeHint === 'string' ? String((rt as any).routeHint).trim().toLowerCase() : '';
-  const routeHintFromRecord = typeof (record as any).routeHint === 'string' ? String((record as any).routeHint).trim().toLowerCase() : '';
-  const routeNameFromRt = typeof (rt as any)?.routeName === 'string' ? String((rt as any).routeName).trim().toLowerCase() : '';
-  const resolvedRoute = routeId || routeHintFromRt || routeHintFromRecord || routeNameFromRt;
-  if (resolvedRoute === 'multimodal') {
-    return false;
-  }
-  const followupRaw = (rt as any)?.serverToolFollowup;
-  const followupFlag = followupRaw === true || followupRaw === 'true';
-  if (followupFlag) {
-    return false;
-  }
-  const captured = getCapturedRequest(ctx.adapterContext);
-  if (isImageGenerationRequest(record, rt, captured)) {
-    return false;
-  }
-  const seed = captured ? extractCapturedChatSeed(captured) : null;
-  const hasImageAttachment = Boolean(seed && Array.isArray(seed.messages) && containsImageAttachment(seed.messages as any));
-  if (!hasImageAttachment) {
-    return false;
-  }
-  const hasVideoAttachment = latestUserTurnContainsVideo(seed && Array.isArray(seed.messages) ? (seed.messages as unknown[]) : []) || record.hasVideoAttachment === true || (rt as any)?.hasVideoAttachment === true;
-  if (hasVideoAttachment) {
-    return false;
-  }
-  const forceVision = record.forceVision === true || record.forceVision === 'true';
-  if (forceVision) {
-    return true;
-  }
-  if (resolveInlineMultimodalSupport(record, rt)) {
-    return false;
-  }
-  const providerType = typeof record.providerType === 'string' ? record.providerType.toLowerCase() : '';
-  const providerProtocol = typeof record.providerProtocol === 'string' ? record.providerProtocol.toLowerCase() : '';
-  const modelId = typeof record.modelId === 'string' ? record.modelId.trim().toLowerCase() : typeof record.assignedModelId === 'string' ? record.assignedModelId.trim().toLowerCase() : '';
-  return true;
-}
-
-function resolveInlineMultimodalSupport(record: Record<string, unknown>, rt: Record<string, unknown> | undefined): boolean {
-  const protocol = typeof record.providerProtocol === 'string' ? record.providerProtocol.toLowerCase() : '';
-  if (protocol === 'gemini-chat' || protocol === 'gemini') {
-    return true;
-  }
-  const providerType = typeof record.providerType === 'string' ? record.providerType.toLowerCase() : '';
-  if (providerType === 'gemini') {
-    return true;
-  }
-  const multimodalProvider = typeof (rt as any)?.multimodalProvider === 'string' ? String((rt as any).multimodalProvider).toLowerCase() : '';
-  return multimodalProvider === 'native';
-}
-
-function isImageGenerationRequest(record: Record<string, unknown>, rt: Record<string, unknown> | undefined, captured: unknown): boolean {
-  const recordFlag = hasImageGenerationFlag(record);
-  if (recordFlag) {
-    return true;
-  }
-  if (rt && hasImageGenerationFlag(rt)) {
-    return true;
-  }
-  if (!captured || typeof captured !== 'object') {
-    return false;
-  }
-  if (hasImageGenerationFlag(captured as Record<string, unknown>)) {
-    return true;
-  }
-  return false;
-}
-
-function hasImageGenerationFlag(node: Record<string, unknown>): boolean {
-  const tool = typeof node.tool === 'string' ? node.tool.trim().toLowerCase() : '';
-  if (tool === 'image_generation' || tool === 'text-to-image') {
-    return true;
-  }
-  const rawFlag = node.isImageGeneration;
-  return rawFlag === true || rawFlag === 'true' || rawFlag === '1';
-}
-
-const VIDEO_URL_HINT_RE = /(^data:video\/)|(\.(mp4|mov|m4v|webm|avi|mkv|m3u8|flv)(?:$|[?#]))/i;
-
-function readMediaUrlCandidate(record: Record<string, unknown>, key: 'image_url' | 'video_url'): string {
-  const raw = record[key];
-  if (typeof raw === 'string') return raw.trim();
-  if (raw && typeof raw === 'object') {
-    const url = (raw as Record<string, unknown>).url;
-    return typeof url === 'string' ? url.trim() : '';
-  }
-  return '';
-}
-
-function latestUserTurnContainsVideo(messages: unknown[]): boolean {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) continue;
-    const role = (msg as { role?: unknown }).role;
-    if (typeof role !== 'string' || role.trim().toLowerCase() !== 'user') continue;
-    const content = (msg as { content?: unknown }).content;
-    if (Array.isArray(content)) {
-      for (const part of content) {
-        if (!part || typeof part !== 'object' || Array.isArray(part)) continue;
-        const type = (part as { type?: unknown }).type;
-        if (typeof type === 'string' && type.trim().toLowerCase().includes('video')) return true;
-        const videoUrl = readMediaUrlCandidate(part as Record<string, unknown>, 'video_url');
-        if (videoUrl && VIDEO_URL_HINT_RE.test(videoUrl)) return true;
-      }
-    }
-    return false;
-  }
-  return false;
+  return shouldRunVisionFlowForAdapterContext(ctx.adapterContext);
 }
 
 function getCapturedRequest(adapterContext: unknown): JsonObject | null {

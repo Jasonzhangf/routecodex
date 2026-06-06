@@ -268,6 +268,7 @@ pub(crate) fn persist_provider_health_state(state: &Value) {
 pub(crate) fn is_state_empty(state: &RoutingInstructionState) -> bool {
     is_stopless_goal_empty(state)
         && state.forced_target.is_none()
+        && state.prefer_target.is_none()
         && state.allowed_providers.is_empty()
         && state.disabled_providers.is_empty()
         && state.disabled_keys.is_empty()
@@ -306,6 +307,12 @@ fn serialize_routing_instruction_state(state: &RoutingInstructionState) -> Value
     if let Some(target) = &state.forced_target {
         out.insert(
             "forcedTarget".to_string(),
+            serialize_instruction_target(target),
+        );
+    }
+    if let Some(target) = &state.prefer_target {
+        out.insert(
+            "preferTarget".to_string(),
             serialize_instruction_target(target),
         );
     }
@@ -578,6 +585,9 @@ fn deserialize_routing_instruction_state(value: &Value) -> Option<RoutingInstruc
     deserialize_stopless_goal_state(obj, &mut state);
     if let Some(target) = obj.get("forcedTarget") {
         state.forced_target = deserialize_instruction_target(target);
+    }
+    if let Some(target) = obj.get("preferTarget") {
+        state.prefer_target = deserialize_instruction_target(target);
     }
     if let Some(items) = obj.get("allowedProviders").and_then(|v| v.as_array()) {
         for entry in items {

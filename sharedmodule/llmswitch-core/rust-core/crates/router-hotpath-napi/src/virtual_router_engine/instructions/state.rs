@@ -45,7 +45,11 @@ pub(crate) fn build_metadata_instructions(
         }
     }
     let forced_field = "__shadowCompareForcedProviderKey";
-    if let Some(raw) = meta_route_03.control().get(forced_field).and_then(|v| v.as_str()) {
+    if let Some(raw) = meta_route_03
+        .control()
+        .get(forced_field)
+        .and_then(|v| v.as_str())
+    {
         let trimmed = raw.trim();
         if let Some(target) = super::parse::parse_target(trimmed) {
             instructions.push(RoutingInstruction {
@@ -348,6 +352,34 @@ fn apply_pre_command_instruction_to_state(
     }
 }
 
+fn disable_target_clears_prefer(
+    disabled_target: &InstructionTarget,
+    prefer_target: &InstructionTarget,
+) -> bool {
+    let disabled_provider = disabled_target.provider.as_deref().unwrap_or("");
+    let prefer_provider = prefer_target.provider.as_deref().unwrap_or("");
+    if disabled_provider.is_empty() || disabled_provider != prefer_provider {
+        return false;
+    }
+    let disables_alias = disabled_target.key_alias.is_some() || disabled_target.key_index.is_some();
+    let disables_model = disabled_target.model.is_some();
+    if !disables_alias && !disables_model {
+        return true;
+    }
+    if let Some(disabled_model) = disabled_target.model.as_deref() {
+        if prefer_target.model.as_deref() != Some(disabled_model) {
+            return false;
+        }
+    }
+    if let Some(disabled_alias) = disabled_target.key_alias.as_deref() {
+        return prefer_target.key_alias.as_deref() == Some(disabled_alias);
+    }
+    if let Some(disabled_index) = disabled_target.key_index {
+        return prefer_target.key_index == Some(disabled_index);
+    }
+    disables_model
+}
+
 pub(crate) fn apply_routing_instructions(
     instructions: &[RoutingInstruction],
     state: &mut RoutingInstructionState,
@@ -358,6 +390,9 @@ pub(crate) fn apply_routing_instructions(
         match instruction.kind.as_str() {
             "force" => {
                 state.forced_target = instruction.target.clone();
+            }
+            "prefer" => {
+                state.prefer_target = instruction.target.clone();
             }
             "allow" => {
                 if !allow_reset {
@@ -404,6 +439,11 @@ pub(crate) fn apply_routing_instructions(
                             state.disabled_providers.insert(provider.clone());
                         }
                     }
+                    if let Some(prefer_target) = state.prefer_target.as_ref() {
+                        if disable_target_clears_prefer(target, prefer_target) {
+                            state.prefer_target = None;
+                        }
+                    }
                 }
             }
             "enable" => {
@@ -444,6 +484,7 @@ pub(crate) fn apply_routing_instructions(
             }
             "clear" => {
                 state.forced_target = None;
+                state.prefer_target = None;
                 state.allowed_providers.clear();
                 state.disabled_providers.clear();
                 state.disabled_keys.clear();
@@ -602,16 +643,25 @@ mod tests {
         assert_eq!(instructions[0].provider.as_deref(), Some("p1"));
         assert_eq!(instructions[2].kind, "force");
         assert_eq!(
-            instructions[2].target.as_ref().and_then(|target| target.provider.as_deref()),
+            instructions[2]
+                .target
+                .as_ref()
+                .and_then(|target| target.provider.as_deref()),
             Some("p3")
         );
         assert_eq!(instructions[3].kind, "disable");
         assert_eq!(
-            instructions[3].target.as_ref().and_then(|target| target.key_alias.as_deref()),
+            instructions[3]
+                .target
+                .as_ref()
+                .and_then(|target| target.key_alias.as_deref()),
             Some("key4")
         );
         assert_eq!(
-            instructions[4].target.as_ref().and_then(|target| target.key_index),
+            instructions[4]
+                .target
+                .as_ref()
+                .and_then(|target| target.key_index),
             Some(6)
         );
     }

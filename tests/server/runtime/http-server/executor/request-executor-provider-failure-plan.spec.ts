@@ -70,4 +70,48 @@ describe('request-executor-provider-failure-plan', () => {
     expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
     expect(excludedProviderKeys.size).toBe(0);
   });
+
+  test('RED: provider business error 2013 traffic saturation must enter retry/cooldown plan, not direct return to client', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const plan = await resolveRequestExecutorProviderFailurePlan({
+      error: Object.assign(new Error('Token Plan 当前请求量较高，请稍后重试'), {
+        code: 'MALFORMED_RESPONSE',
+        upstreamCode: 'PROVIDER_STATUS_2013',
+        statusCode: 200,
+        details: {
+          providerStatusCode: 2013,
+          upstreamCode: 'PROVIDER_STATUS_2013',
+          reason: 'token plan 当前请求量较高，请稍后重试'
+        }
+      }),
+      retryError: {
+        statusCode: 200,
+        errorCode: 'MALFORMED_RESPONSE',
+        upstreamCode: 'PROVIDER_STATUS_2013',
+        reason: 'Token Plan 当前请求量较高，请稍后重试'
+      },
+      requestId: 'req-provider-status-2013-traffic',
+      providerKey: 'minimax.key1.MiniMax-M3',
+      providerId: 'minimax',
+      providerType: 'openai',
+      providerFamily: 'minimax',
+      providerProtocol: 'openai-responses',
+      runtimeKey: 'runtime:minimax',
+      dependencies: {} as any,
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      logicalRequestChainKey: 'logical-provider-status-2013-traffic',
+      logicalChainRetryLimitStageRequestId: 'logical-provider-status-2013-traffic',
+      routePool: ['minimax.key1.MiniMax-M3', 'opencode-zen-free.key1.minimax-m3-free'],
+      excludedProviderKeys,
+      recordAttempt: () => undefined,
+      logStage: () => undefined,
+      logNonBlockingError: () => undefined
+    });
+
+    expect(plan.reportPlan.stageHint).toBe('provider.send');
+    expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
+    expect(plan.retryExecutionPlan.backoffScope).toBe('recoverable');
+  });
 });

@@ -45,7 +45,8 @@ describe('VirtualRouterEngine series cooldown handling', () => {
         auth: { type: 'apiKey', value: 'test' },
         outboundProfile: 'gemini-chat',
         runtimeKey: 'runtime:a',
-        modelId: 'gemini-3-pro-high'
+        modelId: 'gemini-3-pro-high',
+        series: 'gemini-pro'
       },
       [providerB]: {
         providerKey: providerB,
@@ -54,13 +55,14 @@ describe('VirtualRouterEngine series cooldown handling', () => {
         auth: { type: 'apiKey', value: 'test' },
         outboundProfile: 'gemini-chat',
         runtimeKey: 'runtime:b',
-        modelId: 'gemini-3-pro-high'
+        modelId: 'gemini-3-pro-high',
+        series: 'gemini-pro'
       }
     },
     classifier: {}
   };
 
-  it('blacklists only the alias that triggered 429', () => {
+  it('trips only the current providerKey when series cooldown signal targets that key', () => {
     const engine = new VirtualRouterEngine();
     engine.initialize(baseConfig);
     const event: ProviderErrorEvent = {
@@ -90,7 +92,7 @@ describe('VirtualRouterEngine series cooldown handling', () => {
     expect(status.find((entry) => entry.providerKey === providerB)?.state).not.toBe('tripped');
   });
 
-  it('keeps targeted Rust health trip even when quotaView is enabled, without spreading to sibling alias', () => {
+  it('keeps targeted Rust health trip active even when quotaView is enabled', () => {
     const quotaView = (key: string) => ({
       providerKey: key,
       inPool: true,

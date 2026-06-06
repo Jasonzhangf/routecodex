@@ -110,7 +110,10 @@ const mockBridgeModule = () => ({
   persistStoplessGoalStateSnapshot: mockPersistStoplessGoalStateSnapshot,
   loadRoutingInstructionStateSync: mockLoadRoutingInstructionStateSync,
   readStoplessGoalState: mockReadStoplessGoalState,
-  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
+  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
+  deriveFinishReasonNative: jest.fn(() => undefined),
+  updateResponsesContractProbeFromSseChunkNative: jest.fn(() => ({})),
+  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => [])
 });
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
@@ -786,7 +789,7 @@ describe('provider-response-converter unified semantics handoff', () => {
         },
         executeNested: async () => ({ body: { ok: true } } as any),
       },
-    )).rejects.toThrow('Provider SSE marker did not include materializable stream or bodyText');
-    expect(mockConvertProviderResponse).not.toHaveBeenCalled();
+    )).rejects.toThrow('__sse_responses');
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
   });
 });

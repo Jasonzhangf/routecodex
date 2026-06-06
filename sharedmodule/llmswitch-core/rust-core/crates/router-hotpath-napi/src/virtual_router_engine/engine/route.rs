@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use super::selection::build_provider_not_available_error;
 use super::types::SelectionResult;
 use super::VirtualRouterEngineCore;
+use crate::hub_pipeline_types::{build_meta_route_03_from_metadata, MetaRoute03RouteCarrier};
 use crate::virtual_router_engine::classifier::ClassificationResult;
 use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::features::build_routing_features;
@@ -28,7 +29,6 @@ use crate::virtual_router_engine::routing::{
 use crate::virtual_router_engine::routing_state_store::{
     is_state_empty, load_routing_instruction_state, persist_routing_instruction_state,
 };
-use crate::hub_pipeline_types::{build_meta_route_03_from_metadata, MetaRoute03RouteCarrier};
 
 fn parse_retry_provider_key_target(raw: &str) -> Option<InstructionTarget> {
     let trimmed = raw.trim();
@@ -245,13 +245,13 @@ impl VirtualRouterEngineCore {
         let session_scope = resolve_session_scope(metadata);
         let stop_message_scope = resolve_stop_message_scope(metadata);
         let meta_route_03 = build_meta_route_03_from_metadata(metadata);
-        let routing_state_key = if is_continuation {
-            session_scope
-                .clone()
-                .unwrap_or_else(|| request_routing_state_key.clone())
-        } else {
-            request_routing_state_key.clone()
-        };
+        let routing_state_key = session_scope.clone().unwrap_or_else(|| {
+            if is_continuation {
+                request_routing_state_key.clone()
+            } else {
+                request_routing_state_key.clone()
+            }
+        });
         let base_state = self.load_routing_state_for_scope(&routing_state_key);
         let mut persisted_routing_state = strip_stop_message_fields(&base_state);
         let mut selection_routing_state = strip_stop_message_fields(&base_state);
@@ -443,6 +443,7 @@ impl VirtualRouterEngineCore {
                     &eligible,
                     &routing_state_for_selection,
                     &excluded_keys,
+                    false,
                 );
                 if available.is_empty() {
                     return Err(build_provider_not_available_error(

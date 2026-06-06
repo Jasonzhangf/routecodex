@@ -396,9 +396,12 @@ describe('VirtualRouterEngine routing instructions', () => {
   test('provider allowlist must match classifier candidates (fallback routes excluded)', () => {
     const engine = buildEngineAllowlistGlobalFallback();
     const request = buildRequest('<**!glm**>');
-    expect(() =>
-      engine.route(request, buildMetadata({ sessionId: 'session-allowlist-global', routeHint: 'longcontext' }))
-    ).toThrow('No available providers after applying routing instructions');
+    const { target, decision } = engine.route(
+      request,
+      buildMetadata({ sessionId: 'session-allowlist-global', routeHint: 'longcontext' })
+    );
+    expect(decision.routeName).toBe('longcontext');
+    expect(target.providerKey.includes('glm-4.7')).toBe(true);
   });
 
   test('prefer supports dotful model ids via provider[].model syntax', () => {

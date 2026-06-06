@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import { createBridgeHttpServerMock } from '../../../../helpers/bridge-http-server-mock.js';
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
@@ -9,6 +10,10 @@ const mockLoadRoutingInstructionStateSync = jest.fn(() => null);
 const mockRequireCoreDist = jest.fn(() => ({
   normalizeResponsesToolCallArgumentsForClientWithNative: () => ({}),
 }));
+const mockImportCoreDist = jest.fn(async () => ({
+  normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) =>
+    (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>,
+}));
 const mockReadStoplessGoalState = jest.fn((adapterContext: Record<string, unknown>) => {
   const sessionId = typeof adapterContext?.sessionId === 'string' ? adapterContext.sessionId : undefined;
   return {
@@ -17,7 +22,7 @@ const mockReadStoplessGoalState = jest.fn((adapterContext: Record<string, unknow
   };
 });
 
-const mockBridgeModule = () => ({
+const mockBridgeModule = () => createBridgeHttpServerMock({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
@@ -26,6 +31,9 @@ const mockBridgeModule = () => ({
   loadRoutingInstructionStateSync: mockLoadRoutingInstructionStateSync,
   readStoplessGoalState: mockReadStoplessGoalState,
   requireCoreDist: mockRequireCoreDist,
+  importCoreDist: mockImportCoreDist,
+  updateResponsesContractProbeFromSseChunkNative: () => ({}),
+  buildResponsesTerminalSseFramesFromProbeNative: () => [],
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
 });
 

@@ -2,6 +2,11 @@ import { describe, expect, test } from '@jest/globals';
 
 import { applyFollowupDeltaPlan } from '../../sharedmodule/llmswitch-core/src/servertool/followup-origin-delta.js';
 
+const SAMPLE_UPDATE_PATCH = '*** Begin Patch\n*** Update File: sample.txt\n@@\n- old\n+ new\n*** End Patch';
+const A_TS_UPDATE_PATCH = '*** Begin Patch\n*** Update File: a.ts\n@@\n- old\n+ new\n*** End Patch';
+const TMP_A_ADD_PATCH = '*** Begin Patch\n*** Add File: tmp/a.txt\n+ a\n*** End Patch';
+const TMP_B_ADD_PATCH = '*** Begin Patch\n*** Add File: tmp/b.txt\n+ b\n*** End Patch';
+
 describe('servertool followup origin clone delta', () => {
   test('clones origin request and appends canonical apply_patch result delta', () => {
     const originTool = {
@@ -23,7 +28,7 @@ describe('servertool followup origin clone delta', () => {
       tool_outputs: [{
         tool_call_id: 'call_patch_1',
         name: 'apply_patch',
-        arguments: JSON.stringify({ filePath: 'sample.txt', patch: '- old\n+ new' }),
+        arguments: JSON.stringify({ patch: SAMPLE_UPDATE_PATCH }),
         content: JSON.stringify({ status: 'APPLY_PATCH_APPLIED', ok: true, filePath: 'sample.txt' })
       }]
     } as any;
@@ -52,7 +57,7 @@ describe('servertool followup origin clone delta', () => {
         type: 'function',
         function: {
           name: 'apply_patch',
-          arguments: JSON.stringify({ filePath: 'sample.txt', patch: '- old\n+ new' })
+          arguments: JSON.stringify({ patch: SAMPLE_UPDATE_PATCH })
         }
       }]
     });
@@ -65,7 +70,7 @@ describe('servertool followup origin clone delta', () => {
     expect(seed.messages).toEqual([{ role: 'user', content: 'edit sample' }]);
     expect(seed.tools[0]).toBe(originTool);
     expect(JSON.stringify(payload)).not.toContain('fileContent');
-    expect(JSON.stringify(payload)).not.toContain('*** Begin Patch');
+    expect(JSON.stringify(payload)).not.toContain('"filePath":"sample.txt"');
   });
 
 
@@ -88,7 +93,7 @@ describe('servertool followup origin clone delta', () => {
             {
               tool_call_id: 'call_patch_ctx_1',
               name: 'apply_patch',
-              arguments: JSON.stringify({ filePath: 'a.ts', patch: '- old\n+ new' }),
+              arguments: JSON.stringify({ patch: A_TS_UPDATE_PATCH }),
               output: { status: 'APPLY_PATCH_ERROR', ok: false }
             }
           ]
@@ -114,7 +119,7 @@ describe('servertool followup origin clone delta', () => {
             type: 'function',
             function: {
               name: 'apply_patch',
-              arguments: '{}'
+              arguments: JSON.stringify({ patch: A_TS_UPDATE_PATCH })
             }
           }
         ]
@@ -139,7 +144,7 @@ describe('servertool followup origin clone delta', () => {
           tool_calls: [{
             id: 'call_patch_1',
             type: 'function',
-            function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: 'tmp/a.txt', patch: '+ a' }) }
+            function: { name: 'apply_patch', arguments: JSON.stringify({ patch: TMP_A_ADD_PATCH }) }
           }]
         },
         {
@@ -148,7 +153,7 @@ describe('servertool followup origin clone delta', () => {
           tool_calls: [{
             id: 'call_patch_2',
             type: 'function',
-            function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: 'tmp/b.txt', patch: '+ b' }) }
+            function: { name: 'apply_patch', arguments: JSON.stringify({ patch: TMP_B_ADD_PATCH }) }
           }]
         }
       ],
@@ -161,13 +166,13 @@ describe('servertool followup origin clone delta', () => {
         {
           tool_call_id: 'call_patch_1',
           name: 'apply_patch',
-          arguments: JSON.stringify({ filePath: 'tmp/a.txt', patch: '+ a' }),
+          arguments: JSON.stringify({ patch: TMP_A_ADD_PATCH }),
           content: JSON.stringify({ status: 'APPLY_PATCH_APPLIED', ok: true, filePath: 'tmp/a.txt' })
         },
         {
           tool_call_id: 'call_patch_2',
           name: 'apply_patch',
-          arguments: JSON.stringify({ filePath: 'tmp/b.txt', patch: '+ b' }),
+          arguments: JSON.stringify({ patch: TMP_B_ADD_PATCH }),
           content: JSON.stringify({ status: 'APPLY_PATCH_APPLIED', ok: true, filePath: 'tmp/b.txt' })
         }
       ]
@@ -192,12 +197,12 @@ describe('servertool followup origin clone delta', () => {
           {
             id: 'call_patch_1',
             type: 'function',
-            function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: 'tmp/a.txt', patch: '+ a' }) }
+            function: { name: 'apply_patch', arguments: JSON.stringify({ patch: TMP_A_ADD_PATCH }) }
           },
           {
             id: 'call_patch_2',
             type: 'function',
-            function: { name: 'apply_patch', arguments: JSON.stringify({ filePath: 'tmp/b.txt', patch: '+ b' }) }
+            function: { name: 'apply_patch', arguments: JSON.stringify({ patch: TMP_B_ADD_PATCH }) }
           }
         ]
       },
