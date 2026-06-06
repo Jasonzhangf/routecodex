@@ -15994,3 +15994,9 @@ function-map.yml 16 features 是 project AGENTS.md guard 18（功能定位唯一
 - 线上证据：live request `live-nosame-fast-1780740611` 1.39s 返回 HTTP/SSE 429；日志 `openai-responses-minimax.key1-MiniMax-M3-20260606T181011421-277638-549` 只有 `switch=exclude_and_reroute decision=provider_backoff_then_reroute`，无 `route_pool_cooldown_wait` / `CLIENT_RESPONSE_CLOSED`。
 
 2026-06-06 apply_patch/tools route audit: direct contract 已避开后，5555 asxs/cc 仍在 provider.send 报 `Responses wire requires top-level tool.name`。根因定位在 req_outbound stage3 compat：Rust 已有 `normalize_responses_function_tools`，但仅 responses:c4m/crs profile 调用；TS `applyRequestCompat` 对无 explicit profile 直接返回，导致 openai-responses 无 profile provider 的 chat-style function tools 未做 provider wire shape 修复。修复方向：openai-responses 通用 outbound stage 必跑 function tool shape normalization；TS compat shell 不得因无 profile 绕过 native stage。
+
+2026-06-06 stopless/servertool CLI projection closeout:
+- stop_message_auto migrated path must project visible exec_command: routecodex servertool run stop_message_auto --input-json <json>; no private followup/reenter for migrated path.
+- Intercepted assistant stop text must be mapped to reasoning/reasoning_text; CLI input must always include repeatCount, maxRepeats, continuationPrompt.
+- continuationPrompt must be heuristic status-audit prompt (goal, done steps, completion/block status, next step, evidence, issue cause, excluded factors, diagnostic order, learned), not fixed "继续执行".
+- Local 127.0.0.1:10000 is shadowed by netdisk_service on this Mac; RouteCodex 10000 works via non-loopback 192.168.0.93:10000.

@@ -69,8 +69,10 @@ function buildProjection(args: {
         message: {
           role: 'assistant',
           content: '',
+          reasoning_text: args.reasoningText,
           reasoning_content: args.reasoningText,
           reasoning: {
+            summary: [{ type: 'summary_text', text: args.reasoningText }],
             content: [{ type: 'reasoning_text', text: args.reasoningText }]
           },
           tool_calls: [

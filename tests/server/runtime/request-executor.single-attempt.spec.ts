@@ -193,7 +193,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 
-  it('re-enters stopless for openai-responses relay provider stop response', async () => {
+  it('projects stopless as visible exec_command CLI call for openai-responses relay provider stop response', async () => {
     const providerResponse = {
       status: 200,
       data: {
@@ -242,7 +242,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const { executor, request } = createExecutor(relayPipelineResult, handle);
     (executor as any).deps.executeNestedInput = nested;
 
-    await expect(executor.execute({
+    const response = await executor.execute({
       ...request,
       requestId: 'req_executor_minimax_relay_stopless_red',
       entryEndpoint: '/v1/responses',
@@ -255,11 +255,16 @@ describe('HubRequestExecutor single attempt behaviour', () => {
         routecodexRoutingPolicyGroup: 'gateway_coding_10000',
         stoplessGoalState: { status: 'idle', objective: 'test', createdAt: 1, updatedAt: 1 }
       }
-    })).rejects.toMatchObject({
-      code: 'SERVERTOOL_FOLLOWUP_FAILED'
     });
 
     expect(nested).toHaveBeenCalledTimes(0);
+    expect(response.status).toBe(200);
+    expect((response.body as any).__routecodex_finish_reason).toBe('tool_calls');
+    const output = ((response.body as any).__routecodex_stream_contract_probe_body.output ?? []) as Array<Record<string, unknown>>;
+    const toolCall = output.find((item) => item.type === 'function_call') as Record<string, unknown> | undefined;
+    expect(toolCall?.name).toBe('exec_command');
+    expect(String(toolCall?.arguments)).toContain('routecodex servertool run stop_message_auto');
+    expect(String(toolCall?.arguments)).toContain('当前用户目标');
   });
 
   it('resets stopless default budget after openai-responses relay tool_calls response', async () => {
@@ -1602,7 +1607,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 
-  it('does not exclude same-runtime provider keys on PROVIDER_TRAFFIC_SATURATED retry', async () => {
+  it('excludes failed same-runtime provider keys on PROVIDER_TRAFFIC_SATURATED retry', async () => {
     const saturatedError = Object.assign(new Error('provider traffic wait exceeded soft timeout'), {
       statusCode: 429,
       code: 'PROVIDER_TRAFFIC_SATURATED',
@@ -1698,7 +1703,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const excluded = Array.isArray(secondCallMetadata.excludedProviderKeys)
       ? secondCallMetadata.excludedProviderKeys as string[]
       : [];
-    expect(excluded).toEqual([]);
+    expect(excluded).toEqual(['tab.key1', 'tab.key1.alt']);
   });
 
   it('uses short soft wait timeout for web provider traffic acquire', async () => {

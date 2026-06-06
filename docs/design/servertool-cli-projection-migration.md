@@ -119,6 +119,10 @@ Other servertools remain unsupported until explicitly migrated.
 
 Reasoning must not contain internal old restoration paths, provider-private metadata, `__rt`, or debug snapshots.
 
+For `stop_message_auto`, the reasoning text must be the intercepted assistant stop text/summary so the client can display what was swallowed by the stop interception. The CLI input must always include `repeatCount`, `maxRepeats`, and the actual `continuationPrompt` injected for the next model turn.
+
+The stop continuation prompt is not a fixed `继续执行` string. It must be a heuristic status-audit prompt covering: current user goal, completed steps, completion/block status, suggested next action, evidence verification, issue cause, excluded factors, diagnostic order, and learned facts. Legacy prompts that only say `继续执行...` must be upgraded before CLI projection.
+
 ## Gap Review
 
 ### G1: Servertool engine must project, not execute, migrated tools
@@ -160,6 +164,7 @@ Required tests:
 ## Phase 1 Completion Definition
 
 - Stopless returns reasoning + `exec_command: routecodex servertool run stop_message_auto --input-json <json>`.
+- Stopless CLI input includes `repeatCount`, `maxRepeats`, and a heuristic status-audit `continuationPrompt`; output reasoning preserves the intercepted stop text.
 - Basic intercepted servertool fixture returns reasoning + `exec_command: routecodex servertool run servertool_fixture --input-json <json>`.
 - CLI dispatcher executes both supported tools and fails fast for unsupported tools.
 - No old CLI restoration design remains in docs, tests, or runtime code.

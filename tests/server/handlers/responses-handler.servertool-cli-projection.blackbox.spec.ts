@@ -1,4 +1,5 @@
 import { runServerToolOrchestration } from '../../../sharedmodule/llmswitch-core/src/servertool/engine.js';
+import { buildResponsesPayloadFromChatWithNative } from '../../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 
 describe('servertool CLI projection blackbox', () => {
   it('returns exec_command projection and does not reenter for intercepted servertool call', async () => {
@@ -60,7 +61,7 @@ describe('servertool CLI projection blackbox', () => {
             index: 0,
             message: {
               role: 'assistant',
-              content: 'ok'
+              content: '阶段完成：已定位 stopless 投影问题，但还缺少线上复测证据。'
             },
             finish_reason: 'stop'
           }
@@ -99,9 +100,24 @@ describe('servertool CLI projection blackbox', () => {
     expect(match).toBeTruthy();
     const input = JSON.parse(match?.[1] ?? '{}');
     expect(input.flowId).toBe('stop_message_flow');
-    expect(input.continuationPrompt).toContain('继续执行');
-    expect(input.repeatCount).toBeGreaterThanOrEqual(1);
+    expect(input.continuationPrompt).toContain('当前用户目标');
+    expect(input.continuationPrompt).toContain('已完成步骤');
+    expect(input.continuationPrompt).toContain('是否已经完成目标');
+    expect(input.continuationPrompt).toContain('证据如何核验');
+    expect(input.continuationPrompt).toContain('问题根因');
+    expect(input.continuationPrompt).toContain('已排除哪些因素');
+    expect(input.continuationPrompt).toContain('排查顺序');
+    expect(input.continuationPrompt).toContain('learned');
+    expect(input.continuationPrompt).not.toBe('继续执行原任务');
+    expect(input.repeatCount).toBeGreaterThanOrEqual(0);
     expect(input.maxRepeats).toBeGreaterThanOrEqual(1);
+
+    const responsesPayload = buildResponsesPayloadFromChatWithNative(result.chat as any, {
+      requestId: 'req_stop_cli_lifecycle'
+    }) as Record<string, any>;
+    const reasoning = responsesPayload.output.find((item: any) => item.type === 'reasoning');
+    expect(reasoning?.content?.[0]?.type).toBe('reasoning_text');
+    expect(reasoning?.content?.[0]?.text).toContain('阶段完成');
   });
 
   it('does not re-project stop_message_auto after its exec_command output is already in request history', async () => {

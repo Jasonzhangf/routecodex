@@ -45,6 +45,10 @@ import { isStopEligibleForServerTool } from './stop-gateway-context.js';
 type AutoHookQueueName = 'A_optional' | 'B_mandatory';
 type AutoHookDescriptor = ReturnType<typeof listAutoServerToolHooks>[number];
 
+const STOP_MESSAGE_AUTO_PROGRESSIVE_PROMPT =
+  '请用启发式多段核对当前状态，不要只写“继续执行”：当前用户目标是什么；已完成步骤有哪些；是否已经完成目标；建议下一步是什么；证据如何核验；问题根因是什么；已排除哪些因素；排查顺序是什么；本轮 learned 是什么。若下一步存在，不要只总结，直接继续执行并补充文件、日志、命令输出或测试结果证据；若已完成或确实阻塞，给出简洁结论和可核验证据。';
+const STOP_MESSAGE_AUTO_DEFAULT_MAX_REPEATS = 3;
+
 function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | null {
   if (!Array.isArray(values) || values.length === 0) {
     return null;
@@ -274,28 +278,51 @@ export async function runServerSideToolEngine(
 function buildStopMessageAutoCliInput(context: unknown, followup: unknown): JsonObject {
   const out: JsonObject = {};
   const prompt = extractContinuationPromptFromFollowup(followup);
-  if (prompt) {
-    out.continuationPrompt = prompt;
-  }
-  const metadata = asObject(asObject(followup)?.metadata);
-  const rt = asObject(metadata?.__rt);
-  const stopState = asObject(rt?.stopMessageState);
-  const loopState = asObject(rt?.serverToolLoopState);
-  const used = readNonNegativeInteger(stopState?.stopMessageUsed);
-  const maxRepeats =
-    readNonNegativeInteger(stopState?.stopMessageMaxRepeats) ??
-    readNonNegativeInteger(loopState?.maxRepeats);
-  if (used !== undefined) {
-    out.repeatCount = used;
-  }
-  if (maxRepeats !== undefined) {
-    out.maxRepeats = maxRepeats;
-  }
+  out.continuationPrompt = normalizeStopMessageAutoCliPrompt(prompt);
   const contextRecord = asObject(context);
   if (contextRecord?.stopMessageCliInput && typeof contextRecord.stopMessageCliInput === 'object' && !Array.isArray(contextRecord.stopMessageCliInput)) {
     Object.assign(out, contextRecord.stopMessageCliInput as JsonObject);
   }
+  const runtimeState = extractStopMessageRuntimeState(context, followup);
+  const stopState = runtimeState.stopState;
+  const loopState = runtimeState.loopState;
+  const used = readNonNegativeInteger(stopState?.stopMessageUsed) ?? 0;
+  const maxRepeats =
+    readNonNegativeInteger(stopState?.stopMessageMaxRepeats) ??
+    readNonNegativeInteger(loopState?.maxRepeats) ??
+    STOP_MESSAGE_AUTO_DEFAULT_MAX_REPEATS;
+  out.repeatCount = used;
+  out.maxRepeats = maxRepeats;
   return out;
+}
+
+function extractStopMessageRuntimeState(context: unknown, followup: unknown): {
+  stopState: Record<string, unknown> | null;
+  loopState: Record<string, unknown> | null;
+} {
+  const followupRt = asObject(asObject(asObject(followup)?.metadata)?.__rt);
+  const contextRecord = asObject(context);
+  const contextRt = asObject(contextRecord?.__rt);
+  const adapterRt = asObject(asObject(contextRecord?.adapterContext)?.__rt);
+  const rt = followupRt ?? contextRt ?? adapterRt;
+  return {
+    stopState: asObject(rt?.stopMessageState),
+    loopState: asObject(rt?.serverToolLoopState)
+  };
+}
+
+function normalizeStopMessageAutoCliPrompt(prompt: string): string {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return STOP_MESSAGE_AUTO_PROGRESSIVE_PROMPT;
+  }
+  if (/^继续执行/.test(trimmed) && !trimmed.includes('当前用户目标')) {
+    return STOP_MESSAGE_AUTO_PROGRESSIVE_PROMPT;
+  }
+  if (!trimmed.includes('当前用户目标') || !trimmed.includes('已完成步骤') || !trimmed.includes('learned')) {
+    return `${STOP_MESSAGE_AUTO_PROGRESSIVE_PROMPT}\n\n${trimmed}`;
+  }
+  return trimmed;
 }
 
 function extractContinuationPromptFromFollowup(followup: unknown): string {

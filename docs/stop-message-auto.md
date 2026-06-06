@@ -1,13 +1,18 @@
-# stopless 自动续轮（最简版）
+# stopless 自动续轮
 
 本文定义当前唯一有效的 stopless 语义。
 
 ## 1. 默认行为
 
 - 默认开启。
-- 默认注入文本：`继续执行`
-- 默认最大次数：`2`
-- 通过 tmux `clientInjectOnly` 注入，不走 reenter followup。
+- 默认最大次数：`3`。
+- 不再通过 tmux `clientInjectOnly` 或私有 followup/reenter 执行。
+- 当 stopless 触发时，响应投影为客户端可见的 `exec_command`：
+  - `routecodex servertool run stop_message_auto --input-json <json>`
+  - 客户端按普通工具调用执行 CLI，并按普通 `exec_command` 工具结果回传。
+- 被拦截的 assistant stop 文本必须投影到 Responses `reasoning` / Chat `reasoning_*` 字段，避免客户端看不到 summary。
+- CLI input 必须包含 `repeatCount`、`maxRepeats`、`continuationPrompt`。
+- `continuationPrompt` 不得只是固定 `继续执行`；必须是启发式多段核对提示，覆盖当前用户目标、已完成步骤、是否完成/阻塞、建议下一步、证据核验、问题根因、已排除因素、排查顺序、learned。
 
 ## 2. 触发规则
 
@@ -16,19 +21,20 @@
 ### 2.1 `/goal` 模式
 
 - 若 `goal.status = active`：**什么都不做**
-- 若 `goal.status != active`：**自动注入一次 `继续执行`**
+- 若 `goal.status != active`：投影 `stop_message_auto` CLI 工具调用，并携带启发式核对提示。
 
 ### 2.2 非 `/goal` 模式
 
-- 直接自动注入一次 `继续执行`
+- 投影 `stop_message_auto` CLI 工具调用，并携带启发式核对提示。
 
 ## 3. 次数控制
 
-- 状态记录在 sticky/tmux scope 下：
+- 状态记录在 runtime/followup metadata scope 下：
   - `stopMessageText`
   - `stopMessageMaxRepeats`
   - `stopMessageUsed`
-- 达到 `maxRepeats` 后自动清理状态，不再继续注入。
+- CLI input 中 `repeatCount` / `maxRepeats` 必须始终存在，缺 runtime state 时使用 `repeatCount=0`、`maxRepeats=3`。
+- 非连续 stop、工具调用或正常进展必须 reset 连续 stop 计数。
 
 ## 4. 当前明确移除的旧复杂语义
 
@@ -38,7 +44,7 @@
 - approved/done marker 审批链
 - 非 `/goal` no-progress 计数器
 - `stopless_goal_guard` 第二自动决策面
-- “复杂继续执行提示词追加”
+- 固定 `继续执行` 文案作为最终注入文本。
 
 ## 5. 真源文件
 
