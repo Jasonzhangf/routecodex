@@ -27,7 +27,7 @@ import { payloadContainsVideoInput, VIDEO_REQUEST_TIMEOUT_MS } from '../utils/vi
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 import { deriveFinishReason } from '../utils/finish-reason.js';
-import { tryRestoreServertoolCliToolOutputs } from '../../../sharedmodule/llmswitch-core/src/servertool/cli-ticket.js';
+import { tryRestoreServertoolCliToolOutputs } from 'rcc-llmswitch-core/v2/servertool/cli-ticket';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -260,7 +260,7 @@ export async function handleResponses(
         return;
       }
       try {
-        const restoredServertoolCli = tryRestoreServertoolCliToolOutputs(payload as Record<string, unknown>, {
+        const restoredServertoolCli = tryRestoreServertoolCliToolOutputs(payload as any, {
           sessionId: sessionIdForResume
         });
         if (restoredServertoolCli.restored) {
