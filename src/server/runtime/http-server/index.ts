@@ -11,7 +11,6 @@
 import express, { type Application, type Request } from 'express';
 import type { Server } from 'http';
 
-export const getPortRegistry = 'server.http_runtime_entry canonical builder';
 import type { Socket } from 'node:net';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
@@ -1115,10 +1114,10 @@ export class RouteCodexHttpServer {
           }),
           applyPatchMode: 'client',
         });
-        if (!directEntryDecision.providerWireValid) {
+        if (!directEntryDecision.providerWireValid || directEntryDecision.requiresHubRelay) {
           this.logStage('router-direct.skipped', input.requestId, {
-            reason: 'direct_payload_not_provider_wire',
-            detail: directEntryDecision.reason ?? 'invalid_direct_payload',
+            reason: directEntryDecision.requiresHubRelay ? 'direct_payload_requires_hub_relay' : 'direct_payload_not_provider_wire',
+            detail: directEntryDecision.reason ?? (directEntryDecision.requiresHubRelay ? 'requires_hub_relay' : 'invalid_direct_payload'),
             mode: 'client',
           });
           return await this.executePipeline(nextInput);
@@ -1239,12 +1238,12 @@ export class RouteCodexHttpServer {
       payload: rawDirectPayload,
       inboundProtocol,
     });
-    if (!directPayloadDecision.providerWireValid) {
+    if (!directPayloadDecision.providerWireValid || directPayloadDecision.requiresHubRelay) {
       this.logStage('router-direct.skipped', input.requestId, {
-        reason: 'direct_payload_not_provider_wire',
-        detail: directPayloadDecision.reason ?? 'invalid_direct_payload',
+        reason: directPayloadDecision.requiresHubRelay ? 'direct_payload_requires_hub_relay' : 'direct_payload_not_provider_wire',
+        detail: directPayloadDecision.reason ?? (directPayloadDecision.requiresHubRelay ? 'requires_hub_relay' : 'invalid_direct_payload'),
       });
-      return { used: false, reason: 'direct_payload_not_provider_wire' };
+      return { used: false, reason: directPayloadDecision.requiresHubRelay ? 'direct_payload_requires_hub_relay' : 'direct_payload_not_provider_wire' };
     }
 
     let routeResult: {
@@ -1302,6 +1301,13 @@ export class RouteCodexHttpServer {
       },
     );
     try {
+      const finalDirectPayloadDecision = evaluateDirectRouteDecision({
+        payload: requestPayload,
+        inboundProtocol,
+      });
+      if (finalDirectPayloadDecision.requiresHubRelay) {
+        throw new Error(finalDirectPayloadDecision.reason ?? 'requires_hub_relay');
+      }
       assertDirectRouteDecision({
         payload: requestPayload,
         inboundProtocol,
@@ -1309,11 +1315,18 @@ export class RouteCodexHttpServer {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? '');
       this.logStage('router-direct.skipped', input.requestId, {
-        reason: 'direct_payload_not_provider_wire',
+        reason: message.includes('Hub relay') || message.includes('hub_relay')
+          ? 'direct_payload_requires_hub_relay'
+          : 'direct_payload_not_provider_wire',
         detail: message || 'invalid_direct_payload',
         stage: 'final_request_payload',
       });
-      return { used: false, reason: 'direct_payload_not_provider_wire' };
+      return {
+        used: false,
+        reason: message.includes('Hub relay') || message.includes('hub_relay')
+          ? 'direct_payload_requires_hub_relay'
+          : 'direct_payload_not_provider_wire',
+      };
     }
     let capturedUsage: Record<string, unknown> | undefined;
     let retryMetadata: Record<string, unknown> | undefined;
@@ -1618,7 +1631,7 @@ export class RouteCodexHttpServer {
       payload,
       inboundProtocol,
     });
-    if (!directPayloadDecision.providerWireValid) {
+    if (!directPayloadDecision.providerWireValid || directPayloadDecision.requiresHubRelay) {
       throw new Error(directPayloadDecision.reason ?? 'invalid direct payload');
     }
     const providerBinding = portConfig.providerBinding;

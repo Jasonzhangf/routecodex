@@ -11,7 +11,10 @@ use super::profile::{
 };
 use super::qwen::apply_qwen_request_compat;
 use super::qwenchat::apply_qwenchat_request_compat;
-use super::responses::{apply_responses_c4m_request_compat, apply_responses_crs_request_compat};
+use super::responses::{
+    apply_responses_c4m_request_compat, apply_responses_crs_request_compat,
+    normalize_responses_function_tools,
+};
 use super::thinking_history::{
     ensure_deepseek_anthropic_thinking_block_for_tool_use_history,
     ensure_deepseek_thinking_content_for_assistant_history,
@@ -163,6 +166,14 @@ pub fn run_req_outbound_stage3_compat(
     if should_apply_anthropic_thinking_history_compat(&payload, &adapter_context) {
         if let Some(root) = payload.as_object_mut() {
             ensure_reasoning_content_for_anthropic_assistant_history(root);
+        }
+    }
+    if provider_protocol_matches(
+        adapter_context.provider_protocol.as_ref(),
+        "openai-responses",
+    ) {
+        if let Some(root) = payload.as_object_mut() {
+            normalize_responses_function_tools(root);
         }
     }
 

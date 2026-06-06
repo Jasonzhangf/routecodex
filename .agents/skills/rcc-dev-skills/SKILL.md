@@ -1950,6 +1950,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ## 2026-06-06 direct tools leak 复测精华
 
 - 若 `/v1/responses` + `tools[]` 仍出现 `router-direct.send` 或 `Responses wire requires top-level tool.name`，先查 `router-direct-pipeline.ts` 核心函数是否自守卫 `openai-responses tools[] -> direct_requires_hub_relay`；不能只依赖 `index.ts` 外层入口判定。
+- Responses provider wire shape 红线：`openai-responses` 出站 `tools` 必须在 Rust `req_outbound_stage3_compat` 通用 pass 中把 chat-style `{type:"function", function:{name,parameters}}` 修为 top-level `{type:"function", name, parameters}`；不得只挂在 `responses:c4m/crs` profile，也不得让 TS `applyRequestCompat` 因无 explicit profile 绕过 native stage。
 - 复测 10000 时若 `127.0.0.1:10000` 返回 `Empty reply from server`，先用 `lsof -nP -iTCP:10000 -sTCP:LISTEN` 查端口冲突；本机 BaiduNetdisk 可能占用 `127.0.0.1:10000`，可用本机 LAN IP 命中 RCC 的 `0.0.0.0:10000` 监听做对照。
 
 ## 2026-06-06 direct provider error leak / relay reselection lesson

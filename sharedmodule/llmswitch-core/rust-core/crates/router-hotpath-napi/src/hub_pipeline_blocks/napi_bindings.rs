@@ -224,6 +224,15 @@ fn has_declared_apply_patch_tool(payload: &Value) -> bool {
     false
 }
 
+fn has_declared_responses_tools(payload: &Value) -> bool {
+    payload
+        .as_object()
+        .and_then(|root| root.get("tools"))
+        .and_then(Value::as_array)
+        .map(|tools| !tools.is_empty())
+        .unwrap_or(false)
+}
+
 fn evaluate_responses_direct_route_decision(
     payload: &Value,
     inbound_protocol: &str,
@@ -237,6 +246,14 @@ fn evaluate_responses_direct_route_decision(
                 "providerWireValid": false,
                 "requiresHubRelay": true,
                 "reason": reason,
+                "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
+            }));
+        }
+        if has_declared_responses_tools(payload) {
+            return Ok(serde_json::json!({
+                "providerWireValid": true,
+                "requiresHubRelay": true,
+                "reason": "responses tools require Hub relay tool governance",
                 "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
             }));
         }
@@ -294,6 +311,36 @@ mod responses_direct_route_decision_tests {
 
         assert_eq!(decision["providerWireValid"], true);
         assert_eq!(decision["requiresHubRelay"], false);
+    }
+
+    #[test]
+    fn valid_responses_tools_require_hub_relay() {
+        let decision = evaluate_responses_direct_route_decision(
+            &serde_json::json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "hello" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    { "type": "function", "name": "exec_command", "parameters": { "type": "object" } }
+                ]
+            }),
+            "openai-responses",
+            "client",
+        )
+        .expect("valid tool declarations should be relay-governed");
+
+        assert_eq!(decision["providerWireValid"], true);
+        assert_eq!(decision["requiresHubRelay"], true);
+        assert_eq!(
+            decision["reason"],
+            "responses tools require Hub relay tool governance"
+        );
     }
 }
 

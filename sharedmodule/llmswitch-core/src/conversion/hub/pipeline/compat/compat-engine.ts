@@ -48,9 +48,6 @@ export function applyRequestCompat(
 ): CompatApplicationResult {
   assertCompatNativeBoundary();
   const explicitProfile = normalizeProfileId(profileId);
-  if (!explicitProfile) {
-    return { payload };
-  }
 
   const nativeCompat = runReqOutboundStage3CompatWithNative({
     payload,
@@ -68,9 +65,6 @@ export function applyResponseCompat(
 ): CompatApplicationResult {
   assertCompatNativeBoundary();
   const explicitProfile = normalizeProfileId(profileId);
-  if (!explicitProfile) {
-    return { payload };
-  }
 
   const nativeCompat = runRespInboundStage3CompatWithNative({
     payload,

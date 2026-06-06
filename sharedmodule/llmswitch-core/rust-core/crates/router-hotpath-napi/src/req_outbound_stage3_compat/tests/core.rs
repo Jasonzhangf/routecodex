@@ -52,6 +52,65 @@ fn test_no_profile_passthrough() {
 }
 
 #[test]
+fn test_openai_responses_normalizes_chat_style_function_tools_without_profile() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "gpt-5.5",
+            "input": "use tool",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "run a command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "cmd": {"type": "string"}
+                            },
+                            "required": ["cmd"]
+                        }
+                    }
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_responses_tool_shape".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.applied_profile.is_none());
+    assert!(result.native_applied);
+    assert_eq!(result.payload["tools"][0]["type"], "function");
+    assert_eq!(result.payload["tools"][0]["name"], "exec_command");
+    assert_eq!(result.payload["tools"][0]["description"], "run a command");
+    assert_eq!(result.payload["tools"][0]["parameters"]["type"], "object");
+    assert!(result.payload["tools"][0].get("function").is_none());
+}
+
+#[test]
 fn test_profile_selection() {
     let input = ReqOutboundCompatInput {
         payload: json!({"model": "deepseek-chat"}),

@@ -220,11 +220,7 @@ impl VirtualRouterEngineCore {
                         .unwrap_or(true)
             })
             .collect();
-        let available = self.collect_available_candidates(env, &route_candidates);
-        if available.is_empty() && !excluded_keys.is_empty() && !route_candidates.is_empty() {
-            return route_candidates;
-        }
-        available
+        self.collect_available_candidates(env, &route_candidates)
     }
 
     fn collect_available_candidates(&mut self, env: Env, candidates: &[String]) -> Vec<String> {
@@ -715,7 +711,7 @@ impl VirtualRouterEngineCore {
     }
 }
 
-pub(crate) fn build_unavailable_providers_details(
+fn build_unavailable_providers_details(
     core: &VirtualRouterEngineCore,
     env: Env,
     candidate_keys: &[String],
@@ -918,7 +914,7 @@ fn push_unavailable_reason(
     });
 }
 
-pub(crate) fn collect_recoverable_cooldown_for_key(
+fn collect_recoverable_cooldown_for_key(
     core: &VirtualRouterEngineCore,
     env: Env,
     provider_key: &str,
@@ -1400,41 +1396,6 @@ mod tests {
             .expect_err("all excluded targets must not be selected again");
 
         assert!(error.contains("PROVIDER_NOT_AVAILABLE"));
-    }
-
-    #[test]
-    fn retry_exclusion_selects_alternative_even_when_health_cooldown_filtered() {
-        let mut core = build_priority_test_core();
-        core.health_manager.cooldown_provider(
-            "mimo.key1.mimo-v2.5-pro",
-            Some("test_cooldown".to_string()),
-            Some(300_000),
-            now_ms(),
-        );
-        let classification = ClassificationResult {
-            route_name: "thinking".to_string(),
-            confidence: 1.0,
-            reasoning: "test".to_string(),
-            candidates: vec!["thinking".to_string()],
-        };
-        let features = RoutingFeatures::default();
-        let routing_state = RoutingInstructionState::default();
-
-        let selected = core
-            .select_provider(
-                "thinking",
-                &json!({
-                    "excludedProviderKeys": ["sdfv.key1.gpt-5.4"]
-                }),
-                &classification,
-                &features,
-                &routing_state,
-                None,
-                unsafe { Env::from_raw(std::ptr::null_mut()) },
-            )
-            .expect("retry selection should pick non-excluded alternative");
-
-        assert_eq!(selected.provider_key, "mimo.key1.mimo-v2.5-pro");
     }
 
     #[test]

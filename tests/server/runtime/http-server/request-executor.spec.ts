@@ -2464,7 +2464,7 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('responses standard pipeline rejects chat-style function tools before provider.send', async () => {
+  test('responses standard pipeline does not apply direct payload contract before provider.send', async () => {
     jest.resetModules();
     jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => createBridgeHttpServerMock({
       applyResponsesDirectRouteParamsOverrideNative: (input: { payload: Record<string, unknown> }) => input.payload,
@@ -2589,7 +2589,7 @@ describe('HubRequestExecutor failover', () => {
       stats: new StatsManager()
     });
 
-    await expect(executor.execute({
+    const result = await executor.execute({
       requestId: 'req-responses-standard-shape-lock',
       entryEndpoint: '/v1/responses',
       body: {
@@ -2598,9 +2598,10 @@ describe('HubRequestExecutor failover', () => {
       },
       headers: {},
       metadata: {}
-    })).rejects.toThrow(/Responses wire requires top-level tool\.name/);
+    });
 
-    expect(processA).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(processA).toHaveBeenCalledTimes(1);
     expect(processB).not.toHaveBeenCalled();
   });
 
