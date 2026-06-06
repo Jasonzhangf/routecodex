@@ -6,6 +6,8 @@ import {
 } from './cli-ticket.js';
 import type { ServerSideToolEngineOptions, ToolCall } from './types.js';
 
+export const SERVERTOOL_CLI_PROJECTION_FEATURE_ID = 'feature_id: hub.servertool_cli_projection';
+
 export interface ServertoolCliProjectionPlan {
   ticket: ServertoolCliTicket;
   chatResponse: JsonObject;
