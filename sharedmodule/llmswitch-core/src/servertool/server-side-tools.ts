@@ -26,6 +26,10 @@ import {
   runToolCallExecutionLoop
 } from './execution-shell.js';
 import {
+  buildServertoolCliProjectionForAutoFlow,
+  buildServertoolCliProjectionForToolCall
+} from './cli-projection.js';
+import {
   appendToolOutput,
   buildAutoHookQueuesFromConfig,
   filterOutExecutedToolCalls,
@@ -138,6 +142,24 @@ export async function runServerSideToolEngine(
     })
   );
 
+  if (dispatchPlan.executableToolCalls.length > 0) {
+    const projection = buildServertoolCliProjectionForToolCall({
+      options,
+      toolCall: dispatchPlan.executableToolCalls[0],
+      reasoningText: `RouteCodex intercepted servertool ${dispatchPlan.executableToolCalls[0].name} and will execute it through the client-visible CLI path.`
+    });
+    return {
+      mode: 'tool_flow',
+      finalChatResponse: projection.chatResponse,
+      execution: {
+        flowId: 'servertool_cli_projection',
+        context: {
+          servertoolCliProjection: projection.chatResponse.__servertool_cli_projection as JsonObject
+        }
+      }
+    };
+  }
+
   const executionState = await runToolCallExecutionLoop({
     dispatchPlan,
     options,
@@ -180,6 +202,24 @@ export async function runServerSideToolEngine(
     contextBase: contextBase as ServerToolHandlerContext
   });
   if (optionalResult) {
+    if (optionalResult.execution.flowId === 'stop_message_flow') {
+      const projection = buildServertoolCliProjectionForAutoFlow({
+        options,
+        flowId: optionalResult.execution.flowId,
+        reasoningText: extractTextFromChatLike(optionalResult.chatResponse) || 'RouteCodex stopless continuation is projected to client CLI execution.',
+        stdoutPreview: 'stopless continuation ready'
+      });
+      return {
+        mode: 'tool_flow',
+        finalChatResponse: projection.chatResponse,
+        execution: {
+          flowId: 'stop_message_flow',
+          context: {
+            servertoolCliProjection: projection.chatResponse.__servertool_cli_projection as JsonObject
+          }
+        }
+      };
+    }
     return {
       mode: 'tool_flow',
       finalChatResponse: optionalResult.chatResponse,
@@ -194,6 +234,24 @@ export async function runServerSideToolEngine(
     contextBase: contextBase as ServerToolHandlerContext
   });
   if (mandatoryResult) {
+    if (mandatoryResult.execution.flowId === 'stop_message_flow') {
+      const projection = buildServertoolCliProjectionForAutoFlow({
+        options,
+        flowId: mandatoryResult.execution.flowId,
+        reasoningText: extractTextFromChatLike(mandatoryResult.chatResponse) || 'RouteCodex stopless continuation is projected to client CLI execution.',
+        stdoutPreview: 'stopless continuation ready'
+      });
+      return {
+        mode: 'tool_flow',
+        finalChatResponse: projection.chatResponse,
+        execution: {
+          flowId: 'stop_message_flow',
+          context: {
+            servertoolCliProjection: projection.chatResponse.__servertool_cli_projection as JsonObject
+          }
+        }
+      };
+    }
     return {
       mode: 'tool_flow',
       finalChatResponse: mandatoryResult.chatResponse,

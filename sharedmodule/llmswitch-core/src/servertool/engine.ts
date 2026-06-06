@@ -316,6 +316,19 @@ export async function runServerToolOrchestration(
       flowId: engineResult.execution.flowId
     };
   }
+  if (
+    engineResult.execution.context &&
+    typeof engineResult.execution.context === 'object' &&
+    !Array.isArray(engineResult.execution.context) &&
+    (engineResult.execution.context as Record<string, unknown>).servertoolCliProjection
+  ) {
+    logProgress(5, totalSteps, 'completed (servertool cli projection; no reenter)', { flowId });
+    return {
+      chat: engineResult.finalChatResponse,
+      executed: true,
+      flowId: engineResult.execution.flowId
+    };
+  }
   return runFollowupMainline({
     adapterContext: options.adapterContext,
     requestId: options.requestId,
