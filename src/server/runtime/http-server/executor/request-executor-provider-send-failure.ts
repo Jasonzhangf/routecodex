@@ -337,10 +337,7 @@ export async function processProviderSendFailure(
       : null;
   const allowBlockingRecoverableRetryBeyondAttemptBudget =
     args.attempt >= args.maxAttempts
-    && (
-      retryExecutionPlan.blockingRecoverable
-      || (retryExecutionPlan.excludedCurrentProvider && retryExecutionPlan.shouldRetry)
-    );
+    && retryExecutionPlan.blockingRecoverable;
 
   emitRequestExecutorProviderRetryTelemetry({
     requestId: args.requestId,

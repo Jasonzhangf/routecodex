@@ -96,4 +96,68 @@ describe('anthropicFamilyProfile.resolveBusinessResponseError', () => {
 
     expect(error).toBeUndefined();
   });
+
+  it('accepts top-level SSE wrapper with bodyText', () => {
+    const error = anthropicFamilyProfile.resolveBusinessResponseError?.({
+      response: { mode: 'sse', bodyText: 'event: ping\\ndata: {}\\n\\n' },
+      runtimeMetadata: {}
+    });
+
+    expect(error).toBeUndefined();
+  });
+
+  it('accepts nested SSE wrapper with bodyText', () => {
+    const error = anthropicFamilyProfile.resolveBusinessResponseError?.({
+      response: { data: { mode: 'sse', bodyText: 'event: ping\\ndata: {}\\n\\n' } },
+      runtimeMetadata: {}
+    });
+
+    expect(error).toBeUndefined();
+  });
+
+  it('accepts top-level __sse_stream marker', () => {
+    const error = anthropicFamilyProfile.resolveBusinessResponseError?.({
+      response: { __sse_stream: true },
+      runtimeMetadata: {}
+    });
+
+    expect(error).toBeUndefined();
+  });
+
+  it('accepts nested __sse_stream marker', () => {
+    const error = anthropicFamilyProfile.resolveBusinessResponseError?.({
+      response: { data: { __sse_stream: true } },
+      runtimeMetadata: {}
+    });
+
+    expect(error).toBeUndefined();
+  });
+
+  it('accepts anthropic SSE message_start event payload during pre-stream business check', () => {
+    const error = anthropicFamilyProfile.resolveBusinessResponseError?.({
+      response: {
+        type: 'message_start',
+        message: {
+          id: 'msg_1',
+          type: 'message',
+          role: 'assistant',
+          content: []
+        }
+      },
+      runtimeMetadata: {}
+    });
+
+    expect(error).toBeUndefined();
+  });
+
+  it('accepts anthropic SSE ping event payload during pre-stream business check', () => {
+    const error = anthropicFamilyProfile.resolveBusinessResponseError?.({
+      response: {
+        type: 'ping'
+      },
+      runtimeMetadata: {}
+    });
+
+    expect(error).toBeUndefined();
+  });
 });

@@ -82,6 +82,43 @@ function isProviderBusinessStatus2013(value: unknown): boolean {
   return /(?:^|_)2013(?:_|$)/.test(normalized);
 }
 
+function isProviderBusinessStatus2013ContextOverflow(args: {
+  statusCode?: number;
+  error?: unknown;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason?: string;
+  nestedMessage?: string;
+  protocolReason?: string;
+  protocolUpstreamCode?: string;
+  providerStatusCode?: number;
+}): boolean {
+  const has2013Signal =
+    isProviderBusinessStatus2013(args.errorCode)
+    || isProviderBusinessStatus2013(args.upstreamCode)
+    || isProviderBusinessStatus2013(args.protocolUpstreamCode)
+    || isProviderBusinessStatus2013(args.providerStatusCode);
+  if (!has2013Signal) {
+    return false;
+  }
+  if (args.protocolReason === 'context_length_exceeded') {
+    return true;
+  }
+  if ((args.reason ?? '').includes('context_length_exceeded')) {
+    return true;
+  }
+  if ((args.nestedMessage ?? '').includes('context_length_exceeded')) {
+    return true;
+  }
+  return isPromptTooLongLike({
+    error: args.error,
+    statusCode: args.statusCode,
+    errorCode: args.protocolUpstreamCode || args.errorCode,
+    upstreamCode: args.protocolUpstreamCode || args.upstreamCode,
+    reason: args.protocolReason || args.nestedMessage || args.reason
+  });
+}
+
 export function normalizeProviderFailureCodeKey(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -265,18 +302,45 @@ export function resolveProviderFailureClassification(args: {
   const nestedMessage = typeof nested.message === 'string' ? nested.message.toLowerCase() : '';
   const protocolReason = typeof protocolDetails.reason === 'string' ? protocolDetails.reason.trim().toLowerCase() : '';
   const protocolUpstreamCode = normalizeProviderFailureCodeKey(protocolDetails.upstreamCode);
+  const has2013Signal =
+    isProviderBusinessStatus2013(errorCode)
+    || isProviderBusinessStatus2013(upstreamCode)
+    || isProviderBusinessStatus2013(nestedCode)
+    || isProviderBusinessStatus2013(protocolUpstreamCode)
+    || isProviderBusinessStatus2013(protocolDetails.providerStatusCode);
+  const isMalformedProviderBusiness2013 =
+    (errorCode === 'MALFORMED_RESPONSE' || upstreamCode === 'MALFORMED_RESPONSE' || nestedCode === 'MALFORMED_RESPONSE')
+    && (
+      protocolUpstreamCode === 'PROVIDER_STATUS_2013'
+      || upstreamCode === 'PROVIDER_STATUS_2013'
+      || nestedCode === 'PROVIDER_STATUS_2013'
+      || protocolDetails.providerStatusCode === 2013
+      || isProviderBusinessStatus2013(protocolUpstreamCode)
+      || isProviderBusinessStatus2013(upstreamCode)
+      || isProviderBusinessStatus2013(nestedCode)
+    );
 
   if (isProviderRuntimeRequestContractError(reason)) {
     return 'unrecoverable';
   }
 
   if (
-    isProviderBusinessStatus2013(errorCode)
-    || isProviderBusinessStatus2013(upstreamCode)
-    || isProviderBusinessStatus2013(nestedCode)
-    || isProviderBusinessStatus2013(protocolUpstreamCode)
-    || isProviderBusinessStatus2013(protocolDetails.providerStatusCode)
+    isProviderBusinessStatus2013ContextOverflow({
+      error: args.error,
+      statusCode,
+      errorCode,
+      upstreamCode,
+      reason,
+      nestedMessage,
+      protocolReason,
+      protocolUpstreamCode,
+      providerStatusCode: protocolDetails.providerStatusCode
+    })
   ) {
+    return 'special_400';
+  }
+
+  if (has2013Signal && !isMalformedProviderBusiness2013) {
     return 'special_400';
   }
 
@@ -348,6 +412,32 @@ export function resolveProviderFailureClassification(args: {
     // 2056 = upstream rotation/overload (MiniMax). Typically transient.
     // Keep as recoverable so the provider retries internally. After 6 attempts,
     // the error is escalated naturally by the retry engine.
+    return 'recoverable';
+  }
+
+  if (
+    (errorCode === 'MALFORMED_RESPONSE' || upstreamCode === 'MALFORMED_RESPONSE' || nestedCode === 'MALFORMED_RESPONSE')
+    && (
+      protocolUpstreamCode === 'PROVIDER_STATUS_2013'
+      || upstreamCode === 'PROVIDER_STATUS_2013'
+      || nestedCode === 'PROVIDER_STATUS_2013'
+      || protocolDetails.providerStatusCode === 2013
+      || isProviderBusinessStatus2013(protocolUpstreamCode)
+      || isProviderBusinessStatus2013(upstreamCode)
+      || isProviderBusinessStatus2013(nestedCode)
+    )
+    && !isProviderBusinessStatus2013ContextOverflow({
+      error: args.error,
+      statusCode,
+      errorCode,
+      upstreamCode,
+      reason,
+      nestedMessage,
+      protocolReason,
+      protocolUpstreamCode,
+      providerStatusCode: protocolDetails.providerStatusCode
+    })
+  ) {
     return 'recoverable';
   }
 
@@ -574,12 +664,17 @@ export function isBlockingRecoverableProviderFailure(args: {
   ) {
     return true;
   }
+  if (errorCode === 'MALFORMED_RESPONSE' && upstreamCode === 'PROVIDER_STATUS_2013') {
+    return true;
+  }
   if (
     reason.includes('fetch failed')
     || reason.includes('building not completed')
     || reason.includes('network')
     || reason.includes('timeout')
     || reason.includes('temporarily unavailable')
+    || reason.includes('当前请求量较高')
+    || reason.includes('请稍后重试')
   ) {
     return true;
   }

@@ -597,68 +597,71 @@ mod tests {
                 "node observation dataProcessed must not be inserted into control metadata"
             );
             assert!(
-                !source.contains(concat!("\"metadata\".to_string(),\n        json!({", "\n          \"dataProcessed\"")),
+                !source.contains(concat!(
+                    "\"metadata\".to_string(),\n        json!({",
+                    "\n          \"dataProcessed\""
+                )),
                 "node observation dataProcessed must not be nested in metadata JSON"
             );
         }
     }
 }
 
-    #[test]
-    fn describes_all_eight_pipeline_contracts() {
-        let all = all_node_contracts();
-        assert_eq!(all.len(), 8);
-        let node_ids: Vec<_> = all.iter().map(|c| c.node_id).collect();
-        for expected in [
-            "HubReqInbound02Standardized",
-            "HubReqChatProcess03Governed",
-            "HubReqOutbound05ProviderSemantic",
-            "ProviderReqOutbound06WirePayload",
-            "HubRespInbound02Parsed",
-            "HubRespChatProcess03Governed",
-            "HubRespOutbound04ClientSemantic",
-            "VrRoute04SelectedTarget",
-        ] {
-            assert!(
-                node_ids.iter().any(|id| *id == expected),
-                "missing node contract: {expected}"
-            );
-        }
+#[test]
+fn describes_all_eight_pipeline_contracts() {
+    let all = all_node_contracts();
+    assert_eq!(all.len(), 8);
+    let node_ids: Vec<_> = all.iter().map(|c| c.node_id).collect();
+    for expected in [
+        "HubReqInbound02Standardized",
+        "HubReqChatProcess03Governed",
+        "HubReqOutbound05ProviderSemantic",
+        "ProviderReqOutbound06WirePayload",
+        "HubRespInbound02Parsed",
+        "HubRespChatProcess03Governed",
+        "HubRespOutbound04ClientSemantic",
+        "VrRoute04SelectedTarget",
+    ] {
+        assert!(
+            node_ids.iter().any(|id| *id == expected),
+            "missing node contract: {expected}"
+        );
     }
+}
 
-    #[test]
-    fn response_pipeline_contracts_have_valid_owners() {
-        for contract in response_pipeline_contracts() {
-            let owner = contract.owner_builder;
-            assert!(
-                owner.starts_with("parse_")
-                    || owner.starts_with("build_")
-                    || owner.starts_with("project_"),
-                "response contract {owner} must use parse_/build_/project_ prefix"
-            );
-        }
+#[test]
+fn response_pipeline_contracts_have_valid_owners() {
+    for contract in response_pipeline_contracts() {
+        let owner = contract.owner_builder;
+        assert!(
+            owner.starts_with("parse_")
+                || owner.starts_with("build_")
+                || owner.starts_with("project_"),
+            "response contract {owner} must use parse_/build_/project_ prefix"
+        );
     }
+}
 
-    #[test]
-    fn validation_rejects_provider_wire_metadata() {
-        let err = validate_pipeline_node_contract_boundary(
-            "ProviderReqOutbound06WirePayload",
-            &json!({"model":"m","metadata":{"routeHint":"x"}}),
-            &json!({"model":"m","metadata":{"routeHint":"x"}}),
-        )
-        .unwrap_err();
-        assert!(err.contains("forbidden paths present"));
-        assert!(err.contains("metadata"));
-    }
+#[test]
+fn validation_rejects_provider_wire_metadata() {
+    let err = validate_pipeline_node_contract_boundary(
+        "ProviderReqOutbound06WirePayload",
+        &json!({"model":"m","metadata":{"routeHint":"x"}}),
+        &json!({"model":"m","metadata":{"routeHint":"x"}}),
+    )
+    .unwrap_err();
+    assert!(err.contains("forbidden paths present"));
+    assert!(err.contains("metadata"));
+}
 
-    #[test]
-    fn validation_rejects_route_hint_in_provider_wire() {
-        let err = validate_pipeline_node_contract_boundary(
-            "ProviderReqOutbound06WirePayload",
-            &json!({"model":"m"}),
-            &json!({"model":"m","routeHint":"ph_xxx"}),
-        )
-        .unwrap_err();
-        assert!(err.contains("forbidden paths present"));
-        assert!(err.contains("routeHint"));
-    }
+#[test]
+fn validation_rejects_route_hint_in_provider_wire() {
+    let err = validate_pipeline_node_contract_boundary(
+        "ProviderReqOutbound06WirePayload",
+        &json!({"model":"m"}),
+        &json!({"model":"m","routeHint":"ph_xxx"}),
+    )
+    .unwrap_err();
+    assert!(err.contains("forbidden paths present"));
+    assert!(err.contains("routeHint"));
+}

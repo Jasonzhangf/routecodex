@@ -272,6 +272,23 @@ fn serialize_tool_output(entry: &Map<String, Value>) -> Option<String> {
     }
 }
 
+fn repair_bridge_tool_arguments(
+    entry_type: &str,
+    entry: &Map<String, Value>,
+    args: &Value,
+) -> String {
+    if entry_type == "custom_tool_call" {
+        let input = entry.get("input").cloned().unwrap_or(Value::Null);
+        let argument_key = match read_trimmed_string(entry.get("name")).as_deref() {
+            Some("apply_patch") => "patch",
+            _ => "input",
+        };
+        return serde_json::to_string(&serde_json::json!({ argument_key: input }))
+            .unwrap_or_else(|_| "{}".to_string());
+    }
+    repair_arguments_to_string(args).trim().to_string()
+}
+
 struct ProcessBlocksResult {
     text: Option<String>,
     media_blocks: Vec<MediaBlock>,
@@ -465,7 +482,7 @@ fn process_message_blocks(
             }
             continue;
         }
-        if block_type == "function_call" {
+        if block_type == "function_call" || block_type == "custom_tool_call" {
             let raw_name = block_obj.get("name").and_then(Value::as_str).or_else(|| {
                 block_obj
                     .get("function")
@@ -491,7 +508,7 @@ fn process_message_blocks(
                 call_id_candidate,
                 "missing_tool_call_id: bridge function_call block is missing call_id/id",
             )?;
-            let serialized = repair_arguments_to_string(args).trim().to_string();
+            let serialized = repair_bridge_tool_arguments(block_type.as_str(), block_obj, args);
             tool_name_by_id.insert(call_id.clone(), name.clone());
             register_pending_tool_call(pending_tool_call_ids, call_id.as_str());
             let mut fn_row = Map::new();
@@ -507,7 +524,7 @@ fn process_message_blocks(
         }
         if matches!(
             block_type.as_str(),
-            "function_call_output" | "tool_result" | "tool_message"
+            "function_call_output" | "custom_tool_call_output" | "tool_result" | "tool_message"
         ) {
             let tool_call_id = require_explicit_tool_call_id(
                 read_trimmed_string(block_obj.get("tool_call_id"))
@@ -607,7 +624,10 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 }
             }
         }
-        if entry_type == "function_call" || entry_type == "tool_call" {
+        if entry_type == "function_call"
+            || entry_type == "tool_call"
+            || entry_type == "custom_tool_call"
+        {
             if let Some(call_id) = read_trimmed_string(entry_obj.get("call_id"))
                 .or_else(|| read_trimmed_string(entry_obj.get("tool_call_id")))
                 .or_else(|| read_trimmed_string(entry_obj.get("id")))
@@ -747,7 +767,10 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
             continue;
         }
 
-        if entry_type == "function_call" || entry_type == "tool_call" {
+        if entry_type == "function_call"
+            || entry_type == "tool_call"
+            || entry_type == "custom_tool_call"
+        {
             let raw_name = entry_obj.get("name").and_then(Value::as_str).or_else(|| {
                 entry_obj
                     .get("function")
@@ -780,7 +803,7 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 "missing_tool_call_id: bridge function_call item is missing call_id/id",
             )?;
             decrement_call_count(&mut future_tool_call_counts, call_id.as_str());
-            let serialized = repair_arguments_to_string(args).trim().to_string();
+            let serialized = repair_bridge_tool_arguments(entry_type.as_str(), entry_obj, args);
             tool_name_by_id.insert(call_id.clone(), name.clone());
             let mut fn_row = Map::new();
             fn_row.insert("name".to_string(), Value::String(name));
@@ -825,7 +848,7 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
 
         if matches!(
             entry_type.as_str(),
-            "function_call_output" | "tool_result" | "tool_message"
+            "function_call_output" | "custom_tool_call_output" | "tool_result" | "tool_message"
         ) {
             let tool_call_id = require_explicit_tool_call_id(
                 read_trimmed_string(entry_obj.get("tool_call_id"))

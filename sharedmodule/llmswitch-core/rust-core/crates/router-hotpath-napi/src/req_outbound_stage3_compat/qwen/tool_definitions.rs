@@ -74,7 +74,7 @@ pub(crate) fn normalize_qwen_family_tool_definitions(root: &Map<String, Value>) 
             )
         } else if !name.is_empty() {
             Some(
-                "Use the exact tool name and provide a flat `input` object that matches this schema. Call the tool directly when needed.",
+                "Use the exact tool name and provide a flat `input` object that matches this schema. Call the tool directly when needed. For `apply_patch`, send workspace-relative paths inside patch headers. Do not use absolute paths.",
             )
         } else {
             None

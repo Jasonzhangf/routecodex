@@ -38,7 +38,12 @@ fn walk_value(
         }
         Value::Array(items) => {
             for (index, child) in items.iter().enumerate() {
-                walk_value(child, node_name, policy, format!("{path}[{index}]").as_str())?;
+                walk_value(
+                    child,
+                    node_name,
+                    policy,
+                    format!("{path}[{index}]").as_str(),
+                )?;
             }
         }
         _ => {}
@@ -52,9 +57,13 @@ fn validate_tools_array(
     policy: ToolNamespacePolicy,
     path: &str,
 ) -> Result<(), String> {
-    let Some(tools) = tools else { return Ok(()); };
+    let Some(tools) = tools else {
+        return Ok(());
+    };
     let Some(entries) = tools.as_array() else {
-        return Err(format!("{node_name} tools at {path}.tools must be an array"));
+        return Err(format!(
+            "{node_name} tools at {path}.tools must be an array"
+        ));
     };
     for (index, entry) in entries.iter().enumerate() {
         let tool_path = format!("{path}.tools[{index}]");
@@ -107,7 +116,9 @@ fn validate_tool_definition(
             .map(|name| !name.trim().is_empty())
             .unwrap_or(false);
         if !has_name {
-            return Err(format!("{node_name} custom tool at {path}.name must be a string"));
+            return Err(format!(
+                "{node_name} custom tool at {path}.name must be a string"
+            ));
         }
         return Ok(());
     }
@@ -125,7 +136,9 @@ fn validate_tool_definition(
         .map(|name| !name.trim().is_empty())
         .unwrap_or(false);
     if !has_name {
-        return Err(format!("{node_name} function tool at {path} must have a name"));
+        return Err(format!(
+            "{node_name} function tool at {path} must have a name"
+        ));
     }
     Ok(())
 }
@@ -147,18 +160,26 @@ fn validate_namespace_tool(
         .map(|name| !name.trim().is_empty())
         .unwrap_or(false);
     if !has_name {
-        return Err(format!("{node_name} namespace tool at {path}.name must be a string"));
+        return Err(format!(
+            "{node_name} namespace tool at {path}.name must be a string"
+        ));
     }
     let Some(children) = row.get("tools").and_then(Value::as_array) else {
-        return Err(format!("{node_name} namespace tool at {path}.tools must be an array"));
+        return Err(format!(
+            "{node_name} namespace tool at {path}.tools must be an array"
+        ));
     };
     if children.is_empty() {
-        return Err(format!("{node_name} namespace tool at {path}.tools must not be empty"));
+        return Err(format!(
+            "{node_name} namespace tool at {path}.tools must not be empty"
+        ));
     }
     for (index, child) in children.iter().enumerate() {
         let child_path = format!("{path}.tools[{index}]");
         let Some(child_row) = child.as_object() else {
-            return Err(format!("{node_name} namespace child at {child_path} must be an object"));
+            return Err(format!(
+                "{node_name} namespace child at {child_path} must be an object"
+            ));
         };
         let child_type = child_row
             .get("type")
@@ -166,7 +187,9 @@ fn validate_namespace_tool(
             .map(str::trim)
             .unwrap_or("function");
         if !child_type.eq_ignore_ascii_case("function") {
-            return Err(format!("{node_name} namespace child at {child_path}.type must be function"));
+            return Err(format!(
+                "{node_name} namespace child at {child_path}.type must be function"
+            ));
         }
         let has_child_name = child_row
             .get("function")
@@ -177,7 +200,9 @@ fn validate_namespace_tool(
             .map(|name| !name.trim().is_empty())
             .unwrap_or(false);
         if !has_child_name {
-            return Err(format!("{node_name} namespace child at {child_path} must have a name"));
+            return Err(format!(
+                "{node_name} namespace child at {child_path} must have a name"
+            ));
         }
     }
     Ok(())
@@ -188,18 +213,29 @@ fn validate_tool_calls_array(
     node_name: &str,
     path: &str,
 ) -> Result<(), String> {
-    let Some(tool_calls) = tool_calls else { return Ok(()); };
+    let Some(tool_calls) = tool_calls else {
+        return Ok(());
+    };
     let Some(entries) = tool_calls.as_array() else {
-        return Err(format!("{node_name} tool_calls at {path}.tool_calls must be an array"));
+        return Err(format!(
+            "{node_name} tool_calls at {path}.tool_calls must be an array"
+        ));
     };
     for (index, entry) in entries.iter().enumerate() {
         let call_path = format!("{path}.tool_calls[{index}]");
         let Some(row) = entry.as_object() else {
-            return Err(format!("{node_name} tool_call at {call_path} must be an object"));
+            return Err(format!(
+                "{node_name} tool_call at {call_path} must be an object"
+            ));
         };
-        let call_type = row.get("type").and_then(Value::as_str).unwrap_or("function");
+        let call_type = row
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("function");
         if !call_type.eq_ignore_ascii_case("function") {
-            return Err(format!("{node_name} tool_call at {call_path}.type must be function"));
+            return Err(format!(
+                "{node_name} tool_call at {call_path}.type must be function"
+            ));
         }
         let has_name = row
             .get("function")
@@ -209,7 +245,9 @@ fn validate_tool_calls_array(
             .map(|name| !name.trim().is_empty())
             .unwrap_or(false);
         if !has_name {
-            return Err(format!("{node_name} tool_call at {call_path}.function.name must be a string"));
+            return Err(format!(
+                "{node_name} tool_call at {call_path}.function.name must be a string"
+            ));
         }
     }
     Ok(())
@@ -230,7 +268,9 @@ fn validate_responses_function_call_item(
         .map(|name| !name.trim().is_empty())
         .unwrap_or(false);
     if !has_name {
-        return Err(format!("{node_name} function_call at {path}.name must be a string"));
+        return Err(format!(
+            "{node_name} function_call at {path}.name must be a string"
+        ));
     }
     let has_call_id = object
         .get("call_id")
@@ -238,7 +278,9 @@ fn validate_responses_function_call_item(
         .map(|call_id| !call_id.trim().is_empty())
         .unwrap_or(false);
     if !has_call_id {
-        return Err(format!("{node_name} function_call at {path}.call_id must be a string"));
+        return Err(format!(
+            "{node_name} function_call at {path}.call_id must be a string"
+        ));
     }
     Ok(())
 }
@@ -253,11 +295,18 @@ fn validate_required_action_tool_calls(
     };
     let Some(submit) = required_action
         .get("submit_tool_outputs")
-        .and_then(Value::as_object) else {
+        .and_then(Value::as_object)
+    else {
         return Ok(());
     };
-    let Some(calls) = submit.get("tool_calls") else { return Ok(()); };
-    validate_tool_calls_array(Some(calls), node_name, format!("{path}.required_action.submit_tool_outputs").as_str())
+    let Some(calls) = submit.get("tool_calls") else {
+        return Ok(());
+    };
+    validate_tool_calls_array(
+        Some(calls),
+        node_name,
+        format!("{path}.required_action.submit_tool_outputs").as_str(),
+    )
 }
 
 fn is_builtin_tool_type(tool_type: &str) -> bool {

@@ -192,46 +192,9 @@ export function shouldBypassProviderResponseConversion(
 }
 
 function hasServertoolApplyPatchToolCall(body: unknown, metadata?: Record<string, unknown>): boolean {
-  const rt = metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-    ? metadata.__rt as Record<string, unknown>
-    : undefined;
-  const applyPatch = rt?.applyPatch && typeof rt.applyPatch === 'object' && !Array.isArray(rt.applyPatch)
-    ? rt.applyPatch as Record<string, unknown>
-    : undefined;
-  const mode = typeof applyPatch?.mode === 'string' ? applyPatch.mode.trim().toLowerCase() : '';
-  if (mode !== 'servertool') {
-    return false;
-  }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return false;
-  }
-  const choices = (body as Record<string, unknown>).choices;
-  if (!Array.isArray(choices)) {
-    return false;
-  }
-  return choices.some((choice) => {
-    if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
-      return false;
-    }
-    const message = (choice as Record<string, unknown>).message;
-    if (!message || typeof message !== 'object' || Array.isArray(message)) {
-      return false;
-    }
-    const toolCalls = (message as Record<string, unknown>).tool_calls;
-    if (!Array.isArray(toolCalls)) {
-      return false;
-    }
-    return toolCalls.some((toolCall) => {
-      if (!toolCall || typeof toolCall !== 'object' || Array.isArray(toolCall)) {
-        return false;
-      }
-      const fn = (toolCall as Record<string, unknown>).function;
-      const name = fn && typeof fn === 'object' && !Array.isArray(fn)
-        ? (fn as Record<string, unknown>).name
-        : (toolCall as Record<string, unknown>).name;
-      return typeof name === 'string' && name.trim() === 'apply_patch';
-    });
-  });
+  const _ = body;
+  const _metadata = metadata;
+  return false;
 }
 
 export function normalizeStoplessLogMode(value: unknown): StoplessLogMode | undefined {

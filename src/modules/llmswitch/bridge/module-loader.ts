@@ -7,6 +7,7 @@
 import { createRequire } from 'module';
 import path from 'path';
 import {
+  resolveCorePackageDir,
   importCoreModule,
   resolveCoreModulePath
 } from '../core-loader.js';
@@ -69,6 +70,23 @@ function createNodeRequire() {
 
 const nodeRequire = createNodeRequire();
 
+function isJestRuntime(): boolean {
+  return typeof process.env.JEST_WORKER_ID === 'string' && process.env.JEST_WORKER_ID.length > 0;
+}
+
+function resolveBuiltinSourceModulePath(subpath: string, impl: LlmsImpl): string | null {
+  if (impl !== 'ts') {
+    return null;
+  }
+  try {
+    const packageDir = resolveCorePackageDir(impl);
+    const sourcePath = path.join(packageDir, 'src', `${subpath.replace(/^\/*/, '').replace(/\.js$/i, '')}.ts`);
+    return sourcePath;
+  } catch {
+    return null;
+  }
+}
+
 function parsePrefixList(raw: string | undefined): string[] {
   return String(raw || '')
     .split(',')
@@ -128,8 +146,20 @@ function requireCoreDist<TModule extends object = AnyRecord>(
     throw new Error('[llmswitch-bridge] ROUTECODEX_LLMS_ENGINE_ENABLE must be enabled to load engine core');
   }
   const modulePath = resolveCoreModulePath(subpath, impl);
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  return nodeRequire(modulePath) as TModule;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return nodeRequire(modulePath) as TModule;
+  } catch (error) {
+    const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined;
+    if (code === 'ERR_REQUIRE_ESM' && isJestRuntime()) {
+      const sourcePath = resolveBuiltinSourceModulePath(subpath, impl);
+      if (sourcePath) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        return nodeRequire(sourcePath) as TModule;
+      }
+    }
+    throw error;
+  }
 }
 
 export {

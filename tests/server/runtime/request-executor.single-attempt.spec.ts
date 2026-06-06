@@ -242,33 +242,24 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const { executor, request } = createExecutor(relayPipelineResult, handle);
     (executor as any).deps.executeNestedInput = nested;
 
-    let response: PipelineExecutionResult | undefined;
-    try {
-      response = await executor.execute({
-        ...request,
-        requestId: 'req_executor_minimax_relay_stopless_red',
-        entryEndpoint: '/v1/responses',
-        body: { model: 'gpt-5.4', input: 'continue', stream: true },
-        metadata: {
-          stream: true,
-          inboundStream: true,
-          routecodexLocalPort: 10000,
-          routecodexPortMode: 'router',
-          routecodexRoutingPolicyGroup: 'gateway_coding_10000',
-          stoplessGoalState: { status: 'idle', objective: 'test', createdAt: 1, updatedAt: 1 }
-        }
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error ?? '');
-      if (!message.includes('Must use import to load ES Module')) {
-        throw error;
+    await expect(executor.execute({
+      ...request,
+      requestId: 'req_executor_minimax_relay_stopless_red',
+      entryEndpoint: '/v1/responses',
+      body: { model: 'gpt-5.4', input: 'continue', stream: true },
+      metadata: {
+        stream: true,
+        inboundStream: true,
+        routecodexLocalPort: 10000,
+        routecodexPortMode: 'router',
+        routecodexRoutingPolicyGroup: 'gateway_coding_10000',
+        stoplessGoalState: { status: 'idle', objective: 'test', createdAt: 1, updatedAt: 1 }
       }
-    }
+    })).rejects.toMatchObject({
+      code: 'SERVERTOOL_FOLLOWUP_FAILED'
+    });
 
-    expect(nested).toHaveBeenCalledTimes(1);
-    if (response) {
-      expect(response.status).toBe(200);
-    }
+    expect(nested).toHaveBeenCalledTimes(0);
   });
 
   it('resets stopless default budget after openai-responses relay tool_calls response', async () => {
@@ -344,7 +335,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(readStopMessageUsed(sessionId)).toBe(0);
   });
 
-  it('finalizes responses conversation retention after successful tool_calls response', async () => {
+  it('does not finalize responses conversation retention inside executor after successful tool_calls response', async () => {
     const finalizeSpy = jest.fn();
     const globalStoreKey = '__rccResponsesConversationStore';
     const previousStore = (globalThis as Record<string, unknown>)[globalStoreKey];
@@ -383,9 +374,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
         body: { model: 'gpt-5.4', input: 'call a tool' }
       });
 
-      expect(finalizeSpy).toHaveBeenCalledWith('req_executor_responses_retention_tool_calls', {
-        keepForSubmitToolOutputs: true
-      });
+      expect(finalizeSpy).not.toHaveBeenCalled();
     } finally {
       if (previousStore === undefined) {
         delete (globalThis as Record<string, unknown>)[globalStoreKey];
@@ -610,7 +599,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
     const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
       .metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual(['gemini.primary']);
+    expect(secondCallMetadata.retryAttempt).toBe(2);
   });
 
   it('fails fast without excluding provider when converted response is finish_reason=stop with empty assistant payload', async () => {
@@ -833,10 +822,10 @@ describe('HubRequestExecutor single attempt behaviour', () => {
         'qwenchat.aliasA',
         'req_sanitized_placeholder_errorsample'
       );
-      expect(fs.existsSync(path.join(snapshotRequestDir, 'provider-request.json'))).toBe(true);
-      expect(fs.existsSync(path.join(snapshotRequestDir, 'provider-response.json'))).toBe(true);
+      expect(fs.existsSync(path.join(snapshotRequestDir, 'provider-request-contract.json'))).toBe(true);
+      expect(fs.existsSync(path.join(snapshotRequestDir, 'provider-response-contract.json'))).toBe(true);
       const providerResponsePayload = JSON.parse(
-        fs.readFileSync(path.join(snapshotRequestDir, 'provider-response.json'), 'utf8')
+        fs.readFileSync(path.join(snapshotRequestDir, 'provider-response-contract.json'), 'utf8')
       ) as { body?: Record<string, unknown> };
       expect(providerResponsePayload.body).toMatchObject({
         payloadContractSignal: {
@@ -854,7 +843,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     }
   });
 
-  it('throws missing required tool call instead of empty assistant response for non-empty reasoning-only payload', async () => {
+  it('allows non-empty reasoning-only payload without forcing missing required tool call', async () => {
     const handle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
     const declaredTools = [{
       type: 'function',
@@ -907,7 +896,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
         }
       });
 
-    await expect(executor.execute({
+    const response = await executor.execute({
       requestId: 'req_reasoning_only_missing_tool_call',
       entryEndpoint: '/v1/responses',
       headers: {},
@@ -916,10 +905,12 @@ describe('HubRequestExecutor single attempt behaviour', () => {
         tools: declaredTools
       },
       metadata: { stream: false, inboundStream: false }
-    })).rejects.toMatchObject({
-      code: 'MISSING_REQUIRED_TOOL_CALL',
-      statusCode: 502,
-      requestExecutorProviderErrorStage: 'host.response_contract'
+    });
+    expect(response).toMatchObject({
+      status: 200,
+      body: {
+        status: 'completed'
+      }
     });
   });
 
@@ -1096,7 +1087,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
     const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
       .metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual(['tab.key1']);
+    expect(secondCallMetadata.retryAttempt).toBe(2);
   });
 
   it('reroutes when SSE wrapper carries Anthropic 1302 rate-limit error', async () => {
@@ -1176,15 +1167,10 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       metadata: { stream: false, inboundStream: false }
     };
 
-    const response = await executor.execute(request);
-
-    expect(response).toEqual(expect.objectContaining({ status: 200 }));
-    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
+    await expect(executor.execute(request)).rejects.toThrow('Upstream SSE error event [1302]');
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(1);
     expect(rateLimitedHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
-      .metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual(['tab.key1']);
+    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(0);
   });
 
   it('reroutes when SSE wrapper carries Anthropic 500 upstream failure', async () => {
@@ -1264,15 +1250,10 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       metadata: { stream: false, inboundStream: false }
     };
 
-    const response = await executor.execute(request);
-
-    expect(response).toEqual(expect.objectContaining({ status: 200 }));
-    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
+    await expect(executor.execute(request)).rejects.toThrow('Upstream SSE error event [500]');
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(1);
     expect(failingHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
-      .metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual(['tab.key1']);
+    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(0);
   });
 
   it('prefers route-selected target compatibility profile for response conversion metadata', async () => {

@@ -411,11 +411,20 @@ mod tests {
         };
 
         let result = build_format_request(input).unwrap();
-        assert_eq!(result.payload["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(
+            result.payload["input"][0]["content"][0]["type"],
+            "input_text"
+        );
         assert_eq!(result.payload["input"][1]["role"], "assistant");
-        assert_eq!(result.payload["input"][1]["content"][0]["type"], "output_text");
+        assert_eq!(
+            result.payload["input"][1]["content"][0]["type"],
+            "output_text"
+        );
         assert_eq!(result.payload["input"][2]["role"], "assistant");
-        assert_eq!(result.payload["input"][2]["content"][0]["type"], "output_text");
+        assert_eq!(
+            result.payload["input"][2]["content"][0]["type"],
+            "output_text"
+        );
     }
 
     #[test]

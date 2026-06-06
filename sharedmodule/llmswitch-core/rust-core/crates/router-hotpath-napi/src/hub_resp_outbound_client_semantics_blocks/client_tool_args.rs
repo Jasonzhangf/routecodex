@@ -159,10 +159,8 @@ fn read_client_tool_definition(
         .filter(|v| !v.is_empty())?;
     let format = row
         .get("format")
-        .and_then(|v| v.as_str())
-        .or_else(|| fn_row.and_then(|fn_row| fn_row.get("format").and_then(|v| v.as_str())))
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
+        .and_then(read_tool_format)
+        .or_else(|| fn_row.and_then(|fn_row| fn_row.get("format").and_then(read_tool_format)));
     let parameters = fn_row
         .and_then(|fn_row| {
             fn_row
@@ -178,6 +176,21 @@ fn read_client_tool_definition(
         format,
         parameters,
     })
+}
+
+fn read_tool_format(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            value
+                .as_object()
+                .and_then(|row| row.get("type"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
 }
 
 fn register_client_tool(
@@ -447,6 +460,21 @@ pub(crate) fn resolve_client_tool_name(
 }
 
 fn normalize_apply_patch_client_args_raw(args_raw: &Value) -> Option<Value> {
+    normalize_apply_patch_client_args_for_spec(args_raw, None)
+}
+
+fn is_freeform_tool(spec: Option<&ClientToolDefinition>) -> bool {
+    matches!(
+        spec.and_then(|entry| entry.format.as_deref())
+            .map(|value| value.to_ascii_lowercase()),
+        Some(value) if matches!(value.as_str(), "grammar" | "text")
+    )
+}
+
+fn normalize_apply_patch_client_args_for_spec(
+    args_raw: &Value,
+    spec: Option<&ClientToolDefinition>,
+) -> Option<Value> {
     let normalized = crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args(
         Some(args_raw),
     );
@@ -459,6 +487,9 @@ fn normalize_apply_patch_client_args_raw(args_raw: &Value) -> Option<Value> {
         .unwrap_or("");
     if patch.is_empty() || patch.contains("__APPLY_PATCH_ERROR__/") {
         return None;
+    }
+    if is_freeform_tool(spec) {
+        return Some(Value::String(patch.to_string()));
     }
     Some(Value::String(normalized.0))
 }
@@ -540,7 +571,9 @@ pub(crate) fn normalize_responses_tool_call_arguments_for_client(
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| Value::Null);
-                if let Some(normalized) = normalize_apply_patch_client_args_raw(&args_raw) {
+                if let Some(normalized) =
+                    normalize_apply_patch_client_args_for_spec(&args_raw, spec.as_ref())
+                {
                     item_row.insert("arguments".to_string(), normalized);
                     continue;
                 }
@@ -570,9 +603,9 @@ pub(crate) fn normalize_responses_tool_call_arguments_for_client(
                 .cloned()
                 .unwrap_or_else(|| Value::Null);
             let normalized = if spec.declared_name == "apply_patch" {
-                normalize_apply_patch_client_args_raw(&args_raw).unwrap_or_else(|| {
-                    normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec)
-                })
+                normalize_apply_patch_client_args_for_spec(&args_raw, Some(&spec)).unwrap_or_else(
+                    || normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec),
+                )
             } else {
                 normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec)
             };
@@ -628,7 +661,9 @@ pub(crate) fn normalize_responses_tool_call_arguments_for_client(
             let args_raw = fn_args.or(call_args).unwrap_or(Value::Null);
             let spec = resolve_client_tool_name(&tool_index, namespace, name.as_str());
             if name == "apply_patch" {
-                if let Some(normalized) = normalize_apply_patch_client_args_raw(&args_raw) {
+                if let Some(normalized) =
+                    normalize_apply_patch_client_args_for_spec(&args_raw, spec.as_ref())
+                {
                     call_row.insert("arguments".to_string(), normalized.clone());
                     if let Some(fn_row) =
                         call_row.get_mut("function").and_then(|v| v.as_object_mut())
@@ -662,9 +697,9 @@ pub(crate) fn normalize_responses_tool_call_arguments_for_client(
                 }
             }
             let normalized = if spec.declared_name == "apply_patch" {
-                normalize_apply_patch_client_args_raw(&args_raw).unwrap_or_else(|| {
-                    normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec)
-                })
+                normalize_apply_patch_client_args_for_spec(&args_raw, Some(&spec)).unwrap_or_else(
+                    || normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec),
+                )
             } else {
                 normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec)
             };

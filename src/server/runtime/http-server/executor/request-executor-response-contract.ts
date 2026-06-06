@@ -1,20 +1,20 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
 import { STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
-import { requireCoreDist } from '../../../../modules/llmswitch/bridge/module-loader.js';
+import { importCoreDist } from '../../../../modules/llmswitch/bridge/module-loader.js';
 
 type NativeChatProcessNodeResultSemanticsModule = {
   detectRetryableEmptyAssistantResponseWithNative?: (body: unknown, requestSemantics?: Record<string, unknown>) => PayloadContractSignal | null;
 };
 
-let cachedNativeSemantics: NativeChatProcessNodeResultSemanticsModule | null = null;
+let cachedNativeSemanticsPromise: Promise<NativeChatProcessNodeResultSemanticsModule> | null = null;
 
-function getNativeSemantics(): NativeChatProcessNodeResultSemanticsModule {
-  if (!cachedNativeSemantics) {
-    cachedNativeSemantics = requireCoreDist<NativeChatProcessNodeResultSemanticsModule>(
+async function getNativeSemantics(): Promise<NativeChatProcessNodeResultSemanticsModule> {
+  if (!cachedNativeSemanticsPromise) {
+    cachedNativeSemanticsPromise = importCoreDist<NativeChatProcessNodeResultSemanticsModule>(
       'router/virtual-router/engine-selection/native-chat-process-node-result-semantics'
     );
   }
-  return cachedNativeSemantics;
+  return cachedNativeSemanticsPromise;
 }
 
 type ProviderSnapshotWriteArgs = {
@@ -63,11 +63,11 @@ function containsEmptyAssistantSanitizedPlaceholder(value: unknown): boolean {
   return Object.values(value as Record<string, unknown>).some((entry) => containsEmptyAssistantSanitizedPlaceholder(entry));
 }
 
-export function detectRetryableEmptyAssistantResponse(
+export async function detectRetryableEmptyAssistantResponse(
   body: unknown,
   requestSemantics?: Record<string, unknown>
-): PayloadContractSignal | null {
-  const fn = getNativeSemantics().detectRetryableEmptyAssistantResponseWithNative;
+): Promise<PayloadContractSignal | null> {
+  const fn = (await getNativeSemantics()).detectRetryableEmptyAssistantResponseWithNative;
   if (typeof fn !== 'function') throw new Error('[response-contract] detectRetryableEmptyAssistantResponseWithNative unavailable');
   return fn(body, requestSemantics);
 }

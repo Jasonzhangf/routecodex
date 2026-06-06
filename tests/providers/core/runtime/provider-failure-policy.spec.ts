@@ -371,6 +371,56 @@ describe('provider failure policy ssot', () => {
     expect(classification).toBe('recoverable');
   });
 
+  it('RED: classifies provider business error 2013 traffic saturation as recoverable instead of special_400', () => {
+    const error = Object.assign(
+      new Error('Token Plan 当前请求量较高，请稍后重试'),
+      {
+        code: 'MALFORMED_RESPONSE',
+        upstreamCode: 'PROVIDER_STATUS_2013',
+        statusCode: 200,
+        details: {
+          detected: 'provider_business_error',
+          upstreamCode: 'PROVIDER_STATUS_2013',
+          providerStatusCode: 2013,
+          reason: 'token plan 当前请求量较高，请稍后重试'
+        }
+      }
+    );
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 200,
+      errorCode: 'MALFORMED_RESPONSE',
+      upstreamCode: 'PROVIDER_STATUS_2013',
+      reason: 'Token Plan 当前请求量较高，请稍后重试'
+    });
+
+    expect(classification).toBe('recoverable');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      error,
+      errorCode: 'MALFORMED_RESPONSE',
+      upstreamCode: 'PROVIDER_STATUS_2013',
+      statusCode: 200,
+      classification
+    })).toBe(false);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 200,
+      errorCode: 'MALFORMED_RESPONSE',
+      upstreamCode: 'PROVIDER_STATUS_2013',
+      reason: 'Token Plan 当前请求量较高，请稍后重试',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      affectsHealth: true,
+      blockingRecoverable: true,
+      shouldRetry: true
+    }));
+  });
+
   it('keeps provider failure classification space closed to 3 categories', () => {
     const samples = [
       resolveProviderFailureClassification({

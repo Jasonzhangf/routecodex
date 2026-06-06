@@ -19,10 +19,10 @@ fn convert_servertool_line_edit_to_canonical_patch(file_path: &str, patch: &str)
     let has_removals = patch.lines().any(|l| l.starts_with('-'));
     if has_removals {
         out.push(format!("*** Update File: {}", file_path));
+        out.push("@@".to_string());
     } else {
         out.push(format!("*** Add File: {}", file_path));
     }
-    out.push("@@".to_string());
     for line in patch.lines() {
         out.push(line.to_string());
     }
@@ -68,16 +68,14 @@ fn build_current_apply_patch_schema_args(args: &Map<String, Value>) -> Option<(S
         let canonical_patch =
             convert_servertool_line_edit_to_canonical_patch(&file_path, &patch_source);
         let mut out = Map::new();
-        out.insert("patch".to_string(), Value::String(canonical_patch.clone()));
-        out.insert("input".to_string(), Value::String(canonical_patch));
+        out.insert("patch".to_string(), Value::String(canonical_patch));
         return Some((
             serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
             true,
         ));
     }
-    // Fallback: keep raw filePath + patch for pure text content (passthrough)
+    // Fallback: preserve only canonical patch carrier for model-visible history.
     let mut out = Map::new();
-    out.insert("filePath".to_string(), Value::String(file_path));
     out.insert("patch".to_string(), Value::String(patch_source));
     Some((
         serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
@@ -338,8 +336,7 @@ fn normalize_simple_line_edit_apply_patch_schema_args(
     patch_lines.push("*** End Patch".to_string());
     let canonical_patch = patch_lines.join("\n");
     let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(canonical_patch.clone()));
-    out.insert("input".to_string(), Value::String(canonical_patch));
+    out.insert("patch".to_string(), Value::String(canonical_patch));
     Some(HashlineApplyPatchNormalization::Normalized((
         serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
         true,
@@ -392,8 +389,7 @@ fn normalize_hashline_apply_patch_schema_args(
         };
     };
     let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(normalized_patch.clone()));
-    out.insert("input".to_string(), Value::String(normalized_patch));
+    out.insert("patch".to_string(), Value::String(normalized_patch));
     HashlineApplyPatchNormalization::Normalized((
         serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
         true,
@@ -1088,7 +1084,6 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
     let Some(raw_args) = raw_args else {
         let mut out = Map::new();
         out.insert("patch".to_string(), Value::String(String::new()));
-        out.insert("input".to_string(), Value::String(String::new()));
         return (
             serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
             true,
@@ -1115,23 +1110,20 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
     {
         let patch = normalize_apply_patch_text(structured_patch.trim());
         let mut out = Map::new();
-        out.insert("patch".to_string(), Value::String(patch.clone()));
-        out.insert("input".to_string(), Value::String(patch));
+        out.insert("patch".to_string(), Value::String(patch));
         return (
             serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
             structured_repaired,
         );
     }
-    let patch_source = read_apply_patch_source_from_args(&args)
-        .or_else(|| {
-            extract_apply_patch_text(Some(raw_args))
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        });
+    let patch_source = read_apply_patch_source_from_args(&args).or_else(|| {
+        extract_apply_patch_text(Some(raw_args))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    });
     let Some(patch_source) = patch_source else {
         let mut out = Map::new();
         out.insert("patch".to_string(), Value::String(String::new()));
-        out.insert("input".to_string(), Value::String(String::new()));
         return (
             serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
             true,
@@ -1141,8 +1133,7 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
     let patch = normalize_apply_patch_text(source_trimmed);
     let repaired = patch.trim() != source_trimmed;
     let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(patch.clone()));
-    out.insert("input".to_string(), Value::String(patch));
+    out.insert("patch".to_string(), Value::String(patch));
     (
         serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
         repaired,

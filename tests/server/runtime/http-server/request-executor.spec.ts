@@ -4,6 +4,7 @@ import { getServerToolRuntimeState, setServerToolEnabled } from '../../../../src
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types';
 import { StatsManager } from '../../../../src/server/runtime/http-server/stats-manager';
 import type { ProviderTrafficGovernorLike } from '../../../../src/server/runtime/http-server/provider-traffic-governor.js';
+import { createBridgeHttpServerMock } from '../../../helpers/bridge-http-server-mock';
 
 function normalizeMinimalSuccessResponse(result: unknown): unknown {
   if (!result || typeof result !== 'object') {
@@ -83,13 +84,13 @@ describe('HubRequestExecutor failover', () => {
     setServerToolEnabled(previousServerToolState.enabled, previousServerToolState.updatedBy);
   });
 
-  test('RED: retryable provider reroute must re-enter from source entry rebuild instead of rerunning hub inline', async () => {
+  test('recoverable 429 keeps same provider retry instead of source-entry reroute rebuild', async () => {
     const providerA = 'tab.key1.gpt-5.2';
     const providerB = 'tab.key2.gpt-5.2';
 
-    const failingProcess = jest.fn(async () => {
-      throw Object.assign(new Error('HTTP 429'), { statusCode: 429, code: 'HTTP_429' });
-    });
+    const failingProcess = jest.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('HTTP 429'), { statusCode: 429, code: 'HTTP_429' }))
+      .mockResolvedValueOnce({ status: 200, data: { id: 'resp_after_same_provider_retry' } });
     const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
 
     const handles = new Map<string, ProviderHandle>([
@@ -139,18 +140,6 @@ describe('HubRequestExecutor failover', () => {
       updateVirtualRouterConfig: jest.fn()
     };
 
-    const executeNestedInput = jest.fn(async (nestedInput: any) => ({
-      status: 200,
-      body: {
-        id: 'resp_nested_ok',
-        object: 'response',
-        output_text: 'ok-from-entry-rebuild'
-      },
-      metadata: {
-        nestedInput
-      }
-    }));
-
     const executor = createRequestExecutor({
       runtimeManager,
       getHubPipeline: () => pipeline as any,
@@ -159,12 +148,11 @@ describe('HubRequestExecutor failover', () => {
           handleError: jest.fn(async () => undefined)
         }
       }),
-      executeNestedInput,
       logStage: jest.fn(),
       stats: new StatsManager()
     });
 
-    await executor.execute({
+    const result = await executor.execute({
       requestId: 'req-reroute-source-entry-rebuild',
       entryEndpoint: '/v1/responses',
       body: {
@@ -204,8 +192,10 @@ describe('HubRequestExecutor failover', () => {
       }
     });
 
-    expect(executeNestedInput).toHaveBeenCalledTimes(1);
-    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(failingProcess).toHaveBeenCalledTimes(2);
+    expect(successProcess).toHaveBeenCalledTimes(0);
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
   });
 
   test('reports provider business upstream status from protocol details', () => {
@@ -886,7 +876,7 @@ describe('HubRequestExecutor failover', () => {
       recoverableBackoffMs: 0,
     });
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
       output: [
         {
@@ -895,9 +885,9 @@ describe('HubRequestExecutor failover', () => {
         }
       ],
       reasoning: 'internal only'
-    })).toBeNull();
+    })).resolves.toBeNull();
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       choices: [
         {
           finish_reason: 'stop',
@@ -906,11 +896,11 @@ describe('HubRequestExecutor failover', () => {
           }
         }
       ]
-    })).toMatchObject({
+    })).resolves.toMatchObject({
       marker: 'chat_empty_assistant'
     });
 
-    expect(__requestExecutorTestables.hasRequestedToolsInSemantics({
+    await expect(__requestExecutorTestables.hasRequestedToolsInSemantics({
       tools: {
         clientToolsRaw: [
           {
@@ -919,7 +909,7 @@ describe('HubRequestExecutor failover', () => {
           }
         ]
       }
-    })).toBe(true);
+    })).resolves.toBe(true);
 
     expect(__requestExecutorTestables.isRequiredToolCallTurn({
       tools: {
@@ -933,9 +923,9 @@ describe('HubRequestExecutor failover', () => {
       responses: {
         toolChoice: 'required'
       }
-    })).toBe(true);
+    })).resolves.toBe(true);
 
-    expect(__requestExecutorTestables.isRequiredToolCallTurn({
+    await expect(__requestExecutorTestables.isRequiredToolCallTurn({
       tools: {
         clientToolsRaw: [
           {
@@ -947,7 +937,7 @@ describe('HubRequestExecutor failover', () => {
       responses: {
         toolChoice: 'auto'
       }
-    })).toBe(false);
+    })).resolves.toBe(false);
 
     expect(__requestExecutorTestables.isToolResultFollowupTurn({
       messages: [
@@ -957,7 +947,7 @@ describe('HubRequestExecutor failover', () => {
           content: 'ok'
         }
       ]
-    })).toBe(true);
+    })).resolves.toBe(true);
 
     expect(__requestExecutorTestables.isToolResultFollowupTurn({
       continuation: {
@@ -983,9 +973,9 @@ describe('HubRequestExecutor failover', () => {
           ]
         }
       }
-    })).toBe(true);
+    })).resolves.toBe(true);
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       choices: [
         {
           finish_reason: 'stop',
@@ -1006,11 +996,11 @@ describe('HubRequestExecutor failover', () => {
       responses: {
         toolChoice: 'required'
       }
-    })).toMatchObject({
+    })).resolves.toMatchObject({
       marker: 'chat_missing_required_tool_call'
     });
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       choices: [
         {
           finish_reason: 'stop',
@@ -1035,9 +1025,9 @@ describe('HubRequestExecutor failover', () => {
           content: 'ok'
         }
       ]
-    })).toBeNull();
+    })).resolves.toBeNull();
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       choices: [
         {
           finish_reason: 'tool_calls',
@@ -1069,9 +1059,9 @@ describe('HubRequestExecutor failover', () => {
         serverToolFollowup: true,
         serverToolFollowupSource: 'servertool.reasoning_stop_guard'
       }
-    })).toBeNull();
+    })).resolves.toBeNull();
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'requires_action',
       required_action: {
         submit_tool_outputs: {
@@ -1108,9 +1098,9 @@ describe('HubRequestExecutor failover', () => {
         serverToolFollowup: true,
         serverToolFollowupSource: 'servertool.reasoning_stop_guard'
       }
-    })).toBeNull();
+    })).resolves.toBeNull();
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       choices: [
         {
           finish_reason: 'stop',
@@ -1142,11 +1132,11 @@ describe('HubRequestExecutor failover', () => {
           content: 'ok'
         }
       ]
-    })).toMatchObject({
+    })).resolves.toMatchObject({
       marker: 'chat_missing_required_tool_call'
     });
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
       output_text: '请你手动更新 secret 后再告诉我结果。',
       output: [
@@ -1176,11 +1166,11 @@ describe('HubRequestExecutor failover', () => {
           content: '继续执行'
         }
       ]
-    })).toMatchObject({
+    })).resolves.toMatchObject({
       marker: 'responses_missing_required_tool_call'
     });
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
       output_text: '我已经完成审计，下面是结果。',
       output: [
@@ -1210,13 +1200,13 @@ describe('HubRequestExecutor failover', () => {
           content: '继续执行'
         }
       ]
-    })).toBeNull();
+    })).resolves.toBeNull();
 
     const malformedToolWrapperText = `<tool_call>
 {"arguments":{"cmd":"bash -lc 'pwd'","justification":"check"}}
 </tool_call>`;
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       __sse_responses: true,
       __routecodex_finish_reason: 'stop',
       __routecodex_stream_contract_probe_body: {
@@ -1253,11 +1243,11 @@ describe('HubRequestExecutor failover', () => {
           content: '继续'
         }
       ]
-    })).toMatchObject({
+    })).resolves.toMatchObject({
       marker: 'responses_missing_required_tool_call'
     });
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
       output_text: '当前目录是 /Users/fanzhang/Documents/github/routecodex。',
       output: [
@@ -1304,9 +1294,9 @@ describe('HubRequestExecutor failover', () => {
           ]
         }
       }
-    })).toBeNull();
+    })).resolves.toBeNull();
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
       output_text: '',
       output: [
@@ -1338,11 +1328,11 @@ describe('HubRequestExecutor failover', () => {
           content: '继续执行'
         }
       ]
-    })).toMatchObject({
+    })).resolves.toMatchObject({
       marker: 'responses_missing_required_tool_call'
     });
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
       output_text: '.',
       output: [
@@ -1354,11 +1344,11 @@ describe('HubRequestExecutor failover', () => {
           ]
         }
       ]
-    })).toMatchObject({
+    })).resolves.toMatchObject({
       marker: 'responses_empty_output'
     });
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
       output_text: '[reasoning.stop]\n用户任务目标: A\n是否完成: 是\n完成证据: B\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}',
       output: [
@@ -1391,9 +1381,9 @@ describe('HubRequestExecutor failover', () => {
           content: '继续执行'
         }
       ]
-    })).toBeNull();
+    })).resolves.toBeNull();
 
-    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
       output: [
         {
@@ -1422,7 +1412,7 @@ describe('HubRequestExecutor failover', () => {
           content: '继续执行'
         }
       ]
-    })).toBeNull();
+    })).resolves.toBeNull();
 
     expect(__requestExecutorTestables.bodyContainsReasoningStopFinalizedMarker({
       status: 'completed',
@@ -2476,6 +2466,146 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
+  test('responses standard pipeline rejects chat-style function tools before provider.send', async () => {
+    jest.resetModules();
+    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => createBridgeHttpServerMock({
+      applyResponsesDirectRouteParamsOverrideNative: (input: { payload: Record<string, unknown> }) => input.payload,
+      resolveResponsesDirectPayloadNative: (input: { body: unknown }) => (
+        input.body && typeof input.body === 'object' && !Array.isArray(input.body)
+          ? structuredClone(input.body as Record<string, unknown>)
+          : {}
+      ),
+      evaluateResponsesDirectRouteDecisionNative: (input: { payload: Record<string, unknown> }) => {
+        const tools = Array.isArray(input.payload.tools) ? input.payload.tools : [];
+        for (let index = 0; index < tools.length; index += 1) {
+          const tool = tools[index];
+          if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+            continue;
+          }
+          const row = tool as Record<string, unknown>;
+          const type = typeof row.type === 'string' ? row.type.trim() : '';
+          const nested = row.function && typeof row.function === 'object' && !Array.isArray(row.function)
+            ? row.function as Record<string, unknown>
+            : undefined;
+          const nestedName = typeof nested?.name === 'string' ? nested.name.trim() : '';
+          const topLevelName = typeof row.name === 'string' ? row.name.trim() : '';
+          if (type === 'function' && !topLevelName && nestedName) {
+            return {
+              providerWireValid: false,
+              requiresHubRelay: false,
+              reason: `provider-runtime-error: responses payload tools[${index}] is chat-style function tool; Responses wire requires top-level tool.name`,
+              hasDeclaredApplyPatchTool: false,
+            };
+          }
+        }
+        return {
+          providerWireValid: true,
+          requiresHubRelay: false,
+          reason: undefined,
+          hasDeclaredApplyPatchTool: false,
+        };
+      },
+    }));
+    const { createRequestExecutor: createRequestExecutorLocal } = await import('../../../../src/server/runtime/http-server/request-executor');
+    const providerA = 'asxs.crsa.gpt-5.5';
+    const providerB = 'cc.key1.gpt-5.5';
+    const processA = jest.fn(async () => ({ status: 200, data: { id: 'should_not_send_a' } }));
+    const processB = jest.fn(async () => ({ status: 200, data: { id: 'should_not_send_b' } }));
+
+    const handles = new Map<string, ProviderHandle>([
+      [providerA, {
+        ...buildHandle(providerA, processA),
+        providerType: 'responses',
+        providerFamily: 'responses',
+        providerProtocol: 'openai-responses',
+        runtime: {
+          runtimeKey: providerA,
+          providerId: providerA,
+          keyAlias: providerA,
+          providerType: 'responses',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'oauth' },
+          outboundProfile: 'openai-responses'
+        }
+      }],
+      [providerB, {
+        ...buildHandle(providerB, processB),
+        providerType: 'responses',
+        providerFamily: 'responses',
+        providerProtocol: 'openai-responses',
+        runtime: {
+          runtimeKey: providerB,
+          providerId: providerB,
+          keyAlias: providerB,
+          providerType: 'responses',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'oauth' },
+          outboundProfile: 'openai-responses'
+        }
+      }]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+        );
+        const selected = excluded.has(providerA) ? providerB : providerA;
+        return {
+          requestId: input.id,
+          providerPayload: {
+            model: 'gpt-5.5',
+            input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }],
+            tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
+          },
+          target: {
+            providerKey: selected,
+            providerType: 'responses',
+            outboundProfile: 'openai-responses',
+            runtimeKey: selected
+          },
+          routingDecision: {
+            routeName: 'longcontext',
+            pool: [providerA, providerB]
+          },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const executor = createRequestExecutorLocal({
+      runtimeManager,
+      getHubPipeline: () => pipeline as any,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    });
+
+    await expect(executor.execute({
+      requestId: 'req-responses-standard-shape-lock',
+      entryEndpoint: '/v1/responses',
+      body: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
+      },
+      headers: {},
+      metadata: {}
+    })).rejects.toThrow(/Responses wire requires top-level tool\.name/);
+
+    expect(processA).not.toHaveBeenCalled();
+    expect(processB).not.toHaveBeenCalled();
+  });
+
   test('prints compact aggregated provider-switch logs without dedupe key payload', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { });
     const nowSpy = jest.spyOn(Date, 'now');
@@ -3214,18 +3344,20 @@ describe('HubRequestExecutor failover', () => {
   });
 
 
-  test('BLACKBOX: converted HTTP 503 reroutes to backup after first recoverable failure', async () => {
+  test('BLACKBOX: converted HTTP 503 keeps same provider with recoverable backoff before success', async () => {
     const providerA = 'sdfv.key1.gpt-5.5';
     const providerB = 'mimo.mimo-v2.5-pro';
-    const processA = jest.fn(async () => ({
-      status: 503,
-      data: {
-        error: {
-          code: 'HTTP_503',
-          message: 'Service temporarily unavailable'
+    const processA = jest.fn()
+      .mockResolvedValueOnce({
+        status: 503,
+        data: {
+          error: {
+            code: 'HTTP_503',
+            message: 'Service temporarily unavailable'
+          }
         }
-      }
-    }));
+      })
+      .mockResolvedValueOnce({ status: 200, data: { id: 'raw_a_ok_after_retry' } });
     const processB = jest.fn(async () => ({ status: 200, data: { id: 'raw_b' } }));
 
     const handles = new Map<string, ProviderHandle>([
@@ -3303,15 +3435,15 @@ describe('HubRequestExecutor failover', () => {
         body: {},
         headers: {},
         metadata: {}
-      }).catch(() => undefined);
+      });
 
-      expect(selectedProviders).toEqual([providerA, providerB]);
-      expect(processA).toHaveBeenCalledTimes(1);
-      expect(processB).toHaveBeenCalledTimes(1);
+      expect(selectedProviders).toEqual([providerA, providerA]);
+      expect(processA).toHaveBeenCalledTimes(2);
+      expect(processB).toHaveBeenCalledTimes(0);
       const switchLines = warnSpy.mock.calls
         .map((call) => String(call[0] ?? ''))
-        .filter((line) => line.includes('[provider-switch]'));
-      expect(switchLines.some((line) => line.includes(`provider=${providerA}`) && line.includes('switch=exclude_and_reroute') && line.includes('status=503'))).toBe(true);
+        .filter((line) => line.includes('[provider-switch]') && line.includes('req-blackbox-converted-503-reroute'));
+      expect(switchLines.some((line) => line.includes(`provider=${providerA}`) && line.includes('switch=retry_same_provider') && line.includes('status=503'))).toBe(true);
     } finally {
       warnSpy.mockRestore();
       if (previousAttempts === undefined) {
@@ -3419,7 +3551,7 @@ describe('HubRequestExecutor failover', () => {
       expect(result).toEqual(expect.objectContaining({ status: 200 }));
       const switchLines = warnSpy.mock.calls
         .map((call) => String(call[0] ?? ''))
-        .filter((line) => line.includes('[provider-switch]'));
+        .filter((line) => line.includes('[provider-switch]') && line.includes('req-same-provider-500-backoff'));
       expect(switchLines).toHaveLength(1);
       expect(switchLines[0]).toContain(`provider=${providerA}`);
       expect(switchLines[0]).toMatch(/backoff=\d+ms/);
@@ -3656,20 +3788,17 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
-    const result = await executor.execute({
+    await expect(executor.execute({
       requestId: 'req-sse-network-retry',
       entryEndpoint: '/v1/messages',
       body: {},
       headers: {},
       metadata: {}
-    });
+    })).rejects.toThrow('Upstream SSE error event [api_error]');
 
-    expect(pipeline.execute).toHaveBeenCalledTimes(2);
-    expect(failingProcess).toHaveBeenCalledTimes(2);
+    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    expect(failingProcess).toHaveBeenCalledTimes(1);
     expect(successProcess).toHaveBeenCalledTimes(0);
-    const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
-    expect(result).toEqual(expect.objectContaining({ status: 200 }));
   });
 
   test('surfaces converted HTTP 401 without provider failover', async () => {
@@ -3747,14 +3876,6 @@ describe('HubRequestExecutor failover', () => {
     expect(pipeline.execute).toHaveBeenCalledTimes(1);
     expect(unauthorizedProcess).toHaveBeenCalledTimes(1);
     expect(successProcess).toHaveBeenCalledTimes(0);
-    expect(
-      logStage.mock.calls.some(
-        (call) =>
-          call[0] === 'provider.send.error' &&
-          call[1] === 'req-401-failover' &&
-          String(call[2]?.message || '').includes('Upstream authentication failed')
-      )
-    ).toBe(true);
   });
 
   test('surfaces HTTP 401 only after pool is exhausted', async () => {

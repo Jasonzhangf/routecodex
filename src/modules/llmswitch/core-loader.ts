@@ -89,7 +89,7 @@ function tryResolvePackageRootViaRequire(packageName: string, baseUrl: string): 
   }
 }
 
-function resolveCorePackageDir(impl: LlmsImpl): string {
+export function resolveCorePackageDir(impl: LlmsImpl): string {
   const cached = corePackageDirByImpl[impl];
   if (cached) {
     return cached;

@@ -936,7 +936,10 @@ fn reasoning_prepare_responses_request_envelope_flattens_chat_parameters_only() 
         strip_host_fields: None,
     });
     let request = output.request.as_object().cloned().unwrap();
-    assert_eq!(request.get("max_output_tokens").and_then(Value::as_i64), Some(123));
+    assert_eq!(
+        request.get("max_output_tokens").and_then(Value::as_i64),
+        Some(123)
+    );
     assert_eq!(
         request
             .get("response_format")
@@ -979,7 +982,10 @@ fn reasoning_prepare_responses_request_envelope_uses_only_chat_source_and_defaul
     assert_eq!(request.get("stream").and_then(Value::as_bool), Some(true));
     assert_eq!(request.get("store").and_then(Value::as_bool), Some(false));
     assert!(!request.contains_key("tool_choice"));
-    assert_eq!(request.get("parallel_tool_calls").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        request.get("parallel_tool_calls").and_then(Value::as_bool),
+        Some(false)
+    );
     assert_eq!(
         request
             .get("response_format")
@@ -988,8 +994,14 @@ fn reasoning_prepare_responses_request_envelope_uses_only_chat_source_and_defaul
             .and_then(Value::as_str),
         Some("chat-params")
     );
-    assert_eq!(request.get("service_tier").and_then(Value::as_str), Some("priority"));
-    assert_eq!(request.get("truncation").and_then(Value::as_str), Some("auto"));
+    assert_eq!(
+        request.get("service_tier").and_then(Value::as_str),
+        Some("priority")
+    );
+    assert_eq!(
+        request.get("truncation").and_then(Value::as_str),
+        Some("auto")
+    );
     assert_eq!(
         request
             .get("include")
@@ -1023,8 +1035,14 @@ fn reasoning_prepare_responses_request_envelope_keeps_chat_tool_controls_as_sing
         strip_host_fields: Some(false),
     });
     let request = output.request.as_object().cloned().unwrap();
-    assert_eq!(request.get("tool_choice").and_then(Value::as_str), Some("required"));
-    assert_eq!(request.get("parallel_tool_calls").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        request.get("tool_choice").and_then(Value::as_str),
+        Some("required")
+    );
+    assert_eq!(
+        request.get("parallel_tool_calls").and_then(Value::as_bool),
+        Some(true)
+    );
     assert_eq!(
         request
             .get("response_format")
@@ -1052,7 +1070,10 @@ fn reasoning_prepare_responses_request_envelope_drops_tool_choice_without_tools(
     });
     let request = output.request.as_object().cloned().unwrap();
     assert!(!request.contains_key("tool_choice"));
-    assert_eq!(request.get("parallel_tool_calls").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        request.get("parallel_tool_calls").and_then(Value::as_bool),
+        Some(true)
+    );
 }
 
 #[test]
@@ -1423,6 +1444,46 @@ fn build_bridge_history_allows_terminal_pending_tool_call_when_enabled() {
         call.get("call_id").and_then(Value::as_str),
         Some("call_keep_me")
     );
+}
+
+#[test]
+fn convert_bridge_input_preserves_custom_tool_call_and_output_pair() {
+    let patch = "*** Begin Patch\n*** Add File: apply_patch_test/01-add.txt\n+hello\n*** End Patch";
+    let input = BridgeInputToChatInput {
+        input: vec![
+            json!({"type":"message","role":"user","content":"start"}),
+            json!({"type":"custom_tool_call","call_id":"call_patch_1","name":"apply_patch","input":patch}),
+            json!({"type":"custom_tool_call_output","call_id":"call_patch_1","output":"Exit code: 0\nOutput:\nSuccess. Updated the following files:\nA apply_patch_test/01-add.txt\n"}),
+            json!({"type":"message","role":"user","content":"continue"}),
+        ],
+        tools: None,
+        tool_result_fallback_text: Some(String::new()),
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: Some(false),
+    };
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
+    let serialized = serde_json::to_string(&output.messages).unwrap();
+    assert!(serialized.contains("call_patch_1"));
+    assert!(serialized.contains("apply_patch"));
+    assert!(serialized.contains("Success. Updated the following files"));
+    let tool_call = output
+        .messages
+        .iter()
+        .find(|entry| entry.get("tool_calls").and_then(Value::as_array).is_some())
+        .unwrap();
+    assert_eq!(tool_call["role"].as_str(), Some("assistant"));
+    let expected_arguments = serde_json::to_string(&json!({"patch": patch})).unwrap();
+    assert_eq!(
+        tool_call["tool_calls"][0]["function"]["arguments"].as_str(),
+        Some(expected_arguments.as_str())
+    );
+    let tool_result = output
+        .messages
+        .iter()
+        .find(|entry| entry.get("role").and_then(Value::as_str) == Some("tool"))
+        .unwrap();
+    assert_eq!(tool_result["tool_call_id"].as_str(), Some("call_patch_1"));
 }
 
 #[test]

@@ -28,6 +28,8 @@ import {
   convertProviderResponseIfNeeded as convertProviderResponseWithBridge
 } from './executor/provider-response-converter.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
+import { assertDirectRouteDecision } from './direct-passthrough-payload.js';
+import { annotateAsHostPayloadContractError } from '../../../providers/core/runtime/responses-direct-contract-error.js';
 
 // Import from new executor submodules
 import {
@@ -1054,6 +1056,16 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           }));
           throwIfClientAbortSignalAborted(clientAbortSignal);
+          if (providerProtocol === 'openai-responses') {
+            try {
+              assertDirectRouteDecision({
+                payload: providerPayload,
+                inboundProtocol: 'openai-responses',
+              });
+            } catch (error) {
+              throw annotateAsHostPayloadContractError(error);
+            }
+          }
 
           allowSnapshotLocalDiskWrite(
             executorRequestId,
@@ -1128,8 +1140,8 @@ export class HubRequestExecutor implements RequestExecutor {
               providerKey: target.providerKey,
               attempt,
               ...semanticsTrace,
-              hasRequestedToolsInSemantics: hasRequestedToolsInSemantics(requestSemantics),
-              isToolResultFollowupTurn: isToolResultFollowupTurn(requestSemantics)
+              hasRequestedToolsInSemantics: await hasRequestedToolsInSemantics(requestSemantics),
+              isToolResultFollowupTurn: await isToolResultFollowupTurn(requestSemantics)
             });
           }
           logStage('provider.request_semantics.completed', input.requestId, {

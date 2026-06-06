@@ -21,7 +21,7 @@ describe('tool-registry apply_patch validation', () => {
     expect(result.ok).toBe(true);
     const parsed = toArgsObject(result);
     expect(parsed.patch).toContain('*** Begin Patch');
-    expect(parsed.input).toBe(parsed.patch);
+    expect(parsed.input).toBeUndefined();
   });
 
   it('repairs malformed update patch shape via native verdict instead of surfacing unknown tool', () => {
@@ -96,7 +96,7 @@ describe('tool-registry apply_patch validation', () => {
     const parsed = toArgsObject(result);
     expect(parsed.patch).toContain('*** Begin Patch');
     expect(parsed.patch).toContain('*** Update File: test_apply_patch/sample.txt');
-    expect(parsed.input).toBe(parsed.patch);
+    expect(parsed.input).toBeUndefined();
   });
 
   it('accepts canonical add-file patch with stray filePath as repairable shape', () => {
@@ -111,7 +111,7 @@ describe('tool-registry apply_patch validation', () => {
     const parsed = toArgsObject(result);
     expect(parsed.patch).toContain('*** Begin Patch');
     expect(parsed.patch).toContain('*** Add File: test_apply_patch/new_file.txt');
-    expect(parsed.input).toBe(parsed.patch);
+    expect(parsed.input).toBeUndefined();
   });
 
   it('accepts newline-escaped raw patch string without first losing request shape to empty object', () => {

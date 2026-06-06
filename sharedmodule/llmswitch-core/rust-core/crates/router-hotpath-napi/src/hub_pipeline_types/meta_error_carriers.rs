@@ -81,14 +81,31 @@ pub(crate) fn build_meta_route_03_from_metadata(metadata: &Value) -> MetaRoute03
     copy_non_empty_string(source, &mut control, "routecodexRoutingPolicyGroup");
     copy_non_empty_string(source, &mut control, "routecodexPortMode");
     copy_non_empty_string(source, &mut control, "routecodexPortBinding");
-    if let Some(port) = source.get("routecodexLocalPort").and_then(|value| value.as_i64()) {
-        control.insert("routecodexLocalPort".to_string(), Value::Number(port.into()));
+    if source
+        .get("serverToolRequired")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        control.insert("serverToolRequired".to_string(), Value::Bool(true));
+    }
+    if let Some(port) = source
+        .get("routecodexLocalPort")
+        .and_then(|value| value.as_i64())
+    {
+        control.insert(
+            "routecodexLocalPort".to_string(),
+            Value::Number(port.into()),
+        );
     }
 
     MetaRoute03RouteCarrier { control }
 }
 
-fn copy_non_empty_string(source: &Map<String, Value>, target: &mut Map<String, Value>, field: &str) {
+fn copy_non_empty_string(
+    source: &Map<String, Value>,
+    target: &mut Map<String, Value>,
+    field: &str,
+) {
     if let Some(value) = source
         .get(field)
         .and_then(|value| value.as_str())

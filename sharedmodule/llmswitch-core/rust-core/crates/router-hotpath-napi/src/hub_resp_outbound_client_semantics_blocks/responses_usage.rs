@@ -19,17 +19,19 @@ pub(crate) fn normalize_responses_usage(usage_raw: &Value) -> Value {
         .or_else(|| read_number_field(usage.get("prompt_tokens")));
     let output_tokens = read_number_field(usage.get("output_tokens"))
         .or_else(|| read_number_field(usage.get("completion_tokens")));
-    let cache_read_tokens = read_number_field(usage.get("cache_read_input_tokens")).or_else(|| {
-        usage
-            .get("input_tokens_details")
-            .and_then(|v| v.as_object())
-            .and_then(|row| read_number_field(row.get("cached_tokens")))
-    }).or_else(|| {
-        usage
-            .get("prompt_tokens_details")
-            .and_then(|v| v.as_object())
-            .and_then(|row| read_number_field(row.get("cached_tokens")))
-    });
+    let cache_read_tokens = read_number_field(usage.get("cache_read_input_tokens"))
+        .or_else(|| {
+            usage
+                .get("input_tokens_details")
+                .and_then(|v| v.as_object())
+                .and_then(|row| read_number_field(row.get("cached_tokens")))
+        })
+        .or_else(|| {
+            usage
+                .get("prompt_tokens_details")
+                .and_then(|v| v.as_object())
+                .and_then(|row| read_number_field(row.get("cached_tokens")))
+        });
 
     let mut total_tokens = read_number_field(usage.get("total_tokens"));
     if input_tokens.is_none() && output_tokens.is_none() && total_tokens.is_none() {

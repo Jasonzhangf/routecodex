@@ -75,7 +75,10 @@ fn collect_response_message_text(content: Option<&Value>) -> String {
             continue;
         };
         let item_type = read_non_empty_string(row.get("type"));
-        if matches!(item_type.as_deref(), Some("output_text") | Some("text") | None) {
+        if matches!(
+            item_type.as_deref(),
+            Some("output_text") | Some("text") | None
+        ) {
             if let Some(text) = read_non_empty_string(row.get("text")) {
                 parts.push(text);
             }
@@ -114,7 +117,9 @@ fn collect_response_tool_calls(output_items: &[Value]) -> Vec<Value> {
     tool_calls
 }
 
-pub(crate) fn build_openai_chat_completion_from_responses_payload(candidate: &Value) -> Option<Value> {
+pub(crate) fn build_openai_chat_completion_from_responses_payload(
+    candidate: &Value,
+) -> Option<Value> {
     let response = candidate.as_object()?;
     if response.get("object").and_then(Value::as_str) != Some("response") {
         return None;
@@ -155,7 +160,10 @@ pub(crate) fn build_openai_chat_completion_from_responses_payload(candidate: &Va
         response_finish_reason_for_chat(response, has_tool_calls),
     );
     let mut out = Map::new();
-    out.insert("id".to_string(), Value::String(response_id_for_chat(response)));
+    out.insert(
+        "id".to_string(),
+        Value::String(response_id_for_chat(response)),
+    );
     out.insert(
         "object".to_string(),
         Value::String("chat.completion".to_string()),
@@ -168,7 +176,10 @@ pub(crate) fn build_openai_chat_completion_from_responses_payload(candidate: &Va
             .cloned()
             .unwrap_or_else(|| Value::String("unknown".to_string())),
     );
-    out.insert("choices".to_string(), Value::Array(vec![Value::Object(choice)]));
+    out.insert(
+        "choices".to_string(),
+        Value::Array(vec![Value::Object(choice)]),
+    );
     if let Some(usage) = response.get("usage").filter(|value| value.is_object()) {
         out.insert("usage".to_string(), usage.clone());
     }

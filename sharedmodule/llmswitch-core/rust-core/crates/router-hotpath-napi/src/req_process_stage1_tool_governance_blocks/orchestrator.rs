@@ -72,6 +72,7 @@ pub fn apply_req_process_tool_governance(
     let runtime_metadata = read_runtime_metadata(&metadata);
     let client_inject_ready = resolve_client_inject_ready(&metadata);
     apply_chat_process_request_sanitizer(&mut request);
+    normalize_apply_patch_freeform_tool_schema(&mut request);
 
     apply_anthropic_tool_alias_semantics(&mut request, &ctx.entry_endpoint);
 
@@ -102,6 +103,51 @@ pub fn apply_req_process_tool_governance(
         processed_request: processed,
         node_result,
     })
+}
+
+fn normalize_apply_patch_freeform_tool_schema(request: &mut Map<String, Value>) {
+    let Some(tools) = request.get_mut("tools").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for tool in tools {
+        let Some(tool_obj) = tool.as_object_mut() else {
+            continue;
+        };
+        let function_obj =
+            if let Some(function) = tool_obj.get_mut("function").and_then(Value::as_object_mut) {
+                function
+            } else {
+                tool_obj
+            };
+        let name = function_obj
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if name != "apply_patch" {
+            continue;
+        }
+        function_obj.insert(
+            "description".to_string(),
+            Value::String(
+                "Apply a file patch using canonical *** Begin Patch / *** End Patch grammar. Paths in patch headers must be workspace-relative, for example *** Add File: tmp/example.txt or *** Update File: src/main.ts. Send exactly one patch string in this tool call for file edits.".to_string(),
+            ),
+        );
+        function_obj.insert(
+            "parameters".to_string(),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "patch": {
+                        "type": "string",
+                        "description": "One raw patch string using *** Begin Patch / *** End Patch grammar with workspace-relative file headers."
+                    }
+                },
+                "required": ["patch"],
+                "additionalProperties": false
+            }),
+        );
+    }
 }
 
 #[napi]

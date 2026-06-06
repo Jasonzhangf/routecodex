@@ -1,6 +1,6 @@
+use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tooling::{normalize_standard_chunked_tool_text, normalize_tool_result_value};
-use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{json, Map, Value};
 
@@ -952,7 +952,8 @@ mod tests {
     #[test]
     fn universal_shape_filter_request_canonicalizes_apply_patch_history_args_to_patch_only() {
         std::env::set_var("RCC_COMPAT_FILTER_OFF_RESPONSES", "0");
-        let patch = "*** Begin Patch\n*** Add File: tmp_apply_patch_test.txt\n+hello\n*** End Patch\n";
+        let patch =
+            "*** Begin Patch\n*** Add File: tmp_apply_patch_test.txt\n+hello\n*** End Patch\n";
         let payload = json!({
             "model": "gpt-5.5",
             "messages": [

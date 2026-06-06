@@ -1,4 +1,4 @@
-import { requireCoreDist } from '../../../../modules/llmswitch/bridge/module-loader.js';
+import { importCoreDist } from '../../../../modules/llmswitch/bridge/module-loader.js';
 
 type NativeChatProcessNodeResultSemanticsModule = {
   hasRequestedToolsInSemanticsWithNative?: (requestSemantics?: Record<string, unknown>) => boolean;
@@ -6,31 +6,31 @@ type NativeChatProcessNodeResultSemanticsModule = {
   isToolResultFollowupTurnWithNative?: (requestSemantics?: Record<string, unknown>) => boolean;
 };
 
-let cachedNativeSemantics: NativeChatProcessNodeResultSemanticsModule | null = null;
+let cachedNativeSemanticsPromise: Promise<NativeChatProcessNodeResultSemanticsModule> | null = null;
 
-function getNativeSemantics(): NativeChatProcessNodeResultSemanticsModule {
-  if (!cachedNativeSemantics) {
-    cachedNativeSemantics = requireCoreDist<NativeChatProcessNodeResultSemanticsModule>(
+async function getNativeSemantics(): Promise<NativeChatProcessNodeResultSemanticsModule> {
+  if (!cachedNativeSemanticsPromise) {
+    cachedNativeSemanticsPromise = importCoreDist<NativeChatProcessNodeResultSemanticsModule>(
       'router/virtual-router/engine-selection/native-chat-process-node-result-semantics'
     );
   }
-  return cachedNativeSemantics;
+  return cachedNativeSemanticsPromise;
 }
 
-export function hasRequestedToolsInSemantics(requestSemantics?: Record<string, unknown>): boolean {
-  const fn = getNativeSemantics().hasRequestedToolsInSemanticsWithNative;
+export async function hasRequestedToolsInSemantics(requestSemantics?: Record<string, unknown>): Promise<boolean> {
+  const fn = (await getNativeSemantics()).hasRequestedToolsInSemanticsWithNative;
   if (typeof fn !== 'function') throw new Error('[request-semantics] hasRequestedToolsInSemanticsWithNative unavailable');
   return fn(requestSemantics);
 }
 
-export function isRequiredToolCallTurn(requestSemantics?: Record<string, unknown>): boolean {
-  const fn = getNativeSemantics().isRequiredToolCallTurnWithNative;
+export async function isRequiredToolCallTurn(requestSemantics?: Record<string, unknown>): Promise<boolean> {
+  const fn = (await getNativeSemantics()).isRequiredToolCallTurnWithNative;
   if (typeof fn !== 'function') throw new Error('[request-semantics] isRequiredToolCallTurnWithNative unavailable');
   return fn(requestSemantics);
 }
 
-export function isToolResultFollowupTurn(requestSemantics?: Record<string, unknown>): boolean {
-  const fn = getNativeSemantics().isToolResultFollowupTurnWithNative;
+export async function isToolResultFollowupTurn(requestSemantics?: Record<string, unknown>): Promise<boolean> {
+  const fn = (await getNativeSemantics()).isToolResultFollowupTurnWithNative;
   if (typeof fn !== 'function') throw new Error('[request-semantics] isToolResultFollowupTurnWithNative unavailable');
   return fn(requestSemantics);
 }

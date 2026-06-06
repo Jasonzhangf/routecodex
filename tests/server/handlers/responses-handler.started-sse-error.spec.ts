@@ -1,6 +1,8 @@
+import { describe, expect, it } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
 
 async function withServer<T>(app: express.Express, run: (baseUrl: string) => Promise<T>): Promise<T> {
@@ -15,8 +17,46 @@ async function withServer<T>(app: express.Express, run: (baseUrl: string) => Pro
   }
 }
 
-describe('responses-handler started SSE error propagation', () => {
-  it('writes event:error when pipeline fails after SSE headers are already sent', async () => {
+describe('responses-handler SSE error projection regression', () => {
+  it('keeps stream=true request on SSE error path even when client does not advertise Accept: text/event-stream', async () => {
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, {
+        executePipeline: async () => {
+          throw Object.assign(new Error('Upstream rejected the request'), {
+            code: 'bad_request_error',
+            upstreamCode: 'bad_request_error',
+            status: 400
+          });
+        },
+        errorHandling: null
+      });
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          stream: true,
+          input: '继续执行，若失败保持 SSE error event'
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get('content-type')).toContain('text/event-stream');
+      expect(text).toContain('event: error');
+      expect(text).toContain('bad_request_error');
+      expect(text).not.toContain('{"error":');
+    });
+  });
+
+  it('keeps started responses SSE stream on SSE error path instead of degrading to JSON', async () => {
     const app = express();
     app.use(express.json());
     app.post('/v1/responses', async (req, res) => {
@@ -27,10 +67,10 @@ describe('responses-handler started SSE error propagation', () => {
           res.setHeader('Cache-Control', 'no-cache, no-transform');
           res.setHeader('Connection', 'keep-alive');
           (res as any).flushHeaders?.();
-          throw Object.assign(new Error('Upstream service temporarily unavailable'), {
-            code: 'HTTP_502',
-            status: 502,
-            upstreamCode: 'HTTP_502'
+          throw Object.assign(new Error('Internal streaming failure after headers sent'), {
+            code: 'INTERNAL_ERROR',
+            upstreamCode: 'INTERNAL_ERROR',
+            status: 500
           });
         },
         errorHandling: null
@@ -45,17 +85,19 @@ describe('responses-handler started SSE error propagation', () => {
           accept: 'text/event-stream'
         },
         body: JSON.stringify({
-          model: 'test-model',
+          model: 'gpt-5.5',
           stream: true,
-          input: '继续执行并在错误时返回 SSE error 事件'
+          input: '继续执行，若 started SSE 后失败也保持 SSE'
         })
       });
       const text = await response.text();
+
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type')).toContain('text/event-stream');
       expect(text).toContain('event: error');
-      expect(text).toContain('HTTP_502');
-      expect(text).toContain('Upstream service temporarily unavailable');
+      expect(text).toContain('INTERNAL_ERROR');
+      expect(text).not.toContain('application/json');
+      expect(text).not.toContain('{"error":');
     });
   });
 });

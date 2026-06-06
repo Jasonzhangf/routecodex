@@ -3245,10 +3245,18 @@ mod tests {
         .expect("normalized");
         let normalized: Value = serde_json::from_str(&raw).expect("json");
         let choice = &normalized["choices"][0];
-        assert_eq!(choice["finish_reason"], Value::String("tool_calls".to_string()));
-        let tool_calls = choice["message"]["tool_calls"].as_array().expect("tool_calls");
+        assert_eq!(
+            choice["finish_reason"],
+            Value::String("tool_calls".to_string())
+        );
+        let tool_calls = choice["message"]["tool_calls"]
+            .as_array()
+            .expect("tool_calls");
         assert_eq!(tool_calls.len(), 1);
-        assert_eq!(tool_calls[0]["function"]["name"], Value::String("exec_command".to_string()));
+        assert_eq!(
+            tool_calls[0]["function"]["name"],
+            Value::String("exec_command".to_string())
+        );
     }
 
     #[test]

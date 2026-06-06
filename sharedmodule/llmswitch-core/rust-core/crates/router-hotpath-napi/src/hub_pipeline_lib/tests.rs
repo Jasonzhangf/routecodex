@@ -421,6 +421,62 @@ fn execute_hub_pipeline_json_serializes_response_path_errors() {
 }
 
 #[test]
+fn response_path_moves_provider_top_level_metadata_out_of_normal_payload() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-responses-provider-metadata".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            payload: json!({
+                "id": "resp_provider_metadata",
+                "object": "response",
+                "status": "completed",
+                "metadata": {
+                    "turn_id": "provider-turn-1"
+                },
+                "output": [{
+                    "id": "msg_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{
+                        "type": "output_text",
+                        "text": "pong"
+                    }]
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "stream": false
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .expect("response path should accept provider metadata via Meta carrier");
+
+    assert!(output.success);
+    assert_eq!(
+        output
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.get("metadata")),
+        None
+    );
+    assert_eq!(
+        output
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.pointer("/providerResponseMetadata/turn_id"))
+            .and_then(|value| value.as_str()),
+        Some("provider-turn-1")
+    );
+}
+
+#[test]
 fn anthropic_response_remaps_to_openai_responses_client_payload() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine
@@ -496,9 +552,18 @@ fn anthropic_end_turn_stopless_effect_uses_chatprocess_payload() {
         })
         .unwrap();
     assert_eq!(effect.payload["stopGateway"]["source"], json!("chat"));
-    assert_eq!(effect.payload["stopGateway"]["reason"], json!("finish_reason_stop"));
-    assert_eq!(effect.payload["payload"]["choices"][0]["finish_reason"], json!("stop"));
-    assert_eq!(effect.payload["payload"]["choices"][0]["message"]["content"], json!("Jason，继续。先核 coder2 工具。"));
+    assert_eq!(
+        effect.payload["stopGateway"]["reason"],
+        json!("finish_reason_stop")
+    );
+    assert_eq!(
+        effect.payload["payload"]["choices"][0]["finish_reason"],
+        json!("stop")
+    );
+    assert_eq!(
+        effect.payload["payload"]["choices"][0]["message"]["content"],
+        json!("Jason，继续。先核 coder2 工具。")
+    );
 }
 
 #[test]
@@ -541,9 +606,18 @@ fn anthropic_empty_end_turn_stopless_effect_uses_chatprocess_payload() {
         })
         .unwrap();
     assert_eq!(effect.payload["stopGateway"]["source"], json!("chat"));
-    assert_eq!(effect.payload["stopGateway"]["reason"], json!("finish_reason_stop"));
-    assert_eq!(effect.payload["payload"]["choices"][0]["finish_reason"], json!("stop"));
-    assert_eq!(effect.payload["payload"]["choices"][0]["message"]["content"], json!(""));
+    assert_eq!(
+        effect.payload["stopGateway"]["reason"],
+        json!("finish_reason_stop")
+    );
+    assert_eq!(
+        effect.payload["payload"]["choices"][0]["finish_reason"],
+        json!("stop")
+    );
+    assert_eq!(
+        effect.payload["payload"]["choices"][0]["message"]["content"],
+        json!("")
+    );
 }
 
 #[test]
@@ -591,8 +665,14 @@ fn anthropic_wrapped_empty_end_turn_stopless_effect_uses_body_data() {
                 && effect.payload["reason"] == json!("stop_eligible_followup")
         })
         .unwrap();
-    assert_eq!(effect.payload["stopGateway"]["reason"], json!("finish_reason_stop"));
-    assert_eq!(effect.payload["payload"]["choices"][0]["message"]["content"], json!(""));
+    assert_eq!(
+        effect.payload["stopGateway"]["reason"],
+        json!("finish_reason_stop")
+    );
+    assert_eq!(
+        effect.payload["payload"]["choices"][0]["message"]["content"],
+        json!("")
+    );
 }
 
 #[test]
@@ -694,8 +774,14 @@ fn response_stop_with_runtime_callbacks_returns_servertool_effect_plan() {
         .unwrap();
     assert_eq!(effect.payload["action"], json!("requireRuntimeExecutor"));
     assert_eq!(effect.payload["reason"], json!("stop_eligible_followup"));
-    assert_eq!(effect.payload["payload"]["choices"][0]["finish_reason"], json!("stop"));
-    assert_eq!(effect.payload["payload"]["choices"][0]["message"]["content"], json!("done"));
+    assert_eq!(
+        effect.payload["payload"]["choices"][0]["finish_reason"],
+        json!("stop")
+    );
+    assert_eq!(
+        effect.payload["payload"]["choices"][0]["message"]["content"],
+        json!("done")
+    );
     assert_eq!(effect.payload["stopGateway"]["source"], json!("chat"));
     assert_eq!(
         effect.payload["requestId"],
@@ -806,6 +892,12 @@ fn responses_tool_call_servertool_effect_uses_resp_chatprocess_payload_not_clien
         .unwrap();
     assert!(effect.payload["payload"].get("choices").is_some());
     assert!(effect.payload["payload"].get("required_action").is_none());
-    assert_eq!(effect.payload["payload"]["choices"][0]["finish_reason"], json!("tool_calls"));
-    assert_eq!(output.payload.unwrap()["required_action"]["type"], json!("submit_tool_outputs"));
+    assert_eq!(
+        effect.payload["payload"]["choices"][0]["finish_reason"],
+        json!("tool_calls")
+    );
+    assert_eq!(
+        output.payload.unwrap()["required_action"]["type"],
+        json!("submit_tool_outputs")
+    );
 }

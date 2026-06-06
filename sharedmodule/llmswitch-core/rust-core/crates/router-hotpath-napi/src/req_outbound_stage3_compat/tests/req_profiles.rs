@@ -124,8 +124,14 @@ fn test_req_profile_responses_instructions_to_input_trims_html_and_lifts_system_
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.payload.get("instructions").is_none());
     assert_eq!(result.payload["input"][0]["role"], "system");
-    assert_eq!(result.payload["input"][0]["content"][0]["type"], "input_text");
-    assert_eq!(result.payload["input"][0]["content"][0]["text"], "System instruction");
+    assert_eq!(
+        result.payload["input"][0]["content"][0]["type"],
+        "input_text"
+    );
+    assert_eq!(
+        result.payload["input"][0]["content"][0]["text"],
+        "System instruction"
+    );
 }
 
 #[test]
@@ -224,7 +230,10 @@ fn test_req_profile_responses_crs_normalizes_chat_style_function_tools_for_respo
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
     assert_eq!(result.applied_profile, Some("responses:crs".to_string()));
-    let tools = result.payload["tools"].as_array().cloned().unwrap_or_default();
+    let tools = result.payload["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert_eq!(tools.len(), 2);
     assert_eq!(tools[0]["type"], "function");
     assert_eq!(tools[0]["name"], "exec_command");
@@ -279,9 +288,15 @@ fn test_req_profile_responses_tool_parameters_normalizes_string_json_to_object()
         explicit_profile: None,
     };
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    let tools = result.payload["tools"].as_array().cloned().unwrap_or_default();
+    let tools = result.payload["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert_eq!(tools[0]["parameters"]["type"], "object");
-    assert_eq!(tools[0]["parameters"]["properties"]["path"]["type"], "string");
+    assert_eq!(
+        tools[0]["parameters"]["properties"]["path"]["type"],
+        "string"
+    );
 }
 
 #[test]
@@ -327,7 +342,10 @@ fn test_req_profile_responses_tool_parameters_fallback_to_object_schema() {
         explicit_profile: None,
     };
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    let tools = result.payload["tools"].as_array().cloned().unwrap_or_default();
+    let tools = result.payload["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert_eq!(tools[0]["parameters"]["type"], "object");
     assert!(tools[0]["parameters"]["properties"].is_object());
     assert_eq!(tools[0]["parameters"]["additionalProperties"], true);
@@ -3000,6 +3018,8 @@ fn test_req_profile_chat_qwen_only_normalizes_tool_definitions_and_keeps_message
     let patch_desc = tools[1]["function"]["description"].as_str().unwrap_or("");
     assert!(patch_desc.contains("Use the exact tool name"));
     assert!(patch_desc.contains("Call the tool directly when needed."));
+    assert!(patch_desc.contains("workspace-relative"));
+    assert!(patch_desc.contains("Do not use absolute paths"));
     assert!(!patch_desc.contains("Author exactly one canonical patch body in `patch`"));
     assert!(!patch_desc.contains("hashline-first"));
     assert!(!patch_desc.contains("filePath"));
@@ -3155,6 +3175,8 @@ fn test_req_profile_chat_qwenchat_web_injects_override_head_and_normalizes_tool_
     assert!(apply_patch_desc.contains("Use the exact tool name"));
     assert!(apply_patch_desc
         .contains("output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container"));
+    assert!(apply_patch_desc.contains("workspace-relative"));
+    assert!(apply_patch_desc.contains("Do not use absolute paths"));
     assert!(!apply_patch_desc.contains("Author exactly one canonical patch body in `patch`"));
     assert!(!apply_patch_desc.contains("hashline-first"));
     assert!(!apply_patch_desc.contains("filePath"));

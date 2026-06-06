@@ -13,8 +13,8 @@ fn normalize_shell_like_output_text(raw: &str) -> String {
 }
 
 fn normalize_apply_patch_output_text(raw: &str) -> String {
-    const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Use workspace-relative paths inside patch headers (for example *** Update File: src/main.ts or *** Add File: tmp/example.txt). Do not use absolute paths. Do not switch to exec_command just to rediscover the same file.";
-    const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future apply_patch calls with one raw patch string and workspace-relative paths inside patch headers.";
+    const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Use workspace-relative paths inside patch headers (for example *** Update File: src/main.ts or *** Add File: tmp/example.txt). Do not use absolute paths. Do not switch to exec_command or shell writes.";
+    const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future apply_patch calls with one raw patch string and workspace-relative paths inside patch headers. Keep using apply_patch for line edits instead of switching tools.";
 
     let text = raw.replace("\r\n", "\n").replace('\r', "\n");
     let trimmed = text.trim();
@@ -782,7 +782,9 @@ pub fn is_shell_like_tool_name_token_json(name_json: String) -> NapiResult<Strin
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_shell_like_tool_calls_before_governance;
+    use super::{
+        normalize_apply_patch_output_text, normalize_shell_like_tool_calls_before_governance,
+    };
     use crate::hashline::compute_line_hash;
     use serde_json::{json, Value};
     use std::fs;
@@ -1722,10 +1724,12 @@ mod tests {
             .as_str()
             .expect("tool output");
         assert!(content.contains("APPLY_PATCH_ERROR"));
-        assert!(content.contains("line-edit"));
-        assert!(content.contains("filePath"));
+        assert!(content.contains("workspace-relative"));
+        assert!(content.contains("Do not use absolute paths"));
         assert!(content.contains("Do not switch to exec_command"));
-        assert!(content.contains("exact current file lines you already observed"));
+        assert!(!content.to_ascii_lowercase().contains("verify"));
+        assert!(!content.to_ascii_lowercase().contains("rediscover"));
+        assert!(!content.to_ascii_lowercase().contains("read"));
         assert!(!content.contains("Codex apply_patch executor"));
         assert!(!content.contains("fileContent"));
         assert!(!content.contains("*** Begin Patch\n"));
@@ -1753,10 +1757,12 @@ mod tests {
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let output = payload["input"][1]["output"].as_str().expect("tool output");
         assert!(output.contains("APPLY_PATCH_ERROR"));
-        assert!(output.contains("line-edit"));
-        assert!(output.contains("filePath"));
+        assert!(output.contains("workspace-relative"));
+        assert!(output.contains("Do not use absolute paths"));
         assert!(output.contains("Do not switch to exec_command"));
-        assert!(output.contains("exact current file lines you already observed"));
+        assert!(!output.to_ascii_lowercase().contains("verify"));
+        assert!(!output.to_ascii_lowercase().contains("rediscover"));
+        assert!(!output.to_ascii_lowercase().contains("read"));
         assert!(!output.contains("Original executor output"));
         assert!(!output.contains("Codex apply_patch executor"));
         assert!(!output.contains("fileContent"));
@@ -1784,8 +1790,8 @@ mod tests {
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let output = payload["input"][1]["output"].as_str().expect("tool output");
         assert!(output.starts_with("APPLY_PATCH_RESULT:"));
-        assert!(output.contains("line-edit"));
-        assert!(output.contains("filePath"));
+        assert!(output.contains("workspace-relative"));
+        assert!(output.contains("Keep using apply_patch"));
         assert!(!output.contains("Codex apply_patch executor"));
         assert!(!output.contains("fileContent"));
     }
@@ -1874,10 +1880,34 @@ mod tests {
             .as_str()
             .expect("tool output");
         assert!(content.contains("APPLY_PATCH_ERROR"));
-        assert!(content.contains("line-edit"));
-        assert!(content.contains("filePath"));
+        assert!(content.contains("workspace-relative"));
+        assert!(content.contains("Do not use absolute paths"));
         assert!(!content.contains("Codex apply_patch executor"));
         assert!(!content.contains("fileContent"));
+    }
+
+    #[test]
+    fn apply_patch_error_guidance_locks_relative_path_and_no_shell_retry_contract() {
+        let normalized = normalize_apply_patch_output_text(
+            "apply_patch verification failed: invalid patch for /tmp/codex-patch-test/new.txt",
+        );
+        assert!(normalized.contains("Retry with apply_patch only"));
+        assert!(normalized.contains("workspace-relative"));
+        assert!(normalized.contains("Do not use absolute paths"));
+        assert!(normalized.contains("Do not switch to exec_command"));
+        assert!(!normalized.to_ascii_lowercase().contains("verify"));
+        assert!(!normalized.to_ascii_lowercase().contains("rediscover"));
+        assert!(!normalized.to_ascii_lowercase().contains("read"));
+        assert!(!normalized.contains("/tmp/codex-patch-test/new.txt"));
+    }
+
+    #[test]
+    fn apply_patch_success_guidance_locks_relative_path_contract() {
+        let normalized = normalize_apply_patch_output_text("Done!");
+        assert!(normalized.starts_with("APPLY_PATCH_RESULT:"));
+        assert!(normalized.contains("workspace-relative"));
+        assert!(normalized.contains("Keep using apply_patch"));
+        assert!(!normalized.contains("absolute paths"));
     }
 
     fn does_not_normalize_nested_hashline_apply_patch_anymore() {

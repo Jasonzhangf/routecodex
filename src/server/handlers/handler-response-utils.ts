@@ -51,10 +51,6 @@ function isInternalMetadataCarrier(value: unknown): boolean {
   return false;
 }
 
-function allowsClientVisibleProtocolMetadata(payload: Record<string, unknown>): boolean {
-  return payload.object === 'response' && typeof payload.id === 'string' && payload.id.trim().length > 0;
-}
-
 function findForbiddenFieldInResponsePayload(
   payload: unknown,
   seen: WeakSet<object> = new WeakSet(),
@@ -74,9 +70,6 @@ function findForbiddenFieldInResponsePayload(
   const record = payload as Record<string, unknown>;
   for (const [key, value] of Object.entries(record)) {
     if (key === 'metadata') {
-      if (!allowsClientVisibleProtocolMetadata(record)) {
-        return key;
-      }
       if (isInternalMetadataCarrier(value)) {
         return key;
       }
@@ -173,6 +166,12 @@ type StreamContractProbeEnvelope = {
 type ClientSseSnapshotRecorder = {
   record: (chunk: unknown) => void;
   flush: (error?: unknown) => void;
+};
+
+type ResponsesSseClientProjectionState = {
+  pendingApplyPatchArgumentDeltas: Map<string, string>;
+  applyPatchCallIds: Set<string>;
+  emittedApplyPatchDoneCallIds: Set<string>;
 };
 
 function updateContractProbeFromSseChunk(
@@ -1025,7 +1024,26 @@ function sendStructuredSseError(res: Response, requestLabel: string, payload: Re
 }
 
 
-async function normalizeResponsesToolCallsForClientBody(body: unknown, entryEndpoint?: string): Promise<unknown> {
+function readResponsesClientToolsRaw(requestContext?: DispatchOptions['responsesRequestContext']): unknown[] {
+  const payloadTools = Array.isArray(requestContext?.payload?.tools) ? requestContext.payload.tools : undefined;
+  if (payloadTools?.length) {
+    return payloadTools;
+  }
+  const contextTools = Array.isArray(requestContext?.context?.toolsRaw) ? requestContext.context.toolsRaw : undefined;
+  if (contextTools?.length) {
+    return contextTools;
+  }
+  const contextClientTools = Array.isArray(requestContext?.context?.clientToolsRaw)
+    ? requestContext.context.clientToolsRaw
+    : undefined;
+  return contextClientTools?.length ? contextClientTools : [];
+}
+
+async function normalizeResponsesToolCallsForClientBody(
+  body: unknown,
+  entryEndpoint?: string,
+  requestContext?: DispatchOptions['responsesRequestContext']
+): Promise<unknown> {
   if (
     entryEndpoint !== '/v1/responses'
     && entryEndpoint !== '/v1/responses.submit_tool_outputs'
@@ -1042,11 +1060,302 @@ async function normalizeResponsesToolCallsForClientBody(body: unknown, entryEndp
     if (typeof mod.normalizeResponsesToolCallArgumentsForClientWithNative !== 'function') {
       throw new Error('[handler-response] normalizeResponsesToolCallArgumentsForClientWithNative not available');
     }
-    return mod.normalizeResponsesToolCallArgumentsForClientWithNative(body, []);
+    const normalized = mod.normalizeResponsesToolCallArgumentsForClientWithNative(body, readResponsesClientToolsRaw(requestContext));
+    return isResponsesApplyPatchFreeformTool(requestContext)
+      ? convertApplyPatchFunctionCallsToCustomToolCalls(normalized)
+      : normalized;
   } catch (error) {
     logResponseNonBlockingError('normalizeResponsesToolCallsForClientBody', error);
     return body;
   }
+}
+
+function isResponsesApplyPatchFreeformTool(requestContext?: DispatchOptions['responsesRequestContext']): boolean {
+  return readResponsesClientToolsRaw(requestContext).some((tool) => {
+    if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return false;
+    const record = tool as Record<string, unknown>;
+    return record.type === 'custom'
+      && record.name === 'apply_patch'
+      && (!record.format || typeof record.format === 'object');
+  });
+}
+
+function convertApplyPatchFunctionCallsToCustomToolCalls(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    let changed = false;
+    const items = value.map((item) => {
+      const next = convertApplyPatchFunctionCallsToCustomToolCalls(item);
+      if (next !== item) changed = true;
+      return next;
+    });
+    return changed ? items : value;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.type === 'function_call' && record.name === 'apply_patch') {
+    const input = typeof record.arguments === 'string'
+      ? normalizeApplyPatchFreeformInputForClient(record.arguments)
+      : '';
+    const callId = typeof record.call_id === 'string'
+      ? record.call_id
+      : typeof record.id === 'string'
+        ? record.id
+        : 'call_apply_patch';
+    return {
+      type: 'custom_tool_call',
+      name: 'apply_patch',
+      call_id: callId,
+      input,
+    };
+  }
+  if (record.type === 'custom_tool_call' && record.name === 'apply_patch' && typeof record.input === 'string') {
+    const input = normalizeApplyPatchFreeformInputForClient(record.input);
+    if (input !== record.input) {
+      return { ...record, input };
+    }
+  }
+  let changed = false;
+  const out: Record<string, unknown> = { ...record };
+  for (const [key, child] of Object.entries(record)) {
+    const next = convertApplyPatchFunctionCallsToCustomToolCalls(child);
+    if (next !== child) {
+      out[key] = next;
+      changed = true;
+    }
+  }
+  return changed ? out : value;
+}
+
+function normalizeApplyPatchFreeformInputForClient(argumentsText: string): string {
+  try {
+    const parsed = JSON.parse(argumentsText);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const record = parsed as Record<string, unknown>;
+      if (typeof record.patch === 'string') return record.patch;
+      if (typeof record.input === 'string') return record.input;
+    }
+  } catch {
+    return argumentsText;
+  }
+  return argumentsText;
+}
+
+async function normalizeResponsesToolCallsForClientPayloadDeep(
+  value: unknown,
+  entryEndpoint?: string,
+  requestContext?: DispatchOptions['responsesRequestContext'],
+  seen: WeakSet<object> = new WeakSet()
+): Promise<unknown> {
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  if (seen.has(value as object)) {
+    return value;
+  }
+  seen.add(value as object);
+  if (Array.isArray(value)) {
+    let changed = false;
+    const items: unknown[] = [];
+    for (const item of value) {
+      const normalized = await normalizeResponsesToolCallsForClientPayloadDeep(item, entryEndpoint, requestContext, seen);
+      items.push(normalized);
+      if (normalized !== item) changed = true;
+    }
+    return changed ? items : value;
+  }
+  const record = value as Record<string, unknown>;
+  let changed = false;
+  const out: Record<string, unknown> = { ...record };
+  for (const [key, child] of Object.entries(record)) {
+    const normalizedChild = await normalizeResponsesToolCallsForClientPayloadDeep(child, entryEndpoint, requestContext, seen);
+    if (normalizedChild !== child) {
+      out[key] = normalizedChild;
+      changed = true;
+    }
+  }
+  const normalizedSelf = await normalizeResponsesToolCallsForClientBody(
+    changed ? out : record,
+    entryEndpoint,
+    requestContext
+  );
+  return normalizedSelf;
+}
+
+async function normalizeResponsesSseFrameForClient(
+  frame: string,
+  entryEndpoint?: string,
+  requestContext?: DispatchOptions['responsesRequestContext'],
+  projectionState?: ResponsesSseClientProjectionState
+): Promise<string> {
+  if (
+    entryEndpoint !== '/v1/responses'
+    && entryEndpoint !== '/v1/responses.submit_tool_outputs'
+  ) {
+    return frame;
+  }
+  const lines = frame.split('\n');
+  const eventLine = lines.find((line) => line.startsWith('event:'));
+  const dataIndex = lines.findIndex((line) => line.startsWith('data:'));
+  if (dataIndex < 0 || !eventLine) {
+    return frame;
+  }
+  const eventName = eventLine.slice('event:'.length).trim();
+  const dataText = lines
+    .slice(dataIndex)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n');
+  if (!dataText || dataText === '[DONE]') {
+    return frame;
+  }
+  let data: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(dataText);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return frame;
+    }
+    data = parsed as Record<string, unknown>;
+  } catch {
+    return frame;
+  }
+  const item = data.item && typeof data.item === 'object' && !Array.isArray(data.item)
+    ? data.item as Record<string, unknown>
+    : undefined;
+  if (
+    item
+    && item.type === 'function_call'
+    && item.name === 'apply_patch'
+    && typeof item.call_id === 'string'
+    && projectionState
+  ) {
+    projectionState.applyPatchCallIds.add(item.call_id);
+  }
+  if (eventName === 'response.function_call_arguments.delta') {
+    const callName = typeof data.name === 'string' ? data.name : undefined;
+    const callId = typeof data.call_id === 'string' ? data.call_id : 'call_apply_patch';
+    const delta = typeof data.delta === 'string' ? data.delta : undefined;
+    if (
+      delta
+      && projectionState
+      && (callName === 'apply_patch' || projectionState.applyPatchCallIds.has(callId))
+    ) {
+      projectionState.pendingApplyPatchArgumentDeltas.set(
+        callId,
+        `${projectionState.pendingApplyPatchArgumentDeltas.get(callId) ?? ''}${delta}`
+      );
+      return '';
+    }
+    return frame;
+  }
+  const callName =
+    typeof data.name === 'string'
+      ? data.name
+      : data.item && typeof data.item === 'object' && !Array.isArray(data.item)
+        ? typeof (data.item as Record<string, unknown>).name === 'string'
+          ? (data.item as Record<string, unknown>).name as string
+          : undefined
+        : undefined;
+  const callArguments =
+    typeof data.arguments === 'string'
+      ? data.arguments
+      : data.item && typeof data.item === 'object' && !Array.isArray(data.item)
+        ? typeof (data.item as Record<string, unknown>).arguments === 'string'
+          ? (data.item as Record<string, unknown>).arguments as string
+          : undefined
+        : undefined;
+  if (callName === 'apply_patch' && callArguments) {
+    const normalized = await normalizeResponsesToolCallsForClientBody(
+      {
+        output: [{
+          type: 'function_call',
+          name: callName,
+          call_id: typeof data.call_id === 'string' ? data.call_id : 'call_apply_patch',
+          arguments: callArguments,
+        }],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [{
+              id: typeof data.call_id === 'string' ? data.call_id : 'call_apply_patch',
+              type: 'function',
+              name: callName,
+              arguments: callArguments,
+              function: {
+                name: callName,
+                arguments: callArguments,
+              },
+            }],
+          },
+        },
+      },
+      entryEndpoint,
+      requestContext
+    ) as Record<string, unknown>;
+    const normalizedArguments = normalizeApplyPatchFreeformInputForClient(callArguments);
+    if (typeof data.arguments === 'string') {
+      data.arguments = normalizedArguments;
+    }
+    if (data.item && typeof data.item === 'object' && !Array.isArray(data.item)) {
+      (data.item as Record<string, unknown>).arguments = normalizedArguments;
+    }
+    const clientData = isResponsesApplyPatchFreeformTool(requestContext)
+      ? convertApplyPatchFunctionCallsToCustomToolCalls(data)
+      : data;
+    const normalizedFrame = `${lines.map((line, index) => {
+      if (index === dataIndex) return `data: ${JSON.stringify(clientData)}`;
+      if (index > dataIndex && line.startsWith('data:')) return '';
+      return line;
+    }).filter((line) => line !== '').join('\n')}\n\n`;
+    if (
+      eventName === 'response.function_call_arguments.done'
+      && projectionState
+      && typeof data.call_id === 'string'
+    ) {
+      projectionState.pendingApplyPatchArgumentDeltas.delete(data.call_id);
+      projectionState.applyPatchCallIds.delete(data.call_id);
+      if (projectionState.emittedApplyPatchDoneCallIds.has(data.call_id)) {
+        return '';
+      }
+      projectionState.emittedApplyPatchDoneCallIds.add(data.call_id);
+      const customToolDoneData = {
+        type: 'response.output_item.done',
+        item: {
+          type: 'custom_tool_call',
+          name: 'apply_patch',
+          call_id: data.call_id,
+          input: normalizedArguments,
+        },
+      };
+      return `event: response.output_item.done\ndata: ${JSON.stringify(customToolDoneData)}\n\n`;
+    }
+    if (
+      eventName === 'response.output_item.done'
+      && projectionState
+      && typeof data.item === 'object'
+      && data.item !== null
+      && !Array.isArray(data.item)
+    ) {
+      const callId = typeof (data.item as Record<string, unknown>).call_id === 'string'
+        ? (data.item as Record<string, unknown>).call_id as string
+        : undefined;
+      if (callId) {
+        if (projectionState.emittedApplyPatchDoneCallIds.has(callId)) {
+          return '';
+        }
+        projectionState.emittedApplyPatchDoneCallIds.add(callId);
+      }
+    }
+    return normalizedFrame;
+  }
+  const normalized = await normalizeResponsesToolCallsForClientPayloadDeep(data, entryEndpoint, requestContext);
+  if (normalized === data) {
+    return frame;
+  }
+  return `${lines.map((line, index) => {
+    if (index === dataIndex) return `data: ${JSON.stringify(normalized)}`;
+    if (index > dataIndex && line.startsWith('data:')) return '';
+    return line;
+  }).filter((line) => line !== '').join('\n')}\n\n`;
 }
 
 function isResponsesJsonBody(body: unknown, entryEndpoint?: string): body is Record<string, unknown> {
@@ -1110,7 +1419,12 @@ function streamResponsesJsonAsSse(args: {
             requestId: args.requestLabel
           }) as Record<string, unknown>;
         })();
-      const normalizedResponsesPayload = await normalizeResponsesToolCallsForClientBody(responsesPayload, args.entryEndpoint) as Record<string, unknown>;
+      const normalizedResponsesPayload = await normalizeResponsesToolCallsForClientBody(
+        responsesPayload,
+        args.entryEndpoint,
+        args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined
+          ?? args.responsesRequestContext
+      ) as Record<string, unknown>;
       const sanitizedResponsesPayload = stripInternalKeysDeep(normalizedResponsesPayload);
       const conversationProviderKey = deriveResponsesConversationProviderKey(args.result.usageLogInfo);
       await captureResponsesConversationToolCallRequestContext({
@@ -1631,6 +1945,35 @@ export async function sendPipelineResponse(
       });
     };
     let ssePending = '';
+    let clientWriteQueue = Promise.resolve();
+    const responsesSseProjectionState: ResponsesSseClientProjectionState = {
+      pendingApplyPatchArgumentDeltas: new Map(),
+      applyPatchCallIds: new Set(),
+      emittedApplyPatchDoneCallIds: new Set(),
+    };
+    const enqueueClientSseFrame = (frame: string, errorLabel: string) => {
+      if (!frame.includes('apply_patch') && !frame.includes('function_call') && !frame.includes('required_action')) {
+        writeClientSseFrame(frame, errorLabel);
+        return;
+      }
+      clientWriteQueue = clientWriteQueue
+        .then(async () => normalizeResponsesSseFrameForClient(
+          frame,
+          entryEndpoint,
+          effectiveResponsesRequestContext,
+          responsesSseProjectionState
+        ))
+        .then((normalizedFrame) => {
+          if (!normalizedFrame) {
+            return;
+          }
+          writeClientSseFrame(normalizedFrame, errorLabel);
+        })
+        .catch((error) => {
+          logResponseNonBlockingError(`${errorLabel}:normalize:${requestLabel}`, error);
+          writeClientSseFrame(frame, errorLabel);
+        });
+    };
     outboundStream.on('data', (chunk: unknown) => {
       // SSE frames may span TCP chunk boundaries. Buffer partial frames
       // and only feed complete \n\n-delimited blocks to the probe/tracker.
@@ -1646,6 +1989,7 @@ export async function sendPipelineResponse(
         if (!part.trim()) continue;
         updateSseTerminalTrackerFromChunk(part, finishTracker, terminalWatch);
         updateContractProbeFromSseChunk(part, contractProbe);
+        enqueueClientSseFrame(`${part}\n\n`, 'response.sse.stream.write_frame');
       }
       if (!terminalWatch.terminalSource || ended || streamEnded || terminalFlushTimer) {
         return;
@@ -1668,37 +2012,49 @@ export async function sendPipelineResponse(
             if (ended || streamEnded || res.writableEnded || res.destroyed) {
               return;
             }
-            const repairedFrames = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel);
-            const framesToWrite = terminalWatch.terminalSource === 'response.required_action'
-              ? repairedFrames.filter((frame) => !frame.includes('event: response.required_action'))
-              : repairedFrames;
-            if (framesToWrite.length > 0) {
-              try {
-                for (const frame of framesToWrite) {
-                  writeClientSseFrame(frame, 'response.sse.required_action.auto_close.write_terminal');
+            void (async () => {
+              const repairedFrames = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel);
+              const framesToWrite = terminalWatch.terminalSource === 'response.required_action'
+                ? repairedFrames.filter((frame) => !frame.includes('event: response.required_action'))
+                : repairedFrames;
+              if (framesToWrite.length > 0) {
+                try {
+                  for (const frame of framesToWrite) {
+                    const normalizedFrame = await normalizeResponsesSseFrameForClient(
+                      frame,
+                      entryEndpoint,
+                      effectiveResponsesRequestContext,
+                      responsesSseProjectionState
+                    );
+                    if (normalizedFrame) {
+                      writeClientSseFrame(normalizedFrame, 'response.sse.required_action.auto_close.write_terminal');
+                    }
+                  }
+                finishTracker.seenTerminalEvent = true;
+                terminalWatch.sawTerminalChunk = true;
+                terminalWatch.sawResponsesCompletedChunk = true;
+                finishTracker.finishReason = finishTracker.finishReason ?? 'tool_calls';
+                contractProbe.emitted = true;
+                } catch (repairWriteError) {
+                  logResponseNonBlockingError(`response.sse.required_action.auto_close.write_terminal:${requestLabel}`, repairWriteError);
                 }
-              finishTracker.seenTerminalEvent = true;
-              terminalWatch.sawTerminalChunk = true;
-              terminalWatch.sawResponsesCompletedChunk = true;
-              finishTracker.finishReason = finishTracker.finishReason ?? 'tool_calls';
-              contractProbe.emitted = true;
-              } catch (repairWriteError) {
-                logResponseNonBlockingError(`response.sse.required_action.auto_close.write_terminal:${requestLabel}`, repairWriteError);
               }
-            }
-            try {
-              stream.destroy?.();
-            } catch (destroyError) {
-              logResponseNonBlockingError(`response.sse.required_action.auto_close.destroy_stream:${requestLabel}`, destroyError);
-            }
-            if (!res.writableEnded && !res.destroyed) {
               try {
-                res.end();
-              } catch (endError) {
-                logResponseNonBlockingError(`response.sse.required_action.auto_close.end:${requestLabel}`, endError);
+                stream.destroy?.();
+              } catch (destroyError) {
+                logResponseNonBlockingError(`response.sse.required_action.auto_close.destroy_stream:${requestLabel}`, destroyError);
               }
-              clientSseSnapshotRecorder?.flush();
-            }
+              if (!res.writableEnded && !res.destroyed) {
+                try {
+                  res.end();
+                } catch (endError) {
+                  logResponseNonBlockingError(`response.sse.required_action.auto_close.end:${requestLabel}`, endError);
+                }
+                clientSseSnapshotRecorder?.flush();
+              }
+            })().catch((error) => {
+              logResponseNonBlockingError(`response.sse.required_action.auto_close:${requestLabel}`, error);
+            });
           }, 120);
           terminalAutoCloseTimer.unref?.();
         }
@@ -1750,7 +2106,7 @@ export async function sendPipelineResponse(
       }
       clientSseSnapshotRecorder?.flush(error);
     });
-    outboundStream.on('end', () => {
+    outboundStream.on('end', async () => {
       ended = true;
       streamEnded = true;
       clearTimers();
@@ -1772,6 +2128,17 @@ export async function sendPipelineResponse(
         finishReason: resolvedStreamFinishReason,
         terminal: finishTracker.seenTerminalEvent
       });
+      if (ssePending.trim()) {
+        updateSseTerminalTrackerFromChunk(ssePending, finishTracker, terminalWatch);
+        updateContractProbeFromSseChunk(ssePending, contractProbe);
+        enqueueClientSseFrame(`${ssePending}\n\n`, 'response.sse.stream.write_pending_frame');
+        ssePending = '';
+      }
+      try {
+        await clientWriteQueue;
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.stream.end.flush_queue:${requestLabel}`, error);
+      }
       if (!completedLogged) {
         completedLogged = true;
         logStreamRequestComplete(entryEndpoint, requestLabel, status, resolvedStreamFinishReason, requestLogContext);
@@ -1794,7 +2161,15 @@ export async function sendPipelineResponse(
             return true;
           });
           for (const frame of framesToWrite) {
-            writeClientSseFrame(frame, 'response.sse.stream.end.write_terminal_probe');
+            const normalizedFrame = await normalizeResponsesSseFrameForClient(
+              frame,
+              entryEndpoint,
+              effectiveResponsesRequestContext,
+              responsesSseProjectionState
+            );
+            if (normalizedFrame) {
+              writeClientSseFrame(normalizedFrame, 'response.sse.stream.end.write_terminal_probe');
+            }
           }
           if (framesToWrite.length > 0) {
             finishTracker.seenTerminalEvent = true;
@@ -1819,7 +2194,7 @@ export async function sendPipelineResponse(
         .catch((error) => {
           logResponseNonBlockingError(`responses-conversation-native-sse:${requestLabel}`, error);
         })
-        .finally(() => {
+        .finally(async () => {
           const closedBeforeTerminalEvent = !finishTracker.seenTerminalEvent;
           if (closedBeforeTerminalEvent) {
             logPipelineStage('response.sse.stream.error', requestLabel, {
@@ -1833,6 +2208,7 @@ export async function sendPipelineResponse(
             });
             if (!res.writableEnded && !res.destroyed) {
               try {
+                await clientWriteQueue;
                 const payload = {
                   type: 'error',
                   status: 502,
@@ -1869,7 +2245,6 @@ export async function sendPipelineResponse(
       cleanup('close');
     });
     res.on('finish', () => cleanup('finish'));
-    outboundStream.pipe(res, { end: false });
     return Promise.resolve();
   }
 
@@ -1903,7 +2278,9 @@ export async function sendPipelineResponse(
   // Preserve the SSE carrier key (it is handled above and never JSON-encoded).
   const normalizedJsonBody = await normalizeResponsesToolCallsForClientBody(
     normalizeResponsesJsonBody(body, entryEndpoint, requestLabel),
-    entryEndpoint
+    entryEndpoint,
+    result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined
+      ?? options?.responsesRequestContext
   );
   const usageNormalized = normalizeChatUsagePayload(normalizedJsonBody, {
     entryEndpoint,

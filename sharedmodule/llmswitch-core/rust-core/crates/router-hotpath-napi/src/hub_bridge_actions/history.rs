@@ -3,9 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
 use crate::hub_tool_session_compat::{normalize_tool_session_payload, ToolSessionCompatInput};
-use crate::shared_json_utils::{
-    clone_non_empty_object, read_optional_bool, read_trimmed_string,
-};
+use crate::shared_json_utils::{clone_non_empty_object, read_optional_bool, read_trimmed_string};
 use crate::shared_metadata_semantics::read_runtime_metadata_json;
 use crate::shared_responses_tool_utils::resolve_tool_call_id_style_json;
 use crate::shared_tool_call_id_core::clamp_responses_input_item_id;

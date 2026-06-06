@@ -433,7 +433,7 @@ impl HubPipelineEngine {
         &mut self,
         output: crate::hub_pipeline::HubPipelineOutput,
         normalized_payload: Value,
-        normalized_metadata: Value,
+        mut normalized_metadata: Value,
         provider_protocol: String,
         mut diagnostics: Vec<HubPipelineDiagnostic>,
     ) -> HubPipelineResult<HubPipelineExecutionOutput> {
@@ -464,6 +464,8 @@ impl HubPipelineEngine {
             &normalized_metadata,
             output.request_id.as_str(),
         )?;
+        let canonical_payload =
+            move_provider_response_metadata_to_carrier(canonical_payload, &mut normalized_metadata);
         let resp_inbound_02 = run_hub_resp_inbound_02_parsed_entrypoint(canonical_payload.clone())
             .map_err(|message| {
                 HubPipelineError::new("hub_pipeline_resp_inbound_02_failed", message)
@@ -908,6 +910,25 @@ fn canonicalize_provider_response_for_client(
         );
     }
     Ok(payload)
+}
+
+fn move_provider_response_metadata_to_carrier(payload: Value, metadata: &mut Value) -> Value {
+    let mut object = match payload {
+        Value::Object(object) => object,
+        other => return other,
+    };
+    let Some(provider_metadata) = object.remove("metadata") else {
+        return Value::Object(object);
+    };
+    if !provider_metadata.is_null() {
+        if !metadata.is_object() {
+            *metadata = serde_json::json!({});
+        }
+        if let Some(metadata_object) = metadata.as_object_mut() {
+            metadata_object.insert("providerResponseMetadata".to_string(), provider_metadata);
+        }
+    }
+    Value::Object(object)
 }
 
 fn build_adapter_context(

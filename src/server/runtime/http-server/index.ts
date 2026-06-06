@@ -55,6 +55,7 @@ import {
 } from './router-direct-pipeline.js';
 import {
   applyMinimalDirectOverrides,
+  assertDirectRouteDecision,
   evaluateDirectRouteDecision,
   resolveRawPayloadForDirect,
 } from './direct-passthrough-payload.js';
@@ -118,22 +119,6 @@ import {
   isLocalBaseUrl,
   disposeProviders
 } from './http-server-runtime-providers.js';
-
-function readApplyPatchModeFromMetadata(metadata: unknown): 'client' | 'servertool' {
-  const record = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-    ? metadata as Record<string, unknown>
-    : undefined;
-  const rt = record?.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
-    ? record.__rt as Record<string, unknown>
-    : undefined;
-  const applyPatch = rt?.applyPatch && typeof rt.applyPatch === 'object' && !Array.isArray(rt.applyPatch)
-    ? rt.applyPatch as Record<string, unknown>
-    : undefined;
-  const mode = typeof applyPatch?.mode === 'string' ? applyPatch.mode.trim().toLowerCase() : '';
-  return mode === 'servertool' ? 'servertool' : 'client';
-}
-
-
 
 function readTrimmedString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -1117,10 +1102,6 @@ export class RouteCodexHttpServer {
         portConfig?.mode === 'router'
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
       ) {
-        // apply_patch servertool mode requires Hub response-stage tool dispatch.
-        // Router direct bypass skips response conversion/servertool execution,
-        // so we must force relay when request declares apply_patch.
-        const applyPatchMode = readApplyPatchModeFromMetadata(nextInput.metadata);
         const directEntryDecision = evaluateDirectRouteDecision({
           payload:
             nextInput.body && typeof nextInput.body === 'object' && !Array.isArray(nextInput.body)
@@ -1130,12 +1111,13 @@ export class RouteCodexHttpServer {
             path: nextInput.entryEndpoint,
             headers: nextInput.headers as Record<string, string | string[] | undefined>,
           }),
-          applyPatchMode,
+          applyPatchMode: 'client',
         });
-        if (directEntryDecision.requiresHubRelay === true) {
+        if (!directEntryDecision.providerWireValid) {
           this.logStage('router-direct.skipped', input.requestId, {
-            reason: directEntryDecision.reason ?? 'apply_patch_servertool_mode_requires_hub_response_stage',
-            mode: applyPatchMode,
+            reason: 'direct_payload_not_provider_wire',
+            detail: directEntryDecision.reason ?? 'invalid_direct_payload',
+            mode: 'client',
           });
           return await this.executePipeline(nextInput);
         }
@@ -1317,6 +1299,20 @@ export class RouteCodexHttpServer {
             : undefined,
       },
     );
+    try {
+      assertDirectRouteDecision({
+        payload: requestPayload,
+        inboundProtocol,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      this.logStage('router-direct.skipped', input.requestId, {
+        reason: 'direct_payload_not_provider_wire',
+        detail: message || 'invalid_direct_payload',
+        stage: 'final_request_payload',
+      });
+      return { used: false, reason: 'direct_payload_not_provider_wire' };
+    }
     let capturedUsage: Record<string, unknown> | undefined;
     let retryMetadata: Record<string, unknown> | undefined;
     let directOutcome: RouterDirectOutcome;

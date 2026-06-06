@@ -298,7 +298,9 @@ export function validateCanonicalClientToolCall(
           missingFields: ['patch']
         });
       }
-      return { ok: true, normalizedArgs: JSON.stringify({ ...parsed, patch, input: patch }) };
+      const normalized = { ...parsed, patch } as Record<string, unknown>;
+      delete normalized.input;
+      return { ok: true, normalizedArgs: JSON.stringify(normalized) };
     }
     case 'update_plan': {
       if (!Array.isArray(parsed?.plan)) {

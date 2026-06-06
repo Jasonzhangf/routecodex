@@ -60,12 +60,46 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function isSseWrapper(value: unknown): boolean {
+  const record = asRecord(value);
+  if (!record) {
+    return false;
+  }
+  if (record.__sse_responses || record.__sse_stream) {
+    return true;
+  }
+  if (record.mode === 'sse') {
+    return true;
+  }
+  return typeof record.bodyText === 'string' && record.bodyText.trim().length > 0;
+}
+
+function isAnthropicSseEventPayload(value: unknown): boolean {
+  const record = asRecord(value);
+  if (!record) {
+    return false;
+  }
+  const type = typeof record.type === 'string' ? record.type.trim().toLowerCase() : '';
+  return type === 'ping'
+    || type === 'message_start'
+    || type === 'content_block_start'
+    || type === 'content_block_delta'
+    || type === 'content_block_stop'
+    || type === 'message_delta'
+    || type === 'message_stop';
+}
+
 function resolveAnthropicBusinessResponseError(input: ResolveBusinessResponseErrorInput): Error | undefined {
   const response = asRecord(input.response);
   if (!response) {
     return undefined;
   }
-  if (response.__sse_responses || asRecord(response.data)?.__sse_responses) {
+  if (
+    isSseWrapper(response)
+    || isSseWrapper(response.data)
+    || isAnthropicSseEventPayload(response)
+    || isAnthropicSseEventPayload(response.data)
+  ) {
     return undefined;
   }
   const payload = asRecord(response.data) ?? response;

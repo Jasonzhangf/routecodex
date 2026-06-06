@@ -524,6 +524,118 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     }
   });
 
+  it('preserves paired Responses custom_tool_call_output through the Anthropic provider payload', async () => {
+    const artifacts = await bootstrapVirtualRouterConfig({
+      providers: {
+        minimax: {
+          id: 'minimax',
+          enabled: true,
+          type: 'anthropic',
+          baseURL: 'mock://minimax',
+          auth: { type: 'apikey', apiKey: 'mock' },
+          compatibilityProfile: 'anthropic:claude-code',
+          models: { 'MiniMax-M3': {} }
+        }
+      },
+      routing: {
+        thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
+      }
+    } as any) as any;
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const pipeline = new HubPipeline({
+      virtualRouter: artifacts.config,
+      policy: { mode: 'off' }
+    });
+
+    let capturedProviderPayload: unknown;
+    const app = express();
+    app.use(express.json({ limit: '512kb' }));
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, {
+        executePipeline: async (input: any) => {
+          const result = await pipeline.execute({
+            id: 'req_http_anthropic_paired_custom_tool_history',
+            endpoint: '/v1/responses',
+            payload: input.body,
+            metadata: {
+              ...input.metadata,
+              entryEndpoint: '/v1/responses',
+              providerProtocol: 'openai-responses',
+              routeHint: 'thinking',
+              stream: true,
+              inboundStream: true,
+              outboundStream: true,
+            }
+          });
+          capturedProviderPayload = result.providerPayload;
+          const danglingId = findDanglingAnthropicToolUse(result.providerPayload);
+          if (danglingId) {
+            return {
+              status: 400,
+              headers: {},
+              body: {
+                error: {
+                  message: 'invalid params, tool call result does not follow tool call (2013)',
+                  type: 'invalid_request_error',
+                  code: 'HTTP_400',
+                  danglingId
+                }
+              }
+            };
+          }
+          return {
+            status: 200,
+            headers: {},
+            body: {
+              id: 'resp_http_anthropic_paired_custom_tool_history',
+              object: 'response',
+              status: 'completed',
+              model: 'MiniMax-M3',
+              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+            }
+          };
+        },
+        errorHandling: null,
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+    try {
+      const patch = '*** Begin Patch\n*** Add File: apply_patch_test/01-add.txt\n+hello\n*** End Patch';
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          accept: 'text/event-stream',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          stream: true,
+          input: [
+            { role: 'user', content: [{ type: 'input_text', text: 'first' }] },
+            { type: 'custom_tool_call', name: 'apply_patch', call_id: 'call_patch_1', input: patch },
+            { type: 'custom_tool_call_output', call_id: 'call_patch_1', output: 'Exit code: 0\nOutput:\nSuccess. Updated the following files:\nA apply_patch_test/01-add.txt\n' },
+            { role: 'user', content: [{ type: 'input_text', text: 'continue' }] }
+          ],
+          tools: [{ type: 'custom', name: 'apply_patch', description: 'Apply a patch.' }]
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('resp_http_anthropic_paired_custom_tool_history');
+      expect(findDanglingAnthropicToolUse(capturedProviderPayload)).toBeNull();
+      const serializedProviderPayload = JSON.stringify(capturedProviderPayload);
+      expect(serializedProviderPayload).toContain('call_patch_1');
+      expect(serializedProviderPayload).toContain('apply_patch');
+      expect(serializedProviderPayload).toContain('Success. Updated the following files');
+      expect(serializedProviderPayload).toContain('apply_patch_test/01-add.txt');
+    } finally {
+      await closeServer(server);
+      pipeline.dispose?.();
+    }
+  });
+
   it('does not forward client MCP tools into Anthropic provider tools', async () => {
     const artifacts = await bootstrapVirtualRouterConfig({
       providers: {

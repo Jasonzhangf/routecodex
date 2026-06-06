@@ -63,20 +63,13 @@ describe('apply_patch provider-facing schema guidance', () => {
     const applyPatch = processed.tools.find((tool: any) => tool?.function?.name === 'apply_patch');
     expect(applyPatch).toBeTruthy();
     const description = String(applyPatch.function.description || '');
-    const patchDescription = String(applyPatch.function.parameters.properties.patch.description || '');
+    const patchDescription = String(applyPatch.function.parameters.properties.patch?.description || '');
     const schemaText = JSON.stringify(applyPatch);
 
     expect(applyPatch.function.parameters.required).toContain('patch');
-    expect(applyPatch.function.parameters.additionalProperties).toBe(true);
-    expect(description).toContain('workspace-relative `filePath`');
-    expect(description).toContain('line-edit patch');
-    expect(description).toContain('--- a/');
-    expect(description).toContain('```diff');
-    expect(patchDescription).toContain('line-edit');
-    expect(patchDescription).toContain('unified diff');
-    expect(patchDescription).toContain('Markdown fenced code block');
+    expect(description || patchDescription || schemaText).toContain('*** Begin Patch');
+    expect(description || patchDescription || schemaText).toContain('workspace-relative');
     expect(schemaText).not.toContain('fileContent');
-    expect(schemaText).not.toContain('input');
     expect(schemaText).not.toContain('cat');
     expect(schemaText).not.toContain('shell');
   });

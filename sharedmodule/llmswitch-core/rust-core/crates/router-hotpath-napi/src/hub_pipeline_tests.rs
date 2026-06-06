@@ -992,8 +992,14 @@ fn test_build_req_inbound_skipped_node_defaults_reason() {
         .and_then(|v| v.get("dataProcessed"))
         .and_then(|v| v.as_object())
         .expect("observation dataProcessed");
-    assert_eq!(data_processed.get("messages").and_then(|v| v.as_i64()), Some(0));
-    assert_eq!(data_processed.get("tools").and_then(|v| v.as_i64()), Some(0));
+    assert_eq!(
+        data_processed.get("messages").and_then(|v| v.as_i64()),
+        Some(0)
+    );
+    assert_eq!(
+        data_processed.get("tools").and_then(|v| v.as_i64()),
+        Some(0)
+    );
 }
 
 #[test]

@@ -8,6 +8,7 @@ use crate::hub_reasoning_tool_normalizer::{
 use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatprocess_03_response;
 use crate::hub_resp_outbound_client_semantics::build_anthropic_response_from_chat_value;
 use crate::resp_process_stage1_tool_governance::ToolGovernanceInput;
+use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tooling::normalize_tool_result_text;
@@ -282,11 +283,11 @@ fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value>
             serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "patch": {
-                        "type": "string",
-                        "description": "Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. Do not use absolute paths."
-                    }
-                },
+                        "patch": {
+                            "type": "string",
+                            "description": "Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. For temporary tests, use tmp/... inside the workspace, not /tmp/.... Do not use absolute paths."
+                        }
+                    },
                 "required": ["patch"],
                 "additionalProperties": true
             })
@@ -336,6 +337,9 @@ mod apply_patch_tool_schema_tests {
             .unwrap_or("");
         assert!(patch_desc.contains("*** Begin Patch"));
         assert!(patch_desc.contains("workspace-relative"));
+        assert!(patch_desc.contains("tmp/..."));
+        assert!(patch_desc.contains("not /tmp/"));
+        assert!(patch_desc.contains("Do not use absolute paths"));
         assert!(!patch_desc.contains("filePath"));
     }
 }
@@ -914,7 +918,14 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
                 let input = function_row
                     .get("arguments")
                     .and_then(|v| v.as_str())
-                    .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                    .and_then(|raw| {
+                        if name == "apply_patch" {
+                            let raw_value = Value::String(raw.to_string());
+                            let normalized = normalize_apply_patch_schema_args(Some(&raw_value)).0;
+                            return serde_json::from_str::<Value>(&normalized).ok();
+                        }
+                        serde_json::from_str::<Value>(raw).ok()
+                    })
                     .unwrap_or_else(|| Value::Object(Map::new()));
                 blocks.push(Value::Object(Map::from_iter([
                     ("type".to_string(), Value::String("tool_use".to_string())),
@@ -1694,6 +1705,63 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("[Image omitted]"));
+    }
+
+    #[test]
+    fn build_anthropic_from_openai_chat_wraps_freeform_apply_patch_history_as_patch_input() {
+        let patch = "*** Begin Patch\n*** Add File: tmp/apply-patch-test/hello.txt\n+hello apply_patch\n*** End Patch";
+        let payload = json!({
+            "model": "MiniMax-M3",
+            "messages": [
+                { "role": "user", "content": "add file" },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_apply_patch",
+                        "type": "function",
+                        "function": {
+                            "name": "apply_patch",
+                            "arguments": patch
+                        }
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_apply_patch",
+                    "content": "aborted"
+                }
+            ],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "apply_patch",
+                    "description": "apply patch",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "patch": { "type": "string" } },
+                        "required": ["patch"]
+                    }
+                }
+            }]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_anthropic_from_openai_chat_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+        let messages = output["messages"].as_array().expect("messages array");
+        let tool_use = &messages[1]["content"][0];
+
+        assert_eq!(tool_use["type"].as_str(), Some("tool_use"));
+        assert_eq!(tool_use["name"].as_str(), Some("apply_patch"));
+        assert_eq!(tool_use["input"]["patch"].as_str(), Some(patch));
+        assert_ne!(
+            tool_use["input"],
+            json!({}),
+            "freeform apply_patch history must not be dropped to empty provider input"
+        );
     }
 }
 

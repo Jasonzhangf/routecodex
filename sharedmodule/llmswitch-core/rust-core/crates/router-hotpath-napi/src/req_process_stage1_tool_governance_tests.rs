@@ -608,9 +608,9 @@ fn test_chat_process_apply_patch_declared_legacy_fields_no_longer_rewrite_in_ser
     let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
     assert!(patch_desc.contains("*** Begin Patch"));
     assert!(properties.contains_key("patch"));
-    assert!(properties.contains_key("input"));
-    assert!(properties.contains_key("filePath"));
-    assert!(properties.contains_key("fileContent"));
+    assert!(!properties.contains_key("input"));
+    assert!(!properties.contains_key("filePath"));
+    assert!(!properties.contains_key("fileContent"));
     let required = tool["parameters"]["required"].as_array().unwrap();
     assert_eq!(required, &vec![serde_json::json!("patch")]);
 }
@@ -663,7 +663,8 @@ fn test_chat_process_apply_patch_without_internal_fields_keeps_client_contract_b
 }
 
 #[test]
-fn test_chat_process_apply_patch_direct_responses_tool_shape_no_longer_rewrites_in_servertool_mode() {
+fn test_chat_process_apply_patch_direct_responses_tool_shape_no_longer_rewrites_in_servertool_mode()
+{
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "glm-4.7",
@@ -714,8 +715,9 @@ fn test_chat_process_apply_patch_direct_responses_tool_shape_no_longer_rewrites_
     let properties = tool["parameters"]["properties"].as_object().unwrap();
     let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
     assert!(patch_desc.contains("*** Begin Patch"));
-    assert!(properties.contains_key("filePath"));
-    assert!(properties.contains_key("fileContent"));
+    assert!(!properties.contains_key("input"));
+    assert!(!properties.contains_key("filePath"));
+    assert!(!properties.contains_key("fileContent"));
 }
 
 #[test]

@@ -120,7 +120,14 @@ function extractApplyPatchConfigFromUserConfig(userConfig: UnknownRecord): Unkno
   if (vrServertool && isRecord(vrServertool.apply_patch)) candidates.push(vrServertool.apply_patch);
 
   const first = candidates[0];
-  return isRecord(first) ? { ...(first as UnknownRecord) } : undefined;
+  if (!isRecord(first)) {
+    return undefined;
+  }
+  const mode = typeof first.mode === 'string' ? first.mode.trim().toLowerCase() : '';
+  if (mode === 'freeform') {
+    return { ...(first as UnknownRecord), mode: 'client' };
+  }
+  return { ...(first as UnknownRecord) };
 }
 
 function withRoutePolicyGroupTag(routeEntry: unknown, groupId: string): unknown {

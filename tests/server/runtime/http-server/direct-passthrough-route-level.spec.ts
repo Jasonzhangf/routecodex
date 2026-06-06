@@ -1,6 +1,27 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 jest.unstable_mockModule('../../../../src/server/runtime/http-server/direct-passthrough-payload.js', () => {
+  const findInvalidChatStyleFunctionToolIndex = (tools: unknown[]): number => {
+    for (let index = 0; index < tools.length; index += 1) {
+      const tool = tools[index];
+      if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+        continue;
+      }
+      const record = tool as Record<string, unknown>;
+      if (record.type !== 'function') {
+        continue;
+      }
+      const topLevelName = typeof record.name === 'string' ? record.name.trim() : '';
+      const nestedFunction = record.function && typeof record.function === 'object' && !Array.isArray(record.function)
+        ? record.function as Record<string, unknown>
+        : undefined;
+      const nestedName = typeof nestedFunction?.name === 'string' ? nestedFunction.name.trim() : '';
+      if (!topLevelName && nestedName) {
+        return index;
+      }
+    }
+    return -1;
+  };
   const resolveRawPayloadForDirect = (body: unknown, metadata?: Record<string, unknown>) => {
     const source =
       metadata?.__raw_request_body && typeof metadata.__raw_request_body === 'object' && !Array.isArray(metadata.__raw_request_body)
@@ -32,10 +53,13 @@ jest.unstable_mockModule('../../../../src/server/runtime/http-server/direct-pass
       return { ok: false as const, reason: 'invalid_direct_payload', message: 'missing input or instructions' };
     }
     if (Array.isArray(args.payload.tools)) {
-      for (const tool of args.payload.tools) {
-        if (tool && typeof tool === 'object' && !Array.isArray(tool) && (tool as Record<string, unknown>).type === 'function' && !(tool as Record<string, unknown>).name) {
-          return { ok: false as const, reason: 'invalid_direct_payload', message: 'function tool missing name' };
-        }
+      const invalidToolIndex = findInvalidChatStyleFunctionToolIndex(args.payload.tools);
+      if (invalidToolIndex >= 0) {
+        return {
+          ok: false as const,
+          reason: `provider-runtime-error: responses payload tools[${invalidToolIndex}] is chat-style function tool; Responses wire requires top-level tool.name`,
+          message: 'chat-style function tool',
+        };
       }
     }
     if (Array.isArray(args.payload.input)) {
@@ -80,14 +104,6 @@ jest.unstable_mockModule('../../../../src/server/runtime/http-server/direct-pass
     applyPatchMode?: string;
   }) => {
     const hasDeclaredApplyPatchTool = hasDeclaredApplyPatchToolInPayload(args.payload);
-    if (args.applyPatchMode === 'servertool' && hasDeclaredApplyPatchTool) {
-      return {
-        providerWireValid: true,
-        requiresHubRelay: true,
-        reason: 'apply_patch_servertool_mode_requires_hub_response_stage',
-        hasDeclaredApplyPatchTool,
-      };
-    }
     const contract = providerWireValidForPayload(args);
     if (!contract.ok) {
       return {
@@ -104,10 +120,21 @@ jest.unstable_mockModule('../../../../src/server/runtime/http-server/direct-pass
       hasDeclaredApplyPatchTool,
     };
   };
+  const assertDirectRouteDecision = (args: {
+    payload: Record<string, unknown>;
+    inboundProtocol: string;
+    applyPatchMode?: string;
+  }) => {
+    const decision = evaluateDirectRouteDecision(args);
+    if (!decision.providerWireValid) {
+      throw new Error(decision.reason ?? 'invalid direct payload');
+    }
+  };
   return {
     resolveRawPayloadForDirect,
     applyMinimalDirectOverrides,
     evaluateDirectRouteDecision,
+    assertDirectRouteDecision,
   };
 });
 
@@ -522,7 +549,7 @@ describe('direct passthrough route-level', () => {
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
   });
 
-  it('router same-protocol direct is skipped when apply_patch servertool mode is enabled', async () => {
+  it('router same-protocol direct still skips legacy apply_patch servertool metadata when tool shape is chat-style invalid', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -565,7 +592,7 @@ describe('direct passthrough route-level', () => {
     const result = await (server as any).executePortAwarePipeline(
       5520,
       {
-        requestId: 'req_router_skip_direct_apply_patch_servertool',
+        requestId: 'req_router_direct_apply_patch_legacy_servertool',
         entryEndpoint: '/v1/responses',
         method: 'POST',
         headers: {},
@@ -586,7 +613,7 @@ describe('direct passthrough route-level', () => {
     expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay' });
   });
 
-  it('router same-protocol direct is skipped when apply_patch is declared as Responses custom tool in servertool mode', async () => {
+  it('router same-protocol direct validates Responses custom apply_patch instead of forcing servertool relay', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -628,7 +655,7 @@ describe('direct passthrough route-level', () => {
     const result = await (server as any).executePortAwarePipeline(
       5520,
       {
-        requestId: 'req_router_skip_direct_apply_patch_custom_servertool',
+        requestId: 'req_router_direct_apply_patch_custom_legacy_servertool',
         entryEndpoint: '/v1/responses',
         method: 'POST',
         headers: {},
@@ -649,9 +676,135 @@ describe('direct passthrough route-level', () => {
       },
     );
 
+    expect(routerDirectSpy).toHaveBeenCalledTimes(1);
+    expect(executePipelineSpy).not.toHaveBeenCalled();
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_direct_custom' });
+  });
+
+  it('router same-protocol direct is skipped at entry when responses payload is not provider-wire valid', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { object: 'response', id: 'resp_relay_invalid_direct' },
+      metadata: {},
+    } as any);
+    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: true,
+      response: { status: 200, body: { object: 'response', id: 'resp_direct_should_not_happen' } },
+      providerHandle: {} as any,
+      auditContext: {} as any,
+    } as any);
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5555,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline]
+    ]);
+
+    const result = await (server as any).executePortAwarePipeline(5555, {
+      requestId: 'req_router_skip_invalid_responses_direct_entry',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'edit file' }] }],
+        tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
+      },
+      metadata: {},
+    });
+
     expect(routerDirectSpy).not.toHaveBeenCalled();
     expect(executePipelineSpy).toHaveBeenCalledTimes(1);
-    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay_custom' });
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay_invalid_direct' });
+  });
+
+  it('router same-protocol direct is skipped for any responses tool array containing chat-style function tools', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { object: 'response', id: 'resp_relay_sample_locked' },
+      metadata: {},
+    } as any);
+    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: true,
+      response: { status: 200, body: { object: 'response', id: 'resp_direct_should_not_happen' } },
+      providerHandle: {} as any,
+      auditContext: {} as any,
+    } as any);
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5555,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline]
+    ]);
+
+    for (const invalidIndex of [0, 3, 11]) {
+      routerDirectSpy.mockClear();
+      executePipelineSpy.mockClear();
+      const tools = Array.from({ length: 12 }, (_, index) => (
+        index === invalidIndex
+          ? { type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }
+          : { type: 'function', name: `tool_${index}`, description: `tool ${index}`, parameters: { type: 'object' } }
+      ));
+
+      const result = await (server as any).executePortAwarePipeline(5555, {
+        requestId: `req_router_skip_invalid_shape_${invalidIndex}`,
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'gpt-5.5',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'sample lock' }] }],
+          tools,
+        },
+        metadata: {},
+      });
+
+      expect(routerDirectSpy).not.toHaveBeenCalled();
+      expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+      expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay_sample_locked' });
+    }
   });
 
   it('router same-protocol direct keeps stop_followup on direct path', async () => {
@@ -694,7 +847,11 @@ describe('direct passthrough route-level', () => {
       method: 'POST',
       headers: {},
       query: {},
-      body: { model: 'gpt-5.5', input: 'continue' },
+      body: {
+        model: 'gpt-5.5',
+        instructions: 'continue',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }],
+      },
       metadata: { __rt: { serverToolFollowup: true } },
     });
 
@@ -801,7 +958,11 @@ describe('direct passthrough route-level', () => {
       method: 'POST',
       headers: { 'x-route-hint': 'search' },
       query: {},
-      body: { model: 'gpt-5.5', input: 'hello' },
+      body: {
+        model: 'gpt-5.5',
+        instructions: 'hello',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      },
       metadata: {},
     });
 

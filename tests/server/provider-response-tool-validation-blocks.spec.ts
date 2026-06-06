@@ -35,10 +35,10 @@ describe('provider-response-tool-validation-blocks apply_patch normalization', (
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(result.normalizedArgs || '{}') as Record<string, unknown>;
     expect(parsed.patch).toBe(patch);
-    expect(parsed.input).toBe(patch);
+    expect(parsed.input).toBeUndefined();
   });
 
-  it('mirrors input into patch when only input is provided', () => {
+  it('accepts legacy input alias but normalizes to patch only', () => {
     const patch = [
       '*** Begin Patch',
       '*** Add File: tmp/apply-patch-alias.txt',
@@ -49,6 +49,6 @@ describe('provider-response-tool-validation-blocks apply_patch normalization', (
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(result.normalizedArgs || '{}') as Record<string, unknown>;
     expect(parsed.patch).toBe(patch);
-    expect(parsed.input).toBe(patch);
+    expect(parsed.input).toBeUndefined();
   });
 });

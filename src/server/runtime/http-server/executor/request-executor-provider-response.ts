@@ -317,7 +317,7 @@ export async function processSuccessfulProviderResponse(args: {
     }
   });
 
-  const emptyAssistantSignal = detectRetryableEmptyAssistantResponse(args.converted.body, args.requestSemantics);
+  const emptyAssistantSignal = await detectRetryableEmptyAssistantResponse(args.converted.body, args.requestSemantics);
   if (emptyAssistantSignal) {
     const bodyForError = args.converted.body as Record<string, unknown>;
     args.queuePayloadContractErrorsample({

@@ -165,7 +165,13 @@ fn responses_input_contains_tool_history(items: &[Value]) -> bool {
             .to_ascii_lowercase();
         if matches!(
             ty.as_str(),
-            "function_call" | "tool_call" | "function_call_output" | "tool_result" | "tool_message"
+            "function_call"
+                | "custom_tool_call"
+                | "tool_call"
+                | "function_call_output"
+                | "custom_tool_call_output"
+                | "tool_result"
+                | "tool_message"
         ) {
             return true;
         }
@@ -191,7 +197,7 @@ fn filter_orphan_responses_tool_outputs(items: Vec<Value>) -> Vec<Value> {
         let ty = read_trimmed_string(row.get("type"))
             .unwrap_or_default()
             .to_ascii_lowercase();
-        if ty != "function_call" && ty != "tool_call" {
+        if ty != "function_call" && ty != "custom_tool_call" && ty != "tool_call" {
             continue;
         }
         saw_function_calls = true;
@@ -217,7 +223,7 @@ fn filter_orphan_responses_tool_outputs(items: Vec<Value>) -> Vec<Value> {
                 .to_ascii_lowercase();
             if !matches!(
                 ty.as_str(),
-                "function_call_output" | "tool_result" | "tool_message"
+                "function_call_output" | "custom_tool_call_output" | "tool_result" | "tool_message"
             ) {
                 return true;
             }
@@ -253,7 +259,10 @@ fn build_duplicate_responses_call_id_rewrites(
             .unwrap_or_default()
             .to_ascii_lowercase();
 
-        if matches!(ty.as_str(), "function_call" | "tool_call") {
+        if matches!(
+            ty.as_str(),
+            "function_call" | "custom_tool_call" | "tool_call"
+        ) {
             let name = read_trimmed_string(row.get("name"))
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty());
@@ -282,7 +291,7 @@ fn build_duplicate_responses_call_id_rewrites(
 
         if matches!(
             ty.as_str(),
-            "function_call_output" | "tool_result" | "tool_message"
+            "function_call_output" | "custom_tool_call_output" | "tool_result" | "tool_message"
         ) {
             let call_id = read_trimmed_string(row.get("call_id"))
                 .or_else(|| read_trimmed_string(row.get("tool_call_id")))
@@ -340,7 +349,10 @@ fn rewrite_responses_tool_history_entry_call_id(
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    if matches!(ty.as_str(), "function_call" | "tool_call") {
+    if matches!(
+        ty.as_str(),
+        "function_call" | "custom_tool_call" | "tool_call"
+    ) {
         next.insert(
             "call_id".to_string(),
             Value::String(rewritten_call_id.clone()),
@@ -357,7 +369,7 @@ fn rewrite_responses_tool_history_entry_call_id(
 
     if matches!(
         ty.as_str(),
-        "function_call_output" | "tool_result" | "tool_message"
+        "function_call_output" | "custom_tool_call_output" | "tool_result" | "tool_message"
     ) {
         next.insert(
             "call_id".to_string(),
@@ -570,7 +582,10 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                         .to_ascii_lowercase();
                     matches!(
                         ty.as_str(),
-                        "function_call_output" | "tool_result" | "tool_message"
+                        "function_call_output"
+                            | "custom_tool_call_output"
+                            | "tool_result"
+                            | "tool_message"
                     )
                 });
             let allowed_tool_names = raw_request
@@ -609,7 +624,10 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                     .unwrap_or_default()
                     .to_ascii_lowercase();
 
-                if !matches!(ty.as_str(), "function_call" | "tool_call") {
+                if !matches!(
+                    ty.as_str(),
+                    "function_call" | "custom_tool_call" | "tool_call"
+                ) {
                     continue;
                 }
 
@@ -645,7 +663,10 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                     .unwrap_or_default()
                     .to_ascii_lowercase();
 
-                if matches!(ty.as_str(), "function_call" | "tool_call") {
+                if matches!(
+                    ty.as_str(),
+                    "function_call" | "custom_tool_call" | "tool_call"
+                ) {
                     let name = read_trimmed_string(row.get("name"))
                         .map(|value| value.trim().to_string())
                         .filter(|value| !value.is_empty());
@@ -680,7 +701,10 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
 
                 if matches!(
                     ty.as_str(),
-                    "function_call_output" | "tool_result" | "tool_message"
+                    "function_call_output"
+                        | "custom_tool_call_output"
+                        | "tool_result"
+                        | "tool_message"
                 ) {
                     let call_id = read_trimmed_string(row.get("call_id"))
                         .or_else(|| read_trimmed_string(row.get("tool_call_id")))
@@ -726,7 +750,10 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                         .to_ascii_lowercase();
                     !matches!(
                         ty.as_str(),
-                        "function_call_output" | "tool_result" | "tool_message"
+                        "function_call_output"
+                            | "custom_tool_call_output"
+                            | "tool_result"
+                            | "tool_message"
                     )
                 });
             }
@@ -775,6 +802,7 @@ fn has_responses_input_chat_messages(input: &[Value]) -> bool {
                 | "input_text"
                 | "input_image"
                 | "function_call_output"
+                | "custom_tool_call_output"
                 | "tool_result"
                 | "tool_message"
                 | "output_text"

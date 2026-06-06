@@ -390,10 +390,7 @@ fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
             .filter(|value| !value.is_empty());
         if matches!(name, Some("apply_patch")) {
             let mut function = Map::new();
-            function.insert(
-                "name".to_string(),
-                Value::String("apply_patch".to_string()),
-            );
+            function.insert("name".to_string(), Value::String("apply_patch".to_string()));
             if let Some(description) = row
                 .get("description")
                 .and_then(Value::as_str)
@@ -412,7 +409,7 @@ fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
                     "properties": {
                         "patch": {
                             "type": "string",
-                            "description": "Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. Do not use absolute paths."
+                            "description": "Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. For temporary tests, use tmp/... inside the workspace, not /tmp/.... Do not use absolute paths."
                         }
                     },
                     "required": ["patch"],
@@ -452,7 +449,10 @@ fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            function.insert("description".to_string(), Value::String(description.to_string()));
+            function.insert(
+                "description".to_string(),
+                Value::String(description.to_string()),
+            );
         }
         if let Some(parameters) = row
             .get("parameters")
@@ -972,9 +972,18 @@ mod tests {
         let tools = output["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], serde_json::json!("function"));
-        assert_eq!(tools[0]["function"]["name"], serde_json::json!("spawn_agent"));
-        assert_eq!(tools[0]["function"]["description"], serde_json::json!("spawn"));
-        assert_eq!(tools[0]["function"]["parameters"], serde_json::json!({"type":"object"}));
+        assert_eq!(
+            tools[0]["function"]["name"],
+            serde_json::json!("spawn_agent")
+        );
+        assert_eq!(
+            tools[0]["function"]["description"],
+            serde_json::json!("spawn")
+        );
+        assert_eq!(
+            tools[0]["function"]["parameters"],
+            serde_json::json!({"type":"object"})
+        );
     }
 
     #[test]
@@ -1003,7 +1012,10 @@ mod tests {
         let tools = output["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], serde_json::json!("function"));
-        assert_eq!(tools[0]["function"]["name"], serde_json::json!("apply_patch"));
+        assert_eq!(
+            tools[0]["function"]["name"],
+            serde_json::json!("apply_patch")
+        );
         assert_eq!(
             tools[0]["function"]["description"],
             serde_json::json!("Edit files through apply_patch")
@@ -1037,7 +1049,10 @@ mod tests {
         let tools = output["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], serde_json::json!("function"));
-        assert_eq!(tools[0]["function"]["name"], serde_json::json!("apply_patch"));
+        assert_eq!(
+            tools[0]["function"]["name"],
+            serde_json::json!("apply_patch")
+        );
         assert_eq!(
             tools[0]["function"]["description"],
             serde_json::json!("Use the `apply_patch` tool to edit files.")

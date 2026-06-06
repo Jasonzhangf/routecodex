@@ -132,10 +132,8 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
     });
     return {
       providerWireValid: true,
-      requiresHubRelay: input.applyPatchMode === 'servertool' && hasDeclaredApplyPatchTool,
-      reason: input.applyPatchMode === 'servertool' && hasDeclaredApplyPatchTool
-        ? 'apply_patch_servertool_mode_requires_hub_response_stage'
-        : undefined,
+      requiresHubRelay: false,
+      reason: undefined,
       hasDeclaredApplyPatchTool,
     };
   },
@@ -277,6 +275,24 @@ describe('direct-passthrough-payload', () => {
     })).toThrow(/Responses wire requires top-level tool\.name/);
   });
 
+  it('rejects any responses direct tool array that mixes chat-style function tools without top-level name', () => {
+    for (const invalidIndex of [0, 3, 11]) {
+      const tools = Array.from({ length: 12 }, (_, index) => (
+        index === invalidIndex
+          ? { type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }
+          : { type: 'function', name: `tool_${index}`, description: `tool ${index}`, parameters: { type: 'object' } }
+      ));
+      expect(() => assertDirectRouteDecision({
+        inboundProtocol: 'openai-responses',
+        payload: {
+          model: 'gpt-5.5',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'sample lock' }] }],
+          tools,
+        },
+      })).toThrow(new RegExp(`tools\\[${invalidIndex}\\].*top-level tool\\.name`));
+    }
+  });
+
   it('rejects historical chat-style messages on responses direct', () => {
     expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
@@ -316,7 +332,7 @@ describe('direct-passthrough-payload', () => {
     })).not.toThrow();
   });
 
-  it('marks servertool apply_patch direct requests as relay-required', () => {
+  it('does not force relay for legacy servertool apply_patch metadata', () => {
     const result = evaluateDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       applyPatchMode: 'servertool',
@@ -328,8 +344,8 @@ describe('direct-passthrough-payload', () => {
     });
     expect(result).toMatchObject({
       providerWireValid: true,
-      requiresHubRelay: true,
-      reason: 'apply_patch_servertool_mode_requires_hub_response_stage',
+      requiresHubRelay: false,
+      reason: undefined,
       hasDeclaredApplyPatchTool: true,
     });
   });

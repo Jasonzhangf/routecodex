@@ -128,9 +128,8 @@ pub(crate) fn detect_apply_patch_authoring_invalid_reason(raw: &str) -> Option<&
 pub(crate) fn make_apply_patch_guard_args(reason: &str) -> String {
     let patch = build_apply_patch_guard_patch(reason, apply_patch_error_message(reason));
     let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(patch.clone()));
-    out.insert("input".to_string(), Value::String(patch));
+    out.insert("patch".to_string(), Value::String(patch));
     serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| {
-        "{\"patch\":\"*** Begin Patch\\n*** Update File: __APPLY_PATCH_ERROR__/unknown.txt\\n@@\\n-guard\\n+APPLY_PATCH_ERROR: invalid apply_patch schema or patch grammar\\n*** End Patch\",\"input\":\"*** Begin Patch\\n*** Update File: __APPLY_PATCH_ERROR__/unknown.txt\\n@@\\n-guard\\n+APPLY_PATCH_ERROR: invalid apply_patch schema or patch grammar\\n*** End Patch\"}".to_string()
+        "{\"patch\":\"*** Begin Patch\\n*** Update File: __APPLY_PATCH_ERROR__/unknown.txt\\n@@\\n-guard\\n+APPLY_PATCH_ERROR: invalid apply_patch schema or patch grammar\\n*** End Patch\"}".to_string()
     })
 }

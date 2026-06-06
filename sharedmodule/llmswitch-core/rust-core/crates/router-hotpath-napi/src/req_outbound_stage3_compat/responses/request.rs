@@ -41,7 +41,11 @@ pub(crate) fn normalize_responses_function_tools(root: &mut Map<String, Value>) 
         let name = tool_obj
             .get("name")
             .and_then(Value::as_str)
-            .or_else(|| function_obj.and_then(|row| row.get("name")).and_then(Value::as_str))
+            .or_else(|| {
+                function_obj
+                    .and_then(|row| row.get("name"))
+                    .and_then(Value::as_str)
+            })
             .map(str::trim)
             .filter(|value| !value.is_empty());
         let Some(name) = name else {
@@ -54,18 +58,25 @@ pub(crate) fn normalize_responses_function_tools(root: &mut Map<String, Value>) 
         if let Some(description) = tool_obj
             .get("description")
             .and_then(Value::as_str)
-            .or_else(|| function_obj.and_then(|row| row.get("description")).and_then(Value::as_str))
+            .or_else(|| {
+                function_obj
+                    .and_then(|row| row.get("description"))
+                    .and_then(Value::as_str)
+            })
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            normalized_tool.insert("description".to_string(), Value::String(description.to_string()));
+            normalized_tool.insert(
+                "description".to_string(),
+                Value::String(description.to_string()),
+            );
         }
         normalized_tool.insert(
             "parameters".to_string(),
             normalize_responses_tool_parameters(
-                tool_obj.get("parameters").or_else(|| {
-                    function_obj.and_then(|row| row.get("parameters"))
-                }),
+                tool_obj
+                    .get("parameters")
+                    .or_else(|| function_obj.and_then(|row| row.get("parameters"))),
             ),
         );
         normalized.push(Value::Object(normalized_tool));

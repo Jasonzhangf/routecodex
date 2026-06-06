@@ -352,9 +352,8 @@ fn test_govern_response_apply_patch_repair() {
         .unwrap_or("");
     let parsed: Value = serde_json::from_str(args).unwrap();
     let patch = parsed["patch"].as_str().unwrap_or("");
-    let input = parsed["input"].as_str().unwrap_or("");
     assert_eq!(patch, "test");
-    assert_eq!(input, patch);
+    assert!(parsed.get("input").is_none());
 }
 
 #[test]
@@ -386,7 +385,7 @@ fn test_govern_response_apply_patch_inline_create_file_shape() {
     assert!(patch.contains("*** Begin Patch"));
     assert!(patch.contains("*** Add File: src/a.ts"));
     assert!(patch.contains("+console.log('ok')"));
-    assert_eq!(parsed["input"], parsed["patch"]);
+    assert!(parsed.get("input").is_none());
 }
 
 #[test]
@@ -429,7 +428,7 @@ fn test_govern_response_apply_patch_simple_minus_plus_with_file_context_converts
 +new
 *** End Patch"
     );
-    assert_eq!(parsed["input"], parsed["patch"]);
+    assert!(parsed.get("input").is_none());
     assert!(parsed.get("filePath").is_none());
     assert!(parsed.get("fileContent").is_none());
 }
@@ -462,7 +461,7 @@ fn test_govern_response_apply_patch_current_schema_preserves_filepath_and_patch_
         .as_str()
         .unwrap_or("");
     let parsed: Value = serde_json::from_str(args).unwrap();
-    // Servertool {filePath, patch} → canonical {patch, input}
+    // Servertool {filePath, patch} → canonical {patch}
     let patch_value = parsed["patch"].as_str().unwrap_or("");
     assert!(
         patch_value.starts_with("*** Begin Patch"),
@@ -472,9 +471,9 @@ fn test_govern_response_apply_patch_current_schema_preserves_filepath_and_patch_
     assert!(patch_value.contains("+ alpha"));
     assert!(patch_value.contains("+ beta"));
     assert!(patch_value.contains("*** End Patch"));
-    assert_eq!(
-        parsed["input"], parsed["patch"],
-        "input should mirror patch"
+    assert!(
+        parsed.get("input").is_none(),
+        "input should be removed after conversion"
     );
     assert!(
         parsed.get("filePath").is_none(),
@@ -518,7 +517,7 @@ fn test_govern_response_apply_patch_simple_add_with_empty_file_context_converts_
         patch,
         "*** Begin Patch\n*** Add File: rcc_apply_patch_smoke.txt\n+smoke-ok\n*** End Patch"
     );
-    assert_eq!(parsed["input"], parsed["patch"]);
+    assert!(parsed.get("input").is_none());
     assert!(parsed.get("filePath").is_none());
     assert!(parsed.get("fileContent").is_none());
 }
@@ -557,7 +556,7 @@ fn test_govern_response_apply_patch_hashline_shape_is_converted_to_canonical_pat
     assert!(patch.contains("*** Update File: note.txt"));
     assert!(patch.contains("@@"));
     assert!(patch.contains("+hello"));
-    assert_eq!(parsed["input"], parsed["patch"]);
+    assert!(parsed.get("input").is_none());
     assert!(parsed.get("filePath").is_none());
     assert!(parsed.get("file_path").is_none());
 }
@@ -595,7 +594,7 @@ fn test_govern_response_apply_patch_hashline_missing_file_content_fails_closed_w
     assert!(patch.contains("__APPLY_PATCH_ERROR__/"));
     assert!(!patch.contains("\"filePath\""));
     assert!(!patch.contains("+ 2 deadbeef"));
-    assert_eq!(parsed["input"], parsed["patch"]);
+    assert!(parsed.get("input").is_none());
 }
 
 #[test]
@@ -631,7 +630,7 @@ fn test_govern_response_apply_patch_canonical_patch_with_stray_filepath_stays_ca
     assert!(patch.contains("*** Begin Patch"));
     assert!(patch.contains("*** Update File: test_apply_patch/sample.txt"));
     assert!(patch.contains("+Modified line 2: UPDATED!"));
-    assert_eq!(parsed["input"], parsed["patch"]);
+    assert!(parsed.get("input").is_none());
     assert!(parsed.get("filePath").is_none());
     assert!(parsed.get("file_path").is_none());
 }
@@ -700,7 +699,7 @@ fn test_govern_response_apply_patch_raw_string_is_repaired_into_schema() {
     let patch = parsed["patch"].as_str().unwrap_or("");
     assert!(patch.contains("*** Add File: raw.txt"));
     assert!(patch.contains("+raw"));
-    assert_eq!(parsed["input"], parsed["patch"]);
+    assert!(parsed.get("input").is_none());
 }
 
 #[test]
@@ -741,7 +740,7 @@ fn test_govern_response_apply_patch_nested_input_patch_is_converted_to_canonical
     assert!(patch.contains("- world"));
     assert!(patch.contains("+ new"));
     assert!(patch.contains("+ keep"));
-    assert_eq!(parsed["input"], parsed["patch"]);
+    assert!(parsed.get("input").is_none());
 }
 
 #[test]
@@ -924,7 +923,7 @@ fn test_normalize_apply_patch_tool_calls_noop_and_count() {
         .as_str()
         .unwrap_or("");
     let parsed: Value = serde_json::from_str(args).unwrap();
-    assert_eq!(parsed["input"], parsed["patch"]);
+    assert!(parsed.get("input").is_none());
 
     let payload = json!({
         "choices": [{
@@ -2080,11 +2079,10 @@ fn test_normalize_tool_args_apply_patch_strips_apply_patch_prefix() {
     let out = normalize_tool_args("apply_patch", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
     let patch = parsed["patch"].as_str().unwrap_or("");
-    let input = parsed["input"].as_str().unwrap_or("");
     assert!(patch.starts_with("*** Begin Patch"));
     assert!(!patch.starts_with("apply_patch "));
     assert!(patch.contains("*** Add File: src/new.ts"));
-    assert_eq!(input, patch);
+    assert!(parsed.get("input").is_none());
 }
 
 #[test]
@@ -2095,9 +2093,8 @@ fn test_normalize_tool_args_apply_patch_mirrors_patch_into_input() {
     let out = normalize_tool_args("apply_patch", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
     let patch = parsed["patch"].as_str().unwrap_or("");
-    let input = parsed["input"].as_str().unwrap_or("");
-    assert_eq!(input, patch);
     assert!(patch.contains("*** Add File: src/mirror.ts"));
+    assert!(parsed.get("input").is_none());
 }
 
 #[test]
@@ -2108,11 +2105,25 @@ fn test_normalize_tool_args_apply_patch_repairs_add_file_lines_without_plus_pref
     let out = normalize_tool_args("apply_patch", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
     let patch = parsed["patch"].as_str().unwrap_or("");
-    let input = parsed["input"].as_str().unwrap_or("");
     assert!(patch.contains("*** Add File: test_patch.txt"));
     assert!(patch.contains("+Line 1\n+Line 2\n+Line 3"));
     assert!(!patch.contains("\nLine 1\nLine 2\nLine 3\n"));
-    assert_eq!(input, patch);
+    assert!(parsed.get("input").is_none());
+}
+
+#[test]
+fn test_normalize_tool_args_apply_patch_trims_duplicate_end_patch_marker() {
+    let raw_args = json!({
+        "patch": "*** Begin Patch\n*** Add File: tmp/rcc_e2e_apply_patch_marker.txt\n+E2E_OK\n*** End Patch\n*** End Patch"
+    });
+    let out = normalize_tool_args("apply_patch", Some(&raw_args)).unwrap();
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    let patch = parsed["patch"].as_str().unwrap_or("");
+    assert_eq!(patch.matches("*** End Patch").count(), 1);
+    assert_eq!(
+        patch,
+        "*** Begin Patch\n*** Add File: tmp/rcc_e2e_apply_patch_marker.txt\n+E2E_OK\n*** End Patch"
+    );
 }
 
 #[test]
@@ -4303,6 +4314,82 @@ fn test_govern_response_preserves_allowed_multi_tool_calls() {
         result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
         "apply_patch"
     );
+}
+
+#[test]
+fn test_govern_response_blocks_apply_patch_shell_fallback_write_from_live_minimax_shape() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "__rcc_tool_governance": {
+                "requestedToolNames": ["exec_command", "apply_patch"]
+            },
+            "choices": [{
+                "message": {
+                    "content": "Delete also fails. Patch tool is non-functional. Try a no-op or with explicit working dir using exec_command as a fallback write. Use a wrapper that writes via exec_command with tee/cat <<EOF; fall back is required.",
+                    "tool_calls": [{
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": {
+                                "cmd": "cat > tmp/ap_probe5.txt <<'EOF'\nhello\nEOF\ncat tmp/ap_probe5.txt"
+                            }
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/chat/completions".to_string(),
+        request_id: "req_apply_patch_shell_fallback_live_minimax".to_string(),
+    };
+
+    let result = govern_response(input).unwrap();
+    let choice = &result.governed_payload["choices"][0];
+    let message = &choice["message"];
+    let content = message["content"].as_str().unwrap_or("");
+    assert_eq!(result.summary.disallowed_tool_calls_dropped, 1);
+    assert_eq!(choice["finish_reason"], "stop");
+    assert!(message.get("tool_calls").is_none());
+    assert!(content.contains("APPLY_PATCH_ERROR"));
+    assert!(content.contains("Retry with apply_patch only"));
+    assert!(content.contains("tmp/..."));
+    assert!(content.contains("never /tmp/"));
+    assert!(content.contains("Do not switch to exec_command"));
+}
+
+#[test]
+fn test_govern_response_preserves_read_only_exec_command_when_apply_patch_is_mentioned() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "__rcc_tool_governance": {
+                "requestedToolNames": ["exec_command", "apply_patch"]
+            },
+            "choices": [{
+                "message": {
+                    "content": "I will inspect existing files before preparing apply_patch.",
+                    "tool_calls": [{
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": {"cmd": "cat tmp/ap_probe5.txt"}
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/chat/completions".to_string(),
+        request_id: "req_apply_patch_read_only_exec_allowed".to_string(),
+    };
+
+    let result = govern_response(input).unwrap();
+    let message = &result.governed_payload["choices"][0]["message"];
+    assert_eq!(result.summary.disallowed_tool_calls_dropped, 0);
+    assert_eq!(
+        result.governed_payload["choices"][0]["finish_reason"],
+        "tool_calls"
+    );
+    assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
 }
 
 #[test]

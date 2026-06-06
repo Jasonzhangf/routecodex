@@ -29,7 +29,7 @@ pub(crate) fn trim_to_patch_window(raw: &str) -> String {
         return trimmed.to_string();
     };
     let mut patch = trimmed[start..].trim().to_string();
-    if let Some(end_rel) = patch.rfind("*** End Patch") {
+    if let Some(end_rel) = patch.find("*** End Patch") {
         let end = end_rel + "*** End Patch".len();
         patch = patch[..end].trim().to_string();
     }

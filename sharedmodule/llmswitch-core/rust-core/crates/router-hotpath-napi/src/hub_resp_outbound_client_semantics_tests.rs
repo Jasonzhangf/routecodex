@@ -82,13 +82,34 @@ fn normalize_openai_chat_reasoning_outbound_projects_responses_payload_to_chat_c
 
     let output = normalize_openai_chat_reasoning_outbound(&payload).expect("projected chat");
 
-    assert_eq!(output["object"], Value::String("chat.completion".to_string()));
-    assert_eq!(output["choices"][0]["message"]["content"], Value::String("pong".to_string()));
-    assert_eq!(output["choices"][0]["finish_reason"], Value::String("stop".to_string()));
-    assert_eq!(output["routecodex_response"]["metadata"]["user_tag"], Value::String("safe".to_string()));
-    assert_eq!(output["routecodex_response"]["reasoning"]["effort"], Value::String("medium".to_string()));
-    assert_eq!(output["routecodex_response"]["parallel_tool_calls"], Value::Bool(true));
-    assert_eq!(output["routecodex_response"]["service_tier"], Value::String("default".to_string()));
+    assert_eq!(
+        output["object"],
+        Value::String("chat.completion".to_string())
+    );
+    assert_eq!(
+        output["choices"][0]["message"]["content"],
+        Value::String("pong".to_string())
+    );
+    assert_eq!(
+        output["choices"][0]["finish_reason"],
+        Value::String("stop".to_string())
+    );
+    assert_eq!(
+        output["routecodex_response"]["metadata"]["user_tag"],
+        Value::String("safe".to_string())
+    );
+    assert_eq!(
+        output["routecodex_response"]["reasoning"]["effort"],
+        Value::String("medium".to_string())
+    );
+    assert_eq!(
+        output["routecodex_response"]["parallel_tool_calls"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        output["routecodex_response"]["service_tier"],
+        Value::String("default".to_string())
+    );
 }
 
 #[test]
@@ -104,7 +125,10 @@ fn normalize_responses_usage_projects_responses_only_fields_from_anthropic_cache
     assert_eq!(output["input_tokens"], json!(5076.0));
     assert_eq!(output["output_tokens"], json!(16.0));
     assert_eq!(output["total_tokens"], json!(5092.0));
-    assert_eq!(output["input_tokens_details"]["cached_tokens"], json!(28672.0));
+    assert_eq!(
+        output["input_tokens_details"]["cached_tokens"],
+        json!(28672.0)
+    );
     assert!(output.get("prompt_tokens").is_none());
     assert!(output.get("completion_tokens").is_none());
     assert!(output.get("cache_read_input_tokens").is_none());
@@ -124,7 +148,10 @@ fn normalize_responses_usage_projects_responses_only_fields_from_chat_shape() {
     assert_eq!(output["input_tokens"], json!(640.0));
     assert_eq!(output["output_tokens"], json!(2575.0));
     assert_eq!(output["total_tokens"], json!(3215.0));
-    assert_eq!(output["input_tokens_details"]["cached_tokens"], json!(626.0));
+    assert_eq!(
+        output["input_tokens_details"]["cached_tokens"],
+        json!(626.0)
+    );
     assert!(output.get("prompt_tokens").is_none());
     assert!(output.get("completion_tokens").is_none());
     assert!(output.get("prompt_tokens_details").is_none());
@@ -796,6 +823,61 @@ fn normalize_responses_tool_call_arguments_for_client_bridges_apply_patch_minus_
     assert_eq!(
         output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["arguments"],
         output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["arguments"]
+    );
+}
+
+#[test]
+fn normalize_responses_tool_call_arguments_for_client_projects_freeform_apply_patch_as_raw_patch() {
+    let raw_args = serde_json::to_string(&json!({
+        "patch": "*** Begin Patch\n*** Add File: tmp/apft/01-hello.txt\n+hello from apply_patch\n*** End Patch"
+    }))
+    .unwrap();
+    let payload = json!({
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_apply_patch",
+            "name": "apply_patch",
+            "arguments": raw_args
+        }],
+        "required_action": {
+            "type": "submit_tool_outputs",
+            "submit_tool_outputs": {
+                "tool_calls": [{
+                    "id": "call_apply_patch",
+                    "type": "function",
+                    "name": "apply_patch",
+                    "arguments": raw_args,
+                    "function": {
+                        "name": "apply_patch",
+                        "arguments": raw_args
+                    }
+                }]
+            }
+        }
+    });
+    let tools = json!([{
+        "type": "custom",
+        "name": "apply_patch",
+        "description": "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+        "format": {
+            "type": "grammar",
+            "syntax": "lark",
+            "definition": "start: begin_patch hunk+ end_patch"
+        }
+    }]);
+
+    let output = normalize_responses_tool_call_arguments_for_client(&payload, &tools);
+    let expected =
+        "*** Begin Patch\n*** Add File: tmp/apft/01-hello.txt\n+hello from apply_patch\n*** End Patch";
+
+    assert_eq!(output["output"][0]["arguments"], expected);
+    assert_eq!(
+        output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["arguments"],
+        expected
+    );
+    assert_eq!(
+        output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["arguments"],
+        expected
     );
 }
 

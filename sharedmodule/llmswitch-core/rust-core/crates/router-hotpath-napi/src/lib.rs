@@ -40,26 +40,25 @@ mod hub_pipeline_types;
 mod hub_protocol_spec_semantics;
 mod hub_provider_response_helpers;
 mod hub_reasoning_tool_normalizer;
+mod hub_req_chatprocess_03_governance_boundary;
 mod hub_req_inbound_context_capture;
 mod hub_req_inbound_format_parse;
 mod hub_req_inbound_semantic_lift;
 mod hub_req_inbound_tool_call_normalization;
 mod hub_req_inbound_tool_output_diagnostics;
 mod hub_req_inbound_tool_output_snapshot;
-mod hub_req_chatprocess_03_governance_boundary;
 mod hub_req_outbound_context_merge;
 mod hub_req_outbound_format_build;
+mod hub_resp_chatprocess_03_governance_boundary;
 mod hub_resp_inbound_format_parse;
 mod hub_resp_inbound_sse_decode_semantics;
 mod hub_resp_inbound_sse_stream_sniffer;
-mod hub_resp_chatprocess_03_governance_boundary;
-mod hub_resp_outbound_04_finalize_boundary;
 mod hub_resp_outbound_04_client_payload_boundary;
+mod hub_resp_outbound_04_finalize_boundary;
 mod hub_resp_outbound_client_semantics;
 mod hub_resp_outbound_client_semantics_blocks;
 mod hub_resp_outbound_sse_stream;
 mod hub_semantic_mapper_chat;
-mod server_contracts;
 mod hub_snapshot_hooks;
 mod hub_standardized_bridge;
 mod hub_submit_tool_outputs;
@@ -76,6 +75,7 @@ mod resp_process_stage1_tool_governance_blocks;
 mod resp_process_stage2_finalize;
 mod responses_openai_codec;
 mod responses_reasoning_registry;
+mod server_contracts;
 mod servertool_core_blocks;
 mod servertool_followup_delta;
 mod servertool_skeleton;
@@ -87,7 +87,6 @@ mod shared_chat_request_filters;
 mod shared_compaction_detect;
 mod shared_gemini_tool_utils;
 mod shared_json_utils;
-mod snapshot_tool_failures;
 mod shared_mcp_injection;
 mod shared_metadata_semantics;
 mod shared_openai_message_normalize;
@@ -102,16 +101,17 @@ mod shared_tool_call_id_core;
 mod shared_tool_call_id_manager;
 mod shared_tool_mapping;
 mod shared_tooling;
+mod snapshot_tool_failures;
 mod stop_message_auto_blocks;
 mod streaming_tool_extractor;
 mod thought_signature_validator;
 mod tool_harvester;
 mod virtual_router_engine;
-mod vr_route_04_selection_boundary;
 mod virtual_router_provider_key;
 mod virtual_router_stop_message_actions;
 mod virtual_router_stop_message_instruction;
 mod virtual_router_stop_message_state_codec;
+mod vr_route_04_selection_boundary;
 mod web_search_mode;
 mod windsurf_tool_history_projection;
 use crate::virtual_router_engine::routing::resolve_routing_state_key as resolve_virtual_router_routing_state_key;
@@ -652,8 +652,7 @@ pub fn update_responses_contract_probe_from_sse_chunk_json_bridge(
     probe_json: String,
 ) -> NapiResult<String> {
     shared_responses_response_utils::update_responses_contract_probe_from_sse_chunk_json(
-        chunk_json,
-        probe_json,
+        chunk_json, probe_json,
     )
 }
 
@@ -789,7 +788,6 @@ pub fn run_hub_pipeline_lib_json(input_json: String) -> NapiResult<String> {
     hub_pipeline_lib::run_hub_pipeline_lib_json(input_json)
         .map_err(|error| napi::Error::from_reason(format!("{}: {}", error.code, error.message)))
 }
-
 
 #[napi(js_name = "planSseStreamEffectJson")]
 pub fn plan_sse_stream_effect_json(input_json: String) -> NapiResult<String> {
@@ -991,11 +989,8 @@ pub fn evaluate_stop_schema_gate_json(
     used: u32,
     max_repeats: u32,
 ) -> NapiResult<String> {
-    let decision = stop_message_auto_blocks::evaluate_stop_schema(
-        &assistant_text,
-        used,
-        max_repeats,
-    );
+    let decision =
+        stop_message_auto_blocks::evaluate_stop_schema(&assistant_text, used, max_repeats);
     serde_json::to_string(&decision)
         .map_err(|e| napi::Error::from_reason(format!("serialize StopSchemaGateDecision: {e}")))
 }
