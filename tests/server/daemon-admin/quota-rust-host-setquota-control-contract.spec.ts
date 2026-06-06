@@ -8,6 +8,7 @@ import type { AddressInfo } from 'node:net';
 
 import { registerDaemonAuthRoutes } from '../../../src/server/runtime/http-server/daemon-admin/auth-handler.js';
 import { registerControlRoutes } from '../../../src/server/runtime/http-server/daemon-admin/control-handler.js';
+import { createQuotaManagerAdapter } from '../../../src/manager/modules/quota/quota-adapter.js';
 
 const GATE_MODULE_PATH = new URL('../../../src/server/runtime/http-server/daemon-admin/routecodex-x7e-gate.ts', import.meta.url).pathname;
 
@@ -145,8 +146,18 @@ describe('daemon-admin unified quota.setQuota rust-first contract', () => {
     const daemon = {
       getModule: (id: string) => {
         if (id !== 'quota') return undefined;
+        const controlSurface = createQuotaManagerAdapter({
+          rustHostMutator: {
+            getStatus: () => ({ quotaHostSnapshot: [rustState] }),
+            resetProviderQuota: rustMutations.reset,
+            disableProviderQuota: rustMutations.disable,
+            recoverProviderQuota: rustMutations.recover
+          },
+          quotaRoutingEnabled: true
+        });
         return {
           id: 'quota',
+          getControlSurface: () => controlSurface,
           getCoreQuotaManager: () => ({
             getSnapshot: () => ({ updatedAtMs: Date.now(), providers: { [providerKey]: { providerKey, inPool: true, reason: 'ok' } } }),
             getQuotaView: () => (key: string) => ({ providerKey: key, inPool: true, reason: 'ok' }),

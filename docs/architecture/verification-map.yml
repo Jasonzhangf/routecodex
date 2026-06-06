@@ -21,6 +21,24 @@ verification:
     notes:
       - If provider/client protocol shape changes, add targeted followup entry smoke.
 
+  - feature_id: hub.servertool_cli_projection
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+      - sharedmodule/llmswitch-core/src/servertool
+    contract:
+      - tests/servertool/servertool-cli-projection.spec.ts
+      - tests/servertool/servertool-cli-result-restore.spec.ts
+    integration:
+      - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - Phase 1 must prove intercepted servertools return reasoning + exec_command CLI call and do not invoke server-side followup/reenter.
+      - Submit-tool-output restoration must preserve original model tool call identity for protocol symmetry.
+
   - feature_id: error.provider_failure_policy
     change_risk: high
     unit:
@@ -54,6 +72,40 @@ verification:
       - npm run build:min
     notes:
       - If route instruction parsing changes, include routing instruction regression set.
+
+  - feature_id: quota.unified_control_surface
+    change_risk: medium
+    unit:
+      - src/manager/modules/quota/quota-manager.ts
+      - src/manager/modules/quota/quota-adapter.ts
+    contract:
+      - tests/manager/quota/quota-manager-module.spec.ts
+    integration:
+      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
+      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - daemon-admin and control plane must reuse module-owned control surface and must not grow a second adapter or mutator entrypoint.
+
+  - feature_id: vr.route_availability_floor
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
+    contract:
+      - tests/server/handlers/responses-handler.routing-empty-pool.spec.ts
+    integration:
+      - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
+      - tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:min
+    notes:
+      - Empty-pool closeout belongs to Rust VR selection only; no TS-side recovery or fallback is allowed.
 
   - feature_id: hub.metadata_boundary
     change_risk: high

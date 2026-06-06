@@ -10,7 +10,12 @@ import type {
 } from '../../../types/llmswitch-local-types.js';
 import { x7eGate } from '../../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 import type { QuotaManagerAdapter, QuotaViewEntry } from './quota-adapter.js';
+import { createQuotaManagerAdapter } from './quota-adapter.js';
 import { loadProviderQuotaSnapshot, saveProviderQuotaSnapshot } from '../../quota/provider-quota-store.js';
+import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.js';
+import { canonicalizeProviderKey } from './provider-key-normalization.js';
+
+// feature_id: quota.unified_control_surface
 
 export interface QuotaRecord {
   remainingFraction: number | null;
@@ -70,6 +75,17 @@ class ProviderQuotaStoreAdapter implements QuotaStore {
       new Date(snapshot.savedAtMs || Date.now())
     );
   }
+}
+
+function buildProviderKeyVariants(providerKey: string): string[] {
+  const raw = typeof providerKey === 'string' ? providerKey.trim() : '';
+  if (!raw) {
+    return [];
+  }
+  const canonical = canonicalizeProviderKey(raw);
+  const normalized = canonical.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
+  const denormalized = canonical.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
+  return Array.from(new Set([raw, canonical, normalized, denormalized].filter(Boolean)));
 }
 
 function normalizeSelectionPenalty(state: QuotaState, nowMs: number): number {
@@ -165,7 +181,8 @@ function readRustQuotaHostSnapshotMap(context: ManagerContext | null | undefined
 
 async function hydrateRustQuotaHostSnapshotFromStore(
   context: ManagerContext | null | undefined,
-  store: ProviderQuotaStoreAdapter
+  store: ProviderQuotaStoreAdapter,
+  configuredProviderKeys?: ReadonlySet<string>
 ): Promise<boolean> {
   const rustMutator = getRustQuotaHostMutatorFromContext(context);
   if (!rustMutator) {
@@ -181,6 +198,12 @@ async function hydrateRustQuotaHostSnapshotFromStore(
     const providerKey = typeof state?.providerKey === 'string' ? state.providerKey.trim() : '';
     if (!providerKey) {
       continue;
+    }
+    if (configuredProviderKeys && configuredProviderKeys.size > 0) {
+      const variants = buildProviderKeyVariants(providerKey);
+      if (!variants.some((key) => configuredProviderKeys.has(key))) {
+        continue;
+      }
     }
     if (state?.reason === 'blacklist') {
       const until = typeof state.blacklistUntil === 'number' ? state.blacklistUntil : nowMs + 60_000;
@@ -205,7 +228,8 @@ async function hydrateRustQuotaHostSnapshotFromStore(
 
 async function persistRustQuotaHostSnapshotToStore(
   context: ManagerContext | null | undefined,
-  store: ProviderQuotaStoreAdapter
+  store: ProviderQuotaStoreAdapter,
+  configuredProviderKeys?: ReadonlySet<string>
 ): Promise<boolean> {
   const rustMutator = getRustQuotaHostMutatorFromContext(context);
   if (!rustMutator || typeof rustMutator.getStatus !== 'function') {
@@ -218,6 +242,12 @@ async function persistRustQuotaHostSnapshotToStore(
     const normalized = normalizeRustQuotaState(entry as RustQuotaHostSnapshotEntry);
     if (!normalized) {
       continue;
+    }
+    if (configuredProviderKeys && configuredProviderKeys.size > 0) {
+      const variants = buildProviderKeyVariants(normalized.providerKey);
+      if (!variants.some((key) => configuredProviderKeys.has(key))) {
+        continue;
+      }
     }
     providers[normalized.providerKey] = normalized;
   }
@@ -234,6 +264,38 @@ export class QuotaManagerModule implements ManagerModule {
   private context: ManagerContext | null = null;
   private readonly providerQuotaStore = new ProviderQuotaStoreAdapter();
   private rustQuotaHostReady = false;
+  private controlAdapter: QuotaManagerAdapter | null = null;
+  private readonly configuredProviderKeys = new Set<string>();
+  private configuredProviderKeysLoaded = false;
+
+  private async ensureConfiguredProviderKeysLoaded(): Promise<void> {
+    if (this.configuredProviderKeysLoaded) {
+      return;
+    }
+    this.configuredProviderKeysLoaded = true;
+    const configPath = typeof this.context?.configPath === 'string' ? this.context.configPath.trim() : '';
+    if (!configPath) {
+      return;
+    }
+    try {
+      const loaded = await loadRouteCodexConfig(configPath);
+      const providers = loaded?.userConfig?.virtualrouter
+        && typeof loaded.userConfig.virtualrouter === 'object'
+        && !Array.isArray(loaded.userConfig.virtualrouter)
+        && (loaded.userConfig.virtualrouter as { providers?: unknown }).providers
+        && typeof (loaded.userConfig.virtualrouter as { providers?: unknown }).providers === 'object'
+        && !Array.isArray((loaded.userConfig.virtualrouter as { providers?: unknown }).providers)
+          ? ((loaded.userConfig.virtualrouter as { providers: Record<string, unknown> }).providers)
+          : {};
+      for (const providerKey of Object.keys(providers)) {
+        for (const variant of buildProviderKeyVariants(providerKey)) {
+          this.configuredProviderKeys.add(variant);
+        }
+      }
+    } catch {
+      this.configuredProviderKeysLoaded = false;
+    }
+  }
 
   private async ensureRustQuotaHostHydrated(): Promise<boolean> {
     if (this.rustQuotaHostReady) {
@@ -242,9 +304,12 @@ export class QuotaManagerModule implements ManagerModule {
     if (!getRustQuotaHostMutatorFromContext(this.context)) {
       return false;
     }
-    const hydratedByRust = await hydrateRustQuotaHostSnapshotFromStore(this.context, this.providerQuotaStore).catch(
-      () => false
-    );
+    await this.ensureConfiguredProviderKeysLoaded();
+    const hydratedByRust = await hydrateRustQuotaHostSnapshotFromStore(
+      this.context,
+      this.providerQuotaStore,
+      this.getConfiguredProviderKeysForHydration()
+    ).catch(() => false);
     if (!hydratedByRust) {
       return false;
     }
@@ -254,17 +319,22 @@ export class QuotaManagerModule implements ManagerModule {
 
   async init(context: ManagerContext): Promise<void> {
     this.context = context;
+    this.controlAdapter = null;
+    this.configuredProviderKeys.clear();
+    this.configuredProviderKeysLoaded = false;
     if (!x7eGate.phase1UnifiedQuota) {
       throw new Error('legacy quota runtime mode has been removed; enable unified quota (ROUTECODEX_X7E_PHASE_1_UNIFIED_QUOTA=true)');
     }
     // Hub pipeline may not be initialized during daemon module init.
     // Defer hydration until start/runtime readiness when mutator becomes available.
+    await this.ensureConfiguredProviderKeysLoaded();
     await this.ensureRustQuotaHostHydrated();
   }
 
   async start(): Promise<void> {
     // Manager daemon starts before runtime setup/hub pipeline is fully ready.
     // Do not fail server startup on ordering; hydrate lazily when mutator becomes available.
+    await this.ensureConfiguredProviderKeysLoaded();
     await this.ensureRustQuotaHostHydrated();
     return;
   }
@@ -273,7 +343,11 @@ export class QuotaManagerModule implements ManagerModule {
     if (!(await this.ensureRustQuotaHostHydrated())) {
       return;
     }
-    const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
+    const persistedByRust = await persistRustQuotaHostSnapshotToStore(
+      this.context,
+      this.providerQuotaStore,
+      this.configuredProviderKeys
+    ).catch(() => false);
     if (!persistedByRust) {
       throw new Error('unified quota rust host persist contract unavailable');
     }
@@ -281,6 +355,17 @@ export class QuotaManagerModule implements ManagerModule {
 
   async updateRoutingScope(_scope?: RoutingProviderScope): Promise<void> {
     return;
+  }
+
+  getControlSurface(): QuotaManagerAdapter {
+    if (this.controlAdapter) {
+      return this.controlAdapter;
+    }
+    this.controlAdapter = createQuotaManagerAdapter({
+      rustHostMutator: getRustQuotaHostMutatorFromContext(this.context),
+      quotaRoutingEnabled: this.context?.quotaRoutingEnabled !== false,
+    });
+    return this.controlAdapter;
   }
 
   async refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
@@ -311,12 +396,33 @@ export class QuotaManagerModule implements ManagerModule {
         ? { authType: config.authType as QuotaAuthType }
         : {})
     };
-    void providerKey;
+    for (const variant of buildProviderKeyVariants(providerKey)) {
+      this.configuredProviderKeys.add(variant);
+    }
     void normalizedConfig;
   }
 
   getQuotaView(): (providerKey: string) => QuotaViewEntry | null {
     return this.getQuotaViewReadOnly();
+  }
+
+  getAdminSnapshot(): Record<string, QuotaState> {
+    const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
+    if (rustSnapshot) {
+      if (this.configuredProviderKeys.size < 1) {
+        return rustSnapshot;
+      }
+      return Object.fromEntries(
+        Object.entries(rustSnapshot).filter(([providerKey]) =>
+          buildProviderKeyVariants(providerKey).some((key) => this.configuredProviderKeys.has(key))
+        )
+      );
+    }
+    return {};
+  }
+
+  private getConfiguredProviderKeysForHydration(): ReadonlySet<string> | undefined {
+    return this.configuredProviderKeys.size > 0 ? this.configuredProviderKeys : undefined;
   }
 
   getQuotaViewReadOnly(): (providerKey: string) => QuotaViewEntry | null {
@@ -325,6 +431,12 @@ export class QuotaManagerModule implements ManagerModule {
       return (providerKey: string): QuotaViewEntry | null => {
         const key = typeof providerKey === 'string' ? providerKey.trim() : '';
         if (!key) {
+          return null;
+        }
+        if (
+          this.configuredProviderKeys.size > 0 &&
+          !buildProviderKeyVariants(key).some((variant) => this.configuredProviderKeys.has(variant))
+        ) {
           return null;
         }
         const state = rustSnapshot[key];
@@ -350,19 +462,15 @@ export class QuotaManagerModule implements ManagerModule {
     return () => null;
   }
 
-  getAdminSnapshot(): Record<string, QuotaState> {
-    const rustSnapshot = readRustQuotaHostSnapshotMap(this.context);
-    if (rustSnapshot) {
-      return rustSnapshot;
-    }
-    return {};
-  }
-
   async persistNow(): Promise<void> {
     if (!(await this.ensureRustQuotaHostHydrated())) {
       throw new Error('unified quota requires hubPipeline virtual router quota host mutator');
     }
-    const persistedByRust = await persistRustQuotaHostSnapshotToStore(this.context, this.providerQuotaStore).catch(() => false);
+    const persistedByRust = await persistRustQuotaHostSnapshotToStore(
+      this.context,
+      this.providerQuotaStore,
+      this.configuredProviderKeys
+    ).catch(() => false);
     if (!persistedByRust) {
       throw new Error('unified quota rust host persist contract unavailable');
     }
@@ -403,5 +511,17 @@ export class QuotaManagerModule implements ManagerModule {
       return state ? { providerKey: options.providerKey, state } : { providerKey: options.providerKey, state: null };
     }
     return { providerKey: options.providerKey, state: null };
+  }
+
+  async clearCooldown(providerKey: string): Promise<unknown> {
+    return this.getControlSurface().clearCooldown(providerKey);
+  }
+
+  async restoreNow(providerKey: string): Promise<unknown> {
+    return this.getControlSurface().restoreNow(providerKey);
+  }
+
+  async setQuota(options: { providerKey: string; quota: number; reason?: string }): Promise<unknown> {
+    return this.getControlSurface().setQuota(options);
   }
 }

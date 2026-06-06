@@ -34,6 +34,41 @@ owners:
     notes:
       - Rust owns orchestration semantics; TS only bridge/reentry/IO.
 
+  - feature_id: hub.servertool_cli_projection
+    status: planned
+    summary: servertool execution migrates to client-visible exec_command CLI projection with ticket-backed result restoration
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    canonical_types:
+      - ServertoolCliProjection01Planned
+      - ServertoolCliResult02Captured
+      - ServertoolCliResult03RestoredToolResult
+    canonical_builders:
+      - build_servertool_cli_projection_01_from_hub_resp_chatprocess_03
+      - capture_servertool_cli_result_02_from_submit_tool_outputs
+      - restore_servertool_cli_result_03_to_model_tool_result
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - sharedmodule/llmswitch-core/src/servertool
+      - src/commands
+      - src/server/handlers
+      - docs/design/servertool-cli-projection-migration.md
+    forbidden_paths:
+      - src/providers
+      - src/providers/profile
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/servertool/servertool-cli-projection.spec.ts
+      - tests/servertool/servertool-cli-result-restore.spec.ts
+      - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
+    required_gates:
+      - npm run build:min
+      - npm run verify:architecture-ci
+    migration_target: rust
+    notes:
+      - Phase 1 keeps existing injection/interception but projects execution to real client exec_command.
+      - CLI execution path must not call server-side followup/reenter for migrated flows.
+      - `apply_patch` is excluded; it remains native/freeform client tooling.
+
   - feature_id: error.provider_failure_policy
     status: active
     summary: provider error cataloging, runtime classification, router policy application
@@ -92,6 +127,71 @@ owners:
     migration_target: rust
     notes:
       - VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.
+
+  - feature_id: quota.unified_control_surface
+    status: active
+    summary: quota admin/control and startup hydration must stay config-scoped and enter one module-owned control surface only
+    owner_module: src/manager/modules/quota
+    canonical_types:
+      - QuotaManagerModule
+      - QuotaManagerAdapter
+    canonical_builders:
+      - getControlSurface
+      - clearCooldown
+      - restoreNow
+      - setQuota
+      - resetProvider
+      - recoverProvider
+      - disableProvider
+    allowed_paths:
+      - src/manager/modules/quota
+      - src/server/runtime/http-server/daemon-admin
+      - docs
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/manager/quota/quota-manager-module.spec.ts
+      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
+      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
+    required_gates:
+      - npm run verify:architecture-ci
+    migration_target: rust
+    notes:
+      - daemon-admin and control-handler must not create their own adapter or call rust mutator directly.
+      - TS quota module is lifecycle/persistence/control bridge only; runtime quota truth remains in Rust quota host.
+      - startup hydration and persist must ignore providers absent from current config.toml materialized provider set.
+
+  - feature_id: vr.route_availability_floor
+    status: active
+    summary: route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine
+    canonical_types:
+      - VrRoute04SelectedTarget
+    canonical_builders:
+      - build_unavailable_providers_details
+      - collect_recoverable_cooldown_for_key
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+      - sharedmodule/llmswitch-core/src/router/virtual-router
+      - docs
+    forbidden_paths:
+      - src/server/runtime/http-server/daemon-admin
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - src/manager/modules/quota
+    required_tests:
+      - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
+      - tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts
+      - tests/server/handlers/responses-handler.routing-empty-pool.spec.ts
+    required_gates:
+      - npm run verify:architecture-ci
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - non-empty routing invariant belongs to Rust Virtual Router selection only.
+      - do not patch empty-pool behavior in handlers, executors, adapters, or provider TS runtime.
+      - route order is high-priority pools -> low-priority pools -> default pool; if default pool has providers, routing must not return empty.
 
   - feature_id: hub.metadata_boundary
     status: active

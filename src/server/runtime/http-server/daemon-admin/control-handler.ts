@@ -16,7 +16,6 @@ import {
   extractRoutingSnapshot
 } from './providers-handler-routing-utils.js';
 import { x7eGate, getGateState } from './routecodex-x7e-gate.js';
-import { createQuotaManagerAdapter } from '../../../../manager/modules/quota/quota-adapter.js';
 import {
   getServerToolRuntimeState,
   readServerToolStatsSnapshot,
@@ -206,22 +205,23 @@ function getQuotaAdapter(options: DaemonAdminRouteOptions): any | null {
   if (!quotaModule) {
     return null;
   }
-  const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
-  const virtualRouter = hubPipeline && typeof (hubPipeline as any).getVirtualRouter === 'function'
-    ? (hubPipeline as any).getVirtualRouter()
+  return typeof quotaModule.getControlSurface === 'function'
+    ? quotaModule.getControlSurface()
     : null;
-  return createQuotaManagerAdapter({
-    rustHostMutator: virtualRouter,
-    quotaRoutingEnabled: true
-  });
 }
 
 function isRustQuotaMutatorUnavailableResult(result: unknown): boolean {
+  const reason = result && typeof result === 'object'
+    ? (result as { reason?: unknown }).reason
+    : undefined;
   return Boolean(
     result
     && typeof result === 'object'
     && (result as { ok?: unknown }).ok === false
-    && (result as { reason?: unknown }).reason === 'rust_quota_host_mutator_unavailable'
+    && (
+      reason === 'rust_quota_host_mutator_unavailable'
+      || (x7eGate.phase1UnifiedQuota && reason === 'no_quota_manager_available')
+    )
   );
 }
 

@@ -12,6 +12,7 @@
 - `function-map.yml`
   - 记录关键功能的 `feature_id -> owner -> canonical types/builders -> allowed/forbidden paths -> required tests -> migration target`
   - 用于快速定位唯一修改点，防止重复实现和多处同时改
+  - quota 生命周期、统一 control surface、`route non-empty` 这类全局不变量也必须显式登记，避免散落到 handler/executor/adapter
 
 - `verification-map.yml`
   - 记录关键功能的最小验证栈：`unit / contract / integration / smoke / build`

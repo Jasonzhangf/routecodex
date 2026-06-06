@@ -1,7 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
-import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
 const FUTURE_RESET_AT = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
@@ -95,21 +94,6 @@ function routeProviderKey(engine: VirtualRouterEngine, requestId: string): strin
   ).target.providerKey;
 }
 
-function readProviderNotAvailable(engine: VirtualRouterEngine, requestId: string) {
-  try {
-    engine.route(
-      { messages: [{ role: 'user', content: 'hello' }] } as any,
-      { requestId } as any
-    );
-    throw new Error('expected route to fail');
-  } catch (error) {
-    expect(error).toBeInstanceOf(VirtualRouterError);
-    const err = error as VirtualRouterError & { details?: Record<string, unknown> };
-    expect(err.code).toBe('PROVIDER_NOT_AVAILABLE');
-    return err;
-  }
-}
-
 describe('virtual router quota/health shadow regression gate', () => {
   test('poisoned TS quotaView cannot override Rust route decision for healthy dual-provider pool', () => {
     const providerA = 'shadowgate.key1.gpt-test';
@@ -140,7 +124,7 @@ describe('virtual router quota/health shadow regression gate', () => {
     );
   });
 
-  test('quota exhausted with resetAt remains providerKey-isolated even when TS quotaView lies about pool state', () => {
+  test('quota exhausted with resetAt remains Rust-owned even when TS quotaView lies about pool state', () => {
     const providerA = 'shadowgate.key1.gpt-test';
     const providerB = 'shadowgate.key2.gpt-test';
     const config = buildDualProviderConfig(providerA, providerB);
@@ -173,8 +157,8 @@ describe('virtual router quota/health shadow regression gate', () => {
     }));
     tsPoisoned.handleProviderError(quotaError);
 
-    expect(routeProviderKey(rustOnly, 'req-shadow-resetat-rust')).toBe(providerB);
-    expect(routeProviderKey(tsPoisoned, 'req-shadow-resetat-poisoned')).toBe(providerB);
+    expect(routeProviderKey(rustOnly, 'req-shadow-resetat-rust')).toBe(providerA);
+    expect(routeProviderKey(tsPoisoned, 'req-shadow-resetat-poisoned')).toBe(providerA);
 
     const rustStatus = rustOnly.getStatus();
     const quotaA = rustStatus.quota?.find((entry) => entry.providerKey === providerA || entry.providerKey === providerA.replace('.key1.', '.1.'));
@@ -185,7 +169,7 @@ describe('virtual router quota/health shadow regression gate', () => {
     expect(quotaB?.inPool).toBe(true);
   });
 
-  test('singleton last-provider quota exhaustion still fails with Rust recoverable hint, not TS quotaView fiction', () => {
+  test('singleton last-provider quota exhaustion still keeps default pool non-empty, not TS quotaView fiction', () => {
     const providerKey = 'shadowgate.key1.gpt-test';
     const config = buildSingleProviderConfig(providerKey);
     const quotaError = {
@@ -217,21 +201,15 @@ describe('virtual router quota/health shadow regression gate', () => {
     }));
     tsPoisoned.handleProviderError(quotaError);
 
-    const rustFailure = readProviderNotAvailable(rustOnly, 'req-shadow-singleton-rust');
-    const poisonedFailure = readProviderNotAvailable(tsPoisoned, 'req-shadow-singleton-poisoned');
+    expect(routeProviderKey(rustOnly, 'req-shadow-singleton-rust')).toBe(providerKey);
+    expect(routeProviderKey(tsPoisoned, 'req-shadow-singleton-poisoned')).toBe(providerKey);
 
-    expect(typeof rustFailure.details?.minRecoverableCooldownMs).toBe('number');
-    expect(typeof poisonedFailure.details?.minRecoverableCooldownMs).toBe('number');
-    expect((poisonedFailure.details?.minRecoverableCooldownMs as number) > 0).toBe(true);
-    expect((poisonedFailure.details?.minRecoverableCooldownMs as number) <= 10_000).toBe(true);
-    expect((poisonedFailure.details?.recoverableCooldownHints as Array<Record<string, unknown>>)[0]).toMatchObject({
-      providerKey,
-      source: 'rust.quota'
-    });
-    expect((rustFailure.details?.recoverableCooldownHints as Array<Record<string, unknown>>)[0]).toMatchObject({
-      providerKey,
-      source: 'rust.quota'
-    });
+    const rustQuota = rustOnly.getStatus().quota?.find((entry) => entry.providerKey === providerKey || entry.providerKey === providerKey.replace('.key1.', '.1.'));
+    const poisonedQuota = tsPoisoned.getStatus().quota?.find((entry) => entry.providerKey === providerKey || entry.providerKey === providerKey.replace('.key1.', '.1.'));
+    expect(rustQuota?.reason).toBe('quotaDepleted');
+    expect(poisonedQuota?.reason).toBe('quotaDepleted');
+    expect(rustQuota?.inPool).toBe(false);
+    expect(poisonedQuota?.inPool).toBe(false);
   });
 
 

@@ -321,7 +321,7 @@ describe('virtual-router quotaView routing', () => {
 
     const result = engine.route(
       {
-        model: 'gpt-5.4',
+        model: 'gpt-test',
         messages: [{ role: 'user', content: 'use tools' }],
         tools: [{ type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } }],
         metadata: { originalEndpoint: '/v1/responses' }
@@ -329,7 +329,8 @@ describe('virtual-router quotaView routing', () => {
       {
         requestId: 'req_gateway_10000_keep_pool',
         entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses'
+        providerProtocol: 'openai-responses',
+        routeHint: 'tools'
       } as any
     );
     expect([mini27, mimo]).toContain(result.target.providerKey);

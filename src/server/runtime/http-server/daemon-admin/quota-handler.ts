@@ -4,12 +4,25 @@ import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import { x7eGate, getGateState } from './routecodex-x7e-gate.js';
 import type { ManagerModule } from '../../../../manager/types.js';
 import type { QuotaManagerModule, QuotaRecord, QuotaManagerAdapter } from '../../../../manager/modules/quota/index.js';
-import { createQuotaManagerAdapter } from '../../../../manager/modules/quota/quota-adapter.js';
 import { formatUnknownError } from '../../../../utils/common-utils.js';
-import { canonicalizeProviderKey } from '../../../../manager/modules/quota/provider-key-normalization.js';
 
 const QUOTA_HANDLER_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const quotaHandlerNonBlockingLogState = new Map<string, number>();
+
+function isRustQuotaMutatorUnavailableResult(result: unknown): boolean {
+  const reason = result && typeof result === 'object'
+    ? (result as { reason?: unknown }).reason
+    : undefined;
+  return Boolean(
+    result
+    && typeof result === 'object'
+    && (result as { ok?: unknown }).ok === false
+    && (
+      reason === 'rust_quota_host_mutator_unavailable'
+      || (x7eGate.phase1UnifiedQuota && reason === 'no_quota_manager_available')
+    )
+  );
+}
 
 
 function logQuotaHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
@@ -41,102 +54,9 @@ function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerAdapter |
     return null;
   }
   const quotaModule = mod as unknown as QuotaManagerModule;
-
-  const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
-  const getVirtualRouter = hubPipeline && typeof hubPipeline === 'object'
-    ? (hubPipeline as { getVirtualRouter?: () => unknown | null }).getVirtualRouter
+  return typeof quotaModule.getControlSurface === 'function'
+    ? quotaModule.getControlSurface()
     : null;
-  const virtualRouter = typeof getVirtualRouter === 'function' ? getVirtualRouter() : null;
-
-  return createQuotaManagerAdapter({
-    rustHostMutator: virtualRouter && typeof virtualRouter === 'object' ? (virtualRouter as any) : null,
-    quotaRoutingEnabled: true
-  });
-}
-
-type RustQuotaHostSnapshotEntry = {
-  providerKey?: unknown;
-  inPool?: unknown;
-  reason?: unknown;
-  authIssue?: unknown;
-  authType?: unknown;
-  priorityTier?: unknown;
-  cooldownUntil?: unknown;
-  blacklistUntil?: unknown;
-  consecutiveErrorCount?: unknown;
-};
-
-type RustQuotaHostMutator = {
-  resetProviderQuota?(providerKey: string): unknown;
-  recoverProviderQuota?(providerKey: string): unknown;
-  disableProviderQuota?(providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number): unknown;
-};
-
-function getRustQuotaHostMutator(options: DaemonAdminRouteOptions): RustQuotaHostMutator | null {
-  const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
-  if (!hubPipeline || typeof hubPipeline !== 'object') {
-    return null;
-  }
-  const getVirtualRouter = (hubPipeline as { getVirtualRouter?: () => unknown | null }).getVirtualRouter;
-  if (typeof getVirtualRouter !== 'function') {
-    return null;
-  }
-  const virtualRouter = getVirtualRouter();
-  if (!virtualRouter || typeof virtualRouter !== 'object') {
-    return null;
-  }
-  const mutator = virtualRouter as RustQuotaHostMutator;
-  if (
-    typeof mutator.resetProviderQuota !== 'function'
-    && typeof mutator.recoverProviderQuota !== 'function'
-    && typeof mutator.disableProviderQuota !== 'function'
-  ) {
-    return null;
-  }
-  return mutator;
-}
-
-function getRustQuotaHostSnapshot(options: DaemonAdminRouteOptions): Record<string, RustQuotaHostSnapshotEntry> | null {
-  const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
-  if (!hubPipeline || typeof hubPipeline !== 'object') {
-    return null;
-  }
-  const getVirtualRouter = (hubPipeline as { getVirtualRouter?: () => unknown | null }).getVirtualRouter;
-  if (typeof getVirtualRouter !== 'function') {
-    return null;
-  }
-  const virtualRouter = getVirtualRouter();
-  if (!virtualRouter || typeof virtualRouter !== 'object') {
-    return null;
-  }
-  const getStatus = (virtualRouter as { getStatus?: () => unknown }).getStatus;
-  if (typeof getStatus !== 'function') {
-    return null;
-  }
-  try {
-    const status = getStatus() as { quotaHostSnapshot?: unknown } | null;
-    const snapshot = Array.isArray(status?.quotaHostSnapshot) ? status?.quotaHostSnapshot : null;
-    if (!snapshot || snapshot.length === 0) {
-      return null;
-    }
-    const out: Record<string, RustQuotaHostSnapshotEntry> = {};
-    for (const entry of snapshot) {
-      if (!entry || typeof entry !== 'object') {
-        continue;
-      }
-      const providerKey = typeof (entry as { providerKey?: unknown }).providerKey === 'string'
-        ? canonicalizeProviderKey(String((entry as { providerKey?: unknown }).providerKey))
-        : '';
-      if (!providerKey) {
-        continue;
-      }
-      out[providerKey] = entry as RustQuotaHostSnapshotEntry;
-    }
-    return Object.keys(out).length > 0 ? out : null;
-  } catch (error: unknown) {
-    logQuotaHandlerNonBlockingError('getRustQuotaHostSnapshot', error);
-    return null;
-  }
 }
 
 function getQuotaRefreshModule(options: DaemonAdminRouteOptions): (QuotaManagerModule & { refreshNow?: () => Promise<unknown> }) | null {
@@ -235,8 +155,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     try {
       const quotaAdapter = getQuotaModule(options);
-      const rustQuotaHostSnapshot = x7eGate.phase1UnifiedQuota ? getRustQuotaHostSnapshot(options) : null;
-      const snapshot = rustQuotaHostSnapshot ?? (quotaAdapter ? quotaAdapter.getAdminSnapshot() : {});
+      const snapshot = quotaAdapter ? quotaAdapter.getAdminSnapshot() : {};
 
       // Phase 2: Unified control plane DTO
       const unifiedDto = x7eGate.phase2UnifiedControl;
@@ -278,17 +197,11 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     try {
-      const rustMutator = x7eGate.phase1UnifiedQuota ? getRustQuotaHostMutator(options) : null;
-      if (typeof rustMutator?.resetProviderQuota === 'function') {
-        await Promise.resolve(rustMutator.resetProviderQuota(providerKey));
-        res.status(200).json({ ok: true, providerKey, action: 'reset', result: { ok: true, source: 'rust' } });
-        return;
-      }
-      if (x7eGate.phase1UnifiedQuota) {
+      const result = await mod.resetProvider(providerKey);
+      if (isRustQuotaMutatorUnavailableResult(result)) {
         res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
         return;
       }
-      const result = await mod.resetProvider(providerKey);
       res.status(200).json({ ok: true, providerKey, action: 'reset', result });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -309,17 +222,11 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     try {
-      const rustMutator = x7eGate.phase1UnifiedQuota ? getRustQuotaHostMutator(options) : null;
-      if (typeof rustMutator?.recoverProviderQuota === 'function') {
-        await Promise.resolve(rustMutator.recoverProviderQuota(providerKey));
-        res.status(200).json({ ok: true, providerKey, action: 'recover', result: { ok: true, source: 'rust' } });
-        return;
-      }
-      if (x7eGate.phase1UnifiedQuota) {
+      const result = await mod.recoverProvider(providerKey);
+      if (isRustQuotaMutatorUnavailableResult(result)) {
         res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
         return;
       }
-      const result = await mod.recoverProvider(providerKey);
       res.status(200).json({ ok: true, providerKey, action: 'recover', result });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -355,24 +262,11 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     try {
-      const rustMutator = x7eGate.phase1UnifiedQuota ? getRustQuotaHostMutator(options) : null;
-      if (typeof rustMutator?.disableProviderQuota === 'function') {
-        await Promise.resolve(rustMutator.disableProviderQuota(providerKey, mode, durationMs));
-        res.status(200).json({
-          ok: true,
-          providerKey,
-          action: 'disable',
-          mode,
-          durationMs,
-          result: { ok: true, source: 'rust' }
-        });
-        return;
-      }
-      if (x7eGate.phase1UnifiedQuota) {
+      const result = await mod.disableProvider({ providerKey, mode, durationMs });
+      if (isRustQuotaMutatorUnavailableResult(result)) {
         res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
         return;
       }
-      const result = await mod.disableProvider({ providerKey, mode, durationMs });
       res.status(200).json({ ok: true, providerKey, action: 'disable', mode, durationMs, result });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);

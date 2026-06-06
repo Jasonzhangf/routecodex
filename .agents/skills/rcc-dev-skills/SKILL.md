@@ -25,6 +25,10 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Snapshot/errorsample 里的工具失败识别也属于工具语义：`messages/input/tool_call_id/call_id` 扫描、工具名归一、apply_patch/exec/shell 错误分类必须 Rust-only；TS 只能调用 native 并写样本。
 - Virtual Router 只路由，不修 payload；Provider 只 transport/auth/provider 内部兼容，不做 Hub 工具治理；direct/provider passthrough 禁止进入 Hub Pipeline conversion。
 - 发现违规必须先写红测，红测要覆盖真实 Hub Pipeline stage 或 HTTP 黑盒入口；禁止 mock 私有方法冒充黑盒。
+- quota 控制面真源：`QuotaManagerModule.getControlSurface()` 是 daemon-admin / control plane 唯一入口；`quota-handler.ts`、`control-handler.ts` 禁止自建 `createQuotaManagerAdapter(...)`，禁止直连 Rust mutator。
+- quota 初始化硬规则：启动时只能按当前 `config.toml` materialized `virtualrouter.providers` 初始化 quota；未配置 provider 禁止 hydrate/persist/参与本轮 quota 生命周期。
+- “路由不能空” 属于 Rust Virtual Router selection owner；禁止在 handler / executor / quota adapter / provider runtime TS 层补 fallback、补 recover、补第二套 candidate 逻辑。
+- route availability floor 细则：命中顺序固定为高优先级池 → 低优先级池 → `default` 池；只要 `default` 池有 provider，就不能返回空池，且 default 最后一跳只能由 Rust selection 保留。
 
 ## 标准契约流水线定位法（先看 AGENTS.md 图）
 
@@ -1904,3 +1908,12 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 后续接手 Phase 5 必读: 新建 `scripts/ci/hardcode-audit.mjs` 扫 `src/` + `sharedmodule/llmswitch-core/src/` 找新增 provider key 字符串硬编码; package.json 加 `verify:hardcode` 串接 silent-failure-audit + hardcode-audit + hub-deterministic-audit + llmswitch-rustification-audit + check-file-line-limit。
 - cargo test 副作用污染模式: 跑 `cargo test` 后会触碰 6-12 个 timestamp/auto-gen 文件, commit 前必须 `git status --porcelain` + 逐个 `git restore -- <path>` 排除; 唯一真实改动在 `health.rs`, 但 cargo 会再次标 M, 需 `git restore -- sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs` 恢复 commit state。
 - plan 真源: `docs/goals/hardcode-fallback-arch-audit-plan.md`; 实施 commit 顺序: `2395b253a` (Phase 1) → `2eac128ef` (Phase 2) → `72a884092` (Phase 3 TS) → `7295f0e4` (Phase 3 Rust) → Phase 4-6 待续。
+
+### 2026-06-06 5555 route_failed / metadata carrier 精华
+- 看到 5555 `No available providers after applying routing instructions` 时，先查 `~/.rcc/sessions/provider-health.json` 与 `~/.rcc/sessions/127.0.0.1_5555/provider-health.json`；若 cooldown 为空且配置池非空，不要归因 health，继续按最新样本/diag 追下一个 blocker。
+- OpenAI Responses provider 顶层 `metadata` 是合法 provider 响应字段，但进入 Hub response normal payload 前必须移入 `Meta*` carrier（当前为 `normalized_metadata.providerResponseMetadata`）；禁止让它进入 `HubRespInbound02Parsed` normal payload，也禁止在 client projection 静默 strip。
+- 全局安装隔离构建失败若提示 llmswitch-core required output 缺失，先核对 required output 是否仍有源码 owner；`dist/bridge/routecodex-adapter.js` 已是旧契约，不得恢复死文件来满足校验。
+- SSE 线上复测必须显式带 `Accept: text/event-stream`；否则日志 `acceptsSse=false` 只能证明客户端未声明 SSE，不可当作 SSE 回归。
+- longcontext token-threshold 不能把非空 configured pool 筛成 `PROVIDER_NOT_AVAILABLE`：当 `context_hard_limit=false` 时，overflow-context provider 仍必须可被选中，由上游真实尝试/失败显式暴露；修点在 Rust Virtual Router selection，不在 TS executor/handler 补 provider。
+- Client SSE guard 禁止按字段名裸拦 `metadata`：OpenAI Responses SSE event 顶层 `metadata:{}` 和 `response.metadata` 是公开协议字段；只在 metadata 值含 `routeHint/providerKey/__routecodex*/__rt*` 等内部 carrier shape 时 fail-fast。
+- Servertool 执行迁移方向：Phase 1 保留注入/拦截，但拦截后必须投影为真实客户端 `exec_command` CLI (`routecodex servertool run --ticket <id>`)，submit 回来后按 ticket 恢复原 model tool identity；这是 result restoration，不是 followup。详细设计见 `docs/design/servertool-cli-projection-migration.md`。

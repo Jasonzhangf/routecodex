@@ -3,6 +3,7 @@ import { jest } from '@jest/globals';
 const BRIDGE_MODULE_PATH = '../../../src/modules/llmswitch/bridge.js';
 const GATE_MODULE_PATH = new URL('../../../src/server/runtime/http-server/daemon-admin/routecodex-x7e-gate.ts', import.meta.url).pathname;
 const QUOTA_STORE_MODULE_PATH = '../../../src/manager/quota/provider-quota-store.js';
+const CONFIG_LOADER_MODULE_PATH = '../../../src/config/routecodex-config-loader.js';
 
 describe('QuotaManagerModule', () => {
   afterEach(() => {
@@ -440,5 +441,154 @@ describe('QuotaManagerModule', () => {
       cooldownUntil: 789,
       consecutiveErrorCount: 3
     });
+  });
+
+  it('reuses one unified control surface and routes clearCooldown/restoreNow/setQuota through it', async () => {
+    const coreManager = {
+      hydrateFromStore: async () => {},
+      registerProviderStaticConfig: jest.fn(),
+      onProviderError: jest.fn(),
+      onProviderSuccess: jest.fn(),
+      getSnapshot: jest.fn(() => ({ updatedAtMs: Date.now(), providers: {} })),
+      persistNow: async () => {}
+    };
+
+    jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      createCoreQuotaManager: async () => coreManager,
+      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
+      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
+    }));
+    jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
+      x7eGate: {
+        phase1UnifiedQuota: true
+      }
+    }));
+
+    const rustCalls: Array<{ kind: string; args: any[] }> = [];
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
+    const mod = new QuotaManagerModule();
+    await mod.init({
+      serverId: 'test',
+      getHubPipeline: () => ({
+        getVirtualRouter: () => ({
+          getStatus: () => ({ quotaHostSnapshot: [] }),
+          resetProviderQuota: (...args: any[]) => void rustCalls.push({ kind: 'reset', args }),
+          recoverProviderQuota: (...args: any[]) => void rustCalls.push({ kind: 'recover', args }),
+          disableProviderQuota: (...args: any[]) => void rustCalls.push({ kind: 'disable', args })
+        })
+      })
+    });
+    rustCalls.length = 0;
+
+    const controlSurface1 = mod.getControlSurface();
+    const controlSurface2 = mod.getControlSurface();
+    expect(controlSurface1).toBe(controlSurface2);
+
+    await mod.clearCooldown('quota.key1.gpt-test');
+    await mod.restoreNow('quota.key1.gpt-test');
+    await mod.setQuota({ providerKey: 'quota.key1.gpt-test', quota: 0, reason: 'gate-test' });
+
+    expect(rustCalls).toHaveLength(3);
+    expect(rustCalls[0]).toEqual({ kind: 'recover', args: ['quota.key1.gpt-test'] });
+    expect(rustCalls[1]).toEqual({ kind: 'reset', args: ['quota.key1.gpt-test'] });
+    expect(rustCalls[2].kind).toBe('disable');
+    expect(rustCalls[2].args[0]).toBe('quota.key1.gpt-test');
+    expect(rustCalls[2].args[1]).toBe('cooldown');
+    expect(typeof rustCalls[2].args[2]).toBe('number');
+    expect(rustCalls[2].args[2]).toBeGreaterThan(0);
+    expect(rustCalls[2].args[2]).toBeLessThanOrEqual(300000);
+  });
+
+  it('hydrates quota only for providers present in current config.toml materialization', async () => {
+    const loadedSnapshot = {
+      version: 1,
+      updatedAt: new Date(123).toISOString(),
+      providers: {
+        'configured.key1.gpt-test': {
+          providerKey: 'configured.key1.gpt-test',
+          inPool: false,
+          reason: 'cooldown',
+          authType: 'apikey',
+          authIssue: null,
+          priorityTier: 100,
+          cooldownUntil: Date.now() + 60_000,
+          blacklistUntil: null,
+          lastErrorSeries: 'E429',
+          lastErrorCode: 'QUOTA_DEPLETED',
+          lastErrorAtMs: Date.now(),
+          consecutiveErrorCount: 1
+        },
+        'stale.key1.gpt-test': {
+          providerKey: 'stale.key1.gpt-test',
+          inPool: false,
+          reason: 'blacklist',
+          authType: 'apikey',
+          authIssue: null,
+          priorityTier: 100,
+          cooldownUntil: null,
+          blacklistUntil: Date.now() + 60_000,
+          lastErrorSeries: 'EFATAL',
+          lastErrorCode: 'OPERATOR_BLACKLIST',
+          lastErrorAtMs: Date.now(),
+          consecutiveErrorCount: 2
+        }
+      }
+    };
+
+    jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      createCoreQuotaManager: async () => ({
+        hydrateFromStore: async () => {},
+        registerProviderStaticConfig: jest.fn(),
+        onProviderError: jest.fn(),
+        onProviderSuccess: jest.fn(),
+        getSnapshot: jest.fn(() => ({ updatedAtMs: Date.now(), providers: {} })),
+        persistNow: async () => {}
+      }),
+      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
+      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
+    }));
+    jest.unstable_mockModule(QUOTA_STORE_MODULE_PATH, () => ({
+      loadProviderQuotaSnapshot: jest.fn(async () => loadedSnapshot),
+      saveProviderQuotaSnapshot: jest.fn(async () => {}),
+      appendProviderErrorEvent: jest.fn(async () => {}),
+      sanitizeQuotaStateForSnapshot: jest.fn((state: any) => state)
+    }));
+    jest.unstable_mockModule(CONFIG_LOADER_MODULE_PATH, () => ({
+      loadRouteCodexConfig: jest.fn(async () => ({
+        configPath: '/tmp/test-config.toml',
+        userConfig: {
+          virtualrouter: {
+            providers: {
+              'configured.key1.gpt-test': {}
+            }
+          }
+        },
+        providerProfiles: { profiles: [], byId: {} }
+      }))
+    }));
+    jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
+      x7eGate: {
+        phase1UnifiedQuota: true
+      }
+    }));
+
+    const rustCalls: Array<{ kind: string; args: any[] }> = [];
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
+    const mod = new QuotaManagerModule();
+    await mod.init({
+      serverId: 'test',
+      configPath: '/tmp/test-config.toml',
+      getHubPipeline: () => ({
+        getVirtualRouter: () => ({
+          getStatus: () => ({ quotaHostSnapshot: [] }),
+          resetProviderQuota: (...args: any[]) => void rustCalls.push({ kind: 'reset', args }),
+          recoverProviderQuota: (...args: any[]) => void rustCalls.push({ kind: 'recover', args }),
+          disableProviderQuota: (...args: any[]) => void rustCalls.push({ kind: 'disable', args })
+        })
+      })
+    });
+
+    expect(rustCalls.some((entry) => entry.args[0] === 'configured.key1.gpt-test')).toBe(true);
+    expect(rustCalls.some((entry) => entry.args[0] === 'stale.key1.gpt-test')).toBe(false);
   });
 });
