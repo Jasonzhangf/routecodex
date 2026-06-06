@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { executeServertoolCliTicket } from '../../../sharedmodule/llmswitch-core/src/servertool/cli-executor.js';
+import { executeServertoolCliTicket } from 'rcc-llmswitch-core/v2/servertool/cli-executor';
 
 export function createServertoolCommand(
   program: Command,
