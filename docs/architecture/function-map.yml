@@ -58,6 +58,7 @@ owners:
       - src/server/runtime/http-server/executor
     required_tests:
       - tests/servertool/servertool-cli-projection.spec.ts
+      - tests/servertool/servertool-cli-execution.spec.ts
       - tests/servertool/servertool-cli-result-restore.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
     required_gates:
