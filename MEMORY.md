@@ -2255,3 +2255,8 @@ Tags: hub-pipeline-rust-closeout, docs-contract, retired-stage-wrapper, residue-
 - Deleted files: `hub-pipeline-mutable-record-utils.ts`, `target-utils.ts`, `chat-process-governance-finalize.ts`, `chat-process-web-search-intent.ts`, `chat-process-web-search.ts`, `chat-process-web-search-tool-schema.ts`, `client-inject-readiness.ts`, `chat-response-utils.ts`, `provider-response-observation.ts`.
 - Verification: residue audit 83/83 PASS, `npx tsc --noEmit --pretty false` PASS, `git diff --check` PASS.
 Tags: hub-pipeline-rust-closeout, zero-consumer, physical-delete, ts-thin-shell, 2026-06-07
+
+## 2026-06-07 Hub Pipeline timing measure owner cleanup
+- `hub-stage-timing-measure-blocks.ts` duplicated timing measure logic that is already owned by `hub-stage-timing.ts`; with 0 live consumer it should stay deleted, including side-by-side generated `.js`, `.d.ts`, and `.js.map` artifacts.
+- Residue audit now guards the TS source and generated artifacts from reappearing.
+Tags: hub-pipeline-rust-closeout, timing, generated-artifacts, physical-delete, 2026-06-07

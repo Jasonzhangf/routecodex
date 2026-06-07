@@ -42,3 +42,4 @@
 ## 已删除 TS residue
 
 - 2026-06-07 Phase 0：`chat-process-governance-finalize.ts`、`chat-process-web-search.ts`、`chat-process-web-search-intent.ts`、`chat-process-web-search-tool-schema.ts`、`client-inject-readiness.ts`、`hub-pipeline-mutable-record-utils.ts`、`target-utils.ts`、`chat-response-utils.ts`、`provider-response-observation.ts` 均为 0 live consumer 的旧 TS native wrapper / helper，已物理删除并由 residue audit 锁住不得复活。
+- 2026-06-07 Phase 0：`hub-stage-timing-measure-blocks.ts` 及同名 generated JS/DTS/map 已删除；`hub-stage-timing.ts` 是 timing measure 唯一 TS owner。

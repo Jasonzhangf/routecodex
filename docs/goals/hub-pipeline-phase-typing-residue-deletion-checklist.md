@@ -153,6 +153,11 @@ Phase 8F-2 zero-consumer TS wrapper deletion proof: 9 old TS native-wrapper/help
 
 Red test now fails if any of these zero-consumer TS wrapper residues reappear. This deletion does not remove the Rust/native capabilities themselves and does not change provider wire payload or client response semantics.
 
+Phase 8F-3 timing wrapper deletion proof: `hub-stage-timing-measure-blocks.ts` had no live consumer and duplicated the private `measureHubStageExecution` implementation already present in `hub-stage-timing.ts`. The tracked TS file and ignored side-by-side `.js` / `.d.ts` / `.js.map` artifacts were physically removed.
+
+- Red test now fails if the timing measure block TS source or same-name generated artifacts reappear.
+- This deletion keeps `hub-stage-timing.ts` as the single timing measure owner and does not affect Hub payload semantics.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:
