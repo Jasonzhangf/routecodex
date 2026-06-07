@@ -16214,3 +16214,9 @@ Phase E: TS fallback 物理删除
 - Added red test `Hub and Virtual Router source truth dirs must not keep side-by-side TS emit artifacts`; before cleanup it failed with stale `.js/.d.ts/.js.map` entries.
 - Physical cleanup: deleted 193 git-ignored generated artifacts under `sharedmodule/llmswitch-core/src/conversion/hub` and `sharedmodule/llmswitch-core/src/router/virtual-router`; script refused non-ignored candidates before unlinking.
 - Verification after cleanup: residue audit PASS 85/85; `find sharedmodule/llmswitch-core/src/conversion/hub sharedmodule/llmswitch-core/src/router/virtual-router -type f \( -name '*.js' -o -name '*.d.ts' -o -name '*.js.map' \)` returned empty.
+
+## 2026-06-07 Hub Pipeline Phase 8F-8 servertool side-by-side emit cleanup
+- Scope decision: do not bulk-delete `conversion/shared` side-by-side JS because several current Jest suites still import `.js` specifiers there; servertool source dir only had ignored `.d.ts` artifacts and no `.js` runtime shadows.
+- Added red test `servertool source truth dir must not keep side-by-side TS emit artifacts`; before cleanup it failed on 26 stale declaration artifacts.
+- Physical cleanup: deleted 26 git-ignored `.d.ts` artifacts under `sharedmodule/llmswitch-core/src/servertool`; deletion script refused non-ignored candidates before unlinking.
+- Verification after cleanup: residue audit PASS 86/86; `find sharedmodule/llmswitch-core/src/servertool -type f \( -name '*.js' -o -name '*.d.ts' -o -name '*.js.map' \)` returned empty.

@@ -2278,3 +2278,9 @@ Tags: hub-pipeline-rust-closeout, timing, generated-artifacts, physical-delete, 
 - Phase 8F-7 deleted 193 git-ignored side-by-side emit artifacts under those Hub/VR source truth dirs and added a residue gate that fails if they reappear.
 - Deletion rule: only delete candidates after confirming they are git-ignored; never treat source-side JS shadows as semantic fixes for Hub Pipeline or Virtual Router.
 Tags: hub-pipeline-rust-closeout, virtual-router, generated-artifacts, source-truth, 2026-06-07
+
+## 2026-06-07 servertool source-side declaration artifacts are not source truth
+- Source-side `.d.ts` under `sharedmodule/llmswitch-core/src/servertool` are generated artifacts; servertool source truth remains `.ts` plus Rust `servertool-core/servertool-cli` owners.
+- Phase 8F-8 deleted 26 git-ignored servertool declaration artifacts and added a residue gate that fails if `.js`, `.d.ts`, or `.js.map` reappears under `src/servertool`.
+- Do not apply this rule blindly to `conversion/shared`: current tests still import `.js` specifiers there, so those artifacts need a separate migration/proof before deletion.
+Tags: hub-pipeline-rust-closeout, servertool, generated-artifacts, source-truth, 2026-06-07

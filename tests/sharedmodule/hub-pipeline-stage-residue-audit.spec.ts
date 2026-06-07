@@ -1607,6 +1607,15 @@ describe('hub pipeline stage residue audit', () => {
     expect(generatedArtifacts.sort()).toEqual([]);
   });
 
+  it('servertool source truth dir must not keep side-by-side TS emit artifacts', () => {
+    const generatedArtifacts = walkFiles(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool'),
+      ['.js', '.d.ts', '.js.map'],
+    ).map((fullPath) => path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
+
+    expect(generatedArtifacts.sort()).toEqual([]);
+  });
+
   it('active Rust closeout docs must not target retired stage wrapper APIs', () => {
     const activeDocs = [
       'docs/goals/hubpipeline-rust-closeout-goal-prompt.md',

@@ -191,6 +191,13 @@ Phase 8F-7 Hub/VR side-by-side emit cleanup proof: current `sharedmodule/llmswit
 - Red test now fails if either source truth dir contains side-by-side `.js`, `.d.ts`, or `.js.map` artifacts.
 - This cleanup changes no tracked runtime source and does not change provider wire payload or client response semantics.
 
+Phase 8F-8 servertool side-by-side emit cleanup proof: servertool source truth lives in `.ts` plus Rust `servertool-core/servertool-cli` owners; source-side `.d.ts` artifacts under `sharedmodule/llmswitch-core/src/servertool` are stale ignored emit, not runtime source truth.
+
+- Deleted 26 ignored generated declaration artifacts under `sharedmodule/llmswitch-core/src/servertool`.
+- Deletion script refused non-ignored candidates before unlinking; only git-ignored `.js`, `.d.ts`, and `.js.map` files were eligible.
+- Red test now fails if `sharedmodule/llmswitch-core/src/servertool` contains side-by-side `.js`, `.d.ts`, or `.js.map` artifacts.
+- This cleanup changes no tracked runtime source and does not change servertool projection, provider wire payload, or client response semantics.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:
