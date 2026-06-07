@@ -795,10 +795,15 @@ describe('direct passthrough route-level', () => {
       execute: jest.fn(async () => ({ status: 200, body: { relayed: true }, metadata: {} })),
       getVirtualRouter: jest.fn(() => ({
         route: jest.fn(() => ({
-          routeName: 'search',
-          providerKey: 'direct.key1.gpt-test',
-          providerModel: 'gpt-test',
-          providerProtocol: 'openai-responses',
+          target: {
+            providerKey: 'direct.key1.gpt-test',
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: 'direct.key1.gpt-test',
+            modelId: 'gpt-test',
+          },
+          decision: { routeName: 'search', pool: ['direct.key1.gpt-test'] },
+          diagnostics: {},
         })),
       })),
       updateVirtualRouterConfig: jest.fn(),
@@ -809,15 +814,14 @@ describe('direct passthrough route-level', () => {
     (server as any).providerHandles = new Map([[
       'direct.key1.gpt-test',
       {
-        providerProtocol: 'openai-responses',
+        providerProtocol: 'openai-chat',
         instance: {
           processIncomingDirect: jest.fn(async () => ({
             status: 200,
             data: {
-              id: 'resp_direct_stopless_metadata_passthrough',
-              object: 'response',
-              status: 'completed',
-              output: [],
+              id: 'chatcmpl_direct_stopless_metadata_passthrough',
+              object: 'chat.completion',
+              choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
             },
           })),
         },
@@ -828,18 +832,21 @@ describe('direct passthrough route-level', () => {
 
     const result = await (server as any).executePortAwarePipeline(5555, {
       requestId: 'req_router_direct_stopless_stays_direct',
-      entryEndpoint: '/v1/responses',
+      entryEndpoint: '/v1/chat/completions',
       method: 'POST',
       headers: {},
       query: {},
-      body: { model: 'gpt-test', input: 'hello' },
+      body: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hello' }],
+      },
       metadata: {
         stoplessMode: 'on',
         stoplessArmed: true,
       },
     });
 
-    expect(result.body?.id).toBe('resp_direct_stopless_metadata_passthrough');
+    expect(result.body?.id).toBe('chatcmpl_direct_stopless_metadata_passthrough');
     expect(directSpy).toHaveBeenCalledTimes(1);
     expect(executePipelineSpy).not.toHaveBeenCalled();
   });

@@ -430,11 +430,12 @@ function emitVirtualRouterHitLog(result: {
 }
 
 function resolveVirtualRouterLogRequestId(metadata: RouterMetadataInput): string | undefined {
+  const metadataRecord = metadata as unknown as Record<string, unknown>;
   const candidates = [
     metadata.requestId,
-    (metadata as Record<string, unknown>).clientRequestId,
-    (metadata as Record<string, unknown>).inputRequestId,
-    (metadata as Record<string, unknown>).groupRequestId
+    metadataRecord.clientRequestId,
+    metadataRecord.inputRequestId,
+    metadataRecord.groupRequestId
   ];
   for (const value of candidates) {
     if (typeof value === 'string' && value.trim() && !value.includes('unknown')) {
