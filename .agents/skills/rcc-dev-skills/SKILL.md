@@ -26,6 +26,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 工具声明、文本工具 harvest、apply_patch、servertool、MCP/native 工具治理、sanitize、tool list 注入/裁剪必须 Rust-only；TS 只能是 JSON parse/serialize + native 调用薄壳。
 - Snapshot/errorsample 里的工具失败识别也属于工具语义：`messages/input/tool_call_id/call_id` 扫描、工具名归一、apply_patch/exec/shell 错误分类必须 Rust-only；TS 只能调用 native 并写样本。
 - Virtual Router 只路由，不修 payload；Provider 只 transport/auth/provider 内部兼容，不做 Hub 工具治理；direct/provider passthrough 禁止进入 Hub Pipeline conversion。
+- Phase 0 generated artifact cleanup：`sharedmodule/llmswitch-core/src/**/*.js` / `.d.ts` / `.js.map` 是 ignored TS emit，不是 runtime source truth；若发现 tracked src-side `.js.map`，先证明无 runtime import，再物理删除并用 residue gate 锁住，禁止把 side-by-side JS 当语义修复点。
 - 发现违规必须先写红测，红测要覆盖真实 Hub Pipeline stage 或 HTTP 黑盒入口；禁止 mock 私有方法冒充黑盒。
 - quota 控制面真源：`QuotaManagerModule.getControlSurface()` 是 daemon-admin / control plane 唯一入口；`quota-handler.ts`、`control-handler.ts` 禁止自建 `createQuotaManagerAdapter(...)`，禁止直连 Rust mutator。
 - quota 初始化硬规则：启动时只能按当前 `config.toml` materialized `virtualrouter.providers` 初始化 quota；未配置 provider 禁止 hydrate/persist/参与本轮 quota 生命周期。

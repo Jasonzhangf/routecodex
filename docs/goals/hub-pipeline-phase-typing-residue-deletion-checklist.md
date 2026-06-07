@@ -133,6 +133,12 @@ Phase 8E-2 deletion proof: the explicit wrapper contract / required-export gate 
 - Red tests now fail if the legacy TS wrapper, required export, Rust NAPI wrapper, Rust stage implementation, or stage-only helper names are reintroduced.
 - Live mainline remains on `runHubPipelineLibWithNative` / `executeHubPipelineWithNative`; provider wire and client response body semantics were not changed by this deletion.
 
+Phase 8F-1 generated source-map deletion proof: all tracked `sharedmodule/llmswitch-core/src/**/*.js.map` files were physically removed. `.gitignore` already treats src-side `.js`, `.d.ts`, and `.js.map` as generated TS emit; no tracked `.js` or `.d.ts` files exist under that tree, and no runtime source imports `.js.map` artifacts.
+
+- Red test now fails if any worktree-existing `sharedmodule/llmswitch-core/src/**/*.js.map` file is tracked.
+- This deletion touches generated debug artifacts only; `.ts` source, native wrapper imports, provider wire payload, and client response semantics are unchanged.
+- Local ignored side-by-side `.js` files may still exist after builds and must not be treated as source truth or committed.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

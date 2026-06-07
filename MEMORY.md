@@ -2237,3 +2237,9 @@ Tags: responses-sse, terminal-repair, rust-owner, required-action, no-ts-semanti
 - Router-direct successful Responses results must record response scope (`sessionId`/`conversationId`/routing group/provider) and explicitly opt into scope continuation; failed HTTP status and SSE wrapper results must clear the captured request.
 - Verified: direct passthrough route/minimum/direct-result suites PASS 21/21; 429/ErrorHandlingCenter focused gate PASS; `npx tsc --noEmit --pretty false` PASS.
 Tags: direct-passthrough, responses-conversation-store, bridge-singleton, scope-continuation, 2026-06-07
+
+## 2026-06-07 Hub Pipeline Phase 0 generated artifact cleanup
+- `sharedmodule/llmswitch-core/src/**/*.js`, `.d.ts`, and `.js.map` are generated TS emit artifacts and are ignored by `.gitignore`; source truth under that tree is `.ts`, not side-by-side JS.
+- All tracked `sharedmodule/llmswitch-core/src/**/*.js.map` artifacts were physically removed and locked by `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`; the gate fails if an existing src-side `.js.map` becomes tracked again.
+- Verification: residue audit 81/81 PASS, `npx tsc --noEmit --pretty false` PASS, `git diff --check` PASS.
+Tags: hub-pipeline-rust-closeout, generated-artifacts, residue-gate, physical-delete, 2026-06-07

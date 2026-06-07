@@ -1530,6 +1530,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(existing).toEqual([]);
   });
 
+  it('src-side JS source maps must not remain tracked generated artifacts', () => {
+    const trackedSourceMaps = execFileSync(
+      'git',
+      ['ls-files', ':(glob)sharedmodule/llmswitch-core/src/**/*.js.map'],
+      { cwd: process.cwd(), encoding: 'utf8' }
+    )
+      .split('\n')
+      .filter((relativePath) => relativePath && fs.existsSync(path.join(process.cwd(), relativePath)));
+
+    expect(trackedSourceMaps).toEqual([]);
+  });
+
   it('servertool pending-session TS persistence must not inspect tool semantics or swallow load failures', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/pending-session.ts');
     const source = fs.readFileSync(filePath, 'utf8');
