@@ -4,6 +4,10 @@
 
 Tags: cleanup, rcc-home, install-staging, diag-retention, generated-artifacts, 2026-06-07
 
+- 2026-06-07: 根目录生成物治理入口为 `docs/goals/root-generated-artifacts-governance-plan.md`。根目录清理必须先分清 tracked source、ignored generated、本地工具状态、runtime evidence；`git check-ignore` 只能证明 ignored，不能单独证明可删。已删除 tracked 自测 residue `nested/deep/ap003.txt`，apply_patch 自测改用 `tmp/nested/deep/ap003.txt`。`webui/` 被本地 `.git/info/exclude` 隐藏但仍是 package/test/build 源码输入，禁止按 ignored 状态删除。
+
+Tags: root-layout, generated-artifacts, repo-sanity, source-write-paths, cleanup, 2026-06-07
+
 - 2026-05-27: Windsurf 账号管理 Phase 1 完成：删除 `WindsurfQuotaHealthSnapshot`、`WindsurfManagedCredentialEntry` 类型；删除 `readManagedWindsurfAuthConfigDetailed`、`extractQuotaHealthFromUserStatusPayload`、`isWindsurfAccountModelSupported`、`rankManagedCredentialsByHealth`、`selectManagedCredentialForSession`、`fetchWindsurfUserStatusForHealth`、`markCurrentAliasQuotaExhausted`、`computeAccountConcurrencyCapacity`、`assertManagedAccountPoolSelectable`、`resolveManagedAccountPoolCooldownMs` 等 17+ 方法；`selectWindsurfAccount` 简化取消旧多账号健康管理逻辑。Phase 2 新建：`windsurf-account-store.ts`（持久化账号状态，JSON 原子写）、`windsurf-account-pool.ts`（候选过滤 + sticky session + 排序）、`windsurf-account-session-manager.ts`（refresh 去重锁）。Provider 接入选 `selectWindsurfAccount` 使用 pool，`markWindsurfSessionActive/Stopped` 恢复真实实现，`clearManagedWindsurfSessionCredential` 回写 `pool.markAuthInvalid`。Phase 1 删除 ~350 行，Phase 2 新建 3 文件共 ~290 行。5 个测试已删除 Phase 1 API 的 context-continuity RED 测试已清理（15→10 个测试，全绿）。47 个 provider RED 测试不涉及 Phase 1 API，保留为已知失败的预写测试（登录链、RCC 文本协议、Cascade 生命周期）。VR 编译通过（0 新增错误，仅 2 pre-existing Rust native binding 错误），123 VR 测试全绿。
 
 Tags: windsurf, account-management, phase-1-cleanup, phase-2-pool, sticky-session, account-store, session-manager, red-test-cleanup, 2026-05-27

@@ -11,7 +11,7 @@ It does not redefine user runtime state under `~/.rcc`. `~/.rcc` remains the run
 Evidence collected on 2026-06-07:
 
 - `git check-ignore -v` proves these root items are ignored generated/local state: `tmp/`, `bin/`, `lib/`, `.clock/`, `.codex-work/`, `.drudge/`, `.hypatia/`, `.hypatia_data/`, `.reasonix/`, `clock.md`, `entities.json`, `mempalace.yaml`, `hypatia`, `models/`, `tmp-route-sample.mjs`, `tmp-route-test.mjs`.
-- `git ls-files` proves these suspicious root items are tracked, so they must be migrated by a source change, not deleted as local trash: `package/`, `nested/deep/ap003.txt`, `rcc`.
+- `git ls-files` proved these suspicious root items were tracked, so they required source changes instead of local-trash deletion: `package/`, historical `nested/deep/ap003.txt`, `rcc`.
 - `.git/info/exclude` currently ignores `webui/`, but `package.json`, `jest.config.js`, and `scripts/install-global.sh` treat `webui/` as source input. This is a local exclude hazard: ignored status alone is not sufficient deletion evidence.
 - Existing `scripts/ci/repo-sanity.mjs` already enforces a fixed top-level layout, but its allowlist still preserves legacy exceptions such as `package`, `tmp`, `clock.md`, `models`, and `CACHE.md`.
 
@@ -29,7 +29,7 @@ Current root classification:
 | `.install-pack/`, root `*.tgz` | Packaging output | install/pack scripts | Must move to temp or `artifacts/pack/` |
 | `bin/`, `lib/` | Local npm prefix residue | ignored, symlink to repo | Remove and prevent root local prefix usage |
 | `package/` | Tracked legacy release package residue | `git ls-files`, qoder package content | Migrate or delete in dedicated cleanup slice |
-| `nested/deep/ap003.txt` | Tracked self-test residue | `git ls-files`, apply_patch checklist sample | Delete or move into `tests/fixtures/` in dedicated cleanup slice |
+| `nested/deep/ap003.txt` | Tracked self-test residue | `git ls-files`, apply_patch checklist sample | Deleted; checklist now uses `tmp/nested/deep/ap003.txt` |
 | `rcc` | Tracked CLI symlink | `package.json files`, `pack:rcc` flow | Keep until packaging entry is redesigned |
 | `webui/` | Source input hidden by local exclude | package/test/install references | Must not delete; fix local exclude separately |
 | `.beads/` | Task state | `.beads/issues.jsonl` is truth | Track only `issues.jsonl`; runtime db/log disposable |
@@ -96,7 +96,7 @@ Phase 1: stop new root clutter
 Phase 2: migrate legacy tracked clutter
 
 - Decide whether `package/` still has an active packaging role. If not, delete it physically and update `package.json files` / install scripts. If yes, move it under `scripts/packaging/legacy-qoder/` with explicit owner docs.
-- Delete `nested/deep/ap003.txt` or move it into `tests/fixtures/apply-patch/ap003.txt`; update the apply_patch checklist accordingly.
+- Keep `nested/deep/ap003.txt` deleted. The apply_patch self-test checklist must use `tmp/nested/deep/ap003.txt` or another disposable temp path.
 - Replace root `rcc` symlink with a generated packaging artifact if package consumers no longer require a tracked root symlink.
 
 Phase 3: consolidate tool state

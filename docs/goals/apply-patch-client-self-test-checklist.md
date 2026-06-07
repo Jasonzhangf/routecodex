@@ -45,7 +45,7 @@ FAIL 任一命中：
 |---|---|---|---|---|---|---|---|
 | AP-001 | 新建文件 | 用 apply_patch 创建 `tmp/ap001.txt`，内容三行：`alpha`、`beta`、`gamma`。完成后验证。 | 无 | `cat tmp/ap001.txt` | `alpha\nbeta\ngamma\n` |  |  |
 | AP-002 | 新建含空行 | 用 apply_patch 创建 `tmp/ap002.txt`，内容：第一行 `hello`，第二行空行，第三行 `world`。 | 无 | `python3 - <<'PY'\nprint(repr(open('tmp/ap002.txt').read()))\nPY` | `'hello\n\nworld\n'` |  |  |
-| AP-003 | 嵌套目录 | 用 apply_patch 创建 `nested/deep/ap003.txt`，内容 `nested ok`。 | 无 | `cat nested/deep/ap003.txt` | `nested ok\n` |  |  |
+| AP-003 | 嵌套目录 | 用 apply_patch 创建 `tmp/nested/deep/ap003.txt`，内容 `nested ok`。 | 无 | `cat tmp/nested/deep/ap003.txt` | `nested ok\n` |  |  |
 | AP-004 | 中文 UTF-8 | 用 apply_patch 创建 `tmp/ap004.txt`，内容两行：`你好`、`世界`。 | 无 | `cat tmp/ap004.txt` | 中文不乱码 |  |  |
 | AP-005 | JSON 内容 | 用 apply_patch 创建 `tmp/ap005.json`，内容为 `{"ok":true,"items":[1,2]}`。 | 无 | `node -e "console.log(JSON.stringify(JSON.parse(require('fs').readFileSync('tmp/ap005.json','utf8'))))"` | JSON parse 成功且等价 |  |  |
 | AP-006 | Markdown fence | 用 apply_patch 创建 `tmp/ap006.md`，内容包含一个 `ts` fenced code block：`console.log('ok')`。 | 无 | `cat tmp/ap006.md` | 三反引号完整 |  |  |
