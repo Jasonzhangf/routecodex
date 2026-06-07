@@ -1394,6 +1394,24 @@ describe('hub pipeline stage residue audit', () => {
     expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
   });
 
+  it('legacy zero-consumer TS native wrapper residues must stay removed', () => {
+    const repoRoot = process.cwd();
+    const forbiddenFiles = [
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-mutable-record-utils.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/target-utils.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-governance-finalize.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search-intent.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search-tool-schema.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/process/client-inject-readiness.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/response/chat-response-utils.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-observation.ts',
+    ];
+    const existing = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+
+    expect(existing).toEqual([]);
+  });
+
   it('provider runtime must not call TS tool-governor response harvest outside HubPipeline resp_process', () => {
     const providerRuntimeRoot = path.join(process.cwd(), 'src/providers/core/runtime');
     const forbiddenFiles = [

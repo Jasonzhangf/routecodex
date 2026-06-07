@@ -2249,3 +2249,9 @@ Tags: hub-pipeline-rust-closeout, generated-artifacts, residue-gate, physical-de
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now gates the active closeout docs against retired stage wrapper API mentions.
 - Verification: residue audit 82/82 PASS, `npx tsc --noEmit --pretty false` PASS, `git diff --check` PASS.
 Tags: hub-pipeline-rust-closeout, docs-contract, retired-stage-wrapper, residue-gate, 2026-06-07
+
+## 2026-06-07 Hub Pipeline zero-consumer TS wrapper deletion
+- Zero-consumer TS native wrappers/helpers under Hub Pipeline should be physically deleted rather than kept as "thin shells" when they have no live import, no public barrel export, no same-name JS shadow artifact, and the native capability remains available from Rust/native wrapper truth.
+- Deleted files: `hub-pipeline-mutable-record-utils.ts`, `target-utils.ts`, `chat-process-governance-finalize.ts`, `chat-process-web-search-intent.ts`, `chat-process-web-search.ts`, `chat-process-web-search-tool-schema.ts`, `client-inject-readiness.ts`, `chat-response-utils.ts`, `provider-response-observation.ts`.
+- Verification: residue audit 83/83 PASS, `npx tsc --noEmit --pretty false` PASS, `git diff --check` PASS.
+Tags: hub-pipeline-rust-closeout, zero-consumer, physical-delete, ts-thin-shell, 2026-06-07

@@ -139,6 +139,20 @@ Phase 8F-1 generated source-map deletion proof: all tracked `sharedmodule/llmswi
 - This deletion touches generated debug artifacts only; `.ts` source, native wrapper imports, provider wire payload, and client response semantics are unchanged.
 - Local ignored side-by-side `.js` files may still exist after builds and must not be treated as source truth or committed.
 
+Phase 8F-2 zero-consumer TS wrapper deletion proof: 9 old TS native-wrapper/helper files had no live source/test consumers, no public `conversion/index.ts` export, no same-name ignored JS shadow artifacts, and their native capabilities remain available from Rust/native wrapper truth. These files were physically removed:
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-mutable-record-utils.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/target-utils.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-governance-finalize.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search-intent.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search-tool-schema.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/process/client-inject-readiness.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/chat-response-utils.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-observation.ts`
+
+Red test now fails if any of these zero-consumer TS wrapper residues reappear. This deletion does not remove the Rust/native capabilities themselves and does not change provider wire payload or client response semantics.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

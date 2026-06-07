@@ -71,7 +71,6 @@
 - TS 目标文件：
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process.ts`
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-governance-orchestration.ts`
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-governance-finalize.ts`
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-request-sanitizer.ts`
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-node-result.ts`
 - Rust 真源：
@@ -142,13 +141,9 @@
 
 #### D. web-search / review / media / marker-strip / readiness
 - TS 目标文件：
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search.ts`
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search-intent.ts`
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search-tool-schema.ts`
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-review.ts`
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts`
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-generic-marker-strip.ts`
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/client-inject-readiness.ts`
 - Rust 真源：
   - `chat_web_search_intent.rs`
   - `chat_web_search_tool_schema.rs`
@@ -159,6 +154,8 @@
   - Rust：对应语义单测
   - Flow：tool append、review inject、media shape 主链回归
   - 删除门禁：TS 不再保留文本/内容/工具语义改写
+
+Phase 0 deletion note (2026-06-07): `chat-process-web-search.ts`、`chat-process-web-search-intent.ts`、`chat-process-web-search-tool-schema.ts`、`client-inject-readiness.ts`、`chat-process-governance-finalize.ts` 已证明无 live consumer 并物理删除；相关 native capabilities 保留在 Rust/native wrapper 真源中，不再通过这些 TS helper 暴露。
 
 ### Cross-cutting Stage Gate
 - 审核所有 stage index：
