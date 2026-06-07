@@ -16206,3 +16206,11 @@ Phase E: TS fallback 物理删除
 - Deleted six 0-consumer native wrapper files: `native-chat-process-governed-filter-semantics.ts`, `native-chat-process-post-governed-normalization-semantics.ts`, `native-chat-process-web-search-intent-semantics.ts`, `native-hub-pipeline-governance-semantics.ts`, `native-hub-pipeline-target-semantics.ts`, `native-virtual-router-stop-message-actions-semantics.ts`; also deleted same-name generated artifacts for stop-message actions.
 - Evidence: exact path `rg` found no live source/test/dynamic importer for these wrappers. Native capability strings remain in `native-router-hotpath-required-exports.ts`; live governed filter wrapper is `native-chat-request-filter-semantics.ts`.
 - Kept `native-failure-policy.ts` because bridge/runtime code dynamically loads it.
+
+## 2026-06-07 Hub Pipeline Phase 8F-7 Hub/VR side-by-side emit cleanup
+- Review first: `git status --short` was clean and `HEAD == origin/main == f231b37a5`, so there was no uncommitted code to review/commit before continuing.
+- Scoped 0-consumer scan under Hub/VR only returned `native-failure-policy.ts`; kept it because dynamic bridge consumers exist.
+- Source-hygiene evidence: `sharedmodule/llmswitch-core/tsconfig.json` emits to `dist`; `.gitignore` ignores `sharedmodule/llmswitch-core/src/**/*.js`, `.d.ts`, and `.js.map`; therefore Hub/VR source-side emit files are stale generated artifacts.
+- Added red test `Hub and Virtual Router source truth dirs must not keep side-by-side TS emit artifacts`; before cleanup it failed with stale `.js/.d.ts/.js.map` entries.
+- Physical cleanup: deleted 193 git-ignored generated artifacts under `sharedmodule/llmswitch-core/src/conversion/hub` and `sharedmodule/llmswitch-core/src/router/virtual-router`; script refused non-ignored candidates before unlinking.
+- Verification after cleanup: residue audit PASS 85/85; `find sharedmodule/llmswitch-core/src/conversion/hub sharedmodule/llmswitch-core/src/router/virtual-router -type f \( -name '*.js' -o -name '*.d.ts' -o -name '*.js.map' \)` returned empty.

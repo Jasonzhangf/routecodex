@@ -2272,3 +2272,9 @@ Tags: hub-pipeline-rust-closeout, zero-consumer, physical-delete, ts-thin-shell,
 - `hub-stage-timing-measure-blocks.ts` duplicated timing measure logic that is already owned by `hub-stage-timing.ts`; with 0 live consumer it should stay deleted, including side-by-side generated `.js`, `.d.ts`, and `.js.map` artifacts.
 - Residue audit now guards the TS source and generated artifacts from reappearing.
 Tags: hub-pipeline-rust-closeout, timing, generated-artifacts, physical-delete, 2026-06-07
+
+## 2026-06-07 Hub/VR source-side emit artifacts are not source truth
+- `sharedmodule/llmswitch-core/tsconfig.json` emits to `dist`; side-by-side `.js`, `.d.ts`, and `.js.map` under `sharedmodule/llmswitch-core/src/conversion/hub` or `src/router/virtual-router` are stale generated artifacts, not runtime source truth.
+- Phase 8F-7 deleted 193 git-ignored side-by-side emit artifacts under those Hub/VR source truth dirs and added a residue gate that fails if they reappear.
+- Deletion rule: only delete candidates after confirming they are git-ignored; never treat source-side JS shadows as semantic fixes for Hub Pipeline or Virtual Router.
+Tags: hub-pipeline-rust-closeout, virtual-router, generated-artifacts, source-truth, 2026-06-07

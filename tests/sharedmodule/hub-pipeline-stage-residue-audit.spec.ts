@@ -1591,6 +1591,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(trackedSourceMaps).toEqual([]);
   });
 
+  it('Hub and Virtual Router source truth dirs must not keep side-by-side TS emit artifacts', () => {
+    const artifactRoots = [
+      'sharedmodule/llmswitch-core/src/conversion/hub',
+      'sharedmodule/llmswitch-core/src/router/virtual-router',
+    ];
+    const generatedArtifacts: string[] = [];
+
+    for (const relativeRoot of artifactRoots) {
+      for (const fullPath of walkFiles(path.join(process.cwd(), relativeRoot), ['.js', '.d.ts', '.js.map'])) {
+        generatedArtifacts.push(path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
+      }
+    }
+
+    expect(generatedArtifacts.sort()).toEqual([]);
+  });
+
   it('active Rust closeout docs must not target retired stage wrapper APIs', () => {
     const activeDocs = [
       'docs/goals/hubpipeline-rust-closeout-goal-prompt.md',

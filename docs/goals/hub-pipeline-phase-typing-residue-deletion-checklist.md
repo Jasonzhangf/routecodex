@@ -184,6 +184,13 @@ Phase 8F-6 unused native wrapper deletion proof: six TS native wrapper files had
 - Kept `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-failure-policy.ts` because it is dynamically loaded by `src/modules/llmswitch/bridge/native-exports.ts` and `src/providers/core/runtime/provider-failure-policy-native.ts`.
 - Red test now fails if any deleted unused wrapper residue reappears.
 
+Phase 8F-7 Hub/VR side-by-side emit cleanup proof: current `sharedmodule/llmswitch-core/tsconfig.json` emits to `dist`, and `.gitignore` marks `sharedmodule/llmswitch-core/src/**/*.js`, `.d.ts`, and `.js.map` as generated artifacts. Therefore side-by-side emit files under Hub Pipeline and Virtual Router source truth dirs are stale local artifacts, not runtime source truth.
+
+- Deleted 193 ignored generated artifacts under `sharedmodule/llmswitch-core/src/conversion/hub` and `sharedmodule/llmswitch-core/src/router/virtual-router`.
+- Deletion script refused non-ignored candidates before unlinking; only git-ignored `.js`, `.d.ts`, and `.js.map` files were removed.
+- Red test now fails if either source truth dir contains side-by-side `.js`, `.d.ts`, or `.js.map` artifacts.
+- This cleanup changes no tracked runtime source and does not change provider wire payload or client response semantics.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:
