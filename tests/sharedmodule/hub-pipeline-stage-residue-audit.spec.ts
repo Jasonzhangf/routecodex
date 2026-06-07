@@ -1542,6 +1542,26 @@ describe('hub pipeline stage residue audit', () => {
     expect(trackedSourceMaps).toEqual([]);
   });
 
+  it('active Rust closeout docs must not target retired stage wrapper APIs', () => {
+    const activeDocs = [
+      'docs/goals/hubpipeline-rust-closeout-goal-prompt.md',
+      'docs/goals/hubpipeline-rust-closeout-master-plan.md',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of activeDocs) {
+      const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+      const matches = collectMatches(source, [
+        { label: 'runHubPipelineStageJson', pattern: /runHubPipelineStageJson/ },
+        { label: 'run_hub_pipeline_stage_json', pattern: /run_hub_pipeline_stage_json/ },
+        { label: 'runHubPipelineStageWithNative', pattern: /runHubPipelineStageWithNative/ },
+      ]);
+      findings.push(...matches.map((match) => `${relativePath}:${match}`));
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('servertool pending-session TS persistence must not inspect tool semantics or swallow load failures', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/pending-session.ts');
     const source = fs.readFileSync(filePath, 'utf8');

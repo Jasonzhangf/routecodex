@@ -1,7 +1,7 @@
 # HubPipeline Rust Closeout Master Plan
 
 **日期**: 2026-05-31  
-**状态**: 已审计，待执行  
+**状态**: 历史参考；当前执行以 `docs/goals/hubpipeline-full-rust-closeout-plan.md` 为准
 **目标路径**: `HTTP server -> llmswitch-core Hub Pipeline -> Provider V2 -> upstream`
 
 ## 1. 目标与验收标准
@@ -29,14 +29,14 @@
 
 ### 最大架构缺口
 
-当前缺口不是“没有 Rust 函数”，而是“缺 Rust-owned 总控 API”。现状是多个 Rust native functions 已存在，但调用顺序、stage contract、错误边界、metadata merge、effect side effects 仍由 TS 编排决定。
+当前缺口不是“没有 Rust 函数”，而是“缺 Rust-owned 运行时总控”。旧 stage wrapper/API 已在后续 Phase 8E-2 删除；当前入口必须保持在 total HubPipeline path，不得复活 stage-level wrapper。
 
 目标形态必须变成：
 
 ```text
 TS HubPipeline shell
   -> serialize input
-  -> runHubPipelineLibJson / runHubPipelineStageJson
+  -> executeHubPipelineJson / runHubPipelineLibJson
   -> execute returned EffectPlan only
   -> deserialize output
 ```
@@ -81,7 +81,7 @@ TS stage/orchestrator
 
 ### 5.1 API 模块
 
-新增/补齐：
+历史计划曾建议新增/补齐：
 
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib_types.rs`（可选，若类型膨胀）
@@ -89,17 +89,17 @@ TS stage/orchestrator
 
 ### 5.2 NAPI 函数
 
-建议导出：
+当前允许的 total entry 导出：
 
 ```rust
 #[napi(js_name = "runHubPipelineLibJson")]
 pub fn run_hub_pipeline_lib_json(input_json: String) -> NapiResult<String>
 
-#[napi(js_name = "runHubPipelineStageJson")]
-pub fn run_hub_pipeline_stage_json(stage_json: String) -> NapiResult<String>
+#[napi(js_name = "executeHubPipelineJson")]
+pub fn execute_hub_pipeline_json(input_json: String) -> NapiResult<String>
 ```
 
-第一阶段可先提供 stage-level 总控，后续合并为 full pipeline runtime。关键是 TS 不再自己串联多个语义 helper。
+禁止恢复 stage-level wrapper/export。关键是 TS 不再自己串联多个语义 helper，运行时主线必须进入 total HubPipeline entry。
 
 ### 5.3 输入 contract
 
@@ -179,8 +179,8 @@ Rust 决定“要做什么以及为什么”；TS 只执行 effect，不改变 p
 
 ```text
 resp_process.stage3/index.ts
-  -> runHubPipelineStageJson({ stage: "resp_process.stage3" })
-  -> execute EffectPlan: runServerTool / dispatchClientInject / reenterPipeline
+  -> total HubPipeline entry returns Rust-owned EffectPlan
+  -> execute EffectPlan side effects only
   -> return Rust-produced payload/metadata/nodeResults
 ```
 
@@ -350,7 +350,7 @@ routecodex restart --port 5555
 
 ## 11. 完成定义（DoD）
 
-- `runHubPipelineLibJson` / `runHubPipelineStageJson` 成为 Hub Pipeline 语义总控入口。
+- `executeHubPipelineJson` / `runHubPipelineLibJson` 是 Hub Pipeline total entry；legacy stage wrapper/export 不得复活。
 - P0/P1 TS stage/index/orchestrator 文件只剩 wrapper/effect executor/Node glue。
 - 旧 TS 语义实现、重复 mapper、fallback 分支物理删除。
 - 黑盒红测先红后绿证据完整。

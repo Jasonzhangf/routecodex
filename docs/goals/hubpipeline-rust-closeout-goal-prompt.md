@@ -1,29 +1,30 @@
-# /goal — HubPipeline Rust 总控 API Closeout
+# /goal — HubPipeline Full Rust Runtime Closeout
 
 **日期**: 2026-05-31  
-**文档**: `docs/goals/hubpipeline-rust-closeout-master-plan.md`
+**当前执行文档**: `docs/goals/hubpipeline-full-rust-closeout-plan.md`
+**历史参考**: `docs/goals/hubpipeline-rust-closeout-master-plan.md`
 
 ---
 
 ## 目标
 
-把 Hub Pipeline 收口为 Rust 总控 API + TS 最薄调用壳。语义真源唯一，TS 只做 wrapper/effect executor/Node glue，禁用 fallback/降级/双路径。
+把 Hub Pipeline 从“Rust 语义真源 + TS 编排/壳层”收口为“Rust 唯一运行时真源”。TS 只保留必要启动、装配、NAPI/JSON/stream bridge 和外部 IO glue，禁用 fallback/降级/双路径。
 
 ---
 
 ## 实现文档
 
-`docs/goals/hubpipeline-rust-closeout-master-plan.md`
+`docs/goals/hubpipeline-full-rust-closeout-plan.md`
 
-详细设计、技术方案、文件清单、测试矩阵、风险规避均在文档中。执行前必须读。
+当前阶段顺序、边界、验证与 DoD 以该文档为准；旧 master plan 仅作历史参考，不再作为 API 目标真源。
 
 ---
 
 ## 执行规范
 
-- **总控 API 先行**：先补 `hub_pipeline_lib.rs` / `runHubPipelineLibJson` / `runHubPipelineStageJson`，再按 slice 迁语义。
+- **总控入口锁定**：当前入口是 `executeHubPipelineJson` / `runHubPipelineLibJson`；旧 stage wrapper/API 已删除，禁止复活。
 - **一个 slice 一个闭环**：红测 → Rust 实现 → TS 退化/删除 → 绿测 → build。
-- **EffectPlan 边界**：TS 可执行 HTTP/FS/provider/servertool side effects，不得决定 payload/tool/route 语义。
+- **Control/Data 分离**：metadata、route、error、effect 只能进入 control/carrier；业务 payload 只能走 data。
 - **无 fallback**：Rust path 失败必须显式 structured error；禁止 TS 回退旧实现。
 - **物理删除**：迁出后旧 TS 语义实现必须删除，不允许“以防万一”并存。
 
@@ -42,9 +43,9 @@
 
 ## 完成标准
 
-1. `runHubPipelineLibJson` / `runHubPipelineStageJson` 成为 Hub Pipeline 语义总控入口。
-2. P0/P1 TS stage/index 只剩 wrapper + effect executor + Node glue。
-3. 旧 TS 语义实现/fallback/重复 mapper 物理删除。
+1. Rust 拥有请求链、响应链、错误链、metadata carrier、effect/runtime state contract。
+2. TS 不再解释 payload/tool/route/servertool/response effect 语义，只保留必要 bridge/glue。
+3. 旧 TS 语义实现/fallback/重复 mapper/旧 wrapper 物理删除。
 4. 黑盒红测先红后绿证据完整，Rust/Jest/build/install/live smoke 通过。
 5. `MEMORY.md`、`.agents/skills/rcc-dev-skills/SKILL.md` 更新。
 
@@ -52,9 +53,9 @@
 
 ## Slice 执行顺序
 
-1. **Slice 0** — 总控 API 基座：`hub_pipeline_lib.rs` + TS wrapper
-2. **Slice 1** — resp_process.stage3 servertool orchestration
-3. **Slice 2** — req_process.stage1 tool governance 后处理
-4. **Slice 3** — resp_process.stage2 finalize ProcessedRequest 组装
-5. **Slice 4** — hub-pipeline normalize-request 总控
-6. **Slice 5** — operation-table / semantic-mappers / format-adapters
+1. **Phase 0** — Dead code inventory + physical deletion
+2. **Phase 1** — Rust runtime ownership baseline + control/data contracts
+3. **Phase 2** — Request path Rust closeout
+4. **Phase 3** — Response path + effect interpreter Rust closeout
+5. **Phase 4** — Provider transport + HTTP runtime Rust closeout
+6. **Phase 5** — TS runtime physical deletion

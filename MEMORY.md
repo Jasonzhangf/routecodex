@@ -2243,3 +2243,9 @@ Tags: direct-passthrough, responses-conversation-store, bridge-singleton, scope-
 - All tracked `sharedmodule/llmswitch-core/src/**/*.js.map` artifacts were physically removed and locked by `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`; the gate fails if an existing src-side `.js.map` becomes tracked again.
 - Verification: residue audit 81/81 PASS, `npx tsc --noEmit --pretty false` PASS, `git diff --check` PASS.
 Tags: hub-pipeline-rust-closeout, generated-artifacts, residue-gate, physical-delete, 2026-06-07
+
+## 2026-06-07 Hub Pipeline active closeout docs no longer target stage wrapper
+- `runHubPipelineStageJson` / `runHubPipelineStageWithNative` are retired APIs and must not be presented as active Rust closeout targets. Active closeout docs now point to total entries `executeHubPipelineJson` / `runHubPipelineLibJson` and `docs/goals/hubpipeline-full-rust-closeout-plan.md`.
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now gates the active closeout docs against retired stage wrapper API mentions.
+- Verification: residue audit 82/82 PASS, `npx tsc --noEmit --pretty false` PASS, `git diff --check` PASS.
+Tags: hub-pipeline-rust-closeout, docs-contract, retired-stage-wrapper, residue-gate, 2026-06-07
