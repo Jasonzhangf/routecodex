@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { Readable } from 'node:stream';
 import { jest } from '@jest/globals';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../src/server/runtime/handlers/types.js';
 import type { HubPipeline } from '../../../src/server/runtime/http-server/types.js';
@@ -265,6 +266,121 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(toolCall?.name).toBe('exec_command');
     expect(String(toolCall?.arguments)).toContain('routecodex servertool run stop_message_auto');
     expect(String(toolCall?.arguments)).toContain('当前用户目标');
+  });
+
+  it('does not bypass stopless for openai-responses prebuilt SSE stop response', async () => {
+    const responseId = 'resp_prebuilt_sse_stopless_red';
+    const providerResponse = {
+      status: 200,
+      body: {
+        __sse_responses: Readable.from([
+          'event: response.created\n',
+          `data: ${JSON.stringify({
+            type: 'response.created',
+            response: {
+              id: responseId,
+              object: 'response',
+              status: 'in_progress',
+              model: 'gpt-5.5',
+              output: []
+            }
+          })}\n\n`,
+          'event: response.output_item.done\n',
+          `data: ${JSON.stringify({
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: {
+              id: 'msg_prebuilt_sse_stopless_red',
+              type: 'message',
+              role: 'assistant',
+              status: 'completed',
+              content: [{ type: 'output_text', text: 'stopped' }]
+            }
+          })}\n\n`,
+          'event: response.completed\n',
+          `data: ${JSON.stringify({
+            type: 'response.completed',
+            response: {
+              id: responseId,
+              object: 'response',
+              status: 'completed',
+              model: 'gpt-5.5',
+              output: [
+                {
+                  id: 'msg_prebuilt_sse_stopless_red',
+                  type: 'message',
+                  role: 'assistant',
+                  status: 'completed',
+                  content: [{ type: 'output_text', text: 'stopped' }]
+                }
+              ],
+              usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+            }
+          })}\n\n`,
+          'event: response.done\n',
+          `data: ${JSON.stringify({
+            type: 'response.done',
+            response: {
+              id: responseId,
+              object: 'response',
+              status: 'completed',
+              output: [
+                {
+                  id: 'msg_prebuilt_sse_stopless_red',
+                  type: 'message',
+                  role: 'assistant',
+                  status: 'completed',
+                  content: [{ type: 'output_text', text: 'stopped' }]
+                }
+              ]
+            }
+          })}\n\n`,
+          'data: [DONE]\n\n'
+        ]),
+        __routecodex_finish_reason: 'stop'
+      }
+    };
+    const handle = createRuntimeHandleWithProtocol(async () => providerResponse, 'openai-responses');
+    const relayPipelineResult: PipelineExecutionResult = {
+      providerPayload: { model: 'MiniMax-M2.7', messages: [] },
+      target: {
+        providerKey: 'mini27.key1-MiniMax-M2.7',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:key',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {
+        routeName: 'longcontext',
+        routecodexLocalPort: 5555,
+        routecodexPortMode: 'router',
+        routecodexRoutingPolicyGroup: 'gateway-priority-5555-weighted-longcontext'
+      }
+    } as PipelineExecutionResult;
+    const { executor, request } = createExecutor(relayPipelineResult, handle);
+
+    const response = await executor.execute({
+      ...request,
+      requestId: 'req_executor_prebuilt_sse_stopless_red',
+      entryEndpoint: '/v1/responses',
+      body: { model: 'gpt-5.5', input: 'continue', stream: true },
+      metadata: {
+        stream: true,
+        inboundStream: true,
+        routecodexLocalPort: 5555,
+        routecodexPortMode: 'router',
+        routecodexRoutingPolicyGroup: 'gateway-priority-5555-weighted-longcontext',
+        stoplessGoalState: { status: 'idle', objective: 'test', createdAt: 1, updatedAt: 1 }
+      }
+    });
+
+    expect(response.status).toBe(200);
+    expect((response.body as any).__routecodex_finish_reason).toBe('tool_calls');
+    const output = ((response.body as any).__routecodex_stream_contract_probe_body.output ?? []) as Array<Record<string, unknown>>;
+    const toolCall = output.find((item) => item.type === 'function_call') as Record<string, unknown> | undefined;
+    expect(toolCall?.name).toBe('exec_command');
+    expect(String(toolCall?.arguments)).toContain('routecodex servertool run stop_message_auto');
   });
 
   it('resets stopless default budget after openai-responses relay tool_calls response', async () => {

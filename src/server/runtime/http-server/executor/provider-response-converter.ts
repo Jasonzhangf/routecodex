@@ -877,13 +877,31 @@ export async function convertProviderResponseIfNeeded(
       && (options.entryEndpoint || entry).toLowerCase().includes('/v1/responses')
       && options.providerProtocol === 'openai-responses'
     ) {
-      logPipelineStage('convert.bridge.prebuilt_sse_passthrough', options.requestId, {
-        entryEndpoint: options.entryEndpoint || entry,
-        providerProtocol: options.providerProtocol
+      const prebuiltSseFinishReason = deriveFinishReason(bridgeProviderResponse);
+      const prebuiltSseGoalState = readCurrentGoalState({
+        adapterContext,
+        pipelineMetadata: options.pipelineMetadata
       });
-      return attachTimingBreakdown({
-        ...options.response,
-        body: bridgeProviderResponse as Record<string, unknown>
+      const mustBridgePrebuiltSseForStopless =
+        serverToolsEnabled
+        && prebuiltSseFinishReason === 'stop'
+        && Boolean(prebuiltSseGoalState);
+      if (!mustBridgePrebuiltSseForStopless) {
+        logPipelineStage('convert.bridge.prebuilt_sse_passthrough', options.requestId, {
+          entryEndpoint: options.entryEndpoint || entry,
+          providerProtocol: options.providerProtocol,
+          ...(prebuiltSseFinishReason ? { finishReason: prebuiltSseFinishReason } : {})
+        });
+        return attachTimingBreakdown({
+          ...options.response,
+          body: bridgeProviderResponse as Record<string, unknown>
+        });
+      }
+      logPipelineStage('convert.bridge.prebuilt_sse_stopless_bridge', options.requestId, {
+        entryEndpoint: options.entryEndpoint || entry,
+        providerProtocol: options.providerProtocol,
+        finishReason: prebuiltSseFinishReason,
+        goalStatus: prebuiltSseGoalState?.status
       });
     }
     const effectiveRequestSemantics = (() => {

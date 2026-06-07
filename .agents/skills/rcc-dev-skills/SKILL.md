@@ -24,6 +24,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 架构命名按 `inbound / chatprocess / outbound` 三段：`req_inbound` 只解析入口协议和捕获上下文；`req_chatprocess` 是请求侧工具治理唯一入口；`req_outbound` 只做 Hub 语义到 provider 协议编码，禁止把工具语义降级成普通文本。
 - 响应同构：`resp_inbound` 只解析 provider 响应；`resp_chatprocess` 是响应侧工具治理唯一入口；`resp_outbound` 只做客户端协议投影，禁止修补请求侧历史污染。
 - 工具声明、文本工具 harvest、apply_patch、servertool、MCP/native 工具治理、sanitize、tool list 注入/裁剪必须 Rust-only；TS 只能是 JSON parse/serialize + native 调用薄壳。
+- OpenAI Responses prebuilt SSE stopless 边界：TS 只能把 upstream `__sse_responses` 读成 provider `bodyText` 并在 stopless 条件下禁止 passthrough；SSE terminal events 必须在 Rust `RespInbound` materialize 成 Responses JSON 后进入 `RespChatProcess`。禁止把 `__routecodex_stream_contract_probe_body` / snapshot/debug probe 当正常 provider response 语义输入。
 - Snapshot/errorsample 里的工具失败识别也属于工具语义：`messages/input/tool_call_id/call_id` 扫描、工具名归一、apply_patch/exec/shell 错误分类必须 Rust-only；TS 只能调用 native 并写样本。
 - Virtual Router 只路由，不修 payload；Provider 只 transport/auth/provider 内部兼容，不做 Hub 工具治理；direct/provider passthrough 禁止进入 Hub Pipeline conversion。
 - Phase 0 generated artifact cleanup：`sharedmodule/llmswitch-core/src/**/*.js` / `.d.ts` / `.js.map` 是 ignored TS emit，不是 runtime source truth；Hub/VR/servertool source truth 目录（`src/conversion/hub`、`src/router/virtual-router`、`src/servertool`）不应保留 side-by-side emit。清理前必须用 `git check-ignore` 证明候选是 ignored artifact，再物理删除并用 residue gate 锁住；禁止把 side-by-side JS 当语义修复点。不要把该规则直接套到 `conversion/shared`，该目录仍有测试 `.js` import 依赖，需单独迁移/证明。

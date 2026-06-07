@@ -45,10 +45,11 @@ fn validate_payload_size(payload: &Value) -> Result<(), String> {
 }
 
 fn parse_openai_responses_response(payload: &Value) -> Result<FormatEnvelope, String> {
-    validate_payload_size(payload)?;
+    let materialized = materialize_openai_responses_response_payload(payload)?;
+    validate_payload_size(&materialized)?;
 
     // Extract model from response if available
-    let model = payload
+    let model = materialized
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("")
@@ -57,12 +58,44 @@ fn parse_openai_responses_response(payload: &Value) -> Result<FormatEnvelope, St
     Ok(FormatEnvelope {
         format: "openai-responses".to_string(),
         version: "v1".to_string(),
-        payload: payload.clone(),
+        payload: materialized,
         metadata: Some(serde_json::json!({
             "model": model,
             "extracted_at": "resp_format_parse"
         })),
     })
+}
+
+fn materialize_openai_responses_response_payload(payload: &Value) -> Result<Value, String> {
+    if is_openai_responses_response_payload(payload) {
+        return Ok(payload.clone());
+    }
+    if let Some(body_text) = payload
+        .get("bodyText")
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+    {
+        return materialize_openai_responses_sse_body_text(body_text);
+    }
+    if let Some(body) = payload.get("body") {
+        if is_openai_responses_response_payload(body) {
+            return Ok(body.clone());
+        }
+        if let Some(body_text) = body
+            .get("bodyText")
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty())
+        {
+            return materialize_openai_responses_sse_body_text(body_text);
+        }
+    }
+    Ok(payload.clone())
+}
+
+fn is_openai_responses_response_payload(value: &Value) -> bool {
+    value
+        .as_object()
+        .is_some_and(|row| row.get("output").and_then(Value::as_array).is_some())
 }
 
 fn parse_openai_chat_response(payload: &Value) -> Result<FormatEnvelope, String> {
@@ -172,12 +205,143 @@ fn parse_openai_chat_sse_json_events(body_text: &str) -> Vec<Value> {
     events
 }
 
+fn parse_sse_json_events(body_text: &str) -> Vec<(Option<String>, Value)> {
+    let mut events: Vec<(Option<String>, Value)> = Vec::new();
+    let mut event_name: Option<String> = None;
+    let mut data_lines: Vec<String> = Vec::new();
+    let flush = |events: &mut Vec<(Option<String>, Value)>,
+                 event_name: &mut Option<String>,
+                 data_lines: &mut Vec<String>| {
+        if data_lines.is_empty() {
+            *event_name = None;
+            return;
+        }
+        let data = data_lines.join("\n");
+        data_lines.clear();
+        let event = event_name.take();
+        let trimmed = data.trim();
+        if trimmed.is_empty() || trimmed == "[DONE]" {
+            return;
+        }
+        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+            events.push((event, value));
+        }
+    };
+
+    for line in body_text.lines() {
+        let trimmed_end = line.trim_end_matches('\r');
+        if trimmed_end.is_empty() {
+            flush(&mut events, &mut event_name, &mut data_lines);
+            continue;
+        }
+        if let Some(raw) = trimmed_end.strip_prefix("event:") {
+            event_name = Some(raw.trim().to_string());
+            continue;
+        }
+        if let Some(raw) = trimmed_end.strip_prefix("data:") {
+            data_lines.push(raw.trim_start().to_string());
+        }
+    }
+    flush(&mut events, &mut event_name, &mut data_lines);
+    events
+}
+
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(ToString::to_string)
+}
+
+fn merge_response_object(target: &mut Map<String, Value>, response: &Map<String, Value>) {
+    for (key, value) in response {
+        target.insert(key.clone(), value.clone());
+    }
+}
+
+fn upsert_response_output_item(target: &mut Map<String, Value>, item: &Value) {
+    let Some(item_obj) = item.as_object() else {
+        return;
+    };
+    let item_id = read_trimmed_string(item_obj.get("id"));
+    let call_id = read_trimmed_string(item_obj.get("call_id"));
+    let mut output = target
+        .get("output")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let exists = output.iter().any(|existing| {
+        let Some(existing_obj) = existing.as_object() else {
+            return false;
+        };
+        item_id
+            .as_ref()
+            .zip(read_trimmed_string(existing_obj.get("id")).as_ref())
+            .is_some_and(|(left, right)| left == right)
+            || call_id
+                .as_ref()
+                .zip(read_trimmed_string(existing_obj.get("call_id")).as_ref())
+                .is_some_and(|(left, right)| left == right)
+    });
+    if !exists {
+        output.push(item.clone());
+        target.insert("output".to_string(), Value::Array(output));
+    }
+}
+
+fn materialize_openai_responses_sse_body_text(body_text: &str) -> Result<Value, String> {
+    let events = parse_sse_json_events(body_text);
+    if events.is_empty() {
+        return Err("OpenAI Responses SSE response did not contain JSON data events".to_string());
+    }
+
+    let mut response = Map::new();
+    for (event_name, event) in events {
+        let Some(event_obj) = event.as_object() else {
+            continue;
+        };
+        let event_type = read_trimmed_string(event_obj.get("type")).unwrap_or_default();
+        let event_name = event_name.unwrap_or_default();
+        if let Some(response_obj) = event_obj.get("response").and_then(Value::as_object) {
+            merge_response_object(&mut response, response_obj);
+        }
+        let is_output_item_event = matches!(
+            event_name.as_str(),
+            "response.output_item.done" | "response.output_item.added"
+        ) || matches!(
+            event_type.as_str(),
+            "response.output_item.done" | "response.output_item.added"
+        );
+        if is_output_item_event {
+            if let Some(item) = event_obj.get("item") {
+                upsert_response_output_item(&mut response, item);
+            }
+        }
+        if (event_name == "response.required_action" || event_type == "response.required_action")
+            && event_obj.get("required_action").is_some()
+        {
+            response.insert(
+                "required_action".to_string(),
+                event_obj.get("required_action").cloned().unwrap_or(Value::Null),
+            );
+            response.insert(
+                "status".to_string(),
+                Value::String("requires_action".to_string()),
+            );
+        }
+    }
+
+    if response.is_empty() {
+        return Err("OpenAI Responses SSE response did not contain response payload".to_string());
+    }
+    if !response.contains_key("object") {
+        response.insert("object".to_string(), Value::String("response".to_string()));
+    }
+    if !response.contains_key("status") {
+        response.insert("status".to_string(), Value::String("completed".to_string()));
+    }
+    Ok(Value::Object(response))
 }
 
 fn materialize_openai_chat_sse_body_text(body_text: &str) -> Result<Value, String> {
@@ -452,6 +616,42 @@ mod tests {
         assert_eq!(result.envelope.format, "openai-responses");
         assert_eq!(result.envelope.version, "v1");
         assert_eq!(result.envelope.metadata.as_ref().unwrap()["model"], "gpt-4");
+    }
+
+    #[test]
+    fn test_parse_openai_responses_sse_body_text_wrapper() {
+        let body_text = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse_1\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"gpt-5.5\",\"output\":[]}}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_sse_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"stopped\"}]}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse_1\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-5.5\",\"output\":[{\"id\":\"msg_sse_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"stopped\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+            "event: response.done\n",
+            "data: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_sse_1\",\"object\":\"response\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_sse_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"stopped\"}]}]}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "mode": "sse",
+                "bodyText": body_text
+            }),
+            protocol: "openai-responses".to_string(),
+        };
+
+        let result = parse_resp_format_envelope(input).unwrap();
+        assert_eq!(result.envelope.format, "openai-responses");
+        assert_eq!(
+            result.envelope.metadata.as_ref().unwrap()["model"],
+            "gpt-5.5"
+        );
+        assert_eq!(result.envelope.payload["id"], "resp_sse_1");
+        assert_eq!(result.envelope.payload["object"], "response");
+        assert_eq!(result.envelope.payload["status"], "completed");
+        assert_eq!(
+            result.envelope.payload["output"][0]["content"][0]["text"],
+            "stopped"
+        );
     }
 
     #[test]

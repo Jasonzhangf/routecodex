@@ -105,7 +105,7 @@ describe('provider response Rust native plan', () => {
     expect(recordResponsesResponseMock).not.toHaveBeenCalled();
   });
 
-  it('projects servertool followup chatprocess result back to Responses client shape', async () => {
+  it('projects stopless CLI command instead of reentering followup for Anthropic relay stop', async () => {
     const context: Record<string, unknown> = {
       requestId: 'req_provider_response_stopless_followup_projection',
       entryEndpoint: '/v1/responses',
@@ -150,10 +150,13 @@ describe('provider response Rust native plan', () => {
       reenterPipeline: reenterPipeline as any
     });
 
-    expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    expect(reenterPipeline).toHaveBeenCalledTimes(0);
     expect(result.body?.object).toBe('response');
     expect(result.body?.output).toEqual(expect.any(Array));
-    expect(JSON.stringify(result.body)).toContain('continued');
+    const bodyText = JSON.stringify(result.body);
+    expect(bodyText).toContain('exec_command');
+    expect(bodyText).toContain('routecodex servertool run stop_message_auto');
+    expect(bodyText).toContain('stop_message_flow');
   });
 
   it('projects stopless CLI command for relay OpenAI Responses completed stop', async () => {
@@ -203,6 +206,10 @@ describe('provider response Rust native plan', () => {
     expect(outputText).toContain('exec_command');
     expect(outputText).toContain('routecodex servertool run stop_message_auto');
     expect(outputText).toContain('stop_message_flow');
+    const output = Array.isArray((result.body as any)?.output) ? (result.body as any).output : [];
+    const reasoning = output.find((item: any) => item?.type === 'reasoning');
+    expect(reasoning).toBeDefined();
+    expect(outputText).toContain('continuationPrompt');
   });
 
   it('streams stopless CLI command for relay OpenAI Responses completed stop', async () => {
@@ -463,7 +470,7 @@ describe('provider response Rust native plan', () => {
       providerProtocol: 'openai-chat'
     };
 
-    await expect(convertProviderResponse({
+    const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
       providerResponse: {
         id: 'chatcmpl_servertool_stop_guard_1',
@@ -480,8 +487,12 @@ describe('provider response Rust native plan', () => {
       wantsStream: false,
       stageRecorder: recorder,
       providerInvoker: async () => ({ response: {} as any })
-    })).rejects.toThrow('[servertool] followup requires reenter pipeline');
+    });
 
+    expect(result.body?.choices?.[0]?.finish_reason).toBe('tool_calls');
+    const bodyText = JSON.stringify(result.body);
+    expect(bodyText).toContain('exec_command');
+    expect(bodyText).toContain('routecodex servertool run stop_message_auto');
     expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
       effectPlan: expect.objectContaining({
         effects: expect.arrayContaining([

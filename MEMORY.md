@@ -2309,3 +2309,9 @@ Tags: snapshot, client-response, SnapshotStageKind, no-env-bypass, direct-relay,
 - Live metadata envelope type owner is `conversion/hub/types/chat-envelope.ts`; deleted `types/chat-schema.ts` must not be restored as a second schema owner.
 - Verified: residue audit 87/87 PASS, `npx tsc --noEmit --pretty false` PASS, `git diff --check` PASS; post-delete scan leaves only dynamic-load exceptions.
 Tags: hub-pipeline-rust-closeout, zero-consumer, dynamic-import, physical-delete, 2026-06-07
+
+## 2026-06-07 OpenAI Responses prebuilt SSE stopless boundary
+- OpenAI Responses prebuilt SSE wrappers must not bypass stopless when `__routecodex_finish_reason=stop` and stopless goal state is present. TS may gate passthrough, but SSE terminal-event materialization belongs to Rust `RespInbound`.
+- Do not use `__routecodex_stream_contract_probe_body` / snapshot/debug probe as normal provider response semantics. The valid path is upstream stream -> TS transport `bodyText` bridge -> Rust `parse_openai_responses_response` materializes Responses JSON -> Rust `RespChatProcess` stopless CLI projection -> client.
+- Verified: Rust `hub_resp_inbound_format_parse` 16/16 PASS; request-executor + provider-response Jest 43/43 PASS; `npm run verify:servertool-rust-only` PASS; `npx tsc --noEmit --pretty false` PASS; `git diff --check` PASS.
+Tags: responses-sse, stopless, servertool-cli-projection, resp-inbound, no-probe-replay, 2026-06-07
