@@ -3,6 +3,7 @@
 use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_counter;
 use servertool_core::stop_message_loop_guard;
+use servertool_core::cli_contract;
 
 /// Inspect a response payload and return the stop gateway context as JSON.
 pub fn inspect_stop_gateway_signal(payload_json: &str) -> Result<String, String> {
@@ -58,6 +59,48 @@ pub fn calculate_budget_json(
         config.as_ref(),
     );
     serde_json::to_string(&decision).map_err(|e| format!("serialize decision: {e}"))
+}
+
+pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value =
+        serde_json::from_str(input_json).map_err(|e| format!("deserialize projection input: {e}"))?;
+    let tool_name = input
+        .get("toolName")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "missing toolName".to_string())?;
+    let flow_id = input
+        .get("flowId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("servertool_cli_projection");
+    let payload = input
+        .get("input")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let repeat_count = input
+        .get("repeatCount")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0);
+    let max_repeats = input
+        .get("maxRepeats")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0);
+    let output = cli_contract::build_client_exec_cli_projection_output(
+        tool_name,
+        flow_id,
+        payload,
+        repeat_count,
+        max_repeats,
+    )
+    .map_err(|e| e.to_string())?;
+    serde_json::to_string(&output).map_err(|e| format!("serialize projection output: {e}"))
+}
+
+pub fn validate_client_exec_command_result_json(raw_output: &str) -> Result<String, String> {
+    let output = cli_contract::validate_client_exec_command_result(raw_output)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&output).map_err(|e| format!("serialize command result: {e}"))
 }
 
 /// Resolve default max repeats.

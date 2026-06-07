@@ -1,5 +1,12 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-07 direct passthrough 正确边界纠正
+
+- direct/router-direct/provider-direct 不是 Hub Pipeline，也不是 provider outbound builder：正确行为是当前 request body 对象 identity passthrough + 必要 hooks；禁止 clone、raw metadata replay、direct body builder、provider outbound sanitizer、runtime tool validator、history repair、protocol conversion。
+- 旧设计误区已确认并修正：`metadata.__raw_request_body` 作为 live body 来源、router-direct 用 `providerPayload` 覆盖 model、direct runtime 拦截/转换 chat-style Responses tool 都是错误行为。
+- Responses 工具/历史合法性应在 Rust Hub/Responses conversation store owner 保证；direct live 请求若客户端非法，应由 provider fail-fast，而不是 RouteCodex runtime 清洗。
+- 实机样本 `manual-direct-tool-20260607T184640` 验证 provider-request 保留 flat Responses tool `{type:"function", name:"noop_tool"}`，provider body 不含 `metadata`/`__raw_request_body`；失败原因转为真实 upstream/health cooldown，不再是本地 `tools[0].name`。
+
 ## 2026-06-05 apply_patch 10000 新样本根因收口
 
 - 新样本已证实 `provider-request.body.tools[*]` 里的 `apply_patch` schema 不是当前阻塞；live 问题改为历史 assistant `tool_calls[].function.arguments` 仍被发成双份 `{"input":"...","patch":"..."}`。
@@ -16091,3 +16098,35 @@ Phase E: TS fallback 物理删除
 - 修复: `native-exports.ts` 去掉吞异常；native capability 不存在才按 unavailable，contract error 原样抛出。
 - 验证: `npm run verify:responses-direct-tool-shape-contract` PASS；`npm run verify:responses-direct-tool-shape-no-ts-fallback` PASS；direct/request-executor Jest 62/62 PASS；`npm run build:min` PASS -> 0.90.2969；`npm run install:global` PASS；5555/5520 scoped restart 后 health ready 0.90.2969。
 - Runtime 证据: 5555 日志 15:01:44 `openai-responses-router-gpt-5.5-20260607T150144426-313467-1240` 命中 asxs 后 provider-switch 不再出现旧 validator unavailable reason，二跳 mimo 完成 200 tool_calls。
+
+## 2026-06-07 ErrorPolicyCenter Rust-first closeout
+- Phase 1 (3a/3c) re-implemented Rust-first: TS executor passes `routePool` + `excludedProviderKeys` as data passthrough in error event; Rust `event_affects_health` checks pool for strict alternative candidate. Health policy decision lives in Rust VR, not TS.
+- TS changes: `EmitOptions` / `ProviderErrorEvent` / `llmswitch-local-types` / `ProviderErrorEventExtended` gained `routePool?` / `excludedProviderKeys?`; `reportRequestExecutorProviderError` pass-through chain added; `buildProviderErrorEvent` sets fields on event.
+- Rust changes: `events.rs::event_affects_health` enhanced to check `routePool` array for non-excluded alternative; if exists, returns false.
+- Phase 2 (3d): `next_ladder_cooldown_ms` now alternates 30m→3h via `rem_euclid(2)`; `next_recoverable_cooldown_ms` same alternating pattern; removed `http_429_cooldown_cycles %= 3` and `recoverable_cooldown_cycles >= 2` reset from cooldown expiry path.
+- Phase 3 (3e): `consume_persisted_503_reprobe_if_available` pre-arms `consecutive_recoverable_failures = threshold-1` + `recoverable_cooldown_cycles = 1`.
+- Dead const: `LADDER_COOLDOWN_10M_MS` / `LADDER_COOLDOWN_5H_MS` physically deleted.
+- Verified: TS health-impact 2/2 PASS, Rust `virtual_router_engine::health` 25/25 PASS, `npm run build:min` PASS (0.90.2971).
+- Pre-existing failures not caused by this change: `request-executor-provider-failure-plan.spec.ts` 3/3, `recoverable_non_429_three_strikes_then_reprobe_failure_uses_30m_3h` 1/1 (both on clean main).
+2026-06-07 servertool/responses goal resume: investigating servertool server wiring and Responses history content array max-length validation regression.
+2026-06-07 user added: array_above_max_length 400 caused responses provider cooldown; fix must make local/provider request contract 400 health-neutral, then clear affected persisted health state and verify provider healthy.
+
+## 2026-06-07 Responses SSE duplicate-result fix
+- Root cause evidence: client-response_server sample for req_1780822526956_b8dc402b had every Responses SSE sequence_number 0..106 duplicated in snapshot, and required_action terminal repair appended an extra unsequenced response.completed with status requires_action. Provider raw SSE had only one Anthropic stream.
+- Fix: handler-response-utils no longer records upstream stream frames twice into client-response snapshots; required_action terminal repair now filters both response.required_action and response.completed, preserving response.done/[DONE] only.
+- Verified: handler-response-utils.sse-finish-reason.spec.ts 14/14 PASS; npm run build:min PASS -> 0.90.2973; npm run install:global PASS; routecodex restart --port 5520 PASS; routecodex status ready 0.90.2973; provider-health.json remains {providerCooldowns:[],version:1}.
+
+## 2026-06-07 Hub Pipeline full Rust audit
+- Current request main path: TS `HubPipeline.execute()` materializes JSON/SSE and calls Rust `runHubPipelineLibWithNative`, but TS still pre-routes via `VirtualRouterEngine.route()` and injects `metadata.__routecodexPreselectedRoute`; Rust `HubPipelineEngine::select_route()` errors without that route unless config has direct `target`.
+- Current response path: Rust `executeHubPipelineJson` returns payload + `effectPlan`, but TS `provider-response.ts` interprets `streamPipe` / `runtimeStateWrite` / `servertoolRuntimeAction`, writes Responses retention/usage state, and dispatches servertool runtime shell.
+- Current crate shape: `router-hotpath-napi` is cdylib/rlib N-API, not main server binary. `servertool-cli` is Rust bin, but main `routecodex` CLI/HTTP server remains Node/TS.
+- Full Rust/no TS shell target means new Rust runtime/server binary owning HTTP ingress, HubPipeline state, VR state/deps, provider transport invocation contract, response effect execution, and client SSE/JSON egress. Existing N-API wrapper can remain only as test/compat during migration, then physically deleted from runtime path.
+- Node-level contract requirement: each node must expose separate `control` and `data` interfaces; metadata/control/effects stay on `control`, business payload stays on `data`, never mixed.
+
+- 2026-06-07: 5520 配置已切到 asxs provider。coding/thinking/longcontext/default 指向 asxs.crsa.gpt-5.5，tools/search/web_search/multimodal 指向 asxs.crsa.gpt-5.4-mini，thinking 统一 low。旧 llmgate 目标仍在备份文件中，不属于 active config 真源。
+## 2026-06-07 direct/servertool/history verified checkpoint
+
+- Servertool server projection root cause: standalone Rust binary existed, but server `cli-projection.ts` still built `routecodex servertool run ...` and chat response shell semantics locally. Fixed by adding Rust/NAPI projection and result-validation bridge; TS now consumes native `execCommand`/contract output and only wraps client-visible `exec_command`.
+- Direct/relay history rule locked: direct uses current request object identity and only current top-level delta overrides; relay Responses materialize appends current delta after persisted prefix and does not rewrite cached prefix/basePayload. Added regression for direct history object identity and Rust Responses continuation prefix immutability.
+- Verified before checkpoint: `cargo test -p servertool-core --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` PASS 56/56; `cargo test -p router-hotpath-napi shared_responses_conversation --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` PASS 21/21; `npm run verify:servertool-rust-only` PASS; `npm run verify:responses-direct-tool-shape-contract` PASS; `npm run verify:responses-history-protocol-contract` PASS.
+- Known remaining verification gap at checkpoint: focused Jest blackbox failed only because current built native binding did not yet export `buildClientExecCliProjectionOutputJson`; rebuild native/build before final runtime claim.

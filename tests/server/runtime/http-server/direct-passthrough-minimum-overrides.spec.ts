@@ -1,35 +1,18 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
-  resolveResponsesDirectPayloadNative: (input: {
-    body: unknown;
-  }) => (input.body && typeof input.body === 'object' && !Array.isArray(input.body)
-    ? structuredClone(input.body as Record<string, unknown>)
-    : {}),
-  applyResponsesDirectRouteParamsOverrideNative: (input: {
-    payload: Record<string, unknown>;
-    routeParams?: Record<string, unknown>;
-  }) => {
-    const next = structuredClone(input.payload);
-    const routeModel = typeof input.routeParams?.model === 'string' ? input.routeParams.model.trim() : '';
-    if (routeModel) {
-      next.model = routeModel;
-    }
-    const routeReasoningEffort =
-      typeof input.routeParams?.reasoningEffort === 'string' ? input.routeParams.reasoningEffort.trim() : '';
-    if (routeReasoningEffort) {
-      next.reasoning_effort = routeReasoningEffort;
-      next.reasoning = { effort: routeReasoningEffort };
-    }
-    return next;
-  },
   validateResponsesDirectToolShapeContractNative: () => ({ ok: true as const }),
+  evaluateResponsesDirectRouteDecisionNative: () => ({
+    providerWireValid: true,
+    requiresHubRelay: false,
+    hasDeclaredApplyPatchTool: false,
+  }),
 }), { virtual: true });
 
 const { applyMinimalDirectOverrides } = await import('../../../../src/server/runtime/http-server/direct-passthrough-payload.js');
 
 describe('direct passthrough minimum overrides', () => {
-  it('only overrides model/reasoning from routeParams and preserves ingress payload shape', () => {
+  it('overrides only model on the original ingress payload object', () => {
     const ingress = {
       model: 'raw-model',
       previous_response_id: 'resp_raw_prev',
@@ -48,14 +31,13 @@ describe('direct passthrough minimum overrides', () => {
       },
     });
 
+    expect(output).toBe(ingress);
     expect(output).toEqual({
       model: 'route-model',
       previous_response_id: 'resp_raw_prev',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw user' }] }],
       instructions: 'raw-instructions',
       tools: [{ type: 'function', function: { name: 'update_plan' } }],
-      reasoning: { effort: 'high' },
-      reasoning_effort: 'high',
     });
   });
 
@@ -66,27 +48,31 @@ describe('direct passthrough minimum overrides', () => {
     } as Record<string, unknown>;
 
     const output = applyMinimalDirectOverrides(ingress, {});
+    expect(output).toBe(ingress);
     expect(output).toEqual(ingress);
   });
 
   it('keeps direct input history untouched (no request-side sanitization)', () => {
+    const firstHistoryItem = {
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text: '<goal_context>internal planner prompt</goal_context>' }],
+    };
+    const toolHistoryItem = {
+      type: 'function_call',
+      name: 'update_plan',
+      call_id: 'call_1',
+      arguments: '{}',
+    };
     const ingress = {
       model: 'raw-model',
-      input: [
-        {
-          type: 'message',
-          role: 'user',
-          content: [{ type: 'input_text', text: '<goal_context>internal planner prompt</goal_context>' }],
-        },
-        {
-          type: 'function_call',
-          name: 'update_plan',
-          call_id: 'call_1',
-          arguments: '{}',
-        },
-      ],
+      input: [firstHistoryItem, toolHistoryItem],
     } as Record<string, unknown>;
-    const output = applyMinimalDirectOverrides(ingress, {});
-    expect(output).toEqual(ingress);
+    const output = applyMinimalDirectOverrides(ingress, { routeParams: { model: 'route-model' } });
+    expect(output).toBe(ingress);
+    expect(output.model).toBe('route-model');
+    expect((output.input as unknown[])[0]).toBe(firstHistoryItem);
+    expect((output.input as unknown[])[1]).toBe(toolHistoryItem);
+    expect(output.input).toBe(ingress.input);
   });
 });

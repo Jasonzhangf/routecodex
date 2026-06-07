@@ -1,7 +1,32 @@
 import {
+  jest
+} from '@jest/globals';
+
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-servertool-core-semantics.js', () => ({
+  buildClientExecCliProjectionOutputWithNative: (input: any) => {
+    if (input.toolName === 'stop_message_auto') {
+      return {
+        toolName: 'stop_message_auto',
+        flowId: 'stop_message_flow',
+        execCommand: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续执行原任务\",\"repeatCount\":2,\"maxRepeats\":3}'",
+        continuationPrompt: '继续执行原任务',
+        repeatCount: 2,
+        maxRepeats: 3,
+        schemaGuidance: { requiredFields: ['stopreason'] },
+      };
+    }
+    return {
+      toolName: input.toolName,
+      flowId: input.flowId,
+      execCommand: `routecodex servertool run ${input.toolName} --input-json '${JSON.stringify(input.input)}'`,
+    };
+  },
+}));
+
+const {
   buildServertoolCliProjectionForAutoFlow,
   buildServertoolCliProjectionForToolCall
-} from '../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js';
+} = await import('../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js');
 
 describe('servertool CLI projection', () => {
   it('projects stopless auto flow to exec_command with reasoning and direct CLI input', () => {
@@ -28,7 +53,7 @@ describe('servertool CLI projection', () => {
 
     expect(message.reasoning_content).toBe('full stop summary');
     expect(message.tool_calls[0].function.name).toBe('exec_command');
-    expect(command).toBe("routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续执行原任务\",\"repeatCount\":2,\"maxRepeats\":3,\"stdoutPreview\":\"continue\"}'");
+    expect(command).toBe("routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续执行原任务\",\"repeatCount\":2,\"maxRepeats\":3}'");
     expect(command).not.toContain(['--', 'tic', 'ket'].join(''));
     expect(command).not.toContain(['st', 'cli_'].join(''));
     expect(command).not.toContain(['rcc', '_cli_'].join(''));

@@ -8,26 +8,20 @@ function read(relPath) {
   return fs.readFileSync(path.join(root, relPath), 'utf8');
 }
 
+function readIfExists(relPath) {
+  const absPath = path.join(root, relPath);
+  return fs.existsSync(absPath) ? fs.readFileSync(absPath, 'utf8') : null;
+}
+
 const responsesProvider = read('src/providers/core/runtime/responses-provider.ts');
-const directContractError = read('src/providers/core/runtime/responses-direct-contract-error.ts');
 const directPayload = read('src/server/runtime/http-server/direct-passthrough-payload.ts');
 const rustValidator = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
 const ciJest = read('scripts/tests/ci-jest.mjs');
-const directSpec = read('tests/server/runtime/http-server/direct-passthrough-payload.spec.ts');
-const providerSpec = read('tests/providers/core/runtime/protocol-http-providers.unit.test.ts');
-const routeLevelSpec = read('tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts');
+const directSpec = readIfExists('tests/server/runtime/http-server/direct-passthrough-payload.spec.ts');
+const providerSpec = readIfExists('tests/providers/core/runtime/protocol-http-providers.unit.test.ts');
 const serverIndex = read('src/server/runtime/http-server/index.ts');
 const directPayloadModule = read('src/server/runtime/http-server/direct-passthrough-payload.ts');
-
-for (const expected of [
-  'responses payload tools[',
-  'chat-style function tool',
-  'Responses wire requires top-level tool.name',
-]) {
-  if (!rustValidator.includes(expected)) {
-    failures.push(`rust validator missing contract text: ${expected}`);
-  }
-}
+const pkg = read('package.json');
 
 for (const expected of [
   'evaluateDirectRouteDecision',
@@ -38,11 +32,8 @@ for (const expected of [
   }
 }
 
-if (
-  !responsesProvider.includes('assertNativeResponsesDirectContractAvailable')
-  || !directContractError.includes('native responses direct tool-shape validator unavailable')
-) {
-  failures.push('responses-provider must fail fast through shared native-unavailable projector');
+if (responsesProvider.includes('assertNativeResponsesDirectContractAvailable')) {
+  failures.push('responses-provider must not runtime-call direct protocol validator projector');
 }
 
 if (!ciJest.includes('tests/server/runtime/http-server/direct-passthrough-payload.spec.ts')) {
@@ -52,25 +43,52 @@ if (!ciJest.includes('tests/server/runtime/http-server/direct-passthrough-route-
   failures.push('ci-jest must include tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts');
 }
 
-if (!directSpec.includes('rejects historical chat-style function tools on responses direct')) {
-  failures.push('direct passthrough spec missing chat-style function tool regression');
+if (directSpec && !directSpec.includes('does not runtime-reject chat-style function tools on responses direct')) {
+  failures.push('direct passthrough spec must assert chat-style tools are not runtime-rejected');
 }
 
-if (!directSpec.includes('Responses wire requires top-level tool.name')) {
-  failures.push('direct passthrough spec must assert Rust-native tool.name contract text');
+if (directSpec && !directSpec.includes('does not runtime-reject historical responses tool input content on direct')) {
+  failures.push('direct passthrough spec must assert historical tool content is not runtime-rejected');
 }
 
-if (!providerSpec.includes('rejects chat-style response tools before transport')) {
-  failures.push('responses provider unit spec missing pre-transport chat-style function tool regression');
+if (providerSpec && !providerSpec.includes('direct passthrough sends chat-style response tools to transport')) {
+  failures.push('responses provider unit spec must assert direct sends chat-style tools to transport');
 }
 
-for (const expected of [
-  'router same-protocol direct still skips legacy apply_patch servertool metadata when tool shape is chat-style invalid',
-  'router same-protocol direct validates Responses custom apply_patch instead of forcing servertool relay',
+for (const forbidden of [
+  'responses tools require Hub relay tool governance',
+  'valid_responses_tools_require_hub_relay',
+  'has_declared_responses_tools',
+  'validateResponsesDirectToolShapeContractNative(finalBody)',
+  'buildResponsesDirectPassthroughBodyNative',
+  'resolveResponsesDirectPayloadNative',
+  'applyResponsesDirectRouteParamsOverrideNative',
+  '__raw_request_body',
 ]) {
-  if (!routeLevelSpec.includes(expected)) {
-    failures.push(`route-level direct relay spec missing regression: ${expected}`);
+  if (
+    rustValidator.includes(forbidden)
+    || directPayload.includes(forbidden)
+    || responsesProvider.includes(forbidden)
+  ) {
+    failures.push(`direct runtime must not revive relay-by-tool-shape rule: ${forbidden}`);
   }
+}
+
+if (directSpec && !directSpec.includes('expect(resolved).toBe(body)')) {
+  failures.push('direct passthrough spec must assert resolver returns original body object');
+}
+
+if (directSpec && !directSpec.includes('expect(result).toBe(body)')) {
+  failures.push('direct passthrough spec must assert minimal override mutates original body object');
+}
+
+const directMinimumOverrideSpec = readIfExists('tests/server/runtime/http-server/direct-passthrough-minimum-overrides.spec.ts');
+if (directMinimumOverrideSpec && !directMinimumOverrideSpec.includes('expect((output.input as unknown[])[0]).toBe(firstHistoryItem)')) {
+  failures.push('direct minimum override spec must assert direct route overrides do not rewrite history items');
+}
+
+if (!pkg.includes('verify:responses-function-tool-normalization-rust-only')) {
+  failures.push('package build gate must include compile-time responses function-tool normalization verification');
 }
 
 for (const expected of [

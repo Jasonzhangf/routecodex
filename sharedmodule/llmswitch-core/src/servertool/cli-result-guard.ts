@@ -1,7 +1,7 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
+import { validateClientExecCommandResultWithNative } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
 
-const STOP_MESSAGE_AUTO_TOOL = 'stop_message_auto';
 const ROUTECODEX_STOP_MESSAGE_AUTO_CLI = 'routecodex servertool run stop_message_auto';
 const MAX_SCAN_DEPTH = 10;
 const MAX_SCAN_NODES = 2000;
@@ -28,11 +28,9 @@ function collectScanRoots(adapterContext: AdapterContext, runtimeMetadata?: Json
   const runtime = asRecord(runtimeMetadata);
   const responsesContext = asRecord(adapter?.responsesRequestContext) ?? asRecord(runtime?.responsesRequestContext);
   return [
-    adapter?.__raw_request_body,
     adapter?.capturedChatRequest,
     responsesContext?.payload,
     responsesContext?.context,
-    runtime?.__raw_request_body,
     runtime?.capturedChatRequest
   ].filter((value) => value !== undefined);
 }
@@ -73,9 +71,6 @@ function isStopMessageAutoCliResultObject(value: unknown): boolean {
     return false;
   }
   if (textContainsStopMessageAutoCliResult(readResultText(record))) {
-    return true;
-  }
-  if (textEqualsStopMessageAutoTool(record.tool) || textEqualsStopMessageAutoTool(record.kind)) {
     return true;
   }
   return false;
@@ -137,7 +132,7 @@ function textContainsStopMessageAutoCliResult(text: string): boolean {
   if (!parsed) {
     return false;
   }
-  return textEqualsStopMessageAutoTool(parsed.tool) || textEqualsStopMessageAutoTool(parsed.kind);
+  return isNativeClientExecCliResult(parsed);
 }
 
 function parseJsonObjectFromText(text: string): Record<string, unknown> | null {
@@ -161,8 +156,13 @@ function parseJsonObjectFromText(text: string): Record<string, unknown> | null {
   return null;
 }
 
-function textEqualsStopMessageAutoTool(value: unknown): boolean {
-  return typeof value === 'string' && value.trim() === STOP_MESSAGE_AUTO_TOOL;
+function isNativeClientExecCliResult(value: Record<string, unknown>): boolean {
+  try {
+    validateClientExecCommandResultWithNative(JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

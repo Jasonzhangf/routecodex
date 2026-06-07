@@ -2,38 +2,34 @@
 
 ## 目标
 
-把 `responses.direct_tool_shape_contract` 从当前 **TS 校验 + Rust 主链混合**，收口到 **Rust 唯一语义真源 + TS 薄壳 transport**。
+记录 `responses.direct_tool_shape_contract` 在 2026-06-07 后的收口结论：direct 不是请求构造/校验/修复链路，只是 same-protocol provider passthrough + hooks。
 
 核心 contract：
 
-- `openai-responses` direct payload 禁止 chat-style `tools[].function.name`
-- Responses wire `type="function"` 工具必须使用 top-level `tool.name`
-- direct payload 与 provider runtime 必须在 transport 前 fail-fast
-- 同一类错误必须保持统一错误语义，禁止一条链路放行、另一条链路拒绝
+- direct 使用当前请求 body 对象本身；禁止 clone / structuredClone / jsonClone / deep copy。
+- direct 不读取 `metadata.__raw_request_body`、snapshot、context 或 history 来恢复请求体。
+- direct 不调用 direct body builder、provider outbound sanitizer、Responses/chat-style tool validator、history repair、protocol conversion。
+- direct 只允许在当前请求对象上做明确的最小 runtime 覆盖；router-direct 不得用 `providerPayload` 重建或覆盖 request body。
+- direct 最小覆盖只能作用当前 request/delta 顶层，不得重写 `input/messages/history` 中既有历史条目，避免 cached history 被污染后重复命中。
+- relay/Responses continuation 只能基于合法 persisted prefix 追加当前 incoming delta；不得修改 persisted prefix/basePayload，不得把 route/model 覆盖回写 cached history。
+- RouteCodex 自己生成/持久化的 Responses history 必须在 Hub/Responses conversation store owner 保证合法；direct 不负责清洗历史。
 
 ## 当前真相
 
-当前 Rust 已成为唯一 validator 真源：
+当前真相：
 
-- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+- `src/server/runtime/http-server/direct-passthrough-payload.ts`：只返回当前 body 对象并做最小覆盖；不 clone、不 raw replay、不 validator。
+- `src/server/runtime/http-server/router-direct-pipeline.ts`：same-protocol direct 只把当前 requestPayload 传给 `processIncomingDirect`；audit context 不克隆 payload。
+- `src/providers/core/runtime/responses-provider.ts`：direct 走 `processIncomingDirect(request)`，不进 Hub Pipeline，不走 provider outbound sanitizer。
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`：Responses 历史合法化 owner，持久化/恢复的 tools 与 function_call/function_call_output 必须是 Responses 合法 shape。
+- `materialize_responses_continuation_payload`：relay continuation 只在 incoming 是纯 delta 时 materialize；route/model 等当前请求字段只进入新 payload 顶层，不回写 cached prefix/history。
 
-当前 TS 仅保留桥接与 transport 壳：
+已纠正的错误实现：
 
-- `src/server/runtime/http-server/direct-passthrough-payload.ts`
-- `src/providers/core/runtime/responses-provider.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.ts`
-
-当前 direct routeParams override 真源：
-
-- `apply_responses_direct_route_params_override_json`
-- 同时覆盖 server direct 与 provider direct 的 `model` / `reasoning_effort` 覆写
-- TS 不再各自持有两套 mutation 逻辑
-
-当前 direct raw replay / stream lift 真源：
-
-- `resolve_responses_direct_payload_json`
-- 统一处理 `metadata.__raw_request_body` 优先级、`metadata` fail-fast、`stream=true` 注入
-- TS 不再本地判断 replay raw 与 stream flag 合成
+- `metadata.__raw_request_body` 作为 live direct body 来源：已移除。
+- direct body builder / Rust direct payload builder：已移除 direct live path 使用。
+- direct runtime 拦截 chat-style function tool：已移除；客户端非法请求由 provider 返回错误。
+- router-direct 使用 `providerPayload` 覆盖 model：已废弃并通过测试改为 requestPayload identity passthrough。
 
 ## Rust-only 收口阶段
 
@@ -47,28 +43,19 @@
 - 2026-06-05 phase9 closeout: shrank `direct-passthrough-payload.ts` surface so `checkDirectPayloadContract` becomes a thin wrapper over `evaluateDirectRouteDecision`; removed direct local `hasDeclaredApplyPatchToolInPayload` export to avoid TS-side split owner drift.
 - 禁止新增第二套 TS 校验实现
 
-### Phase 2：Rust 引入唯一 validator
+### Phase 2：历史合法化 owner
 
-在 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/` 增加唯一语义入口，目标命名：
+Responses history/tool shape 的唯一修复点是 Hub/Responses conversation store owner。新增或修复能力必须落在 Rust history/conversation owner，不得在 direct/provider runtime 中补 sanitizer。
 
-- `assert_responses_direct_tool_shape_contract`
-- `assert_no_chat_style_function_tools_in_responses_wire`
-
-要求：
-
-- 输入为 direct responses payload / provider semantic payload
-- 输出为 pass / fail-fast error
-- 错误文案与现有 TS contract 对齐，迁移期允许通过 shadow compare 校准
-
-### Phase 3：TS 改为薄壳调用 Rust
+### Phase 3：TS 保持薄壳
 
 TS 仅保留：
 
 - transport/auth/header shell
-- bridge / napi 调用
+- current body object handoff
 - typed projection / error rethrow
 
-TS 不再保留工具 shape 语义判定分支。
+TS 不得保留 direct 工具 shape 语义判定、raw replay 或 builder 分支。
 
 ### Phase 4：anti-regression gate
 
@@ -105,9 +92,9 @@ TS 不再保留工具 shape 语义判定分支。
 
 满足以下条件才允许宣称 TS 删除完成：
 
-1. Rust validator 成为唯一真源
-2. TS 仅剩桥接与 transport，不再判断工具 wire shape
-3. direct payload / provider runtime 两条入口统一调用 Rust contract
-4. no-ts-fallback gate 持续通过
-5. 旧 TS 语义分支已物理删除
-- 2026-06-05 phase5 closeout: moved provider-local direct passthrough body build (`stripInternalKeysDeep`, top-level `metadata` rejection, trimmed `model` requirement) into Rust NAPI helper `build_responses_direct_passthrough_body_json`; `responses-provider.ts` now only bridges to native owner.
+1. direct 入口没有 clone / raw replay / builder / sanitizer / validator。
+2. provider-request snapshot 不含 `metadata` / `__raw_request_body` / `requestMetadata` / `contextSnapshot`。
+3. Responses history tests 证明持久化/恢复 tools 与 function_call/function_call_output 是合法 Responses shape。
+4. direct focused Jest + Rust history contract gate 持续通过。
+5. 旧 direct builder、raw metadata 入口、providerPayload model override 期望已物理删除。
+6. direct/relay 回归测试证明 current delta 覆盖不改 cached history/persisted prefix。

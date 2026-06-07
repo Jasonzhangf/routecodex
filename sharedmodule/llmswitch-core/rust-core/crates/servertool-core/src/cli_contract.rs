@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use crate::outcome_contract::is_client_exec_cli_projection;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -75,7 +76,13 @@ pub fn build_servertool_cli_binary_run_command_from_client_exec_result(
 fn build_stop_message_auto_run_output(
     input: ServertoolCliRunInput,
 ) -> Result<ServertoolCliRunOutput, ServertoolCliError> {
-    let flow_id = non_empty(input.flow_id.as_deref(), "flowId")?;
+    let flow_id = input
+        .flow_id
+        .as_deref()
+        .map(|value| non_empty(Some(value), "flowId"))
+        .transpose()?
+        .or_else(|| read_non_empty_string(&input.input, "flowId").ok())
+        .ok_or(ServertoolCliError::MissingField("flowId"))?;
     if flow_id != "stop_message_flow" {
         return Err(ServertoolCliError::InvalidField("flowId"));
     }
@@ -156,31 +163,45 @@ pub fn build_client_exec_cli_projection_output(
     repeat_count: u32,
     max_repeats: u32,
 ) -> Result<Value, ServertoolCliError> {
-    if flow_id != "stop_message_flow" {
-        return Err(ServertoolCliError::InvalidField("flowId"));
+    if !is_client_exec_cli_projection(tool_name) {
+        return Err(ServertoolCliError::UnsupportedTool(tool_name.to_string()));
     }
-    match tool_name {
-        "stop_message_auto" => {}
-        other => return Err(ServertoolCliError::UnsupportedTool(other.to_string())),
-    }
-    let continuation_prompt = read_non_empty_string(&input, "continuationPrompt")?;
-    let cmd = format!(
-        "routecodex servertool run {} --input-json '{}'",
-        tool_name,
-        serde_json::to_string(&serde_json::json!({
+    if tool_name == "stop_message_auto" {
+        if flow_id != "stop_message_flow" {
+            return Err(ServertoolCliError::InvalidField("flowId"));
+        }
+        let continuation_prompt = read_non_empty_string(&input, "continuationPrompt")?;
+        let cmd = format!(
+            "routecodex servertool run {} --input-json '{}'",
+            tool_name,
+            serde_json::to_string(&serde_json::json!({
+                "flowId": flow_id,
+                "continuationPrompt": continuation_prompt,
+                "repeatCount": repeat_count,
+                "maxRepeats": max_repeats
+            })).map_err(|_| ServertoolCliError::InvalidField("json"))?
+        );
+        return Ok(serde_json::json!({
+            "toolName": tool_name,
             "flowId": flow_id,
             "continuationPrompt": continuation_prompt,
             "repeatCount": repeat_count,
-            "maxRepeats": max_repeats
-        })).map_err(|_| ServertoolCliError::InvalidField("json"))?
+            "maxRepeats": max_repeats,
+            "schemaGuidance": stopless_schema_guidance(),
+            "execCommand": cmd
+        }));
+    }
+
+    let cmd = format!(
+        "routecodex servertool run {} --input-json '{}'",
+        tool_name,
+        serde_json::to_string(&input).map_err(|_| ServertoolCliError::InvalidField("json"))?
     );
     Ok(serde_json::json!({
         "toolName": tool_name,
         "flowId": flow_id,
-        "continuationPrompt": continuation_prompt,
         "repeatCount": repeat_count,
         "maxRepeats": max_repeats,
-        "schemaGuidance": stopless_schema_guidance(),
         "execCommand": cmd
     }))
 }
@@ -197,12 +218,11 @@ pub fn validate_client_exec_command_result(raw_output: &str) -> Result<Value, Se
     let flow_id = value.get("flowId")
         .and_then(|v| v.as_str())
         .ok_or(ServertoolCliError::MissingField("flowId"))?;
-    if flow_id != "stop_message_flow" {
-        return Err(ServertoolCliError::InvalidField("flowId"));
+    if !is_client_exec_cli_projection(tool_name) {
+        return Err(ServertoolCliError::UnsupportedTool(tool_name.to_string()));
     }
-    match tool_name {
-        "stop_message_auto" => {}
-        other => return Err(ServertoolCliError::UnsupportedTool(other.to_string())),
+    if tool_name == "stop_message_auto" && flow_id != "stop_message_flow" {
+        return Err(ServertoolCliError::InvalidField("flowId"));
     }
     Ok(value)
 }
@@ -218,11 +238,12 @@ mod tests {
             ServertoolCliRunInput {
                 tool_name: "stop_message_auto".to_string(),
                 input: json!({
+                    "flowId": "stop_message_flow",
                     "continuationPrompt": "continue with schema",
                     "repeatCount": 1,
                     "maxRepeats": 3
                 }),
-                flow_id: Some("stop_message_flow".to_string()),
+                flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
             },
@@ -302,6 +323,25 @@ mod tests {
     }
 
     #[test]
+    fn projection_output_supports_servertool_fixture_without_stopless_schema() {
+        let out = build_client_exec_cli_projection_output(
+            "servertool_fixture",
+            "servertool_cli_projection",
+            json!({"value":1}),
+            0,
+            0,
+        )
+        .expect("fixture projection output");
+        assert_eq!(out["toolName"], "servertool_fixture");
+        assert_eq!(out["flowId"], "servertool_cli_projection");
+        assert_eq!(
+            out["execCommand"].as_str(),
+            Some("routecodex servertool run servertool_fixture --input-json '{\"value\":1}'")
+        );
+        assert!(out.get("schemaGuidance").is_none());
+    }
+
+    #[test]
     fn exec_result_validation_accepts_valid_stop_message_auto() {
         let raw = json!({
             "toolName": "stop_message_auto",
@@ -330,5 +370,12 @@ mod tests {
             validate_client_exec_command_result(&raw.to_string()),
             Err(ServertoolCliError::InvalidField("flowId"))
         );
+    }
+
+    #[test]
+    fn exec_result_validation_accepts_servertool_fixture() {
+        let raw = json!({"toolName": "servertool_fixture", "flowId": "servertool_cli_projection"});
+        let parsed = validate_client_exec_command_result(&raw.to_string()).expect("valid result");
+        assert_eq!(parsed["toolName"], "servertool_fixture");
     }
 }

@@ -20,6 +20,8 @@
 6. 文本工具 harvest 必须容器优先：先识别并 mask wrapper/fence，再解析内部顶层工具壳；正文 prose/shell/patch body 只保留或透传，不得参与猜测式恢复。
 7. Provider-specific 提示词只允许调整“上游怎么吐”，不能在 Provider 层重写 harvest 语义；真正的收割边界仍在 chat-process Rust 真源。
 8. DeepSeek tools 的当前主路径真源仍是**文本 fence / 文本工具壳**；不要把“要求 upstream 直接输出原生标准 function call”当成主策略。允许客户端侧桥接成标准 `function_call`，但 provider upstream 仍按文本协议治理与验收。
+9. direct/provider-direct/router-direct 的唯一职责是 same-protocol provider passthrough + hooks：直接使用当前 request body 对象，不 clone，不从 `metadata.__raw_request_body`/snapshot/context 恢复，不调用 direct body builder / provider outbound sanitizer / runtime tool validator，不用 `providerPayload` 重建或覆盖 body。允许的最小覆盖只能作用当前 request/delta 顶层，禁止重写 `input/messages/history` 既有条目。Responses 历史合法性只能在 Hub/Responses conversation store owner 修复。
+10. relay/Responses continuation 只能在合法 persisted prefix 后追加当前 incoming delta；不得改 persisted prefix/basePayload，不得把 route/model 覆盖回写 cached history。非纯 delta、部分重放 prefix、已完成 call_id 重放必须显式拒绝/返回 null，禁止猜测修历史。
 
 ## 三层职责（Block / App / UI）
 - Block：基础能力唯一真源。

@@ -1,6 +1,10 @@
 import { randomUUID } from 'crypto';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions, ToolCall } from './types.js';
+import {
+  buildClientExecCliProjectionOutputWithNative,
+  type ClientExecCliProjectionOutput,
+} from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
 
 export const SERVERTOOL_CLI_PROJECTION_FEATURE_ID = 'feature_id: hub.servertool_cli_projection';
 export const SERVERTOOL_CLI_PROJECTION_CANONICAL_BUILDER =
@@ -13,51 +17,66 @@ export interface ServertoolCliProjectionPlan {
   chatResponse: JsonObject;
 }
 
+type ServertoolCliProjectionOptions = Pick<ServerSideToolEngineOptions, 'requestId'>;
+
 export function buildServertoolCliProjectionForToolCall(args: {
-  options: ServerSideToolEngineOptions;
+  options: ServertoolCliProjectionOptions;
   toolCall: ToolCall;
   reasoningText?: string;
 }): ServertoolCliProjectionPlan {
   const toolName = args.toolCall.name;
   const input = parseArguments(args.toolCall.arguments);
   const reasoningText = args.reasoningText || `RouteCodex will execute servertool ${toolName} through client CLI.`;
-  return buildProjection({
-    requestId: args.options.requestId,
+  const nativeProjection = buildClientExecCliProjectionOutputWithNative({
     toolName,
+    flowId: 'servertool_cli_projection',
     input,
+    repeatCount: 0,
+    maxRepeats: 0,
+  });
+  return buildProjectionShell({
+    requestId: args.options.requestId,
+    nativeProjection,
     reasoningText
   });
 }
 
 export function buildServertoolCliProjectionForAutoFlow(args: {
-  options: ServerSideToolEngineOptions;
+  options: ServertoolCliProjectionOptions;
   flowId: string;
   reasoningText: string;
   stdoutPreview?: string;
   input?: JsonObject;
 }): ServertoolCliProjectionPlan {
   const toolName = args.flowId === 'stop_message_flow' ? 'stop_message_auto' : args.flowId;
-  return buildProjection({
-    requestId: args.options.requestId,
+  const repeatCount = typeof args.input?.repeatCount === 'number' ? args.input.repeatCount : 0;
+  const maxRepeats = typeof args.input?.maxRepeats === 'number' ? args.input.maxRepeats : 0;
+  const nativeProjection = buildClientExecCliProjectionOutputWithNative({
     toolName,
+    flowId: args.flowId,
     input: {
       flowId: args.flowId,
       ...(args.input ?? {}),
       ...(args.stdoutPreview ? { stdoutPreview: args.stdoutPreview } : {})
     },
+    repeatCount,
+    maxRepeats,
+  });
+  return buildProjectionShell({
+    requestId: args.options.requestId,
+    nativeProjection,
     reasoningText: args.reasoningText
   });
 }
 
-function buildProjection(args: {
+function buildProjectionShell(args: {
   requestId: string;
-  toolName: string;
-  input: JsonObject;
+  nativeProjection: ClientExecCliProjectionOutput;
   reasoningText: string;
 }): ServertoolCliProjectionPlan {
-  const toolName = formatServertoolCliToolName(args.toolName);
   const clientCallId = `call_servertool_cli_${randomUUID().replace(/-/g, '')}`;
-  const command = `routecodex servertool run ${toolName} --input-json ${shellQuoteJson(args.input)}`;
+  const toolName = args.nativeProjection.toolName;
+  const command = args.nativeProjection.execCommand;
   const chatResponse: JsonObject = {
     id: `chatcmpl_${clientCallId}`,
     object: 'chat.completion',
@@ -116,15 +135,4 @@ function parseArguments(value: string): JsonObject {
     throw new Error('[servertool.cli] tool arguments must be JSON object');
   }
   throw new Error('[servertool.cli] tool arguments must be JSON object');
-}
-
-function formatServertoolCliToolName(toolName: string): string {
-  if (!/^[A-Za-z0-9_.-]+$/.test(toolName)) {
-    throw new Error(`[servertool.cli] unsafe tool name for CLI projection: ${toolName}`);
-  }
-  return toolName;
-}
-
-function shellQuoteJson(value: JsonObject): string {
-  return `'${JSON.stringify(value).replace(/'/g, `'\\''`)}'`;
 }

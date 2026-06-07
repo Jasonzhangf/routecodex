@@ -74,6 +74,24 @@ export interface DefaultBudgetConfig {
   is_non_active_managed_goal: boolean;
 }
 
+export interface ClientExecCliProjectionInput {
+  toolName: string;
+  flowId?: string;
+  input?: unknown;
+  repeatCount?: number;
+  maxRepeats?: number;
+}
+
+export interface ClientExecCliProjectionOutput {
+  toolName: string;
+  flowId: string;
+  execCommand: string;
+  continuationPrompt?: string;
+  repeatCount?: number;
+  maxRepeats?: number;
+  schemaGuidance?: unknown;
+}
+
 // ── Stop gateway context ────────────────────────────────────────────────────
 
 export function inspectStopGatewaySignalWithNative(payload: unknown): StopGatewayContext {
@@ -139,4 +157,32 @@ export function calculateBudgetWithNative(
     throw new Error(`calculateBudget native returned non-string: ${typeof resultJson}`);
   }
   return JSON.parse(resultJson);
+}
+
+export function buildClientExecCliProjectionOutputWithNative(
+  input: ClientExecCliProjectionInput,
+): ClientExecCliProjectionOutput {
+  const capability = 'buildClientExecCliProjectionOutputJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('buildClientExecCliProjectionOutputJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`buildClientExecCliProjectionOutputJson native returned non-string: ${typeof resultJson}`);
+  }
+  return JSON.parse(resultJson);
+}
+
+export function validateClientExecCommandResultWithNative(rawOutput: string): Record<string, unknown> {
+  const capability = 'validateClientExecCommandResultJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('validateClientExecCommandResultJson native unavailable');
+  }
+  const resultJson = fn(rawOutput);
+  if (typeof resultJson !== 'string') {
+    throw new Error(`validateClientExecCommandResultJson native returned non-string: ${typeof resultJson}`);
+  }
+  return JSON.parse(resultJson) as Record<string, unknown>;
 }

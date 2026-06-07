@@ -1669,7 +1669,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 - 2026-05-30 Responses store missing context rule: if logs show `recordResponse: missing request context` for provider-shaped request ids or `:stop_followup`, check whether core response recording passes scope fields into `recordResponsesResponse`. Do not add fallback replay; bind via existing `scopeIndex` by carrying `sessionId`, `conversationId`, `matchedPort`, `routingPolicyGroup`, and `providerKey` from AdapterContext.
 
-- 2026-05-30 chat direct model rule: if `/v1/chat/completions` fails with provider `Model X is not supported` while route target has a provider-specific model id (for example `deepseek-v4-flash-free`), inspect router-direct payload. OpenAI-chat direct sends must override inbound `model` with selected providerPayload/runtime model before provider send; keep Responses direct continuation transparent.
+- 2026-05-30 chat direct model rule 已废弃（2026-06-07 纠正）：router-direct 不得用 selected `providerPayload` / runtime model 覆盖当前请求 body；这会把 direct 变成 provider outbound builder。若 provider 不接受客户端 model，必须在路由/入口契约上解决，不允许 direct 层重建请求。
 
 ### 2026-05-30 Windsurf Cascade poll / retry 精华
 - Windsurf provider 内的 Cascade 状态机错误必须显式终止：`WINDSURF_CASCADE_BUSY` / `WINDSURF_CASCADE_NO_PROGRESS` 是本地 Cascade executor 状态，不是上游 503；retry policy 必须视为 unrecoverable，禁止 provider-switch 再次 Send 导致 `executor is not idle` 风暴。
@@ -1737,6 +1737,10 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-05-31 Direct passthrough 架构禁令
 - router-direct/provider-direct = provider passthrough + hooks only；禁止进入 HubPipeline response conversion、chat-process、servertool response orchestration 或任何 `executor-response` 专用壳。
+- direct 的正确请求行为是“当前请求 body 对象 identity passthrough + 必要 hooks”。禁止 clone、structuredClone、jsonClone、深拷贝、从 `metadata.__raw_request_body`/snapshot/context 恢复 body、调用 direct body builder、provider outbound sanitizer、Responses/chat-style tool shape validator、history repair、protocol conversion。
+- direct 允许的最小覆盖只限当前请求对象上的明确 runtime 必需字段（当前仅 stream intent 与路由层明确传入的同协议 model override；router-direct 不得用 `providerPayload` 重建或覆盖 request body）。这不是清洗、转换或兼容层；覆盖只能作用当前 request/delta 顶层，禁止重写 `input/messages/history` 中既有条目，避免 cached history 被污染并导致重复命中。
+- direct provider-request 样本验收：provider body 必须是当前请求语义，不含 `metadata` / `__raw_request_body` / `requestMetadata` / `contextSnapshot`；Responses flat tool 必须保持 `{type:"function", name,...}`，direct 不得把 chat-style tool 转回或拦截。
+- 如果 direct live 报 `tools[0].name` / chat-style function tool，先查请求历史/Hub Responses store owner 是否存入非法工具定义；修复点在 Hub/Responses conversation history owner，禁止在 direct runtime 清洗、补偿或 raw metadata 旁路。
 - HubPipeline request/response 保持三段式严格协议链路；SSE 按 provider 配置协议在唯一链路处理。direct path 不做 materialize/remap/canonicalize，不做 fallback/patch。
 - 禁止 direct 5xx/转换错误用 `routecodexSameProtocolDirectDisabled`、`recoverable_direct_5xx_reenter_executor`、二次 `executePipeline` 重入来伪装统一重试；direct 错误必须按 direct/provider transport 结果显式返回或抛出。
 - 禁止把 `outboundProfile` 当 provider 物理协议猜测；配置的 provider type/module 才决定 provider runtime，VR target `outboundProfile` 只属于 HubPipeline 路由/转换语义。
@@ -1894,7 +1898,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-06-04 direct passthrough/provider-wire 红线
 - router-direct 不是 Hub Pipeline：只取 VirtualRouter target，禁止 `hubPipeline.execute`、禁止 req/resp inbound/outbound conversion；direct 只按入口协议与 providerProtocol 一致进入。
-- `/v1/responses` direct payload 必须是 Responses wire；ResponsesProvider 在 transport 前 fail-fast 拒绝 chat `messages` 与 `{type:"function", function:{name}}` 工具，避免上游 400 `tools[n].name`。
+- `/v1/responses` direct payload 必须是当前客户端提供的 Responses wire；direct runtime 不做 chat `messages`/chat-style tool validator 或 sanitizer，客户端非法就让 provider fail-fast 返回。RouteCodex 自己生成/持久化的 Responses history 必须在 Hub/Responses store owner 保证合法，不能靠 direct 修。
+- `/v1/responses` relay/Responses continuation 只能基于合法 persisted prefix 追加当前 incoming delta；不得修改 persisted prefix/basePayload，不得把 route/model 覆盖回写到 cached history。若 incoming 不是纯 delta、部分重放 prefix、或重放已完成 call_id，必须返回 null/fail-fast 走原 payload，而不是猜测修历史。
 
 ## 2026-06-04 调试精华（10000 loopback shadow）
 
