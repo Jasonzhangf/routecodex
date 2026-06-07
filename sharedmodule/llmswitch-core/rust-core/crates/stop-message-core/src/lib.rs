@@ -23,7 +23,7 @@ const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
     "请重新检查用户最初输入和后续指令：用户真正意图是什么？目标边界是什么？当前问题卡在哪里？之前的笔记、文件、日志、命令输出或测试结果是否已经看过？如果仅靠重新理解用户意图就能获得信息，请先据此继续执行；否则按目标、已做、证据、问题原因、已排除因素、排查顺序补齐缺口。",
     "这是最后一次自动续杯预算。不要再开启新一轮执行，不要复述系统校验过程；请直接给出面向用户的最终收尾 summary，包含：已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步。最后必须附 stop schema；若目标未完成且仍有下一步，也不要继续执行，把下一步写入 next_suggested_path 并以 blocked/continue_needed 说明。",
 ];
-const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"请在回复末尾附这个 JSON 对象，字段名必须一致：{"stopreason":0,"reason":"已完成/已阻塞/仍需继续的具体原因","has_evidence":1,"evidence":"文件/日志/命令输出/测试结果等证据；没有则空字符串","issue_cause":"问题原因；无异常填空字符串","excluded_factors":"已排除因素；无则空字符串","diagnostic_order":"排查顺序/已执行顺序","done_steps":"已经完成的步骤；没有则空字符串","next_step":"立刻继续执行的下一步；若没有则空字符串","next_suggested_path":"建议继续推进的路径；若没有则空字符串","learned":"本轮学到的可复用事实/踩坑/配置结论；无则空字符串"}。stopreason 只能用数字：0=finished，1=blocked，2=continue_needed。"#;
+const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"请在回复末尾附这个 JSON 对象，字段名必须一致：{"stopreason":0,"reason":"已完成/已阻塞/仍需继续的具体原因","has_evidence":1,"evidence":"文件/日志/命令输出/测试结果等证据；没有则空字符串","issue_cause":"问题原因；无异常填空字符串","excluded_factors":"已排除因素；无则空字符串","diagnostic_order":"排查顺序/已执行顺序","done_steps":"已经完成的步骤；没有则空字符串","next_step":"立刻继续执行的下一步；若没有则空字符串","next_suggested_path":"建议继续推进的路径；若没有则空字符串","needs_user_input":false,"learned":"本轮学到的可复用事实/踩坑/配置结论；无则空字符串"}。stopreason 只能用数字：0=finished，1=blocked，2=continue_needed。needs_user_input 为 true 时表示你需要向用户提出一个简单问题（如澄清意图、确认需求），此时 next_step 填写问题内容，Rust 会允许停止。"#;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -200,6 +200,7 @@ pub struct StopSchemaParsed {
     pub issue_cause: Option<String>,
     pub excluded_factors: Option<String>,
     pub diagnostic_order: Option<String>,
+    pub needs_user_input: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -341,6 +342,31 @@ pub fn evaluate_stop_schema_gate(
             );
         }
     };
+
+
+    // needs_user_input gate: if model needs to ask user a simple question,
+    // allow stop without counting budget. Next_step must contain the question.
+    if parsed.needs_user_input.unwrap_or(false) {
+        let next_step_raw = parsed.next_step.as_deref().map(str::trim).unwrap_or("");
+        if next_step_raw.is_empty() {
+            return schema_invalid_followup(
+                "stop_schema_needs_user_input_missing_next_step",
+                used,
+                provided_cap,
+                "你声明需要向用户提问（needs_user_input=true），但没有给出问题内容。请在 next_step 中填写你的问题，然后允许停止等待用户回答。",
+                parsed,
+            );
+        }
+        return StopSchemaGateDecision {
+            max_repeats: provided_cap,
+            action: StopSchemaGateAction::AllowStop,
+            reason_code: "stop_schema_needs_user_input".to_string(),
+            summary_prefix: Some(format!("需要向用户确认：{}", next_step_raw)),
+            followup_text: None,
+            count_budget: false,
+            parsed: Some(parsed),
+        };
+    }
 
     if stopreason == 0 || stopreason == 1 {
         let reason = parsed.reason.as_deref().map(str::trim).unwrap_or("");
@@ -744,6 +770,7 @@ fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
         issue_cause: read_string(row.get("issue_cause")),
         excluded_factors: read_string(row.get("excluded_factors")),
         diagnostic_order: read_string(row.get("diagnostic_order")),
+        needs_user_input: row.get("needs_user_input").and_then(|v| v.as_bool()),
     })
 }
 
@@ -1662,5 +1689,61 @@ mod tests {
         assert!(!decision.loop_detected);
         assert_eq!(decision.goal_context_count, 0);
         assert_eq!(decision.reason_code, "goal_active_stop_no_goal_context");
+    }
+
+    #[test]
+    fn needs_user_input_with_next_step_allows_stop_without_budget() {
+        let decision = evaluate_stop_schema_gate(
+            r#"{"stopreason":2,"reason":"需要确认","has_evidence":0,"next_step":"请确认：你希望使用哪个版本的 API？v1 还是 v2？","needs_user_input":true}"#,
+            0,
+            3,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(decision.reason_code, "stop_schema_needs_user_input");
+        assert!(!decision.count_budget);
+        assert!(decision.summary_prefix.as_ref().unwrap().contains("请确认"));
+    }
+
+    #[test]
+    fn needs_user_input_without_next_step_fails() {
+        let decision = evaluate_stop_schema_gate(
+            r#"{"stopreason":2,"reason":"需要确认","has_evidence":0,"next_step":"","needs_user_input":true}"#,
+            0,
+            3,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(
+            decision.reason_code,
+            "stop_schema_needs_user_input_missing_next_step"
+        );
+    }
+
+    #[test]
+    fn needs_user_input_does_not_increase_budget() {
+        // First round: needs_user_input → AllowStop, no budget
+        let d1 = evaluate_stop_schema_gate(
+            r#"{"stopreason":2,"reason":"确认","has_evidence":0,"next_step":"问题内容","needs_user_input":true}"#,
+            0,
+            3,
+        );
+        assert_eq!(d1.action, StopSchemaGateAction::AllowStop);
+        assert!(!d1.count_budget);
+
+        // Second round: normal stopreason=0 → should still be at used=0
+        let d2 = evaluate_stop_schema_gate(
+            r#"{"stopreason":0,"reason":"已完成","has_evidence":1,"next_step":""}"#,
+            0,
+            3,
+        );
+        assert_eq!(d2.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(d2.reason_code, "stop_schema_finished");
+    }
+
+    #[test]
+    fn needs_user_input_not_exposed_to_model() {
+        // The STOP_SCHEMA_JSON_EXAMPLE should contain needs_user_input
+        // but stopreason should NOT contain 3
+        assert!(STOP_SCHEMA_JSON_EXAMPLE.contains("needs_user_input"));
+        assert!(!STOP_SCHEMA_JSON_EXAMPLE.contains(r#"stopreason":3"#));
     }
 }

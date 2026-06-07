@@ -16010,3 +16010,84 @@ function-map.yml 16 features 是 project AGENTS.md guard 18（功能定位唯一
 - 根因：`stop-message-auto.ts` 用 `goalLoopContext.goalContextCount > 0` 直接把 `goal_status` 设为 active，导致 `/goal achieved/completed` 场景只要 captured request 仍含 active goal 文案就误跳过 stopless。
 - 修复：goal active 只看显式 request-scoped active；persisted active 和 completed/paused/stopped 不覆盖为 active。`goalLoopContext` 只保留重复 stop loop 检测用途。
 - 验证：`npm run build:min` PASS；定向 Jest PASS；线上 `192.168.0.93:10000/v1/responses` stream=true 返回 reasoning + `exec_command routecodex servertool run stop_message_auto`，SSE 保存 `tmp/stopless-live-10000.sse`。
+
+## 2026-06-07 servertool Rust binary Phase 1 closeout
+
+- Phase 1 目标完成：独立 Rust binary `servertool-cli` 可独立构建和测试，stopless schema / CLI input-output 全部 Rust owner。
+- 新增 crate：`sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/`（`[[bin]] routecodex-servertool`），已加入 workspace。
+- `servertool-core/src/cli_contract.rs` 新增：
+  - `build_servertool_cli_binary_run_command_from_client_exec_result` — binary CLI 入口 contract。
+  - `build_client_exec_cli_projection_output` — 投影输出 schema owner（TS 不得发明字段）。
+  - `validate_client_exec_command_result` — exec result 进入 req_chatprocess 前的 Rust guard。
+  - `stopless_schema_guidance` — stopless schema 闭环的 Rust owner（required_fields + stopreason_values）。
+- 测试覆盖：
+  - `servertool-core` 32 tests PASS（含 projection rejection / result validation / fake_exec 拒绝）。
+  - `servertool-cli` 3 Rust blackbox tests PASS（spawn binary）。
+  - `servertool-cli-binary-blackbox.mjs` 5 node blackbox tests PASS（stop_message_auto / missing prompt / web_search / invalid flowId / repeatCount>maxRepeats）。
+  - `verify-servertool-rust-only.mjs` 全 PASS。
+- 整链路覆盖边界（诚实审计）：
+  - ✅ binary CLI 输入/输出 contract（Rust unit + blackbox）。
+  - ✅ projection schema owner（Rust unit test `projection_output_is_rust_owned_schema`）。
+  - ✅ old restoration marker 拒绝（`--ticket`/`stcli_`/`rcc_cli_`）。
+  - ⚠️ 完整 HTTP pipeline 串联（拦截→exec_command→客户端执行→exec result→req_chatprocess 改名→schema 注入）需要 Phase 2 HTTP blackbox。
+  - ⚠️ `stopless-followup-blackbox.mjs` 已覆盖 server-side stop→followup 链路（BackendRouteReenter），但不覆盖 ClientExecCliProjection 完整链。
+- TS 边界锁定：TS 不得写 servertool 业务逻辑，不得 fallback 默认 summary，不得从 exec_command stdout 恢复 model tool identity；TS 只允许 spawn/parse/write。
+- 不新增 TS 文件或 TS 业务逻辑。
+
+## 2026-06-07 stopless schema simple_inquiry 扩展
+
+新增 `stopreason=3`（simple_inquiry）：模型需要向用户做简单询问时，允许 stop 且不计入连续 stop 预算。
+
+规则：
+- `stopreason=3` + `next_step` 非空（问题本身）→ 允许 stop
+- `stopreason=3` 不计入 budget（与 `0`/`1` 的完成/阻塞 stop 不同）
+- `stopreason=3` 不触发 schema guidance 注入（模型下一轮会收到用户回答后正常继续）
+- `stopreason=3` + `next_step` 为空 → 不允许 stop，要求补问题文本
+
+验证：
+- Rust gate 单测：stopreason=3 + next_step 非空 → skip（不 trigger）
+- Rust gate 单测：stopreason=3 + next_step 为空 → trigger（要求补问题）
+- Rust gate 单测：stopreason=3 不增加 stopMessageUsed（不计入预算）
+- schema guidance 的 stopreason_values 新增 `simpleInquiry: 3`
+- CLI blackbox：输出包含 `stopreasonValues.simpleInquiry === 3`
+
+## 2026-06-07 5555 gpt-5.5 502/400排查
+- 样本 requestId: openai-responses-router-gpt-5.5-20260607T134124377-313071-844 / 849 / 850 / 851
+- 5555 thinking 命中 cc.key1.gpt-5.5；外层日志 502，需追 upstream 真实 400。
+- error sample 初看 requestBody 含超长 instructions + 旧工具调用/输出历史，怀疑 responses history/build shape 污染。
+- 日志证据: ~/.rcc/logs/server-5555.log 380989-381028 连续 cc.key1.gpt-5.5 bad_response_status_code。
+- 样本 req_1780809794377_76ef37a3 的 provider-response.json 显示 upstream 已返回 response.created SSE，疑似本地 SSE 解析/stream 消费层报错，不是请求 shape 400。
+- 修复点: handler-response-utils.ts 将 data [DONE] 与 event response.done 分开追踪，避免 direct SSE 只补 response.completed、不补 response.done。
+
+## 2026-06-07 servertool stopless CLI Phase B-E closeout
+
+Phase B: 三类 outcome 分类
+- `servertool-core/src/outcome_contract.rs`：`classify_servertool_outcome()` / `is_client_exec_cli_projection()` / `contains_denied_cli_marker()` / `is_denied_cli_projection()`
+- 12 单测覆盖：stop_message_auto→ClientExecCliProjection / web_search→BackendRouteReenter / memory_cache_auto→ServerIoInternal / fake_exec 拒绝 / --ticket/stcli_/rcc_cli_ 拒绝
+
+Phase C: req_chatprocess 03 工具改名
+- `servertool-core/src/tool_name_projection.rs`：`project_exec_command_result_to_model_tool_result()` / `validate_exec_command_result_for_projection()`
+- 10 单测覆盖：stop_message_auto 投影 / invalid JSON 拒绝 / missing tool_name 拒绝 / web_search 拒绝 / wrong flow_id 拒绝 / fake_exec 拒绝 / --ticket marker 拒绝
+
+Phase D: schema 闭环 + needs_user_input gate
+- `stop-message-core` 42/42 PASS（含 needs_user_input gate 4 新测试）
+- `cli_contract.rs` `stopless_schema_guidance()` 包含 needs_user_input
+- `STOP_SCHEMA_JSON_EXAMPLE` 更新：模型可输出 needs_user_input=true + next_step 填问题内容
+
+Phase E: TS fallback 物理删除
+- `stop-message-counter.ts`：删除 resolveDefaultSnapshot 函数 + 删除 fallback branch + tryNativeBudget catch 改为 throw SERVERTOOL_NATIVE_BUDGET_FAILED + applyStopMessageFinishReasonBudget 无 TS fallback
+- `verify-servertool-rust-only.mjs` ALL PASS
+
+最终验证：
+- cargo test -p servertool-core: 54/54
+- cargo test -p servertool-cli: 3/3
+- cargo test -p stop-message-core: 42/42
+- node servertool-cli-binary-blackbox.mjs: 5/5
+- node verify-servertool-rust-only.mjs: ALL PASS
+
+## 2026-06-07 responses direct native validator wrapper
+- 新日志问题: provider-switch reason="provider-runtime-error: native responses direct tool-shape validator unavailable"。
+- 根因确认: `validateResponsesDirectToolShapeContractNative()` catch 了所有 native 异常并返回 null，导致真实 payload contract error 被误报为 native validator unavailable。
+- 修复: `native-exports.ts` 去掉吞异常；native capability 不存在才按 unavailable，contract error 原样抛出。
+- 验证: `npm run verify:responses-direct-tool-shape-contract` PASS；`npm run verify:responses-direct-tool-shape-no-ts-fallback` PASS；direct/request-executor Jest 62/62 PASS；`npm run build:min` PASS -> 0.90.2969；`npm run install:global` PASS；5555/5520 scoped restart 后 health ready 0.90.2969。
+- Runtime 证据: 5555 日志 15:01:44 `openai-responses-router-gpt-5.5-20260607T150144426-313467-1240` 命中 asxs 后 provider-switch 不再出现旧 validator unavailable reason，二跳 mimo 完成 200 tool_calls。

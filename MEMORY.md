@@ -2178,3 +2178,26 @@ Tags: error-policy-center, final-verification, direct-passthrough, build-min, 20
 - 阻塞: `cargo test` 副作用每次跑会触碰 6-12 个 timestamp/auto-gen 文件 (`docs/agent-routing/10-runtime-ssot-routing.md` / `package.json` / `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/{chat_servertool_orchestration,req_process_stage2_route_select,shared_metadata_semantics,virtual_router_engine/forwarder,virtual_router_engine/routing/direct_model,servertool/handlers/stop-message-auto}.{rs,ts}` / `src/server/runtime/http-server/{index,port-config-types,port-config-validator}.ts` / `tests/servertool/stop-message-auto.spec.ts` / `tests/server/runtime/http-server/port-config-validator-sameprotocol.spec.ts` / `src/providers/core/runtime/provider-failure-policy-impl.ts`), commit 前需逐个 `git restore -- <path>` 排除. 旧工作区 `stash@{0}` 仍有 30 个无关文件, 已确认是另一台模型过期工作, 不在本 plan 范围.
 - Phase 4 静默 catch 清理 (5 文件) / Phase 5 `verify:hardcode` 新建 / Step 6 AGENTS.md + rcc-dev-skills 同步 / live smoke / 黑盒 curl: **未开始**. 接手执行时先 `git status --porcelain` 看 13 M + 3 untracked 残留, 逐个 restore 非 plan 文件; 唯一真实改动 `health.rs` 已在 `7295f0e4` commit. 红测先行 → 改 5 文件 → silent-failure-audit 命中数 < 488 (基线) → 新建 `scripts/ci/hardcode-audit.mjs` → package.json 加 `verify:hardcode` → 落 AGENTS.md §10/§12/§17 引用 plan + rcc-dev-skills "2026-06-05 硬编码 / fallback 收口" 精华段.
 Tags: hardcode-fallback-arch-audit, ssot, provider-family-abstraction, persisted-503-family, no-fallback, 2026-06-05
+
+## 2026-06-07 servertool Rust binary Phase 1 closeout
+
+- servertool 的最终执行形态是独立 Rust binary（`routecodex-servertool`），不是 TS command handler。
+- crate 拓扑：`servertool-core`（lib: decision/contract/builder/gate/prompt/budget/projection）→ `servertool-cli`（bin: `routecodex-servertool`）→ `router-hotpath-napi`（napi bridge）。
+- CLI contract 入口：`routecodex-servertool run <toolName> --input-json <json> [--flow <flowId>] [--repeat-count N --max-repeats N]`。
+- stopless schema 闭环 Rust owner：`stopless_schema_guidance()` 返回 `schemaGuidance`（required_fields + stopreason_values）；TS 不得发明字段。
+- projection schema Rust owner：`build_client_exec_cli_projection_output()` 构建 `execCommand` / `schemaGuidance` / `repeatCount` / `maxRepeats`；旧 `--ticket` / `stcli_` / `rcc_cli_` 标记在 Rust 测试中被显式拒绝。
+- exec result validation Rust guard：`validate_client_exec_command_result()` 在 exec result 进入 req_chatprocess 前做 tool_name + flow_id 校验。
+- TS 红线：TS 不得写 servertool 业务逻辑，不得 fallback 默认 summary，不得从 exec_command stdout 恢复 model tool identity；TS 只允许 spawn/parse/write。旧 TS CLI handler 在 Rust binary parity 后物理删除。
+- Phase 1 验证命令：`cargo build -p servertool-cli` / `cargo test -p servertool-core`（32/32）/ `cargo test -p servertool-cli`（3/3）/ `node servertool-cli-binary-blackbox.mjs`（5/5）/ `node verify-servertool-rust-only.mjs`（全 PASS）。
+- 整链路边界：Phase 1 覆盖 binary contract + projection schema + result validation；完整 HTTP pipeline 串联（拦截→exec→exec result→req_chatprocess 改名→schema 注入）是 Phase 2 目标。
+Tags: servertool-rust-binary, servertool-cli, cli-contract, stopless-schema, projection-schema, no-ts-fallback, 2026-06-07
+
+## 2026-06-07 servertool stopless CLI Phase B-E closeout
+
+- Phase B（outcome classification）：`servertool-core/src/outcome_contract.rs` 实现三类 outcome 分类，stop_message_auto→ClientExecCliProjection，web_search→BackendRouteReenter，memory_cache_auto→ServerIoInternal；fake_exec/--ticket/stcli_/rcc_cli_ 在 Rust 层被拒绝。
+- Phase C（tool name projection）：`servertool-core/src/tool_name_projection.rs` 实现 exec_command result → model-side original tool name 转换；验证 tool_name/flow_id/denied markers；web_search 不得投影为 ClientExecCliProjection。
+- Phase D（schema closed loop + needs_user_input）：`needs_user_input` gate 已在 stop-message-core 实现，模型输出 needs_user_input=true + next_step 填问题内容 → Rust AllowStop 不计预算；next_step 为空 → Followup 要求补问题。
+- Phase E（TS fallback deletion）：`stop-message-counter.ts` 的 resolveDefaultSnapshot / fallback branch 已物理删除；tryNativeBudget catch 改为 throw SERVERTOOL_NATIVE_BUDGET_FAILED；verify-servertool-rust-only ALL PASS。
+- Rust 测试总数：servertool-core 54 + servertool-cli 3 + stop-message-core 42 = 99 tests ALL PASS。
+- 覆盖边界：Phase B/C/D 的 Rust unit test 已覆盖分类/projection/gate/schema；HTTP blackbox 整链路（拦截→exec→exec result→改名→schema 注入）需要完整 server 启动，当前未覆盖。
+Tags: servertool-rust-binary, outcome-contract, tool-name-projection, needs-user-input, no-ts-fallback, 2026-06-07

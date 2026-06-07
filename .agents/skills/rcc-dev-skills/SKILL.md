@@ -1971,3 +1971,24 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - `stop_message_auto` migrated path 必须同时锁 projection 和 CLI executor：projection 生成 `exec_command routecodex servertool run stop_message_auto --input-json <json>`；CLI executor 必须强制 `flowId=stop_message_flow`、`continuationPrompt`、`repeatCount`、`maxRepeats`，缺失直接 fail-fast，禁止默认 summary 或固定“继续执行”兜底。
 - stopless CLI counters 读取必须按字段级优先级：`metadata.serverToolLoopState.repeatCount/maxRepeats` -> `metadata.__rt.serverToolLoopState.repeatCount/maxRepeats` -> `metadata.__rt.stopMessageState.stopMessageUsed/stopMessageMaxRepeats`；禁止对象级 `??` 短路，否则顶层 loopState 缺字段会遮住 `__rt` 真值。
 - 旧 ticket/restoration 审计要分两层扫：精确 marker (`--ticket|stcli_|rcc_cli_|cli-ticket|ServertoolCliTicket|tryRestoreServertoolCliToolOutputs`) 用于证明 runtime/src/tests 无旧 ticket；宽词 `restore/restoration` 必须分类为 servertool 禁止性 marker、Responses continuation 正常语义、或无关 git restore 文案，不能把宽词命中误当旧设计复活。
+
+### 2026-06-07 servertool Rust binary Phase 1 closeout 精华
+
+- servertool 最终执行形态是独立 Rust binary `routecodex-servertool`（`sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/`），不是 TS command handler；`servertool-core` 是 lib，提供 decision/contract/builder/gate/prompt/budget/projection。
+- CLI contract 入口：`routecodex-servertool run <toolName> --input-json <json> [--flow <flowId>] [--repeat-count N --max-repeats N]`；输出 schema 由 Rust `servertool-core` owner，TS 不得发明字段。
+- stopless schema 闭环 Rust owner：`stopless_schema_guidance()` 返回 `schemaGuidance`（required_fields 含 stopreason/reason/has_evidence/evidence/issue_cause/excluded_factors/diagnostic_order/done_steps/next_step/next_suggested_path/learned；stopreason_values: 0=finished/1=blocked/2=continue_needed）。
+- projection schema Rust owner：`build_client_exec_cli_projection_output()` 构建 execCommand + schemaGuidance + repeatCount + maxRepeats；旧 `--ticket` / `stcli_` / `rcc_cli_` 标记在 Rust unit test 中被显式拒绝。
+- exec result validation Rust guard：`validate_client_exec_command_result()` 在 exec result 进入 req_chatprocess 前校验 tool_name=stop_message_auto + flow_id=stop_message_flow；错误返回 SERVERTOOL_UNSUPPORTED_TOOL / SERVERTOOL_CLI_MISSING_FIELD / SERVERTOOL_CLI_INVALID_FIELD。
+- TS 红线（Phase 1 已锁定）：TS 不得写 servertool 业务逻辑，不得 fallback 默认 summary，不得从 exec_command stdout 恢复 model tool identity；TS 只允许 spawn routecodex-servertool / parse stdout/stderr / write exec_command result / emit error event。旧 TS CLI handler 在 Rust binary parity 后物理删除。
+- Phase 1 验证命令：`cargo build -p servertool-cli` / `cargo test -p servertool-core`（32/32）/ `cargo test -p servertool-cli`（3/3）/ `node scripts/tests/servertool-cli-binary-blackbox.mjs`（5/5）/ `node scripts/verify-servertool-rust-only.mjs`（全 PASS）。
+- 整链路边界：Phase 1 覆盖 binary contract + projection schema + result validation + old marker 拒绝；完整 HTTP pipeline 串联（HubRespChatProcess03 拦截 → exec_command projection → 客户端执行 → exec result 回链 → req_chatprocess 03 工具改名 → schema 注入）是 Phase 2 目标，需要 HTTP blackbox 覆盖。
+- 整链路已知覆盖：`stopless-followup-blackbox.mjs` 覆盖 server-side stop→followup（BackendRouteReenter），但不覆盖 ClientExecCliProjection 完整链；`tests/servertool/servertool-cli-projection.spec.ts` 覆盖 TS projection 格式，但不覆盖 Rust schema owner 身份。
+
+## 2026-06-07 servertool stopless CLI Phase B-E closeout 精华
+
+- Phase B outcome classification Rust owner：`classify_servertool_outcome()` 在 `servertool-core/src/outcome_contract.rs`；stop_message_auto/servertool_fixture→ClientExecCliProjection，web_search/vision_auto→BackendRouteReenter，memory_cache_auto→ServerIoInternal；fake_exec/--ticket/stcli_/rcc_cli_ 在 Rust 层被拒绝。
+- Phase C tool name projection Rust owner：`project_exec_command_result_to_model_tool_result()` 在 `servertool-core/src/tool_name_projection.rs`；exec_command result → model-side original tool name 转换；验证 tool_name/flow_id/denied markers；web_search 不得投影为 ClientExecCliProjection。
+- Phase D needs_user_input gate：模型输出 `needs_user_input: true` + `next_step` 填问题内容 → Rust gate AllowStop 不计 budget；next_step 为空 → Followup 要求补问题；判断标准不暴露给模型（stopreason 不含 3）。
+- Phase E TS fallback deletion：`stop-message-counter.ts` 的 `resolveDefaultSnapshot` / fallback branch 已物理删除；`tryNativeBudget` catch 改为 throw `SERVERTOOL_NATIVE_BUDGET_FAILED`；`applyStopMessageFinishReasonBudget` 无 TS fallback。
+- Rust 测试总数：servertool-core 54 + servertool-cli 3 + stop-message-core 42 = 99 tests ALL PASS。
+- 覆盖边界：Rust unit test 已覆盖分类/projection/gate/schema；HTTP blackbox 整链路（拦截→exec→exec result→改名→schema 注入）需要完整 server 启动，当前未覆盖。

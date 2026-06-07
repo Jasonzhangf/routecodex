@@ -86,7 +86,10 @@ function tryNativeBudget(args: {
       used: decision.next_used,
       maxRepeats: decision.max_repeats,
     };
-  } catch { return undefined; }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(`SERVERTOOL_NATIVE_BUDGET_FAILED: ${msg}`);
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -134,28 +137,6 @@ export function applyStopMessageFinishReasonBudget(args: {
     return nativeResult;
   }
 
-  // Fallback: pure TS
-  const fallbackSnapshot = snapshot ?? resolveDefaultSnapshot(stopSignal.eligible, args.adapterContext);
-  if (!fallbackSnapshot) {
-    return { observed: true, stopEligible: stopSignal.eligible };
-  }
-  if (!stopSignal.eligible) {
-    persistBudget({ stickyKey: lookup.stickyKey, text: fallbackSnapshot.text, maxRepeats: fallbackSnapshot.maxRepeats, used: 0, source: fallbackSnapshot.source });
-    return { observed: true, stopEligible: false, used: 0, maxRepeats: fallbackSnapshot.maxRepeats };
-  }
-  const nextUsed = Math.max(0, Math.floor(fallbackSnapshot.used)) + 1;
-  persistBudget({ stickyKey: lookup.stickyKey, text: fallbackSnapshot.text, maxRepeats: fallbackSnapshot.maxRepeats, used: nextUsed, source: fallbackSnapshot.source });
-  return { observed: true, stopEligible: true, used: nextUsed, maxRepeats: fallbackSnapshot.maxRepeats };
+
 }
 
-// Keep existing helper for backward compat during migration
-function resolveDefaultSnapshot(stopEligible: boolean, adapterContext: AdapterContext): StopMessageSnapshot | null {
-  if (!stopEligible) return null;
-  if (resolveStopMessageDefaultEnabled() === false) return null;
-  const text = resolveStopMessageDefaultText()?.trim() || '继续执行';
-  const goal = readStoplessGoalState(adapterContext).state;
-  const isNonActiveManaged = Boolean(goal && goal.status !== 'idle' && goal.status !== 'active');
-  const configuredMax = isNonActiveManaged ? 1 : resolveStopMessageDefaultMaxRepeats();
-  const maxRepeats = Number.isFinite(configuredMax) && Number(configuredMax) > 0 ? Math.floor(Number(configuredMax)) : 3;
-  return { text, maxRepeats, used: 0, source: 'default' as const };
-}
