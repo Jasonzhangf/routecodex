@@ -127,8 +127,12 @@ pub(crate) fn build_route_queue(
         queue.insert(0, "video".to_string());
     }
 
-    if features.has_image_attachment && has_multimodal_targets {
-        if !queue.iter().any(|v| v == "multimodal") {
+    if features.has_image_attachment && (has_multimodal_targets || has_vision_targets) {
+        queue.retain(|route| route != "multimodal" && route != "vision");
+        if has_vision_targets {
+            queue.insert(0, "vision".to_string());
+        }
+        if has_multimodal_targets {
             queue.insert(0, "multimodal".to_string());
         }
     }
@@ -196,6 +200,34 @@ pub(crate) fn filter_pools_by_capability(
                         || provider_registry.has_capability(key, "web_search_direct");
                 }
                 provider_registry.has_capability(key, capability)
+            })
+            .cloned()
+            .collect();
+        if targets.is_empty() {
+            continue;
+        }
+        let mut next = pool.clone();
+        next.targets = targets;
+        out.push(next);
+    }
+    out
+}
+
+pub(crate) fn filter_pools_by_visual_capability(
+    pools: &[RoutePoolTier],
+    provider_registry: &ProviderRegistry,
+) -> Vec<RoutePoolTier> {
+    let mut out = Vec::new();
+    for pool in pools {
+        if pool.targets.is_empty() {
+            continue;
+        }
+        let targets: Vec<String> = pool
+            .targets
+            .iter()
+            .filter(|key| {
+                provider_registry.has_capability(key, "multimodal")
+                    || provider_registry.has_capability(key, "vision")
             })
             .cloned()
             .collect();
@@ -431,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn image_attachment_prefers_multimodal_and_does_not_auto_prepend_vision() {
+    fn image_attachment_prefers_multimodal_then_vision_before_text_routes() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "multimodal".to_string(),
@@ -469,6 +501,7 @@ mod tests {
             queue,
             vec![
                 "multimodal".to_string(),
+                "vision".to_string(),
                 "coding".to_string(),
                 "default".to_string()
             ]
@@ -476,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn image_attachment_without_multimodal_targets_does_not_auto_route_to_vision() {
+    fn image_attachment_without_multimodal_targets_routes_to_vision() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "vision".to_string(),
@@ -502,7 +535,14 @@ mod tests {
 
         let queue = build_route_queue("coding", &["default".to_string()], &features, &routing);
 
-        assert_eq!(queue, vec!["coding".to_string(), "default".to_string()]);
+        assert_eq!(
+            queue,
+            vec![
+                "vision".to_string(),
+                "coding".to_string(),
+                "default".to_string()
+            ]
+        );
     }
 
     #[test]

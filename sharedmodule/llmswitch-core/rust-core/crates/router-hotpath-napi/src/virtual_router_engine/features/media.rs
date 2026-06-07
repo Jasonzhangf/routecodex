@@ -33,6 +33,10 @@ pub(super) fn analyze_media_attachments(message: Option<&Value>) -> MediaAttachm
             if has_image_block {
                 result.has_image = true;
             }
+            if text_contains_image_placeholder(raw) {
+                result.has_any_media = true;
+                result.has_image = true;
+            }
             if has_video_block {
                 result.has_video = true;
                 if has_data_video {
@@ -52,6 +56,13 @@ pub(super) fn analyze_media_attachments(message: Option<&Value>) -> MediaAttachm
         if let Some(items) = content.as_array() {
             for part in items {
                 if let Some(map) = part.as_object() {
+                    if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
+                        if text_contains_image_placeholder(text) {
+                            result.has_any_media = true;
+                            result.has_image = true;
+                            continue;
+                        }
+                    }
                     let type_value = map
                         .get("type")
                         .and_then(|v| v.as_str())
@@ -92,6 +103,17 @@ pub(super) fn analyze_media_attachments(message: Option<&Value>) -> MediaAttachm
         }
     }
     result
+}
+
+fn text_contains_image_placeholder(raw: &str) -> bool {
+    let lowered = raw.to_lowercase();
+    if lowered.contains("<image ") || lowered.contains("<image>") {
+        return true;
+    }
+    if lowered.contains("[image omitted]") {
+        return true;
+    }
+    Regex::new(r"\[image\s*#\d+\]").unwrap().is_match(&lowered)
 }
 
 fn extract_media_url_candidate(record: &serde_json::Map<String, Value>) -> String {

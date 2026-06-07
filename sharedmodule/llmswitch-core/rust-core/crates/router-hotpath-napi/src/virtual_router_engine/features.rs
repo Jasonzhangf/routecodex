@@ -1039,6 +1039,27 @@ mod tests {
     }
 
     #[test]
+    fn current_user_image_placeholder_is_media_intent() {
+        let request = json!({
+            "model": "glm-5",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "<image name=[Image #1]>" },
+                    { "type": "text", "text": "[Image omitted]" },
+                    { "type": "text", "text": "</image>" },
+                    { "type": "text", "text": "[Image #1]这两个节点通吗？" }
+                ]
+            }]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+
+        assert!(features.latest_message_from_user);
+        assert!(features.has_image_attachment);
+    }
+
+    #[test]
     fn responses_wire_input_function_call_output_uses_current_turn_tool_call() {
         let request = json!({
             "model": "glm-5",

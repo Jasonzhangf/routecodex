@@ -18,7 +18,7 @@ use crate::virtual_router_engine::quota::ProviderQuotaState;
 use crate::virtual_router_engine::routing::{
     build_route_queue, default_pool_supports_capability, extract_excluded_provider_keys,
     extract_key_alias, extract_provider_id, filter_candidates_by_state, filter_pools_by_capability,
-    resolve_instruction_target, route_has_targets,
+    filter_pools_by_visual_capability, resolve_instruction_target, route_has_targets,
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
@@ -419,6 +419,15 @@ impl VirtualRouterEngineCore {
                 if !capability_filtered.is_empty() {
                     pools = capability_filtered;
                 } else if select_default_pool_for_multimodal && route_name == "multimodal" {
+                    continue;
+                }
+            }
+            if multimodal_route_requested && route_name == "vision" {
+                let capability_filtered =
+                    filter_pools_by_visual_capability(&pools, &self.provider_registry);
+                if !capability_filtered.is_empty() {
+                    pools = capability_filtered;
+                } else {
                     continue;
                 }
             }
@@ -1239,6 +1248,264 @@ mod tests {
             )
             .expect("selection should succeed");
         assert_eq!(selected.provider_key, "sdfv.key1.gpt-5.4");
+    }
+
+    #[test]
+    fn image_request_prefers_multimodal_route_over_search_continuation() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "text.search".to_string(),
+            json!({
+                "providerKey": "text.search",
+                "providerType": "openai",
+                "modelId": "search-text",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "media.mm".to_string(),
+            json!({
+                "providerKey": "media.mm",
+                "providerType": "openai",
+                "modelId": "media-mm",
+                "enabled": true,
+                "modelCapabilities": {
+                    "media-mm": ["multimodal"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([
+            (
+                "search".to_string(),
+                Value::Array(vec![json!({
+                    "id": "search",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["text.search"]
+                })]),
+            ),
+            (
+                "multimodal".to_string(),
+                Value::Array(vec![json!({
+                    "id": "multimodal",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["text.search", "media.mm"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let classification = ClassificationResult {
+            route_name: "search".to_string(),
+            confidence: 1.0,
+            reasoning: "search:last-tool-search".to_string(),
+            candidates: vec!["search".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_image_attachment: true,
+            ..RoutingFeatures::default()
+        };
+        let selected = core
+            .select_provider(
+                "search",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("image request should select media target");
+
+        assert_eq!(selected.provider_key, "media.mm");
+        assert_eq!(selected.route_used, "multimodal");
+    }
+
+    #[test]
+    fn image_request_uses_vision_route_when_multimodal_route_missing() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "text.default".to_string(),
+            json!({
+                "providerKey": "text.default",
+                "providerType": "openai",
+                "modelId": "text-default",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "media.vision".to_string(),
+            json!({
+                "providerKey": "media.vision",
+                "providerType": "openai",
+                "modelId": "media-vision",
+                "enabled": true,
+                "modelCapabilities": {
+                    "media-vision": ["vision"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([
+            (
+                "vision".to_string(),
+                Value::Array(vec![json!({
+                    "id": "vision",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["text.default", "media.vision"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "default",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["text.default"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let classification = ClassificationResult {
+            route_name: "coding".to_string(),
+            confidence: 1.0,
+            reasoning: "coding:last-tool-coding".to_string(),
+            candidates: vec!["default".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_image_attachment: true,
+            ..RoutingFeatures::default()
+        };
+        let selected = core
+            .select_provider(
+                "coding",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("image request should select vision target");
+
+        assert_eq!(selected.provider_key, "media.vision");
+        assert_eq!(selected.route_used, "vision");
+    }
+
+    #[test]
+    fn image_request_uses_vision_route_when_multimodal_pool_has_no_visual_target() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "text.search".to_string(),
+            json!({
+                "providerKey": "text.search",
+                "providerType": "openai",
+                "modelId": "search-text",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "text.default".to_string(),
+            json!({
+                "providerKey": "text.default",
+                "providerType": "openai",
+                "modelId": "text-default",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "media.vision".to_string(),
+            json!({
+                "providerKey": "media.vision",
+                "providerType": "openai",
+                "modelId": "media-vision",
+                "enabled": true,
+                "modelCapabilities": {
+                    "media-vision": ["vision"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([
+            (
+                "search".to_string(),
+                Value::Array(vec![json!({
+                    "id": "search",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["text.search"]
+                })]),
+            ),
+            (
+                "multimodal".to_string(),
+                Value::Array(vec![json!({
+                    "id": "multimodal",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["text.search"]
+                })]),
+            ),
+            (
+                "vision".to_string(),
+                Value::Array(vec![json!({
+                    "id": "vision",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["text.default", "media.vision"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "default",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["text.default"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let classification = ClassificationResult {
+            route_name: "search".to_string(),
+            confidence: 1.0,
+            reasoning: "search:last-tool-search".to_string(),
+            candidates: vec!["search".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_image_attachment: true,
+            ..RoutingFeatures::default()
+        };
+        let selected = core
+            .select_provider(
+                "search",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("image request should continue to vision after empty multimodal capability");
+
+        assert_eq!(selected.provider_key, "media.vision");
+        assert_eq!(selected.route_used, "vision");
     }
 
     #[test]
