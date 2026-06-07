@@ -335,31 +335,33 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
       },
     );
 
-    upstream.write('event: response.function_call_arguments.done\n');
-    upstream.write(`data: ${JSON.stringify({
-      type: 'response.function_call_arguments.done',
-      name: 'apply_patch',
-      call_id: 'call_patch_order',
-      arguments: wrapped,
-    })}\n\n`);
-    upstream.write('event: response.completed\n');
-    upstream.write(`data: ${JSON.stringify({
-      type: 'response.completed',
-      response: {
-        id: 'resp_apply_patch_order',
-        object: 'response',
-        status: 'completed',
-      },
-    })}\n\n`);
-    upstream.write('event: response.done\n');
-    upstream.write(`data: ${JSON.stringify({
-      type: 'response.done',
-      response: {
-        id: 'resp_apply_patch_order',
-        object: 'response',
-        status: 'completed',
-      },
-    })}\n\n`);
+    upstream.write([
+      'event: response.function_call_arguments.done\n',
+      `data: ${JSON.stringify({
+        type: 'response.function_call_arguments.done',
+        name: 'apply_patch',
+        call_id: 'call_patch_order',
+        arguments: wrapped,
+      })}\n\n`,
+      'event: response.completed\n',
+      `data: ${JSON.stringify({
+        type: 'response.completed',
+        response: {
+          id: 'resp_apply_patch_order',
+          object: 'response',
+          status: 'completed',
+        },
+      })}\n\n`,
+      'event: response.done\n',
+      `data: ${JSON.stringify({
+        type: 'response.done',
+        response: {
+          id: 'resp_apply_patch_order',
+          object: 'response',
+          status: 'completed',
+        },
+      })}\n\n`,
+    ].join(''));
     upstream.end();
     await waitForEnd(res);
     const text = Buffer.concat(chunks).toString('utf8');
