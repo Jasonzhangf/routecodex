@@ -18,6 +18,17 @@ async function withServer<T>(app: express.Express, run: (baseUrl: string) => Pro
   }
 }
 
+function findSseDataByType(text: string, type: string): Record<string, unknown> | undefined {
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('data: ')) continue;
+    const raw = line.slice('data: '.length);
+    if (raw === '[DONE]') continue;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed.type === type) return parsed;
+  }
+  return undefined;
+}
+
 describe('responses-handler stream closed before completed regression', () => {
   it('repairs terminal Responses SSE frames with a response id when upstream emits output item then closes', async () => {
     const app = express();
@@ -68,22 +79,16 @@ describe('responses-handler stream closed before completed regression', () => {
         })
       });
       const text = await response.text();
-      const completedLine = text
-        .split('\n')
-        .find((line) => line.startsWith('data: {"type":"response.completed"'));
-      const doneLine = text
-        .split('\n')
-        .find((line) => line.startsWith('data: {"type":"response.done"'));
+      const completedEvent = findSseDataByType(text, 'response.completed');
+      const doneEvent = findSseDataByType(text, 'response.done');
 
       expect(response.status).toBe(200);
       expect(text).toContain('event: response.output_item.done');
       expect(text).toContain('event: response.completed');
       expect(text).toContain('event: response.done');
       expect(text).toContain('data: [DONE]');
-      expect(completedLine).toBeDefined();
-      expect(doneLine).toBeDefined();
-      expect(JSON.parse(completedLine!.slice('data: '.length)).response.id).toEqual(expect.any(String));
-      expect(JSON.parse(doneLine!.slice('data: '.length)).response.id).toEqual(expect.any(String));
+      expect(completedEvent?.response).toEqual(expect.objectContaining({ id: expect.any(String) }));
+      expect(doneEvent?.response).toEqual(expect.objectContaining({ id: expect.any(String) }));
     });
   });
 

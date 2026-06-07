@@ -1951,11 +1951,13 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Responses SSE terminal repair/dedupe 的唯一语义 owner 是 Rust native `shared_responses_response_utils.rs`。TS handler 只能 buffer/split SSE、调用 native probe update、调用 native terminal frame builder、写 native 返回的 client frames、管理 stream lifecycle。
 - 若 residue/audit 命中 TS 在 terminal repair 中读取 `response.required_action` / `submit_tool_outputs` / `tool_calls`、把 required_action 推导成 `tool_calls`、或按 required_action 过滤 native repair frames，必须迁回 Rust probe/frame builder，而不是在 TS 再补一层判断。
 - Required_action terminal contract：只补缺失的 `response.required_action`，不得补 `response.completed`；只补缺失的 `response.done` / `[DONE]`。Rust 改完后必须跑 `node scripts/build-core.mjs`，否则 Node blackbox 仍加载旧 `dist/native/router_hotpath_napi.node`。
+- 5555 direct/relay 混跑时，若 `/v1/responses` direct SSE 在 `required_action` 后 client close 且缺 `response.done`，不要清 Responses store，也不要强制 direct->relay；TS handler 只基于 native probe 的 continuation 结论调用 native SSE conversation persistence，普通 partial delta close 仍按 abandoned request 清理并报 `upstream_stream_incomplete`。
 
 ## 2026-06-07 Responses conversation store bridge 精华
 - Bridge/runtime integrations 操作 Responses conversation store 时必须命中同一个 active singleton。若 global store 缺方法，不要在 bridge 里 fallback import core dist；dist import 可能覆盖 `globalThis.__rccResponsesConversationStore`，造成 source/test store 与 runtime bridge store 分裂。
 - 需要 bridge 调的方法应挂到 `ResponsesConversationStore` class 并由 exported helper 委托同一 store；禁止在 bridge 侧用 requestMap introspection 或另一个 dist store 补偿。
 - router-direct 成功 Responses result 若要支持 scope continuation，必须 record response scope (`sessionId`/`conversationId`/routingPolicyGroup/providerKey) 并显式 opt-in；失败状态或 SSE wrapper 必须 clear captured request，避免 pending request payload orphan。
+- `/v1/responses` SSE `client_close closeBeforeStreamEnd=true` 不能一律当 abandoned cleanup；若 native contract probe 已证明 `required_action` / tool-call continuation，必须先 persist native SSE conversation state 并保留 submit_tool_outputs continuation。只有非 tool continuation 的提前关闭才清 captured request/store。
 
 ## 2026-06-06 apply_patch 高效编辑法（沉淀）
 - 想在 yml/JSON/MD 末尾追加大块内容时，先用空行 sentinel 单独 patch 一行（如 `__LONGTAIL_TAIL_SENTINEL__`），然后第二次 patch 用 sentinel 作为 find-context 并把 `+` 行接在它后面，sentinel 行用 `-` 删掉；这样 verifier 的 find-context 短、匹配稳。

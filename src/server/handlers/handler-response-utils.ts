@@ -1721,6 +1721,7 @@ export async function sendPipelineResponse(
     let completedLogged = false;
     let cleanupLogged = false;
     let streamEnded = false;
+    let preservedConversationOnClientClose = false;
     const finishTracker: SseFinishReasonTracker = {
       finishReason:
         typeof sseBody[STREAM_LOG_FINISH_REASON_KEY] === 'string'
@@ -1929,11 +1930,22 @@ export async function sendPipelineResponse(
           ...details,
           closeBeforeStreamEnd
         });
-        cleanupAbandonedResponsesConversation(requestLabel, {
-          entryEndpoint,
-          closeBeforeStreamEnd,
-          timingRequestIds: result.usageLogInfo?.timingRequestIds
-        });
+        if (
+          entryEndpoint === '/v1/responses'
+          && contractProbe.probe
+          && isToolCallContinuationResponse(contractProbe.probe)
+        ) {
+          preservedConversationOnClientClose = true;
+          void persistNativeSseConversationState().catch((error) => {
+            logResponseNonBlockingError(`responses-conversation-native-sse-client-close:${requestLabel}`, error);
+          });
+        } else {
+          cleanupAbandonedResponsesConversation(requestLabel, {
+            entryEndpoint,
+            closeBeforeStreamEnd,
+            timingRequestIds: result.usageLogInfo?.timingRequestIds
+          });
+        }
         logPipelineStage('response.sse.client_close', requestLabel, {
           ...details,
           closeBeforeStreamEnd
@@ -2182,7 +2194,7 @@ export async function sendPipelineResponse(
         })
         .finally(async () => {
           const closedBeforeTerminalEvent = !finishTracker.seenTerminalEvent;
-          if (closedBeforeTerminalEvent) {
+          if (closedBeforeTerminalEvent && !preservedConversationOnClientClose) {
             logPipelineStage('response.sse.stream.error', requestLabel, {
               message: 'stream closed before response.completed',
               code: 'upstream_stream_incomplete'

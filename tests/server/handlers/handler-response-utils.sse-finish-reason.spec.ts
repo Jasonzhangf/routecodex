@@ -276,6 +276,124 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(clearResponsesConversationByRequestId).toHaveBeenCalledWith('req-stream-client-close');
   });
 
+  it('persists required_action continuation instead of clearing store when client closes before response.done', async () => {
+    const captureResponsesRequestContextForRequest = jest.fn(async () => undefined);
+    const clearResponsesConversationByRequestId = jest.fn(async () => undefined);
+    const finalizeResponsesConversationRequestRetention = jest.fn(async () => undefined);
+    const recordResponsesResponseForRequest = jest.fn(async () => undefined);
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest,
+      clearResponsesConversationByRequestId,
+      finalizeResponsesConversationRequestRetention,
+      recordResponsesResponseForRequest,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: (body: unknown) => {
+        return Boolean(
+          body
+          && typeof body === 'object'
+          && !Array.isArray(body)
+          && (body as Record<string, unknown>).required_action
+        );
+      },
+      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
+        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+        const dataLine = text.split('\n').find((line) => line.startsWith('data:'));
+        if (!dataLine) return next;
+        const parsed = JSON.parse(dataLine.slice('data:'.length).trim()) as Record<string, unknown>;
+        const response = parsed.response && typeof parsed.response === 'object' && !Array.isArray(parsed.response)
+          ? parsed.response as Record<string, unknown>
+          : undefined;
+        if (response) Object.assign(next, response);
+        if (parsed.required_action) next.required_action = parsed.required_action;
+        if (parsed.type === 'response.required_action') next.__seen_response_required_action = true;
+        return next;
+      },
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const stream = new PassThrough();
+    const closed = new Promise<void>((resolve) => {
+      res.on('close', () => setTimeout(resolve, 25));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream,
+          __routecodex_finish_reason: 'tool_calls'
+        },
+        usageLogInfo: {
+          providerKey: 'asxs.crsa.gpt-5.5',
+          timingRequestIds: ['req-direct-required-action-close'],
+          finishReason: 'tool_calls',
+          sessionId: 'sess-direct-relay-close',
+          conversationId: 'conv-direct-relay-close'
+        }
+      } as any,
+      'req-direct-required-action-close',
+      {
+        forceSSE: true,
+        entryEndpoint: '/v1/responses',
+        responsesRequestContext: {
+          payload: {
+            model: 'gpt-5.5',
+            input: [{ role: 'user', content: [{ type: 'input_text', text: 'run tool' }] }],
+            tools: [{ type: 'function', name: 'exec_command' }]
+          },
+          context: {
+            input: [{ role: 'user', content: [{ type: 'input_text', text: 'run tool' }] }],
+            toolsRaw: [{ type: 'function', name: 'exec_command' }]
+          },
+          sessionId: 'sess-direct-relay-close',
+          conversationId: 'conv-direct-relay-close',
+          matchedPort: 5555,
+          routingPolicyGroup: 'gateway_priority_5555'
+        }
+      }
+    );
+
+    stream.write('event: response.required_action\n');
+    stream.write(
+      'data: {"type":"response.required_action","response":{"id":"resp_direct_required_action_close","object":"response","status":"requires_action"},"required_action":{"submit_tool_outputs":{"tool_calls":[{"id":"call_direct_close","type":"function","function":{"name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}}]}}}\n\n'
+    );
+    res.destroy();
+
+    await closed;
+
+    expect(recordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'resp_direct_required_action_close',
+      providerKey: 'asxs.crsa.gpt-5.5',
+      sessionId: 'sess-direct-relay-close',
+      conversationId: 'conv-direct-relay-close',
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555'
+    }));
+    expect(captureResponsesRequestContextForRequest).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'resp_direct_required_action_close',
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555'
+    }));
+    expect(finalizeResponsesConversationRequestRetention).toHaveBeenCalledWith(
+      'resp_direct_required_action_close',
+      { keepForSubmitToolOutputs: true }
+    );
+    expect(clearResponsesConversationByRequestId).not.toHaveBeenCalledWith('resp_direct_required_action_close');
+  });
+
   it('does not enforce stopless contract inside raw SSE handler path', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,

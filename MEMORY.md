@@ -2290,3 +2290,9 @@ Tags: hub-pipeline-rust-closeout, servertool, generated-artifacts, source-truth,
 - Active Responses→Chat bridge owner remains `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`; request semantics must continue moving to Rust req_inbound / req_chatprocess native boundaries, not to a restored shared adapter middle layer.
 - Residue audit now fails if the adapter source or active guide mention reappears.
 Tags: hub-pipeline-rust-closeout, responses-bridge, zero-consumer, physical-delete, 2026-06-07
+
+## 2026-06-07 5555 direct/relay Responses SSE client-close continuation
+- For `/v1/responses`, a client close before terminal event must not clear a conversation if the native SSE probe has already proven `required_action`/tool continuation; persist the continuation record instead so a later 5555 relay/cross-protocol turn can submit tool outputs.
+- Ordinary partial delta close without continuation proof must still clear the abandoned Responses request and surface `upstream_stream_incomplete`; do not solve this by forcing tools/direct traffic to relay.
+- Verified: focused SSE/direct regression command passed 6 suites / 49 tests, plus `npx tsc --noEmit --pretty false` and `git diff --check`.
+Tags: responses-sse, direct-relay, client-close, required-action, conversation-store, 5555, 2026-06-07
