@@ -151,6 +151,7 @@ type SseFinishReasonTracker = {
 type SseTerminalWatch = {
   sawTerminalChunk: boolean;
   sawResponsesCompletedChunk?: boolean;
+  sawResponsesDoneEvent?: boolean;
   sawDoneChunk?: boolean;
   requiresResponsesTerminalEvent?: boolean;
   terminalSource?: string;
@@ -898,6 +899,9 @@ function updateSseTerminalTrackerFromChunk(
       if (parsedType === 'response.completed') {
         terminalWatch.sawResponsesCompletedChunk = true;
       }
+      if (parsedType === 'response.done') {
+        terminalWatch.sawResponsesDoneEvent = true;
+      }
       const trueTerminal = parsedType === 'response.completed' || parsedType === 'response.done' || parsedType === 'response.error' || parsedType === 'response.cancelled';
       if (trueTerminal) {
         finishTracker.seenTerminalEvent = true;
@@ -940,6 +944,9 @@ function updateSseTerminalTrackerFromChunk(
     }
     if (effectiveTerminalEvent === 'response.completed') {
       terminalWatch.sawResponsesCompletedChunk = true;
+    }
+    if (effectiveTerminalEvent === 'response.done') {
+      terminalWatch.sawResponsesDoneEvent = true;
     }
     const trueTerminal2 = effectiveTerminalEvent === 'response.completed' || effectiveTerminalEvent === 'response.done' || effectiveTerminalEvent === 'response.error' || effectiveTerminalEvent === 'response.cancelled';
     if (trueTerminal2) {
@@ -2143,7 +2150,7 @@ export async function sendPipelineResponse(
         completedLogged = true;
         logStreamRequestComplete(entryEndpoint, requestLabel, status, resolvedStreamFinishReason, requestLogContext);
       }
-      const repairedTerminalFrames = !terminalWatch.sawResponsesCompletedChunk || !terminalWatch.sawDoneChunk
+      const repairedTerminalFrames = !terminalWatch.sawResponsesCompletedChunk || !terminalWatch.sawResponsesDoneEvent || !terminalWatch.sawDoneChunk
         ? buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel)
         : [];
       if (repairedTerminalFrames.length > 0 && !res.writableEnded && !res.destroyed) {
@@ -2152,7 +2159,10 @@ export async function sendPipelineResponse(
             if (terminalWatch.sawResponsesCompletedChunk && frame.includes('event: response.completed')) {
               return false;
             }
-            if (terminalWatch.sawDoneChunk && (frame.includes('event: response.done') || frame.includes('data: [DONE]'))) {
+            if (terminalWatch.sawResponsesDoneEvent && frame.includes('event: response.done')) {
+              return false;
+            }
+            if (terminalWatch.sawDoneChunk && frame.includes('data: [DONE]')) {
               return false;
             }
             if (terminalWatch.terminalSource === 'response.required_action' && frame.includes('event: response.required_action')) {
@@ -2175,7 +2185,8 @@ export async function sendPipelineResponse(
             finishTracker.seenTerminalEvent = true;
             terminalWatch.sawTerminalChunk = true;
             terminalWatch.sawResponsesCompletedChunk = true;
-            terminalWatch.sawDoneChunk = terminalWatch.sawDoneChunk || framesToWrite.some((frame) => frame.includes('event: response.done') || frame.includes('data: [DONE]'));
+            terminalWatch.sawResponsesDoneEvent = terminalWatch.sawResponsesDoneEvent || framesToWrite.some((frame) => frame.includes('event: response.done'));
+            terminalWatch.sawDoneChunk = terminalWatch.sawDoneChunk || framesToWrite.some((frame) => frame.includes('data: [DONE]'));
             contractProbe.emitted = true;
           }
         } catch (repairWriteError) {
