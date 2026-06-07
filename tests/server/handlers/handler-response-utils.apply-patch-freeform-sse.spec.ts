@@ -40,9 +40,12 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   })),
   deriveFinishReasonNative: jest.fn(() => 'tool_calls'),
   finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
-  importCoreDist: jest.fn(async () => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: normalizeResponsesToolCallArgumentsForClientWithNativeMock,
-  })),
+  importCoreDist: jest.fn(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return {
+      normalizeResponsesToolCallArgumentsForClientWithNative: normalizeResponsesToolCallArgumentsForClientWithNativeMock,
+    };
+  }),
   isToolCallContinuationResponseNative: jest.fn(() => false),
   recordResponsesResponseForRequest: jest.fn(async () => undefined),
   rebindResponsesConversationRequestId: jest.fn(async () => undefined),
@@ -303,5 +306,71 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
     expect(text).toContain('"input":');
     expect(text).toContain(JSON.stringify(patch));
     expect(text).not.toContain('{\\"patch\\"');
+  });
+
+  it('preserves live SSE frame order when normalized tool frames precede terminal frames', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const patch = '*** Begin Patch\n*** Add File: tmp/routecodex-online-apply-patch-smoke.txt\n+hello\n*** End Patch';
+    const wrapped = JSON.stringify({ patch });
+    const upstream = new PassThrough();
+    const res = new MockResponse();
+    const chunks: Buffer[] = [];
+    res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+
+    await sendPipelineResponse(
+      res as any,
+      { status: 200, headers: {}, body: { __sse_responses: upstream } } as any,
+      'req_apply_patch_terminal_order_sse',
+      {
+        entryEndpoint: '/v1/responses',
+        forceSSE: true,
+        responsesRequestContext: {
+          payload: {
+            model: 'gpt-5.5',
+            input: [],
+            tools: [{ type: 'custom', name: 'apply_patch', format: { type: 'grammar' } }],
+          },
+          context: {},
+        },
+      },
+    );
+
+    upstream.write('event: response.function_call_arguments.done\n');
+    upstream.write(`data: ${JSON.stringify({
+      type: 'response.function_call_arguments.done',
+      name: 'apply_patch',
+      call_id: 'call_patch_order',
+      arguments: wrapped,
+    })}\n\n`);
+    upstream.write('event: response.completed\n');
+    upstream.write(`data: ${JSON.stringify({
+      type: 'response.completed',
+      response: {
+        id: 'resp_apply_patch_order',
+        object: 'response',
+        status: 'completed',
+      },
+    })}\n\n`);
+    upstream.write('event: response.done\n');
+    upstream.write(`data: ${JSON.stringify({
+      type: 'response.done',
+      response: {
+        id: 'resp_apply_patch_order',
+        object: 'response',
+        status: 'completed',
+      },
+    })}\n\n`);
+    upstream.end();
+    await waitForEnd(res);
+    const text = Buffer.concat(chunks).toString('utf8');
+
+    const outputDoneIndex = text.indexOf('event: response.output_item.done');
+    const completedIndex = text.indexOf('event: response.completed');
+    const doneIndex = text.indexOf('event: response.done');
+    expect(outputDoneIndex).toBeGreaterThanOrEqual(0);
+    expect(completedIndex).toBeGreaterThan(outputDoneIndex);
+    expect(doneIndex).toBeGreaterThan(completedIndex);
+    expect(text).not.toContain('stream closed before response.completed');
+    expect(text).not.toContain('sse_stream_error');
   });
 });
