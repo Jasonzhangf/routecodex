@@ -375,4 +375,86 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
     expect(text).not.toContain('stream closed before response.completed');
     expect(text).not.toContain('sse_stream_error');
   });
+
+  it('preserves live SSE frame order when generic function_call done precedes terminal frames', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const upstream = new PassThrough();
+    const res = new MockResponse();
+    const chunks: Buffer[] = [];
+    res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+
+    await sendPipelineResponse(
+      res as any,
+      { status: 200, headers: {}, body: { __sse_responses: upstream } } as any,
+      'req_function_call_terminal_order_sse',
+      {
+        entryEndpoint: '/v1/responses',
+        forceSSE: true,
+        responsesRequestContext: {
+          payload: {
+            model: 'gpt-5.5',
+            input: [],
+            tools: [{
+              type: 'function',
+              name: 'exec_command',
+              parameters: {
+                type: 'object',
+                properties: { cmd: { type: 'string' } },
+                required: ['cmd'],
+                additionalProperties: false,
+              },
+            }],
+          },
+          context: {},
+        },
+      },
+    );
+
+    upstream.write([
+      'event: response.output_item.done\n',
+      `data: ${JSON.stringify({
+        type: 'response.output_item.done',
+        output_index: 0,
+        item: {
+          id: 'fc_order_1',
+          type: 'function_call',
+          name: 'exec_command',
+          call_id: 'call_order_1',
+          arguments: '{"cmd":"pwd"}',
+          status: 'completed',
+        },
+      })}\n\n`,
+      'event: response.completed\n',
+      `data: ${JSON.stringify({
+        type: 'response.completed',
+        response: {
+          id: 'resp_function_call_order',
+          object: 'response',
+          status: 'completed',
+          output: [],
+        },
+      })}\n\n`,
+      'event: response.done\n',
+      `data: ${JSON.stringify({
+        type: 'response.done',
+        response: {
+          id: 'resp_function_call_order',
+          object: 'response',
+          status: 'completed',
+        },
+      })}\n\n`,
+    ].join(''));
+    upstream.end();
+    await waitForEnd(res);
+    const text = Buffer.concat(chunks).toString('utf8');
+
+    const outputDoneIndex = text.indexOf('event: response.output_item.done');
+    const completedIndex = text.indexOf('event: response.completed');
+    const doneIndex = text.indexOf('event: response.done');
+    expect(outputDoneIndex).toBeGreaterThanOrEqual(0);
+    expect(completedIndex).toBeGreaterThan(outputDoneIndex);
+    expect(doneIndex).toBeGreaterThan(completedIndex);
+    expect(text).not.toContain('stream closed before response.completed');
+    expect(text).not.toContain('sse_stream_error');
+  });
 });
