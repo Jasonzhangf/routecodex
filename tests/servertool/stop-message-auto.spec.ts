@@ -1390,6 +1390,9 @@ describe('stop_message_auto servertool', () => {
 
   test('historical goal-context repeated stop projects CLI and preserves assistant stop text', async () => {
     const assistantText = '立刻跑全测试 + 远端验证。';
+    const sessionId = 'stopmessage-spec-session-goal-loop';
+    fs.rmSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`), { force: true });
+    fs.rmSync(path.join(SESSION_DIR, `session-${sessionId}.json`), { force: true });
     const result = await runServerToolOrchestration({
         chat: {
           id: 'chatcmpl-goal-loop-stop',
@@ -1407,7 +1410,7 @@ describe('stop_message_auto servertool', () => {
           requestId: 'req-goal-active-stop-loop',
           entryEndpoint: '/v1/chat/completions',
           providerProtocol: 'openai-chat',
-          sessionId: 'stopmessage-spec-session-goal-loop',
+          sessionId,
           capturedChatRequest: {
             model: 'gpt-test',
             messages: [
@@ -1426,8 +1429,8 @@ describe('stop_message_auto servertool', () => {
         providerProtocol: 'openai-chat'
       });
     const { cmd } = readStopMessageCliProjection(result, assistantText);
-    expect(cmd).toContain('"repeatCount":3');
-    expect(cmd).toContain('第三轮最终收尾');
+    expect(cmd).toContain('"repeatCount":1');
+    expect(cmd).toContain('第一轮核对');
   });
 
   test.skip('codex backend uses session workdir as spawn cwd', async () => {

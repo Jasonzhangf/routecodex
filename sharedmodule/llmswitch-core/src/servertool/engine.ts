@@ -119,7 +119,61 @@ function readStopMessageAssistantStopText(execution: NonNullable<ServerToolEngin
     ? execution.context as Record<string, unknown>
     : undefined;
   const text = typeof context?.assistantStopText === 'string' ? context.assistantStopText.trim() : '';
-  return text || '模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。';
+  return text;
+}
+
+function collectTextFromContentParts(value: unknown, out: string[]): void {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (text) out.push(text);
+    return;
+  }
+  if (!Array.isArray(value)) return;
+  for (const part of value) {
+    if (typeof part === 'string') {
+      const text = part.trim();
+      if (text) out.push(text);
+      continue;
+    }
+    const record = part && typeof part === 'object' && !Array.isArray(part)
+      ? part as Record<string, unknown>
+      : undefined;
+    const text = typeof record?.text === 'string'
+      ? record.text
+      : typeof record?.output_text === 'string'
+        ? record.output_text
+        : typeof record?.content === 'string'
+          ? record.content
+          : '';
+    const trimmed = text.trim();
+    if (trimmed) out.push(trimmed);
+  }
+}
+
+function readAssistantStopTextFromChat(chat: unknown): string {
+  const row = chat && typeof chat === 'object' && !Array.isArray(chat)
+    ? chat as Record<string, unknown>
+    : undefined;
+  if (!row) return '';
+  const texts: string[] = [];
+  const choices = Array.isArray(row.choices) ? row.choices : [];
+  for (const choice of choices) {
+    const choiceRow = choice && typeof choice === 'object' && !Array.isArray(choice)
+      ? choice as Record<string, unknown>
+      : undefined;
+    const message = choiceRow?.message && typeof choiceRow.message === 'object' && !Array.isArray(choiceRow.message)
+      ? choiceRow.message as Record<string, unknown>
+      : undefined;
+    collectTextFromContentParts(message?.content, texts);
+  }
+  const output = Array.isArray(row.output) ? row.output : [];
+  for (const item of output) {
+    const itemRow = item && typeof item === 'object' && !Array.isArray(item)
+      ? item as Record<string, unknown>
+      : undefined;
+    collectTextFromContentParts(itemRow?.content, texts);
+  }
+  return texts.join('\n').trim();
 }
 
 function readStopMessageRuntimeMetadata(execution: NonNullable<ServerToolEngineResult['execution']>): Record<string, unknown> | undefined {
@@ -153,12 +207,16 @@ function readStopMessageLoopNumber(execution: NonNullable<ServerToolEngineResult
 function buildStopMessageCliProjectionResult(args: {
   options: ServerToolOrchestrationOptions;
   execution: NonNullable<ServerToolEngineResult['execution']>;
+  finalChatResponse: JsonObject;
   flowId: string;
   totalSteps: number;
   logProgress: (step: number, total: number, message: string, extra?: Record<string, unknown>) => void;
 }): ServerToolOrchestrationResult {
   const continuationPrompt = readStopMessageFollowupText(args.execution);
-  const assistantStopText = readStopMessageAssistantStopText(args.execution);
+  const assistantStopText =
+    readStopMessageAssistantStopText(args.execution) ||
+    readAssistantStopTextFromChat(args.finalChatResponse) ||
+    '模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。';
   const projection = buildServertoolCliProjectionForAutoFlow({
     options: args.options,
     flowId: args.flowId,
@@ -433,6 +491,7 @@ export async function runServerToolOrchestration(
     return buildStopMessageCliProjectionResult({
       options,
       execution: engineResult.execution,
+      finalChatResponse: engineResult.finalChatResponse,
       flowId,
       totalSteps,
       logProgress

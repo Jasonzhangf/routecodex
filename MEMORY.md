@@ -2321,6 +2321,12 @@ Tags: hub-pipeline-rust-closeout, zero-consumer, dynamic-import, physical-delete
 - Verified: Rust `hub_resp_inbound_format_parse` 16/16 PASS; request-executor + provider-response Jest 43/43 PASS; `npm run verify:servertool-rust-only` PASS; `npx tsc --noEmit --pretty false` PASS; `git diff --check` PASS.
 Tags: responses-sse, stopless, servertool-cli-projection, resp-inbound, no-probe-replay, 2026-06-07
 
+## 2026-06-07 stopless CLI projection reasoning source order
+- Stopless CLI projection reasoning must preserve the intercepted assistant stop text, not the continuation prompt. Source order is `execution.context.assistantStopText -> current finalChatResponse assistant text -> explicit default message`.
+- Tests that assert stopless repeatCount/prompt layer must isolate session/tmux state files first; stale `stopMessageUsed` residue can legitimately shift the prompt from first to later layers and make the test nondeterministic.
+- Verified: `cargo test -p stop-message-core --lib`; `cargo test -p router-hotpath-napi stop_message_auto --lib`; stop-message Jest 2 suites / 68 passed / 16 skipped; `npm run verify:servertool-rust-only`; `npx tsc --noEmit --pretty false`; `git diff --check`.
+Tags: stopless, servertool-cli-projection, reasoning, test-isolation, 2026-06-07
+
 ## 2026-06-07 5555 current image routing contract
 - Current-request image placeholder text (`<image ...>`, `[Image omitted]`, `[Image #n]`) is still media intent for Virtual Router. It must set `has_image_attachment` before classification so image requests do not inherit `search:last-tool-search` or other non-media continuation routes.
 - Image route order is: configured `multimodal` route first, then configured `vision` route, then original text/default routes. Do not drop `vision` merely because `multimodal` exists; if the multimodal pool has no visual-capable available target, selection must continue to `vision` before search/default. Only when neither visual route has visual-capable targets may media placeholder/default behavior apply.
