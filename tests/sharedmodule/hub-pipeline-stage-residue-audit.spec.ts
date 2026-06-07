@@ -510,6 +510,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('legacy virtual router bootstrap TS helper residues must be physically removed', () => {
+    const virtualRouterRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/router/virtual-router',
+    );
+    const legacyFiles = [
+      'bootstrap/auth-utils.ts',
+      'bootstrap/claude-code-helpers.ts',
+      'bootstrap/config-normalizers.ts',
+      'bootstrap/web-search-config.ts',
+      'token-file-scanner.ts',
+    ].filter((relativePath) => fs.existsSync(path.join(virtualRouterRoot, relativePath)));
+
+    expect(legacyFiles).toEqual([]);
+  });
+
   it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
     const wrapperPath = path.join(
       process.cwd(),

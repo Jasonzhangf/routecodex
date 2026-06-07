@@ -158,6 +158,15 @@ Phase 8F-3 timing wrapper deletion proof: `hub-stage-timing-measure-blocks.ts` h
 - Red test now fails if the timing measure block TS source or same-name generated artifacts reappear.
 - This deletion keeps `hub-stage-timing.ts` as the single timing measure owner and does not affect Hub payload semantics.
 
+Phase 8F-4 virtual router bootstrap helper deletion proof: five legacy TS bootstrap helper files had no live source/test import, no public barrel export, and no same-name generated shadow artifacts. Their responsibilities are already owned by native bootstrap entries (`bootstrapVirtualRouterProvidersJson`, `bootstrapVirtualRouterProviderProfilesJson`, `bootstrapVirtualRouterConfigMetaJson`), Rust `virtual_router_engine/provider_bootstrap.rs`, and the active auth token scanner under `src/providers/auth/token-scanner/`.
+
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/auth-utils.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/claude-code-helpers.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/config-normalizers.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/web-search-config.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/token-file-scanner.ts`.
+- Red test now fails if any of these legacy bootstrap helper residues reappear.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

@@ -149,7 +149,7 @@
 | stop-message-markers.ts | 138 | 2 | 待审 | marker 处理 |
 | stop-message-file-resolver.ts | 96 | 2 | 待审 | 文件解析 |
 | pre-command-file-resolver.ts | 129 | 2 | 待审 | 文件解析 |
-| token-file-scanner.ts | 131 | 0 | 待审 | 可能死代码 |
+| token-file-scanner.ts | 131 | 0 | 已删 | 2026-06-07 Phase 8F-4 已物理删除；auth token scanning 现由 `src/providers/auth/token-scanner/` 承担 |
 | token-estimator.ts | 21 | 0 | 待审 | 可能死代码 |
 | bootstrap.ts | 162 | 2 | 留 TS | 编排：bootstrap 入口（调用 native） |
 

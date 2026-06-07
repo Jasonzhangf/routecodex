@@ -31,7 +31,7 @@
 ### Step 0.2：确认 token-file-scanner.ts 和 token-estimator.ts 死代码
 
 **改什么**：检查引用，如确认死代码则删除
-- `src/router/virtual-router/token-file-scanner.ts`（131 行，0 引用）
+- `src/router/virtual-router/token-file-scanner.ts`（131 行，0 引用，2026-06-07 Phase 8F-4 已删）
 - `src/router/virtual-router/token-estimator.ts`（21 行，0 引用）
 
 **为什么改**：grep 确认 0 引用
