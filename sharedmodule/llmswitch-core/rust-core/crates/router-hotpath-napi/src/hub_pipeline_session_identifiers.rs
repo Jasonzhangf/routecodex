@@ -193,90 +193,6 @@ fn find_identifier(source: &Value, preferred_keys: &[&str], regex: &Regex) -> Op
     }
 }
 
-fn extract_session_id_from_user_metadata(
-    raw_record: &Map<String, Value>,
-    session_regex: &Regex,
-) -> Option<String> {
-    let metadata = raw_record.get("metadata")?.as_object()?;
-    let user_id = metadata.get("user_id")?.as_str()?;
-    let trimmed = user_id.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let captures = session_regex.captures(trimmed)?;
-    let matched = captures.get(1)?;
-    let token = matched.as_str().trim();
-    if token.is_empty() {
-        return None;
-    }
-    if let Some(uuid_match) =
-        Regex::new(r"(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-            .ok()
-            .and_then(|uuid_regex| {
-                uuid_regex
-                    .find(token)
-                    .map(|found| found.as_str().to_string())
-            })
-    {
-        return Some(uuid_match);
-    }
-    Some(token.to_string())
-}
-
-fn derive_identifiers_from_raw_payload(
-    metadata: &Map<String, Value>,
-    session_regex: &Regex,
-    conversation_regex: &Regex,
-) -> (Option<String>, Option<String>) {
-    let raw = metadata.get("__raw_request_body");
-    if raw.is_none() {
-        return (None, None);
-    }
-
-    let mut targets: Vec<&Value> = Vec::new();
-    let mut raw_user_metadata_session: Option<String> = None;
-    if let Some(raw_value) = raw {
-        targets.push(raw_value);
-        if let Some(raw_record) = raw_value.as_object() {
-            raw_user_metadata_session =
-                extract_session_id_from_user_metadata(raw_record, session_regex);
-            if let Some(metadata_node) = raw_record.get("metadata") {
-                targets.push(metadata_node);
-            }
-            if let Some(raw_text) = raw_record.get("rawText") {
-                targets.push(raw_text);
-            }
-            if let Some(events) = raw_record.get("events") {
-                targets.push(events);
-            }
-        }
-    }
-
-    let mut session_id = raw_user_metadata_session;
-    let mut conversation_id: Option<String> = None;
-
-    for candidate in targets {
-        if session_id.is_none() {
-            session_id = find_identifier(candidate, &SESSION_FIELD_KEYS, session_regex);
-        }
-        if conversation_id.is_none() {
-            conversation_id =
-                find_identifier(candidate, &CONVERSATION_FIELD_KEYS, conversation_regex);
-        }
-        if session_id.is_some() && conversation_id.is_some() {
-            break;
-        }
-    }
-
-    if session_id.is_none() && conversation_id.is_some() {
-        session_id = conversation_id.clone();
-    } else if session_id.is_some() && conversation_id.is_none() {
-        conversation_id = session_id.clone();
-    }
-
-    (session_id, conversation_id)
-}
-
 fn extract_session_identifiers_from_metadata(metadata: Option<&Value>) -> SessionIdentifiers {
     let Some(metadata_obj) = metadata.and_then(|value| value.as_object()) else {
         return SessionIdentifiers {
@@ -304,21 +220,6 @@ fn extract_session_identifiers_from_metadata(metadata: Option<&Value>) -> Sessio
     if conversation_id.is_none() {
         if let Some(header_values) = headers.as_ref() {
             conversation_id = pick_header(header_values, &CONVERSATION_HEADER_KEYS);
-        }
-    }
-
-    let session_regex = Regex::new(r"(?i)session[_:\-\s]?([A-Za-z0-9][A-Za-z0-9_-]{7,})").unwrap();
-    let conversation_regex =
-        Regex::new(r"(?i)conversation[_:\-\s]?([A-Za-z0-9][A-Za-z0-9_-]{7,})").unwrap();
-
-    if session_id.is_none() || conversation_id.is_none() {
-        let (fallback_session, fallback_conversation) =
-            derive_identifiers_from_raw_payload(metadata_obj, &session_regex, &conversation_regex);
-        if session_id.is_none() {
-            session_id = fallback_session;
-        }
-        if conversation_id.is_none() {
-            conversation_id = fallback_conversation.or_else(|| session_id.clone());
         }
     }
 
@@ -444,26 +345,6 @@ mod tests {
         let result = extract_session_identifiers_from_metadata(Some(&metadata));
         assert_eq!(result.session_id.as_deref(), Some("sess-norm"));
         assert_eq!(result.conversation_id.as_deref(), Some("conv-norm"));
-    }
-
-    #[test]
-    fn resolves_from_raw_payload_and_mirrors_missing_conversation() {
-        let metadata = json!({
-          "__raw_request_body": {
-            "metadata": {
-              "user_id": "prefix_session_019c7393-e244-7892-801a-d1b32c360af9_suffix"
-            }
-          }
-        });
-        let result = extract_session_identifiers_from_metadata(Some(&metadata));
-        assert_eq!(
-            result.session_id.as_deref(),
-            Some("019c7393-e244-7892-801a-d1b32c360af9")
-        );
-        assert_eq!(
-            result.conversation_id.as_deref(),
-            Some("019c7393-e244-7892-801a-d1b32c360af9")
-        );
     }
 
     #[test]

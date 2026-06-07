@@ -15,7 +15,6 @@ import {
 } from "../../../constants/index.js";
 import type { ServiceProfile } from '../api/provider-types.js';
 import { DEEPSEEK_UPSTREAM_USER_AGENT } from '../contracts/deepseek-provider-contract.js';
-import { resolveQwenCodeUserAgent } from '../utils/qwen-client-fingerprint.js';
 
 /**
  * 动态服务配置档案构建器
@@ -104,31 +103,6 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     },
     // 默认 Provider 请求超时时间：500s
     timeout: PROVIDER_TIMEOUTS.OPENAI,
-    maxRetries: 3
-  },
-
-  qwen: {
-    // Qwen OpenAI兼容模式
-    // 对齐系统 qwen 安装包（@qwen-code/qwen-code）：
-    // OAuth 设备码/令牌端点在 chat.qwen.ai 下，由 provider-oauth-configs 提供；
-    // 实际推理请求走 DashScope compatible-mode。
-    defaultBaseUrl: API_BASE_URLS.QWEN,
-    defaultEndpoint: '/chat/completions',
-    // 对齐官方 @qwen-code/qwen-code：Qwen OAuth 默认走 coder-model。
-    defaultModel: PROVIDER_DEFAULT_MODELS.QWEN,
-    requiredAuth: [],
-    optionalAuth: ['apikey','oauth'],
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      // 对齐 Qwen Code（DashScope OpenAI-compatible）默认请求头。
-      'User-Agent': resolveQwenCodeUserAgent(),
-      'X-DashScope-CacheControl': 'enable',
-      'X-DashScope-UserAgent': resolveQwenCodeUserAgent(),
-      'X-DashScope-AuthType': 'qwen-oauth'
-    },
-    // 对齐官方 @qwen-code/qwen-code DEFAULT_TIMEOUT=120000ms
-    timeout: PROVIDER_TIMEOUTS.QWEN,
     maxRetries: 3
   },
 
@@ -227,7 +201,6 @@ export const SERVICE_PROFILES: Record<string, ServiceProfile> = DynamicProfileLo
 export enum ServiceType {
   OPENAI = 'openai',
   GLM = 'glm',
-  QWEN = 'qwen',
   LMSTUDIO = 'lmstudio'
 }
 

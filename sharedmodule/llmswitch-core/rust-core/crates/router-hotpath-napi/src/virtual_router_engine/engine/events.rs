@@ -336,10 +336,38 @@ impl VirtualRouterEngineCore {
 const DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS: i64 = 5 * 60_000;
 
 fn event_affects_health(event: &Value) -> bool {
-    !matches!(
+    if matches!(
         event.get("affectsHealth").and_then(|v| v.as_bool()),
         Some(false)
-    )
+    ) {
+        return false;
+    }
+    // Rule 3a/3c: if the route pool has a strict alternative candidate,
+    // the error should NOT mutate VR health state.
+    let provider_key = resolve_provider_key(event).unwrap_or_default();
+    if provider_key.is_empty() {
+        return true;
+    }
+    let pool = match event.get("routePool").and_then(|v| v.as_array()) {
+        Some(arr) if arr.len() > 1 => arr,
+        _ => return true,
+    };
+    let excluded: Vec<&str> = event
+        .get("excludedProviderKeys")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    let has_alternative = pool.iter().any(|candidate| {
+        candidate
+            .as_str()
+            .map(|s| s != provider_key && !excluded.contains(&s))
+            .unwrap_or(false)
+    });
+    !has_alternative
 }
 
 fn resolve_provider_key(event: &Value) -> Option<String> {

@@ -984,4 +984,139 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(output).not.toContain('upstream_stream_incomplete');
     expect(output).not.toContain('event: error');
   });
+
+  it('does not duplicate stream frames in client-response snapshots', async () => {
+    const snapshots: Array<{ phase?: string; data?: Record<string, unknown> }> = [];
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => true,
+      writeServerSnapshot: async (snapshot: { phase?: string; data?: Record<string, unknown> }) => {
+        snapshots.push(snapshot);
+      }
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = new PassThrough();
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream
+        }
+      } as any,
+      'req-stream-snapshot-no-duplicate',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    stream.write('event: response.output_text.delta\n');
+    stream.write('data: {"type":"response.output_text.delta","sequence_number":7,"delta":"once"}\n\n');
+    stream.write('event: response.completed\n');
+    stream.write('data: {"type":"response.completed","sequence_number":8,"response":{"id":"resp_once","object":"response","status":"completed"}}\n\n');
+    stream.write('event: response.done\n');
+    stream.write('data: {"type":"response.done","sequence_number":9,"response":{"id":"resp_once","object":"response","status":"completed"}}\n\n');
+    stream.write('data: [DONE]\n\n');
+    stream.end();
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output.match(/sequence_number":7/g)).toHaveLength(1);
+    const clientSnapshot = snapshots.find((snapshot) => snapshot.phase === 'client-response');
+    expect(clientSnapshot).toBeDefined();
+    const bodyText = String(clientSnapshot?.data?.bodyText ?? '');
+    expect(bodyText.match(/sequence_number":7/g)).toHaveLength(1);
+  });
+
+  it('does not repair required_action streams with response.completed', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [
+        'event: response.required_action\n' +
+          'data: {"type":"response.required_action","response":{"id":"resp_tool","object":"response","status":"requires_action"},"required_action":{"submit_tool_outputs":{"tool_calls":[]}}}\n\n',
+        'event: response.completed\n' +
+          'data: {"type":"response.completed","response":{"id":"resp_tool","object":"response","status":"requires_action"}}\n\n',
+        'event: response.done\n' +
+          'data: {"type":"response.done","response":{"id":"resp_tool","object":"response","status":"requires_action"}}\n\n',
+        'data: [DONE]\n\n'
+      ],
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = new PassThrough();
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 180));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream,
+          __stream_contract_probe_body: {
+            id: 'resp_tool',
+            object: 'response',
+            status: 'requires_action',
+            required_action: { submit_tool_outputs: { tool_calls: [] } }
+          }
+        }
+      } as any,
+      'req-required-action-no-completed-repair',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    stream.write('event: response.required_action\n');
+    stream.write('data: {"type":"response.required_action","sequence_number":105,"response":{"id":"resp_tool","object":"response","status":"requires_action"},"required_action":{"submit_tool_outputs":{"tool_calls":[]}}}\n\n');
+    stream.end();
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output.match(/event: response.required_action/g)).toHaveLength(1);
+    expect(output).not.toContain('event: response.completed');
+    expect(output).toContain('event: response.done');
+    expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
+  });
 });

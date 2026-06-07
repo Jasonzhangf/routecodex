@@ -576,8 +576,12 @@ export function decorateMetadataForAttempt(
   clone.retryAttempt = attempt;
   if (excludedProviderKeys.size > 0) {
     clone.excludedProviderKeys = Array.from(excludedProviderKeys);
+    delete clone.__routecodexPreselectedRoute;
   } else if (clone.excludedProviderKeys) {
     delete clone.excludedProviderKeys;
+  }
+  if (attempt > 1) {
+    delete clone.__routecodexPreselectedRoute;
   }
   return clone;
 }

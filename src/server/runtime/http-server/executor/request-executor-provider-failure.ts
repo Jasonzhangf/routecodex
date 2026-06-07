@@ -203,6 +203,10 @@ export async function reportRequestExecutorProviderError(
       statusCode,
       recoverable: outcome.recoverable,
       affectsHealth: outcome.affectsHealth,
+      routePool: args.routePool,
+      excludedProviderKeys: args.excludedProviderKeys
+        ? Array.from(args.excludedProviderKeys)
+        : undefined,
       details: {
         source: stage,
         ...(classification ? { errorClassification: classification } : {}),
@@ -210,8 +214,6 @@ export async function reportRequestExecutorProviderError(
         ...(upstreamCode ? { upstreamCode } : {}),
         reason: args.retryError.reason,
         attempt: args.attempt,
-        ...(Array.isArray(args.routePool) ? { routePool: args.routePool } : {}),
-        ...(args.excludedProviderKeys ? { excludedProviderKeys: Array.from(args.excludedProviderKeys) } : {}),
         ...(args.extraDetails ?? {})
       }
     });

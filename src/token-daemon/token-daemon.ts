@@ -461,24 +461,6 @@ export class TokenDaemon {
     }
   }
 
-  private async runQwenAutoAuthorization(token: TokenDescriptor): Promise<void> {
-    try {
-      await this.ensureTokenWithOverrides(token, {
-        useCamoufox: true,
-        autoMode: 'qwen',
-        devMode: false
-      });
-      return;
-    } catch (autoError) {
-      const message = autoError instanceof Error ? autoError.message : String(autoError);
-      console.warn(
-        chalk.yellow('!'),
-        `Camoufox auto OAuth failed for qwen (${token.displayName}): ${message}. Manual fallback is disabled in daemon; waiting for next auto cycle.`
-      );
-      throw autoError;
-    }
-  }
-
   private async ensureTokenWithOverrides(
     token: TokenDescriptor,
     camoufoxOptions?: CamoufoxOverrideOptions
@@ -826,28 +808,6 @@ async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return;
     }
-    const providerType =
-      typeof parsed.type === 'string' && parsed.type.trim()
-        ? parsed.type.trim().toLowerCase()
-        : path.basename(filePath).toLowerCase().startsWith('qwen-')
-          ? 'qwen'
-          : '';
-    const accessToken =
-      typeof parsed.access_token === 'string' && parsed.access_token.trim()
-        ? parsed.access_token.trim()
-        : typeof parsed.AccessToken === 'string' && parsed.AccessToken.trim()
-          ? parsed.AccessToken.trim()
-          : '';
-    const apiKey =
-      typeof parsed.apiKey === 'string' && parsed.apiKey.trim()
-        ? parsed.apiKey.trim()
-        : typeof parsed.api_key === 'string' && parsed.api_key.trim()
-          ? parsed.api_key.trim()
-          : '';
-    const hasStableQwenApiKey = Boolean(apiKey) && (!accessToken || apiKey !== accessToken);
-    if (providerType === 'qwen' && !hasStableQwenApiKey) {
-      return;
-    }
     const already =
       parsed.norefresh === true ||
       parsed.noRefresh === true ||
@@ -867,9 +827,6 @@ async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
 }
 
 function defaultTokenFilePath(provider: OAuthProviderId): string {
-  if (provider === 'qwen') {
-    return path.join(resolveRccAuthDir(), 'qwen-oauth-1-default.json');
-  }
   if (provider === 'deepseek-account') {
     return path.join(resolveRccAuthDir(), 'deepseek-account-default.json');
   }

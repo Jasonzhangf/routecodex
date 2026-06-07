@@ -11,92 +11,10 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
   reportProviderErrorToRouterPolicy: async () => {},
   writeSnapshotViaHooks: async () => {},
-  applyResponsesDirectRouteParamsOverrideNative: (input: {
-    payload: Record<string, unknown>;
-    routeParams?: Record<string, unknown>;
-    providerDefaultModel?: string;
-    requestReasoningEffort?: string;
-  }) => {
-    const next = structuredClone(input.payload);
-    const routeModel = typeof input.routeParams?.model === 'string' ? input.routeParams.model.trim() : '';
-    const providerDefaultModel = typeof input.providerDefaultModel === 'string' ? input.providerDefaultModel.trim() : '';
-    if (routeModel || providerDefaultModel) {
-      next.model = routeModel || providerDefaultModel;
-    }
-    const routeReasoningEffort =
-      typeof input.routeParams?.reasoningEffort === 'string' ? input.routeParams.reasoningEffort.trim() : '';
-    const topLevelReasoningEffort =
-      typeof input.requestReasoningEffort === 'string' ? input.requestReasoningEffort.trim() : '';
-    if (routeReasoningEffort || topLevelReasoningEffort) {
-      const effort = routeReasoningEffort || topLevelReasoningEffort;
-      next.reasoning_effort = effort;
-      next.reasoning = { ...(typeof next.reasoning === 'object' && next.reasoning && !Array.isArray(next.reasoning) ? next.reasoning as Record<string, unknown> : {}), effort };
-    }
-    return next;
-  },
-  buildResponsesDirectPassthroughBodyNative: (payload: Record<string, unknown>) => {
-    const next = structuredClone(payload);
-    for (const key of Object.keys(next)) {
-      if (key.startsWith('__')) {
-        delete (next as Record<string, unknown>)[key];
-      }
-    }
-    if (Object.prototype.hasOwnProperty.call(next, 'metadata')) {
-      throw new Error('provider-runtime-error: metadata is not allowed in direct passthrough responses payload');
-    }
-    const model = typeof next.model === 'string' ? next.model.trim() : '';
-    if (!model) {
-      throw new Error('provider-runtime-error: missing model from direct passthrough responses payload');
-    }
-    next.model = model;
-    return next;
-  },
   sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => input.payload,
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ status: 'completed', output: [] })
-  }),
-  validateResponsesDirectToolShapeContractNative: (payload: Record<string, unknown>) => {
-    if (Array.isArray(payload.messages)) {
-      throw new Error(
-        'provider-runtime-error: responses provider received chat-style "messages". This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions).'
-      );
-    }
-    const hasInput = Array.isArray(payload.input);
-    const hasInstructions = typeof payload.instructions === 'string' && payload.instructions.trim().length > 0;
-    if (!hasInput && !hasInstructions) {
-      throw new Error('provider-runtime-error: responses payload missing "input" or "instructions"');
-    }
-    if (Array.isArray(payload.tools)) {
-      payload.tools.forEach((tool, index) => {
-        if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
-          throw new Error(`provider-runtime-error: responses payload tools[${index}] must be an object`);
-        }
-        const type = typeof (tool as { type?: unknown }).type === 'string' ? String((tool as { type?: unknown }).type).trim() : '';
-        if (type === 'function') {
-          const name = typeof (tool as { name?: unknown }).name === 'string' ? String((tool as { name?: unknown }).name).trim() : '';
-          if (!name) {
-            throw new Error(
-              `provider-runtime-error: responses payload tools[${index}] is chat-style function tool; Responses wire requires top-level tool.name`
-            );
-          }
-        }
-      });
-    }
-    if (Array.isArray(payload.input)) {
-      payload.input.forEach((item, index) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) {
-          return;
-        }
-        const type = typeof (item as { type?: unknown }).type === 'string' ? String((item as { type?: unknown }).type).trim() : '';
-        if ((type === 'function_call' || type === 'function_call_output') && Object.prototype.hasOwnProperty.call(item, 'content')) {
-          throw new Error(
-            `provider-runtime-error: responses payload input[${index}] ${type} must not carry content; tool call data belongs in arguments/output fields`
-          );
-        }
-      });
-    }
-    return { ok: true as const };
-  }
+  })
 }), { virtual: true });
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
@@ -303,9 +221,16 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     provider.snapshotPhase = async () => {};
     provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
     provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    let capturedBody: any;
     provider.httpClient = {
-      post: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); },
-      postStream: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); }
+      post: async (_url: string, body: any) => {
+        capturedBody = body;
+        throw new Error('STOP_AFTER_CAPTURE');
+      },
+      postStream: async (_url: string, body: any) => {
+        capturedBody = body;
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
     };
 
     await expect(provider.processIncomingDirect({
@@ -313,10 +238,11 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       messages: [{ role: 'user', content: 'hello' }],
       tools: [{ type: 'function', function: { name: 'exec_command' } }],
       stream: false
-    })).rejects.toThrow(/chat-style "messages"/);
+    })).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(capturedBody.messages).toEqual([{ role: 'user', content: 'hello' }]);
   });
 
-  test('ResponsesProvider direct passthrough rejects chat-style response tools before transport', async () => {
+  test('ResponsesProvider direct passthrough sends chat-style response tools to transport', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-chat-tools-reject',
       type: 'responses-http-provider',
@@ -332,9 +258,16 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     provider.snapshotPhase = async () => {};
     provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
     provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    let capturedBody: any;
     provider.httpClient = {
-      post: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); },
-      postStream: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); }
+      post: async (_url: string, body: any) => {
+        capturedBody = body;
+        throw new Error('STOP_AFTER_CAPTURE');
+      },
+      postStream: async (_url: string, body: any) => {
+        capturedBody = body;
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
     };
 
     await expect(provider.processIncomingDirect({
@@ -342,10 +275,11 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
       tools: [{ type: 'function', function: { name: 'exec_command' } }],
       stream: false
-    })).rejects.toThrow(/chat-style function tool/);
+    })).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(capturedBody.tools).toEqual([{ type: 'function', function: { name: 'exec_command' } }]);
   });
 
-  test('ResponsesProvider rejects historical tool input content before transport', async () => {
+  test('ResponsesProvider sends historical tool input content to transport', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-historical-tool-content-reject',
       type: 'responses-http-provider',
@@ -361,9 +295,16 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     provider.snapshotPhase = async () => {};
     provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
     provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    let capturedBody: any;
     provider.httpClient = {
-      post: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); },
-      postStream: async () => { throw new Error('MUST_NOT_CALL_TRANSPORT'); }
+      post: async (_url: string, body: any) => {
+        capturedBody = body;
+        throw new Error('STOP_AFTER_CAPTURE');
+      },
+      postStream: async (_url: string, body: any) => {
+        capturedBody = body;
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
     };
 
     await expect(provider.processIncomingDirect({
@@ -378,7 +319,8 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
         }
       ],
       stream: false
-    })).rejects.toThrow(/function_call_output must not carry content/);
+    })).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(capturedBody.input[1].content).toEqual([{ type: 'output_text', text: 'historical leak' }]);
   });
 
   test('ResponsesProvider honors explicit stream=false even when provider streaming preference is always', async () => {
@@ -457,77 +399,6 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     provider.prepareSseRequestBody(body);
     expect(body.stream).toBe(true);
   });
-
-  test('HttpTransportProvider/openai (qwen) uses native web_search endpoint/body and honors official resource_url override', () => {
-    const config: OpenAIStandardConfig = {
-      id: 'test-qwen',
-      type: 'openai-http-provider',
-      config: {
-        providerType: 'openai',
-        providerId: 'qwen',
-        auth: { type: 'qwen-oauth', apiKey: 'test-key-1234567890' },
-        overrides: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', endpoint: '/chat/completions' }
-      }
-    } as unknown as OpenAIStandardConfig;
-    const provider = new HttpTransportProvider(config, emptyDeps, 'openai-http-provider') as any;
-
-    provider.authProvider = {
-      getTokenPayload: () => ({ resource_url: 'dashscope.aliyuncs.com/compatible-mode' })
-    };
-
-    const endpoint = provider.resolveRequestEndpoint(
-      {},
-      '/chat/completions'
-    );
-    expect(endpoint).toBe('/chat/completions');
-
-    const body = provider.buildHttpRequestBody({
-      data: { model: 'coder-model', uq: 'routecodex', page: 1, rows: 5 }
-    });
-    expect(body).toEqual({ model: 'coder-model', uq: 'routecodex', page: 1, rows: 5, max_tokens: 8192 });
-
-    provider.lastRuntimeMetadata = {
-      qwenWebSearch: true,
-      metadata: { qwenWebSearch: true, entryEndpoint: '/api/v1/indices/plugin/web_search' }
-    };
-    expect(provider.resolveRequestEndpoint({}, '/chat/completions')).toBe('/api/v1/indices/plugin/web_search');
-    expect(provider.buildHttpRequestBody({ data: { model: 'coder-model', uq: 'routecodex', page: 1, rows: 5 } })).toEqual({
-      uq: 'routecodex',
-      page: 1,
-      rows: 5
-    });
-    expect(provider.resolveAuthResourceBaseUrlOverride()).toBe('https://dashscope.aliyuncs.com/compatible-mode');
-
-    provider.lastRuntimeMetadata = { metadata: {} };
-    expect(provider.resolveAuthResourceBaseUrlOverride()).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1');
-
-    provider.authProvider = {
-      getTokenPayload: () => ({ resource_url: 'portal.qwen.ai' })
-    };
-    provider.getRuntimeProfile = () => ({ baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' });
-    expect(provider.resolveAuthResourceBaseUrlOverride()).toBe('https://portal.qwen.ai/v1');
-    expect(provider.getEffectiveBaseUrl()).toBe('https://portal.qwen.ai/v1');
-
-    const aliasConfig: OpenAIStandardConfig = {
-      id: 'test-qwen-alias',
-      type: 'openai-http-provider',
-      config: {
-        providerType: 'openai',
-        providerId: 'qwen-jasonqueque',
-        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
-        overrides: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', endpoint: '/chat/completions' }
-      }
-    } as unknown as OpenAIStandardConfig;
-    const aliasProvider = new HttpTransportProvider(aliasConfig, emptyDeps, 'openai-http-provider') as any;
-    aliasProvider.oauthProviderId = 'qwen';
-    aliasProvider.authProvider = {
-      getTokenPayload: () => ({ resource_url: 'portal.qwen.ai' })
-    };
-    aliasProvider.getRuntimeProfile = () => ({ baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' });
-    expect(aliasProvider.resolveAuthResourceBaseUrlOverride()).toBe('https://portal.qwen.ai/v1');
-    expect(aliasProvider.getEffectiveBaseUrl()).toBe('https://portal.qwen.ai/v1');
-  });
-
 
   test('DeepSeekHttpProvider keeps openai providerType and deepseek module type', async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-deepseek-protocol-'));

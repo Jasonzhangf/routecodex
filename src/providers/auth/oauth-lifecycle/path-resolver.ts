@@ -14,9 +14,6 @@ export { expandHome };
 import type { OAuthAuth } from '../../core/api/provider-config.js';
 
 export function defaultTokenFile(providerType: string): string {
-  if (providerType === 'qwen') {
-    return path.join(resolveRccAuthDir(), 'qwen-oauth-1-default.json');
-  }
   if (providerType === 'deepseek-account') {
     return path.join(resolveRccAuthDir(), 'deepseek-account-oauth-1-default.json');
   }

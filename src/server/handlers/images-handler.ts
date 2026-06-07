@@ -201,7 +201,11 @@ async function handleImageRequest(
     }
     const count = clampCount(payload.n);
     const responseFormat = normalizeResponseFormat(payload.response_format);
-    const model = normalizeInputString(payload.model) || 'qwen.qwen3-vl-plus';
+    const model = normalizeInputString(payload.model);
+    if (!model) {
+      res.status(400).json({ error: { message: 'model is required', type: 'invalid_request_error', code: 'bad_request' } });
+      return;
+    }
     const requestBodyMetadata = readRequestBodyMetadata(payload);
 
     logRequestStart(entryEndpoint, requestId, {
@@ -221,7 +225,7 @@ async function handleImageRequest(
           content: buildUserMessageContent(prompt, inputImages)
         }
       ],
-      qwenImageGeneration: {
+      imageGeneration: {
         enabled: true,
         n: count,
         size: payload.size,
@@ -229,7 +233,7 @@ async function handleImageRequest(
         mode: options.requireInputImage ? 'edit' : 'generate'
       }
     };
-    const qwenImageGenerationMeta = {
+    const imageGenerationMeta = {
       enabled: true,
       n: count,
       size: payload.size,
@@ -249,8 +253,7 @@ async function handleImageRequest(
         stream: false,
         clientRequestId,
         providerProtocol: 'openai-chat',
-        qwenImageGeneration: qwenImageGenerationMeta,
-        __raw_request_body: payload
+        imageGeneration: imageGenerationMeta,
       }
     });
 

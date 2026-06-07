@@ -260,17 +260,6 @@ export class TokenFileAuthProvider implements IAuthProvider {
           logTokenfileAuthNonBlocking('resolve_token_file.direct_stem_probe', error, { path: directStem });
         }
         if (providerId) {
-          // Qwen: pin tokenFile="default" to a stable file name when present, to avoid "I reauthed but server reads another seq".
-          if (providerId === 'qwen' && tf === 'default') {
-            const pinned = path.join(resolveAuthDir(), 'qwen-oauth-1-default.json');
-            try {
-              if (fs.existsSync(pinned)) {
-                return pinned;
-              }
-            } catch (error) {
-              logTokenfileAuthNonBlocking('resolve_token_file.qwen_pinned_probe', error, { path: pinned });
-            }
-          }
           const match = pickLatestTokenFile({ providerPrefix: providerId, alias: tf });
           if (match) {
             return match;
@@ -281,60 +270,16 @@ export class TokenFileAuthProvider implements IAuthProvider {
         }
         return null;
       }
-
       const resolved = this.expandHome(tf);
-      // Qwen: allow legacy single-file token path, but fall back to auth dir token set when missing.
-      if (providerId === 'qwen') {
-        try {
-          if (!fs.existsSync(resolved)) {
-            const fallback = pickLatestTokenFile({ providerPrefix: 'qwen' });
-            if (fallback) {
-              return fallback;
-            }
-          }
-        } catch (error) {
-          logTokenfileAuthNonBlocking('resolve_token_file.qwen_fallback_scan', error, { path: resolved });
-        }
-      }
       return this.ensureTokenFileExists(resolved);
     }
 
     const providerId = this.getConfiguredProviderId();
-    // Qwen: default to RouteCodex auth dir tokens (daemon-admin / oauth-lifecycle output)
-    if (providerId === 'qwen') {
-      const legacySingle = path.join(resolveRccAuthDirForRead(), 'qwen-oauth.json');
-      try {
-        if (fs.existsSync(legacySingle)) {
-          return legacySingle;
-        }
-      } catch (error) {
-        logTokenfileAuthNonBlocking('resolve_token_file.qwen_legacy_single_probe', error, { path: legacySingle });
-      }
-      const latest = pickLatestTokenFile({ providerPrefix: 'qwen' });
+    if (providerId) {
+      const latest = pickLatestTokenFile({ providerPrefix: providerId });
       if (latest) {
         return latest;
       }
-      // Old fallback: RouteCodex tokens dir (legacy external tooling)
-      const rc = path.join(resolveRccTokensDirForRead(), 'qwen-default.json');
-      try {
-        if (fs.existsSync(rc)) {
-          return rc;
-        }
-      } catch (error) {
-        logTokenfileAuthNonBlocking('resolve_token_file.qwen_legacy_tokens_dir_probe', error, { path: rc });
-      }
-    }
-
-    // CLIProxyAPI directory (legacy external tooling)
-    const home = process.env.HOME || '';
-    const dir = path.join(home, '.cli-proxy-api');
-    try {
-      const list = fs.readdirSync(dir).filter(n => /^qwen-.*\.json$/i.test(n));
-      if (list.length > 0) {
-        return path.join(dir, list.sort()[0]);
-      }
-    } catch (error) {
-      logTokenfileAuthNonBlocking('resolve_token_file.cliproxy_scan', error, { path: dir });
     }
     return null;
   }
@@ -383,13 +328,6 @@ export class TokenFileAuthProvider implements IAuthProvider {
   }
 
   private resolveBearerCredential(tok: TokenPayload | null): string | null {
-    const providerId = this.getConfiguredProviderId();
-
-    // Align with Qwen CLI qwen-oauth branch: access_token is the primary runtime credential.
-    if (providerId === 'qwen') {
-      return this.extractAccessToken(tok) || this.extractApiKey(tok);
-    }
-
     return this.extractAccessToken(tok) || this.extractApiKey(tok);
   }
 

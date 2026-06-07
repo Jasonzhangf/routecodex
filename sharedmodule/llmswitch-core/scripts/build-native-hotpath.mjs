@@ -8,9 +8,14 @@ const rustRoot = path.join(projectRoot, 'rust-core');
 const cargoManifest = path.join(rustRoot, 'Cargo.toml');
 const targetRelease = path.join(rustRoot, 'target', 'release');
 const distNativeDir = path.join(projectRoot, 'dist', 'native');
+const distBinDir = path.join(projectRoot, 'dist', 'bin');
 const packagedNodeTarget = path.join(distNativeDir, 'router_hotpath_napi.node');
+const servertoolBinaryName = process.platform === 'win32' ? 'routecodex-servertool.exe' : 'routecodex-servertool';
+const releaseServertoolBinary = path.join(targetRelease, servertoolBinaryName);
+const packagedServertoolBinary = path.join(distBinDir, servertoolBinaryName);
 const releaseArtifacts = [
   path.join(targetRelease, 'router_hotpath_napi.node'),
+  releaseServertoolBinary,
   path.join(targetRelease, 'deps', 'librouter_hotpath_napi.dylib'),
   path.join(targetRelease, 'deps', 'librouter_hotpath_napi.so'),
   path.join(targetRelease, 'deps', 'router_hotpath_napi.dll'),
@@ -74,6 +79,8 @@ function getLatestSourceMtime() {
     path.join(rustRoot, 'crates', 'router-hotpath-napi', 'Cargo.toml'),
     path.join(rustRoot, 'crates', 'router-hotpath-napi', 'build.rs'),
     path.join(rustRoot, 'crates', 'router-hotpath-napi', 'src'),
+    path.join(rustRoot, 'crates', 'servertool-cli', 'Cargo.toml'),
+    path.join(rustRoot, 'crates', 'servertool-cli', 'src'),
   ];
   // Dependency crates — changes in these also require a rebuild
   const depCrates = [
@@ -90,20 +97,19 @@ function getLatestSourceMtime() {
   return candidates.reduce((latest, item) => Math.max(latest, walkLatestMtime(item)), 0);
 }
 
-function getLatestArtifactMtime() {
-  let latest = 0;
-  for (const artifact of releaseArtifacts) {
-    if (!fs.existsSync(artifact)) {
-      continue;
-    }
-    const mtime = fs.statSync(artifact).mtimeMs || 0;
-    latest = Math.max(latest, mtime);
+function getRequiredArtifactMtime() {
+  const primaryNative = resolvePrimaryNativeArtifact();
+  if (!primaryNative || !fs.existsSync(releaseServertoolBinary)) {
+    return 0;
   }
-  return latest;
+  return Math.min(
+    fs.statSync(primaryNative).mtimeMs || 0,
+    fs.statSync(releaseServertoolBinary).mtimeMs || 0
+  );
 }
 
 function hasReleaseArtifact() {
-  return releaseArtifacts.some((file) => fs.existsSync(file));
+  return Boolean(resolvePrimaryNativeArtifact()) && fs.existsSync(releaseServertoolBinary);
 }
 
 function resolvePrimaryNativeArtifact() {
@@ -147,6 +153,21 @@ function syncNodeBridgeArtifact() {
   );
 }
 
+function syncServertoolBinaryArtifact() {
+  if (!fs.existsSync(releaseServertoolBinary)) {
+    console.error(`[native-build] missing servertool binary: ${releaseServertoolBinary}`);
+    process.exit(1);
+  }
+  fs.mkdirSync(distBinDir, { recursive: true });
+  const tempTarget = `${packagedServertoolBinary}.tmp-${process.pid}-${Date.now()}`;
+  fs.copyFileSync(releaseServertoolBinary, tempTarget);
+  fs.chmodSync(tempTarget, 0o755);
+  fs.renameSync(tempTarget, packagedServertoolBinary);
+  console.log(
+    `[native-build] packaged servertool binary: ${path.basename(releaseServertoolBinary)} -> ${path.relative(projectRoot, packagedServertoolBinary)}`
+  );
+}
+
 function ensureCargoReady() {
   const probe = spawnSync(cargoBinary, ['--version'], { stdio: 'pipe', cwd: projectRoot });
   if ((probe.status ?? 1) !== 0) {
@@ -162,7 +183,7 @@ function ensureCargoReady() {
 }
 
 function runCargoBuild() {
-  const args = ['build', '-p', 'router-hotpath-napi', '--release'];
+  const args = ['build', '-p', 'router-hotpath-napi', '-p', 'servertool-cli', '--release'];
   console.log(`[native-build] run: ${cargoBinary} ${args.join(' ')}`);
   const result = spawnSync(cargoBinary, args, { stdio: 'inherit', cwd: rustRoot });
   if ((result.status ?? 1) !== 0) {
@@ -182,9 +203,10 @@ function main() {
   }
 
   const latestSource = getLatestSourceMtime();
-  const latestArtifact = getLatestArtifactMtime();
+  const latestArtifact = getRequiredArtifactMtime();
   if (latestArtifact > 0 && latestArtifact >= latestSource) {
     syncNodeBridgeArtifact();
+    syncServertoolBinaryArtifact();
     console.log('[native-build] up-to-date, skip cargo build');
     return;
   }
@@ -198,6 +220,7 @@ function main() {
   }
 
   syncNodeBridgeArtifact();
+  syncServertoolBinaryArtifact();
   console.log('[native-build] ready');
 }
 

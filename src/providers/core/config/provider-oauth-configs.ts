@@ -18,36 +18,6 @@ function registerOAuthFlowFactories(): void {
 }
 
 function registerProviderOAuthConfigs(): void {
-  OAuthFlowConfigManager.registerDefaultConfig('qwen', {
-    flowType: OAuthFlowType.DEVICE_CODE,
-    activationType: OAuthActivationType.AUTO_BROWSER,
-    endpoints: {
-      deviceCodeUrl: 'https://chat.qwen.ai/api/v1/oauth2/device/code',
-      tokenUrl: 'https://chat.qwen.ai/api/v1/oauth2/token',
-      userInfoUrl: 'https://chat.qwen.ai/api/v1/user/info'
-    },
-    client: {
-      clientId: 'f0304373b74a44d2b584a3fb70ca9e56',
-      scopes: ['openid', 'profile', 'email', 'model.completion']
-    },
-    headers: {},
-    polling: {
-      interval: 5000,
-      maxAttempts: 60,
-      timeout: 300000
-    },
-    retry: {
-      maxAttempts: 3,
-      backoffMs: 1000
-    },
-    features: {
-      supportsPKCE: true,
-      supportsApiKeyExchange: false,
-      requireHttpsCallback: true,
-      customState: false,
-      requestOfflineAccess: true
-    }
-  });
 }
 
 export function initializeOAuthConfigs(): void {

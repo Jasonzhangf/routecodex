@@ -125,6 +125,8 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
       logStage: args.logStage,
       stageHint: reportPlan.stageHint,
       metadata: args.metadata,
+      routePool: args.routePool,
+      excludedProviderKeys: args.excludedProviderKeys,
       extraDetails: {
         routePoolSize: Array.isArray(args.routePool) ? args.routePool.length : 0
       }

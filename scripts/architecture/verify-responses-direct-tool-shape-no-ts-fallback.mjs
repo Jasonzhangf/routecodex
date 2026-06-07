@@ -10,7 +10,6 @@ function read(relPath) {
 
 const directPayload = read('src/server/runtime/http-server/direct-passthrough-payload.ts');
 const responsesProvider = read('src/providers/core/runtime/responses-provider.ts');
-const directContractError = read('src/providers/core/runtime/responses-direct-contract-error.ts');
 const serverIndex = read('src/server/runtime/http-server/index.ts');
 
 for (const forbidden of [
@@ -28,35 +27,35 @@ for (const forbidden of [
 }
 
 for (const required of [
-  'resolveResponsesDirectPayloadNative',
   'evaluateResponsesDirectRouteDecisionNative',
 ]) {
   if (!directPayload.includes(required)) {
-    failures.push(`direct payload missing Rust-only guard: ${required}`);
+    failures.push(`direct payload missing route decision hook: ${required}`);
   }
 }
 
 for (const forbidden of [
   'validateResponsesDirectToolShapeContractNative',
+  'resolveResponsesDirectPayloadNative',
+  'applyResponsesDirectRouteParamsOverrideNative',
+  'buildResponsesDirectPassthroughBodyNative',
   'hasDeclaredApplyPatchToolNative',
 ]) {
   if (directPayload.includes(forbidden)) {
-    failures.push(`direct payload must not retain split Rust wrapper path: ${forbidden}`);
+    failures.push(`direct payload must not retain direct body builder/raw replay/runtime validator path: ${forbidden}`);
   }
 }
 
-for (const required of [
+for (const forbidden of [
   'validateResponsesDirectToolShapeContractNative',
-  'buildResponsesDirectPassthroughBodyNative',
   'assertNativeResponsesDirectContractAvailable',
+  'resolveResponsesDirectPayloadNative',
+  'applyResponsesDirectRouteParamsOverrideNative',
+  'buildResponsesDirectPassthroughBodyNative',
 ]) {
-  if (!responsesProvider.includes(required)) {
-    failures.push(`responses provider missing Rust-only guard: ${required}`);
+  if (responsesProvider.includes(forbidden)) {
+    failures.push(`responses provider runtime must not call direct body builder/raw replay/runtime validator: ${forbidden}`);
   }
-}
-
-if (!directContractError.includes('native responses direct tool-shape validator unavailable')) {
-  failures.push('shared direct contract projector missing native unavailable error text');
 }
 
 for (const forbidden of [

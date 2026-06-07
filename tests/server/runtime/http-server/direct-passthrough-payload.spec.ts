@@ -1,125 +1,11 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
-  resolveResponsesDirectPayloadNative: (input: {
-    body: unknown;
-    rawRequestBody?: Record<string, unknown>;
-    bodyStream?: boolean;
-    metadataStream?: boolean;
-    outboundStream?: boolean;
-  }) => {
-    const source =
-      input.rawRequestBody && typeof input.rawRequestBody === 'object' && !Array.isArray(input.rawRequestBody)
-        ? structuredClone(input.rawRequestBody)
-        : (input.body && typeof input.body === 'object' && !Array.isArray(input.body)
-          ? structuredClone(input.body as Record<string, unknown>)
-          : {});
-    if (Object.prototype.hasOwnProperty.call(source, 'metadata')) {
-      throw new Error('provider-runtime-error: metadata is not allowed in direct passthrough provider body');
-    }
-    if ((input.bodyStream === true || input.metadataStream === true || input.outboundStream === true) && source.stream !== true) {
-      source.stream = true;
-    }
-    return source;
-  },
-  applyResponsesDirectRouteParamsOverrideNative: (input: {
-    payload: Record<string, unknown>;
-    routeParams?: Record<string, unknown>;
-  }) => {
-    const next = structuredClone(input.payload);
-    const routeModel = typeof input.routeParams?.model === 'string' ? input.routeParams.model.trim() : '';
-    if (routeModel) {
-      next.model = routeModel;
-    }
-    return next;
-  },
-  validateResponsesDirectToolShapeContractNative: (payload: Record<string, unknown>) => {
-    if (Array.isArray(payload.messages)) {
-      throw new Error(
-        'provider-runtime-error: responses provider received chat-style "messages". This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions).'
-      );
-    }
-    const hasInput = Array.isArray(payload.input);
-    const hasInstructions = typeof payload.instructions === 'string' && payload.instructions.trim().length > 0;
-    if (!hasInput && !hasInstructions) {
-      throw new Error('provider-runtime-error: responses payload missing "input" or "instructions"');
-    }
-    if (Array.isArray(payload.tools)) {
-      payload.tools.forEach((tool, index) => {
-        if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
-          throw new Error(`provider-runtime-error: responses payload tools[${index}] must be an object`);
-        }
-        const type = typeof (tool as { type?: unknown }).type === 'string' ? String((tool as { type?: unknown }).type).trim() : '';
-        if (type === 'function') {
-          const name = typeof (tool as { name?: unknown }).name === 'string' ? String((tool as { name?: unknown }).name).trim() : '';
-          if (!name) {
-            throw new Error(
-              `provider-runtime-error: responses payload tools[${index}] is chat-style function tool; Responses wire requires top-level tool.name`
-            );
-          }
-        }
-      });
-    }
-    if (Array.isArray(payload.input)) {
-      payload.input.forEach((item, index) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) {
-          return;
-        }
-        const type = typeof (item as { type?: unknown }).type === 'string' ? String((item as { type?: unknown }).type).trim() : '';
-        if ((type === 'function_call' || type === 'function_call_output') && Object.prototype.hasOwnProperty.call(item, 'content')) {
-          throw new Error(
-            `provider-runtime-error: responses payload input[${index}] ${type} must not carry content; tool call data belongs in arguments/output fields`
-          );
-        }
-      });
-    }
-    return { ok: true as const };
-  },
   evaluateResponsesDirectRouteDecisionNative: (input: {
     payload: Record<string, unknown>;
     inboundProtocol: string;
     applyPatchMode?: string;
   }) => {
-    if (input.inboundProtocol === 'openai-responses') {
-      const payload = input.payload;
-      if (Array.isArray(payload.messages)) {
-        throw new Error(
-          'provider-runtime-error: responses provider received chat-style "messages". This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions).'
-        );
-      }
-      const hasInput = Array.isArray(payload.input);
-      const hasInstructions = typeof payload.instructions === 'string' && payload.instructions.trim().length > 0;
-      if (!hasInput && !hasInstructions) {
-        throw new Error('provider-runtime-error: responses payload missing "input" or "instructions"');
-      }
-      if (Array.isArray(payload.tools)) {
-        payload.tools.forEach((tool, index) => {
-          if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
-            throw new Error(`provider-runtime-error: responses payload tools[${index}] must be an object`);
-          }
-          const type = typeof (tool as { type?: unknown }).type === 'string' ? String((tool as { type?: unknown }).type).trim() : '';
-          if (type === 'function') {
-            const name = typeof (tool as { name?: unknown }).name === 'string' ? String((tool as { name?: unknown }).name).trim() : '';
-            if (!name) {
-              throw new Error(`provider-runtime-error: responses payload tools[${index}] is chat-style function tool; Responses wire requires top-level tool.name`);
-            }
-          }
-        });
-      }
-      if (Array.isArray(payload.input)) {
-        payload.input.forEach((item, index) => {
-          if (!item || typeof item !== 'object' || Array.isArray(item)) {
-            return;
-          }
-          const type = typeof (item as { type?: unknown }).type === 'string' ? String((item as { type?: unknown }).type).trim() : '';
-          if ((type === 'function_call' || type === 'function_call_output') && Object.prototype.hasOwnProperty.call(item, 'content')) {
-            throw new Error(
-              `provider-runtime-error: responses payload input[${index}] ${type} must not carry content; tool call data belongs in arguments/output fields`
-            );
-          }
-        });
-      }
-    }
     const hasDeclaredApplyPatchTool = Array.isArray(input.payload.tools) && input.payload.tools.some((tool) => {
       if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return false;
       const row = tool as Record<string, unknown>;
@@ -130,11 +16,10 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
       const directName = typeof row.name === 'string' ? row.name.trim() : '';
       return functionName === 'apply_patch' || directName === 'apply_patch';
     });
-    const hasDeclaredToolArray = Array.isArray(input.payload.tools) && input.payload.tools.length > 0;
     return {
       providerWireValid: true,
-      requiresHubRelay: hasDeclaredToolArray,
-      reason: hasDeclaredToolArray ? 'responses tools require Hub relay tool governance' : undefined,
+      requiresHubRelay: false,
+      reason: undefined,
       hasDeclaredApplyPatchTool,
     };
   },
@@ -164,13 +49,14 @@ const {
 } = await import('../../../../src/server/runtime/http-server/direct-passthrough-payload.js');
 
 describe('direct-passthrough-payload', () => {
-  it('prefers metadata.__raw_request_body over mutated body', () => {
+  it('ignores metadata.__raw_request_body and keeps current body as direct payload source', () => {
+    const body = {
+      model: 'gpt-5.3-codex',
+      instructions: 'current',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'current' }] }],
+    };
     const resolved = resolveRawPayloadForDirect(
-      {
-        model: 'gpt-5.3-codex',
-        instructions: 'mutated',
-        input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
-      },
+      body,
       {
         __raw_request_body: {
           model: 'gpt-5.4',
@@ -180,40 +66,21 @@ describe('direct-passthrough-payload', () => {
       },
     );
 
+    expect(resolved).toBe(body);
     expect(resolved).toEqual({
-      model: 'gpt-5.4',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
-      previous_response_id: 'resp_prev',
+      model: 'gpt-5.3-codex',
+      instructions: 'current',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'current' }] }],
     });
   });
 
-  it('fails fast instead of stripping metadata from replay raw payload', () => {
-    expect(() =>
-      resolveRawPayloadForDirect(
-        {
-          model: 'gpt-5.3-codex',
-          input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
-        },
-        {
-          __raw_request_body: {
-            model: 'gpt-5.4',
-            metadata: {
-              session_id: 'replay-session-must-not-leak',
-              routeHint: 'internal'
-            },
-            input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
-          },
-        },
-      )
-    ).toThrow(/metadata is not allowed in direct passthrough provider body/);
-  });
-
-  it('lifts stream=true onto replay raw payload when direct metadata requests streaming', () => {
+  it('lifts stream=true onto current body when direct metadata requests streaming', () => {
+    const body = {
+      model: 'gpt-5.3-codex',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'current' }] }],
+    };
     const resolved = resolveRawPayloadForDirect(
-      {
-        model: 'gpt-5.3-codex',
-        input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
-      },
+      body,
       {
         stream: true,
         __raw_request_body: {
@@ -223,20 +90,22 @@ describe('direct-passthrough-payload', () => {
       },
     );
 
+    expect(resolved).toBe(body);
     expect(resolved).toEqual({
-      model: 'gpt-5.4',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      model: 'gpt-5.3-codex',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'current' }] }],
       stream: true,
     });
   });
 
   it('only applies explicit direct routeParams model override', () => {
+    const body = {
+      model: 'gpt-5.4',
+      previous_response_id: 'resp_prev',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+    };
     const result = applyMinimalDirectOverrides(
-      {
-        model: 'gpt-5.4',
-        previous_response_id: 'resp_prev',
-        input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
-      },
+      body,
       {
         routeParams: {
           model: 'dbittai-gpt.key1.gpt-5.3-codex',
@@ -246,6 +115,7 @@ describe('direct-passthrough-payload', () => {
       },
     );
 
+    expect(result).toBe(body);
     expect(result).toEqual({
       model: 'dbittai-gpt.key1.gpt-5.3-codex',
       previous_response_id: 'resp_prev',
@@ -265,7 +135,7 @@ describe('direct-passthrough-payload', () => {
     expect(output).toEqual(ingress);
   });
 
-  it('routes valid responses tool declarations through Hub relay instead of router-direct', () => {
+  it('keeps responses tool declarations on direct path without Hub relay', () => {
     const decision = evaluateDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
@@ -276,11 +146,11 @@ describe('direct-passthrough-payload', () => {
     });
 
     expect(decision.providerWireValid).toBe(true);
-    expect(decision.requiresHubRelay).toBe(true);
-    expect(decision.reason).toMatch(/tools require Hub relay/);
+    expect(decision.requiresHubRelay).toBe(false);
+    expect(decision.reason).toBeUndefined();
   });
 
-  it('rejects historical chat-style function tools on responses direct', () => {
+  it('does not runtime-reject chat-style function tools on responses direct', () => {
     expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
@@ -288,10 +158,10 @@ describe('direct-passthrough-payload', () => {
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
         tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
       },
-    })).toThrow(/Responses wire requires top-level tool\.name/);
+    })).not.toThrow();
   });
 
-  it('rejects any responses direct tool array that mixes chat-style function tools without top-level name', () => {
+  it('does not runtime-reject mixed responses direct tool arrays', () => {
     for (const invalidIndex of [0, 3, 11]) {
       const tools = Array.from({ length: 12 }, (_, index) => (
         index === invalidIndex
@@ -305,21 +175,21 @@ describe('direct-passthrough-payload', () => {
           input: [{ role: 'user', content: [{ type: 'input_text', text: 'sample lock' }] }],
           tools,
         },
-      })).toThrow(new RegExp(`tools\\[${invalidIndex}\\].*top-level tool\\.name`));
+      })).not.toThrow();
     }
   });
 
-  it('rejects historical chat-style messages on responses direct', () => {
+  it('does not runtime-reject chat-style messages on responses direct', () => {
     expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
         model: 'gpt-5.5',
         messages: [{ role: 'user', content: 'hello' }],
       },
-    })).toThrow(/chat-style "messages"/);
+    })).not.toThrow();
   });
 
-  it('rejects historical responses tool input content on responses direct', () => {
+  it('does not runtime-reject historical responses tool input content on direct', () => {
     expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
@@ -334,7 +204,7 @@ describe('direct-passthrough-payload', () => {
           },
         ],
       },
-    })).toThrow(/function_call_output must not carry content/);
+    })).not.toThrow();
   });
 
   it('allows responses-native hosted tools without name', () => {
@@ -348,7 +218,7 @@ describe('direct-passthrough-payload', () => {
     })).not.toThrow();
   });
 
-  it('routes legacy servertool apply_patch metadata through Hub relay', () => {
+  it('detects legacy servertool apply_patch metadata without forcing Hub relay', () => {
     const result = evaluateDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       applyPatchMode: 'servertool',
@@ -360,9 +230,9 @@ describe('direct-passthrough-payload', () => {
     });
     expect(result).toMatchObject({
       providerWireValid: true,
-      requiresHubRelay: true,
-      reason: 'responses tools require Hub relay tool governance',
+      requiresHubRelay: false,
       hasDeclaredApplyPatchTool: true,
     });
+    expect(result.reason).toBeUndefined();
   });
 });

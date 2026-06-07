@@ -9,7 +9,6 @@ import { BaseOAuthFlowStrategy, OAuthFlowType } from '../config/oauth-flows.js';
 import type { OAuthFlowConfig } from '../config/oauth-flows.js';
 import fs from 'fs/promises';
 import path from 'path';
-import { randomUUID } from 'node:crypto';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import { formatOAuthErrorMessage } from '../../auth/oauth-error-message.js';
 import { isPermanentOAuthRefreshErrorMessage } from './oauth-refresh-errors.js';
@@ -160,7 +159,6 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       scope: this.config.client.scopes.join(' ')
     });
 
-    // 启用 PKCE：对齐 Qwen CLI 实现（设备码 + 代码校验）
     let codeVerifier: string | undefined;
     if (this.config.features?.supportsPKCE) {
       try {
@@ -179,9 +177,6 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
-        ...(this.isQwenDeviceEndpoint()
-          ? { 'x-request-id': randomUUID() }
-          : {})
       },
       body: formData
     });
@@ -268,26 +263,6 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     let resolvedVerificationUriComplete =
       typeof verification_uri_complete === 'string' ? verification_uri_complete : undefined;
 
-    // Qwen requires user_code/client in the authorize URL; ensure we keep/construct it.
-    if (resolvedUserCode && resolvedVerificationUri) {
-      const deviceUrl = String(this.config.endpoints.deviceCodeUrl || '');
-      const isQwenDevice = deviceUrl.includes('chat.qwen.ai');
-      if (isQwenDevice) {
-        try {
-          const url = new URL(resolvedVerificationUriComplete || resolvedVerificationUri);
-          if (!url.searchParams.get('user_code')) {
-            url.searchParams.set('user_code', resolvedUserCode);
-          }
-          if (!url.searchParams.get('client')) {
-            url.searchParams.set('client', 'qwen-code');
-          }
-          resolvedVerificationUriComplete = url.toString();
-        } catch {
-          // Leave as-is when URL parsing fails.
-        }
-      }
-    }
-
     const result: DeviceCodeData = {
       device_code,
       user_code: resolvedUserCode,
@@ -335,7 +310,6 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
           device_code: deviceCode
         });
 
-        // Qwen 等提供商要求在轮询阶段携带 code_verifier（PKCE）
         if (this.config.features?.supportsPKCE && codeVerifier) {
           formData.append('code_verifier', codeVerifier);
         }
@@ -385,18 +359,12 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     throw new Error(`Device authorization timed out after ${maxAttempts} attempts`);
   }
 
-  private isQwenDeviceEndpoint(): boolean {
-    const deviceUrl = String(this.config.endpoints.deviceCodeUrl || '').toLowerCase();
-    return deviceUrl.includes('chat.qwen.ai/api/v1/oauth2/device/code');
-  }
-
   private isAutoAuthModeEnabled(): boolean {
     const raw = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
     if (raw) {
       return !DISABLED_CAMOUFOX_AUTO_MODE.has(raw);
     }
-    // Default: qwen oauth device flow should run Camoufox auto mode even when env is not preset.
-    return this.isQwenDeviceEndpoint();
+    return false;
   }
 
   /**

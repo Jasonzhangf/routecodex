@@ -439,20 +439,6 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     const safeWindowMs = 10 * 60_000;
     if (status === 'valid' && (msLeft === null || msLeft > safeWindowMs)) {
       console.log(chalk.green('✓'), `Token is still valid; skip interactive OAuth (${label})`);
-      // Still provide a hint when qwen token exists but user config has no qwen provider.
-      if (token.provider === 'qwen') {
-        try {
-          const { userConfig } = await loadRouteCodexConfig();
-          if (!configHasProviderId(userConfig, 'qwen')) {
-            console.warn(
-              chalk.yellow('⚠'),
-              'Your user config has no "qwen" provider entry. This token will not be used until you add a qwen provider.'
-            );
-          }
-        } catch (configError) {
-          logTokenDaemonNonBlockingError('interactiveRefresh.qwenConfigCheck.preflight', configError);
-        }
-      }
       return;
     }
   }
@@ -486,21 +472,6 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   } catch (configLoadError) {
     logTokenDaemonNonBlockingError('interactiveRefresh.loadRouteCodexConfig', configLoadError);
   }
-  // If token exists but config doesn't reference the provider, users will keep reauthing without effect.
-  if (token.provider === 'qwen') {
-    try {
-      const { userConfig } = await loadRouteCodexConfig();
-      if (!configHasProviderId(userConfig, 'qwen')) {
-        console.warn(
-          chalk.yellow('⚠'),
-          'Your user config has no "qwen" provider entry. This token will not be used until you add a qwen provider.'
-        );
-      }
-    } catch (configError) {
-      logTokenDaemonNonBlockingError('interactiveRefresh.qwenConfigCheck.beforeOAuth', configError);
-    }
-  }
-
   const providerType = token.provider;
   const rawType = `${providerType}-oauth`;
 

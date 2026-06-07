@@ -10,7 +10,6 @@ import {
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
-  captureRawRequestBodyForMetadata,
   mergePipelineMetadata,
   readRequestBodyMetadata,
   stripRequestBodyMetadataForPipeline
@@ -43,18 +42,11 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     let jsonPayload: MessagesPayload | undefined;
     let warmupPayload: MessagesPayload | undefined;
     let pipelineBody: Record<string, unknown>;
-    let originalPayload: MessagesPayload | undefined;
-    let rawRequestMetadata: unknown;
     let inferredModel: string | undefined;
 
     if (isSseRequest) {
       try {
         const parsed = await parseSseJsonRequest(req);
-        rawRequestMetadata = {
-          format: 'sse',
-          rawText: parsed.rawText,
-          events: parsed.events
-        };
         if (parsed.firstPayload && typeof parsed.firstPayload === 'object') {
           jsonPayload = parsed.firstPayload as MessagesPayload;
           inferredModel =
@@ -79,8 +71,6 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       jsonPayload = (req.body && typeof req.body === 'object'
         ? req.body
         : {}) as MessagesPayload;
-      originalPayload = captureRawRequestBodyForMetadata(jsonPayload) as MessagesPayload;
-      rawRequestMetadata = originalPayload;
       applySystemPromptOverride(entryEndpoint, jsonPayload);
       pipelineBody = jsonPayload;
       inferredModel = typeof jsonPayload?.model === 'string' ? jsonPayload.model : undefined;
@@ -127,7 +117,6 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         inboundStream,
         outboundStream,
         providerProtocol: 'anthropic-messages',
-        __raw_request_body: rawRequestMetadata,
         clientHeaders,
         clientConnectionState
       })

@@ -852,17 +852,10 @@ mod tests {
     #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_qwen_tool_definitions_local_clone() {
         let path = crate_src_path("req_outbound_stage3_compat/qwen/tool_definitions.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_trimmed_string(value: Option<&Value>) -> Option<String>"),
-            "local read_trimmed_string clone still present in {}",
+            !path.exists(),
+            "removed qwen compat module must not be restored: {}",
             path.display()
-        );
-        assert!(
-            source.contains("shared_json_utils::read_trimmed_string")
-                || source.contains("use crate::shared_json_utils::read_trimmed_string"),
-            "qwen/tool_definitions.rs must use shared read_trimmed_string truth"
         );
     }
 
@@ -993,34 +986,20 @@ mod tests {
     #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_qwenchat_tool_definitions_local_clone() {
         let path = crate_src_path("req_outbound_stage3_compat/qwenchat/tool_definitions.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_trimmed_string(value: Option<&Value>) -> Option<String>"),
-            "local read_trimmed_string clone still present in {}",
+            !path.exists(),
+            "removed qwenchat compat module must not be restored: {}",
             path.display()
-        );
-        assert!(
-            source.contains("shared_json_utils::read_trimmed_string")
-                || source.contains("use crate::shared_json_utils::read_trimmed_string"),
-            "qwenchat/tool_definitions.rs must use shared read_trimmed_string truth"
         );
     }
 
     #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_qwenchat_response_local_clone() {
         let path = crate_src_path("req_outbound_stage3_compat/qwenchat/response.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_trimmed_string(value: Option<&Value>) -> Option<String>"),
-            "local read_trimmed_string clone still present in {}",
+            !path.exists(),
+            "removed qwenchat response module must not be restored: {}",
             path.display()
-        );
-        assert!(
-            source.contains("shared_json_utils::read_trimmed_string")
-                || source.contains("use crate::shared_json_utils::read_trimmed_string"),
-            "qwenchat/response.rs must use shared read_trimmed_string truth"
         );
     }
 
@@ -1222,23 +1201,17 @@ mod tests {
     #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_qwenchat_append_description_clone() {
         let qwen_path = crate_src_path("req_outbound_stage3_compat/qwen/tool_definitions.rs");
-        let qwen_source = fs::read_to_string(&qwen_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", qwen_path.display(), error));
         let qwenchat_path =
             crate_src_path("req_outbound_stage3_compat/qwenchat/tool_definitions.rs");
-        let qwenchat_source = fs::read_to_string(&qwenchat_path).unwrap_or_else(|error| {
-            panic!("failed to read {}: {}", qwenchat_path.display(), error)
-        });
         assert!(
-            !qwenchat_source.contains(
-                "fn append_description(existing: Option<&Value>, extra: &str) -> Value {"
-            ),
-            "qwenchat/tool_definitions.rs still owns local append_description clone"
+            !qwen_path.exists(),
+            "removed qwen tool definitions must not be restored: {}",
+            qwen_path.display()
         );
         assert!(
-            qwen_source.contains("pub(crate) fn append_description(")
-                || qwenchat_source.contains("append_description("),
-            "qwen/qwenchat tool definitions must share a single append_description truth"
+            !qwenchat_path.exists(),
+            "removed qwenchat tool definitions must not be restored: {}",
+            qwenchat_path.display()
         );
     }
 

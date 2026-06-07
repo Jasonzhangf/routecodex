@@ -461,6 +461,32 @@ describe('client connection timeout hint', () => {
 
     expect(signal?.aborted).toBe(true);
   });
+
+  it('drops stale preselected route on retry attempts with provider exclusions', () => {
+    const preselectedRoute = {
+      decision: {
+        routeName: 'search',
+        providerKey: 'minimax.key1.MiniMax-M3',
+        pool: ['minimax.key1.MiniMax-M3', 'mimo.key2.mimo-v2.5']
+      }
+    };
+    const baseMetadata = {
+      __routecodexPreselectedRoute: preselectedRoute
+    };
+
+    const firstAttempt = decorateMetadataForAttempt(baseMetadata, 1, new Set<string>());
+    expect(firstAttempt.__routecodexPreselectedRoute).toEqual(preselectedRoute);
+
+    const retryAttempt = decorateMetadataForAttempt(
+      baseMetadata,
+      2,
+      new Set<string>(['minimax.key1.MiniMax-M3'])
+    );
+
+    expect(retryAttempt.excludedProviderKeys).toEqual(['minimax.key1.MiniMax-M3']);
+    expect(retryAttempt.__routecodexPreselectedRoute).toBeUndefined();
+    expect(baseMetadata.__routecodexPreselectedRoute).toBe(preselectedRoute);
+  });
 });
 
 describe('executor metadata route hint extraction', () => {

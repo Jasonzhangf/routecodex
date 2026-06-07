@@ -83,18 +83,6 @@ type NativeHubBridgePolicySemantics = {
     compatibilityProfile?: string;
     payload: Record<string, unknown>;
   }) => Record<string, unknown>;
-  validateResponsesDirectToolShapeContractWithNative?: (
-    payload: Record<string, unknown>
-  ) => { ok: true } | null;
-  applyResponsesDirectRouteParamsOverrideWithNative?: (input: {
-    payload: Record<string, unknown>;
-    routeParams?: Record<string, unknown>;
-    providerDefaultModel?: string;
-    requestReasoningEffort?: string;
-  }) => Record<string, unknown>;
-  buildResponsesDirectPassthroughBodyWithNative?: (
-    payload: unknown
-  ) => Record<string, unknown>;
   hasDeclaredApplyPatchToolWithNative?: (
     payload: unknown
   ) => boolean;
@@ -108,36 +96,14 @@ type NativeHubBridgePolicySemantics = {
     reason?: string;
     hasDeclaredApplyPatchTool?: boolean;
   };
-  resolveResponsesDirectPayloadWithNative?: (input: {
-    body: unknown;
-    rawRequestBody?: Record<string, unknown>;
-    bodyStream?: boolean;
-    metadataStream?: boolean;
-    outboundStream?: boolean;
-  }) => Record<string, unknown>;
 };
 
 type NativeRouterHotpathJsonBinding = {
-  validateResponsesDirectToolShapeContractJson?: (payloadJson: string) => string;
-  applyResponsesDirectRouteParamsOverrideJson?: (
-    payloadJson: string,
-    routeParamsJson: string,
-    providerDefaultModelJson: string,
-    requestReasoningEffortJson: string
-  ) => string;
-  buildResponsesDirectPassthroughBodyJson?: (payloadJson: string) => string;
   hasDeclaredApplyPatchToolJson?: (payloadJson: string) => string;
   evaluateResponsesDirectRouteDecisionJson?: (
     payloadJson: string,
     inboundProtocolJson: string,
     applyPatchModeJson: string
-  ) => string;
-  resolveResponsesDirectPayloadJson?: (
-    bodyJson: string,
-    rawRequestBodyJson: string,
-    bodyStreamJson: string,
-    metadataStreamJson: string,
-    outboundStreamJson: string
   ) => string;
 };
 
@@ -538,33 +504,6 @@ export async function sanitizeProviderOutboundPayload(input: {
   return fn(input) as AnyRecord;
 }
 
-export function validateResponsesDirectToolShapeContractNative(
-  payload: Record<string, unknown>
-): { ok: true } | null {
-  const parsed = invokeRouterHotpathJsonCapability('validateResponsesDirectToolShapeContractJson', [payload ?? {}]);
-  return assertNativeObject('validateResponsesDirectToolShapeContractJson', parsed) as { ok: true };
-}
-
-export function applyResponsesDirectRouteParamsOverrideNative(input: {
-  payload: Record<string, unknown>;
-  routeParams?: Record<string, unknown>;
-  providerDefaultModel?: string;
-  requestReasoningEffort?: string;
-}): AnyRecord {
-  const parsed = invokeRouterHotpathJsonCapability('applyResponsesDirectRouteParamsOverrideJson', [
-    input.payload ?? {},
-    input.routeParams ?? null,
-    input.providerDefaultModel ?? null,
-    input.requestReasoningEffort ?? null,
-  ]);
-  return assertNativeObject('applyResponsesDirectRouteParamsOverrideJson', parsed);
-}
-
-export function buildResponsesDirectPassthroughBodyNative(payload: unknown): AnyRecord {
-  const parsed = invokeRouterHotpathJsonCapability('buildResponsesDirectPassthroughBodyJson', [payload ?? null]);
-  return assertNativeObject('buildResponsesDirectPassthroughBodyJson', parsed);
-}
-
 export function hasDeclaredApplyPatchToolNative(payload: unknown): boolean {
   const parsed = invokeRouterHotpathJsonCapability('hasDeclaredApplyPatchToolJson', [payload ?? null]);
   const row = assertNativeObject('hasDeclaredApplyPatchToolJson', parsed);
@@ -592,23 +531,6 @@ export function evaluateResponsesDirectRouteDecisionNative(input: {
     reason?: string;
     hasDeclaredApplyPatchTool?: boolean;
   };
-}
-
-export function resolveResponsesDirectPayloadNative(input: {
-  body: unknown;
-  rawRequestBody?: Record<string, unknown>;
-  bodyStream?: boolean;
-  metadataStream?: boolean;
-  outboundStream?: boolean;
-}): AnyRecord {
-  const parsed = invokeRouterHotpathJsonCapability('resolveResponsesDirectPayloadJson', [
-    input.body ?? null,
-    input.rawRequestBody ?? null,
-    input.bodyStream === true,
-    input.metadataStream === true,
-    input.outboundStream === true,
-  ]);
-  return assertNativeObject('resolveResponsesDirectPayloadJson', parsed);
 }
 
 export function describeHubPipelineContractsNative(): AnyRecord {

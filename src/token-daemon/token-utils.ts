@@ -84,18 +84,6 @@ export function hasApiKey(token: RawTokenPayload | null): boolean {
   return typeof cand === 'string' && cand.trim().length > 0;
 }
 
-function hasStableQwenApiKey(token: RawTokenPayload | null): boolean {
-  if (!token) {
-    return false;
-  }
-  const apiKey = token.apiKey ?? token.api_key;
-  if (typeof apiKey !== 'string' || !apiKey.trim()) {
-    return false;
-  }
-  const access = token.access_token ?? token.AccessToken;
-  return typeof access !== 'string' || !access.trim() || access.trim() !== apiKey.trim();
-}
-
 export function hasRefreshToken(token: RawTokenPayload | null): boolean {
   if (!token) {
     return false;
@@ -111,21 +99,16 @@ export function evaluateTokenState(
 ): TokenState {
   const access = hasAccessToken(token);
   const apiKey = hasApiKey(token);
-  const isQwenProvider = provider === 'qwen';
-  const apiKeyBypassesExpiry = isQwenProvider && hasStableQwenApiKey(token);
   const refresh = hasRefreshToken(token);
   const expiresAt = getExpiresAtMillis(token);
   const msUntilExpiry = expiresAt !== null ? expiresAt - now : null;
   const rawNoRefresh =
     token !== null && (token.norefresh === true || (typeof token.noRefresh === 'boolean' && token.noRefresh));
-  const noRefresh = isQwenProvider ? rawNoRefresh && apiKeyBypassesExpiry : rawNoRefresh;
+  const noRefresh = rawNoRefresh;
 
   let status: TokenState['status'] = 'invalid';
-  if (!access && !apiKeyBypassesExpiry) {
+  if (!access) {
     status = 'invalid';
-  } else if (apiKeyBypassesExpiry) {
-    // qwen reaches this branch only when api_key is stable (not a copy of access_token).
-    status = 'valid';
   } else if (expiresAt === null) {
     status = 'valid';
   } else if (msUntilExpiry !== null && msUntilExpiry <= 0) {

@@ -112,7 +112,7 @@ Reasoning 不得包含 provider internal metadata、`__rt`、snapshot/debug carr
 红测优先：
 
 - `tests/servertool/servertool-cli-projection.spec.ts`：projection 命令必须是 direct CLI，不含 old restoration markers。
-- `tests/servertool/servertool-cli-execution.spec.ts`：dispatcher 支持 stopless + fixture，unsupported fail-fast。
+- `tests/cli/servertool-command.spec.ts`：CLI command 只调用 Rust `routecodex-servertool` binary，unsupported fail-fast。
 - `tests/servertool/servertool-cli-result-restore.spec.ts`：锁定不使用 old CLI restoration。
 - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`：SSE 不变 JSON，输出 `exec_command`，无 old restoration/internal marker 泄漏。
 - `tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts`：no-reenter/no-providerInvoker/no-restoration 静态 gate。
@@ -120,7 +120,7 @@ Reasoning 不得包含 provider internal metadata、`__rt`、snapshot/debug carr
 定向验证：
 
 - projection 单测：stopless response -> reasoning + `exec_command`。
-- CLI dispatcher 单测：stopless + fixture tool 成功执行；unsupported tool fail-fast。
+- Rust CLI command 单测：stopless + fixture tool 通过 `routecodex-servertool` 执行；unsupported tool fail-fast。
 - direct submit contract：不捕获 `old_cli_result_*`，不恢复原模型 tool identity。
 - SSE 黑盒：stream=true 仍输出 SSE tool_call，不返回 JSON。
 - provider outbound snapshot：provider request 不含 old restoration marker、metadata、`__rt`。

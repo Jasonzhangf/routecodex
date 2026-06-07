@@ -113,13 +113,12 @@ export class AuthProviderFactory {
       moduleType: this.context.moduleType
     });
 
-    // For providers like Qwen/Gemini CLI where public OAuth client may not be available,
+    // For providers like Gemini CLI where public OAuth client may not be available,
     // allow reading tokens produced by external login tools (CLIProxyAPI) via token file.
     const useTokenFile =
       (typeof profileTokenFileMode === 'boolean'
         ? profileTokenFileMode
         : (
-            resolvedOAuthProviderId === 'qwen' ||
             resolvedOAuthProviderId === 'gemini'
           )) &&
       !auth.clientId &&

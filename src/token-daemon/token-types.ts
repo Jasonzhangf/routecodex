@@ -1,9 +1,8 @@
 import path from 'path';
 
-export type OAuthProviderId = 'qwen' | 'deepseek-account';
+export type OAuthProviderId = 'deepseek-account';
 
 export const SUPPORTED_OAUTH_PROVIDERS: OAuthProviderId[] = [
-  'qwen',
   'deepseek-account'
 ];
 

@@ -1,7 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
-  validateResponsesDirectToolShapeContractNative: () => ({ ok: true as const }),
   evaluateResponsesDirectRouteDecisionNative: () => ({
     providerWireValid: true,
     requiresHubRelay: false,

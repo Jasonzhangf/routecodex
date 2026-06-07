@@ -95,19 +95,16 @@ describe('router-direct-pipeline', () => {
       const result = await executeRouterDirectPipeline(input);
       expect(result.used).toBe(true);
       expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
-      expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledWith({
-        ...input.requestPayload,
-        model: 'gpt-4',
-      });
+      expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledWith(input.requestPayload);
       const ctx = result.auditContext;
       expect(ctx.observedFields).toBeDefined();
-      expect(ctx.originalPayload).toEqual(input.requestPayload);
+      expect(ctx.payload).toBe(input.requestPayload);
       expect(ctx.providerKey).toBe('openai.gpt-4');
       expect(ctx.inboundProtocol).toBe('openai-chat');
       expect(ctx.providerProtocol).toBe('openai-chat');
     });
 
-    it('overrides chat model with provider payload model before direct send', async () => {
+    it('does not override chat model with provider payload model before direct send', async () => {
       const input = {
         portConfig: createRouterPortConfig(),
         providerPayload: {
@@ -132,7 +129,8 @@ describe('router-direct-pipeline', () => {
 
       expect(result.used).toBe(true);
       const sentPayload = (openaiHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
-      expect(sentPayload.model).toBe('deepseek-v4-flash-free');
+      expect(sentPayload).toBe(input.requestPayload);
+      expect(sentPayload.model).toBe('deepseek-v4-flash');
       expect(input.requestPayload.model).toBe('deepseek-v4-flash');
     });
 
@@ -262,7 +260,7 @@ describe('router-direct-pipeline', () => {
       expect(result.used).toBe(true);
       expect(beforeSnapshots).toHaveLength(1);
       expect(afterSnapshots).toHaveLength(1);
-      expect(beforeSnapshots[0].ctx.originalPayload).toEqual(input.requestPayload);
+      expect(beforeSnapshots[0].ctx.payload).toBe(input.requestPayload);
       expect(beforeSnapshots[0].ctx).toBe(afterSnapshots[0].ctx);
     });
 

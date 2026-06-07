@@ -321,7 +321,7 @@ export function resolveProviderFailureClassification(args: {
     );
 
   if (isProviderRuntimeRequestContractError(reason)) {
-    return 'unrecoverable';
+    return 'special_400';
   }
 
   if (

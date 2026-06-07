@@ -15,12 +15,6 @@ if (typeof binding !== 'object' || !binding) {
   failures.push('native router_hotpath_napi.node did not load as object');
 }
 
-if (!REQUIRED_NATIVE_HOTPATH_EXPORTS.includes('validateResponsesDirectToolShapeContractJson')) {
-  failures.push('required native exports list missing validateResponsesDirectToolShapeContractJson');
-}
-if (!REQUIRED_NATIVE_HOTPATH_EXPORTS.includes('buildResponsesDirectPassthroughBodyJson')) {
-  failures.push('required native exports list missing buildResponsesDirectPassthroughBodyJson');
-}
 if (!REQUIRED_NATIVE_HOTPATH_EXPORTS.includes('hasDeclaredApplyPatchToolJson')) {
   failures.push('required native exports list missing hasDeclaredApplyPatchToolJson');
 }
@@ -28,11 +22,18 @@ if (!REQUIRED_NATIVE_HOTPATH_EXPORTS.includes('evaluateResponsesDirectRouteDecis
   failures.push('required native exports list missing evaluateResponsesDirectRouteDecisionJson');
 }
 
-if (typeof binding?.validateResponsesDirectToolShapeContractJson !== 'function') {
-  failures.push('native binding missing validateResponsesDirectToolShapeContractJson export');
-}
-if (typeof binding?.buildResponsesDirectPassthroughBodyJson !== 'function') {
-  failures.push('native binding missing buildResponsesDirectPassthroughBodyJson export');
+for (const removed of [
+  'validateResponsesDirectToolShapeContractJson',
+  'buildResponsesDirectPassthroughBodyJson',
+  'applyResponsesDirectRouteParamsOverrideJson',
+  'resolveResponsesDirectPayloadJson',
+]) {
+  if (REQUIRED_NATIVE_HOTPATH_EXPORTS.includes(removed)) {
+    failures.push(`required native exports list must not retain removed direct body interface: ${removed}`);
+  }
+  if (typeof binding?.[removed] === 'function') {
+    failures.push(`native binding must not retain removed direct body interface: ${removed}`);
+  }
 }
 if (typeof binding?.hasDeclaredApplyPatchToolJson !== 'function') {
   failures.push('native binding missing hasDeclaredApplyPatchToolJson export');

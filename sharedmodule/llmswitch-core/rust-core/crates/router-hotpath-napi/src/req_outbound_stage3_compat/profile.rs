@@ -57,20 +57,12 @@ pub(super) fn is_responses_output2choices_profile(profile: &str) -> bool {
     profile_matches(profile, "responses:output2choices-test")
 }
 
-pub(super) fn is_qwen_profile(profile: &str) -> bool {
-    profile_matches(profile, "chat:qwen")
-}
-
 pub(super) fn is_lmstudio_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:lmstudio")
 }
 
 pub(super) fn is_deepseek_web_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:deepseek-web")
-}
-
-pub(super) fn is_qwenchat_web_profile(profile: &str) -> bool {
-    profile_matches(profile, "chat:qwenchat-web")
 }
 
 pub(super) fn is_gemini_profile(profile: &str) -> bool {

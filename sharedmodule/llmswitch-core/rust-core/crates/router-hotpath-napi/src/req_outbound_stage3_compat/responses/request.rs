@@ -84,6 +84,22 @@ pub(crate) fn normalize_responses_function_tools(root: &mut Map<String, Value>) 
     root.insert("tools".to_string(), Value::Array(normalized));
 }
 
+// feature_id: responses.request_compat_normalization
+pub(crate) fn strip_responses_reasoning_content_for_provider_wire(root: &mut Map<String, Value>) {
+    let Some(input) = root.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for entry in input.iter_mut() {
+        let Some(row) = entry.as_object_mut() else {
+            continue;
+        };
+        if row.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
+        row.remove("content");
+    }
+}
+
 fn strip_html_tags(text: &str) -> String {
     match Regex::new(r"</?[^>]+(>|$)") {
         Ok(re) => re.replace_all(text, "").to_string(),

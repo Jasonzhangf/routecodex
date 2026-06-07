@@ -33,7 +33,6 @@ export {
   extractAccessToken,
   extractApiKey,
   hasApiKeyField,
-  hasStableQwenApiKey,
   hasAccessToken,
   getExpiresAt,
   resolveProjectId,

@@ -50,15 +50,6 @@ export function hasApiKeyField(token: StoredOAuthToken | null): boolean {
   return hasNonEmptyString(token.apiKey ?? token.api_key);
 }
 
-export function hasStableQwenApiKey(token: StoredOAuthToken | null): boolean {
-  const apiKey = extractApiKey(token);
-  if (!apiKey) {
-    return false;
-  }
-  const access = extractAccessToken(token);
-  return !access || apiKey !== access;
-}
-
 export function hasAccessToken(token: StoredOAuthToken | null): boolean {
   return hasNonEmptyString(token?.access_token) || hasNonEmptyString(token?.AccessToken);
 }
@@ -128,16 +119,12 @@ export function hasNoRefreshFlag(token: StoredOAuthToken | null): boolean {
 
 export function evaluateTokenState(token: StoredOAuthToken | null, providerType: string) {
   const hasApiKey = hasApiKeyField(token);
-  const hasStableQwenKey = providerType === 'qwen' ? hasStableQwenApiKey(token) : false;
   const hasAccess = hasAccessToken(token);
   const expiresAt = getExpiresAt(token);
   const isExpired = expiresAt !== null && Date.now() >= expiresAt - 60_000;
   const isNearExpiry = expiresAt !== null && Date.now() >= expiresAt - 300_000;
 
-  // qwen: only stable api_key can bypass expiry checks.
-  // so expired api_key never short-circuits token refresh/reauth.
-  const apiKeyBypassesExpiry = providerType === 'qwen' && hasStableQwenKey;
-  const validAccess = apiKeyBypassesExpiry || (hasAccess && !isExpired);
+  const validAccess = hasAccess && !isExpired;
   const isExpiredOrNear = isExpired || isNearExpiry;
 
   return {

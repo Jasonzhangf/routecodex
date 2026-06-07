@@ -100,9 +100,6 @@ export function resolveFollowupExecutionMode(args: {
   if (decision.outcomeMode === 'skip' || decision.noFollowup) {
     return 'skip';
   }
-  if (args.flowId === 'stop_message_flow') {
-    return 'reenter';
-  }
   // goal-managed stopless continue keeps normal re-enter path.
   if (injectSource === 'servertool.stopless_goal_continue') {
     return 'reenter';

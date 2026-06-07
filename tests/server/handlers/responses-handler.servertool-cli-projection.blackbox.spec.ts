@@ -100,13 +100,16 @@ describe('servertool CLI projection blackbox', () => {
     expect(match).toBeTruthy();
     const input = JSON.parse(match?.[1] ?? '{}');
     expect(input.flowId).toBe('stop_message_flow');
-    expect(input.continuationPrompt).toContain('当前用户目标');
-    expect(input.continuationPrompt).toContain('已完成步骤');
-    expect(input.continuationPrompt).toContain('是否已经完成目标');
-    expect(input.continuationPrompt).toContain('证据如何核验');
-    expect(input.continuationPrompt).toContain('问题根因');
-    expect(input.continuationPrompt).toContain('已排除哪些因素');
-    expect(input.continuationPrompt).toContain('排查顺序');
+    expect(input.continuationPrompt).toContain('stopreason');
+    expect(input.continuationPrompt).toContain('0=finished');
+    expect(input.continuationPrompt).toContain('1=blocked');
+    expect(input.continuationPrompt).toContain('2=continue_needed');
+    expect(input.continuationPrompt).toContain('has_evidence');
+    expect(input.continuationPrompt).toContain('issue_cause');
+    expect(input.continuationPrompt).toContain('excluded_factors');
+    expect(input.continuationPrompt).toContain('diagnostic_order');
+    expect(input.continuationPrompt).toContain('done_steps');
+    expect(input.continuationPrompt).toContain('next_step');
     expect(input.continuationPrompt).toContain('learned');
     expect(input.continuationPrompt).not.toBe('继续执行原任务');
     expect(input.repeatCount).toBeGreaterThanOrEqual(0);
@@ -117,7 +120,7 @@ describe('servertool CLI projection blackbox', () => {
     }) as Record<string, any>;
     const reasoning = responsesPayload.output.find((item: any) => item.type === 'reasoning');
     expect(reasoning?.content?.[0]?.type).toBe('reasoning_text');
-    expect(reasoning?.content?.[0]?.text).toContain('阶段完成');
+    expect(reasoning?.content?.[0]?.text).toContain(input.continuationPrompt);
   });
 
   it('does not re-project stop_message_auto after its exec_command output is already in request history', async () => {

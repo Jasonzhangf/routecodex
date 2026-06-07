@@ -111,6 +111,69 @@ fn test_openai_responses_normalizes_chat_style_function_tools_without_profile() 
 }
 
 #[test]
+fn test_openai_responses_strips_historical_reasoning_content_without_profile() {
+    let mut input_entries = Vec::new();
+    for index in 0..22 {
+        input_entries.push(json!({
+            "type": "message",
+            "role": "user",
+            "content": [{ "type": "input_text", "text": format!("history {}", index) }]
+        }));
+    }
+    input_entries.push(json!({
+        "type": "reasoning",
+        "content": [{ "type": "reasoning_text", "text": "provider must not receive this" }],
+        "encrypted_content": "opaque-reasoning-state"
+    }));
+    input_entries.push(json!({
+        "type": "message",
+        "role": "user",
+        "content": [{ "type": "input_text", "text": "next" }]
+    }));
+
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "gpt-5.5",
+            "input": input_entries
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_responses_reasoning_content".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let input = result.payload["input"].as_array().unwrap();
+    assert_eq!(input[22]["type"], "reasoning");
+    assert!(input[22].get("content").is_none());
+    assert_eq!(
+        input[22]["encrypted_content"].as_str(),
+        Some("opaque-reasoning-state")
+    );
+    assert_eq!(input[23]["content"][0]["text"].as_str(), Some("next"));
+}
+
+#[test]
 fn test_profile_selection() {
     let input = ReqOutboundCompatInput {
         payload: json!({"model": "deepseek-chat"}),

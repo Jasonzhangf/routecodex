@@ -3,7 +3,7 @@ import type { OAuthProviderId } from './token-types.js';
 
 type UnknownRecord = Record<string, unknown>;
 
-const DEFAULT_OAUTH_PROVIDERS: OAuthProviderId[] = ['qwen'];
+const DEFAULT_OAUTH_PROVIDERS: OAuthProviderId[] = [];
 
 export class DynamicProviderRegistry {
   private providers: OAuthProviderId[] = [...DEFAULT_OAUTH_PROVIDERS];

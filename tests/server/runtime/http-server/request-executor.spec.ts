@@ -2361,7 +2361,15 @@ describe('HubRequestExecutor failover', () => {
       entryEndpoint: '/v1/chat/completions',
       body: {},
       headers: {},
-      metadata: {}
+      metadata: {
+        __routecodexPreselectedRoute: {
+          decision: {
+            routeName: 'thinking',
+            providerKey: firstProviderKey,
+            pool: [firstProviderKey, secondProviderKey]
+          }
+        }
+      }
     });
 
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
@@ -2371,6 +2379,7 @@ describe('HubRequestExecutor failover', () => {
 
     const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
     expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
+    expect(secondCallMetadata.__routecodexPreselectedRoute).toBeUndefined();
   });
 
   test('prints retry switch reason and error code to console on provider switch', async () => {
@@ -2467,42 +2476,12 @@ describe('HubRequestExecutor failover', () => {
   test('responses standard pipeline does not apply direct payload contract before provider.send', async () => {
     jest.resetModules();
     jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => createBridgeHttpServerMock({
-      applyResponsesDirectRouteParamsOverrideNative: (input: { payload: Record<string, unknown> }) => input.payload,
-      resolveResponsesDirectPayloadNative: (input: { body: unknown }) => (
-        input.body && typeof input.body === 'object' && !Array.isArray(input.body)
-          ? structuredClone(input.body as Record<string, unknown>)
-          : {}
-      ),
-      evaluateResponsesDirectRouteDecisionNative: (input: { payload: Record<string, unknown> }) => {
-        const tools = Array.isArray(input.payload.tools) ? input.payload.tools : [];
-        for (let index = 0; index < tools.length; index += 1) {
-          const tool = tools[index];
-          if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
-            continue;
-          }
-          const row = tool as Record<string, unknown>;
-          const type = typeof row.type === 'string' ? row.type.trim() : '';
-          const nested = row.function && typeof row.function === 'object' && !Array.isArray(row.function)
-            ? row.function as Record<string, unknown>
-            : undefined;
-          const nestedName = typeof nested?.name === 'string' ? nested.name.trim() : '';
-          const topLevelName = typeof row.name === 'string' ? row.name.trim() : '';
-          if (type === 'function' && !topLevelName && nestedName) {
-            return {
-              providerWireValid: false,
-              requiresHubRelay: false,
-              reason: `provider-runtime-error: responses payload tools[${index}] is chat-style function tool; Responses wire requires top-level tool.name`,
-              hasDeclaredApplyPatchTool: false,
-            };
-          }
-        }
-        return {
-          providerWireValid: true,
-          requiresHubRelay: false,
-          reason: undefined,
-          hasDeclaredApplyPatchTool: false,
-        };
-      },
+      evaluateResponsesDirectRouteDecisionNative: () => ({
+        providerWireValid: true,
+        requiresHubRelay: false,
+        reason: undefined,
+        hasDeclaredApplyPatchTool: false,
+      }),
     }));
     const { createRequestExecutor: createRequestExecutorLocal } = await import('../../../../src/server/runtime/http-server/request-executor');
     const providerA = 'asxs.crsa.gpt-5.5';

@@ -60,9 +60,3 @@ export function projectResponsesDirectContractDecision(
     { reason: decision.reason ?? 'invalid_direct_payload' },
   );
 }
-
-export function assertNativeResponsesDirectContractAvailable(nativeResult: { ok: true } | null): void {
-  if (!nativeResult?.ok) {
-    throw new Error('provider-runtime-error: native responses direct tool-shape validator unavailable');
-  }
-}

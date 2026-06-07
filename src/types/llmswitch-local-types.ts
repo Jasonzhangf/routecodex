@@ -27,6 +27,8 @@ export interface ProviderErrorEvent {
   errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
   runtime: ProviderErrorRuntimeMetadata;
   timestamp: number;
+  routePool?: string[];
+  excludedProviderKeys?: string[];
   details?: Record<string, unknown>;
 }
 

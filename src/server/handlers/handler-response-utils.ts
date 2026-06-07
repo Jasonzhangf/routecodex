@@ -694,15 +694,7 @@ function buildClientVisibleResponseRestoreContext(
   if (!metadata) {
     return undefined;
   }
-  const rawRequestBody =
-    metadata.__raw_request_body && typeof metadata.__raw_request_body === 'object' && !Array.isArray(metadata.__raw_request_body)
-      ? (metadata.__raw_request_body as Record<string, unknown>)
-      : undefined;
-  const clientModelId =
-    extractClientModelId(metadata)
-    ?? (typeof rawRequestBody?.model === 'string' && rawRequestBody.model.trim()
-      ? rawRequestBody.model.trim()
-      : undefined);
+  const clientModelId = extractClientModelId(metadata);
   const reasoningEffort =
     readReasoningEffortCandidate(metadata.reasoning)
     ?? (metadata.target && typeof metadata.target === 'object' && !Array.isArray(metadata.target)
@@ -711,9 +703,6 @@ function buildClientVisibleResponseRestoreContext(
     ?? (metadata.originalRequest && typeof metadata.originalRequest === 'object' && !Array.isArray(metadata.originalRequest)
       ? readReasoningEffortCandidate((metadata.originalRequest as Record<string, unknown>).reasoning)
       : undefined)
-    ?? (rawRequestBody
-      ? readReasoningEffortCandidate(rawRequestBody.reasoning)
-      : undefined);
   if (!clientModelId && !reasoningEffort) {
     return undefined;
   }
@@ -1713,8 +1702,14 @@ export async function sendPipelineResponse(
     logPipelineStage('response.sse.stream.start', requestLabel, { status });
     getSessionExecutionStateTracker().recordSseStreamStart(requestLabel);
 
-    const writeClientSseFrame = (frame: string, errorLabel: string) => {
-      clientSseSnapshotRecorder?.record(frame);
+    const writeClientSseFrame = (
+      frame: string,
+      errorLabel: string,
+      options?: { recordSnapshot?: boolean }
+    ) => {
+      if (options?.recordSnapshot !== false) {
+        clientSseSnapshotRecorder?.record(frame);
+      }
       try {
         res.write(frame);
       } catch (error) {
@@ -1960,7 +1955,7 @@ export async function sendPipelineResponse(
     };
     const enqueueClientSseFrame = (frame: string, errorLabel: string) => {
       if (!frame.includes('apply_patch') && !frame.includes('function_call') && !frame.includes('required_action')) {
-        writeClientSseFrame(frame, errorLabel);
+        writeClientSseFrame(frame, errorLabel, { recordSnapshot: false });
         return;
       }
       clientWriteQueue = clientWriteQueue
@@ -1974,11 +1969,11 @@ export async function sendPipelineResponse(
           if (!normalizedFrame) {
             return;
           }
-          writeClientSseFrame(normalizedFrame, errorLabel);
+          writeClientSseFrame(normalizedFrame, errorLabel, { recordSnapshot: false });
         })
         .catch((error) => {
           logResponseNonBlockingError(`${errorLabel}:normalize:${requestLabel}`, error);
-          writeClientSseFrame(frame, errorLabel);
+          writeClientSseFrame(frame, errorLabel, { recordSnapshot: false });
         });
     };
     outboundStream.on('data', (chunk: unknown) => {
@@ -2022,7 +2017,10 @@ export async function sendPipelineResponse(
             void (async () => {
               const repairedFrames = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel);
               const framesToWrite = terminalWatch.terminalSource === 'response.required_action'
-                ? repairedFrames.filter((frame) => !frame.includes('event: response.required_action'))
+                ? repairedFrames.filter((frame) =>
+                  !frame.includes('event: response.required_action')
+                  && !frame.includes('event: response.completed')
+                )
                 : repairedFrames;
               if (framesToWrite.length > 0) {
                 try {
@@ -2166,6 +2164,9 @@ export async function sendPipelineResponse(
               return false;
             }
             if (terminalWatch.terminalSource === 'response.required_action' && frame.includes('event: response.required_action')) {
+              return false;
+            }
+            if (terminalWatch.terminalSource === 'response.required_action' && frame.includes('event: response.completed')) {
               return false;
             }
             return true;

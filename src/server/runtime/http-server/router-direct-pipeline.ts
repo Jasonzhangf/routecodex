@@ -19,8 +19,8 @@ import { detectInboundProtocolFromRequest } from './provider-direct-pipeline.js'
 
 /** Context snapshot for a single router-direct request — feeds snapshot hooks and logs. */
 export interface RouterDirectAuditContext {
-  /** Payload before audit recording (Hub Pipeline output, unchanged) */
-  originalPayload: Record<string, unknown>;
+  /** Current request payload object used for direct send. This is not cloned. */
+  payload: Record<string, unknown>;
   /** Observable fields recorded for traceability */
   observedFields: Array<{
     field: string;
@@ -119,7 +119,7 @@ export async function executeRouterDirectPipeline(
   }
 
   const auditContext: RouterDirectAuditContext = {
-    originalPayload: structuredClone(input.requestPayload),
+    payload: input.requestPayload,
     observedFields: [],
     providerKey: target.providerKey,
     inboundProtocol,

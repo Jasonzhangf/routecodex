@@ -22,36 +22,34 @@ const bridgeSource = fs.readFileSync(bridgePath, 'utf8');
 const nativeTsSource = fs.readFileSync(nativeTsPath, 'utf8');
 const rustSource = fs.readFileSync(rustPath, 'utf8');
 
-for (const expected of [
+for (const forbidden of [
   'validateResponsesDirectToolShapeContractNative',
   'buildResponsesDirectPassthroughBodyNative',
   'build_responses_direct_passthrough_body_json',
+  'validate_responses_direct_tool_shape_contract_json',
+  'resolveResponsesDirectPayloadNative',
+  'resolve_responses_direct_payload_json',
+  'applyResponsesDirectRouteParamsOverrideNative',
+  'apply_responses_direct_route_params_override_json',
+]) {
+  if (directSource.includes(forbidden) || providerSource.includes(forbidden) || bridgeSource.includes(forbidden) || nativeTsSource.includes(forbidden) || rustSource.includes(forbidden)) {
+    failures.push(`direct passthrough must not retain body builder/raw replay/runtime validator interface: ${forbidden}`);
+  }
+}
+
+for (const expected of [
   'evaluateDirectRouteDecision',
   'evaluateResponsesDirectRouteDecisionNative',
   'evaluate_responses_direct_route_decision_json',
   'has_declared_apply_patch_tool_json',
-  'resolveResponsesDirectPayloadNative',
-  'resolve_responses_direct_payload_json',
 ]) {
   if (!directSource.includes(expected) && !providerSource.includes(expected) && !bridgeSource.includes(expected) && !nativeTsSource.includes(expected) && !rustSource.includes(expected)) {
-    failures.push(`missing Rust-first direct tool-shape symbol mention: ${expected}`);
+    failures.push(`missing direct route decision/apply_patch symbol mention: ${expected}`);
   }
 }
 
-if (!directSource.includes('resolveResponsesDirectPayloadNative')) {
-  failures.push('direct passthrough raw replay must call resolveResponsesDirectPayloadNative');
-}
 if (!directSource.includes('evaluateResponsesDirectRouteDecisionNative')) {
   failures.push('direct passthrough helper must call evaluateResponsesDirectRouteDecisionNative');
-}
-if (!providerSource.includes('validateResponsesDirectToolShapeContractNative')) {
-  failures.push('responses provider must call validateResponsesDirectToolShapeContractNative');
-}
-if (!providerSource.includes('buildResponsesDirectPassthroughBodyNative')) {
-  failures.push('responses provider must call buildResponsesDirectPassthroughBodyNative');
-}
-if (!nativeTsSource.includes('buildResponsesDirectPassthroughBodyWithNative')) {
-  failures.push('native TS bridge must expose buildResponsesDirectPassthroughBodyWithNative');
 }
 if (!nativeTsSource.includes('hasDeclaredApplyPatchToolWithNative')) {
   failures.push('native TS bridge must expose hasDeclaredApplyPatchToolWithNative');
@@ -59,20 +57,11 @@ if (!nativeTsSource.includes('hasDeclaredApplyPatchToolWithNative')) {
 if (!nativeTsSource.includes('evaluateResponsesDirectRouteDecisionWithNative')) {
   failures.push('native TS bridge must expose evaluateResponsesDirectRouteDecisionWithNative');
 }
-if (!nativeTsSource.includes('resolveResponsesDirectPayloadWithNative')) {
-  failures.push('native TS bridge must expose resolveResponsesDirectPayloadWithNative');
-}
-if (!rustSource.includes('build_responses_direct_passthrough_body_json')) {
-  failures.push('Rust NAPI must export build_responses_direct_passthrough_body_json');
-}
 if (!rustSource.includes('has_declared_apply_patch_tool_json')) {
   failures.push('Rust NAPI must export has_declared_apply_patch_tool_json');
 }
 if (!rustSource.includes('evaluate_responses_direct_route_decision_json')) {
   failures.push('Rust NAPI must export evaluate_responses_direct_route_decision_json');
-}
-if (!rustSource.includes('resolve_responses_direct_payload_json')) {
-  failures.push('Rust NAPI must export resolve_responses_direct_payload_json');
 }
 
 if (failures.length > 0) {

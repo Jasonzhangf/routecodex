@@ -65,7 +65,6 @@ export class ProviderRequestPreprocessor {
         : typeof requestMetadata?.stream === 'boolean'
           ? requestMetadata.stream
           : undefined;
-    const qwenWebSearch = requestMetadata?.qwenWebSearch === true;
     if (runtimeMetadata) {
       if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
         runtimeMetadata.metadata = {};
@@ -79,10 +78,6 @@ export class ProviderRequestPreprocessor {
       if (typeof inboundModel === 'string' && inboundModel.trim()) {
         (runtimeMetadata.metadata as Record<string, unknown>).__origModel = inboundModel;
       }
-      if (qwenWebSearch) {
-        runtimeMetadata.qwenWebSearch = true;
-        (runtimeMetadata.metadata as Record<string, unknown>).qwenWebSearch = true;
-      }
     }
     if (runtimeMetadata && processedRequest && typeof processedRequest === 'object') {
       attachProviderRuntimeMetadata(processedRequest as Record<string, unknown>, runtimeMetadata);
@@ -93,7 +88,6 @@ export class ProviderRequestPreprocessor {
       entryEndpoint: _dropEntryEndpoint,
       stream: _dropStream,
       clientHeaders: _dropClientHeaders,
-      qwenWebSearch: _dropQwenWebSearch,
       __origModel: _dropOrigModel,
       ...restMetadata
     } = processedMetadata;

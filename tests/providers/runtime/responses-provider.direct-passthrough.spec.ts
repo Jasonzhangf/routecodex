@@ -19,47 +19,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
     }
     return next;
   },
-  validateResponsesDirectToolShapeContractNative: () => ({ ok: true as const }),
-  applyResponsesDirectRouteParamsOverrideNative: (input: {
-    payload: Record<string, unknown>;
-    routeParams?: Record<string, unknown>;
-    providerDefaultModel?: string;
-    requestReasoningEffort?: string;
-  }) => {
-    const next = structuredClone(input.payload);
-    const routeModel = typeof input.routeParams?.model === 'string' ? input.routeParams.model.trim() : '';
-    const providerDefaultModel = typeof input.providerDefaultModel === 'string' ? input.providerDefaultModel.trim() : '';
-    if (routeModel || providerDefaultModel) {
-      next.model = routeModel || providerDefaultModel;
-    }
-    const routeReasoningEffort =
-      typeof input.routeParams?.reasoningEffort === 'string' ? input.routeParams.reasoningEffort.trim() : '';
-    const topLevelReasoningEffort =
-      typeof input.requestReasoningEffort === 'string' ? input.requestReasoningEffort.trim() : '';
-    if (routeReasoningEffort || topLevelReasoningEffort) {
-      const effort = routeReasoningEffort || topLevelReasoningEffort;
-      next.reasoning_effort = effort;
-      next.reasoning = { effort };
-    }
-    return next;
-  },
-  buildResponsesDirectPassthroughBodyNative: (payload: Record<string, unknown>) => {
-    const next = structuredClone(payload);
-    for (const key of Object.keys(next)) {
-      if (key.startsWith('__')) {
-        delete (next as Record<string, unknown>)[key];
-      }
-    }
-    if (Object.prototype.hasOwnProperty.call(next, 'metadata')) {
-      throw new Error('provider-runtime-error: metadata is not allowed in direct passthrough responses payload');
-    }
-    const model = typeof next.model === 'string' ? next.model.trim() : '';
-    if (!model) {
-      throw new Error('provider-runtime-error: missing model from direct passthrough responses payload');
-    }
-    next.model = model;
-    return next;
-  },
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ status: 'completed', output: [] })
   })
@@ -83,7 +42,7 @@ const emptyDeps: ModuleDependencies = {
 } as ModuleDependencies;
 
 describe('ResponsesProvider direct passthrough', () => {
-  test('fails fast when direct passthrough body contains metadata', async () => {
+  test('sends the original direct request object without provider-side metadata validation', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-metadata-boundary',
       type: 'responses-http-provider',
@@ -97,21 +56,31 @@ describe('ResponsesProvider direct passthrough', () => {
 
     const provider = new ResponsesProvider(config, emptyDeps) as any;
     provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
     provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
     provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    let capturedBody: any;
+    provider.httpClient = {
+      postStream: async (_url: string, body: any) => {
+        capturedBody = body;
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
+    };
     const inbound = {
       model: 'gpt-5.5',
       input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+      stream: true,
       metadata: { __responsesDirectPassthrough: true }
     } as any;
     attachProviderRuntimeMetadata(inbound, {
       metadata: { __responsesDirectPassthrough: true }
     });
 
-    await expect(provider.sendRequestInternal(inbound)).rejects.toThrow(/metadata is not allowed/);
+    await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(capturedBody).toBe(inbound);
   });
 
-  test('strips reasoning.content before provider HTTP send for non-DeepSeek responses provider', async () => {
+  test('does not sanitize reasoning content on direct provider path', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-reasoning-filter',
       type: 'responses-http-provider',
@@ -133,14 +102,6 @@ describe('ResponsesProvider direct passthrough', () => {
     provider.httpClient = {
       postStream: async (_url: string, body: any) => {
         capturedBody = body;
-        const badReasoning = Array.isArray(body.input)
-          && body.input.some((item: any) => item?.type === 'reasoning' && Array.isArray(item.content) && item.content.length > 0);
-        if (badReasoning) {
-          const error = new Error("HTTP 400: Invalid 'input[6].content': array too long") as Error & { status?: number; code?: string };
-          error.status = 400;
-          error.code = 'HTTP_400';
-          throw error;
-        }
         throw new Error('STOP_AFTER_CAPTURE');
       }
     };
@@ -163,10 +124,10 @@ describe('ResponsesProvider direct passthrough', () => {
     });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(capturedBody).toBe(inbound);
     expect(capturedBody.input[1].type).toBe('reasoning');
-    expect(capturedBody.input[1].content).toBeUndefined();
-    expect(capturedBody.input[1].encrypted_content).toBeUndefined();
-    expect(JSON.stringify(capturedBody)).not.toContain('must not reach provider runtime');
+    expect(capturedBody.input[1].content).toEqual([{ type: 'reasoning_text', text: 'must not reach provider runtime' }]);
+    expect(capturedBody.input[1].encrypted_content).toBeNull();
   });
 
   test('preserves inbound responses payload without rebuilding input/history/model', async () => {
@@ -216,6 +177,7 @@ describe('ResponsesProvider direct passthrough', () => {
     });
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
     expect(capturedHeaders?.Accept).toBe('text/event-stream');
+    expect(capturedBody).toBe(inbound);
     expect(capturedBody.model).toBe('gpt-5.4');
     expect(capturedBody.previous_response_id).toBe('resp_prev_turn');
     expect(capturedBody.input).toEqual(inbound.input);

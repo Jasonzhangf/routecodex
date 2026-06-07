@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { createServertoolCommand } from '../../src/cli/commands/servertool.js';
 
 describe('servertool CLI command', () => {
-  it('runs fixture executor through readable CLI input', async () => {
+  it('runs stopless through the standalone Rust binary', async () => {
     const output: string[] = [];
     const errors: string[] = [];
     const program = new Command();
@@ -11,39 +11,7 @@ describe('servertool CLI command', () => {
       log: (line) => output.push(line),
       error: (line) => errors.push(line),
       exit: (code) => {
-        throw new Error(`unexpected exit ${code}`);
-      }
-    });
-
-    await program.parseAsync([
-      'node',
-      'routecodex',
-      'servertool',
-      'run',
-      'servertool_fixture',
-      '--input-json',
-      '{"marker":"cli-command-ok"}'
-    ]);
-
-    expect(errors).toEqual([]);
-    expect(JSON.parse(output[0] ?? '{}')).toMatchObject({
-      ok: true,
-      kind: 'fixture',
-      tool: 'servertool_fixture',
-      result: { marker: 'cli-command-ok' }
-    });
-  });
-
-  it('runs stopless executor through the same CLI namespace', async () => {
-    const output: string[] = [];
-    const errors: string[] = [];
-    const program = new Command();
-    program.exitOverride();
-    createServertoolCommand(program, {
-      log: (line) => output.push(line),
-      error: (line) => errors.push(line),
-      exit: (code) => {
-        throw new Error(`unexpected exit ${code}`);
+        throw new Error(`unexpected exit ${code}: ${errors.join('\n')}`);
       }
     });
 
@@ -59,14 +27,16 @@ describe('servertool CLI command', () => {
 
     expect(errors).toEqual([]);
     expect(JSON.parse(output[0] ?? '{}')).toMatchObject({
-      ok: true,
-      kind: 'stop_message_auto',
-      tool: 'stop_message_auto',
-      summary: 'continue',
+      toolName: 'stop_message_auto',
+      flowId: 'stop_message_flow',
       continuationPrompt: '继续执行原任务',
       repeatCount: 2,
       maxRepeats: 3,
-      injectedPromptPreview: '继续执行原任务'
+      schemaGuidance: {
+        stopreasonValues: {
+          continueNeeded: 2
+        }
+      }
     });
   });
 
@@ -90,7 +60,7 @@ describe('servertool CLI command', () => {
     ).rejects.toThrow('exit 1');
 
     expect(output).toEqual([]);
-    expect(errors[0]).toContain('[servertool.cli] unsupported tool: web_search');
+    expect(errors[0]).toContain('SERVERTOOL_UNSUPPORTED_TOOL: web_search');
     expect(exits).toEqual([1]);
   });
 });

@@ -16,11 +16,8 @@ import {
   writeProviderSnapshot
 } from '../utils/snapshot-writer.js';
 import {
-  applyResponsesDirectRouteParamsOverrideNative,
-  buildResponsesDirectPassthroughBodyNative,
   createResponsesSseToJsonConverter,
-  sanitizeProviderOutboundPayload,
-  validateResponsesDirectToolShapeContractNative
+  sanitizeProviderOutboundPayload
 } from '../../../modules/llmswitch/bridge.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
@@ -41,7 +38,6 @@ import {
   type ResponsesStreamingMode,
   type SubmitToolOutputsPayload
 } from './responses-provider-helpers.js';
-import { assertNativeResponsesDirectContractAvailable } from './responses-direct-contract-error.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
 type ResponsesSseConverter = {
@@ -86,6 +82,10 @@ export class ResponsesProvider extends HttpTransportProvider {
    * 对于 SSE 模式，Provider 必须将上游 SSE 解析为 JSON 再返回 Host（对内一律 JSON）。
    */
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
+    if (extractResponsesDirectPassthroughFlag(request)) {
+      return await this.processIncomingDirect(request);
+    }
+
     const endpoint = this.getEffectiveEndpoint();
     const baseHeaders = await this.buildRequestHeaders();
     const headers = await this.finalizeRequestHeaders(baseHeaders, request);
@@ -117,9 +117,6 @@ export class ResponsesProvider extends HttpTransportProvider {
       ? this.buildPassthroughResponsesBody(request)
       : this.responsesClient.buildRequestBody(request);
     const finalBody = await this.sanitizeResponsesProviderOutboundBody(builtBody, context);
-    assertNativeResponsesDirectContractAvailable(
-      validateResponsesDirectToolShapeContractNative(finalBody),
-    );
 
     const explicitStream = extractStreamFlagFromBody(finalBody);
     const streamingPreference = this.responsesClient.getStreamingPreference();
@@ -185,7 +182,7 @@ export class ResponsesProvider extends HttpTransportProvider {
   }
 
   async processIncomingDirect(request: UnknownObject): Promise<UnknownObject> {
-    const directRequest = { ...(request as Record<string, unknown>) };
+    const directRequest = request as Record<string, unknown>;
     const endpoint = this.getEffectiveEndpoint();
     const baseHeaders = await this.buildRequestHeaders();
     const headers = await this.finalizeRequestHeaders(baseHeaders, directRequest);
@@ -193,7 +190,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     const entryEndpoint = extractEntryEndpoint(directRequest) ?? '/v1/responses';
     const targetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
     const builtBody = this.buildPassthroughResponsesBody(directRequest);
-    const finalBody = await this.sanitizeResponsesProviderOutboundBody(builtBody, context);
+    const finalBody = builtBody;
     const runtimeMetadata = extractProviderRuntimeMetadata(directRequest);
     const metadata = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
       ? runtimeMetadata.metadata as Record<string, unknown>
@@ -202,17 +199,15 @@ export class ResponsesProvider extends HttpTransportProvider {
       metadata?.routeParams && typeof metadata.routeParams === 'object' && !Array.isArray(metadata.routeParams)
         ? (metadata.routeParams as Record<string, unknown>)
         : undefined;
-    const overriddenBody = applyResponsesDirectRouteParamsOverrideNative({
-      payload: finalBody,
-      routeParams,
-      providerDefaultModel:
-        typeof this.serviceProfile?.defaultModel === 'string' ? this.serviceProfile.defaultModel : undefined,
-      requestReasoningEffort:
-        typeof directRequest.reasoning_effort === 'string' ? directRequest.reasoning_effort : undefined,
-    });
-    assertNativeResponsesDirectContractAvailable(
-      validateResponsesDirectToolShapeContractNative(overriddenBody),
-    );
+    const routeModel = typeof routeParams?.model === 'string' ? routeParams.model.trim() : '';
+    const defaultModel = typeof this.serviceProfile?.defaultModel === 'string'
+      ? this.serviceProfile.defaultModel.trim()
+      : '';
+    const model = routeModel || defaultModel;
+    if (model) {
+      finalBody.model = model;
+    }
+    const overriddenBody = finalBody;
     const explicitStream = extractStreamFlagFromBody(overriddenBody);
 
     await this.snapshotPhase('provider-request', context, overriddenBody, headers, targetUrl, entryEndpoint);
@@ -311,7 +306,7 @@ export class ResponsesProvider extends HttpTransportProvider {
   }
 
   private buildPassthroughResponsesBody(request: UnknownObject): Record<string, unknown> {
-    return buildResponsesDirectPassthroughBodyNative(request);
+    return request;
   }
 
   private async snapshotPhase(

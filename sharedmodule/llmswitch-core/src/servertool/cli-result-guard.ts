@@ -28,6 +28,7 @@ function collectScanRoots(adapterContext: AdapterContext, runtimeMetadata?: Json
   const runtime = asRecord(runtimeMetadata);
   const responsesContext = asRecord(adapter?.responsesRequestContext) ?? asRecord(runtime?.responsesRequestContext);
   return [
+    adapter?.__raw_request_body,
     adapter?.capturedChatRequest,
     responsesContext?.payload,
     responsesContext?.context,
@@ -90,7 +91,7 @@ function isToolResultLike(record: Record<string, unknown>): boolean {
 }
 
 function readResultText(record: Record<string, unknown>): string {
-  const fields = [record.output, record.content, record.text];
+  const fields = [record.output, record.content, record.text, record.arguments];
   const parts: string[] = [];
   for (const field of fields) {
     collectText(field, parts);

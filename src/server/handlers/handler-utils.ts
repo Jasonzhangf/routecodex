@@ -590,13 +590,6 @@ export function captureClientHeaders(headers: IncomingHttpHeaders | undefined): 
   return result;
 }
 
-export function captureRawRequestBodyForMetadata(payload: unknown): unknown {
-  if (payload === undefined) {
-    return undefined;
-  }
-  return structuredClone(payload);
-}
-
 export function readRequestBodyMetadata(payload: unknown): Record<string, unknown> | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return undefined;

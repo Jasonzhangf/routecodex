@@ -28,7 +28,6 @@ verification:
       - sharedmodule/llmswitch-core/src/servertool
     contract:
       - tests/servertool/servertool-cli-projection.spec.ts
-      - tests/servertool/servertool-cli-execution.spec.ts
       - tests/servertool/servertool-cli-result-restore.spec.ts
       - tests/cli/servertool-command.spec.ts
     integration:

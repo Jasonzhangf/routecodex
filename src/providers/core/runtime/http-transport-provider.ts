@@ -312,13 +312,6 @@ export class HttpTransportProvider extends BaseProvider {
       request && typeof request === 'object' && typeof (request as { metadata?: unknown }).metadata === 'object'
         ? ((request as { metadata: Record<string, unknown> }).metadata || {})
         : undefined;
-    if (runtimeMetadata && requestMetadata?.qwenWebSearch === true) {
-      runtimeMetadata.qwenWebSearch = true;
-      if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
-        runtimeMetadata.metadata = {};
-      }
-      (runtimeMetadata.metadata as Record<string, unknown>).qwenWebSearch = true;
-    }
     this.getRuntimeProfile();
     const processedRequest = ProviderRequestPreprocessor.preprocess(request, runtimeMetadata);
     logVisionDebugSummary('preprocess', processedRequest);
@@ -563,100 +556,12 @@ export class HttpTransportProvider extends BaseProvider {
     return this.getRuntimeDetector().isGeminiFamily();
   }
 
-  private normalizeQwenAuthResourceBaseUrl(raw: string): string | undefined {
-    const trimmed = typeof raw === 'string' ? raw.trim() : '';
-    if (!trimmed) {
-      return undefined;
-    }
-    let baseUrl = trimmed;
-    if (!/^https?:\/\//i.test(baseUrl)) {
-      baseUrl = `https://${baseUrl}`;
-    }
-    baseUrl = baseUrl.replace(/\/+$/, '');
-    let parsed: URL;
-    try {
-      parsed = new URL(baseUrl);
-    } catch {
-      return undefined;
-    }
-    const host = parsed.hostname.trim().toLowerCase();
-    const pathname = parsed.pathname.replace(/\/+$/, '');
-    const isOfficialQwenCodeHost = host === 'portal.qwen.ai' || host === 'chat.qwen.ai';
-    if (isOfficialQwenCodeHost && (!pathname || pathname === '/v1')) {
-      return parsed.origin;
-    }
-    const isDashscopeCompatibleHost = host === 'dashscope.aliyuncs.com' && /^\/compatible-mode(?:\/v1)?$/i.test(pathname);
-    if (!isDashscopeCompatibleHost) {
-      return undefined;
-    }
-    return `${parsed.origin}${pathname}`;
-  }
-
   private getRuntimeDetector(): RuntimeDetector {
     return new RuntimeDetector(this.config, this.providerType, this.oauthProviderId);
   }
 
   private resolveAuthResourceBaseUrlOverride(): string | undefined {
-    const cfg = this.config.config as ProviderConfigInternal & { providerId?: string };
-    const providerId = typeof cfg.providerId === 'string' ? cfg.providerId.trim().toLowerCase() : '';
-    const auth = cfg.auth as { type?: unknown; rawType?: unknown };
-    const authType =
-      typeof auth?.rawType === 'string' && auth.rawType.trim()
-        ? auth.rawType.trim().toLowerCase()
-        : typeof auth?.type === 'string'
-          ? auth.type.trim().toLowerCase()
-          : '';
-    const oauthProviderId = typeof this.oauthProviderId === 'string' ? this.oauthProviderId.trim().toLowerCase() : '';
-    const isQwenOAuthRuntime =
-      oauthProviderId === 'qwen' ||
-      authType === 'qwen-oauth' ||
-      providerId === 'qwen' ||
-      providerId.startsWith('qwen-');
-    if (!isQwenOAuthRuntime) {
-      return undefined;
-    }
-
-    const authReader = this.authProvider as TokenPayloadReader | null;
-    if (!authReader?.getTokenPayload) {
-      return undefined;
-    }
-
-    let payload: Record<string, unknown> | null = null;
-    try {
-      payload = authReader.getTokenPayload();
-    } catch (error) {
-      this.logNonBlockingError('resolveAuthResourceBaseUrlOverride.readTokenPayload', error, {
-        providerId
-      });
-      return undefined;
-    }
-    if (!payload || typeof payload !== 'object') {
-      return undefined;
-    }
-
-    const raw =
-      (typeof payload.resource_url === 'string' && payload.resource_url.trim()) ||
-      (typeof payload.resourceUrl === 'string' && payload.resourceUrl.trim())
-        ? String((payload.resource_url ?? payload.resourceUrl)).trim()
-        : '';
-    if (!raw) {
-      return undefined;
-    }
-
-    let baseUrl = this.normalizeQwenAuthResourceBaseUrl(raw);
-    if (!baseUrl) {
-      return undefined;
-    }
-    const runtimeMetadata = this.getCurrentRuntimeMetadata();
-    const isQwenWebSearchRequest =
-      runtimeMetadata?.qwenWebSearch === true ||
-      (runtimeMetadata?.metadata &&
-        typeof runtimeMetadata.metadata === 'object' &&
-        (runtimeMetadata.metadata as Record<string, unknown>).qwenWebSearch === true);
-    if (!isQwenWebSearchRequest && !/\/v1$/i.test(baseUrl)) {
-      baseUrl = `${baseUrl}/v1`;
-    }
-    return baseUrl;
+    return undefined;
   }
 
 }

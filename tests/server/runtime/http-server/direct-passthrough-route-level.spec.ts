@@ -172,7 +172,7 @@ describe('direct passthrough route-level', () => {
     }
   }, 15000);
 
-  it('provider-mode direct sends metadata.__raw_request_body instead of mutated body', async () => {
+  it('provider-mode direct sends current request body and ignores metadata.__raw_request_body', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -237,11 +237,11 @@ describe('direct passthrough route-level', () => {
     );
 
     expect(sentPayload).toEqual({
-      model: 'raw-model',
-      previous_response_id: 'resp_prev_raw',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      model: 'mutated-model',
+      instructions: 'mutated-system-prompt',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
     });
-    expect((sentPayload as Record<string, unknown>).instructions).toBeUndefined();
+    expect((sentPayload as Record<string, unknown>).previous_response_id).toBeUndefined();
   });
 
   it('router same-protocol direct does not enter HubPipeline and keeps ingress payload transparent', async () => {
@@ -329,28 +329,31 @@ describe('direct passthrough route-level', () => {
 
     expect(directResult.used).toBe(true);
     expect(sentPayload).toEqual({
-      model: 'raw-model',
-      previous_response_id: 'resp_prev_router',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      model: 'mutated-model',
+      instructions: 'mutated-system-prompt',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
     });
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
     expect(routerRoute).toHaveBeenCalledTimes(1);
-    expect((sentPayload as Record<string, unknown>).instructions).toBeUndefined();
+    expect((sentPayload as Record<string, unknown>).previous_response_id).toBeUndefined();
   });
 
-  it('router same-protocol direct fails fast when ingress tools are not provider-wire-valid', async () => {
+  it('router same-protocol direct does not runtime-reject chat-style function tools', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
     const server = new RouteCodexHttpServer({
       configPath: '/tmp/routecodex-test-config.json',
-      server: { host: '127.0.0.1', port: 5520 },
+      server: { host: '127.0.0.1', port: 5555 },
       pipeline: {},
       logging: { level: 'error', enableConsole: false },
       providers: {},
     } as any);
 
-    const directSend = jest.fn(async () => ({ status: 200, body: { ok: true } }));
+    const directSend = jest.fn(async () => ({
+      status: 200,
+      body: { object: 'response', id: 'resp_direct_chat_style_tool' },
+    }));
     const providerHandle = {
       runtimeKey: 'asxs.crsa.gpt-5.5',
       providerId: 'asxs',
@@ -382,316 +385,43 @@ describe('direct passthrough route-level', () => {
         })),
       })),
     };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([['default', (server as any).hubPipeline]]);
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([['gateway_priority_5555', (server as any).hubPipeline]]);
 
-    const outcome = await (server as any).executeRouterDirectPipelineForPort(
-      {
-        port: 5520,
-        host: '0.0.0.0',
-        mode: 'router',
-        routingPolicyGroup: 'default',
-        sameProtocolBehavior: 'direct',
-      },
-      {
-        requestId: 'req_router_direct_bad_tool',
-        entryEndpoint: '/v1/responses',
-        method: 'POST',
-        headers: {},
-        query: {},
-        body: {
-          model: 'gpt-5.5',
-          input: 'hello',
-          tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
-        },
-        metadata: {},
-      },
-    );
-    expect(directSend).not.toHaveBeenCalled();
-    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
-    expect(outcome).toEqual({
-      used: false,
-      reason: 'direct_payload_not_provider_wire',
-    });
-  });
-
-  it('router same-protocol direct still skips legacy apply_patch servertool metadata when tool shape is chat-style invalid', async () => {
-    jest.resetModules();
-    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
-
-    const server = new RouteCodexHttpServer({
-      configPath: '/tmp/routecodex-test-config.json',
-      server: { host: '127.0.0.1', port: 5520 },
-      pipeline: {},
-      logging: { level: 'error', enableConsole: false },
-      providers: {},
-    } as any);
-
-    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
-      used: true,
-      response: { status: 200, body: { object: 'response', id: 'resp_direct' } },
-      providerHandle: {} as any,
-      auditContext: {} as any,
-    } as any);
-    (server as any).userConfig = {
-      httpserver: {
-        ports: [{
-          port: 5520,
-          host: '127.0.0.1',
-          mode: 'router',
-          routingPolicyGroup: 'default',
-          sameProtocolBehavior: 'direct',
-        }],
-      },
-    };
-    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['default', (server as any).hubPipeline]
-    ]);
-
-    await expect((server as any).executePortAwarePipeline(
-      5520,
-      {
-        requestId: 'req_router_direct_apply_patch_legacy_servertool',
-        entryEndpoint: '/v1/responses',
-        method: 'POST',
-        headers: {},
-        query: {},
-        body: {
-          model: 'gpt-5.4',
-          input: [{ role: 'user', content: [{ type: 'input_text', text: 'edit file' }] }],
-          tools: [{ type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } }],
-        },
-        metadata: {
-          __rt: { applyPatch: { mode: 'servertool' } },
-        },
-      },
-    )).rejects.toThrow(/top-level tool\.name/);
-
-    expect(routerDirectSpy).not.toHaveBeenCalled();
-  });
-
-  it('router same-protocol direct validates Responses custom apply_patch instead of forcing servertool relay', async () => {
-    jest.resetModules();
-    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
-
-    const server = new RouteCodexHttpServer({
-      configPath: '/tmp/routecodex-test-config.json',
-      server: { host: '127.0.0.1', port: 5520 },
-      pipeline: {},
-      logging: { level: 'error', enableConsole: false },
-      providers: {},
-    } as any);
-
-    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
-      used: true,
-      response: { status: 200, body: { object: 'response', id: 'resp_direct_custom' } },
-      providerHandle: {} as any,
-      auditContext: {} as any,
-    } as any);
-    (server as any).userConfig = {
-      httpserver: {
-        ports: [{
-          port: 5520,
-          host: '127.0.0.1',
-          mode: 'router',
-          routingPolicyGroup: 'default',
-          sameProtocolBehavior: 'direct',
-        }],
-      },
-    };
-    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['default', (server as any).hubPipeline]
-    ]);
-
-    const result = await (server as any).executePortAwarePipeline(
-      5520,
-      {
-        requestId: 'req_router_relay_apply_patch_custom_governed',
-        entryEndpoint: '/v1/responses',
-        method: 'POST',
-        headers: {},
-        query: {},
-        body: {
-          model: 'gpt-5.5',
-          input: [{ role: 'user', content: [{ type: 'input_text', text: 'edit file' }] }],
-          tools: [{
-            type: 'custom',
-            name: 'apply_patch',
-            description: 'freeform patch tool',
-            format: { type: 'grammar', syntax: 'lark', definition: 'start: begin_patch' },
-          }],
-        },
-        metadata: {
-          __rt: { applyPatch: { mode: 'servertool' } },
-        },
-      },
-    );
-
-    expect(routerDirectSpy).toHaveBeenCalledTimes(1);
-    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_direct_custom' });
-  });
-
-  it('router same-protocol direct fails fast when responses payload is not provider-wire valid', async () => {
-    jest.resetModules();
-    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
-
-    const server = new RouteCodexHttpServer({
-      configPath: '/tmp/routecodex-test-config.json',
-      server: { host: '127.0.0.1', port: 5555 },
-      pipeline: {},
-      logging: { level: 'error', enableConsole: false },
-      providers: {},
-    } as any);
-
-    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
-      used: true,
-      response: { status: 200, body: { object: 'response', id: 'resp_direct_should_not_happen' } },
-      providerHandle: {} as any,
-      auditContext: {} as any,
-    } as any);
-    (server as any).userConfig = {
-      httpserver: {
-        ports: [{
-          port: 5555,
-          host: '127.0.0.1',
-          mode: 'router',
-          routingPolicyGroup: 'gateway_priority_5555',
-          sameProtocolBehavior: 'direct',
-        }],
-      },
-    };
-    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
-
-    await expect((server as any).executePortAwarePipeline(5555, {
-      requestId: 'req_router_skip_invalid_responses_direct_entry',
-      entryEndpoint: '/v1/responses',
-      method: 'POST',
-      headers: {},
-      query: {},
-      body: {
-        model: 'gpt-5.5',
-        input: [{ role: 'user', content: [{ type: 'input_text', text: 'edit file' }] }],
-        tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
-      },
-      metadata: {},
-    })).rejects.toThrow(/top-level tool\.name/);
-
-    expect(routerDirectSpy).not.toHaveBeenCalled();
-  });
-
-  it('router same-protocol direct keeps valid Responses tools on the direct path', async () => {
-    jest.resetModules();
-    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
-
-    const server = new RouteCodexHttpServer({
-      configPath: '/tmp/routecodex-test-config.json',
-      server: { host: '127.0.0.1', port: 5555 },
-      pipeline: {},
-      logging: { level: 'error', enableConsole: false },
-      providers: {},
-    } as any);
-
-    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
-      used: true,
-      response: { status: 200, body: { object: 'response', id: 'resp_direct_tools_governed' } },
-      providerHandle: {} as any,
-      auditContext: {} as any,
-    } as any);
-    (server as any).userConfig = {
-      httpserver: {
-        ports: [{
-          port: 5555,
-          host: '127.0.0.1',
-          mode: 'router',
-          routingPolicyGroup: 'gateway_priority_5555',
-          sameProtocolBehavior: 'direct',
-        }],
-      },
-    };
-    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
-
-    const result = await (server as any).executePortAwarePipeline(5555, {
-      requestId: 'req_router_skip_tools_require_hub_relay',
-      entryEndpoint: '/v1/responses',
-      method: 'POST',
-      headers: {},
-      query: {},
-      body: {
-        model: 'gpt-5.5',
-        input: [{ role: 'user', content: [{ type: 'input_text', text: 'edit file' }] }],
-        tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object' } }],
-      },
-      metadata: {},
-    });
-
-    expect(routerDirectSpy).toHaveBeenCalledTimes(1);
-    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_direct_tools_governed' });
-  });
-
-  it('router same-protocol direct fails fast for any responses tool array containing chat-style function tools', async () => {
-    jest.resetModules();
-    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
-
-    const server = new RouteCodexHttpServer({
-      configPath: '/tmp/routecodex-test-config.json',
-      server: { host: '127.0.0.1', port: 5555 },
-      pipeline: {},
-      logging: { level: 'error', enableConsole: false },
-      providers: {},
-    } as any);
-
-    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
-      used: true,
-      response: { status: 200, body: { object: 'response', id: 'resp_direct_should_not_happen' } },
-      providerHandle: {} as any,
-      auditContext: {} as any,
-    } as any);
-    (server as any).userConfig = {
-      httpserver: {
-        ports: [{
-          port: 5555,
-          host: '127.0.0.1',
-          mode: 'router',
-          routingPolicyGroup: 'gateway_priority_5555',
-          sameProtocolBehavior: 'direct',
-        }],
-      },
-    };
-    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
-
-    for (const invalidIndex of [0, 3, 11]) {
-      routerDirectSpy.mockClear();
+    for (const nestedToolIndex of [0, 3, 11]) {
+      directSend.mockClear();
       const tools = Array.from({ length: 12 }, (_, index) => (
-        index === invalidIndex
+        index === nestedToolIndex
           ? { type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }
           : { type: 'function', name: `tool_${index}`, description: `tool ${index}`, parameters: { type: 'object' } }
       ));
 
-      await expect((server as any).executePortAwarePipeline(5555, {
-        requestId: `req_router_skip_invalid_shape_${invalidIndex}`,
-        entryEndpoint: '/v1/responses',
-        method: 'POST',
-        headers: {},
-        query: {},
-        body: {
-          model: 'gpt-5.5',
-          input: [{ role: 'user', content: [{ type: 'input_text', text: 'sample lock' }] }],
-          tools,
+      const outcome = await (server as any).executeRouterDirectPipelineForPort(
+        {
+          port: 5555,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
         },
-        metadata: {},
-      })).rejects.toThrow(/top-level tool\.name/);
+        {
+          requestId: `req_router_direct_nested_tool_${nestedToolIndex}`,
+          entryEndpoint: '/v1/responses',
+          method: 'POST',
+          headers: {},
+          query: {},
+          body: {
+            model: 'gpt-5.5',
+            input: [{ role: 'user', content: [{ type: 'input_text', text: 'sample lock' }] }],
+            tools,
+          },
+          metadata: {},
+        },
+      );
 
-      expect(routerDirectSpy).not.toHaveBeenCalled();
+      expect(outcome.used).toBe(true);
+      expect(directSend).toHaveBeenCalledTimes(1);
+      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(outcome.response?.body).toMatchObject({ object: 'response', id: 'resp_direct_chat_style_tool' });
     }
   });
 

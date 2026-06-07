@@ -11,7 +11,6 @@ import {
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
-  captureRawRequestBodyForMetadata,
   mergePipelineMetadata,
   readRequestBodyMetadata,
   stripRequestBodyMetadataForPipeline
@@ -39,8 +38,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       ? req.body
       : {}) as ChatCompletionPayload;
     const isVideoRequest = payloadContainsVideoInput(payload);
-    const originalPayload = captureRawRequestBodyForMetadata(payload) as ChatCompletionPayload;
-    const requestBodyMetadata = readRequestBodyMetadata(originalPayload);
+    const requestBodyMetadata = readRequestBodyMetadata(payload);
     const clientHeaders = captureClientHeaders(req.headers);
     const clientConnectionState = trackClientConnectionState(req, res);
     const acceptsSse = typeof req.headers['accept'] === 'string'
@@ -77,7 +75,6 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
         inboundStream: wantsSSE,
         outboundStream,
         providerProtocol: 'openai-chat',
-        __raw_request_body: originalPayload,
         clientHeaders,
         clientConnectionState
       })

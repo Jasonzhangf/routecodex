@@ -10,10 +10,8 @@ fn stop_message_auto_outputs_rust_owned_schema() {
         .args([
             "run",
             "stop_message_auto",
-            "--flow",
-            "stop_message_flow",
             "--input-json",
-            r#"{"continuationPrompt":"continue with schema","repeatCount":1,"maxRepeats":3}"#,
+            r#"{"flowId":"stop_message_flow","continuationPrompt":"continue with schema","repeatCount":1,"maxRepeats":3}"#,
         ])
         .output()
         .expect("run routecodex-servertool");

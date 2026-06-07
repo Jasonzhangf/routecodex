@@ -236,7 +236,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies responses runtime payload contract failures as unrecoverable direct-return', () => {
+  it('classifies responses runtime payload contract failures as health-neutral special_400', () => {
     const reason = 'provider-runtime-error: responses payload missing "input" or "instructions"';
     const error = new Error(reason);
     const classification = resolveProviderFailureClassification({
@@ -245,7 +245,13 @@ describe('provider failure policy ssot', () => {
       reason
     });
 
-    expect(classification).toBe('unrecoverable');
+    expect(classification).toBe('special_400');
+    expect(isProviderFailureHealthNeutral({
+      error,
+      stage: 'provider.send',
+      reason,
+      classification
+    } as any)).toBe(true);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -253,7 +259,8 @@ describe('provider failure policy ssot', () => {
       attempt: 2,
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
-      classification: 'unrecoverable',
+      classification: 'special_400',
+      affectsHealth: false,
       shouldRetry: false,
       action: 'direct_return',
       decisionLabel: 'direct_return'
@@ -265,8 +272,52 @@ describe('provider failure policy ssot', () => {
       attempt: 2,
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
-      classification: 'unrecoverable',
+      classification: 'special_400',
       shouldRetry: false
+    }));
+  });
+
+  it('classifies responses reasoning.content array_above_max_length as health-neutral special_400', () => {
+    const error = Object.assign(
+      new Error("HTTP 400: Invalid 'input[22].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead."),
+      {
+        statusCode: 400,
+        code: 'HTTP_400',
+        response: {
+          data: {
+            error: {
+              message: "Invalid 'input[22].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead.",
+              type: 'invalid_request_error',
+              param: 'input[22].content',
+              code: 'array_above_max_length'
+            }
+          }
+        }
+      }
+    );
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message
+    });
+
+    expect(classification).toBe('special_400');
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message,
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'special_400',
+      affectsHealth: false,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return'
     }));
   });
 

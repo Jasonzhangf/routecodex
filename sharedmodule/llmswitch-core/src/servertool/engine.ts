@@ -20,6 +20,7 @@ import {
 } from './engine-selection-block.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
 import { runFollowupMainline } from './backend-route-mainline-block.js';
+import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
 
 // native-router-hotpath contract:
 // servertool followup metadata/injection shape is consumed by Rust hub pipeline
@@ -79,6 +80,79 @@ type ServerToolEngineResult = Awaited<ReturnType<typeof runServerSideToolEngine>
 type ServerToolEngineRunner = (
   overrides: Partial<ServerSideToolEngineOptions>
 ) => Promise<ServerToolEngineResult>;
+
+function readStopMessageFollowupText(execution: NonNullable<ServerToolEngineResult['execution']>): string {
+  const context = execution.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
+    ? execution.context as Record<string, unknown>
+    : undefined;
+  const decision = context?.decision && typeof context.decision === 'object' && !Array.isArray(context.decision)
+    ? context.decision as Record<string, unknown>
+    : undefined;
+  const decisionText = typeof decision?.followupText === 'string'
+    ? decision.followupText.trim()
+    : typeof decision?.followup_text === 'string'
+      ? decision.followup_text.trim()
+      : '';
+  if (decisionText) {
+    return decisionText;
+  }
+  const followup = execution.followup && typeof execution.followup === 'object' && !Array.isArray(execution.followup)
+    ? execution.followup as Record<string, unknown>
+    : undefined;
+  const injection = followup?.injection && typeof followup.injection === 'object' && !Array.isArray(followup.injection)
+    ? followup.injection as Record<string, unknown>
+    : undefined;
+  const ops = Array.isArray(injection?.ops) ? injection.ops : [];
+  for (let index = ops.length - 1; index >= 0; index -= 1) {
+    const op = ops[index];
+    if (!op || typeof op !== 'object' || Array.isArray(op)) continue;
+    const record = op as Record<string, unknown>;
+    if (record.op !== 'append_user_text') continue;
+    const text = typeof record.text === 'string' ? record.text.trim() : '';
+    if (text) return text;
+  }
+  return '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。';
+}
+
+function readStopMessageLoopNumber(execution: NonNullable<ServerToolEngineResult['execution']>, key: 'repeatCount' | 'maxRepeats'): number | undefined {
+  const context = execution.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
+    ? execution.context as Record<string, unknown>
+    : undefined;
+  const loopState = context?.serverToolLoopState && typeof context.serverToolLoopState === 'object' && !Array.isArray(context.serverToolLoopState)
+    ? context.serverToolLoopState as Record<string, unknown>
+    : undefined;
+  const value = loopState?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined;
+}
+
+function buildStopMessageCliProjectionResult(args: {
+  options: ServerToolOrchestrationOptions;
+  execution: NonNullable<ServerToolEngineResult['execution']>;
+  flowId: string;
+  totalSteps: number;
+  logProgress: (step: number, total: number, message: string, extra?: Record<string, unknown>) => void;
+}): ServerToolOrchestrationResult {
+  const continuationPrompt = readStopMessageFollowupText(args.execution);
+  const projection = buildServertoolCliProjectionForAutoFlow({
+    options: args.options,
+    flowId: args.flowId,
+    reasoningText: continuationPrompt,
+    stdoutPreview: continuationPrompt,
+    input: {
+      continuationPrompt,
+      repeatCount: readStopMessageLoopNumber(args.execution, 'repeatCount') ?? 0,
+      maxRepeats: readStopMessageLoopNumber(args.execution, 'maxRepeats') ?? 1
+    }
+  });
+  args.logProgress(5, args.totalSteps, 'completed (stop_message_auto cli projection; no reenter)', {
+    flowId: args.flowId
+  });
+  return {
+    chat: projection.chatResponse,
+    executed: true,
+    flowId: args.flowId
+  };
+}
 
 function summarizeServertoolExecutionForSnapshot(engineResult: ServerToolEngineResult): Record<string, unknown> {
   const finalChat = engineResult.finalChatResponse as Record<string, unknown>;
@@ -328,6 +402,15 @@ export async function runServerToolOrchestration(
       executed: true,
       flowId: engineResult.execution.flowId
     };
+  }
+  if (flowId === 'stop_message_flow') {
+    return buildStopMessageCliProjectionResult({
+      options,
+      execution: engineResult.execution,
+      flowId,
+      totalSteps,
+      logProgress
+    });
   }
   return runFollowupMainline({
     adapterContext: options.adapterContext,

@@ -17,8 +17,10 @@ const verificationMap = read('docs/architecture/verification-map.yml');
 
 for (const required of [
   'normalize_responses_function_tools',
+  'strip_responses_reasoning_content_for_provider_wire',
   'apply_responses_c4m_request_compat',
   'apply_responses_crs_request_compat',
+  'row.remove("content")',
   'root.remove("max_tokens")',
   'root.remove("max_output_tokens")',
   'root.remove("temperature")',

@@ -2201,3 +2201,24 @@ Tags: servertool-rust-binary, servertool-cli, cli-contract, stopless-schema, pro
 - Rust 测试总数：servertool-core 54 + servertool-cli 3 + stop-message-core 42 = 99 tests ALL PASS。
 - 覆盖边界：Phase B/C/D 的 Rust unit test 已覆盖分类/projection/gate/schema；HTTP blackbox 整链路（拦截→exec→exec result→改名→schema 注入）需要完整 server 启动，当前未覆盖。
 Tags: servertool-rust-binary, outcome-contract, tool-name-projection, needs-user-input, no-ts-fallback, 2026-06-07
+
+## 2026-06-07 ErrorPolicyCenter Rust-first 3-gap closeout
+- 3a/3c (pool alternative → no health mutation): Rust `event_affects_health` checks `routePool`/`excludedProviderKeys` from error event. TS passes data only. TS health-impact test 2/2 PASS.
+- 3d (429 ladder): `next_ladder_cooldown_ms` alternates 30m→3h via `rem_euclid(2)`. `http_429_cooldown_cycles %= 3` removed. 25/25 Rust health tests PASS.
+- 3e (reprobe → 3h): `consume_persisted_503_reprobe_if_available` pre-arms `threshold-1` + `cycle=1`.
+- Dead const deleted: `LADDER_COOLDOWN_10M_MS` / `LADDER_COOLDOWN_5H_MS`.
+- Build: `npm run build:min` PASS (0.90.2971).
+- Pre-existing failures: `provider-failure-plan.spec.ts` 3/3, `recoverable_non_429...events test` 1/1 (both on clean main).
+
+## 2026-06-07 direct passthrough corrected contract
+- direct/router-direct/provider-direct is same-protocol provider passthrough + hooks only: use the current request body object, do not clone, do not rebuild from `metadata.__raw_request_body`/snapshot/context, do not call direct body builders/provider outbound sanitizers/runtime tool validators/history repair/protocol conversion.
+- router-direct must not use `providerPayload` or selected runtime model to overwrite current request body. If a provider rejects the client model, fix the route/entry contract, not direct payload construction.
+- Responses tool/history legality belongs to Rust Hub/Responses conversation store owner. Direct live requests do not clean chat-style tools; client-invalid body should fail at provider, while RouteCodex-generated history must be persisted/restored as legal Responses shape.
+- Verified gates: focused direct Jest 5 suites / 42 tests PASS; `npm run verify:responses-direct-tool-shape-contract` PASS; `cargo test -p router-hotpath-napi hub_pipeline_session_identifiers` 6/6 PASS; `npm run build:min` PASS and installed/restarted 5520 at 0.90.2978.
+Tags: direct-passthrough, router-direct, provider-direct, responses-history, no-raw-metadata, no-clone, 2026-06-07
+
+## 2026-06-07 429 retry stale preselected route fix
+- Live sample `openai-responses-router-gpt-5.5-20260607T190937966-313995-1768` proved `provider-switch exclude_and_reroute` can still terminally return MiniMax 429 when retry metadata preserves `__routecodexPreselectedRoute`; the second Hub route then reuses the failed MiniMax target despite `excludedProviderKeys`.
+- Owner fix: `src/server/runtime/http-server/executor-metadata.ts::decorateMetadataForAttempt()` must delete `__routecodexPreselectedRoute` whenever `excludedProviderKeys.size > 0` or `attempt > 1`. Do not fix this in `ErrorHandlingCenter`; it is only `ErrorErr06ClientProjected`.
+- Verification: targeted metadata red test and request-executor 429 failover test PASS; retry execution plan suite PASS.
+Tags: error-policy-center, request-executor, preselected-route, 429-reroute, ErrorErr05, 2026-06-07

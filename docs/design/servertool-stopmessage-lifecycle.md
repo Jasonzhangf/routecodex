@@ -24,7 +24,7 @@ Design goals:
 - Budget counter: Rust `stop-message-counter.rs` (`STOP_SCHEMA_MISSING_MAX_REPEATS=10`, `STOP_SCHEMA_MAX_REPEATS=3`)
 - Handler: `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
 - CLI projection: `sharedmodule/llmswitch-core/src/servertool/cli-projection.ts` (`buildServertoolCliProjectionForAutoFlow`)
-- CLI executor: `sharedmodule/llmswitch-core/src/servertool/cli-executor.ts`
+- CLI executor: Rust `servertool-cli` binary (`routecodex-servertool`), invoked by `src/cli/commands/servertool.ts`
 - Note write: `sharedmodule/llmswitch-core/src/servertool/memory/cache-writer.ts` (`writeStoplessLearnedNoteEntry`)
 
 ## 3. Lifecycle (CLI Projection Only)

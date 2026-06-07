@@ -892,7 +892,10 @@ const handler: ServerToolHandler = async (
           execution: {
             flowId: FLOW_ID,
             ...(stickyKey ? { stopMessageReservation: { stickyKey, previousState: null } } : {}),
-            followup: handlerResult.followup as unknown as ServerToolFollowupPlan
+            followup: handlerResult.followup as unknown as ServerToolFollowupPlan,
+            context: {
+              decision: effectiveDecision as unknown as JsonObject
+            }
           }
         };
       }

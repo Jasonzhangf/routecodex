@@ -13,8 +13,6 @@ struct GovernanceContextOutput {
     provider_protocol: String,
     metadata_tool_hints: Value,
     inbound_stream_intent: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    raw_request_body: Option<Value>,
 }
 
 fn normalize_record(value: Option<&Value>) -> Value {
@@ -65,19 +63,12 @@ fn resolve_governance_context(request: Value, context: Value) -> GovernanceConte
         .unwrap_or(false);
     let inbound_stream_intent = metadata_stream_flag.unwrap_or(request_stream);
 
-    let raw_request_body = context_obj
-        .and_then(|obj| obj.get("metadata"))
-        .and_then(|v| v.as_object())
-        .and_then(|metadata| metadata.get("__raw_request_body"))
-        .and_then(|v| if v.is_object() { Some(v.clone()) } else { None });
-
     GovernanceContextOutput {
         entry_endpoint,
         metadata,
         provider_protocol,
         metadata_tool_hints,
         inbound_stream_intent,
-        raw_request_body,
     }
 }
 

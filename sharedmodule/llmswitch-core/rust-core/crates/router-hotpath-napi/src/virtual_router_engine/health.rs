@@ -285,10 +285,6 @@ impl ProviderHealthManager {
                 state.consecutive_http_502_failures = 0;
                 state.consecutive_http_429_failures = 0;
                 state.consecutive_recoverable_failures = 0;
-                state.http_429_cooldown_cycles %= 3;
-                if state.recoverable_cooldown_cycles >= 2 {
-                    state.recoverable_cooldown_cycles = 0;
-                }
                 state.persisted_503_reprobe_available = false;
                 return true;
             }
@@ -550,8 +546,9 @@ impl ProviderHealthManager {
 
         state.consecutive_http_429_failures = 0;
         state.state = "tripped".to_string();
+        let cycle = state.http_429_cooldown_cycles;
         state.cooldown_expires_at =
-            Some(now_ms + next_ladder_cooldown_ms(state.http_429_cooldown_cycles));
+            Some(now_ms + next_ladder_cooldown_ms(cycle));
         state.http_429_cooldown_cycles += 1;
         Http429ControlOutcome::CooldownApplied
     }
@@ -644,22 +641,25 @@ impl Default for ProviderHealthConfigNormalized {
 const DEFAULT_FAILURE_THRESHOLD: i64 = 3;
 pub(crate) const DEFAULT_COOLDOWN_MS: i64 = 30 * 60_000;
 const DEFAULT_FATAL_COOLDOWN_MS: i64 = 120_000;
-const LADDER_COOLDOWN_10M_MS: i64 = 10 * 60_000;
 const LADDER_COOLDOWN_30M_MS: i64 = 30 * 60_000;
-const LADDER_COOLDOWN_5H_MS: i64 = 5 * 60 * 60_000;
 const LADDER_COOLDOWN_3H_MS: i64 = 3 * 60 * 60_000;
 
 fn next_ladder_cooldown_ms(cycles: i64) -> i64 {
-    match cycles {
-        i64::MIN..=0 => LADDER_COOLDOWN_10M_MS,
-        1 => LADDER_COOLDOWN_30M_MS,
-        _ => LADDER_COOLDOWN_5H_MS,
+    if cycles <= 0 {
+        return LADDER_COOLDOWN_30M_MS;
+    }
+    match cycles.rem_euclid(2) {
+        0 => LADDER_COOLDOWN_30M_MS,
+        _ => LADDER_COOLDOWN_3H_MS,
     }
 }
 
 fn next_recoverable_cooldown_ms(cycles: i64) -> i64 {
-    match cycles {
-        i64::MIN..=0 => LADDER_COOLDOWN_30M_MS,
+    if cycles <= 0 {
+        return LADDER_COOLDOWN_30M_MS;
+    }
+    match cycles.rem_euclid(2) {
+        0 => LADDER_COOLDOWN_30M_MS,
         _ => LADDER_COOLDOWN_3H_MS,
     }
 }
@@ -749,12 +749,12 @@ mod tests {
     }
 
     #[test]
-    fn test_http_429_three_strikes_trigger_cooldown_ladder_10m_30m_5h() {
+    fn test_http_429_three_strikes_trigger_cooldown_ladder_30m_3h_cycle() {
         let mut manager = ProviderHealthManager::new();
         manager.register_providers(&["test-provider".to_string()]);
         let now = 10_000i64;
 
-        // first cycle: 3 consecutive 429 -> 10m cooldown
+        // first cycle: 3 consecutive 429 -> 30m cooldown
         assert_eq!(
             manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now),
             Http429ControlOutcome::None
@@ -782,9 +782,9 @@ mod tests {
         ));
 
         let first_ttl = first.cooldown_expires_at.expect("expiry") - now;
-        assert!(first_ttl > 9 * 60_000 && first_ttl <= 11 * 60_000);
+        assert!(first_ttl > 29 * 60_000 && first_ttl <= 31 * 60_000);
 
-        // second cycle: 3 consecutive 429 -> 30m cooldown
+        // second cycle: 3 consecutive 429 -> 3h cooldown (alternating ladder)
         assert_eq!(
             manager.record_http_429_failure(
                 "test-provider",
@@ -817,11 +817,13 @@ mod tests {
         assert_eq!(second.state, "tripped");
         let second_expiry = second.cooldown_expires_at.expect("second expiry");
         let second_ttl = second_expiry - (first.cooldown_expires_at.expect("expiry") + 4);
-        assert!(second_ttl > 29 * 60_000 && second_ttl <= 31 * 60_000);
+        assert!(
+            second_ttl > (3 * 60 * 60_000 - 60_000) && second_ttl <= (3 * 60 * 60_000 + 60_000)
+        );
 
         assert!(manager.is_available("test-provider", second_expiry + 1));
 
-        // third cycle: 3 consecutive 429 -> 5h cooldown
+        // third cycle: 3 consecutive 429 -> 30m cooldown (alternating ladder)
         let _ = manager.record_http_429_failure(
             "test-provider",
             Some("HTTP_429".to_string()),
@@ -846,16 +848,16 @@ mod tests {
             .find(|s| s.provider_key == "test-provider")
             .expect("provider state");
         let third_ttl = third.cooldown_expires_at.expect("third expiry") - (second_expiry + 4);
-        assert!(third_ttl > (5 * 60 * 60_000 - 60_000) && third_ttl <= (5 * 60 * 60_000 + 60_000));
+        assert!(third_ttl > 29 * 60_000 && third_ttl <= 31 * 60_000);
     }
 
     #[test]
-    fn test_http_429_third_cycle_uses_long_5h_cooldown() {
+    fn test_http_429_ladder_alternates_30m_3h_30m_3h() {
         let mut manager = ProviderHealthManager::new();
         manager.register_providers(&["test-provider".to_string()]);
         let now = 1_747_800_000_000i64;
 
-        // First 3x 429 => 10m
+        // First 3x 429 => 30m
         let _ = manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now);
         let _ =
             manager.record_http_429_failure("test-provider", Some("HTTP_429".to_string()), now + 1);
@@ -869,7 +871,7 @@ mod tests {
         let first_expiry = first.cooldown_expires_at.expect("cooldown expiry");
         assert!(manager.is_available("test-provider", first_expiry + 1));
 
-        // Second 3x 429 => 30m
+        // Second 3x 429 => 3h (cycle 1 in alternating ladder)
         let _ = manager.record_http_429_failure(
             "test-provider",
             Some("HTTP_429".to_string()),
@@ -891,9 +893,13 @@ mod tests {
             .find(|s| s.provider_key == "test-provider")
             .expect("provider state");
         let second_expiry = second.cooldown_expires_at.expect("second cooldown expiry");
+        let second_ttl = second_expiry - (first_expiry + 4);
+        assert!(
+            second_ttl > (3 * 60 * 60_000 - 60_000) && second_ttl <= (3 * 60 * 60_000 + 60_000)
+        );
         assert!(manager.is_available("test-provider", second_expiry + 1));
 
-        // Third 3x 429 => 5h
+        // Third 3x 429 => 30m (cycle 2 in alternating ladder)
         let _ = manager.record_http_429_failure(
             "test-provider",
             Some("HTTP_429".to_string()),
@@ -917,11 +923,11 @@ mod tests {
         let third_expiry = third.cooldown_expires_at.expect("third cooldown expiry");
 
         let third_ttl = third_expiry - (second_expiry + 4);
-        assert!(third_ttl > (5 * 60 * 60_000 - 60_000) && third_ttl <= (5 * 60 * 60_000 + 60_000));
+        assert!(third_ttl > 29 * 60_000 && third_ttl <= 31 * 60_000);
 
         assert!(manager.is_available("test-provider", third_expiry + 1));
 
-        // Fourth 3x 429 => cycle resets back to 10m
+        // Fourth 3x 429 => 3h
         let _ = manager.record_http_429_failure(
             "test-provider",
             Some("HTTP_429".to_string()),
@@ -944,7 +950,18 @@ mod tests {
             .expect("provider state");
         let fourth_ttl =
             fourth.cooldown_expires_at.expect("fourth cooldown expiry") - (third_expiry + 4);
-        assert!(fourth_ttl > 9 * 60_000 && fourth_ttl <= 11 * 60_000);
+        assert!(
+            fourth_ttl > (3 * 60 * 60_000 - 60_000) && fourth_ttl <= (3 * 60 * 60_000 + 60_000)
+        );
+    }
+
+    #[test]
+    fn test_http_429_ladder_cycle_duration_function_alternates() {
+        assert_eq!(next_ladder_cooldown_ms(-1), 30 * 60_000);
+        assert_eq!(next_ladder_cooldown_ms(0), 30 * 60_000);
+        assert_eq!(next_ladder_cooldown_ms(1), 3 * 60 * 60_000);
+        assert_eq!(next_ladder_cooldown_ms(2), 30 * 60_000);
+        assert_eq!(next_ladder_cooldown_ms(3), 3 * 60 * 60_000);
     }
 
     // ========== 黑盒红测：锁定 ProviderHealthManager 公共行为 ==========

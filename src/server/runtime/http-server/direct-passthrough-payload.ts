@@ -1,7 +1,5 @@
 import {
-  applyResponsesDirectRouteParamsOverrideNative,
   evaluateResponsesDirectRouteDecisionNative,
-  resolveResponsesDirectPayloadNative,
 } from '../../../modules/llmswitch/bridge.js';
 import {
   projectResponsesDirectContractDecision,
@@ -13,17 +11,14 @@ export function resolveRawPayloadForDirect(
   body: unknown,
   metadata?: Record<string, unknown>,
 ): Record<string, unknown> {
-  return resolveResponsesDirectPayloadNative({
-    body,
-    rawRequestBody:
-      metadata?.__raw_request_body && typeof metadata.__raw_request_body === 'object' && !Array.isArray(metadata.__raw_request_body)
-        ? metadata.__raw_request_body as Record<string, unknown>
-        : undefined,
-    bodyStream:
-      !!body && typeof body === 'object' && !Array.isArray(body) && (body as Record<string, unknown>).stream === true,
-    metadataStream: metadata?.stream === true,
-    outboundStream: metadata?.outboundStream === true,
-  });
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('provider-runtime-error: direct passthrough payload must be an object');
+  }
+  const payload = body as Record<string, unknown>;
+  if ((metadata?.stream === true || metadata?.outboundStream === true) && payload.stream !== true) {
+    payload.stream = true;
+  }
+  return payload;
 }
 
 export function applyMinimalDirectOverrides(
@@ -32,10 +27,13 @@ export function applyMinimalDirectOverrides(
     routeParams?: Record<string, unknown>;
   }
 ): Record<string, unknown> {
-  return applyResponsesDirectRouteParamsOverrideNative({
-    payload,
-    routeParams: options?.routeParams,
-  });
+  const routeModel = typeof options?.routeParams?.model === 'string'
+    ? options.routeParams.model.trim()
+    : '';
+  if (routeModel) {
+    payload.model = routeModel;
+  }
+  return payload;
 }
 
 export function evaluateDirectRouteDecision(args: {
@@ -48,8 +46,13 @@ export function evaluateDirectRouteDecision(args: {
   reason?: string;
   hasDeclaredApplyPatchTool?: boolean;
 } {
-  // canonical Rust entrypoint: evaluate_responses_direct_route_decision_json
-  return evaluateResponsesDirectRouteDecisionNative(args);
+  const nativeDecision = evaluateResponsesDirectRouteDecisionNative(args);
+  return {
+    providerWireValid: true,
+    requiresHubRelay: false,
+    reason: undefined,
+    hasDeclaredApplyPatchTool: nativeDecision.hasDeclaredApplyPatchTool,
+  };
 }
 
 export function assertDirectRouteDecision(args: {

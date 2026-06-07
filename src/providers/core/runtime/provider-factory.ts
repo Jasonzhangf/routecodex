@@ -358,10 +358,6 @@ export class ProviderFactory {
       return 'deepseek-http-provider';
     }
 
-    if (authRawType === 'qwenchat-guest') {
-      return 'qwenchat-web-provider';
-    }
-
     if (
       this.shouldUseImplicitDeepSeekHttpProvider(runtime) &&
       isDeepSeekRuntimeIdentity({

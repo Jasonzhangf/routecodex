@@ -54,7 +54,6 @@ owners:
       - src/server/runtime/http-server/executor
     required_tests:
       - tests/servertool/servertool-cli-projection.spec.ts
-      - tests/servertool/servertool-cli-execution.spec.ts
       - tests/servertool/servertool-cli-result-restore.spec.ts
       - tests/cli/servertool-command.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
@@ -284,18 +283,14 @@ owners:
 
   - feature_id: responses.direct_tool_shape_contract
     status: active
-    summary: Responses direct passthrough payload must stay Responses-native; chat-style function tools must fail before transport
+    summary: Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
-      - HubReqOutbound05ProviderSemantic
+      - VrRoute04SelectedTarget
       - ProviderReqOutbound06WirePayload
     canonical_builders:
-      - validate_responses_direct_tool_shape_contract_json
-      - build_responses_direct_passthrough_body_json
       - evaluate_responses_direct_route_decision_json
       - has_declared_apply_patch_tool_json
-      - apply_responses_direct_route_params_override_json
-      - resolve_responses_direct_payload_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - src/modules/llmswitch/bridge
@@ -319,13 +314,12 @@ owners:
       - npm run test:ci:jest
     migration_target: rust
     notes:
-      - Rust validator is the only contract truth; TS is now transport/bridge shell only.
-      - Direct provider passthrough body build (`strip __*`, metadata fail-fast, trimmed model required) must stay in Rust, not in provider TS runtime.
-      - Direct route eligibility / relay-required decision (`providerWireValid` + `requiresHubRelay`) must stay in Rust, not split across `index.ts` and local helper branches.
+      - Direct/provider-direct/router-direct is same-protocol passthrough plus hooks only; live request body identity is preserved.
+      - Deleted old direct body builder, raw replay, route-params builder, and runtime tool-shape validator exports must stay deleted.
+      - Direct route decision may detect apply_patch for routing hooks, but must not validate Responses wire shape or force Hub relay for normal tools.
       - same-protocol direct `apply_patch` declaration detection for servertool-mode relay must stay in Rust, not in `http-server/index.ts`.
-      - `direct-passthrough-payload.ts` should expose one Rust-backed decision surface; avoid parallel TS helper exports for contract-vs-relay split.
-      - Direct routeParams model/reasoning override must use the same Rust owner as provider direct, not duplicate TS mutation logic.
-      - Direct raw `__raw_request_body` replay and stream flag lift must use the same Rust owner instead of local TS selection logic.
+      - Direct must not read `metadata.__raw_request_body`, snapshot, context, or history to rebuild request payload.
+      - Historical tool-shape repair belongs in Hub/req_outbound compat, never in direct passthrough.
 
   - feature_id: responses.request_compat_normalization
     status: active

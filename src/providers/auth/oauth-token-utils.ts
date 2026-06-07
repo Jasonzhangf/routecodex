@@ -7,7 +7,6 @@ export {
   extractAccessToken,
   extractApiKey,
   hasApiKeyField,
-  hasStableQwenApiKey,
   hasAccessToken,
   hasNoRefreshFlag,
   getExpiresAt,

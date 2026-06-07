@@ -20,6 +20,8 @@ type ProviderErrorEventExtended = ProviderErrorEvent & {
   quotaReason?: string;
   resetAt?: string;
   errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
+  routePool?: string[];
+  excludedProviderKeys?: string[];
 };
 
 type ErrorWithMetadata = Error & {
@@ -62,6 +64,8 @@ interface EmitOptions {
   statusCode?: number;
   recoverable: boolean;
   affectsHealth: boolean;
+  routePool?: string[];
+  excludedProviderKeys?: string[];
   details?: Record<string, unknown>;
 }
 
@@ -163,6 +167,12 @@ function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtend
     details: mergedDetails
   };
   event.affectsHealth = options.affectsHealth;
+  if (Array.isArray(options.routePool) && options.routePool.length > 0) {
+    event.routePool = options.routePool;
+  }
+  if (Array.isArray(options.excludedProviderKeys) && options.excludedProviderKeys.length > 0) {
+    event.excludedProviderKeys = options.excludedProviderKeys;
+  }
   // Propagate recoverable flag back to original error for callers that want
   // to implement custom retry/failover behaviour.
   if (typeof recoverable === 'boolean') {

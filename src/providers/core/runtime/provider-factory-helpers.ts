@@ -1,7 +1,6 @@
 import { DeepSeekHttpProvider } from './deepseek-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
 import { HttpTransportProvider } from './http-transport-provider.js';
-import { QwenChatWebProvider } from './qwenchat-web-provider.js';
 import { WindsurfChatProvider } from './windsurf-chat-provider.js';
 import { ResponsesProvider } from './responses-provider.js';
 import { AnthropicProtocolClient } from '../../../client/anthropic/anthropic-protocol-client.js';
@@ -107,21 +106,18 @@ export function mapRuntimeAuthToConfig(
     const isOpenCodeZen = isOpenCodeZenProviderId(runtime?.providerId);
     const rawType = isNonEmptyString(auth.rawType) ? auth.rawType.trim().toLowerCase() : undefined;
     const openCodeZenResolved = isOpenCodeZen ? resolveOpenCodeZenApiKey(auth.value) : null;
-    const isQwenchatGuest = rawType === 'qwenchat-guest';
-    const resolvedApiKey = isQwenchatGuest
-      ? ''
-      : openCodeZenResolved
+    const resolvedApiKey = openCodeZenResolved
         ? openCodeZenResolved.apiKey
         : (isNonEmptyString(auth.value) ? auth.value.trim() : '');
 
-    if (rawType !== 'deepseek-account' && rawType !== 'qwenchat-guest' && rawType !== 'windsurf-account' && rawType !== 'windsurf-devin-token' && !resolvedApiKey) {
+    if (rawType !== 'deepseek-account' && rawType !== 'windsurf-account' && rawType !== 'windsurf-devin-token' && !resolvedApiKey) {
       const baseUrl =
         runtime && typeof (runtime as any).baseUrl === 'string'
           ? String((runtime as any).baseUrl).trim()
           : runtime && typeof (runtime as any).endpoint === 'string'
             ? String((runtime as any).endpoint).trim()
             : '';
-      const allowEmpty = isLocalBaseUrl(baseUrl) || rawType === 'deepseek-account' || rawType === 'qwenchat-guest' || rawType === 'windsurf-account' || rawType === 'windsurf-devin-token';
+      const allowEmpty = isLocalBaseUrl(baseUrl) || rawType === 'deepseek-account' || rawType === 'windsurf-account' || rawType === 'windsurf-devin-token';
       if (!allowEmpty) {
         throw new Error(`[ProviderFactory] runtime ${runtimeKey} missing inline apiKey value`);
       }
@@ -131,7 +127,7 @@ export function mapRuntimeAuthToConfig(
     const apiKeyAuth: ApiKeyAuthExtended = {
       type: 'apikey',
       apiKey:
-        rawType === 'deepseek-account' || rawType === 'qwenchat-guest'
+        rawType === 'deepseek-account'
           ? ''
           : preserveInlineValueForRawType
             ? resolvedApiKey
@@ -185,7 +181,6 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
     case 'gemini-http-provider':
     case 'deepseek-http-provider':
     case 'mimoweb-provider':
-    case 'qwenchat-web-provider':
    case 'mock-provider':
     case 'windsurf-chat-provider':
      return trimmed as OpenAIStandardConfig['type'];
@@ -201,8 +196,6 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
       return 'gemini-http-provider';
     case 'mimoweb':
       return 'mimoweb-provider';
-   case 'qwenchat-web':
-      return 'qwenchat-web-provider';
     case 'windsurf':
       return 'windsurf-chat-provider';
     default:
@@ -249,9 +242,6 @@ export function instantiateProvider(
   }
   if (moduleType === 'deepseek-http-provider') {
     return new DeepSeekHttpProvider(config, dependencies);
-  }
- if (moduleType === 'qwenchat-web-provider') {
-    return new QwenChatWebProvider(config, dependencies);
   }
   if (moduleType === 'windsurf-chat-provider') {
     return new WindsurfChatProvider(config, dependencies);

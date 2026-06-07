@@ -13,7 +13,6 @@ import {
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
-  captureRawRequestBodyForMetadata,
   mergePipelineMetadata,
   readRequestBodyMetadata,
   stripRequestBodyMetadataForPipeline
@@ -56,16 +55,6 @@ function buildResponsesConversationPortScope(ctx: HandlerContext): { matchedPort
     ...(typeof matchedPort === 'number' ? { matchedPort } : {}),
     ...(routingPolicyGroup ? { routingPolicyGroup } : {})
   };
-}
-
-function buildResponsesResumeRawRequestBody(originalPayload: ResponsesPayload, responseId?: string): Record<string, unknown> {
-  const raw = originalPayload && typeof originalPayload === 'object' && !Array.isArray(originalPayload)
-    ? { ...(originalPayload as Record<string, unknown>) }
-    : {};
-  if (typeof responseId === 'string' && responseId.trim() && typeof raw.response_id !== 'string') {
-    raw.response_id = responseId.trim();
-  }
-  return raw;
 }
 
 function logResponsesHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
@@ -242,8 +231,7 @@ export async function handleResponses(
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
       return;
     }
-    const originalPayload = captureRawRequestBodyForMetadata(payload) as ResponsesPayload;
-    const requestBodyMetadata = readRequestBodyMetadata(originalPayload);
+    const requestBodyMetadata = readRequestBodyMetadata(payload);
     const sessionIdForResume = readResponsesSessionId(requestBodyMetadata);
     const responsesConversationPortScope = buildResponsesConversationPortScope(ctx);
     if (options.responseIdFromPath && !payload.response_id) {
@@ -365,9 +353,6 @@ export async function handleResponses(
           }
           return undefined;
         })(),
-        __raw_request_body: isSubmitToolOutputs
-          ? buildResponsesResumeRawRequestBody(originalPayload, typeof payload.previous_response_id === 'string' ? payload.previous_response_id : options.responseIdFromPath)
-          : originalPayload,
         clientHeaders,
         clientConnectionState,
 	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),
