@@ -210,6 +210,8 @@ export async function reportRequestExecutorProviderError(
         ...(upstreamCode ? { upstreamCode } : {}),
         reason: args.retryError.reason,
         attempt: args.attempt,
+        ...(Array.isArray(args.routePool) ? { routePool: args.routePool } : {}),
+        ...(args.excludedProviderKeys ? { excludedProviderKeys: Array.from(args.excludedProviderKeys) } : {}),
         ...(args.extraDetails ?? {})
       }
     });

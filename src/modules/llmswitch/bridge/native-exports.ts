@@ -541,12 +541,8 @@ export async function sanitizeProviderOutboundPayload(input: {
 export function validateResponsesDirectToolShapeContractNative(
   payload: Record<string, unknown>
 ): { ok: true } | null {
-  try {
-    const parsed = invokeRouterHotpathJsonCapability('validateResponsesDirectToolShapeContractJson', [payload ?? {}]);
-    return assertNativeObject('validateResponsesDirectToolShapeContractJson', parsed) as { ok: true };
-  } catch {
-    return null;
-  }
+  const parsed = invokeRouterHotpathJsonCapability('validateResponsesDirectToolShapeContractJson', [payload ?? {}]);
+  return assertNativeObject('validateResponsesDirectToolShapeContractJson', parsed) as { ok: true };
 }
 
 export function applyResponsesDirectRouteParamsOverrideNative(input: {

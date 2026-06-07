@@ -133,4 +133,6 @@ export type ReportRequestExecutorProviderErrorArgs = {
   stageHint?: RequestExecutorProviderErrorStage;
   extraDetails?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  routePool?: string[];
+  excludedProviderKeys?: Set<string>;
 };
