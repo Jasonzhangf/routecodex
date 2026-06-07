@@ -2296,3 +2296,9 @@ Tags: hub-pipeline-rust-closeout, responses-bridge, zero-consumer, physical-dele
 - Ordinary partial delta close without continuation proof must still clear the abandoned Responses request and surface `upstream_stream_incomplete`; do not solve this by forcing tools/direct traffic to relay.
 - Verified: focused SSE/direct regression command passed 6 suites / 49 tests, plus `npx tsc --noEmit --pretty false` and `git diff --check`.
 Tags: responses-sse, direct-relay, client-close, required-action, conversation-store, 5555, 2026-06-07
+
+## 2026-06-07 client-response snapshot stage-policy owner
+- Client response snapshots (`client-response` and `client-response.error`) are controlled only by `isSnapshotsEnabled()` plus `shouldCaptureSnapshotStage(stage)`. `ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS` / `ROUTECODEX_CAPTURE_CLIENT_STREAM_SNAPSHOTS` must not bypass `SnapshotStageKind`.
+- `ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS` remains provider stream capture control, not client final response capture control.
+- Verified: handler response SSE finish-reason suite + snapshot-stage policy suite PASS 18/18; snapshot architecture contract/owners gates PASS; `npx tsc --noEmit --pretty false` PASS.
+Tags: snapshot, client-response, SnapshotStageKind, no-env-bypass, direct-relay, 2026-06-07

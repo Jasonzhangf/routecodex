@@ -1070,6 +1070,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 可复用动作：429 / concurrency / recoverable followup 一律保持“阻塞 + 指数回退”，但必须给 **recoverable backoff queue** 和 **provider traffic acquire queue** 都加 waiter 上限；否则只是把重试风暴改成排队堆内存。
 - 可复用动作：本地盘 snapshot gate 要在 `provider.send.start` 之后、`processIncoming` 之前放行；如果等 provider 返回后才放行，`provider-request / provider-response / provider-error` 的本地 mirror 会整段丢失。
 - 可复用动作：查 5555/5520 的 SSE snapshot 缺口时，不要只看 generic `postStream` 分支；`executePreparedRequest`（SDK transport）返回的 `__sse_responses` 也必须走同一套 `wrapUpstreamSseResponse + provider-response snapshot` 收口。
+- 可复用动作：`client-response` / `client-response.error` snapshot 只能由 `SnapshotStageKind`（`shouldCaptureSnapshotStage(stage)`）控制；`ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS` 只允许影响 provider stream capture，不能作为 client final response 的 env bypass。
 - 触发信号：`SSE timeout after 1000000ms`、`PROVIDER_TRAFFIC_SATURATED` 高频、WindowServer watchdog/panic。
 - 可复用动作：优先排查“深拷贝 + 双写落盘 + 超长超时”三件套；请求/响应大历史块一律走**零拷贝摘要（mmap-hint）**，禁止在热路径做全量 JSON 深拷贝。
 - 日志口径边界（2026-04-12）：`[session-request][rt] internal` **不应包含 SSE decode**。若要看真正核心内耗，口径应为 `total - external - sseDecode`; rollup 的 `avg.core_internal` 只能再扣 `codec` 超出 `sse` 的残余，不能把 SSE 重复减两次。

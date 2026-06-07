@@ -1232,6 +1232,66 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(bodyText.match(/sequence_number":7/g)).toHaveLength(1);
   });
 
+  it('does not let stream snapshot env bypass client-response stage selector', async () => {
+    const previousCapture = process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS;
+    const previousStages = process.env.ROUTECODEX_SNAPSHOT_STAGES;
+    const snapshots: Array<{ phase?: string; data?: Record<string, unknown> }> = [];
+
+    process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS = '1';
+    process.env.ROUTECODEX_SNAPSHOT_STAGES = 'provider-request';
+
+    try {
+      jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+        captureResponsesRequestContextForRequest: async () => undefined,
+        clearResponsesConversationByRequestId: async () => undefined,
+        finalizeResponsesConversationRequestRetention: async () => undefined,
+        recordResponsesResponseForRequest: async () => undefined,
+        rebindResponsesConversationRequestId: async () => undefined,
+        writeSnapshotViaHooks: async () => undefined,
+        createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+        deriveFinishReasonNative: () => undefined,
+        isToolCallContinuationResponseNative: () => false,
+        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+        buildResponsesTerminalSseFramesFromProbeNative: () => [],
+        importCoreDist: async () => ({}),
+        requireCoreDist: () => ({})
+      }));
+      jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+        isSnapshotsEnabled: () => true,
+        writeServerSnapshot: async (snapshot: { phase?: string; data?: Record<string, unknown> }) => {
+          snapshots.push(snapshot);
+        }
+      }));
+      const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+      const res = new MockResponse();
+
+      await sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          body: { id: 'resp_stage_selector', status: 'completed' }
+        } as any,
+        'req-client-response-stage-selector',
+        { entryEndpoint: '/v1/responses' }
+      );
+
+      expect(snapshots).toHaveLength(0);
+      expect(res.jsonBody).toEqual({ id: 'resp_stage_selector', status: 'completed' });
+    } finally {
+      if (previousCapture === undefined) {
+        delete process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS;
+      } else {
+        process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS = previousCapture;
+      }
+      if (previousStages === undefined) {
+        delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
+      } else {
+        process.env.ROUTECODEX_SNAPSHOT_STAGES = previousStages;
+      }
+    }
+  });
+
   it('does not repair required_action streams with response.completed', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,

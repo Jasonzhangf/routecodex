@@ -102,6 +102,7 @@ import { normalizeUsage } from '../runtime/http-server/executor/usage-aggregator
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
+import { shouldCaptureSnapshotStage } from '../../utils/snapshot-stage-policy.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../utils/finish-reason.js';
 import { STREAM_CONTRACT_PROBE_BODY_KEY } from '../runtime/http-server/executor/servertool-response-normalizer.js';
@@ -1533,7 +1534,7 @@ export async function sendPipelineResponse(
     conversationId: result.usageLogInfo?.conversationId
   };
   registerRequestLogContext(requestLabel, requestLogContext);
-  const captureClientResponse = shouldCaptureClientStreamSnapshots();
+  const captureClientResponse = shouldCaptureClientResponseSnapshotStage('client-response');
   const responseStartedAtMs = Date.now();
   let responseCompletedLogged = false;
 
@@ -1613,7 +1614,7 @@ export async function sendPipelineResponse(
       reason: structuredErrorPayload ? 'structured_error_passthrough' : 'missing_stream',
       bridgeStatus: structuredErrorPayload ? status : 502
     });
-    if (captureClientResponse) {
+    if (shouldCaptureClientResponseSnapshotStage('client-response.error')) {
       void writeServerSnapshot({
         phase: 'client-response.error',
         requestId: requestLabel,
@@ -1650,7 +1651,7 @@ export async function sendPipelineResponse(
     if (!stream) {
       logPipelineStage('response.sse.missing', requestLabel, {});
       logResponseCompleted({ status: 200, mode: 'sse', reason: 'missing_stream', bridgeStatus: 502 });
-      if (captureClientResponse) {
+      if (shouldCaptureClientResponseSnapshotStage('client-response.error')) {
         void writeServerSnapshot({
           phase: 'client-response.error',
           requestId: requestLabel,
@@ -2256,7 +2257,7 @@ export async function sendPipelineResponse(
       });
     }
     logPipelineStage('response.json.empty', requestLabel, { status });
-    if (captureClientResponse) {
+    if (shouldCaptureClientResponseSnapshotStage('client-response')) {
       void writeServerSnapshot({
         phase: 'client-response',
         requestId: requestLabel,
@@ -2327,7 +2328,7 @@ export async function sendPipelineResponse(
     body: sanitized,
   });
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
-  if (captureClientResponse) {
+  if (shouldCaptureClientResponseSnapshotStage('client-response')) {
     void writeServerSnapshot({
       phase: 'client-response',
       requestId: requestLabel,
@@ -2393,26 +2394,8 @@ function toNodeReadable(streamLike: unknown): Readable | null {
   return null;
 }
 
-function shouldCaptureClientStreamSnapshots(): boolean {
-  const explicit = String(
-    process.env.ROUTECODEX_CAPTURE_CLIENT_STREAM_SNAPSHOTS
-      ?? process.env.RCC_CAPTURE_CLIENT_STREAM_SNAPSHOTS
-      ?? ''
-  ).trim().toLowerCase();
-  if (explicit === '1' || explicit === 'true') {
-    return true;
-  }
-  if (explicit === '0' || explicit === 'false') {
-    return false;
-  }
-  const flag = String(process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS || '').trim().toLowerCase();
-  if (flag === '1' || flag === 'true') {
-    return true;
-  }
-  if (flag === '0' || flag === 'false') {
-    return false;
-  }
-  return isSnapshotsEnabled();
+function shouldCaptureClientResponseSnapshotStage(stage: 'client-response' | 'client-response.error'): boolean {
+  return isSnapshotsEnabled() && shouldCaptureSnapshotStage(stage);
 }
 
 function maybeAttachClientSseSnapshotStream(
