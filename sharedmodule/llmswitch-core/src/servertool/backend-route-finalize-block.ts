@@ -2,7 +2,7 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   resolveFollowupFlowDecision,
   type FollowupFlowDecision
-} from './followup-flow-policy.js';
+} from './backend-route-flow-policy.js';
 
 function cloneJsonObject<T extends JsonObject>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;

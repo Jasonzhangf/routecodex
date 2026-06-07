@@ -1,4 +1,4 @@
-# Plan: Rustify followup-mainline-block.ts (P0)
+# Plan: Rustify backend-route-mainline-block.ts (P0)
 
 Architecture: shared lib (decision-only) → NAPI blocks → TS orchestration shell
 
@@ -6,26 +6,26 @@ Architecture: shared lib (decision-only) → NAPI blocks → TS orchestration sh
 
 | Layer | File | Lines |
 |---|---|---|
-| Source | `servertool/followup-mainline-block.ts` | 484 |
+| Source | `servertool/backend-route-mainline-block.ts` | 484 |
 | Shared lib | `rust-core/crates/followup-core/src/` (new crate) | — |
 | NAPI blocks | `rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs` | ~150 |
-| TS shell | `servertool/followup-mainline-block.ts` → ~250 | — |
+| TS shell | `servertool/backend-route-mainline-block.ts` → ~250 | — |
 
 ## 当前结构
 
 ```
 runFollowupMainline (360 行)
-├── 决策: resolveFollowupFlowDecision            → followup-flow-policy.ts
+├── 决策: resolveFollowupFlowDecision            → backend-route-flow-policy.ts
 ├── 决策: isStopMessageFlow, followupPlan        → 简单派生
-├── 入参组装: loopPayload, loopState, metadata   → followup-runtime-block.ts
-├── 入参组装: followupInjectionPlan, executionMode → followup-runtime-block.ts
-├── 副作用: assertAutoLimitNotExceeded           → followup-runtime-block.ts
+├── 入参组装: loopPayload, loopState, metadata   → backend-route-runtime-block.ts
+├── 入参组装: followupInjectionPlan, executionMode → backend-route-runtime-block.ts
+├── 副作用: assertAutoLimitNotExceeded           → backend-route-runtime-block.ts
 ├── 副作用: evaluateStopMessageLoopGuard         → stop-message-loop-guard-block.ts
 ├── 副作用: appendLoopWarning                   → 本文件 ~8 行
-├── 副作用: applyFollowupRuntimeMetadata         → followup-runtime-block.ts
-├── 副作用: applyFollowupDeltaPlan               → followup-origin-delta.ts
+├── 副作用: applyFollowupRuntimeMetadata         → backend-route-runtime-block.ts
+├── 副作用: applyFollowupDeltaPlan               → backend-route-origin-delta.ts
 ├── 编排: runClientInjectOnlyFollowup            → client-inject-followup-block.ts
-├── 编排: runReenterFollowup                    → reenter-followup-block.ts
+├── 编排: runReenterFollowup                    → backend-route-reenter-block.ts
 ├── 编排: maybeRunTransparentBootstrapReplay     → bootstrap-followup-replay-block.ts
 ├── 编排: decorateFinalChatWithServerToolContext → finalize-followup-block.ts
 └── 后处理: resetStopMessageBudgetAfterNonStopFollowup → 本文件 ~13 行

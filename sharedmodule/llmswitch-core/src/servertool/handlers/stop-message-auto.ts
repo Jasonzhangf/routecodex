@@ -11,7 +11,7 @@ import {
   shouldBypassStopMessageForMediaContext,
   shouldRunVisionFlowForAdapterContext
 } from './vision-eligibility.js';
-import { extractCapturedChatSeed } from '../followup-seed.js';
+import { extractCapturedChatSeed } from '../backend-route-seed.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 import { isStopEligibleForServerTool, resolveStopGatewayContext } from '../stop-gateway-context.js';
 import { attachStopMessageCompareContext, type StopMessageCompareContext } from '../stop-message-compare-context.js';
@@ -287,6 +287,7 @@ function attachStopMessageRuntimeStateToMetadata(metadata: Record<string, unknow
   rt.serverToolLoopState = {
     ...loopState,
     flowId: FLOW_ID,
+    repeatCount: state.used,
     maxRepeats: state.maxRepeats
   };
   metadata.__rt = rt;

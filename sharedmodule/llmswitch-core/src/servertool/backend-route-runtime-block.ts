@@ -5,7 +5,7 @@ import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtim
 import {
   resolveFollowupFlowDecision,
   type FollowupFlowDecision
-} from './followup-flow-policy.js';
+} from './backend-route-flow-policy.js';
 
 export type ServerToolLoopStateLike = {
   flowId?: string;

@@ -19,7 +19,7 @@ import {
   runPrimaryServerToolEngineSelection
 } from './engine-selection-block.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
-import { runFollowupMainline } from './followup-mainline-block.js';
+import { runFollowupMainline } from './backend-route-mainline-block.js';
 
 // native-router-hotpath contract:
 // servertool followup metadata/injection shape is consumed by Rust hub pipeline

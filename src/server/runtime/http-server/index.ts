@@ -60,6 +60,7 @@ import {
   evaluateDirectRouteDecision,
   resolveRawPayloadForDirect,
 } from './direct-passthrough-payload.js';
+import { buildDirectPayloadContractError } from './responses-direct-contract-error.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { extractStatusCodeFromError } from './executor/utils.js';
 import { resolveRequestExecutorProviderFailurePlan } from './executor/request-executor-provider-failure-plan.js';
@@ -1120,7 +1121,15 @@ export class RouteCodexHttpServer {
             detail: directEntryDecision.reason ?? (directEntryDecision.requiresHubRelay ? 'requires_hub_relay' : 'invalid_direct_payload'),
             mode: 'client',
           });
-          return await this.executePipeline(nextInput);
+          throw buildDirectPayloadContractError(
+            directEntryDecision.reason ?? (directEntryDecision.requiresHubRelay ? 'requires_hub_relay' : 'invalid_direct_payload'),
+            {
+              requestId: input.requestId,
+              entryEndpoint: input.entryEndpoint,
+              mode: 'client',
+              reason: directEntryDecision.reason ?? (directEntryDecision.requiresHubRelay ? 'requires_hub_relay' : 'invalid_direct_payload'),
+            },
+          );
         }
         this.logStage('router-direct.entry', input.requestId, {
           routingPolicyGroup: portConfig.routingPolicyGroup,
@@ -1291,15 +1300,7 @@ export class RouteCodexHttpServer {
     const runtimeKey = typeof target.runtimeKey === 'string' && target.runtimeKey.trim() ? target.runtimeKey.trim() : providerKey;
     const providerType = typeof target.providerType === 'string' ? target.providerType : '';
 
-    const requestPayload = applyMinimalDirectOverrides(
-      rawDirectPayload,
-      {
-        routeParams:
-          target.routeParams && typeof target.routeParams === 'object' && !Array.isArray(target.routeParams)
-            ? (target.routeParams as Record<string, unknown>)
-            : undefined,
-      },
-    );
+    const requestPayload = applyMinimalDirectOverrides(rawDirectPayload);
     try {
       const finalDirectPayloadDecision = evaluateDirectRouteDecision({
         payload: requestPayload,

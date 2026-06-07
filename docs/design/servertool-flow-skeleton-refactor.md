@@ -41,7 +41,7 @@ functions -> blocks -> orchestration
 当前 followup policy 的单点真源已经基本存在：
 
 - TS 壳：
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/followup-flow-policy.ts`
+  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/backend-route-flow-policy.ts`
 - Rust 真源：
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`
 
@@ -90,10 +90,10 @@ Rust `plan_servertool_followup_runtime_json(flow_id)` 已能输出：
 
 ## 当前违反“config-only orchestration”的点
 
-### 1. `followup-runtime-block.ts` 仍有 flow-specific 真相硬编码
+### 1. `backend-route-runtime-block.ts` 仍有 flow-specific 真相硬编码
 
 文件：
-- `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.ts`
+- `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts`
 
 已确认越界点：
 
@@ -114,7 +114,7 @@ if (args.flowId === 'stop_message_flow') {
 ### 2. `applyClientInjectOnlyMetadata(...)` 仍把 stop_message 作为特殊流内建
 
 文件：
-- `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.ts`
+- `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts`
 
 已确认越界点：
 
@@ -126,10 +126,10 @@ if ((args.flowId !== 'stop_message_flow' && !decision.clientInjectOnly) || ...)
 - 是否强制 client inject 应由 `decision.clientInjectOnly` 决定。
 - 编排 block 不应再知道 `stop_message_flow` 这个业务名。
 
-### 3. `followup-mainline-block.ts` 仍混有 flow-specific 行为编排
+### 3. `backend-route-mainline-block.ts` 仍混有 flow-specific 行为编排
 
 文件：
-- `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts`
+- `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts`
 
 当前仍有以下越界：
 - `const isStopMessageFlow = args.execution.flowId === 'stop_message_flow'`
@@ -352,7 +352,7 @@ request_context
 
 唯一修改点：
 - Rust skeleton profile
-- TS `followup-runtime-block.ts`
+- TS `backend-route-runtime-block.ts`
 
 目标：
 1. 确保 `stop_message_flow -> reenter` 的 outcome 只来自 Rust skeleton/profile。
@@ -366,7 +366,7 @@ request_context
 ### Phase 2：把 flow-specific state mutation 从 mainline 抽成 block
 
 唯一修改点：
-- `followup-mainline-block.ts`
+- `backend-route-mainline-block.ts`
 - 新增 `flow-state-policy-block.ts` / `followup-plan-block.ts`
 
 目标：

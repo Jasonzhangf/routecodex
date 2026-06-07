@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { runFollowupMainline } from '../../sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.js';
+import { runFollowupMainline } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 

@@ -2,8 +2,8 @@ import type { JsonObject } from '../../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions, ServerToolBackendPlan, ServerToolBackendResult, ServerToolHandler, ServerToolHandlerContext, ServerToolHandlerPlan } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
 import { bindServertoolContractWithNative, cloneJson, extractTextFromChatLike } from '../server-side-tools.js';
-import { extractCapturedChatSeed } from '../followup-seed.js';
-import { reenterServerToolBackend } from '../reenter-backend.js';
+import { extractCapturedChatSeed } from '../backend-route-seed.js';
+import { reenterServerToolBackend } from '../backend-route-backend.js';
 import { shouldRunVisionFlowForAdapterContext } from './vision-eligibility.js';
 import {
   visionBuildAnalysisPayloadWithNative,

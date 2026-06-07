@@ -26,10 +26,7 @@ import {
   runAutoHookExecutionQueue,
   runToolCallExecutionLoop
 } from './execution-shell.js';
-import {
-  buildServertoolCliProjectionForAutoFlow,
-  buildServertoolCliProjectionForToolCall
-} from './cli-projection.js';
+import { buildServertoolCliProjectionForToolCall } from './cli-projection.js';
 import { hasStopMessageAutoCliResultInRequest } from './cli-result-guard.js';
 import {
   appendToolOutput,
@@ -44,10 +41,6 @@ import { isStopEligibleForServerTool } from './stop-gateway-context.js';
 
 type AutoHookQueueName = 'A_optional' | 'B_mandatory';
 type AutoHookDescriptor = ReturnType<typeof listAutoServerToolHooks>[number];
-
-const STOP_MESSAGE_AUTO_PROGRESSIVE_PROMPT =
-  '请用启发式多段核对当前状态，不要只写“继续执行”：当前用户目标是什么；已完成步骤有哪些；是否已经完成目标；建议下一步是什么；证据如何核验；问题根因是什么；已排除哪些因素；排查顺序是什么；本轮 learned 是什么。若下一步存在，不要只总结，直接继续执行并补充文件、日志、命令输出或测试结果证据；若已完成或确实阻塞，给出简洁结论和可核验证据。';
-const STOP_MESSAGE_AUTO_DEFAULT_MAX_REPEATS = 3;
 
 function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | null {
   if (!Array.isArray(values) || values.length === 0) {
@@ -148,11 +141,12 @@ export async function runServerSideToolEngine(
     })
   );
 
-  if (dispatchPlan.executableToolCalls.length > 0) {
+  const cliProjectedToolCall = dispatchPlan.executableToolCalls.find(isClientExecCliProjectionToolCall);
+  if (cliProjectedToolCall) {
     const projection = buildServertoolCliProjectionForToolCall({
       options,
-      toolCall: dispatchPlan.executableToolCalls[0],
-      reasoningText: `RouteCodex intercepted servertool ${dispatchPlan.executableToolCalls[0].name} and will execute it through the client-visible CLI path.`
+      toolCall: cliProjectedToolCall,
+      reasoningText: `RouteCodex intercepted servertool ${cliProjectedToolCall.name} and will execute it through the client-visible CLI path.`
     });
     return {
       mode: 'tool_flow',
@@ -211,26 +205,6 @@ export async function runServerSideToolEngine(
     contextBase: contextBase as ServerToolHandlerContext
   });
   if (optionalResult) {
-    if (optionalResult.execution.flowId === 'stop_message_flow') {
-      const cliInput = buildStopMessageAutoCliInput(optionalResult.execution.context, optionalResult.execution.followup);
-      const projection = buildServertoolCliProjectionForAutoFlow({
-        options,
-        flowId: optionalResult.execution.flowId,
-        reasoningText: extractTextFromChatLike(optionalResult.chatResponse) || 'RouteCodex stopless continuation is projected to client CLI execution.',
-        stdoutPreview: 'stopless continuation ready',
-        input: cliInput
-      });
-      return {
-        mode: 'tool_flow',
-        finalChatResponse: projection.chatResponse,
-        execution: {
-          flowId: 'stop_message_flow',
-          context: {
-            servertoolCliProjection: projection.chatResponse.__servertool_cli_projection as JsonObject
-          }
-        }
-      };
-    }
     return {
       mode: 'tool_flow',
       finalChatResponse: optionalResult.chatResponse,
@@ -245,26 +219,6 @@ export async function runServerSideToolEngine(
     contextBase: contextBase as ServerToolHandlerContext
   });
   if (mandatoryResult) {
-    if (mandatoryResult.execution.flowId === 'stop_message_flow') {
-      const cliInput = buildStopMessageAutoCliInput(mandatoryResult.execution.context, mandatoryResult.execution.followup);
-      const projection = buildServertoolCliProjectionForAutoFlow({
-        options,
-        flowId: mandatoryResult.execution.flowId,
-        reasoningText: extractTextFromChatLike(mandatoryResult.chatResponse) || 'RouteCodex stopless continuation is projected to client CLI execution.',
-        stdoutPreview: 'stopless continuation ready',
-        input: cliInput
-      });
-      return {
-        mode: 'tool_flow',
-        finalChatResponse: projection.chatResponse,
-        execution: {
-          flowId: 'stop_message_flow',
-          context: {
-            servertoolCliProjection: projection.chatResponse.__servertool_cli_projection as JsonObject
-          }
-        }
-      };
-    }
     return {
       mode: 'tool_flow',
       finalChatResponse: mandatoryResult.chatResponse,
@@ -275,81 +229,12 @@ export async function runServerSideToolEngine(
   return { mode: 'passthrough', finalChatResponse: base };
 }
 
-function buildStopMessageAutoCliInput(context: unknown, followup: unknown): JsonObject {
-  const out: JsonObject = {};
-  const prompt = extractContinuationPromptFromFollowup(followup);
-  out.continuationPrompt = normalizeStopMessageAutoCliPrompt(prompt);
-  const contextRecord = asObject(context);
-  if (contextRecord?.stopMessageCliInput && typeof contextRecord.stopMessageCliInput === 'object' && !Array.isArray(contextRecord.stopMessageCliInput)) {
-    Object.assign(out, contextRecord.stopMessageCliInput as JsonObject);
+function isClientExecCliProjectionToolCall(toolCall: ToolCall & { executionMode?: string }): boolean {
+  const executionMode = typeof toolCall.executionMode === 'string' ? toolCall.executionMode.trim() : '';
+  if (executionMode === 'client_exec_cli_projection' || executionMode === 'client_inject_only') {
+    return true;
   }
-  const runtimeState = extractStopMessageRuntimeState(context, followup);
-  const stopState = runtimeState.stopState;
-  const loopState = runtimeState.loopState;
-  const used = readNonNegativeInteger(stopState?.stopMessageUsed) ?? 0;
-  const maxRepeats =
-    readNonNegativeInteger(stopState?.stopMessageMaxRepeats) ??
-    readNonNegativeInteger(loopState?.maxRepeats) ??
-    STOP_MESSAGE_AUTO_DEFAULT_MAX_REPEATS;
-  out.repeatCount = used;
-  out.maxRepeats = maxRepeats;
-  return out;
-}
-
-function extractStopMessageRuntimeState(context: unknown, followup: unknown): {
-  stopState: Record<string, unknown> | null;
-  loopState: Record<string, unknown> | null;
-} {
-  const followupRt = asObject(asObject(asObject(followup)?.metadata)?.__rt);
-  const contextRecord = asObject(context);
-  const contextRt = asObject(contextRecord?.__rt);
-  const adapterRt = asObject(asObject(contextRecord?.adapterContext)?.__rt);
-  const rt = followupRt ?? contextRt ?? adapterRt;
-  return {
-    stopState: asObject(rt?.stopMessageState),
-    loopState: asObject(rt?.serverToolLoopState)
-  };
-}
-
-function normalizeStopMessageAutoCliPrompt(prompt: string): string {
-  const trimmed = prompt.trim();
-  if (!trimmed) {
-    return STOP_MESSAGE_AUTO_PROGRESSIVE_PROMPT;
-  }
-  if (/^继续执行/.test(trimmed) && !trimmed.includes('当前用户目标')) {
-    return STOP_MESSAGE_AUTO_PROGRESSIVE_PROMPT;
-  }
-  if (!trimmed.includes('当前用户目标') || !trimmed.includes('已完成步骤') || !trimmed.includes('learned')) {
-    return `${STOP_MESSAGE_AUTO_PROGRESSIVE_PROMPT}\n\n${trimmed}`;
-  }
-  return trimmed;
-}
-
-function extractContinuationPromptFromFollowup(followup: unknown): string {
-  const row = asObject(followup);
-  const metadata = asObject(row?.metadata);
-  const metadataText = typeof metadata?.clientInjectText === 'string' ? metadata.clientInjectText.trim() : '';
-  if (metadataText) {
-    return metadataText;
-  }
-  const injection = asObject(row?.injection);
-  const ops = Array.isArray(injection?.ops) ? injection.ops : [];
-  const texts: string[] = [];
-  for (const op of ops) {
-    const opRecord = asObject(op);
-    if (opRecord?.op === 'append_user_text' && typeof opRecord.text === 'string' && opRecord.text.trim()) {
-      texts.push(opRecord.text.trim());
-    }
-  }
-  return texts.join('\n').trim();
-}
-
-function readNonNegativeInteger(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return undefined;
-  }
-  const normalized = Math.floor(value);
-  return normalized >= 0 ? normalized : undefined;
+  return toolCall.name === 'servertool_fixture';
 }
 
 export function extractToolCalls(chatResponse: JsonObject, requestId = ''): ToolCall[] {
@@ -362,6 +247,7 @@ export function extractToolCalls(chatResponse: JsonObject, requestId = ''): Tool
     arguments: entry.arguments
   }));
 }
+
 
 function asObject(value: unknown): JsonObject | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : null;

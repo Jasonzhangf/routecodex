@@ -8,9 +8,9 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ## Hub Pipeline 工具边界审计硬规则（最醒目）
 
 - 审计/修复 Hub Pipeline 工具问题前，先读 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
-- Servertool followup 固定节点锁：`HubRespChatProcess03Governed -> ServertoolResp03RuntimeAction -> ServertoolReq04FollowupBuilt -> normal Hub reenter -> ServertoolResp03FollowupResult -> HubRespOutbound04ClientSemantic`；`ServertoolResp03RuntimeAction` 必须在 chat-process 标准态判定，只决定 followup action。`ServertoolReq04FollowupBuilt` 是唯一标准 followup 请求 builder：clone `HubReqInbound02Standardized` 捕获的标准请求 origin，只在标准 chat/input 位置追加 followup delta，并保留 origin 标准请求语义字段；内部 metadata 仍走 side-channel。TS 只能调用 native 并执行 IO/reenter，禁止判断工具语义、拼装 messages/tools、清洗工具列表、修补 `requires_action`、从 `rawBody` 正常构造请求、用 provider raw/client outbound/SSE payload 判定 stopless，或用旧 `streamPipe.payload` 覆盖 post-servertool payload。
-- Servertool 响应职责锁：servertool 只代客户端执行本地工具或发起正常 followup；它没有专用 response projection。followup 响应方向固定为 provider/model -> `RespInbound` -> `HubRespChatProcess03Governed` -> `HubRespOutbound04ClientSemantic` -> client。`ServertoolResp03FollowupResult` 若仍是 chatprocess payload，只能经 `buildHubRespOutbound04FromHubRespChatProcess03` 相邻转换；禁止手写 Responses wrapper、直接写 SSE/client frame、或把 chat completion shape 泄到 `/v1/responses`。
-- Servertool 命名真相：`finalChatResponse` 只代表 pre-followup governed response；`followupBody` / `ServertoolResp03FollowupResult` 非空时必须成为 `HubRespOutbound04ClientSemantic` 的唯一输入。
+- stopless/servertool CLI projection 固定契约：`HubRespChatProcess03Governed -> stopless gate -> buildServertoolCliProjectionForAutoFlow -> exec_command CLI projection -> client`。`stop_message_auto` 不 reenter Hub Pipeline，不走 followup 编排，不调用 `reenterPipeline`。TS 只调用 Rust native gate + 构建 CLI projection JSON，禁止判断工具语义、拼装 messages/tools、清洗工具列表、从 `rawBody` 正常构造请求、用 provider raw/client outbound/SSE payload 判定 stopless。
+- Servertool 响应职责锁：`stop_message_auto` CLI projection 是唯一 stopless 执行路径。其他 servertool（vision、web_search）走 backend route reenter，各有独立 outcome contract。禁止在 stopless 路径手写 Responses wrapper、直接写 SSE/client frame。
+- Servertool 命名真相：CLI projection 投影为 `exec_command` 工具调用；客户端通过 exec_command 执行 CLI 后，结果作为工具返回进入下一轮请求。禁止在 CLI output 恢复内部 servertool tool identity，禁止使用 `followup` / `reenter` / `ServertoolReq04FollowupBuilt` 旧契约。
 - 请求/响应转换必须是唯一语义链：`req_inbound -> req_chatprocess -> req_outbound -> provider_runtime -> resp_inbound -> resp_chatprocess -> resp_outbound`；`req_inbound/resp_inbound` 只解析入口协议和捕获上下文，所有字段的唯一语义映射必须发生在 `req_chatprocess/resp_chatprocess`，再由 outbound 只编码目标协议 wire，禁止绕过 chatprocess 直接重建上下文。
 - 字段守恒规则：正常传输链路不得丢字段、不得把工具语义/`thinking`/`reasoning`/`tool_use`/`tool_result` 降级成普通文本；协议不支持的字段必须进入明确 canonical carrier 或 fail-fast，不允许静默删除、合并、清理、fallback。
 - Anthropic reasoning 映射规则：入口 Anthropic `thinking` block / `reasoning_content` 必须先由 `req_inbound` 保留原始语义，再在 `req_chatprocess` 唯一映射为 Hub Chat canonical reasoning part；`req_outbound` 只编码为 provider wire 的 Anthropic `thinking` block / 合法字段；响应链同构在 `resp_chatprocess` 映射回 canonical reasoning，再由 `resp_outbound` 投影到 Responses reasoning，provider runtime 不得补做 reasoning/history 转换。
@@ -109,7 +109,7 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
 - L116-L135 `diagnosis`: PipeDebug 诊断流程
 - L136-L195 `restart`: 服务器重启与热加载（SIGUSR2）
 - L196-L275 `snapshot-startup`: Snapshot 启动策略（默认轻量 + 显式 stage）
-- L276-L375 `stopless-skeleton`: servertool stopless/followup 骨架、改动点、测试矩阵
+- L276-L375 `stopless-skeleton`: servertool stopless CLI projection 骨架、契约、测试矩阵（2026-06-06 reenter/followup 旧契约已废弃）
 - L376+ `hard-guard`: fallback / 静默失败治理硬规则
 
 ## 标准重构 / 修复闭环（强制顺序）
@@ -261,7 +261,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ## 2026-05-27 调试精华（5555 主备/health/stopless）
 
-- stopless schema-missing 若首轮 `decision=trigger reason=stop_schema_missing` 后，`:stop_followup` 打出 `skip_servertool_followup_hop` 并最终 `finish_reason=stop`，优先查 nested metadata 是否缺 `__rt.serverToolLoopState.flowId=stop_message_flow`；缺 flowId 会被当 generic servertool followup 跳过 schema gate。
+- stopless schema-missing：CLI projection 后客户端发回 tool result；查断流/不触发时先确认客户端是否正确执行了 `exec_command` 并返回 tool result，而非只看日志 `trigger`。
 
 ## 2026-05-29 调试精华（CompatProfileRegistry）
 
@@ -323,10 +323,10 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
   - quota/blacklist 是否把主 provider 挡掉。
 
 6. stopless/stop_message 约束（复盘）
-- 默认开启不等于无条件触发；必须有 followup 上下文且 finish_reason 条件正确。
+- 默认开启不等于无条件触发；必须有 CLI projection 执行上下文且 finish_reason 条件正确。
 - 禁止任何“把非 stop 改成 stop”的语义改写（仅允许既定例外：text harvest；stop -> tool_calls）。
-- 2026-06-03 更新：`stop_message_flow` 只能走 servertool reenter，禁止 `clientInjectOnly/clientInjectSource=servertool.stop_message` 与 tmux/client injection；`stop_message_flow` followup hop 是正常带工具列表的 bounded continuation，必须保留 stopMessage eligible，并由 `used/max_repeats` 计数防循环。只有非 `stop_message_flow` 的 generic followup hop 才进入 Rust skip 防递归。
-- 2026-06-03 更新：stopless schema 的 `learned` 字段属于 Rust `stop-message-core` 默认 schema；只有 `schemaGate.action=allow_stop` 且 `learned` 非空时，TS IO 薄壳才可写入项目 `note.md`。followup / invalid schema / missing schema / budget exhausted 不得写入记忆。
+- 2026-06-06 更新：`stop_message_flow` 只走 CLI projection，禁止 reenter/followup 编排；`used/max_repeats` 防循环；其他 servertool（vision/web_search）走 backend route reenter。
+- 2026-06-06 更新：stopless schema 的 `learned` 字段属于 Rust `stop-message-core` 默认 schema；只有 `schemaGate.action=allow_stop` 且 `learned` 非空时，TS IO 薄壳才可写入项目 `note.md`。invalid schema / missing schema / budget exhausted 不得写入记忆。
 - 2026-06-04 更新：stopless/servertool gateway 只能检查 `HubRespChatProcess03Governed` chat 标准态；禁止用 provider raw `stop_reason` 或 client outbound/SSE payload 判定。Rust effect 必须携带 chat-process payload，TS shell 缺 payload 必须 fail-fast。
 
 
@@ -583,9 +583,9 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
      - `SERVERTOOL_EMPTY_FOLLOWUP`
      - 样本中 `payload.stream=false` + `body.__sse_responses`
    - 唯一修复点：
-     - `sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts`
-     - `sharedmodule/llmswitch-core/src/servertool/reenter-backend.ts`
-     - `sharedmodule/llmswitch-core/src/servertool/followup-response-block.ts`
+     - `sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts`
+     - `sharedmodule/llmswitch-core/src/servertool/backend-route-backend.ts`
+     - `sharedmodule/llmswitch-core/src/servertool/backend-route-response-block.ts`
    - 修复原则：
      - followup 不强制改 stream；
      - SSE wrapper 不能被空响应判定误杀。
@@ -594,7 +594,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
    - 现象：
      - `[hub_response] Non-canonical response payload at chat_process.response.entry`
    - 唯一修复点：
-     - `sharedmodule/llmswitch-core/src/servertool/reenter-followup-block.ts`
+     - `sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts`
    - 修复原则：
      - 不得把 wrapper 当 body；
      - 只允许 canonical `followup.body` 进入后续 contract 检查。
@@ -653,22 +653,22 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
    - 改这里的触发：缓存泄漏、生命周期、跨轮丢 seed
 
 3. **Delta 组装层（唯一构建 followup payload）**
-   - 文件：`sharedmodule/llmswitch-core/src/servertool/followup-origin-delta.ts`
+   - 文件：`sharedmodule/llmswitch-core/src/servertool/backend-route-origin-delta.ts`
    - 职责：`seed + injection ops -> followup payload(messages)`，统一 tool/text/system/vision 增量函数
    - 改这里的触发：tool_call/tool_result 配对错误、文本增量错误、附件/vision 增量错误
 
 4. **Shape 归一层（responses 入口合法化）**
-   - 文件：`sharedmodule/llmswitch-core/src/servertool/followup-shape-guard.ts`
+   - 文件：`sharedmodule/llmswitch-core/src/servertool/backend-route-shape-guard.ts`
    - 职责：`messages -> input`、assistant.tool_calls -> function_call、tool -> function_call_output
    - 改这里的触发：`bodyHasMessages=true bodyHasInput=false`、shape 非法 400
 
 5. **Reenter 执行层（重入 + 重试 + client disconnect）**
-   - 文件：`sharedmodule/llmswitch-core/src/servertool/reenter-followup-block.ts`
+   - 文件：`sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts`
    - 职责：统一 followup 重入、超时、终止条件、失败落盘证据
    - 改这里的触发：重试风暴、client 断开后仍重试、orphan_tool_result 证据采集
 
 6. **编排层（策略入口）**
-   - 文件：`sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts`
+   - 文件：`sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts`
    - 职责：选择 executionMode（reenter/client inject）、拼装 metadata、调用 reenter block
    - 改这里的触发：不触发 stopless、触发次数策略错误、/goal active 行为错误
 
@@ -695,7 +695,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
    - `tests/servertool/origin-request-store.spec.ts`
 
 ### 4) 失败证据固化（必须保留）
-- 文件：`sharedmodule/llmswitch-core/src/servertool/reenter-followup-block.ts`
+- 文件：`sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts`
 - 规则：仅在 `orphan_tool_result` 失败时落盘
   `tmp/servertool-followup-failures/<followupRequestId>.json`
 - 用途：线上失败 -> 本地 1:1 replay；禁止“凭感觉修”。
@@ -1651,7 +1651,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 黑盒回归必须覆盖：端口 A 的 recoverable cooldown 不影响端口 B；端口 A 捕获的 Responses `response_id` 不能在端口 B resume；否则就是跨端口上下文/路由池泄漏。
 - 真源文件：`src/server/runtime/http-server/index.ts`、`sharedmodule/llmswitch-core/rust-core/.../virtual_router_engine/engine/selection.rs`、`sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`。
 
-### 2026-05-29 调试精华（OpenAI-chat 协议字段守恒 + stopless 断连）
+### 2026-05-29 调试精华（OpenAI-chat 协议字段守恒 + stopless 断连）⚠️ 历史记录
 - opencode/DeepSeek OpenAI-chat 400 不只看 null 字段；必须检查真实 `provider-request.json` 是否混入 Anthropic 字段，尤其 assistant tool-call history 的 `content:[{type:"thinking"}]`。OpenAI-chat 允许 `reasoning_content`，但不得带 Anthropic thinking block；红测必须覆盖 inbound / chat process / outbound 三段协议字段守恒。
 - stopless/servertool followup 必须在 `executeNested` 启动前检查 client abort signal；不能只把 abort signal 传进 Promise.race，否则 nested 请求已发出，客户端断开后仍会续杯/重路由。
 
@@ -1934,7 +1934,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### 2026-06-06 direct retry wrapper 红线
 - router-direct 只能做 same-protocol provider passthrough + hooks；禁止在 `index.ts` direct live path 调 `resolveRequestExecutorProviderFailurePlan`、生成 `retryMetadata`、写 `__routecodexProviderFailureAttemptOffset` 或本地重入标准 pipeline。provider 错误必须进入 executor/error 唯一链，direct 本地只记录 `router-direct.send.error` 并抛出。
-- `/v1/responses` 出现 `Responses wire requires top-level tool.name` 时先查 direct 入口：chat-style `{type:"function", function:{...}}` 工具必须让 `evaluateDirectRouteDecision` 返回 `providerWireValid=false` 并走 relay；线上复测要看 provider-request tool shape 和 `router-direct.send.error` 是否消失。
+- `/v1/responses` 出现 `Responses wire requires top-level tool.name` 时，先对照 live 原始 client request / provider-request snapshot / native sanitizer 输出，确认 tool shape 首次变坏的节点；不要默认归因 direct 入口，也不要把合法 flat Responses tools 因为“有工具”改走 relay。已验证一次根因是 Rust `sanitize_provider_outbound_payload_json` 把合法 `{type:"function", name,...}` 改成 chat-style `{type:"function", function:{...}}`；唯一修复点是 provider outbound sanitizer 按协议保持 wire shape。
 
 ## 2026-06-06 apply_patch 高效编辑法（沉淀）
 - 想在 yml/JSON/MD 末尾追加大块内容时，先用空行 sentinel 单独 patch 一行（如 `__LONGTAIL_TAIL_SENTINEL__`），然后第二次 patch 用 sentinel 作为 find-context 并把 `+` 行接在它后面，sentinel 行用 `-` 删掉；这样 verifier 的 find-context 短、匹配稳。
@@ -1949,17 +1949,25 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 3 个新 gate：deleted-path（拦截 `required_tests/required_gates/allowed_paths` 指向已删文件）、duplicate-owner（owner 唯一性 + keyword 动作对跨 family 检测）、ts-owner-ban（除白名单外 TS 壳不得作为 owner）。注册为独立 `verify:architecture-ci-longtail` 链，不并入长 `verify:architecture-ci`（避免 1800+ 字符 find context 死循环）。
 - 完成标准：25 features（17 旧 + 8 新），全套 `verify:architecture-ci` 与 3 个新 gate 全绿。
 
-## 2026-06-06 direct tools leak 复测精华
+## 2026-06-06 direct tools / provider outbound shape 复测精华
 
-- 若 `/v1/responses` + `tools[]` 仍出现 `router-direct.send` 或 `Responses wire requires top-level tool.name`，先查 `router-direct-pipeline.ts` 核心函数是否自守卫 `openai-responses tools[] -> direct_requires_hub_relay`；不能只依赖 `index.ts` 外层入口判定。
-- Responses provider wire shape 红线：`openai-responses` 出站 `tools` 必须在 Rust `req_outbound_stage3_compat` 通用 pass 中把 chat-style `{type:"function", function:{name,parameters}}` 修为 top-level `{type:"function", name, parameters}`；不得只挂在 `responses:c4m/crs` profile，也不得让 TS `applyRequestCompat` 因无 explicit profile 绕过 native stage。
+- Same-protocol direct 是否成立只看入口协议与目标 provider protocol，和有没有 `tools[]` 无关；合法 Responses flat tools 必须继续 direct。禁止用“工具存在 / chat-style 变体”作为 direct->relay 选择依据。
+- `Responses wire requires top-level tool.name` 的正确取证顺序：先看原始 client request 是否已经是 flat `{type:"function", name, parameters}`；再看 Rust provider outbound sanitizer / provider-request snapshot 是否把它改成 `{type:"function", function:{...}}`。若原始合法而 provider-request 变坏，根因在 outbound sanitizer/provider wire builder，不在请求前清洗，也不在 direct 入口。
+- Responses provider wire shape 红线：`openai-responses` 出站 `tools` 必须保持 top-level `{type:"function", name, parameters}`；`openai-chat` 才使用 `{type:"function", function:{...}}`。协议归属必须静态/红测锁住，避免 chat tool shape 进入 Responses wire。
 - 复测 10000 时若 `127.0.0.1:10000` 返回 `Empty reply from server`，先用 `lsof -nP -iTCP:10000 -sTCP:LISTEN` 查端口冲突；本机 BaiduNetdisk 可能占用 `127.0.0.1:10000`，可用本机 LAN IP 命中 RCC 的 `0.0.0.0:10000` 监听做对照。
 
-## 2026-06-06 direct provider error leak / relay reselection lesson
-- Symptom: `router-direct.send.error` provider runtime errors reached client instead of switching providers. Fix owner is `RouteCodexHttpServer.executeRouterDirectPipelineForPort` + `executePortAwarePipeline`: report through `reportRequestExecutorProviderError`, return `excludedProviderKey`, then relay executor runs with `excludedProviderKeys`; do not add local retry/classification in `router-direct-pipeline.ts`.
-- Required red test: `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts` must include `router same-protocol direct provider error reroutes through relay with provider excluded`, and online smoke must check 5555/10000 SSE contains no direct provider error marker.
+## 2026-06-06 direct provider error / preselected route reselection lesson
+- Direct provider errors must not be locally retried/rerouted in router-direct. Direct records `router-direct.send.error` and rethrows; request-level provider switching belongs to the executor/error chain, not a direct wrapper.
+- 429 after a preselected direct miss can still leak to client if retry metadata keeps `__routecodexPreselectedRoute`: the second Hub execution will reselect the same failed provider and ignore `excludedProviderKeys`. Fix owner is `decorateMetadataForAttempt`: when `excludedProviderKeys.size > 0` or `attempt > 1`, remove `__routecodexPreselectedRoute` so Virtual Router can choose the next provider.
+- Required red test: request-executor must cover “provider 429 with preselected route clears preselection and selects backup”; live smoke should show first `[provider-switch] ... exclude_and_reroute`, second `[virtual-router-hit]` to a different provider, then 200.
 
 ## 2026-06-06 调试精华（10000 loopback shadow / stopless metadata）
 
 - 10000 若 `LAN /health` 正常但 `127.0.0.1 /health` empty reply，优先查 loopback-only shadow listener；macOS 可同时存在 `127.0.0.1:PORT` 与 `*.PORT`，必须启动前 fail-fast，禁止按 IP 做端口特例或把它误判为 RouteCodex block IP。
 - stopless/session metadata owner 只解析并绑定 scope：header/body/user metadata 的 tmux/session/workdir 是请求事实，不能在 metadata builder 阶段因 tmux liveness 抹掉；tmux alive 检查属于后续注入/cleanup owner。
+
+## 2026-06-07 servertool CLI / stopless closeout 精华
+
+- `stop_message_auto` migrated path 必须同时锁 projection 和 CLI executor：projection 生成 `exec_command routecodex servertool run stop_message_auto --input-json <json>`；CLI executor 必须强制 `flowId=stop_message_flow`、`continuationPrompt`、`repeatCount`、`maxRepeats`，缺失直接 fail-fast，禁止默认 summary 或固定“继续执行”兜底。
+- stopless CLI counters 读取必须按字段级优先级：`metadata.serverToolLoopState.repeatCount/maxRepeats` -> `metadata.__rt.serverToolLoopState.repeatCount/maxRepeats` -> `metadata.__rt.stopMessageState.stopMessageUsed/stopMessageMaxRepeats`；禁止对象级 `??` 短路，否则顶层 loopState 缺字段会遮住 `__rt` 真值。
+- 旧 ticket/restoration 审计要分两层扫：精确 marker (`--ticket|stcli_|rcc_cli_|cli-ticket|ServertoolCliTicket|tryRestoreServertoolCliToolOutputs`) 用于证明 runtime/src/tests 无旧 ticket；宽词 `restore/restoration` 必须分类为 servertool 禁止性 marker、Responses continuation 正常语义、或无关 git restore 文案，不能把宽词命中误当旧设计复活。

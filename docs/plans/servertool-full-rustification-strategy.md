@@ -52,7 +52,7 @@ rust-core/crates/
 
 | 文件 | 行数 | 依赖 |
 |---|---|---|
-| `servertool/followup-mainline-block.ts` | ~480 | async HTTP/pipeline reentry |
+| `servertool/backend-route-mainline-block.ts` | ~480 | async HTTP/pipeline reentry |
 | `servertool/engine.ts` | ~200 | async orchestration |
 | `servertool/server-side-tools.ts` | ~200 | handler registry + dispatch |
 | `servertool/registry.ts` | ~60 | handler registration |

@@ -2,9 +2,9 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
-import { applyFollowupRuntimeMetadata } from './followup-runtime-block.js';
-import { resolveFollowupFlowDecision, resolveTransparentReplayRequestSuffixForFlowId, type FollowupFlowDecision } from './followup-flow-policy.js';
-import { extractCapturedChatSeed } from './followup-seed.js';
+import { applyFollowupRuntimeMetadata } from './backend-route-runtime-block.js';
+import { resolveFollowupFlowDecision, resolveTransparentReplayRequestSuffixForFlowId, type FollowupFlowDecision } from './backend-route-flow-policy.js';
+import { extractCapturedChatSeed } from './backend-route-seed.js';
 
 function buildFollowupRequestId(baseRequestId: string, suffix?: string): string {
   const trimmedBase = typeof baseRequestId === 'string' && baseRequestId.trim() ? baseRequestId.trim() : 'servertool';

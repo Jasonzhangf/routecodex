@@ -1,4 +1,4 @@
-import { decorateFinalChatWithServerToolContext } from '../../sharedmodule/llmswitch-core/src/servertool/finalize-followup-block.js';
+import { decorateFinalChatWithServerToolContext } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-finalize-block.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 
 describe('finish_reason policy', () => {

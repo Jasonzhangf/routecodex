@@ -781,9 +781,9 @@ describe('stop_message_auto servertool', () => {
     expect(result.executed).toBe(true);
     expect((followupRuntime?.serverToolLoopState as any)?.flowId).toBe('stop_message_flow');
     expect((followupRuntime?.serverToolLoopState as any)?.repeatCount).toBe(1);
-    expect((followupRuntime?.serverToolLoopState as any)?.maxRepeats).toBe(3);
+    expect((followupRuntime?.serverToolLoopState as any)?.maxRepeats).toBe(10);
     expect((followupRuntime?.stopMessageState as any)?.stopMessageUsed).toBe(1);
-    expect((followupRuntime?.stopMessageState as any)?.stopMessageMaxRepeats).toBe(3);
+    expect((followupRuntime?.stopMessageState as any)?.stopMessageMaxRepeats).toBe(10);
     expect(resolveRuntimeStopMessageState(followupRuntime)?.used).toBe(1);
   });
 
@@ -1367,7 +1367,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('goal active repeated stop fails fast instead of passthrough looping', async () => {
+  test('historical goal-context repeated stop fails fast through followup error chain', async () => {
     const assistantText = '立刻跑全测试 + 远端验证。';
     await expect(
       runServerToolOrchestration({
@@ -1406,7 +1406,7 @@ describe('stop_message_auto servertool', () => {
         providerProtocol: 'openai-chat'
       })
     ).rejects.toMatchObject({
-      code: 'SERVERTOOL_HANDLER_FAILED'
+      code: 'SERVERTOOL_FOLLOWUP_FAILED'
     });
   });
 

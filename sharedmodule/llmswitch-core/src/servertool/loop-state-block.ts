@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
-import { resolveFollowupFlowDecision, type FollowupFlowDecision } from './followup-flow-policy.js';
+import { resolveFollowupFlowDecision, type FollowupFlowDecision } from './backend-route-flow-policy.js';
 
 export type ServerToolLoopState = {
   flowId?: string;

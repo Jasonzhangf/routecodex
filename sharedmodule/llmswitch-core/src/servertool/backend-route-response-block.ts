@@ -5,7 +5,7 @@ import {
   isEmptyClientResponsePayloadWithNative,
   isToolCallContinuationResponseWithNative
 } from '../router/virtual-router/engine-selection/native-chat-process-node-result-semantics.js';
-import { extractCapturedChatSeed } from './followup-seed.js';
+import { extractCapturedChatSeed } from './backend-route-seed.js';
 
 export function extractAppendUserTextFromFollowupPlan(followupPlan: unknown): string | undefined {
   if (!followupPlan || typeof followupPlan !== 'object' || Array.isArray(followupPlan)) {

@@ -3,11 +3,11 @@ import {
   applyClientInjectOnlyMetadata,
   applyFollowupRuntimeMetadata,
   resolveFollowupExecutionMode
-} from '../../sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.js';
-import { resolveFollowupFlowDecision } from '../../sharedmodule/llmswitch-core/src/servertool/followup-flow-policy.js';
-import { shouldShortCircuitRequiresActionFollowup } from '../../sharedmodule/llmswitch-core/src/servertool/finalize-followup-block.js';
-import { runReenterFollowup } from '../../sharedmodule/llmswitch-core/src/servertool/reenter-followup-block.js';
-import { runClientInjectOnlyFollowup } from '../../sharedmodule/llmswitch-core/src/servertool/client-inject-followup-block.js';
+} from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.js';
+import { resolveFollowupFlowDecision } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-flow-policy.js';
+import { shouldShortCircuitRequiresActionFollowup } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-finalize-block.js';
+import { runReenterFollowup } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.js';
+import { runClientInjectOnlyFollowup } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-client-inject-block.js';
 
 describe('stopless re-enter path (no tmux inject)', () => {
   test('stopless_goal_continue returns reenter execution mode regardless of skeleton config', () => {

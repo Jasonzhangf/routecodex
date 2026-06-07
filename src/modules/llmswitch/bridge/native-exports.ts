@@ -6,6 +6,7 @@
 
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { resolveCorePackageDir } from '../core-loader.js';
 import { importCoreDist, requireCoreDist, resolveCoreModulePath, type AnyRecord } from './module-loader.js';
 import type { ToolExecutionFailureSignal } from './snapshot-recorder-types.js';
 
@@ -116,6 +117,30 @@ type NativeHubBridgePolicySemantics = {
   }) => Record<string, unknown>;
 };
 
+type NativeRouterHotpathJsonBinding = {
+  validateResponsesDirectToolShapeContractJson?: (payloadJson: string) => string;
+  applyResponsesDirectRouteParamsOverrideJson?: (
+    payloadJson: string,
+    routeParamsJson: string,
+    providerDefaultModelJson: string,
+    requestReasoningEffortJson: string
+  ) => string;
+  buildResponsesDirectPassthroughBodyJson?: (payloadJson: string) => string;
+  hasDeclaredApplyPatchToolJson?: (payloadJson: string) => string;
+  evaluateResponsesDirectRouteDecisionJson?: (
+    payloadJson: string,
+    inboundProtocolJson: string,
+    applyPatchModeJson: string
+  ) => string;
+  resolveResponsesDirectPayloadJson?: (
+    bodyJson: string,
+    rawRequestBodyJson: string,
+    bodyStreamJson: string,
+    metadataStreamJson: string,
+    outboundStreamJson: string
+  ) => string;
+};
+
 type NativeHubVrNodeContracts = {
   describeHubPipelineContractsWithNative?: () => AnyRecord;
   describeVirtualRouterContractsWithNative?: () => AnyRecord;
@@ -134,6 +159,7 @@ let cachedFollowupSanitize: FollowupSanitizeModule | null | undefined;
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
 let cachedHubBridgePolicySemantics: NativeHubBridgePolicySemantics | null | undefined;
 let cachedHubBridgePolicySemanticsSync: NativeHubBridgePolicySemantics | null | undefined;
+let cachedRouterHotpathJsonBindingSync: NativeRouterHotpathJsonBinding | null | undefined;
 let cachedHubVrNodeContracts: NativeHubVrNodeContracts | null | undefined;
 let cachedChatProcessNodeResultSemantics: NativeChatProcessNodeResultSemantics | null | undefined;
 let sharedBindingsChecked: boolean | undefined;
@@ -319,6 +345,77 @@ function getHubBridgePolicySemanticsSync(): NativeHubBridgePolicySemantics {
   return cachedHubBridgePolicySemanticsSync;
 }
 
+function getRouterHotpathJsonBindingSync(): NativeRouterHotpathJsonBinding {
+  if (cachedRouterHotpathJsonBindingSync !== undefined) {
+    if (!cachedRouterHotpathJsonBindingSync) {
+      throw new Error('[llmswitch-bridge] router_hotpath_napi native binding not available');
+    }
+    return cachedRouterHotpathJsonBindingSync;
+  }
+
+  try {
+    const packageDir = resolveCorePackageDir('ts');
+    const candidates = [
+      path.join(packageDir, 'rust-core', 'target', 'release', 'router_hotpath_napi.node'),
+      path.join(packageDir, 'rust-core', 'target', 'debug', 'router_hotpath_napi.node'),
+      path.join(packageDir, 'dist', 'native', 'router_hotpath_napi.node'),
+      path.join(packageDir, 'router_hotpath_napi.node'),
+    ];
+    const requireFromPackage = createRequire(path.join(packageDir, 'package.json'));
+    for (const candidate of candidates) {
+      try {
+        const loaded = requireFromPackage(candidate) as NativeRouterHotpathJsonBinding;
+        if (loaded && typeof loaded === 'object') {
+          cachedRouterHotpathJsonBindingSync = loaded;
+          return cachedRouterHotpathJsonBindingSync;
+        }
+      } catch {
+        // try the next canonical native artifact location
+      }
+    }
+  } catch {
+    cachedRouterHotpathJsonBindingSync = null;
+  }
+
+  cachedRouterHotpathJsonBindingSync = null;
+  throw new Error('[llmswitch-bridge] router_hotpath_napi native binding not available');
+}
+
+function stringifyNativeJsonArg(capability: string, value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? 'null';
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
+    throw new Error(`[llmswitch-bridge] ${capability} JSON stringify failed: ${detail}`);
+  }
+}
+
+function invokeRouterHotpathJsonCapability(capability: keyof NativeRouterHotpathJsonBinding, args: unknown[]): unknown {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding[capability];
+  if (typeof fn !== 'function') {
+    throw new Error(`[llmswitch-bridge] ${String(capability)} not available`);
+  }
+  const encodedArgs = args.map((arg) => stringifyNativeJsonArg(String(capability), arg));
+  const raw = (fn as (...args: string[]) => string)(...encodedArgs);
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error(`[llmswitch-bridge] ${String(capability)} returned empty result`);
+  }
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
+    throw new Error(`[llmswitch-bridge] ${String(capability)} JSON parse failed: ${detail}`);
+  }
+}
+
+function assertNativeObject(capability: keyof NativeRouterHotpathJsonBinding, value: unknown): AnyRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`[llmswitch-bridge] ${String(capability)} returned invalid payload`);
+  }
+  return value as AnyRecord;
+}
+
 function getChatProcessNodeResultSemantics(): NativeChatProcessNodeResultSemantics {
   if (cachedChatProcessNodeResultSemantics !== undefined) {
     if (!cachedChatProcessNodeResultSemantics) {
@@ -444,17 +541,12 @@ export async function sanitizeProviderOutboundPayload(input: {
 export function validateResponsesDirectToolShapeContractNative(
   payload: Record<string, unknown>
 ): { ok: true } | null {
-  let mod: NativeHubBridgePolicySemantics;
   try {
-    mod = getHubBridgePolicySemanticsSync();
+    const parsed = invokeRouterHotpathJsonCapability('validateResponsesDirectToolShapeContractJson', [payload ?? {}]);
+    return assertNativeObject('validateResponsesDirectToolShapeContractJson', parsed) as { ok: true };
   } catch {
     return null;
   }
-  const fn = mod.validateResponsesDirectToolShapeContractWithNative;
-  if (typeof fn !== 'function') {
-    return null;
-  }
-  return fn(payload) as { ok: true } | null;
 }
 
 export function applyResponsesDirectRouteParamsOverrideNative(input: {
@@ -463,30 +555,24 @@ export function applyResponsesDirectRouteParamsOverrideNative(input: {
   providerDefaultModel?: string;
   requestReasoningEffort?: string;
 }): AnyRecord {
-  const mod = getHubBridgePolicySemanticsSync();
-  const fn = mod.applyResponsesDirectRouteParamsOverrideWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] applyResponsesDirectRouteParamsOverrideWithNative not available');
-  }
-  return fn(input) as AnyRecord;
+  const parsed = invokeRouterHotpathJsonCapability('applyResponsesDirectRouteParamsOverrideJson', [
+    input.payload ?? {},
+    input.routeParams ?? null,
+    input.providerDefaultModel ?? null,
+    input.requestReasoningEffort ?? null,
+  ]);
+  return assertNativeObject('applyResponsesDirectRouteParamsOverrideJson', parsed);
 }
 
 export function buildResponsesDirectPassthroughBodyNative(payload: unknown): AnyRecord {
-  const mod = getHubBridgePolicySemanticsSync();
-  const fn = mod.buildResponsesDirectPassthroughBodyWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] buildResponsesDirectPassthroughBodyWithNative not available');
-  }
-  return fn(payload) as AnyRecord;
+  const parsed = invokeRouterHotpathJsonCapability('buildResponsesDirectPassthroughBodyJson', [payload ?? null]);
+  return assertNativeObject('buildResponsesDirectPassthroughBodyJson', parsed);
 }
 
 export function hasDeclaredApplyPatchToolNative(payload: unknown): boolean {
-  const mod = getHubBridgePolicySemanticsSync();
-  const fn = mod.hasDeclaredApplyPatchToolWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] hasDeclaredApplyPatchToolWithNative not available');
-  }
-  return fn(payload) === true;
+  const parsed = invokeRouterHotpathJsonCapability('hasDeclaredApplyPatchToolJson', [payload ?? null]);
+  const row = assertNativeObject('hasDeclaredApplyPatchToolJson', parsed);
+  return row.hasDeclaredApplyPatchTool === true;
 }
 
 export function evaluateResponsesDirectRouteDecisionNative(input: {
@@ -499,12 +585,17 @@ export function evaluateResponsesDirectRouteDecisionNative(input: {
   reason?: string;
   hasDeclaredApplyPatchTool?: boolean;
 } {
-  const mod = getHubBridgePolicySemanticsSync();
-  const fn = mod.evaluateResponsesDirectRouteDecisionWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] evaluateResponsesDirectRouteDecisionWithNative not available');
-  }
-  return fn(input);
+  const parsed = invokeRouterHotpathJsonCapability('evaluateResponsesDirectRouteDecisionJson', [
+    input.payload ?? {},
+    input.inboundProtocol ?? '',
+    input.applyPatchMode ?? '',
+  ]);
+  return assertNativeObject('evaluateResponsesDirectRouteDecisionJson', parsed) as {
+    providerWireValid: boolean;
+    requiresHubRelay: boolean;
+    reason?: string;
+    hasDeclaredApplyPatchTool?: boolean;
+  };
 }
 
 export function resolveResponsesDirectPayloadNative(input: {
@@ -514,12 +605,14 @@ export function resolveResponsesDirectPayloadNative(input: {
   metadataStream?: boolean;
   outboundStream?: boolean;
 }): AnyRecord {
-  const mod = getHubBridgePolicySemanticsSync();
-  const fn = mod.resolveResponsesDirectPayloadWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] resolveResponsesDirectPayloadWithNative not available');
-  }
-  return fn(input) as AnyRecord;
+  const parsed = invokeRouterHotpathJsonCapability('resolveResponsesDirectPayloadJson', [
+    input.body ?? null,
+    input.rawRequestBody ?? null,
+    input.bodyStream === true,
+    input.metadataStream === true,
+    input.outboundStream === true,
+  ]);
+  return assertNativeObject('resolveResponsesDirectPayloadJson', parsed);
 }
 
 export function describeHubPipelineContractsNative(): AnyRecord {

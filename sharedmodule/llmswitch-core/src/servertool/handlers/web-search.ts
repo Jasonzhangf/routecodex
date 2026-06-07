@@ -5,8 +5,8 @@ import { registerServerToolHandler } from '../registry.js';
 import { extractTextFromChatLike } from '../server-side-tools.js';
 import {
   extractCapturedChatSeed
-} from '../followup-seed.js';
-import { reenterServerToolBackend } from '../reenter-backend.js';
+} from '../backend-route-seed.js';
+import { reenterServerToolBackend } from '../backend-route-backend.js';
 import {
   webSearchResolveToolNameWithNative,
   webSearchParseToolArgumentsWithNative,
@@ -192,6 +192,12 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
                 metadata: {
                   stream: false,
                   preserveRouteHint: false
+                },
+                injection: {
+                  ops: [
+                    { op: 'append_assistant_message', required: true },
+                    { op: 'append_tool_messages_from_tool_outputs', required: true }
+                  ]
                 }
               }
             }

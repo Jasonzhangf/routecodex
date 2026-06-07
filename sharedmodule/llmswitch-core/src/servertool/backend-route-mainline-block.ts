@@ -2,7 +2,7 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import type { ServerToolExecution } from './types.js';
-import { applyHubFollowupPolicyShadow } from './followup-shadow.js';
+import { applyHubFollowupPolicyShadow } from './backend-route-shadow.js';
 import {
   applyClientInjectOnlyMetadata,
   applyFollowupRuntimeMetadata,
@@ -11,15 +11,15 @@ import {
   resolveFollowupExecutionMode,
   resolveFollowupEntryEndpoint,
   resolveLoopPayload
-} from './followup-runtime-block.js';
+} from './backend-route-runtime-block.js';
 import { evaluateStopMessageLoopGuard } from './stop-message-loop-guard-block.js';
-import { runClientInjectOnlyFollowup } from './client-inject-followup-block.js';
-import { runReenterFollowup } from './reenter-followup-block.js';
-import { maybeRunTransparentBootstrapReplay } from './bootstrap-followup-replay-block.js';
+import { runClientInjectOnlyFollowup } from './backend-route-client-inject-block.js';
+import { runReenterFollowup } from './backend-route-reenter-block.js';
+import { maybeRunTransparentBootstrapReplay } from './backend-route-bootstrap-replay-block.js';
 import {
   decorateFinalChatWithServerToolContext,
   shouldShortCircuitRequiresActionFollowup
-} from './finalize-followup-block.js';
+} from './backend-route-finalize-block.js';
 import { buildServerToolLoopState } from './loop-state-block.js';
 import { inspectStopGatewaySignal } from './stop-gateway-context.js';
 import { applyStopMessageFinishReasonBudget } from './stop-message-counter.js';
@@ -38,11 +38,11 @@ import {
   extractAppendUserTextFromFollowupPlan,
   hasRequiresActionShape,
   isEmptyClientResponsePayload
-} from './followup-response-block.js';
+} from './backend-route-response-block.js';
 import {
   applyFollowupDeltaPlan,
   loadFollowupOriginSeed
-} from './followup-origin-delta.js';
+} from './backend-route-origin-delta.js';
 import {
   appendStopMessageLoopWarning,
   buildStopMessageLoopPayload
@@ -59,7 +59,7 @@ import {
   resolveAdapterContextProviderKey
 } from './orchestration-policy-block.js';
 import { isAdapterClientDisconnected } from './timeout-error-block.js';
-import { resolveFollowupFlowDecision } from './followup-flow-policy.js';
+import { resolveFollowupFlowDecision } from './backend-route-flow-policy.js';
 import { clearStopMessageState } from './handlers/stop-message-auto/routing-state.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 import {

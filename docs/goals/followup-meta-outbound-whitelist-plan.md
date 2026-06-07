@@ -135,8 +135,8 @@ Out of Scope：
 ### 4. followup / direct / relay 语义守护
 目标文件：
 - `src/server/handlers/responses-handler.ts`
-- `sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.ts`
-- `sharedmodule/llmswitch-core/src/servertool/reenter-backend.ts`
+- `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts`
+- `sharedmodule/llmswitch-core/src/servertool/backend-route-backend.ts`
 - `src/server/runtime/http-server/executor/provider-response-converter.ts`
 
 策略：

@@ -7,7 +7,7 @@ import path from 'node:path';
 import {
   normalizeServertoolFollowupPayloadShape,
   validateServertoolFollowupPayloadShape
-} from './followup-shape-guard.js';
+} from './backend-route-shape-guard.js';
 
 function readTrimmedString(value: unknown): string | undefined {
   if (typeof value !== 'string') {

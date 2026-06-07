@@ -1,7 +1,7 @@
 import type { JsonObject } from '../../conversion/hub/types/json.js';
 import { containsImageAttachment } from '../../conversion/hub/process/chat-process-media.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
-import { extractCapturedChatSeed } from '../followup-seed.js';
+import { extractCapturedChatSeed } from '../backend-route-seed.js';
 
 const VIDEO_URL_HINT_RE = /(^data:video\/)|(\.(mp4|mov|m4v|webm|avi|mkv|m3u8|flv)(?:$|[?#]))/i;
 

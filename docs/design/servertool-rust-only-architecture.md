@@ -1083,7 +1083,7 @@ TS shell 只做：
 
 - `sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts`：6
 - `sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts`：2
-- `sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.ts`：1
+- `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts`：1
 - `sharedmodule/llmswitch-core/src/servertool/origin-request-store.ts`：1
 
 原因：

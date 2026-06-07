@@ -1,8 +1,8 @@
 import { describe, expect, test } from '@jest/globals';
 import { Readable } from 'node:stream';
 
-import { reenterServerToolBackend } from '../../sharedmodule/llmswitch-core/src/servertool/reenter-backend.js';
-import { isEmptyClientResponsePayload } from '../../sharedmodule/llmswitch-core/src/servertool/followup-response-block.js';
+import { reenterServerToolBackend } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-backend.js';
+import { isEmptyClientResponsePayload } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-response-block.js';
 
 describe('servertool followup stream compatibility', () => {
   test('reenter backend does not force stream=false when metadata stream is not provided', async () => {

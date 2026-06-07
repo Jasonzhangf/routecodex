@@ -36,8 +36,8 @@ Auditor: Reasonix Code
 |---|---|---|---|
 | stop_message_auto handler | `stop-message-auto.ts` | 697 | **全 TS**——状态机、默认逻辑、provider pin |
 | stop_message_counter | `stop-message-counter.ts` | 93 | 预算计数器 |
-| followup_mainline | `followup-mainline-block.ts` | 470 | **全 TS**——followup 重入编排中枢 |
-| followup_runtime | `followup-runtime-block.ts` | 265 | 全 TS——运行时状态 |
+| followup_mainline | `backend-route-mainline-block.ts` | 470 | **全 TS**——followup 重入编排中枢 |
+| followup_runtime | `backend-route-runtime-block.ts` | 265 | 全 TS——运行时状态 |
 | stopless_goal_state | `stopless-goal-state.ts` | 381 | **全 TS**——goal 状态机（仅 rcc_fence.rs 做 directive 解析） |
 | web_search handler | `web-search.ts` | ~350 | 全 TS |
 | vision handler | `vision.ts` | ~400 | 全 TS |
@@ -62,7 +62,7 @@ Auditor: Reasonix Code
 | 优先级 | 块 | 行数 | 理由 |
 |---|---|---|---|
 | **P0** | `stop-message-auto.ts` | 697 | 维护痛点最高，每次 stopless 变更都在改这里 |
-| **P0** | `followup-mainline-block.ts` | 470 | followup 重入编排中枢 |
+| **P0** | `backend-route-mainline-block.ts` | 470 | followup 重入编排中枢 |
 | P1 | `hub-pipeline.ts` + stage 编排 | ~400 | 编排壳，逻辑稳定 |
 | P1 | `stopless-goal-state.ts` | 381 | 已有 rcc_fence.rs 底层 |
 | P2 | web_search / vision handlers | ~750 | 按调用频率排序 |

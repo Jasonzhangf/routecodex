@@ -2873,49 +2873,49 @@
       "topDir": "servertool"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/followup-flow-policy.ts",
+      "path": "sharedmodule/llmswitch-core/src/servertool/backend-route-flow-policy.ts",
       "loc": 86,
       "nativeLinked": true,
       "topDir": "servertool"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts",
+      "path": "sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts",
       "loc": 497,
       "nativeLinked": true,
       "topDir": "servertool"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/followup-origin-delta.ts",
+      "path": "sharedmodule/llmswitch-core/src/servertool/backend-route-origin-delta.ts",
       "loc": 379,
       "nativeLinked": false,
       "topDir": "servertool"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/followup-response-block.ts",
+      "path": "sharedmodule/llmswitch-core/src/servertool/backend-route-response-block.ts",
       "loc": 247,
       "nativeLinked": false,
       "topDir": "servertool"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.ts",
+      "path": "sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts",
       "loc": 243,
       "nativeLinked": false,
       "topDir": "servertool"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/followup-seed.ts",
+      "path": "sharedmodule/llmswitch-core/src/servertool/backend-route-seed.ts",
       "loc": 153,
       "nativeLinked": false,
       "topDir": "servertool"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/followup-shadow.ts",
+      "path": "sharedmodule/llmswitch-core/src/servertool/backend-route-shadow.ts",
       "loc": 163,
       "nativeLinked": false,
       "topDir": "servertool"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/followup-shape-guard.ts",
+      "path": "sharedmodule/llmswitch-core/src/servertool/backend-route-shape-guard.ts",
       "loc": 127,
       "nativeLinked": false,
       "topDir": "servertool"
@@ -3149,13 +3149,13 @@
       "topDir": "servertool"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/reenter-backend.ts",
+      "path": "sharedmodule/llmswitch-core/src/servertool/backend-route-backend.ts",
       "loc": 34,
       "nativeLinked": false,
       "topDir": "servertool"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/reenter-followup-block.ts",
+      "path": "sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts",
       "loc": 624,
       "nativeLinked": false,
       "topDir": "servertool"

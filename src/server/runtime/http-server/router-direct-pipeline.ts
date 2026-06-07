@@ -7,8 +7,8 @@
  * to the provider.
  *
  * Design intent: transparent passthrough + audit trail.
- * - The entry payload is passed through without transformation.
- * - All observable fields are recorded in appliedOverrides for snapshot/log traceability.
+ * - The entry payload shape is passed through unchanged.
+ * - Observable fields are recorded for snapshot/log traceability.
  * - Response is passed through without outbound rewriting.
  * - Fail-fast: no fallback, no silent compensation.
  */
@@ -127,10 +127,7 @@ export async function executeRouterDirectPipeline(
     routingDecision: input.routingDecision,
   };
 
-  const payloadToSend = recordPayloadAudit(
-    applyProviderModelOverride(input.requestPayload, input.providerPayload, providerHandle, inboundProtocol),
-    auditContext,
-  );
+  const payloadToSend = recordPayloadAudit(input.requestPayload, auditContext);
 
   input.onSnapshotBefore?.(payloadToSend, auditContext);
 
@@ -152,30 +149,6 @@ export async function executeRouterDirectPipeline(
     response,
     providerHandle,
     auditContext,
-  };
-}
-
-function readNonEmptyString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function applyProviderModelOverride(
-  requestPayload: Record<string, unknown>,
-  providerPayload: Record<string, unknown>,
-  providerHandle: ProviderHandle,
-  inboundProtocol: ProviderProtocol,
-): Record<string, unknown> {
-  if (inboundProtocol !== 'openai-chat') {
-    return requestPayload;
-  }
-  const providerModel = readNonEmptyString(providerPayload.model)
-    ?? readNonEmptyString(providerHandle.runtime.defaultModel);
-  if (!providerModel || requestPayload.model === providerModel) {
-    return requestPayload;
-  }
-  return {
-    ...requestPayload,
-    model: providerModel,
   };
 }
 

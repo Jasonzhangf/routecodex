@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { applyFollowupDeltaPlan } from '../../sharedmodule/llmswitch-core/src/servertool/followup-origin-delta.js';
+import { applyFollowupDeltaPlan } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-origin-delta.js';
 
 const SAMPLE_UPDATE_PATCH = '*** Begin Patch\n*** Update File: sample.txt\n@@\n- old\n+ new\n*** End Patch';
 const A_TS_UPDATE_PATCH = '*** Begin Patch\n*** Update File: a.ts\n@@\n- old\n+ new\n*** End Patch';

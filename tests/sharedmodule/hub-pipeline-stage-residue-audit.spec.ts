@@ -803,7 +803,7 @@ describe('hub pipeline stage residue audit', () => {
     ];
     const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(process.cwd(), relativePath)));
     const followupOriginDelta = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/followup-origin-delta.ts'),
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/backend-route-origin-delta.ts'),
       'utf8'
     );
     const findings = collectMatches(followupOriginDelta, [
@@ -819,7 +819,7 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('servertool followup seed must not retain TS payload or tool semantics', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/followup-seed.ts');
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/backend-route-seed.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
       { label: 'imports non-native responses bridge conversion', pattern: /from ['"]\.\.\/conversion\/responses\/responses-openai-bridge\.js['"]/ },
@@ -838,7 +838,7 @@ describe('hub pipeline stage residue audit', () => {
 
   it('servertool followup dispatch and shape guard must not coerce tool semantics in TS', () => {
     const files = [
-      'sharedmodule/llmswitch-core/src/servertool/followup-shape-guard.ts',
+      'sharedmodule/llmswitch-core/src/servertool/backend-route-shape-guard.ts',
       'src/server/runtime/http-server/executor/servertool-followup-dispatch.ts',
     ];
     const findings = files.flatMap((relativePath) => {
@@ -982,7 +982,7 @@ describe('hub pipeline stage residue audit', () => {
   it('servertool followup response block must not classify tool-bearing client payloads in TS', () => {
     const filePath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/servertool/followup-response-block.ts',
+      'sharedmodule/llmswitch-core/src/servertool/backend-route-response-block.ts',
     );
     const source = fs.readFileSync(filePath, 'utf8');
     const bodyStart = source.indexOf('export function isEmptyClientResponsePayload');

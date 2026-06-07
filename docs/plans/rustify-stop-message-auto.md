@@ -28,4 +28,4 @@
 ## 下一步
 
 1. **编译 `.node` 文件**：`napi build --release` 将 `decide_stop_message_action` 编译进 native binding。之后测试回退走 native 路径，loop 测试应通过
-2. **followup-mainline-block.ts Rust 化**：见 `docs/plans/rustify-followup-mainline.md`
+2. **backend-route-mainline-block.ts Rust 化**：见 `docs/plans/rustify-followup-mainline.md`
