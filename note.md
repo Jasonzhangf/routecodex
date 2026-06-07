@@ -16196,3 +16196,8 @@ Phase E: TS fallback 物理删除
 - Deleted five 0-consumer virtual-router bootstrap TS helpers: `auth-utils.ts`, `claude-code-helpers.ts`, `config-normalizers.ts`, `web-search-config.ts`, `token-file-scanner.ts`.
 - Evidence: `bootstrap.ts` now calls native provider/profile/config-meta bootstrap entries; symbol-level `rg` found no live source/test import of the deleted exports; no same-name `.js/.d.ts/.js.map` artifacts existed before deletion. After deleting `auth-utils.ts`, `token-file-scanner.ts` also became 0-consumer and is superseded by active `src/providers/auth/token-scanner/`.
 - Residue gate added to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` so these helper files cannot reappear.
+
+## 2026-06-07 Hub Pipeline Phase 8F-5 virtual-router engine helper deletion
+- Deleted two additional 0-consumer Virtual Router TS helpers: `engine/route-analytics.ts` and `engine/routing-state/metadata.ts`.
+- Evidence: symbol-level `rg` found no live source/test import of `RouteAnalytics`, `buildMetadataInstructions`, or `resolveRoutingMode`; no same-name `.js/.d.ts/.js.map` artifacts existed before deletion.
+- Residue gate now covers the deleted engine helpers as well as bootstrap helpers.

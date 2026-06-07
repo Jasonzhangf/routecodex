@@ -510,7 +510,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('legacy virtual router bootstrap TS helper residues must be physically removed', () => {
+  it('legacy virtual router dead TS helper residues must be physically removed', () => {
     const virtualRouterRoot = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/router/virtual-router',
@@ -520,6 +520,8 @@ describe('hub pipeline stage residue audit', () => {
       'bootstrap/claude-code-helpers.ts',
       'bootstrap/config-normalizers.ts',
       'bootstrap/web-search-config.ts',
+      'engine/route-analytics.ts',
+      'engine/routing-state/metadata.ts',
       'token-file-scanner.ts',
     ].filter((relativePath) => fs.existsSync(path.join(virtualRouterRoot, relativePath)));
 

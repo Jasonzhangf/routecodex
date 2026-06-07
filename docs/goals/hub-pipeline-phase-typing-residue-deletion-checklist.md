@@ -167,6 +167,12 @@ Phase 8F-4 virtual router bootstrap helper deletion proof: five legacy TS bootst
 - Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/token-file-scanner.ts`.
 - Red test now fails if any of these legacy bootstrap helper residues reappear.
 
+Phase 8F-5 virtual router engine helper deletion proof: two TS engine helper files had no live source/test import and no same-name generated shadow artifacts. Their routing-state and selection semantics now live in Rust Virtual Router/native routing owners; `VirtualRouterEngine` does not import these helpers.
+
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine/route-analytics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/metadata.ts`.
+- Red test now fails if either legacy engine helper residue reappears.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

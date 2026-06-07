@@ -52,7 +52,7 @@ Out of scope：
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features/tools.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/parse/parse_instructions.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/metadata.ts`
+- `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/metadata.ts`（2026-06-07 Phase 8F-5 已删；routing-state metadata 语义不得在 TS 复活）
 - `src/server/runtime/http-server/request-executor.ts`
 - `src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts`
 - `src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts`
