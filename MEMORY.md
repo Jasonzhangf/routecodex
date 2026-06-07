@@ -2284,3 +2284,9 @@ Tags: hub-pipeline-rust-closeout, virtual-router, generated-artifacts, source-tr
 - Phase 8F-8 deleted 26 git-ignored servertool declaration artifacts and added a residue gate that fails if `.js`, `.d.ts`, or `.js.map` reappears under `src/servertool`.
 - Do not apply this rule blindly to `conversion/shared`: current tests still import `.js` specifiers there, so those artifacts need a separate migration/proof before deletion.
 Tags: hub-pipeline-rust-closeout, servertool, generated-artifacts, source-truth, 2026-06-07
+
+## 2026-06-07 legacy shared Responses request adapter deleted
+- `sharedmodule/llmswitch-core/src/conversion/shared/responses-request-adapter.ts` was a zero-consumer adapter over `conversion/responses/responses-openai-bridge.ts` and is now physically deleted.
+- Active Responses→Chat bridge owner remains `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`; request semantics must continue moving to Rust req_inbound / req_chatprocess native boundaries, not to a restored shared adapter middle layer.
+- Residue audit now fails if the adapter source or active guide mention reappears.
+Tags: hub-pipeline-rust-closeout, responses-bridge, zero-consumer, physical-delete, 2026-06-07

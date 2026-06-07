@@ -198,6 +198,13 @@ Phase 8F-8 servertool side-by-side emit cleanup proof: servertool source truth l
 - Red test now fails if `sharedmodule/llmswitch-core/src/servertool` contains side-by-side `.js`, `.d.ts`, or `.js.map` artifacts.
 - This cleanup changes no tracked runtime source and does not change servertool projection, provider wire payload, or client response semantics.
 
+Phase 8F-9 legacy shared Responses request adapter deletion proof: `sharedmodule/llmswitch-core/src/conversion/shared/responses-request-adapter.ts` was a zero-consumer thin adapter that re-exported `captureResponsesContext` / `buildChatRequestFromResponses` from the live bridge while adding only a native capability probe. Live source and tests call `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts` directly.
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/shared/responses-request-adapter.ts`.
+- No same-name `.js`, `.d.ts`, or `.js.map` artifacts existed before deletion.
+- Updated `sharedmodule/llmswitch-core/src/guidance/RCC_TOOL_GUIDE.md` so active guidance points to the bridge owner and forbids restoring the shared adapter middle layer.
+- Red test now fails if the adapter source or active guide mention reappears.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

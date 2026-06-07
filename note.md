@@ -16220,3 +16220,10 @@ Phase E: TS fallback 物理删除
 - Added red test `servertool source truth dir must not keep side-by-side TS emit artifacts`; before cleanup it failed on 26 stale declaration artifacts.
 - Physical cleanup: deleted 26 git-ignored `.d.ts` artifacts under `sharedmodule/llmswitch-core/src/servertool`; deletion script refused non-ignored candidates before unlinking.
 - Verification after cleanup: residue audit PASS 86/86; `find sharedmodule/llmswitch-core/src/servertool -type f \( -name '*.js' -o -name '*.d.ts' -o -name '*.js.map' \)` returned empty.
+
+## 2026-06-07 Hub Pipeline Phase 8F-9 legacy shared Responses adapter deletion
+- Candidate proof: `sharedmodule/llmswitch-core/src/conversion/shared/responses-request-adapter.ts` was the only tracked file matching `responses-request-adapter`; no same-name `.js/.d.ts/.js.map` artifacts existed.
+- Import proof: live source/test users of `captureResponsesContext` and `buildChatRequestFromResponses` already import `conversion/responses/responses-openai-bridge.ts` directly; `responses-request-adapter.ts` had no source/test/script importer.
+- Active doc residue: `sharedmodule/llmswitch-core/src/guidance/RCC_TOOL_GUIDE.md` still pointed Responses→Chat request adaptation to the old shared adapter. Updated it to point at the bridge owner and forbid restoring adapter middle layer.
+- Red test: `legacy shared responses request adapter must stay deleted from active docs and source` failed before deletion because the file existed.
+- Physical deletion: removed `sharedmodule/llmswitch-core/src/conversion/shared/responses-request-adapter.ts`.

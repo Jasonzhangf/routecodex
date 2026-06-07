@@ -1558,6 +1558,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('legacy shared responses request adapter must stay deleted from active docs and source', () => {
+    const adapterPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-request-adapter.ts',
+    );
+    const guidePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/guidance/RCC_TOOL_GUIDE.md');
+    const guideSource = fs.readFileSync(guidePath, 'utf8');
+
+    expect(fs.existsSync(adapterPath)).toBe(false);
+    expect(guideSource).not.toContain('responses-request-adapter');
+  });
+
   it('ignored src-side JS build artifacts must not carry retired tool semantics', () => {
     const repoRoot = process.cwd();
     const forbiddenArtifacts = [
