@@ -7,6 +7,12 @@ const pkgPath = path.join(root, 'package.json');
 const mapText = fs.readFileSync(mapPath, 'utf8');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 const scripts = pkg.scripts || {};
+const deletedPathDenylist = [
+  'scripts/cleanup-unused-code.sh',
+  'scripts/phase1-cleanup.sh',
+  'scripts/simple_dead_function_finder.py',
+  'scripts/verify-cleanup-safety.sh',
+];
 
 function parseOwners(text) {
   const lines = text.split('\n');
@@ -43,6 +49,12 @@ function parseOwners(text) {
 }
 
 const failures = [];
+for (const rel of deletedPathDenylist) {
+  const abs = path.join(root, rel);
+  if (fs.existsSync(abs)) {
+    failures.push(`deleted_path resurrected -> ${rel}`);
+  }
+}
 for (const owner of parseOwners(mapText)) {
   for (const rel of owner.allowedPaths) {
     const abs = path.join(root, rel);
@@ -73,3 +85,4 @@ if (failures.length > 0) {
 
 console.log('[verify:architecture-deleted-path] ok');
 console.log(`- checked ${parseOwners(mapText).length} features for dead allowed_paths / required_tests / required_gates`);
+console.log(`- checked ${deletedPathDenylist.length} deleted paths stay absent`);
