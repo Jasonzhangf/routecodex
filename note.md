@@ -17,6 +17,7 @@
 - 仓库已清理 ignored 本地生成物：`tmp/`、`.install-pack/`、test-results、旧 `.tgz`、`.DS_Store`、备份文件、src-side `.js.map`；保留 `dist/node_modules/vendor/target` 以免破坏当前开发验证。
 - 已物理删除旧 dead-code 清理链：`scripts/cleanup-unused-code.sh`、`scripts/phase1-cleanup.sh`、`scripts/verify-cleanup-safety.sh`、`scripts/simple_dead_function_finder.py`。证据：无 package 入口；引用只在自身/生成器；其中 `cleanup-unused-code.sh` 含危险批量 `sed` 删除源码逻辑，`phase1-cleanup.sh` 是 2025 生成的 TODO 脚本。
 - `.beads` 清理边界：按 `bd-task-flow`，只保留任务真源 `.beads/issues.jsonl` 与 active runtime db/lock/pid；已删除旧 `issues.jsonl.bak.*` 和 `daemon.log`。
+- 根目录治理现状：`git check-ignore` 证明 `tmp/`、`bin/`、`lib/`、`.clock/`、`tmp-route-*.mjs` 是 ignored local/generated residue；已删除这些高置信散件。`package/`、`nested/deep/ap003.txt`、`rcc` 是 tracked 历史例外，不能当本地垃圾删；`webui/` 被 `.git/info/exclude` 本地隐藏但 package/test/build 引用，属于 local exclude hazard。治理文档已落 `docs/goals/root-generated-artifacts-governance-plan.md`，后续源码写入路径按该文档迁移和加 gate。
 
 ## 2026-06-05 apply_patch 10000 新样本根因收口
 

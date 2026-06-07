@@ -33,6 +33,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Phase 0 静态 0-consumer 误报边界：删除前必须查 `importCoreDist(...)` / native dynamic loader；`conversion/hub/snapshot-recorder.ts` 和 `native-failure-policy.ts` 这类动态入口不能仅因无静态 import 删除，除非先迁移动态 importer。
 - 本地生成物清理边界（2026-06-07）：`~/.rcc/install/releases/.staging-routecodex-*` 是失败/未完成安装 staging，确认 `install/current` 不指向后可删；`~/.rcc/diag` / `codex-samples` 是线上取证真源，禁止整目录删除，只能按 TTL/采样策略清理。仓库 `tmp/`、`.install-pack/`、test-results、旧 `.tgz`、`.DS_Store`、src-side `.js.map` 可按 `git check-ignore` 证据清理；`.js/.d.ts` 需先确认无动态 import / dist 依赖。
 - 废弃清理脚本反模式（2026-06-07）：若脚本批量 `sed` 修改源码、依赖过期 `dead-code-analysis-report.json`、或生成 TODO 型 cleanup 脚本且无 package 入口，应视为死代码物理删除；禁止执行这类脚本冒充审计。
+- 根目录生成物治理（2026-06-07）：根目录清理要先按 `docs/goals/root-generated-artifacts-governance-plan.md` 分类，区分 tracked source、ignored generated、local tool state、runtime evidence。`git check-ignore` 只能证明 ignored，不能单独证明可删；`webui/` 这种被 `.git/info/exclude` 本地隐藏但被 package/test/build 使用的源码必须保留。`package/`、`nested/`、`rcc` 是 tracked 历史例外，需按迁移文档单独处理，不能当 ignored 垃圾删。
 - 发现违规必须先写红测，红测要覆盖真实 Hub Pipeline stage 或 HTTP 黑盒入口；禁止 mock 私有方法冒充黑盒。
 - quota 控制面真源：`QuotaManagerModule.getControlSurface()` 是 daemon-admin / control plane 唯一入口；`quota-handler.ts`、`control-handler.ts` 禁止自建 `createQuotaManagerAdapter(...)`，禁止直连 Rust mutator。
 - quota 初始化硬规则：启动时只能按当前 `config.toml` materialized `virtualrouter.providers` 初始化 quota；未配置 provider 禁止 hydrate/persist/参与本轮 quota 生命周期。
