@@ -37,8 +37,12 @@ describe('http-server direct result metadata propagation', () => {
       providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
       auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'thinking' } }
     }, {
+      requestId: 'req-router-direct-session-color',
       body: { model: 'gpt-5.3-codex', stream: true },
       metadata: {
+        sessionId: 'sess-router-direct-color',
+        conversationId: 'conv-router-direct-color',
+        cwd: '/tmp/router-direct-project',
         clientModelId: 'gpt-5.3-codex',
         originalModelId: 'gpt-5.3-codex',
         __raw_request_body: { model: 'gpt-5.3-codex', reasoning: { effort: 'high' } }
@@ -48,6 +52,13 @@ describe('http-server direct result metadata propagation', () => {
     expect(result.metadata).toMatchObject({
       clientModelId: 'gpt-5.3-codex',
       originalModelId: 'gpt-5.3-codex'
+    });
+    expect(result.usageLogInfo).toMatchObject({
+      sessionId: 'sess-router-direct-color',
+      conversationId: 'conv-router-direct-color',
+      projectPath: '/tmp/router-direct-project',
+      providerRequestId: 'req-router-direct-session-color',
+      inputRequestId: 'req-router-direct-session-color'
     });
   });
 
@@ -62,8 +73,12 @@ describe('http-server direct result metadata propagation', () => {
       providerProtocol: 'openai-responses',
       providerHandle: { providerType: 'openai' }
     }, {
+      requestId: 'req-provider-direct-session-color',
       body: { model: 'gpt-5.3-codex', stream: true },
       metadata: {
+        sessionId: 'sess-provider-direct-color',
+        conversationId: 'conv-provider-direct-color',
+        workdir: '/tmp/provider-direct-project',
         clientModelId: 'gpt-5.3-codex',
         originalModelId: 'gpt-5.3-codex',
         __raw_request_body: { model: 'gpt-5.3-codex', reasoning: { effort: 'high' } }
@@ -73,6 +88,13 @@ describe('http-server direct result metadata propagation', () => {
     expect(result.metadata).toMatchObject({
       clientModelId: 'gpt-5.3-codex',
       originalModelId: 'gpt-5.3-codex'
+    });
+    expect(result.usageLogInfo).toMatchObject({
+      sessionId: 'sess-provider-direct-color',
+      conversationId: 'conv-provider-direct-color',
+      projectPath: '/tmp/provider-direct-project',
+      providerRequestId: 'req-provider-direct-session-color',
+      inputRequestId: 'req-provider-direct-session-color'
     });
   });
 

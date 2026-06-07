@@ -145,7 +145,7 @@ export class VirtualRouterEngine {
     );
     if ((metadata as { __rt?: Record<string, unknown> }).__rt?.disableVirtualRouterHitLog !== true) {
       emitVirtualRouterHitLog(parsed, {
-        requestId: metadata.requestId,
+        requestId: resolveVirtualRouterLogRequestId(metadata),
         sessionId: resolveVirtualRouterLogSessionId(metadata),
         stopScope,
         stopState,
@@ -427,6 +427,21 @@ function emitVirtualRouterHitLog(result: {
   console.log(
     `${prefixColor}[virtual-router-hit]${reset} ${timeColor}${timestamp}${reset}${requestLabel}${sessionLabel} ${routeColor}${routeLabel} -> ${providerKey}${modelSuffix}${reason}${reset}${stopStatusLabel ? ` ${stopColor}${stopStatusLabel}${reset}` : ''}`
   );
+}
+
+function resolveVirtualRouterLogRequestId(metadata: RouterMetadataInput): string | undefined {
+  const candidates = [
+    metadata.requestId,
+    (metadata as Record<string, unknown>).clientRequestId,
+    (metadata as Record<string, unknown>).inputRequestId,
+    (metadata as Record<string, unknown>).groupRequestId
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim() && !value.includes('unknown')) {
+      return value.trim();
+    }
+  }
+  return undefined;
 }
 
 function resolveVirtualRouterLogSessionId(metadata: RouterMetadataInput): string | undefined {

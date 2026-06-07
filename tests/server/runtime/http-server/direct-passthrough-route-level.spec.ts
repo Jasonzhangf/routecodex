@@ -768,6 +768,82 @@ describe('direct passthrough route-level', () => {
     }
   }, 15000);
 
+  it('router same-protocol direct remains direct when stopless metadata is present', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5555,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => ({ status: 200, body: { relayed: true }, metadata: {} })),
+      getVirtualRouter: jest.fn(() => ({
+        route: jest.fn(() => ({
+          routeName: 'search',
+          providerKey: 'direct.key1.gpt-test',
+          providerModel: 'gpt-test',
+          providerProtocol: 'openai-responses',
+        })),
+      })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline],
+    ]);
+    (server as any).providerHandles = new Map([[
+      'direct.key1.gpt-test',
+      {
+        providerProtocol: 'openai-responses',
+        instance: {
+          processIncomingDirect: jest.fn(async () => ({
+            status: 200,
+            data: {
+              id: 'resp_direct_stopless_metadata_passthrough',
+              object: 'response',
+              status: 'completed',
+              output: [],
+            },
+          })),
+        },
+      },
+    ]]);
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline');
+    const directSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort');
+
+    const result = await (server as any).executePortAwarePipeline(5555, {
+      requestId: 'req_router_direct_stopless_stays_direct',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: { model: 'gpt-test', input: 'hello' },
+      metadata: {
+        stoplessMode: 'on',
+        stoplessArmed: true,
+      },
+    });
+
+    expect(result.body?.id).toBe('resp_direct_stopless_metadata_passthrough');
+    expect(directSpy).toHaveBeenCalledTimes(1);
+    expect(executePipelineSpy).not.toHaveBeenCalled();
+  });
+
   it('HTTP BLACKBOX: router-direct passes provider response body through without model rewrite', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');

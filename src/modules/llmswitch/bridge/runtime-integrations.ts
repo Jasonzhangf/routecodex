@@ -208,6 +208,7 @@ export async function recordResponsesResponseForRequest(args: {
   providerKey?: string;
   matchedPort?: number;
   routingPolicyGroup?: string;
+  allowScopeContinuation?: boolean;
 }): Promise<void> {
   const globalStore = readGlobalResponsesConversationStore();
   const fn =

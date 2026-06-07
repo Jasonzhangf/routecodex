@@ -674,6 +674,12 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
             .map_err(|e| napi::Error::from_reason(e.to_string()));
     }
     for block in text.split("\n\n") {
+        if block.contains("data: [DONE]") {
+            probe.insert(
+                "__seen_done_chunk".to_string(),
+                Value::Bool(true),
+            );
+        }
         let Some((event_name, parsed)) = parse_sse_block(block) else {
             continue;
         };
@@ -684,6 +690,21 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
         let response = parsed_obj.get("response").and_then(Value::as_object);
         let required_action = parsed_obj.get("required_action").and_then(Value::as_object);
         let output_item = parsed_obj.get("item");
+        if event_name == "response.completed" || parsed_type == "response.completed" {
+            probe.insert(
+                "__seen_response_completed".to_string(),
+                Value::Bool(true),
+            );
+        }
+        if event_name == "response.done" || parsed_type == "response.done" {
+            probe.insert("__seen_response_done".to_string(), Value::Bool(true));
+        }
+        if event_name == "response.required_action" || parsed_type == "response.required_action" {
+            probe.insert(
+                "__seen_response_required_action".to_string(),
+                Value::Bool(true),
+            );
+        }
         let is_output_item_event = matches!(
             event_name.as_str(),
             "response.output_item.done" | "response.output_item.added"
@@ -747,6 +768,22 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
         .unwrap_or_default()
         .to_ascii_lowercase();
     let required_action = probe.get("required_action").and_then(Value::as_object);
+    let seen_required_action = probe
+        .get("__seen_response_required_action")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let seen_completed = probe
+        .get("__seen_response_completed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let seen_done = probe
+        .get("__seen_response_done")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let seen_done_chunk = probe
+        .get("__seen_done_chunk")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let has_completed_output = probe
         .get("output")
         .and_then(Value::as_array)
@@ -787,25 +824,23 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
     let done_payload = serde_json::json!({"type":"response.done","response":response_value});
     let mut frames: Vec<String> = Vec::new();
     if let Some(required_action) = required_action {
-        let completed_payload = serde_json::json!({
-            "type":"response.completed",
-            "response": Value::Object(response_payload.clone())
-        });
         let required_payload = serde_json::json!({
             "type":"response.required_action",
             "response": Value::Object(response_payload.clone()),
             "required_action": Value::Object(required_action.clone())
         });
-        frames.push(format!(
-            "event: response.required_action\ndata: {}\n\n",
-            required_payload
-        ));
-        frames.push(format!(
-            "event: response.completed\ndata: {}\n\n",
-            completed_payload
-        ));
-        frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
-        frames.push("data: [DONE]\n\n".to_string());
+        if !seen_required_action {
+            frames.push(format!(
+                "event: response.required_action\ndata: {}\n\n",
+                required_payload
+            ));
+        }
+        if !seen_done {
+            frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
+        }
+        if !seen_done_chunk {
+            frames.push("data: [DONE]\n\n".to_string());
+        }
         return serde_json::to_string(&frames).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
     if status == "completed" || !probe.is_empty() {
@@ -813,12 +848,18 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
             "type":"response.completed",
             "response": Value::Object(response_payload)
         });
-        frames.push(format!(
-            "event: response.completed\ndata: {}\n\n",
-            completed_payload
-        ));
-        frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
-        frames.push("data: [DONE]\n\n".to_string());
+        if !seen_completed {
+            frames.push(format!(
+                "event: response.completed\ndata: {}\n\n",
+                completed_payload
+            ));
+        }
+        if !seen_done {
+            frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
+        }
+        if !seen_done_chunk {
+            frames.push("data: [DONE]\n\n".to_string());
+        }
     }
     serde_json::to_string(&frames).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

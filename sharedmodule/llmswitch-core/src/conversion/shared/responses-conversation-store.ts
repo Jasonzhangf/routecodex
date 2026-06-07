@@ -451,6 +451,9 @@ class ResponsesConversationStore {
     if (collectPendingToolCallIds(entry.input).length > 0) {
       entry.allowContinuation = true;
     }
+    if (args.allowScopeContinuation === true && entry.scopeKeys.length > 0) {
+      entry.allowContinuation = true;
+    }
     entry.lastResponseId = responseId;
     entry.updatedAt = Date.now();
     this.responseIndex.set(responseId, entry);
@@ -568,6 +571,35 @@ class ResponsesConversationStore {
     entry.updatedAt = Date.now();
     this.attachEntryScopes(entry);
     this.flushPersistence();
+  }
+
+  finalizeResponsesConversationRequestRetention(
+    requestId?: string,
+    options?: { keepForSubmitToolOutputs?: boolean }
+  ): void {
+    if (!requestId) {
+      return;
+    }
+    const entry = this.requestMap.get(requestId);
+    if (!entry) {
+      return;
+    }
+    if (
+      typeof entry.lastResponseId !== 'string' ||
+      !String(entry.lastResponseId).trim()
+    ) {
+      this.clearRequest(requestId);
+      return;
+    }
+    if (options?.keepForSubmitToolOutputs === true) {
+      this.releaseRequestPayload(requestId);
+      return;
+    }
+    if (!Array.isArray(entry.scopeKeys) || entry.scopeKeys.length <= 0) {
+      this.clearRequest(requestId);
+      return;
+    }
+    this.releaseRequestPayload(requestId);
   }
 
   resumeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
@@ -791,33 +823,7 @@ export function finalizeResponsesConversationRequestRetention(
   requestId?: string,
   options?: { keepForSubmitToolOutputs?: boolean }
 ): void {
-  if (!requestId) {
-    return;
-  }
-  const entry = (store as unknown as {
-    requestMap?: Map<string, {
-      scopeKeys?: string[];
-    }>;
-  }).requestMap?.get(requestId);
-  if (!entry) {
-    return;
-  }
-  if (
-    typeof (entry as { lastResponseId?: unknown }).lastResponseId !== 'string' ||
-    !String((entry as { lastResponseId?: unknown }).lastResponseId).trim()
-  ) {
-    store.clearRequest(requestId);
-    return;
-  }
-  if (options?.keepForSubmitToolOutputs === true) {
-    store.releaseRequestPayload(requestId);
-    return;
-  }
-  if (!Array.isArray(entry.scopeKeys) || entry.scopeKeys.length <= 0) {
-    store.clearRequest(requestId);
-    return;
-  }
-  store.releaseRequestPayload(requestId);
+  store.finalizeResponsesConversationRequestRetention(requestId, options);
 }
 
 export function rebindResponsesConversationRequestId(oldId?: string, newId?: string): void {

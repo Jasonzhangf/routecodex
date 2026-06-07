@@ -1937,9 +1937,22 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 若线上日志出现同一 provider 错误反复打或 `No available providers`，先用同一 `clientRequestId` 查 `~/.rcc/codex-samples/.../ports/<port>/**`：必须看到失败 provider request 后有另一个 provider response；没有第二 provider 样本，优先查 executor 是否把 provider-switch 预算错误绑定到 `maxAttempts`。
 - provider 切换不是同 provider retry：任意 provider 错误只要 route pool 有未排除候选，就应写入 `excludedProviderKeys` 并 `exclude_and_reroute`；日志应包含 `[provider-switch] ... decision=provider_backoff_then_reroute`，避免模型/用户看到无反馈循环。
 
-### 2026-06-06 direct retry wrapper 红线
-- router-direct 只能做 same-protocol provider passthrough + hooks；禁止在 `index.ts` direct live path 调 `resolveRequestExecutorProviderFailurePlan`、生成 `retryMetadata`、写 `__routecodexProviderFailureAttemptOffset` 或本地重入标准 pipeline。provider 错误必须进入 executor/error 唯一链，direct 本地只记录 `router-direct.send.error` 并抛出。
+### 2026-06-06 direct retry wrapper 红线（2026-06-07 修正）
+- router-direct 只能做 same-protocol provider passthrough + hooks；禁止本地重写 recoverable/affectsHealth/cooldown/reroute policy，禁止 provider-specific fallback，禁止把 429/5xx 投到 `ErrorHandlingCenter` 后直返。
+- direct provider error 的允许路径：记录 `router-direct.send.error` → 调统一 `resolveRequestExecutorProviderFailurePlan` / Router policy decision → 若返回 `retrySwitchPlan`，只生成 `retryMetadata` 并交回标准 pipeline retry；否则原错误 fail-fast。direct 仍不得自己分类或冷却 provider。
+- 429 after direct/preselected route 的关键修点是 `decorateMetadataForAttempt` 清除 `__routecodexPreselectedRoute`；否则第二跳会忽略 `excludedProviderKeys` 又打回同一 provider。
+- direct 不因 `stopless` / `stopMessage` / servertool armed 改走 relay，也不在 direct response 侧激发 stopless；需要 stopless 的请求必须本来就在 relay/Hub response chain。排查“relay 不续杯”时先确认日志不是 `router-direct:*`，再看 `provider.response_convert.start serverToolsEnabled=true` 与 `[servertool] ... stop_message_auto`。
 - `/v1/responses` 出现 `Responses wire requires top-level tool.name` 时，先对照 live 原始 client request / provider-request snapshot / native sanitizer 输出，确认 tool shape 首次变坏的节点；不要默认归因 direct 入口，也不要把合法 flat Responses tools 因为“有工具”改走 relay。已验证一次根因是 Rust `sanitize_provider_outbound_payload_json` 把合法 `{type:"function", name,...}` 改成 chat-style `{type:"function", function:{...}}`；唯一修复点是 provider outbound sanitizer 按协议保持 wire shape。
+
+## 2026-06-07 Responses SSE terminal repair 精华
+- Responses SSE terminal repair/dedupe 的唯一语义 owner 是 Rust native `shared_responses_response_utils.rs`。TS handler 只能 buffer/split SSE、调用 native probe update、调用 native terminal frame builder、写 native 返回的 client frames、管理 stream lifecycle。
+- 若 residue/audit 命中 TS 在 terminal repair 中读取 `response.required_action` / `submit_tool_outputs` / `tool_calls`、把 required_action 推导成 `tool_calls`、或按 required_action 过滤 native repair frames，必须迁回 Rust probe/frame builder，而不是在 TS 再补一层判断。
+- Required_action terminal contract：只补缺失的 `response.required_action`，不得补 `response.completed`；只补缺失的 `response.done` / `[DONE]`。Rust 改完后必须跑 `node scripts/build-core.mjs`，否则 Node blackbox 仍加载旧 `dist/native/router_hotpath_napi.node`。
+
+## 2026-06-07 Responses conversation store bridge 精华
+- Bridge/runtime integrations 操作 Responses conversation store 时必须命中同一个 active singleton。若 global store 缺方法，不要在 bridge 里 fallback import core dist；dist import 可能覆盖 `globalThis.__rccResponsesConversationStore`，造成 source/test store 与 runtime bridge store 分裂。
+- 需要 bridge 调的方法应挂到 `ResponsesConversationStore` class 并由 exported helper 委托同一 store；禁止在 bridge 侧用 requestMap introspection 或另一个 dist store 补偿。
+- router-direct 成功 Responses result 若要支持 scope continuation，必须 record response scope (`sessionId`/`conversationId`/routingPolicyGroup/providerKey) 并显式 opt-in；失败状态或 SSE wrapper 必须 clear captured request，避免 pending request payload orphan。
 
 ## 2026-06-06 apply_patch 高效编辑法（沉淀）
 - 想在 yml/JSON/MD 末尾追加大块内容时，先用空行 sentinel 单独 patch 一行（如 `__LONGTAIL_TAIL_SENTINEL__`），然后第二次 patch 用 sentinel 作为 find-context 并把 `+` 行接在它后面，sentinel 行用 `-` 删掉；这样 verifier 的 find-context 短、匹配稳。

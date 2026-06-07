@@ -23,7 +23,9 @@ const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
     "请重新检查用户最初输入和后续指令：用户真正意图是什么？目标边界是什么？当前问题卡在哪里？之前的笔记、文件、日志、命令输出或测试结果是否已经看过？如果仅靠重新理解用户意图就能获得信息，请先据此继续执行；否则按目标、已做、证据、问题原因、已排除因素、排查顺序补齐缺口。",
     "这是最后一次自动续杯预算。不要再开启新一轮执行，不要复述系统校验过程；请直接给出面向用户的最终收尾 summary，包含：已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步。最后必须附 stop schema；若目标未完成且仍有下一步，也不要继续执行，把下一步写入 next_suggested_path 并以 blocked/continue_needed 说明。",
 ];
-const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"请在回复末尾附这个 JSON 对象，字段名必须一致：{"stopreason":0,"reason":"已完成/已阻塞/仍需继续的具体原因","has_evidence":1,"evidence":"文件/日志/命令输出/测试结果等证据；没有则空字符串","issue_cause":"问题原因；无异常填空字符串","excluded_factors":"已排除因素；无则空字符串","diagnostic_order":"排查顺序/已执行顺序","done_steps":"已经完成的步骤；没有则空字符串","next_step":"立刻继续执行的下一步；若没有则空字符串","next_suggested_path":"建议继续推进的路径；若没有则空字符串","needs_user_input":false,"learned":"本轮学到的可复用事实/踩坑/配置结论；无则空字符串"}。stopreason 只能用数字：0=finished，1=blocked，2=continue_needed。needs_user_input 为 true 时表示你需要向用户提出一个简单问题（如澄清意图、确认需求），此时 next_step 填写问题内容，Rust 会允许停止。"#;
+const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须在回复末尾附一个 JSON 对象，字段名和类型必须一致：
+{"stopreason":2,"reason":"当前状态原因","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"如果仍需继续，写立刻执行的下一步；否则空字符串","next_suggested_path":"","needs_user_input":false,"learned":""}
+字段规则：stopreason 只能是数字，0=finished，1=blocked，2=continue_needed；has_evidence 只能是 0 或 1；needs_user_input=true 只用于需要问用户一个简单问题，此时 next_step 必须写问题内容。"#;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -325,7 +327,7 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_missing",
                 used,
                 missing_cap,
-                &format!("你刚才试图停止，但没有提供 stop schema。先核对目标、过程、证据、问题原因、已排除因素、排查顺序：目标是否逐项完成？过程是否覆盖要求？证据是否可核验？异常原因是否有依据？哪些因素已被排除？下一步排查顺序是什么？现在必须二选一：1) 若完成或阻塞，立即给出 stop schema；{} 2) 若任一项没有文件/日志/命令输出/测试证据，不准总结、道歉、解释工具被拒或复述计划，必须在本轮直接发出工具调用继续执行当前目标；需要读文件/验证/测试时优先调用 exec_command。", STOP_SCHEMA_JSON_EXAMPLE),
+                &format!("你刚才试图停止，但没有提供 stop schema。先核对：目标、已完成步骤、证据、问题原因、已排除因素、排查顺序。现在必须二选一：1) 若完成或阻塞，直接给用户简洁结论并附 stop schema；2) 若缺少文件/日志/命令输出/测试证据，必须继续执行当前目标，优先调用 exec_command。{}", STOP_SCHEMA_JSON_EXAMPLE),
             );
         }
     };
@@ -337,7 +339,7 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_stopreason_missing_or_non_numeric",
                 used,
                 provided_cap,
-                &format!("stop schema 缺少数字 stopreason。不要猜、不要总结。先回答：目标是什么、过程做到哪一步、证据是什么、问题原因在哪里、已排除哪些因素、排查顺序是什么。{} 若目标/过程/证据/原因/排除项/顺序任一项不足，选择 2，给 next_step 并立即执行。", STOP_SCHEMA_JSON_EXAMPLE),
+                &format!("stop schema 缺少数字 stopreason。不要猜、不要总结；先核对目标、过程、证据、问题原因、已排除因素、排查顺序。若任一项不足，stopreason=2 并给出 next_step 后继续执行。{}", STOP_SCHEMA_JSON_EXAMPLE),
                 parsed,
             );
         }
@@ -738,7 +740,7 @@ fn schema_followup(
         || (used as usize) >= DEFAULT_EXECUTION_PROMPTS.len().saturating_sub(1)
     {
         text.push_str(default_execution_prompt(used).as_str());
-        text.push_str("\n\n最终收尾 schema 缺失：请不要继续执行新动作，不要复述 stopless/校验过程；直接给用户可读 summary，并在末尾附 stop schema。summary 必须包含已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步。");
+        text.push_str("\n\n最终收尾 schema 缺失：不要复述 stopless/校验过程；直接给用户可读 summary，包含已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步，并在末尾附 stop schema。\n");
         text.push_str(STOP_SCHEMA_JSON_EXAMPLE);
     } else {
         text.push_str(default_execution_prompt(used).as_str());

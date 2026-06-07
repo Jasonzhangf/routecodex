@@ -20,6 +20,7 @@ export interface RecordResponseArgs {
   providerKey?: string;
   matchedPort?: number;
   routingPolicyGroup?: string;
+  allowScopeContinuation?: boolean;
 }
 
 

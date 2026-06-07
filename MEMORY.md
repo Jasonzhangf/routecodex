@@ -2222,3 +2222,18 @@ Tags: direct-passthrough, router-direct, provider-direct, responses-history, no-
 - Owner fix: `src/server/runtime/http-server/executor-metadata.ts::decorateMetadataForAttempt()` must delete `__routecodexPreselectedRoute` whenever `excludedProviderKeys.size > 0` or `attempt > 1`. Do not fix this in `ErrorHandlingCenter`; it is only `ErrorErr06ClientProjected`.
 - Verification: targeted metadata red test and request-executor 429 failover test PASS; retry execution plan suite PASS.
 Tags: error-policy-center, request-executor, preselected-route, 429-reroute, ErrorErr05, 2026-06-07
+
+## 2026-06-07 Responses SSE terminal native-owner closeout
+- Responses SSE terminal repair/dedupe truth is Rust native `shared_responses_response_utils.rs`: probe records `__seen_response_required_action`, `__seen_response_completed`, `__seen_response_done`, and `__seen_done_chunk`; terminal frame builder dedupes from those flags.
+- TS `handler-response-utils.ts` may buffer/write native-returned frames and manage stream lifecycle, but must not infer `tool_calls` from `response.required_action`, inspect `required_action/submit_tool_outputs/tool_calls` for terminal repair, or filter native repair frames by required_action semantics.
+- Required_action terminal contract remains: emit `response.required_action` only if missing, never emit `response.completed`, and emit `response.done` / `[DONE]` only if missing.
+- After Rust native terminal repair changes, run `node scripts/build-core.mjs` before blackbox/Jest suites that load `dist/native/router_hotpath_napi.node`; source-only Rust changes are not enough for Node tests.
+- Verified: residue + affected SSE Jest set PASS 98/98; `npx tsc --noEmit --pretty false` PASS; Rust targeted `terminal_frames_for_required_action_must_not_emit_completed` PASS.
+Tags: responses-sse, terminal-repair, rust-owner, required-action, no-ts-semantics, 2026-06-07
+
+## 2026-06-07 direct Responses conversation store bridge invariant
+- `src/modules/llmswitch/bridge/runtime-integrations.ts` must operate on the active global Responses conversation store; if a store method is missing, falling back to core dist can overwrite `globalThis.__rccResponsesConversationStore` and split runtime/test state.
+- `ResponsesConversationStore` therefore exposes class-level `finalizeResponsesConversationRequestRetention()`, and the exported helper delegates to the same singleton. Do not reintroduce requestMap introspection from bridge or dist fallback for this method.
+- Router-direct successful Responses results must record response scope (`sessionId`/`conversationId`/routing group/provider) and explicitly opt into scope continuation; failed HTTP status and SSE wrapper results must clear the captured request.
+- Verified: direct passthrough route/minimum/direct-result suites PASS 21/21; 429/ErrorHandlingCenter focused gate PASS; `npx tsc --noEmit --pretty false` PASS.
+Tags: direct-passthrough, responses-conversation-store, bridge-singleton, scope-continuation, 2026-06-07

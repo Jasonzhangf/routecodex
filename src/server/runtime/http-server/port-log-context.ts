@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { colorizeVirtualRouterHitLogLine } from '../../utils/request-log-color.js';
 
 export interface PortRequestContext {
   localPort?: number;
@@ -64,11 +65,15 @@ export function installPortLogConsoleRouter(): void {
   const originalWarn = console.warn.bind(console);
   const originalError = console.error.bind(console);
   const wrap = (original: (...args: unknown[]) => void) => (...args: unknown[]) => {
+    const routedArgs =
+      args.length === 1 && typeof args[0] === 'string'
+        ? [colorizeVirtualRouterHitLogLine(args[0])]
+        : args;
     const port = resolvePort(storage.getStore());
     if (port) {
-      writePortLine(port, args.map(stringifyArg).join(' '));
+      writePortLine(port, routedArgs.map(stringifyArg).join(' '));
     }
-    original(...args);
+    original(...routedArgs);
   };
   console.log = wrap(originalLog) as typeof console.log;
   console.info = wrap(originalInfo) as typeof console.info;

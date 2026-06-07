@@ -100,7 +100,20 @@ describe('sendPipelineResponse SSE completion logging', () => {
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
+        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+        if (text.includes('event: response.required_action') || text.includes('"type":"response.required_action"')) {
+          next.__seen_response_required_action = true;
+        }
+        if (text.includes('event: response.done') || text.includes('"type":"response.done"')) {
+          next.__seen_response_done = true;
+        }
+        if (text.includes('data: [DONE]')) {
+          next.__seen_done_chunk = true;
+        }
+        return next;
+      },
       buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
         if (!probe || typeof probe !== 'object') return [];
         const response = {
@@ -187,7 +200,20 @@ describe('sendPipelineResponse SSE completion logging', () => {
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
+        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+        if (text.includes('event: response.required_action') || text.includes('"type":"response.required_action"')) {
+          next.__seen_response_required_action = true;
+        }
+        if (text.includes('event: response.done') || text.includes('"type":"response.done"')) {
+          next.__seen_response_done = true;
+        }
+        if (text.includes('data: [DONE]')) {
+          next.__seen_done_chunk = true;
+        }
+        return next;
+      },
       buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
         if (!probe || typeof probe !== 'object') return [];
         const response = {
@@ -261,7 +287,17 @@ describe('sendPipelineResponse SSE completion logging', () => {
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
+        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+        if (text.includes('event: response.done') || text.includes('"type":"response.done"')) {
+          next.__seen_response_done = true;
+        }
+        if (text.includes('data: [DONE]')) {
+          next.__seen_done_chunk = true;
+        }
+        return next;
+      },
       buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
         if (!probe || typeof probe !== 'object') return [];
         const response = {
@@ -280,8 +316,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
         }
         return [
           `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
-          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-          'data: [DONE]\n\n'
+          ...(probe.__seen_response_done ? [] : [
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`
+          ]),
+          ...(probe.__seen_done_chunk ? [] : ['data: [DONE]\n\n'])
         ];
       },
       importCoreDist: async () => ({}),
@@ -343,7 +381,17 @@ describe('sendPipelineResponse SSE completion logging', () => {
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
+        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+        if (text.includes('event: response.done') || text.includes('"type":"response.done"')) {
+          next.__seen_response_done = true;
+        }
+        if (text.includes('data: [DONE]')) {
+          next.__seen_done_chunk = true;
+        }
+        return next;
+      },
       buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
         if (!probe || typeof probe !== 'object') return [];
         const response = {
@@ -362,8 +410,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
         }
         return [
           `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
-          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-          'data: [DONE]\n\n'
+          ...(probe.__seen_response_done ? [] : [
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`
+          ]),
+          ...(probe.__seen_done_chunk ? [] : ['data: [DONE]\n\n'])
         ];
       },
       importCoreDist: async () => ({}),
@@ -767,7 +817,17 @@ describe('sendPipelineResponse SSE completion logging', () => {
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
+        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+        if (text.includes('event: response.done') || text.includes('"type":"response.done"')) {
+          next.__seen_response_done = true;
+        }
+        if (text.includes('data: [DONE]')) {
+          next.__seen_done_chunk = true;
+        }
+        return next;
+      },
       buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
         if (!probe || typeof probe !== 'object') return [];
         const response = {
@@ -780,14 +840,18 @@ describe('sendPipelineResponse SSE completion logging', () => {
         if (probe.required_action) {
           return [
             `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
-            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-            'data: [DONE]\n\n'
+            ...(probe.__seen_response_done ? [] : [
+              `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`
+            ]),
+            ...(probe.__seen_done_chunk ? [] : ['data: [DONE]\n\n'])
           ];
         }
         return [
           `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
-          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-          'data: [DONE]\n\n'
+          ...(probe.__seen_response_done ? [] : [
+            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`
+          ]),
+          ...(probe.__seen_done_chunk ? [] : ['data: [DONE]\n\n'])
         ];
       },
       importCoreDist: async () => ({}),
@@ -1061,15 +1125,26 @@ describe('sendPipelineResponse SSE completion logging', () => {
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
-      buildResponsesTerminalSseFramesFromProbeNative: () => [
-        'event: response.required_action\n' +
-          'data: {"type":"response.required_action","response":{"id":"resp_tool","object":"response","status":"requires_action"},"required_action":{"submit_tool_outputs":{"tool_calls":[]}}}\n\n',
-        'event: response.completed\n' +
-          'data: {"type":"response.completed","response":{"id":"resp_tool","object":"response","status":"requires_action"}}\n\n',
-        'event: response.done\n' +
-          'data: {"type":"response.done","response":{"id":"resp_tool","object":"response","status":"requires_action"}}\n\n',
-        'data: [DONE]\n\n'
+      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
+        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+        if (text.includes('event: response.required_action') || text.includes('"type":"response.required_action"')) {
+          next.__seen_response_required_action = true;
+        }
+        if (text.includes('event: response.done') || text.includes('"type":"response.done"')) {
+          next.__seen_response_done = true;
+        }
+        if (text.includes('data: [DONE]')) {
+          next.__seen_done_chunk = true;
+        }
+        return next;
+      },
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: Record<string, unknown> | undefined) => [
+        ...(probe?.__seen_response_done ? [] : [
+          'event: response.done\n' +
+            'data: {"type":"response.done","response":{"id":"resp_tool","object":"response","status":"requires_action"}}\n\n'
+        ]),
+        ...(probe?.__seen_done_chunk ? [] : ['data: [DONE]\n\n'])
       ],
       importCoreDist: async () => ({}),
       requireCoreDist: () => ({})

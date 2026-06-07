@@ -967,12 +967,17 @@ describe('hub pipeline stage residue audit', () => {
   it('server response handler must not inspect required_action to repair finish reason in TS', () => {
     const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    const repairStart = source.indexOf('const repairedTerminalFrames = !finishTracker.seenTerminalEvent');
+    const autoCloseStart = source.indexOf('terminalAutoCloseTimer = setTimeout');
+    expect(autoCloseStart).toBeGreaterThanOrEqual(0);
+    const autoCloseEnd = source.indexOf("}, 120);", autoCloseStart);
+    expect(autoCloseEnd).toBeGreaterThan(autoCloseStart);
+    const autoCloseBody = source.slice(autoCloseStart, autoCloseEnd);
+    const repairStart = source.indexOf('const repairedTerminalFrames = !terminalWatch.sawResponsesCompletedChunk');
     expect(repairStart).toBeGreaterThanOrEqual(0);
     const repairEnd = source.indexOf('void persistNativeSseConversationState', repairStart);
     expect(repairEnd).toBeGreaterThan(repairStart);
     const repairBody = source.slice(repairStart, repairEnd);
-    const findings = collectMatches(repairBody, [
+    const findings = collectMatches(`${autoCloseBody}\n${repairBody}`, [
       { label: 'checks required_action in TS finish repair', pattern: /required_action|response\.required_action|submit_tool_outputs|tool_calls/ },
     ]);
 
@@ -1641,7 +1646,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(runtimeUtilsSource).toContain('readPositiveInteger(loopState.maxRepeats)');
     expect(runtimeUtilsSource).not.toContain('readPositiveInteger(loopState.repeatCount)');
     expect(runtimeUtilsSource).toContain('readPositiveInteger(state?.stopMessageUsed)');
-    expect(handlerSource).toContain('if (followupFlowId)');
+    expect(handlerSource).toContain('if (followupFlowId && followupFlowId !== FLOW_ID)');
     expect(handlerSource).toContain("reason: 'skip_servertool_followup_hop'");
     expect(handlerSource).not.toContain('stop_message_followup_policy');
     expect(handlerSource).not.toContain('preserve_eligibility');

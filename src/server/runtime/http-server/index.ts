@@ -1515,6 +1515,9 @@ export class RouteCodexHttpServer {
       normalized.body && typeof normalized.body === 'object'
         ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
+    const inputMetadata = input.metadata && typeof input.metadata === 'object'
+      ? (input.metadata as Record<string, unknown>)
+      : {};
     if (input.requestId && providerHandle.providerProtocol === 'openai-responses') {
       const responseBody = normalized.body;
       if (
@@ -1530,6 +1533,14 @@ export class RouteCodexHttpServer {
           requestId: input.requestId,
           response: responseBody as Record<string, unknown>,
           providerKey: auditContext.providerKey,
+          sessionId: typeof inputMetadata.sessionId === 'string' ? inputMetadata.sessionId : undefined,
+          conversationId: typeof inputMetadata.conversationId === 'string' ? inputMetadata.conversationId : undefined,
+          routingPolicyGroup:
+            directResult.pipelineMetadata
+            && typeof directResult.pipelineMetadata.routecodexRoutingPolicyGroup === 'string'
+              ? directResult.pipelineMetadata.routecodexRoutingPolicyGroup
+              : undefined,
+          allowScopeContinuation: true,
         });
         await finalizeResponsesConversationRequestRetention(input.requestId, {
           keepForSubmitToolOutputs: finishReason === 'tool_calls',
@@ -1550,6 +1561,15 @@ export class RouteCodexHttpServer {
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,
         requestStartedAtMs: Date.now(),
+        sessionId: inputMetadata.sessionId,
+        conversationId: inputMetadata.conversationId,
+        projectPath:
+          inputMetadata.clientWorkdir
+          ?? inputMetadata.client_workdir
+          ?? inputMetadata.workdir
+          ?? inputMetadata.cwd,
+        providerRequestId: input.requestId,
+        inputRequestId: input.requestId,
       },
     };
 
@@ -1584,6 +1604,9 @@ export class RouteCodexHttpServer {
       normalized.body && typeof normalized.body === 'object'
         ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
+    const inputMetadata = input.metadata && typeof input.metadata === 'object'
+      ? (input.metadata as Record<string, unknown>)
+      : {};
     return {
       ...normalized,
       metadata:
@@ -1598,6 +1621,15 @@ export class RouteCodexHttpServer {
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,
         requestStartedAtMs: Date.now(),
+        sessionId: inputMetadata.sessionId,
+        conversationId: inputMetadata.conversationId,
+        projectPath:
+          inputMetadata.clientWorkdir
+          ?? inputMetadata.client_workdir
+          ?? inputMetadata.workdir
+          ?? inputMetadata.cwd,
+        providerRequestId: input.requestId,
+        inputRequestId: input.requestId,
       },
     };
   }

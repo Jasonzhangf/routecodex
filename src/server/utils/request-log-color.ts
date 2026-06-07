@@ -137,6 +137,23 @@ export function colorizeRequestLog(
   return `${color}${text}${ANSI_RESET}`;
 }
 
+export function colorizeVirtualRouterHitLogLine(text: string): string {
+  if (!text || !text.includes('[virtual-router-hit]') || !isConsoleColorEnabled()) {
+    return text;
+  }
+  const requestId = text.match(/\breq=([^ \x1b]+)/)?.[1];
+  if (!requestId) {
+    return text;
+  }
+  const color = resolveRequestLogColorToken(requestId);
+  if (!color || color === ANSI_FALLBACK_LOG_COLOR) {
+    return text;
+  }
+  let line = text.replace(/\x1b\[[0-9;]*m\[virtual-router-hit\]\x1b\[0m/, `${color}[virtual-router-hit]${ANSI_RESET}`);
+  line = line.replace(/(\breq=[^ \x1b]+(?: sid=[^ \x1b]+)? )\x1b\[[0-9;]*m/, `$1${color}`);
+  return line;
+}
+
 export function formatHighlightedFinishReasonLabel(finishReason?: string): string {
   const normalized = typeof finishReason === 'string' ? finishReason.trim() : '';
   if (!normalized) {

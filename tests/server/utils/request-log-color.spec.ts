@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
+  colorizeVirtualRouterHitLogLine,
   colorizeRequestLog,
   registerRequestLogContext,
   resolveRequestLogColorToken
@@ -87,6 +88,21 @@ describe('request log color registry', () => {
     expect(requestColor).toBe(expectedColor);
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(`[virtual-router-hit] [${sessionId}]`));
     expect(String(logSpy.mock.calls[0]?.[0] ?? '').startsWith(String(expectedColor))).toBe(true);
+  });
+
+  it('colors virtual-router-hit lines from registered request context when sid is absent', () => {
+    const sessionId = 'session-vr-hit-context';
+    const requestId = 'req-vr-hit-context';
+    const expectedColor = resolveSessionAnsiColor(sessionId);
+
+    registerRequestLogContext(requestId, { sessionId });
+    const line = colorizeVirtualRouterHitLogLine(
+      `\x1b[38;5;208m[virtual-router-hit]\x1b[0m \x1b[90m19:42:25\x1b[0m req=${requestId} \x1b[36mtools/pool -> provider.model reason=tools\x1b[0m`
+    );
+
+    expect(expectedColor).toBeDefined();
+    expect(line).toContain(`${expectedColor}[virtual-router-hit]\x1b[0m`);
+    expect(line).toContain(`req=${requestId} ${expectedColor}tools/pool -> provider.model`);
   });
 
   it('separates current uuid-like session ids into different colors more reliably', () => {

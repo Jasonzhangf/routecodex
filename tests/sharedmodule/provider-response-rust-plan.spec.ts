@@ -156,6 +156,105 @@ describe('provider response Rust native plan', () => {
     expect(JSON.stringify(result.body)).toContain('continued');
   });
 
+  it('projects stopless CLI command for relay OpenAI Responses completed stop', async () => {
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_responses_stopless_cli_projection',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId: 'provider-response-responses-stopless-cli-projection',
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true,
+      capturedEntryRequest: {
+        model: 'gpt-test',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
+      }
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-responses',
+      providerResponse: {
+        id: 'resp_stopless_cli_projection',
+        object: 'response',
+        status: 'completed',
+        model: 'gpt-test',
+        output: [{
+          id: 'msg_stopless_cli_projection',
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'output_text', text: 'I stopped without schema.' }]
+        }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+      },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: false,
+      clientInjectDispatch: jest.fn(async () => ({
+        body: {
+          id: 'chatcmpl_unused',
+          object: 'chat.completion',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'unused' }, finish_reason: 'stop' }]
+        }
+      })) as any
+    });
+
+    expect(result.body?.object).toBe('response');
+    const outputText = JSON.stringify(result.body);
+    expect(outputText).toContain('exec_command');
+    expect(outputText).toContain('routecodex servertool run stop_message_auto');
+    expect(outputText).toContain('stop_message_flow');
+  });
+
+  it('streams stopless CLI command for relay OpenAI Responses completed stop', async () => {
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_responses_stopless_cli_projection_stream',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId: 'provider-response-responses-stopless-cli-projection-stream',
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true,
+      capturedEntryRequest: {
+        model: 'gpt-test',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
+      }
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-responses',
+      providerResponse: {
+        id: 'resp_stopless_cli_projection_stream',
+        object: 'response',
+        status: 'completed',
+        model: 'gpt-test',
+        output: [{
+          id: 'msg_stopless_cli_projection_stream',
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'output_text', text: 'I stopped without schema.' }]
+        }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+      },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: true,
+      clientInjectDispatch: jest.fn(async () => ({
+        body: {
+          id: 'chatcmpl_unused',
+          object: 'chat.completion',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'unused' }, finish_reason: 'stop' }]
+        }
+      })) as any
+    });
+
+    expect(result.__sse_responses).toBeDefined();
+    const sseBody = await readStreamBody(result.__sse_responses!);
+    expect(sseBody).toContain('exec_command');
+    expect(sseBody).toContain('routecodex servertool run stop_message_auto');
+    expect(sseBody).toContain('stop_message_flow');
+    expect(sseBody).toContain('event: response.done');
+    expect(sseBody).toContain('"status":"requires_action"');
+  });
 
   it('uses Rust streamPipe effect plan for streaming response path', async () => {
     const recorder = new StubStageRecorder();
