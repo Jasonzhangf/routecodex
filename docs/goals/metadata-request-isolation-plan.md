@@ -79,8 +79,8 @@
    - 当前状态：非枚举 symbol carrier 是正确方向。
    - 收口方向：文档化“只能 internal side-channel，不得 merge 到 body”。
 
-9. `sharedmodule/llmswitch-core/src/conversion/hub/types/chat-schema.ts`
-   - 当前状态：多层 `metadata?: JsonObject` 存在于 ChatHubEnvelope / message / tool / block / config。
+9. `sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts`
+   - 当前状态：live Hub envelope 类型仍承载内部 `metadata?: JsonObject`；旧 0-consumer `types/chat-schema.ts` 已物理删除，禁止复活第二套 schema。
    - 收口方向：保留内部 envelope metadata，但标注生命周期边界；provider wire schema 不得复用这些字段。
 
 10. `docs/ARCHITECTURE.md` 或独立设计文档

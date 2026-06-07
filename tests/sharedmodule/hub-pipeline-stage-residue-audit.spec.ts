@@ -1437,6 +1437,9 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-measure-blocks.js',
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-measure-blocks.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-measure-blocks.js.map',
+      'sharedmodule/llmswitch-core/src/conversion/hub/ops/operations.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/tool-session-compat.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/chat-schema.ts',
     ];
     const existing = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 

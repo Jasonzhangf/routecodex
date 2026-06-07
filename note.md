@@ -16123,7 +16123,7 @@ Phase E: TS fallback 物理删除
 - Full Rust/no TS shell target means new Rust runtime/server binary owning HTTP ingress, HubPipeline state, VR state/deps, provider transport invocation contract, response effect execution, and client SSE/JSON egress. Existing N-API wrapper can remain only as test/compat during migration, then physically deleted from runtime path.
 - Node-level contract requirement: each node must expose separate `control` and `data` interfaces; metadata/control/effects stay on `control`, business payload stays on `data`, never mixed.
 
-- 2026-06-07: 5520 配置已切到 asxs provider。coding/thinking/longcontext/default 指向 asxs.crsa.gpt-5.5，tools/search/web_search/multimodal 指向 asxs.crsa.gpt-5.4-mini，thinking 统一 low。旧 llmgate 目标仍在备份文件中，不属于 active config 真源。
+- 2026-06-07: 5520 配置已切到 asxs provider。coding/tools/search/web_search/multimodal 指向 asxs.crsa.gpt-5.4-mini，thinking/longcontext/default 指向 asxs.crsa.gpt-5.5，thinking 统一 low。旧 llmgate 目标仍在备份文件中，不属于 active config 真源。
 ## 2026-06-07 direct/servertool/history verified checkpoint
 
 - Servertool server projection root cause: standalone Rust binary existed, but server `cli-projection.ts` still built `routecodex servertool run ...` and chat response shell semantics locally. Fixed by adding Rust/NAPI projection and result-validation bridge; TS now consumes native `execCommand`/contract output and only wraps client-visible `exec_command`.
@@ -16243,3 +16243,10 @@ Phase E: TS fallback 物理删除
 - Red/coverage: added handler test proving `ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS=1` with `ROUTECODEX_SNAPSHOT_STAGES=provider-request` does not write a `client-response` snapshot.
 - Verification PASS: `handler-response-utils.sse-finish-reason.spec.ts` + `snapshot-stage-policy.spec.ts` 18/18; `npm run verify:architecture-snapshot-stage-contract`; `npm run verify:architecture-snapshot-stage-owners`; `npx tsc --noEmit --pretty false`; `git diff --check`.
 - Follow-up dirty review: `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts` had an uncommitted test-only addition for apply_patch SSE frame ordering. Verified PASS: apply_patch freeform SSE spec 5/5, `npm run verify:apply-patch-freeform-contract`, `git diff --check`.
+
+## 2026-06-07 Hub Pipeline Phase 8F-10 extra zero-consumer deletion
+- Import graph scan after prior cleanup found 5 apparent 0-consumer candidates: `ops/operations.ts`, `snapshot-recorder.ts`, `tool-session-compat.ts`, `types/chat-schema.ts`, and `native-failure-policy.ts`.
+- Dynamic import exclusion: kept `snapshot-recorder.ts` because `src/modules/llmswitch/bridge/snapshot-recorder.ts` loads `conversion/hub/snapshot-recorder` via `importCoreDist`; kept `native-failure-policy.ts` because bridge/runtime failure-policy owners dynamically load it.
+- Physical deletion: removed `sharedmodule/llmswitch-core/src/conversion/hub/ops/operations.ts`, `sharedmodule/llmswitch-core/src/conversion/hub/tool-session-compat.ts`, and `sharedmodule/llmswitch-core/src/conversion/hub/types/chat-schema.ts`.
+- Doc cleanup: `metadata-request-isolation-plan.md` now points metadata analysis to live `chat-envelope.ts` and records deleted `chat-schema.ts` as forbidden to restore.
+- Verification PASS: residue audit 87/87, `npx tsc --noEmit --pretty false`, `git diff --check`; post-delete import graph leaves only dynamic-load exceptions `snapshot-recorder.ts` and `native-failure-policy.ts`.

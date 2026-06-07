@@ -29,6 +29,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Phase 0 generated artifact cleanup：`sharedmodule/llmswitch-core/src/**/*.js` / `.d.ts` / `.js.map` 是 ignored TS emit，不是 runtime source truth；Hub/VR/servertool source truth 目录（`src/conversion/hub`、`src/router/virtual-router`、`src/servertool`）不应保留 side-by-side emit。清理前必须用 `git check-ignore` 证明候选是 ignored artifact，再物理删除并用 residue gate 锁住；禁止把 side-by-side JS 当语义修复点。不要把该规则直接套到 `conversion/shared`，该目录仍有测试 `.js` import 依赖，需单独迁移/证明。
 - Phase 0 zero-consumer wrapper cleanup：Hub Pipeline 下无 live import、无 public barrel export、无同名 JS shadow、且 native capability 仍在 Rust/native truth 的 TS thin wrapper/helper 必须物理删除；不要把“薄壳”当保留理由。
 - Phase 0 zero-consumer shared adapter cleanup：若 shared adapter 只是转发 live bridge/native owner 且无 source/test/script importer，必须删除并更新 active docs；禁止用“统一入口/避免分叉”的旧文案保留 0-consumer 中转层。
+- Phase 0 静态 0-consumer 误报边界：删除前必须查 `importCoreDist(...)` / native dynamic loader；`conversion/hub/snapshot-recorder.ts` 和 `native-failure-policy.ts` 这类动态入口不能仅因无静态 import 删除，除非先迁移动态 importer。
 - 发现违规必须先写红测，红测要覆盖真实 Hub Pipeline stage 或 HTTP 黑盒入口；禁止 mock 私有方法冒充黑盒。
 - quota 控制面真源：`QuotaManagerModule.getControlSurface()` 是 daemon-admin / control plane 唯一入口；`quota-handler.ts`、`control-handler.ts` 禁止自建 `createQuotaManagerAdapter(...)`，禁止直连 Rust mutator。
 - quota 初始化硬规则：启动时只能按当前 `config.toml` materialized `virtualrouter.providers` 初始化 quota；未配置 provider 禁止 hydrate/persist/参与本轮 quota 生命周期。

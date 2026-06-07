@@ -205,6 +205,16 @@ Phase 8F-9 legacy shared Responses request adapter deletion proof: `sharedmodule
 - Updated `sharedmodule/llmswitch-core/src/guidance/RCC_TOOL_GUIDE.md` so active guidance points to the bridge owner and forbids restoring the shared adapter middle layer.
 - Red test now fails if the adapter source or active guide mention reappears.
 
+Phase 8F-10 additional Hub zero-consumer source deletion proof: import graph and symbol scan showed three Hub source files had no live source/test/script importer, no public barrel export, and no same-name generated runtime shadow. The related native capabilities remain in native wrapper truth; the live Hub envelope type owner is `types/chat-envelope.ts`.
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/ops/operations.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/tool-session-compat.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/types/chat-schema.ts`.
+- Kept `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts` because it is dynamically loaded by `src/modules/llmswitch/bridge/snapshot-recorder.ts` via `importCoreDist('conversion/hub/snapshot-recorder')`.
+- Kept `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-failure-policy.ts` because it is dynamically loaded by bridge/runtime failure-policy owners.
+- Updated `docs/goals/metadata-request-isolation-plan.md` so it points to live `chat-envelope.ts` and records that `chat-schema.ts` must not be restored.
+- Red test now fails if any deleted source file reappears.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

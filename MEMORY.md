@@ -2302,3 +2302,10 @@ Tags: responses-sse, direct-relay, client-close, required-action, conversation-s
 - `ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS` remains provider stream capture control, not client final response capture control.
 - Verified: handler response SSE finish-reason suite + snapshot-stage policy suite PASS 18/18; snapshot architecture contract/owners gates PASS; `npx tsc --noEmit --pretty false` PASS.
 Tags: snapshot, client-response, SnapshotStageKind, no-env-bypass, direct-relay, 2026-06-07
+
+## 2026-06-07 Hub Pipeline Phase 8F-10 zero-consumer Hub source deletion
+- Deleted three additional 0-consumer Hub TS source files: `conversion/hub/ops/operations.ts`, `conversion/hub/tool-session-compat.ts`, and `conversion/hub/types/chat-schema.ts`.
+- `snapshot-recorder.ts` and `native-failure-policy.ts` are false positives for static import scans because they are loaded dynamically by bridge/runtime owners; keep them unless dynamic importers are migrated first.
+- Live metadata envelope type owner is `conversion/hub/types/chat-envelope.ts`; deleted `types/chat-schema.ts` must not be restored as a second schema owner.
+- Verified: residue audit 87/87 PASS, `npx tsc --noEmit --pretty false` PASS, `git diff --check` PASS; post-delete scan leaves only dynamic-load exceptions.
+Tags: hub-pipeline-rust-closeout, zero-consumer, dynamic-import, physical-delete, 2026-06-07
