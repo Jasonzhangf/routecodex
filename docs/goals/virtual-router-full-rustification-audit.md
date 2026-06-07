@@ -44,7 +44,7 @@
 | native-hub-bridge-action-semantics-tools-core.ts | 280 | 8 | 9 |
 | native-hub-pipeline-orchestration-semantics.ts | 271 | 27 | 2 |
 | native-shared-conversion-semantics-tools.ts | 265 | 7 | 8 |
-| native-hub-pipeline-governance-semantics.ts | 238 | 6 | 2 |
+| native-hub-pipeline-governance-semantics.ts | 238 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-hub-pipeline-session-identifiers-semantics.ts | 231 | 6 | 2 |
 | native-chat-process-node-result-semantics.ts | 226 | 6 | 2 |
 | native-hub-pipeline-orchestration-semantics-builders.ts | 313 | 12 | 2 |
@@ -52,7 +52,7 @@
 | native-followup-mainline-semantics.ts | 196 | 16 | 4 |
 | native-hub-pipeline-req-process-semantics.ts | 196 | 7 | 2 |
 | native-shared-conversion-semantics-openai.ts | 197 | 5 | 6 |
-| native-hub-pipeline-target-semantics.ts | 143 | 3 | 2 |
+| native-hub-pipeline-target-semantics.ts | 143 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-servertool-core-semantics.ts | 142 | 10 | 0 |
 | native-router-hotpath-quota-buckets.ts | 137 | 6 | 0 |
 | native-virtual-router-bootstrap-providers.ts | 131 | 2 | 2 |
@@ -60,15 +60,15 @@
 | native-snapshot-hooks.ts | 113 | 3 | 2 |
 | native-stop-message-auto-semantics.ts | 117 | 10 | 3 |
 | native-virtual-router-routing-instructions-semantics.ts | 144 | 3 | 2 |
-| native-chat-process-governed-filter-semantics.ts | 78 | 2 | 2 |
-| native-chat-process-post-governed-normalization-semantics.ts | 54 | 1 | 2 |
-| native-chat-process-web-search-intent-semantics.ts | 54 | 1 | 2 |
+| native-chat-process-governed-filter-semantics.ts | 78 | 0 | 已删：2026-06-07 Phase 8F-6 |
+| native-chat-process-post-governed-normalization-semantics.ts | 54 | 0 | 已删：2026-06-07 Phase 8F-6 |
+| native-chat-process-web-search-intent-semantics.ts | 54 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-chat-request-filter-semantics.ts | 61 | 1 | 2 |
 | native-shared-conversion-semantics-core.ts | 60 | 7 | 2 |
 | native-shared-conversion-semantics-misc.ts | 90 | 3 | 4 |
 | native-shared-conversion-semantics-shell-utils.ts | 183 | 6 | 7 |
 | native-shared-conversion-semantics-tool-definitions.ts | 199 | 6 | 7 |
-| native-virtual-router-stop-message-actions-semantics.ts | 102 | 2 | 2 |
+| native-virtual-router-stop-message-actions-semantics.ts | 102 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-virtual-router-stop-message-semantics.ts | 97 | 2 | 2 |
 | native-virtual-router-stop-message-state-semantics.ts | 82 | 2 | 2 |
 | native-router-hotpath.ts | 199 | 11 | 2 |

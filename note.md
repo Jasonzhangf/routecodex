@@ -16201,3 +16201,8 @@ Phase E: TS fallback 物理删除
 - Deleted two additional 0-consumer Virtual Router TS helpers: `engine/route-analytics.ts` and `engine/routing-state/metadata.ts`.
 - Evidence: symbol-level `rg` found no live source/test import of `RouteAnalytics`, `buildMetadataInstructions`, or `resolveRoutingMode`; no same-name `.js/.d.ts/.js.map` artifacts existed before deletion.
 - Residue gate now covers the deleted engine helpers as well as bootstrap helpers.
+
+## 2026-06-07 Hub Pipeline Phase 8F-6 unused native wrapper deletion
+- Deleted six 0-consumer native wrapper files: `native-chat-process-governed-filter-semantics.ts`, `native-chat-process-post-governed-normalization-semantics.ts`, `native-chat-process-web-search-intent-semantics.ts`, `native-hub-pipeline-governance-semantics.ts`, `native-hub-pipeline-target-semantics.ts`, `native-virtual-router-stop-message-actions-semantics.ts`; also deleted same-name generated artifacts for stop-message actions.
+- Evidence: exact path `rg` found no live source/test/dynamic importer for these wrappers. Native capability strings remain in `native-router-hotpath-required-exports.ts`; live governed filter wrapper is `native-chat-request-filter-semantics.ts`.
+- Kept `native-failure-policy.ts` because bridge/runtime code dynamically loads it.

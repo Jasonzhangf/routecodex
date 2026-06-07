@@ -522,6 +522,15 @@ describe('hub pipeline stage residue audit', () => {
       'bootstrap/web-search-config.ts',
       'engine/route-analytics.ts',
       'engine/routing-state/metadata.ts',
+      'engine-selection/native-chat-process-governed-filter-semantics.ts',
+      'engine-selection/native-chat-process-post-governed-normalization-semantics.ts',
+      'engine-selection/native-chat-process-web-search-intent-semantics.ts',
+      'engine-selection/native-hub-pipeline-governance-semantics.ts',
+      'engine-selection/native-hub-pipeline-target-semantics.ts',
+      'engine-selection/native-virtual-router-stop-message-actions-semantics.ts',
+      'engine-selection/native-virtual-router-stop-message-actions-semantics.js',
+      'engine-selection/native-virtual-router-stop-message-actions-semantics.d.ts',
+      'engine-selection/native-virtual-router-stop-message-actions-semantics.js.map',
       'token-file-scanner.ts',
     ].filter((relativePath) => fs.existsSync(path.join(virtualRouterRoot, relativePath)));
 

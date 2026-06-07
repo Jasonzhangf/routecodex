@@ -173,6 +173,17 @@ Phase 8F-5 virtual router engine helper deletion proof: two TS engine helper fil
 - Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/metadata.ts`.
 - Red test now fails if either legacy engine helper residue reappears.
 
+Phase 8F-6 unused native wrapper deletion proof: six TS native wrapper files had no live source/test import and no dynamic bridge importer. The native capabilities they referenced remain locked by `native-router-hotpath-required-exports.ts`; the live request filter wrapper is `native-chat-request-filter-semantics.ts`, not the deleted governed-filter residue.
+
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-governed-filter-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-post-governed-normalization-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-web-search-intent-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-governance-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-target-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-virtual-router-stop-message-actions-semantics.ts` plus same-name generated `.js` / `.d.ts` / `.js.map` artifacts.
+- Kept `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-failure-policy.ts` because it is dynamically loaded by `src/modules/llmswitch/bridge/native-exports.ts` and `src/providers/core/runtime/provider-failure-policy-native.ts`.
+- Red test now fails if any deleted unused wrapper residue reappears.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

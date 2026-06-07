@@ -1557,6 +1557,10 @@ Tags: hub-pipeline-phase8f4, virtual-router-bootstrap, rust-ssot, dead-ts-deleti
 
 Tags: hub-pipeline-phase8f5, virtual-router-engine, rust-ssot, dead-ts-deletion, no-resurrection, 2026-06-07
 
+- 2026-06-07: Hub Pipeline Phase 8F-6 已物理删除 6 个 0-consumer native wrapper：`native-chat-process-governed-filter-semantics.ts`、`native-chat-process-post-governed-normalization-semantics.ts`、`native-chat-process-web-search-intent-semantics.ts`、`native-hub-pipeline-governance-semantics.ts`、`native-hub-pipeline-target-semantics.ts`、`native-virtual-router-stop-message-actions-semantics.ts`。保留 `native-failure-policy.ts`，因为 `src/modules/llmswitch/bridge/native-exports.ts` 与 `src/providers/core/runtime/provider-failure-policy-native.ts` 动态加载它。native capability 本身仍由 `native-router-hotpath-required-exports.ts` 锁定。
+
+Tags: hub-pipeline-phase8f6, native-wrapper, required-exports, dynamic-bridge, dead-ts-deletion, no-resurrection, 2026-06-07
+
 - 2026-05-13: port-mode 收口确认两个 owner 边界。可复用规则：`/admin/ports` 的配置真值 owner 只能是 `RouteCodexHttpServer.getPortConfigs()`；若 live listener 已按 runtime bind port 启动，但 `/admin/ports` 仍回磁盘旧端口，先对照 `src`/`dist` 的 `getPortConfigs()` 顺序，确认是否把 `userConfig.httpserver.port` 错盖回 runtime port，禁止去 PortRegistry 或 handler 层补第二真源。另一个边界是 `provider-direct-pipeline.ts::convertProtocolForRelay()`：relay 只允许在**已显式实现的协议对**内工作（当前 `openai-chat ↔ anthropic-messages`），其余跨协议必须 fail-fast，不能把未实现 semantic map 静默透传给 provider。验证链：Jest `port-mode-routing/provider-direct-pipeline`、`build:min`、`install:global`、10000 live `/admin/ports`、临时 provider 端口 direct/auto/relay 回放全部通过。
 
 Tags: port-mode, admin-ports, getPortConfigs, runtime-bind-port, dist-drift, provider-direct, relay-boundary, fail-fast, live-10000, 2026-05-13
