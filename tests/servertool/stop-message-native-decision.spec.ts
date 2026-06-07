@@ -183,9 +183,10 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.reason_code).toBe('stop_schema_missing');
     expect(gate.count_budget).toBe(true);
     expect(gate.followup_text).not.toContain('质询');
-    expect(gate.followup_text).toContain('问题原因');
-    expect(gate.followup_text).toContain('已排除因素');
-    expect(gate.followup_text).toContain('排查顺序');
+    expect(gate.followup_text).toContain('第一轮核对');
+    expect(gate.followup_text).toContain('当前用户目标');
+    expect(gate.followup_text).toContain('证据');
+    expect(gate.followup_text).not.toContain('问题原因');
     expect(gate.followup_text).toContain('issue_cause');
     expect(gate.followup_text).toContain('excluded_factors');
     expect(gate.followup_text).toContain('diagnostic_order');
@@ -221,14 +222,16 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.count_budget).toBe(false);
   });
 
-  test('default stopless followup prompt asks for cause exclusions and diagnostic order', () => {
+  test('default stopless followup prompt starts with goal and evidence check', () => {
     const decision = decideStopMessageActionWithNative(buildMinimalDecisionContext({
       stopEligible: true,
       finishReasons: ['stop'],
     }));
     expect(decision.action).toBe('trigger');
-    expect(decision.followup_text).toContain('当前用户目标是什么');
-    expect(decision.followup_text).toContain('建议下一步是什么');
+    expect(decision.followup_text).toContain('第一轮核对');
+    expect(decision.followup_text).toContain('当前用户目标');
+    expect(decision.followup_text).toContain('证据');
+    expect(decision.followup_text).not.toContain('问题原因');
   });
 
   test('last default stopless followup asks for final user-facing summary only', () => {
@@ -246,9 +249,9 @@ describe('stop-message native decision (blackbox)', () => {
       }
     });
     expect(decision.action).toBe('trigger');
-    expect(decision.followup_text).toContain('最后一次自动续杯预算');
-    expect(decision.followup_text).toContain('最终收尾 summary');
-    expect(decision.followup_text).toContain('不要再开启新一轮执行');
+    expect(decision.followup_text).toContain('第三轮最终收尾');
+    expect(decision.followup_text).toContain('用户可读 summary');
+    expect(decision.followup_text).toContain('不要开启新一轮执行');
     expect(decision.followup_text).not.toContain('直接执行下一步');
   });
 
@@ -268,7 +271,10 @@ describe('stop-message native decision (blackbox)', () => {
       }
     });
     expect(decision.action).toBe('trigger');
-    expect(decision.followup_text).toContain('用户真正意图是什么');
+    expect(decision.followup_text).toContain('第二轮核对');
+    expect(decision.followup_text).toContain('问题原因');
+    expect(decision.followup_text).toContain('已排除因素');
+    expect(decision.followup_text).toContain('排查顺序');
     expect(decision.followup_text).not.toBe('继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结。');
   });
 

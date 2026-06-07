@@ -114,12 +114,37 @@ function readStopMessageFollowupText(execution: NonNullable<ServerToolEngineResu
   return '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。';
 }
 
-function readStopMessageLoopNumber(execution: NonNullable<ServerToolEngineResult['execution']>, key: 'repeatCount' | 'maxRepeats'): number | undefined {
+function readStopMessageAssistantStopText(execution: NonNullable<ServerToolEngineResult['execution']>): string {
   const context = execution.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
     ? execution.context as Record<string, unknown>
     : undefined;
-  const loopState = context?.serverToolLoopState && typeof context.serverToolLoopState === 'object' && !Array.isArray(context.serverToolLoopState)
-    ? context.serverToolLoopState as Record<string, unknown>
+  const text = typeof context?.assistantStopText === 'string' ? context.assistantStopText.trim() : '';
+  return text || '模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。';
+}
+
+function readStopMessageRuntimeMetadata(execution: NonNullable<ServerToolEngineResult['execution']>): Record<string, unknown> | undefined {
+  const context = execution.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
+    ? execution.context as Record<string, unknown>
+    : undefined;
+  if (context?.serverToolLoopState && typeof context.serverToolLoopState === 'object' && !Array.isArray(context.serverToolLoopState)) {
+    return context;
+  }
+  const followup = execution.followup && typeof execution.followup === 'object' && !Array.isArray(execution.followup)
+    ? execution.followup as Record<string, unknown>
+    : undefined;
+  const metadata = followup?.metadata && typeof followup.metadata === 'object' && !Array.isArray(followup.metadata)
+    ? followup.metadata as Record<string, unknown>
+    : undefined;
+  const rt = metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+    ? metadata.__rt as Record<string, unknown>
+    : undefined;
+  return rt ?? context;
+}
+
+function readStopMessageLoopNumber(execution: NonNullable<ServerToolEngineResult['execution']>, key: 'repeatCount' | 'maxRepeats'): number | undefined {
+  const runtime = readStopMessageRuntimeMetadata(execution);
+  const loopState = runtime?.serverToolLoopState && typeof runtime.serverToolLoopState === 'object' && !Array.isArray(runtime.serverToolLoopState)
+    ? runtime.serverToolLoopState as Record<string, unknown>
     : undefined;
   const value = loopState?.[key];
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined;
@@ -133,10 +158,11 @@ function buildStopMessageCliProjectionResult(args: {
   logProgress: (step: number, total: number, message: string, extra?: Record<string, unknown>) => void;
 }): ServerToolOrchestrationResult {
   const continuationPrompt = readStopMessageFollowupText(args.execution);
+  const assistantStopText = readStopMessageAssistantStopText(args.execution);
   const projection = buildServertoolCliProjectionForAutoFlow({
     options: args.options,
     flowId: args.flowId,
-    reasoningText: continuationPrompt,
+    reasoningText: assistantStopText,
     stdoutPreview: continuationPrompt,
     input: {
       continuationPrompt,

@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import type { IncomingHttpHeaders } from 'http';
 import type { HandlerContext } from './types.js';
-import { mapErrorToHttp, type HttpErrorPayload } from '../utils/http-error-mapper.js';
+import { mapErrorToHttp, mapErrorToPublicLogSummary, type HttpErrorPayload } from '../utils/http-error-mapper.js';
 import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
@@ -176,6 +176,31 @@ function extractErrorLogFields(error: unknown, summary: string): {
   };
 }
 
+function buildPublicRawErrorMeta(args: {
+  rawMeta: { rawError?: string; rawErrorSnippet?: string };
+  fields: { statusCode?: number; errorCode?: string; upstreamCode?: string };
+  publicSummary: string;
+}): { rawError?: string; rawErrorSnippet?: string } {
+  const errorNode: Record<string, unknown> = {};
+  if (args.fields.errorCode) {
+    errorNode.code = args.fields.errorCode;
+  }
+  if (typeof args.fields.statusCode === 'number') {
+    errorNode.status = args.fields.statusCode;
+  }
+  if (args.fields.upstreamCode) {
+    errorNode.upstream_code = args.fields.upstreamCode;
+  }
+  if (!Object.keys(errorNode).length) {
+    errorNode.message = args.publicSummary;
+  }
+  const sanitized = JSON.stringify({ error: errorNode });
+  return {
+    ...(args.rawMeta.rawError ? { rawError: sanitized } : {}),
+    rawErrorSnippet: sanitized
+  };
+}
+
 function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
 }
@@ -276,11 +301,16 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const line = `❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${publicSummary}${fieldSuffix ? ` (${fieldSuffix})` : ''}${timingSuffix}`;
   console.error(colorizeRequestLog(line, resolvedId) || line);
   if (rawMeta && shouldLogHttpErrorMeta()) {
+    const publicRawMeta = buildPublicRawErrorMeta({
+      rawMeta,
+      fields,
+      publicSummary
+    });
     const payload = {
       requestId: resolvedId,
       endpoint,
-      rawError: rawMeta.rawError,
-      rawErrorSnippet: rawMeta.rawErrorSnippet ?? summary
+      rawError: publicRawMeta.rawError,
+      rawErrorSnippet: publicRawMeta.rawErrorSnippet
     };
     const metaLine = `[http.error.meta] ${JSON.stringify(payload)}`;
     console.error(colorizeRequestLog(metaLine, resolvedId) || metaLine);
@@ -288,14 +318,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
 }
 
 function resolvePrimaryErrorLogSummary(error: unknown, fallback: string): string {
-  try {
-    const projected = mapErrorToHttp(error);
-    if (projected.status === 429 && projected.body.error.message) {
-      return projected.body.error.message;
-    }
-  } catch {
-  }
-  return fallback;
+  return mapErrorToPublicLogSummary(error, fallback);
 }
 
 function shouldUseRawSnippetAsSummary(rawSnippet: string | undefined, fallbackText: string): boolean {
@@ -525,45 +548,55 @@ export async function resolveReportedRouteErrorHttpResponse(args: {
   normalizedError: Error & Record<string, unknown>;
   onReportError?: (error: unknown) => void;
 }): Promise<HttpErrorPayload> {
-  let mapped = mapErrorToHttp(args.normalizedError);
-  const isValidHttpErrorPayload = (candidate: HttpErrorPayload | undefined): candidate is HttpErrorPayload => {
-    if (!candidate || typeof candidate !== 'object') {
-      return false;
-    }
-    if (typeof candidate.status !== 'number' || !Number.isFinite(candidate.status)) {
-      return false;
-    }
-    const body = candidate.body;
-    const error = body?.error;
-    if (!error || typeof error !== 'object') {
-      return false;
-    }
-    return typeof error.message === 'string' && error.message.trim().length > 0;
-  };
+  const mapped = mapErrorToHttp(buildClientHttpProjectionSource(args.routePayload, args.normalizedError));
   try {
     const { reportRouteError } = await import('../../error-handling/route-error-hub.js');
-    const { http } = await reportRouteError(args.routePayload, { includeHttpResult: true });
-    if (isValidHttpErrorPayload(http)) {
-      mapped = http;
-    }
+    await reportRouteError(args.routePayload, { includeHttpResult: true });
   } catch (error) {
     args.onReportError?.(error);
-    // Hub not initialized — propagate routePayload code into the error for correct mapping
-    const routeCode = typeof args.routePayload.code === 'string' ? args.routePayload.code : undefined;
-    if (routeCode && routeCode !== mapped.body?.error?.code) {
-      const augmented = Object.assign(new Error(args.normalizedError.message), {
-        name: args.normalizedError.name,
-        code: routeCode,
-        status: (args.normalizedError as any).status ?? (args.normalizedError as any).statusCode,
-      });
-      mapped = mapErrorToHttp(augmented);
-    }
   }
   const requestId = typeof args.routePayload.requestId === 'string' ? args.routePayload.requestId : undefined;
   if (requestId && mapped.body?.error && !mapped.body.error.request_id) {
     mapped.body.error.request_id = requestId;
   }
   return mapped;
+}
+
+function buildClientHttpProjectionSource(
+  routePayload: RouteErrorPayload,
+  normalizedError: Error & Record<string, unknown>
+): Error & Record<string, unknown> {
+  const status =
+    typeof normalizedError.status === 'number'
+      ? normalizedError.status
+      : typeof normalizedError.statusCode === 'number'
+        ? normalizedError.statusCode
+        : typeof routePayload.details?.status === 'number'
+          ? routePayload.details.status
+          : typeof routePayload.details?.statusCode === 'number'
+            ? routePayload.details.statusCode
+            : undefined;
+  return Object.assign(new Error(normalizedError.message), normalizedError, {
+    code: typeof routePayload.code === 'string' && routePayload.code.trim()
+      ? routePayload.code
+      : normalizedError.code,
+    ...(typeof status === 'number' ? { status, statusCode: status } : {}),
+    requestId: routePayload.requestId ?? normalizedError.requestId,
+    providerKey: routePayload.providerKey ?? normalizedError.providerKey,
+    providerType: routePayload.providerType ?? normalizedError.providerType,
+    routeName: routePayload.routeName ?? normalizedError.routeName,
+    details: {
+      ...(normalizedError.details && typeof normalizedError.details === 'object' && !Array.isArray(normalizedError.details)
+        ? normalizedError.details as Record<string, unknown>
+        : {}),
+      ...(routePayload.details ?? {}),
+      ...(typeof status === 'number' ? { status, statusCode: status } : {}),
+      requestId: routePayload.requestId ?? normalizedError.requestId,
+      providerKey: routePayload.providerKey ?? normalizedError.providerKey,
+      providerType: routePayload.providerType ?? normalizedError.providerType,
+      routeName: routePayload.routeName ?? normalizedError.routeName
+    }
+  });
 }
 
 export function captureClientHeaders(headers: IncomingHttpHeaders | undefined): Record<string, string> {

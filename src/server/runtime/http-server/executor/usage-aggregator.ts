@@ -34,11 +34,19 @@ function extractUsageCandidatesFromSseText(text: string): unknown[] {
       const response = data.response && typeof data.response === 'object' && !Array.isArray(data.response)
         ? data.response as Record<string, unknown>
         : undefined;
-      const usage = response?.usage ?? data.usage;
+      const message = data.message && typeof data.message === 'object' && !Array.isArray(data.message)
+        ? data.message as Record<string, unknown>
+        : undefined;
+      const usage = response?.usage ?? data.usage ?? message?.usage;
       if (!usage) {
         continue;
       }
-      if (currentEvent === 'response.completed' || data.type === 'response.completed') {
+      const isTerminalUsage =
+        currentEvent === 'response.completed'
+        || data.type === 'response.completed'
+        || currentEvent === 'message_delta'
+        || data.type === 'message_delta';
+      if (isTerminalUsage) {
         completed.push(usage);
       } else {
         other.push(usage);
@@ -153,7 +161,14 @@ export function extractUsageFromResult(
     const normalized = normalizeUsage(candidate, {
       sourceProtocol
     });
-    if (normalized) {
+    const hasNonZeroUsage =
+      normalized
+      && ((normalized.prompt_tokens ?? 0) > 0
+        || (normalized.completion_tokens ?? 0) > 0
+        || (normalized.total_tokens ?? 0) > 0
+        || (normalized.cache_read_input_tokens ?? 0) > 0
+        || (normalized.cache_creation_input_tokens ?? 0) > 0);
+    if (hasNonZeroUsage) {
       return normalized;
     }
   }

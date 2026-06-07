@@ -158,12 +158,73 @@ function stripStopSchemaControlBlocks(text: string): string {
     }
     return '';
   });
+  current = removeBareStopSchemaJsonObjects(current);
   return current
     .split('\n')
     .map((line) => line.trimEnd())
+    .filter((line) => !/^停止原因\s*[:：]/.test(line.trim()))
     .filter((line, index, lines) => line.trim() || (index > 0 && index < lines.length - 1))
     .join('\n')
     .trim();
+}
+
+function removeBareStopSchemaJsonObjects(text: string): string {
+  const source = String(text || '');
+  let out = '';
+  let cursor = 0;
+  while (cursor < source.length) {
+    const start = source.indexOf('{', cursor);
+    if (start < 0) {
+      out += source.slice(cursor);
+      break;
+    }
+    out += source.slice(cursor, start);
+    const end = findJsonObjectEnd(source, start);
+    if (end < 0) {
+      out += source.slice(start);
+      break;
+    }
+    const candidate = source.slice(start, end + 1);
+    if (!isStopSchemaControlJson(candidate)) {
+      out += candidate;
+    }
+    cursor = end + 1;
+  }
+  return out;
+}
+
+function findJsonObjectEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const ch = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') {
+      depth += 1;
+      continue;
+    }
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return -1;
 }
 
 function isStopSchemaControlJson(rawJson: string): boolean {
@@ -894,7 +955,8 @@ const handler: ServerToolHandler = async (
             ...(stickyKey ? { stopMessageReservation: { stickyKey, previousState: null } } : {}),
             followup: handlerResult.followup as unknown as ServerToolFollowupPlan,
             context: {
-              decision: effectiveDecision as unknown as JsonObject
+              decision: effectiveDecision as unknown as JsonObject,
+              assistantStopText
             }
           }
         };

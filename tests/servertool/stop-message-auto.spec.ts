@@ -159,6 +159,24 @@ function readClientInjectMeta(followup: any): { clientInjectOnly: boolean; clien
   return { clientInjectOnly, clientInjectText };
 }
 
+function readStopMessageCliProjection(result: any, expectedReasoning?: string): { cmd: string; message: any } {
+  expect(result.executed).toBe(true);
+  expect(result.flowId).toBe('stop_message_flow');
+  const projectedChoice = (result.chat?.choices as any[] | undefined)?.[0];
+  expect(projectedChoice?.finish_reason).toBe('tool_calls');
+  const projectedMessage = projectedChoice?.message as any;
+  if (expectedReasoning !== undefined) {
+    expect(projectedMessage.reasoning_content).toBe(expectedReasoning);
+  }
+  const toolCall = projectedMessage?.tool_calls?.[0];
+  expect(toolCall?.function?.name).toBe('exec_command');
+  const toolArgs = JSON.parse(String(toolCall?.function?.arguments ?? '{}')) as { cmd?: string };
+  const cmd = String(toolArgs.cmd ?? '');
+  expect(cmd).toContain('routecodex servertool run stop_message_auto');
+  expect(cmd).toContain('"continuationPrompt"');
+  return { cmd, message: projectedMessage };
+}
+
 function buildStopChatResponse(id = 'chatcmpl-stopmessage-double-dispatch'): JsonObject {
   return {
     id,
@@ -182,9 +200,9 @@ function buildStopChatResponse(id = 'chatcmpl-stopmessage-double-dispatch'): Jso
 function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, unknown> {
   const defaultPrompt = (used: number): string => {
     const prompts = [
-      '收尾前请先回答：当前用户目标是什么？已经完成了哪些步骤？是否已经完成目标？建议下一步是什么？如果建议下一步不为空，不要询问用户、不要只总结，直接执行下一步并用文件、日志、命令输出或测试结果补证据；如果目标已完成或确实阻塞，请给出面向用户的简洁总结。',
-      '请重新检查用户最初输入和后续指令：用户真正意图是什么？目标边界是什么？当前问题卡在哪里？之前的笔记、文件、日志、命令输出或测试结果是否已经看过？如果仅靠重新理解用户意图就能获得信息，请先据此继续执行；否则按目标、已做、证据、问题原因、已排除因素、排查顺序补齐缺口。',
-      '这是最后一次自动续杯预算。不要再开启新一轮执行，不要复述系统校验过程；请直接给出面向用户的最终收尾 summary，包含：已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步。最后必须附 stop schema；若目标未完成且仍有下一步，也不要继续执行，把下一步写入 next_suggested_path 并以 blocked/continue_needed 说明。'
+      '第一轮核对：只确认当前用户目标、已经完成的步骤、以及是否已有文件/日志/命令输出/测试结果作为证据。证据不足时不要询问用户、不要总结，直接调用工具补证据；若目标已完成或阻塞，给出简洁结论并附 stop schema。',
+      '第二轮核对：在目标、已做步骤、证据之外，补齐问题原因、已排除因素、排查顺序。仍有缺口时必须调用工具继续验证；只有完成或确实阻塞时，才给用户结论并附 stop schema。',
+      '第三轮最终收尾：不要开启新一轮执行，不要暴露 stopless/校验过程。直接给用户可读 summary，包含已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步，并在末尾附 stop schema。'
     ];
     return prompts[Math.min(Math.max(used, 0), prompts.length - 1)];
   };
@@ -575,7 +593,7 @@ describe('stop_message_auto servertool', () => {
     expect(result.execution?.flowId).toBe('stop_message_flow');
     const followup = result.execution?.followup as any;
     expect(followup).toBeDefined();
-    // stop_message now follows normal reenter path via followup injection plan.
+    // Engine preview still exposes the internal injection plan; final orchestration projects it to CLI.
     expect(followup.requestIdSuffix).toBe(':stop_followup');
     expect(followup.metadata).toBeDefined();
     expect(followup.entryEndpoint).toBeUndefined();
@@ -585,7 +603,8 @@ describe('stop_message_auto servertool', () => {
     expect(followup.metadata?.clientInjectSource).toBe('servertool.stop_message');
     const injectMeta = readClientInjectMeta(followup);
     expect(injectMeta.clientInjectOnly).toBe(false);
-    expect(injectMeta.clientInjectText).toContain('当前用户目标是什么');
+    expect(injectMeta.clientInjectText).toContain('第一轮核对');
+    expect(injectMeta.clientInjectText).toContain('当前用户目标');
     expect(injectMeta.clientInjectText).toContain('JSON 对象');
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
@@ -687,7 +706,7 @@ describe('stop_message_auto servertool', () => {
     expect(followup?.metadata?.target?.modelId).toBe('MiniMax-M2.7');
   });
 
-  test('servertool orchestration reenters stopless followup and never calls client injection', async () => {
+  test('servertool orchestration projects stopless to CLI and never reenters or client-injects', async () => {
     const sessionId = 'stopmessage-spec-session-reenter-only';
     writeRoutingStateForSession(sessionId, {
       forcedTarget: undefined,
@@ -728,12 +747,12 @@ describe('stop_message_auto servertool', () => {
       reenterPipeline
     });
 
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe('stop_message_flow');
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).toHaveBeenCalledTimes(1);
-    const followupBody = reenterPipeline.mock.calls[0]?.[0]?.body as any;
-    expect(JSON.stringify(followupBody)).toContain('继续执行');
+    expect(reenterPipeline).not.toHaveBeenCalled();
+    const { cmd } = readStopMessageCliProjection(result, 'ok');
+    expect(cmd).toContain('"repeatCount":1');
+    expect(cmd).toContain('"maxRepeats":3');
+    expect(cmd).toContain('第一轮核对');
   });
 
   test('missing stop schema followup increments schema rejection budget', async () => {
@@ -749,7 +768,9 @@ describe('stop_message_auto servertool', () => {
       stopMessageUsed: 0
     });
 
-    let followupRuntime: Record<string, unknown> | undefined;
+    const reenterPipeline = jest.fn(async () => {
+      throw new Error('stop_message_auto CLI projection must not reenter pipeline');
+    });
     const result = await runServerToolOrchestration({
       chat: buildStopChatResponse('chatcmpl-stop-missing-schema-budget'),
       adapterContext: {
@@ -765,29 +786,32 @@ describe('stop_message_auto servertool', () => {
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-stopmessage-missing-schema-budget',
       providerProtocol: 'openai-chat',
-      reenterPipeline: async (opts: any) => {
-        followupRuntime = opts?.metadata?.__rt as Record<string, unknown> | undefined;
-        return {
-          body: {
-            id: 'chatcmpl-followup-missing-schema-budget',
-            object: 'chat.completion',
-            model: 'gpt-test',
-            choices: [{ index: 0, message: { role: 'assistant', content: 'still no schema' }, finish_reason: 'stop' }]
-          } as JsonObject
-        };
-      }
+      reenterPipeline
     });
 
     expect(result.executed).toBe(true);
-    expect((followupRuntime?.serverToolLoopState as any)?.flowId).toBe('stop_message_flow');
-    expect((followupRuntime?.serverToolLoopState as any)?.repeatCount).toBe(1);
-    expect((followupRuntime?.serverToolLoopState as any)?.maxRepeats).toBe(10);
-    expect((followupRuntime?.stopMessageState as any)?.stopMessageUsed).toBe(1);
-    expect((followupRuntime?.stopMessageState as any)?.stopMessageMaxRepeats).toBe(10);
-    expect(resolveRuntimeStopMessageState(followupRuntime)?.used).toBe(1);
+    expect(result.flowId).toBe('stop_message_flow');
+    expect(reenterPipeline).not.toHaveBeenCalled();
+    const projectedChoice = (result.chat.choices as any[])[0];
+    expect(projectedChoice.finish_reason).toBe('tool_calls');
+    const projectedMessage = projectedChoice.message as any;
+    expect(projectedMessage.reasoning_content).toBe('ok');
+    const toolCall = projectedMessage.tool_calls?.[0];
+    expect(toolCall?.function?.name).toBe('exec_command');
+    const toolArgs = JSON.parse(String(toolCall?.function?.arguments ?? '{}')) as { cmd?: string };
+    expect(toolArgs.cmd).toContain('routecodex servertool run stop_message_auto');
+    expect(toolArgs.cmd).toContain('"repeatCount":1');
+    expect(toolArgs.cmd).toContain('"maxRepeats":3');
+
+    const persisted = await readJsonFileUntil<{ state?: { stopMessageMaxRepeats?: number; stopMessageUsed?: number } }>(
+      resolveStopStatePath(sessionId),
+      (data) => data?.state?.stopMessageMaxRepeats === 3 && data?.state?.stopMessageUsed === 1
+    );
+    expect(persisted.state?.stopMessageMaxRepeats).toBe(3);
+    expect(persisted.state?.stopMessageUsed).toBe(1);
   });
 
-  test('strips stop_schema control block from final visible stop text', async () => {
+  test('strips stop schema control payload from final visible stop text', async () => {
     const sessionId = 'stopmessage-spec-session-strip-schema-visible';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -804,9 +828,7 @@ describe('stop_message_auto servertool', () => {
     const chatResponse = buildStopChatResponse('chatcmpl-strip-schema-visible');
     ((chatResponse.choices as any[])[0].message as any).content = [
       '停止原因：工具权限被拒，任务阻塞。',
-      '<stop_schema>',
-      '{"stopreason":"blocked","reason":"工具权限被拒","has_evidence":1,"evidence":"exec_command rejected","next_step":""}',
-      '</stop_schema>'
+      '{"stopreason":"blocked","reason":"工具权限被拒","has_evidence":1,"evidence":"exec_command rejected","next_step":""}'
     ].join('\n');
 
     const result = await runServerSideToolEngine({
@@ -828,7 +850,10 @@ describe('stop_message_auto servertool', () => {
 
     expect(result.mode).toBe('tool_flow');
     const content = String(((result.finalChatResponse.choices as any[])[0].message as any).content);
-    expect(content).toContain('停止原因：工具权限被拒');
+    expect(content).toContain('## 当前结果');
+    expect(content).toContain('结论: 工具权限被拒');
+    expect(content).toContain('证据: exec_command rejected');
+    expect(content).not.toContain('停止原因：工具权限被拒');
     expect(content).not.toContain('<stop_schema>');
     expect(content).not.toContain('"stopreason"');
   });
@@ -873,7 +898,10 @@ describe('stop_message_auto servertool', () => {
 
     expect(result.mode).toBe('tool_flow');
     const content = String(((result.finalChatResponse.choices as any[])[0].message as any).content);
+    expect(content).toContain('## 当前结果');
+    expect(content).toContain('结论: 上游工具拒绝');
     expect(content).toContain('model mentioned stopreason in user-visible evidence');
+    expect(content).not.toContain('停止原因：已阻塞');
     expect(content).not.toContain('<stop_schema>');
     expect(content).not.toContain('"stopreason":1');
   });
@@ -1251,7 +1279,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('raw responses request body cannot build stopless followup without standard origin', async () => {
+  test('raw responses request body projects stopless to CLI without rebuilding followup payload', async () => {
     const decisionContexts: StopMessageDecisionContext[] = [];
     const reenterPipeline = jest.fn(async (input: any) => ({
       body: {
@@ -1265,7 +1293,7 @@ describe('stop_message_auto servertool', () => {
       return testStopMessageDecision(ctx as any) as StopMessageDecision;
     });
     try {
-      await expect(runServerToolOrchestration({
+      const result = await runServerToolOrchestration({
         chat: buildStopChatResponse('chatcmpl-stop-raw-responses-captured'),
         adapterContext: {
           requestId: 'req-stopmessage-raw-responses-captured',
@@ -1296,19 +1324,19 @@ describe('stop_message_auto servertool', () => {
         requestId: 'req-stopmessage-raw-responses-captured',
         providerProtocol: 'openai-chat',
         reenterPipeline
-      })).rejects.toMatchObject({
-        code: 'SERVERTOOL_FOLLOWUP_FAILED',
-        details: expect.objectContaining({ reason: 'followup_payload_missing_after_validation' })
       });
 
       expect(decisionContexts[0]?.goal_status).toBe('idle');
       expect(reenterPipeline).not.toHaveBeenCalled();
+      const { cmd } = readStopMessageCliProjection(result, 'ok');
+      expect(cmd).toContain('"repeatCount":1');
+      expect(cmd).toContain('"maxRepeats":3');
     } finally {
       __setDecideOverrideForTests(testStopMessageDecision as any);
     }
   });
 
-  test('standard captured responses request builds stopless followup with tools', async () => {
+  test('standard captured responses request projects stopless CLI with continuation input', async () => {
     const decisionContexts: StopMessageDecisionContext[] = [];
     const sessionId = 'stopmessage-spec-session-standard-responses-captured-isolated';
     fs.rmSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`), { force: true });
@@ -1348,29 +1376,21 @@ describe('stop_message_auto servertool', () => {
       });
 
       expect(decisionContexts[0]?.goal_status).toBe('idle');
-      expect(result.executed).toBe(true);
-      expect(result.flowId).toBe('stop_message_flow');
-      expect(reenterPipeline).toHaveBeenCalledTimes(1);
-      expect(reenterPipeline.mock.calls[0]?.[0]?.entryEndpoint).toBe('/v1/responses');
-      const followupBody = reenterPipeline.mock.calls[0]?.[0]?.body as any;
-      expect(followupBody.model).toBe('gpt-test');
-      expect(followupBody.messages).toBeUndefined();
-      expect(followupBody.input?.[0]).toMatchObject({ role: 'user', content: [{ type: 'input_text', text: 'hi' }] });
-      expect(followupBody.input?.[1]).toMatchObject({ role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] });
-      expect(followupBody.tools?.[0]?.function?.name).toBe('exec_command');
-      const followupText = JSON.stringify(followupBody);
-      expect(followupText).toMatch(/用户真正意图是什么|当前用户目标是什么|请给出当前工作的执行总结/);
-      expect(followupText).toContain('Stop schema 校验未通过');
-      expect(followupText).toContain('JSON 对象');
+      expect(reenterPipeline).not.toHaveBeenCalled();
+      const { cmd } = readStopMessageCliProjection(result, 'ok');
+      expect(cmd).toContain('"repeatCount":1');
+      expect(cmd).toContain('"maxRepeats":3');
+      expect(cmd).toContain('第一轮核对');
+      expect(cmd).toContain('Stop schema 校验未通过');
+      expect(cmd).toContain('JSON 对象');
     } finally {
       __setDecideOverrideForTests(testStopMessageDecision as any);
     }
   });
 
-  test('historical goal-context repeated stop fails fast through followup error chain', async () => {
+  test('historical goal-context repeated stop projects CLI and preserves assistant stop text', async () => {
     const assistantText = '立刻跑全测试 + 远端验证。';
-    await expect(
-      runServerToolOrchestration({
+    const result = await runServerToolOrchestration({
         chat: {
           id: 'chatcmpl-goal-loop-stop',
           object: 'chat.completion',
@@ -1404,10 +1424,10 @@ describe('stop_message_auto servertool', () => {
         entryEndpoint: '/v1/chat/completions',
         requestId: 'req-goal-active-stop-loop',
         providerProtocol: 'openai-chat'
-      })
-    ).rejects.toMatchObject({
-      code: 'SERVERTOOL_FOLLOWUP_FAILED'
-    });
+      });
+    const { cmd } = readStopMessageCliProjection(result, assistantText);
+    expect(cmd).toContain('"repeatCount":3');
+    expect(cmd).toContain('第三轮最终收尾');
   });
 
   test.skip('codex backend uses session workdir as spawn cwd', async () => {
@@ -1766,7 +1786,7 @@ describe('stop_message_auto servertool', () => {
   });
 
 
-  test('stop_message_flow uses reenterPipeline and never clientInjectDispatch when both are available', async () => {
+  test('stop_message_flow uses CLI projection and never clientInjectDispatch or reenterPipeline', async () => {
     const sessionId = 'stopmessage-client-inject-only';
     writeRoutingStateForSession(sessionId, {
       forcedTarget: undefined,
@@ -1813,13 +1833,10 @@ describe('stop_message_auto servertool', () => {
       reenterPipeline
     });
 
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe('stop_message_flow');
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).toHaveBeenCalledTimes(1);
-    const reenterMeta = reenterPipeline.mock.calls[0]?.[0]?.metadata as Record<string, unknown> | undefined;
-    expect(reenterMeta?.clientInjectOnly).toBeUndefined();
-    expect(reenterMeta?.clientInjectSource).toBe('servertool.stop_message');
+    expect(reenterPipeline).not.toHaveBeenCalled();
+    const { cmd } = readStopMessageCliProjection(result, 'ok');
+    expect(cmd).toContain('"repeatCount":1');
   });
 
   test.skip('main done marker does not terminate until ai-followup reviewer approves', async () => {
@@ -3263,7 +3280,7 @@ describe('stop_message_auto servertool', () => {
     expect(records.find((entry) => entry.stage === 'servertool.stop_compare')).toBeUndefined();
   });
 
-  test('aborts waiting followup when client disconnects during reenter', async () => {
+  test('does not wait for reenter when client disconnects during CLI projection', async () => {
     const sessionId = 'stopmessage-spec-session-disconnect-during-followup';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -3319,7 +3336,7 @@ describe('stop_message_auto servertool', () => {
       (adapterContext as any).clientDisconnected = true;
     }, 30);
 
-    await expect(runServerToolOrchestration({
+    const result = await runServerToolOrchestration({
       chat: chatResponse,
       adapterContext,
       requestId: 'req-stopmessage-disconnect-during-followup',
@@ -3337,9 +3354,11 @@ describe('stop_message_auto servertool', () => {
           } as JsonObject
         };
       }
-    })).rejects.toThrow(/client disconnected|CLIENT_DISCONNECTED|CLIENT_RESPONSE_CLOSED|CLIENT_REQUEST_ABORTED|CLIENT_TIMEOUT_HINT_EXPIRED/i);
+    });
 
-    expect(reenterCalls).toBe(1);
+    expect(reenterCalls).toBe(0);
+    const { cmd } = readStopMessageCliProjection(result, 'ok');
+    expect(cmd).toContain('"repeatCount":1');
   });
 
   test('stop followup never uses client injection even when client inject is ready', async () => {
@@ -3400,10 +3419,10 @@ describe('stop_message_auto servertool', () => {
       reenterPipeline
     });
 
-    expect(orchestration.executed).toBe(true);
-    expect(orchestration.flowId).toBe('stop_message_flow');
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    expect(reenterPipeline).not.toHaveBeenCalled();
+    const { cmd } = readStopMessageCliProjection(orchestration, 'ok');
+    expect(cmd).toContain('"repeatCount":1');
   });
 
   test.skip('forces followup stream=false even when captured parameters.stream=true', async () => {
@@ -3846,15 +3865,13 @@ describe('stop_message_auto servertool', () => {
       capturedChatRequest
     } as any;
 
-    let nextRuntime: Record<string, unknown> | undefined;
     const first = await runServerToolOrchestration({
         chat: chatResponse,
         adapterContext,
       requestId: 'req-stopmessage-loop-fail-1',
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
-        reenterPipeline: async (opts: any) => {
-          nextRuntime = opts?.metadata?.__rt as Record<string, unknown> | undefined;
+        reenterPipeline: async () => {
           return {
             body: {
               id: 'chatcmpl-followup-loop-fail',
@@ -3865,8 +3882,8 @@ describe('stop_message_auto servertool', () => {
           };
         }
       });
-    expect(first.executed).toBe(true);
-    adapterContext.__rt = nextRuntime;
+    const firstProjection = readStopMessageCliProjection(first, 'ok');
+    expect(firstProjection.cmd).toContain('"repeatCount":1');
 
     let followupCalled = false;
     const nested = await runServerToolOrchestration({
@@ -3889,7 +3906,9 @@ describe('stop_message_auto servertool', () => {
       });
     expect(nested.executed).toBe(true);
     expect(nested.flowId).toBe('stop_message_flow');
-    expect(followupCalled).toBe(true);
+    expect(followupCalled).toBe(false);
+    const nestedProjection = readStopMessageCliProjection(nested, 'ok');
+    expect(nestedProjection.cmd).toContain('"repeatCount":2');
   });
 
   test('skips elapsed-time timeout check on stopMessage followup hop', async () => {
@@ -3959,9 +3978,9 @@ describe('stop_message_auto servertool', () => {
           };
         }
       });
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe('stop_message_flow');
-    expect(followupCalled).toBe(true);
+    expect(followupCalled).toBe(false);
+    const { cmd } = readStopMessageCliProjection(result, 'ok');
+    expect(cmd).toContain('"repeatCount":1');
   });
   test.skip('ignores stage policy templates in stop_message_auto followup flow', async () => {
     const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-userdir-'));
@@ -4571,7 +4590,8 @@ describe('stop_message_auto servertool', () => {
         (data) => data?.state?.stopMessageUsed === 4
       );
       expect(typeof persisted?.state?.stopMessageText).toBe('string');
-      expect(String(persisted?.state?.stopMessageText ?? '')).toContain('最终收尾 summary');
+      expect(String(persisted?.state?.stopMessageText ?? '')).toContain('第三轮最终收尾');
+      expect(String(persisted?.state?.stopMessageText ?? '')).toContain('用户可读 summary');
       expect(String(persisted?.state?.stopMessageText ?? '')).not.toContain('直接发出工具调用');
       expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
     } finally {

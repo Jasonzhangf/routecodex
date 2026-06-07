@@ -98,7 +98,7 @@ import type { Response } from 'express';
 import type { PipelineExecutionResult } from './types.js';
 import { formatRequestTimingSummary, logPipelineStage } from '../utils/stage-logger.js';
 import { logUsageSummary } from '../runtime/http-server/executor/usage-logger.js';
-import { normalizeUsage } from '../runtime/http-server/executor/usage-aggregator.js';
+import { extractUsageFromResult, normalizeUsage } from '../runtime/http-server/executor/usage-aggregator.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
@@ -652,6 +652,46 @@ function normalizeChatUsagePayload(
     normalized: true,
     source: resolved.source
   };
+}
+
+function resolveProviderProtocolHintFromSseFrame(frame: string): string | undefined {
+  if (/\bevent:\s*response\./.test(frame) || /"type"\s*:\s*"response\./.test(frame)) {
+    return 'openai-responses';
+  }
+  if (/\bevent:\s*message_/.test(frame) || /"type"\s*:\s*"message_/.test(frame)) {
+    return 'anthropic';
+  }
+  return undefined;
+}
+
+function maybeUpdateUsageLogInfoFromSseFrame(
+  result: PipelineExecutionResult,
+  frame: string
+): void {
+  const usageLogInfo = result.usageLogInfo;
+  if (!usageLogInfo || !frame || !/usage|usageMetadata|input_tokens|output_tokens|prompt_tokens|completion_tokens/.test(frame)) {
+    return;
+  }
+  const usage = extractUsageFromResult({
+    body: {
+      bodyText: frame
+    }
+  }, {
+    providerProtocol: resolveProviderProtocolHintFromSseFrame(frame)
+  });
+  if (!usage) {
+    return;
+  }
+  const hasNonZeroUsage =
+    (usage.prompt_tokens ?? 0) > 0
+    || (usage.completion_tokens ?? 0) > 0
+    || (usage.total_tokens ?? 0) > 0
+    || (usage.cache_read_input_tokens ?? 0) > 0
+    || (usage.cache_creation_input_tokens ?? 0) > 0;
+  if (!hasNonZeroUsage) {
+    return;
+  }
+  usageLogInfo.usage = usage as unknown as Record<string, unknown>;
 }
 
 export function normalizeResponsesJsonBody(
@@ -2002,9 +2042,11 @@ export async function sendPipelineResponse(
       ssePending = parts.pop() ?? '';
       for (const part of parts) {
         if (!part.trim()) continue;
+        const frame = `${part}\n\n`;
+        maybeUpdateUsageLogInfoFromSseFrame(result, frame);
         updateSseTerminalTrackerFromChunk(part, finishTracker, terminalWatch);
         updateContractProbeFromSseChunk(part, contractProbe);
-        enqueueClientSseFrame(`${part}\n\n`, 'response.sse.stream.write_frame');
+        enqueueClientSseFrame(frame, 'response.sse.stream.write_frame');
       }
       if (!terminalWatch.terminalSource || ended || streamEnded || terminalFlushTimer) {
         return;
@@ -2138,9 +2180,11 @@ export async function sendPipelineResponse(
         terminal: finishTracker.seenTerminalEvent
       });
       if (ssePending.trim()) {
+        const pendingFrame = `${ssePending}\n\n`;
+        maybeUpdateUsageLogInfoFromSseFrame(result, pendingFrame);
         updateSseTerminalTrackerFromChunk(ssePending, finishTracker, terminalWatch);
         updateContractProbeFromSseChunk(ssePending, contractProbe);
-        enqueueClientSseFrame(`${ssePending}\n\n`, 'response.sse.stream.write_pending_frame');
+        enqueueClientSseFrame(pendingFrame, 'response.sse.stream.write_pending_frame');
         ssePending = '';
       }
       try {

@@ -675,10 +675,7 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
     }
     for block in text.split("\n\n") {
         if block.contains("data: [DONE]") {
-            probe.insert(
-                "__seen_done_chunk".to_string(),
-                Value::Bool(true),
-            );
+            probe.insert("__seen_done_chunk".to_string(), Value::Bool(true));
         }
         let Some((event_name, parsed)) = parse_sse_block(block) else {
             continue;
@@ -691,10 +688,7 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
         let required_action = parsed_obj.get("required_action").and_then(Value::as_object);
         let output_item = parsed_obj.get("item");
         if event_name == "response.completed" || parsed_type == "response.completed" {
-            probe.insert(
-                "__seen_response_completed".to_string(),
-                Value::Bool(true),
-            );
+            probe.insert("__seen_response_completed".to_string(), Value::Bool(true));
         }
         if event_name == "response.done" || parsed_type == "response.done" {
             probe.insert("__seen_response_done".to_string(), Value::Bool(true));

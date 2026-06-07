@@ -139,6 +139,15 @@ function readRuntimeScopeFromMetadata(metadata: Record<string, unknown>): { sess
   };
 }
 
+function readSessionIdForUsageLog(metadata: Record<string, unknown>): string | undefined {
+  return readTrimmedString(metadata.sessionId)
+    ?? readTrimmedString(metadata.session_id)
+    ?? readTrimmedString(metadata.clientTmuxSessionId)
+    ?? readTrimmedString(metadata.client_tmux_session_id)
+    ?? readTrimmedString(metadata.tmuxSessionId)
+    ?? readTrimmedString(metadata.tmux_session_id);
+}
+
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -168,6 +177,7 @@ import { convertProviderResponseIfNeeded } from './executor/provider-response-co
 import { extractUsageFromResult } from './executor/usage-aggregator.js';
 import { deriveFinishReason } from '../../utils/finish-reason.js';
 import { mapProviderProtocol } from './provider-utils.js';
+import { mapErrorToPublicLogSummary } from '../../utils/http-error-mapper.js';
 
 export class RouteCodexHttpServer {
   private app: Application;
@@ -1390,6 +1400,7 @@ export class RouteCodexHttpServer {
         const statusCode = typeof retryError.statusCode === 'number'
           ? retryError.statusCode
           : extractStatusCodeFromError(error);
+        const publicErrorMessage = mapErrorToPublicLogSummary(error);
         this.logStage('router-direct.send.error', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
@@ -1397,7 +1408,7 @@ export class RouteCodexHttpServer {
           statusCode,
           errorCode: retryError.errorCode,
           upstreamCode: retryError.upstreamCode,
-          message: error instanceof Error ? error.message : String(error ?? ''),
+          message: publicErrorMessage,
           directAttempt,
         });
         const excludedProviderKeys = new Set<string>(readStringArray(metadataForHub.excludedProviderKeys));
@@ -1533,7 +1544,7 @@ export class RouteCodexHttpServer {
           requestId: input.requestId,
           response: responseBody as Record<string, unknown>,
           providerKey: auditContext.providerKey,
-          sessionId: typeof inputMetadata.sessionId === 'string' ? inputMetadata.sessionId : undefined,
+          sessionId: readSessionIdForUsageLog(inputMetadata),
           conversationId: typeof inputMetadata.conversationId === 'string' ? inputMetadata.conversationId : undefined,
           routingPolicyGroup:
             directResult.pipelineMetadata
@@ -1561,7 +1572,7 @@ export class RouteCodexHttpServer {
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,
         requestStartedAtMs: Date.now(),
-        sessionId: inputMetadata.sessionId,
+        sessionId: readSessionIdForUsageLog(inputMetadata),
         conversationId: inputMetadata.conversationId,
         projectPath:
           inputMetadata.clientWorkdir
@@ -1621,7 +1632,7 @@ export class RouteCodexHttpServer {
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,
         requestStartedAtMs: Date.now(),
-        sessionId: inputMetadata.sessionId,
+        sessionId: readSessionIdForUsageLog(inputMetadata),
         conversationId: inputMetadata.conversationId,
         projectPath:
           inputMetadata.clientWorkdir

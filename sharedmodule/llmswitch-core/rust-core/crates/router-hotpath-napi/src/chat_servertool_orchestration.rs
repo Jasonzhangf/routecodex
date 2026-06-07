@@ -28,9 +28,9 @@ pub(crate) fn build_servertool_cli_projection_01_from_hub_resp_chatprocess_03() 
 const NOOP_SERVERTOOL_NAMES: [&str; 1] = ["continue_execution"];
 const LEGACY_STOP_MESSAGE_FOLLOWUP_TEXT: &str = "继续执行";
 const DEFAULT_STOP_MESSAGE_EXECUTION_PROMPTS: [&str; 3] = [
-    "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。",
-    "你刚才再次停止。请先质询：当前用户目标是否已经完成？如果未完成，必须调用可用工具继续操作、检查或验证；如果已完成，必须给出明确完成证据，不要只总结、道歉、复述状态或输出计划。",
-    "最后一次续杯预算。必须严格判断目标是否完成：已完成则给出可核验证据；未完成则必须调用工具继续执行到有证据为止。禁止空泛总结、道歉、计划或再次无证据停止。",
+    "第一轮核对：只确认当前用户目标、已经完成的步骤、以及是否已有文件/日志/命令输出/测试结果作为证据。证据不足时不要询问用户、不要总结，直接调用工具补证据；若目标已完成或阻塞，给出简洁结论并附 stop schema。",
+    "第二轮核对：在目标、已做步骤、证据之外，补齐问题原因、已排除因素、排查顺序。仍有缺口时必须调用工具继续验证；只有完成或确实阻塞时，才给用户结论并附 stop schema。",
+    "第三轮最终收尾：不要开启新一轮执行，不要暴露 stopless/校验过程。直接给用户可读 summary，包含已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步，并在末尾附 stop schema。",
 ];
 
 fn default_stop_message_execution_prompt(used: u32) -> String {
@@ -2970,8 +2970,9 @@ mod tests {
             .as_str()
             .expect("followup text");
         assert!(text.contains("当前用户目标"));
-        assert!(text.contains("必须调用可用工具"));
-        assert!(text.contains("不要只总结"));
+        assert!(text.contains("第一轮核对"));
+        assert!(text.contains("直接调用工具补证据"));
+        assert!(!text.contains("问题原因"));
         assert_ne!(text, "继续执行");
     }
 
@@ -3004,17 +3005,18 @@ mod tests {
             .as_str()
             .expect("followup text");
         assert!(text.contains("当前用户目标"));
-        assert!(text.contains("必须调用可用工具"));
+        assert!(text.contains("第一轮核对"));
+        assert!(text.contains("直接调用工具补证据"));
         assert_ne!(text, "继续执行");
     }
 
     #[test]
     fn test_stop_message_auto_legacy_followup_text_escalates_by_used_count() {
         for (used, expected) in [
-            (0, "完成证据"),
-            (1, "是否已经完成"),
-            (2, "最后一次续杯预算"),
-            (3, "最后一次续杯预算"),
+            (0, "第一轮核对"),
+            (1, "第二轮核对"),
+            (2, "第三轮最终收尾"),
+            (3, "第三轮最终收尾"),
         ] {
             let input = json!({
                 "base": {

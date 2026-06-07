@@ -1,5 +1,9 @@
 # RouteCodex Memory
 
+- 2026-06-07: `~/.rcc` 清理边界已验证：`~/.rcc` 实际为 `/Volumes/extension/.rcc` 软链；`install/releases/.staging-routecodex-*` 是失败/未完成安装 staging，确认 `install/current` 不指向后可物理删除，本次把 `~/.rcc/install` 从约 78G 降到约 2.5G，`routecodex/rcc --version` 仍可执行。`diag`/`codex-samples` 是线上错误取证真源，不得整目录删除，只能按 TTL/采样/大文件策略收敛。仓库 ignored 清理边界：`tmp/`、`.install-pack/`、test-results、旧 `.tgz`、`.DS_Store`、src-side `.js.map` 可清；`dist/node_modules/vendor/target/models/samples` 需按开发/验证成本单独决策。
+
+Tags: cleanup, rcc-home, install-staging, diag-retention, generated-artifacts, 2026-06-07
+
 - 2026-05-27: Windsurf 账号管理 Phase 1 完成：删除 `WindsurfQuotaHealthSnapshot`、`WindsurfManagedCredentialEntry` 类型；删除 `readManagedWindsurfAuthConfigDetailed`、`extractQuotaHealthFromUserStatusPayload`、`isWindsurfAccountModelSupported`、`rankManagedCredentialsByHealth`、`selectManagedCredentialForSession`、`fetchWindsurfUserStatusForHealth`、`markCurrentAliasQuotaExhausted`、`computeAccountConcurrencyCapacity`、`assertManagedAccountPoolSelectable`、`resolveManagedAccountPoolCooldownMs` 等 17+ 方法；`selectWindsurfAccount` 简化取消旧多账号健康管理逻辑。Phase 2 新建：`windsurf-account-store.ts`（持久化账号状态，JSON 原子写）、`windsurf-account-pool.ts`（候选过滤 + sticky session + 排序）、`windsurf-account-session-manager.ts`（refresh 去重锁）。Provider 接入选 `selectWindsurfAccount` 使用 pool，`markWindsurfSessionActive/Stopped` 恢复真实实现，`clearManagedWindsurfSessionCredential` 回写 `pool.markAuthInvalid`。Phase 1 删除 ~350 行，Phase 2 新建 3 文件共 ~290 行。5 个测试已删除 Phase 1 API 的 context-continuity RED 测试已清理（15→10 个测试，全绿）。47 个 provider RED 测试不涉及 Phase 1 API，保留为已知失败的预写测试（登录链、RCC 文本协议、Cascade 生命周期）。VR 编译通过（0 新增错误，仅 2 pre-existing Rust native binding 错误），123 VR 测试全绿。
 
 Tags: windsurf, account-management, phase-1-cleanup, phase-2-pool, sticky-session, account-store, session-manager, red-test-cleanup, 2026-05-27
@@ -2313,5 +2317,13 @@ Tags: hub-pipeline-rust-closeout, zero-consumer, dynamic-import, physical-delete
 ## 2026-06-07 OpenAI Responses prebuilt SSE stopless boundary
 - OpenAI Responses prebuilt SSE wrappers must not bypass stopless when `__routecodex_finish_reason=stop` and stopless goal state is present. TS may gate passthrough, but SSE terminal-event materialization belongs to Rust `RespInbound`.
 - Do not use `__routecodex_stream_contract_probe_body` / snapshot/debug probe as normal provider response semantics. The valid path is upstream stream -> TS transport `bodyText` bridge -> Rust `parse_openai_responses_response` materializes Responses JSON -> Rust `RespChatProcess` stopless CLI projection -> client.
+- Stopless CLI projection reasoning should expose the intercepted assistant stop text; continuation prompts and stop schema guidance belong in the CLI `--input-json` payload, not as replacement reasoning. Strip bare stop schema control JSON before projecting assistant stop text.
 - Verified: Rust `hub_resp_inbound_format_parse` 16/16 PASS; request-executor + provider-response Jest 43/43 PASS; `npm run verify:servertool-rust-only` PASS; `npx tsc --noEmit --pretty false` PASS; `git diff --check` PASS.
 Tags: responses-sse, stopless, servertool-cli-projection, resp-inbound, no-probe-replay, 2026-06-07
+
+## 2026-06-07 5555 current image routing contract
+- Current-request image placeholder text (`<image ...>`, `[Image omitted]`, `[Image #n]`) is still media intent for Virtual Router. It must set `has_image_attachment` before classification so image requests do not inherit `search:last-tool-search` or other non-media continuation routes.
+- Image route order is: configured `multimodal` route first, then configured `vision` route, then original text/default routes. Do not drop `vision` merely because `multimodal` exists; if the multimodal pool has no visual-capable available target, selection must continue to `vision` before search/default. Only when neither visual route has visual-capable targets may media placeholder/default behavior apply.
+- `vision` route selection must filter candidates to `vision || multimodal` capability. Explicit direct `provider.model` image requests may stay direct only when the target model has `multimodal || vision`; remote video still requires `multimodal`.
+- Verified: Rust feature/config/selection/direct_model tests PASS for placeholder detection, multimodal-over-search, vision fallback, route queue preservation, direct image visual gate, and remote-video multimodal gate; build-core, tsc, and diff-check passed.
+Tags: virtual-router, multimodal, vision, image-placeholder, media-routing, 5555, 2026-06-07

@@ -228,6 +228,15 @@ export function project_error_err_06_client_from_error_err_05_execution_decision
   return mapErrorToHttp(decision);
 }
 
+export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): string {
+  const projected = mapErrorToHttp(error);
+  const message = projected.body.error.message;
+  if (fallback !== undefined && projected.status !== 401 && projected.status !== 403 && projected.status !== 429) {
+    return fallback;
+  }
+  return message || fallback || 'Upstream provider error';
+}
+
 function extractStatus(err: RawErrorPayload): number | undefined {
   if (typeof err?.status === 'number') {
     return err.status;

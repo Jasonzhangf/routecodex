@@ -7,6 +7,17 @@
 - Responses 工具/历史合法性应在 Rust Hub/Responses conversation store owner 保证；direct live 请求若客户端非法，应由 provider fail-fast，而不是 RouteCodex runtime 清洗。
 - 实机样本 `manual-direct-tool-20260607T184640` 验证 provider-request 保留 flat Responses tool `{type:"function", name:"noop_tool"}`，provider body 不含 `metadata`/`__raw_request_body`；失败原因转为真实 upstream/health cooldown，不再是本地 `tools[0].name`。
 
+## 2026-06-07 ~/.rcc 与生成物清理审计
+
+- `~/.rcc` 是 `/Volumes/extension/.rcc` 软链；运行配置真源仍是 `config.toml` / `provider/*` / `state/*` / `sessions/*`，清理不得碰这些真源目录。
+- 高置信可清理项：`~/.rcc/install/releases/.staging-routecodex-*` 是失败/未完成 install staging，`install/current` 只指向 `routecodex-0.90.2984-2026-06-07T142846Z`；其中两个 staging 各约 38G，是主要空间残留。
+- `~/.rcc/diag` 当前约 5.1 万个 JSON、逻辑大小约 99G；它是错误取证真源，不能整目录删除，需按保留窗口/大文件策略清理并补采样/TTL 建议。
+- 仓库侧 `sharedmodule/llmswitch-core/src/**/*.js|*.d.ts|*.js.map` 已被 `.gitignore` 明确忽略，属于 side-by-side TS emit；但 `conversion/shared` 有历史动态 import 依赖边界，清理必须分目录证明。
+- 已清理 `~/.rcc/install/releases/.staging-routecodex-0.90.1270-*`、`.staging-routecodex-0.90.1538-*`、`.staging-routecodex-0.90.2835-*`，并清理 token-stats tmp / 空目录 / `.DS_Store`；`~/.rcc/install` 从约 78G 降到约 2.5G，`routecodex --version` / `rcc --version` 均为 `0.90.2984`。
+- 仓库已清理 ignored 本地生成物：`tmp/`、`.install-pack/`、test-results、旧 `.tgz`、`.DS_Store`、备份文件、src-side `.js.map`；保留 `dist/node_modules/vendor/target` 以免破坏当前开发验证。
+- 已物理删除旧 dead-code 清理链：`scripts/cleanup-unused-code.sh`、`scripts/phase1-cleanup.sh`、`scripts/verify-cleanup-safety.sh`、`scripts/simple_dead_function_finder.py`。证据：无 package 入口；引用只在自身/生成器；其中 `cleanup-unused-code.sh` 含危险批量 `sed` 删除源码逻辑，`phase1-cleanup.sh` 是 2025 生成的 TODO 脚本。
+- `.beads` 清理边界：按 `bd-task-flow`，只保留任务真源 `.beads/issues.jsonl` 与 active runtime db/lock/pid；已删除旧 `issues.jsonl.bak.*` 和 `daemon.log`。
+
 ## 2026-06-05 apply_patch 10000 新样本根因收口
 
 - 新样本已证实 `provider-request.body.tools[*]` 里的 `apply_patch` schema 不是当前阻塞；live 问题改为历史 assistant `tool_calls[].function.arguments` 仍被发成双份 `{"input":"...","patch":"..."}`。
@@ -16254,6 +16265,44 @@ Phase E: TS fallback 物理删除
 ## 2026-06-07 OpenAI Responses prebuilt SSE stopless fix
 - Root cause: `/v1/responses` relay provider could return a prebuilt SSE wrapper with `__sse_responses` and `__routecodex_finish_reason=stop`; TS passthrough returned it directly before Rust `RespChatProcess`, so stopless CLI projection was bypassed. Falling through without Rust Responses SSE materialization made Rust outbound remap see the wrapper as non-standard Chat payload and fail with `missing choices`.
 - Fix boundary: TS `provider-response-converter` now only passthroughs OpenAI Responses prebuilt SSE when stopless is not required; when stopless is required it passes the stream wrapper into the normal bridge. Rust `hub_resp_inbound_format_parse.rs` materializes OpenAI Responses SSE `bodyText` terminal events into Responses JSON before tool governance. TS does not use `__routecodex_stream_contract_probe_body` as semantic input.
+- Servertool alignment: stopless CLI projection now maps the intercepted assistant stop text into client-visible reasoning, while the continuation prompt remains in the CLI `--input-json` payload. Stop schema control JSON is stripped from assistant stop text before reasoning projection.
 - Tests: added request-executor regression with only real `__sse_responses` + finish marker, no probe body; added Rust RespInbound SSE materialization unit test; updated stale provider-response plan assertions from stopless reenter to current CLI projection contract.
 - Verification PASS: Rust `hub_resp_inbound_format_parse` 16/16, request-executor + provider-response Jest 43/43, `verify:servertool-rust-only`, `npx tsc --noEmit --pretty false`, `git diff --check`.
-- Dirty boundary: `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs` is unrelated dirty and must not be staged with this fix unless separately reviewed.
+
+## 2026-06-07 5555 image placeholder VR routing fix
+- Real bad sample: `~/.rcc/codex-samples/openai-responses/ports/5555/mimo.key2.mimo-v2.5/req_1780842504109_c2f0f140/provider-request.json` sent current user image as text placeholder blocks: `<image name=[Image #1]>`, `[Image omitted]`, `</image>`, `[Image #1]这两个节点通吗？`.
+- Live log evidence: `~/.rcc/logs/server-5520.log` showed `req=req_1780842504109_c2f0f140 search/gateway-priority-5555-weighted-search -> mimo.key2.mimo-v2.5... reason=search:last-tool-search`; runtime snapshot had no media route fields. This proved VR did not detect current image intent before route selection.
+- Root cause: Rust `virtual_router_engine/features/media.rs` detected structured `input_image`/`image_url`/`data:image` but not the current-request placeholder shape; `routing/config.rs` also had `has_vision_targets` computed but unused for image routing.
+- Fix: current user placeholder text now sets `has_image_attachment`; route queue preserves visual priority as `multimodal -> vision -> original text/default routes` whenever those routes exist, so a bad/unusable multimodal pool can still continue to vision instead of search/default. Selection filters `vision` route candidates to `vision || multimodal` capability, and direct `provider.model` media gating now treats image as visual (`multimodal || vision`) while remote video still requires `multimodal`.
+- Verification PASS:
+  - `cargo test -p router-hotpath-napi current_user_image_placeholder_is_media_intent --lib`
+  - `cargo test -p router-hotpath-napi direct_model --lib`
+  - `cargo test -p router-hotpath-napi image_attachment_without_multimodal_targets_routes_to_vision --lib`
+  - `cargo test -p router-hotpath-napi image_request --lib`
+  - `cargo test -p router-hotpath-napi virtual_router_engine::routing::config --lib`
+  - `cargo test -p router-hotpath-napi virtual_router_engine::features --lib`
+  - `node scripts/build-core.mjs`
+  - `npx tsc --noEmit --pretty false`
+  - `git diff --check`
+
+## 2026-06-07 cc provider availability + 5555/5520 backup audit
+- Read ~/.rcc/config.toml: 5520 currently only asxs; 5555 currently asxs > cc > minimax/mimo for default/coding/thinking/longcontext.
+- Need live proof whether cc.key1.gpt-5.5 is actually usable before changing 5520 or confirming 5555.
+- User interrupted after cc live check. New directive: directly change 5520/5555 GPT order to llmgate > asxs > cc.
+- User supplied another llmgate key via screenshot; will add as second auth entry before routing change.
+- Confirmed llmgate targets use free-gpt-5.5 in config edit.
+
+## 2026-06-07 stopless/direct usage/error projection deploy
+- Stopless root cause: `/v1/responses` relay prebuilt SSE (`__sse_responses`) with `finish_reason=stop` bypassed Rust RespChatProcess, so stopless CLI projection never fired. Fix keeps non-stopless passthrough, but stopless-required Responses SSE now materializes through Rust response parsing before CLI projection.
+- Stopless UX fixed: Rust continuation prompt is now layered across attempts; CLI projection maps intercepted assistant stop text into reasoning, strips stop schema/control JSON, and returns user-facing markdown summary rather than raw stop reason.
+- Direct usage/session fixed: direct raw SSE usage is extracted at `ServerRespOutbound05ClientFrame`; usage aggregator reads Anthropic `message.usage` and terminal `message_delta`; session log now accepts `sessionId`, `session_id`, `clientTmuxSessionId`, `client_tmux_session_id`, `tmuxSessionId`, `tmux_session_id`.
+- Client/log error projection fixed: `ErrorErr06` no longer trusts ErrorHub HTTP payload for client body; `logRequestError`, `http.error.meta`, and `[router-direct.send] error` all use public auth/quota summaries for 401/403/429. Original provider error object is still passed to failure policy; only display/log projection is sanitized.
+- Red/green coverage added: stopless prebuilt SSE regression, usage/session propagation, public error mapper leak tests for 401/403 quota/token payloads, forced SSE error response shape, unsafe ErrorHub payload, and request error log meta sanitization.
+- Verification PASS:
+  - `npm run jest:run -- --runTestsByPath tests/server/handlers/request-error-log.spec.ts tests/server/handlers/handler-utils.error-response-shape.spec.ts tests/server/utils/http-error-mapper-public-leak.spec.ts tests/server/utils/http-error-mapper-provider-not-available-details.spec.ts tests/server/utils/http-error-mapper-timeout.spec.ts tests/server/utils/http-error-mapper-tool-validation.spec.ts tests/server/utils/http-error-mapper-malformed-request.spec.ts --runInBand --forceExit` -> 7 suites / 18 tests.
+  - `npm run jest:run -- --runTestsByPath tests/server/handlers/handler-response-utils.sse-usage-log.spec.ts tests/server/runtime/http-server/executor/usage-aggregator.spec.ts tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts --runInBand --forceExit` -> 3 suites / 26 tests.
+  - `npm run jest:run -- --runTestsByPath tests/server/runtime/request-executor.single-attempt.spec.ts --runInBand -t "projects stopless|bypass stopless|resets stopless" --forceExit` -> 3 focused tests.
+  - `npx tsc --noEmit --pretty false`, `git diff --check`, `node scripts/build-core.mjs`, `npm run build:min`, `npm run install:global` all PASS.
+- Deploy evidence: build bumped to `0.90.2987`; install snapshots refreshed at `/Users/fanzhang/.rcc/install/current` and `/Volumes/extension/.rcc/install/current`; `routecodex --version` and `rcc --version` both `0.90.2987`; `routecodex restart --port 5555` and `routecodex restart --port 5520` both used in-place restart; health on both ports returned `ready=true`, `pipelineReady=true`, `version=0.90.2987`.
+- Live evidence after install: 5520 health OK and post-restart log no longer shows new auth/quota raw leak; old raw `[router-direct.send]` leak at line 197929 belongs to pre-0.90.2987 23:41 request. Natural 5520 traffic currently routes to `sdfv`, so no fresh 401/403 provider error occurred after deploy to live-confirm the stage line in production.
+- New next issue observed after deploy: 5520 produced `response.sse.stream` errors for `openai-responses-router-gpt-5.5-20260607T234912124-315365-3138` and `...234921834-315367-3140` with `{"message":"stream closed before response.completed","code":"upstream_stream_incomplete"}`. This is the next SSE incomplete/断流 problem, separate from auth/quota error text projection.

@@ -336,8 +336,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
             }
           })}\n\n`,
           'data: [DONE]\n\n'
-        ]),
-        __routecodex_finish_reason: 'stop'
+        ])
       }
     };
     const handle = createRuntimeHandleWithProtocol(async () => providerResponse, 'openai-responses');

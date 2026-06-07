@@ -62,6 +62,30 @@ describe('http-server direct result metadata propagation', () => {
     });
   });
 
+  it('router-direct usage log uses client tmux session when sessionId is absent', async () => {
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    const result = await server.buildRouterDirectResult({
+      response: {
+        status: 200,
+        data: { id: 'resp_router_direct_tmux_session', model: 'gpt-5.4' }
+      },
+      providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
+      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'tools' } }
+    }, {
+      requestId: 'req-router-direct-tmux-session',
+      body: { model: 'gpt-5.3-codex', stream: false },
+      metadata: {
+        clientTmuxSessionId: 'tmux-router-direct-session',
+        cwd: '/tmp/router-direct-tmux-project'
+      }
+    });
+
+    expect(result.usageLogInfo).toMatchObject({
+      sessionId: 'tmux-router-direct-session',
+      projectPath: '/tmp/router-direct-tmux-project'
+    });
+  });
+
   it('provider-direct result preserves input metadata for downstream SSE restore', async () => {
     const server = Object.create(RouteCodexHttpServer.prototype) as any;
     server.extractProviderModel = () => 'gpt-5.4';

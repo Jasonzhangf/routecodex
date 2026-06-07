@@ -149,6 +149,32 @@ describe('usage log text', () => {
     });
   });
 
+  it('prefers Anthropic message_delta usage over zero message_start usage in SSE bodyText', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        mode: 'sse_passthrough',
+        bodyText: [
+          'event: message_start',
+          'data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":0,"output_tokens":0}}}',
+          '',
+          'event: message_delta',
+          'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":7858,"output_tokens":1160,"cache_read_input_tokens":81024}}',
+          ''
+        ].join('\n')
+      }
+    }, {
+      providerProtocol: 'anthropic'
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 88882,
+      completion_tokens: 1160,
+      total_tokens: 90042,
+      cache_read_input_tokens: 81024,
+      cache_creation_input_tokens: undefined
+    });
+  });
+
   it('recomputes total when cache tokens are excluded upstream', () => {
     const usage = extractUsageFromResult({
       body: {

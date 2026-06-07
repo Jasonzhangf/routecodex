@@ -117,7 +117,6 @@ mod responses_direct_route_decision_tests {
         assert_eq!(decision["requiresHubRelay"], false);
         assert_eq!(decision["reason"], Value::Null);
     }
-
 }
 
 use crate::hub_pipeline::{

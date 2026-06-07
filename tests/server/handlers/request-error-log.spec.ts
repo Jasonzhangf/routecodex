@@ -87,4 +87,64 @@ describe('logRequestError diagnostics', () => {
     expect(firstLine).not.toContain('Token Plan Max');
     expect(firstLine).not.toContain('067332f1228901ab7a06e6c2b2e23f5d');
   });
+
+  it('does not print upstream 401 provider payload in primary failure line or http error meta', () => {
+    const previousVerbose = process.env.ROUTECODEX_HTTP_ERROR_META_LOG;
+    process.env.ROUTECODEX_HTTP_ERROR_META_LOG = '1';
+    try {
+      const err: any = new Error(
+        'HTTP 401: {"error":{"code":"","message":"Invalid token (request id: 202606071512468498407098268d9d6mBARM7HT)","type":"new_api_error"}}'
+      );
+      err.statusCode = 401;
+      err.code = 'HTTP_401';
+      err.rawErrorSnippet =
+        '{"error":{"code":"new_api_error","message":"Invalid token (request id: 202606071512468498407098268d9d6mBARM7HT)","type":"new_api_error"}}';
+
+      logRequestError('/v1/responses', 'req_401_public_summary', err);
+
+      const rendered = errorSpy.mock.calls.map((call) => String(call[0] ?? '')).join('\n');
+      expect(rendered).toContain('Upstream authentication failed');
+      expect(rendered).toContain('status=401');
+      expect(rendered).toContain('code=HTTP_401');
+      expect(rendered).not.toContain('Invalid token');
+      expect(rendered).not.toContain('202606071512468498407098268d9d6mBARM7HT');
+      expect(rendered).not.toContain('new_api_error');
+    } finally {
+      if (previousVerbose === undefined) {
+        delete process.env.ROUTECODEX_HTTP_ERROR_META_LOG;
+      } else {
+        process.env.ROUTECODEX_HTTP_ERROR_META_LOG = previousVerbose;
+      }
+    }
+  });
+
+  it('does not print upstream 403 provider quota payload in primary failure line or http error meta', () => {
+    const previousVerbose = process.env.ROUTECODEX_HTTP_ERROR_META_LOG;
+    process.env.ROUTECODEX_HTTP_ERROR_META_LOG = '1';
+    try {
+      const err: any = new Error(
+        'HTTP 403: {"error":{"message":"余额和订阅额度均不足，请充值后再使用","type":"permission_error","code":"insufficient_quota"}}'
+      );
+      err.statusCode = 403;
+      err.code = 'HTTP_403';
+      err.rawErrorSnippet =
+        '{"error":{"message":"余额和订阅额度均不足，请充值后再使用","type":"permission_error","code":"insufficient_quota"}}';
+
+      logRequestError('/v1/responses', 'req_403_public_summary', err);
+
+      const rendered = errorSpy.mock.calls.map((call) => String(call[0] ?? '')).join('\n');
+      expect(rendered).toContain('Upstream authentication failed');
+      expect(rendered).toContain('status=403');
+      expect(rendered).toContain('code=HTTP_403');
+      expect(rendered).not.toContain('余额和订阅额度均不足');
+      expect(rendered).not.toContain('insufficient_quota');
+      expect(rendered).not.toContain('permission_error');
+    } finally {
+      if (previousVerbose === undefined) {
+        delete process.env.ROUTECODEX_HTTP_ERROR_META_LOG;
+      } else {
+        process.env.ROUTECODEX_HTTP_ERROR_META_LOG = previousVerbose;
+      }
+    }
+  });
 });

@@ -884,7 +884,7 @@ export async function convertProviderResponseIfNeeded(
       });
       const mustBridgePrebuiltSseForStopless =
         serverToolsEnabled
-        && prebuiltSseFinishReason === 'stop'
+        && (prebuiltSseFinishReason === 'stop' || prebuiltSseFinishReason === undefined)
         && Boolean(prebuiltSseGoalState);
       if (!mustBridgePrebuiltSseForStopless) {
         logPipelineStage('convert.bridge.prebuilt_sse_passthrough', options.requestId, {

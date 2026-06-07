@@ -256,11 +256,37 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
 
 fn merge_response_object(target: &mut Map<String, Value>, response: &Map<String, Value>) {
     for (key, value) in response {
+        if key == "output" {
+            merge_response_output_array(target, value);
+            continue;
+        }
         target.insert(key.clone(), value.clone());
     }
 }
 
-fn upsert_response_output_item(target: &mut Map<String, Value>, item: &Value) {
+fn output_item_matches(existing_obj: &Map<String, Value>, item_id: &Option<String>, call_id: &Option<String>) -> bool {
+    item_id
+        .as_ref()
+        .zip(read_trimmed_string(existing_obj.get("id")).as_ref())
+        .is_some_and(|(left, right)| left == right)
+        || call_id
+            .as_ref()
+            .zip(read_trimmed_string(existing_obj.get("call_id")).as_ref())
+            .is_some_and(|(left, right)| left == right)
+}
+
+fn merge_output_item_value(existing: &Value, item: &Value) -> Value {
+    let (Some(existing_obj), Some(item_obj)) = (existing.as_object(), item.as_object()) else {
+        return item.clone();
+    };
+    let mut merged = existing_obj.clone();
+    for (key, value) in item_obj {
+        merged.insert(key.clone(), value.clone());
+    }
+    Value::Object(merged)
+}
+
+fn record_response_output_item(target: &mut Map<String, Value>, item: &Value, merge_existing: bool) {
     let Some(item_obj) = item.as_object() else {
         return;
     };
@@ -271,21 +297,76 @@ fn upsert_response_output_item(target: &mut Map<String, Value>, item: &Value) {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let exists = output.iter().any(|existing| {
-        let Some(existing_obj) = existing.as_object() else {
-            return false;
-        };
-        item_id
-            .as_ref()
-            .zip(read_trimmed_string(existing_obj.get("id")).as_ref())
-            .is_some_and(|(left, right)| left == right)
-            || call_id
-                .as_ref()
-                .zip(read_trimmed_string(existing_obj.get("call_id")).as_ref())
-                .is_some_and(|(left, right)| left == right)
+    let existing_index = output.iter().position(|existing| {
+        existing
+            .as_object()
+            .is_some_and(|existing_obj| output_item_matches(existing_obj, &item_id, &call_id))
     });
-    if !exists {
-        output.push(item.clone());
+    match existing_index {
+        Some(index) if merge_existing => {
+            output[index] = merge_output_item_value(&output[index], item);
+        }
+        Some(_) => {}
+        None => output.push(item.clone()),
+    }
+    target.insert("output".to_string(), Value::Array(output));
+}
+
+fn merge_response_output_array(target: &mut Map<String, Value>, value: &Value) {
+    let Some(items) = value.as_array() else {
+        target.insert("output".to_string(), value.clone());
+        return;
+    };
+    if items.is_empty() {
+        if !target.contains_key("output") {
+            target.insert("output".to_string(), Value::Array(Vec::new()));
+        }
+        return;
+    }
+    for item in items {
+        record_response_output_item(target, item, true);
+    }
+}
+
+fn read_response_function_call_arguments_key(event_obj: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(event_obj.get("item_id"))
+        .or_else(|| read_trimmed_string(event_obj.get("id")))
+        .or_else(|| read_trimmed_string(event_obj.get("call_id")))
+}
+
+fn apply_function_call_argument_buffers(
+    target: &mut Map<String, Value>,
+    buffers: &std::collections::BTreeMap<String, String>,
+) {
+    if buffers.is_empty() {
+        return;
+    }
+    let mut output = target
+        .get("output")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut changed = false;
+    for item in &mut output {
+        let Some(item_obj) = item.as_object_mut() else {
+            continue;
+        };
+        if item_obj.get("type").and_then(Value::as_str) != Some("function_call") {
+            continue;
+        }
+        let item_id = read_trimmed_string(item_obj.get("id"));
+        let call_id = read_trimmed_string(item_obj.get("call_id"));
+        let Some(arguments) = item_id
+            .as_ref()
+            .and_then(|id| buffers.get(id))
+            .or_else(|| call_id.as_ref().and_then(|id| buffers.get(id)))
+        else {
+            continue;
+        };
+        item_obj.insert("arguments".to_string(), Value::String(arguments.clone()));
+        changed = true;
+    }
+    if changed {
         target.insert("output".to_string(), Value::Array(output));
     }
 }
@@ -297,6 +378,7 @@ fn materialize_openai_responses_sse_body_text(body_text: &str) -> Result<Value, 
     }
 
     let mut response = Map::new();
+    let mut function_call_argument_buffers = std::collections::BTreeMap::<String, String>::new();
     for (event_name, event) in events {
         let Some(event_obj) = event.as_object() else {
             continue;
@@ -306,16 +388,29 @@ fn materialize_openai_responses_sse_body_text(body_text: &str) -> Result<Value, 
         if let Some(response_obj) = event_obj.get("response").and_then(Value::as_object) {
             merge_response_object(&mut response, response_obj);
         }
-        let is_output_item_event = matches!(
-            event_name.as_str(),
-            "response.output_item.done" | "response.output_item.added"
-        ) || matches!(
-            event_type.as_str(),
-            "response.output_item.done" | "response.output_item.added"
-        );
-        if is_output_item_event {
+        let is_output_item_added =
+            event_name == "response.output_item.added" || event_type == "response.output_item.added";
+        let is_output_item_done =
+            event_name == "response.output_item.done" || event_type == "response.output_item.done";
+        if is_output_item_added || is_output_item_done {
             if let Some(item) = event_obj.get("item") {
-                upsert_response_output_item(&mut response, item);
+                record_response_output_item(&mut response, item, is_output_item_done);
+            }
+        }
+        let is_function_call_arguments_delta = event_name == "response.function_call_arguments.delta"
+            || event_type == "response.function_call_arguments.delta";
+        let is_function_call_arguments_done = event_name == "response.function_call_arguments.done"
+            || event_type == "response.function_call_arguments.done";
+        if is_function_call_arguments_delta || is_function_call_arguments_done {
+            if let Some(key) = read_response_function_call_arguments_key(event_obj) {
+                if let Some(arguments) = event_obj.get("arguments").and_then(Value::as_str) {
+                    function_call_argument_buffers.insert(key, arguments.to_string());
+                } else if let Some(delta) = event_obj.get("delta").and_then(Value::as_str) {
+                    function_call_argument_buffers
+                        .entry(key)
+                        .or_default()
+                        .push_str(delta);
+                }
             }
         }
         if (event_name == "response.required_action" || event_type == "response.required_action")
@@ -323,7 +418,10 @@ fn materialize_openai_responses_sse_body_text(body_text: &str) -> Result<Value, 
         {
             response.insert(
                 "required_action".to_string(),
-                event_obj.get("required_action").cloned().unwrap_or(Value::Null),
+                event_obj
+                    .get("required_action")
+                    .cloned()
+                    .unwrap_or(Value::Null),
             );
             response.insert(
                 "status".to_string(),
@@ -331,6 +429,7 @@ fn materialize_openai_responses_sse_body_text(body_text: &str) -> Result<Value, 
             );
         }
     }
+    apply_function_call_argument_buffers(&mut response, &function_call_argument_buffers);
 
     if response.is_empty() {
         return Err("OpenAI Responses SSE response did not contain response payload".to_string());
@@ -651,6 +750,43 @@ mod tests {
         assert_eq!(
             result.envelope.payload["output"][0]["content"][0]["text"],
             "stopped"
+        );
+    }
+
+    #[test]
+    fn test_parse_openai_responses_sse_function_call_arguments_delta() {
+        let body_text = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse_call_1\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"gpt-5.5\",\"output\":[]}}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_fc_1\",\"name\":\"exec_command\",\"arguments\":\"\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{\\\"cmd\\\":\"}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"\\\"pwd\\\"}\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_fc_1\",\"name\":\"exec_command\",\"arguments\":\"\",\"status\":\"completed\"}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse_call_1\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-5.5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "mode": "sse",
+                "bodyText": body_text
+            }),
+            protocol: "openai-responses".to_string(),
+        };
+
+        let result = parse_resp_format_envelope(input).unwrap();
+        assert_eq!(result.envelope.payload["id"], "resp_sse_call_1");
+        assert_eq!(result.envelope.payload["status"], "completed");
+        assert_eq!(result.envelope.payload["output"][0]["type"], "function_call");
+        assert_eq!(result.envelope.payload["output"][0]["name"], "exec_command");
+        assert_eq!(result.envelope.payload["output"][0]["status"], "completed");
+        assert_eq!(
+            result.envelope.payload["output"][0]["arguments"],
+            "{\"cmd\":\"pwd\"}"
         );
     }
 

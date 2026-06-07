@@ -31,6 +31,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Phase 0 zero-consumer wrapper cleanup：Hub Pipeline 下无 live import、无 public barrel export、无同名 JS shadow、且 native capability 仍在 Rust/native truth 的 TS thin wrapper/helper 必须物理删除；不要把“薄壳”当保留理由。
 - Phase 0 zero-consumer shared adapter cleanup：若 shared adapter 只是转发 live bridge/native owner 且无 source/test/script importer，必须删除并更新 active docs；禁止用“统一入口/避免分叉”的旧文案保留 0-consumer 中转层。
 - Phase 0 静态 0-consumer 误报边界：删除前必须查 `importCoreDist(...)` / native dynamic loader；`conversion/hub/snapshot-recorder.ts` 和 `native-failure-policy.ts` 这类动态入口不能仅因无静态 import 删除，除非先迁移动态 importer。
+- 本地生成物清理边界（2026-06-07）：`~/.rcc/install/releases/.staging-routecodex-*` 是失败/未完成安装 staging，确认 `install/current` 不指向后可删；`~/.rcc/diag` / `codex-samples` 是线上取证真源，禁止整目录删除，只能按 TTL/采样策略清理。仓库 `tmp/`、`.install-pack/`、test-results、旧 `.tgz`、`.DS_Store`、src-side `.js.map` 可按 `git check-ignore` 证据清理；`.js/.d.ts` 需先确认无动态 import / dist 依赖。
+- 废弃清理脚本反模式（2026-06-07）：若脚本批量 `sed` 修改源码、依赖过期 `dead-code-analysis-report.json`、或生成 TODO 型 cleanup 脚本且无 package 入口，应视为死代码物理删除；禁止执行这类脚本冒充审计。
 - 发现违规必须先写红测，红测要覆盖真实 Hub Pipeline stage 或 HTTP 黑盒入口；禁止 mock 私有方法冒充黑盒。
 - quota 控制面真源：`QuotaManagerModule.getControlSurface()` 是 daemon-admin / control plane 唯一入口；`quota-handler.ts`、`control-handler.ts` 禁止自建 `createQuotaManagerAdapter(...)`，禁止直连 Rust mutator。
 - quota 初始化硬规则：启动时只能按当前 `config.toml` materialized `virtualrouter.providers` 初始化 quota；未配置 provider 禁止 hydrate/persist/参与本轮 quota 生命周期。
@@ -326,6 +328,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
   - provider init/health probe 失败；
   - runtime key 映射是否命中可用 handle；
   - quota/blacklist 是否把主 provider 挡掉。
+- 带图请求被 `[Image omitted]` 吞掉时，先用 `~/.rcc/codex-samples/**/provider-request.json` 与 `~/.rcc/logs/server-5520.log` 确认 VR 是否出现 `multimodal:visual-content` 或 media route；当前用户 turn 的 `<image ...>` / `[Image omitted]` / `[Image #n]` 仍是 media intent，必须在 Rust VR feature 层识别。路由顺序固定为 `multimodal -> vision -> 原文本/默认路由`：只要配置里存在 vision 路由，就必须保留为 multimodal 之后的视觉后备；只有两者都无视觉可用目标时才允许落到 default/text route 后做 placeholder/阻断。禁止用改配置或提前裁剪真实 payload 解决。
 
 6. stopless/stop_message 约束（复盘）
 - 默认开启不等于无条件触发；必须有 CLI projection 执行上下文且 finish_reason 条件正确。

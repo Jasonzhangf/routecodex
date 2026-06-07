@@ -1,4 +1,7 @@
-import { mapErrorToHttp } from '../../../src/server/utils/http-error-mapper.js';
+import {
+  mapErrorToHttp,
+  mapErrorToPublicLogSummary,
+} from '../../../src/server/utils/http-error-mapper.js';
 
 describe('http-error-mapper public payload leak guard', () => {
   it('masks provider diagnostics from upstream 400 payloads', () => {
@@ -31,5 +34,47 @@ describe('http-error-mapper public payload leak guard', () => {
     expect(publicJson).not.toContain('provider_key');
     expect(publicJson).not.toContain('upstream_message');
     expect(publicJson).not.toContain('tool result id not found');
+  });
+
+  it('projects upstream 401 provider payload to public stage-log summary', () => {
+    const err = Object.assign(
+      new Error(
+        'HTTP 401: {"error":{"code":"","message":"Invalid token (request id: 202606071512468498407098268d9d6mBARM7HT)","type":"new_api_error"}}'
+      ),
+      {
+        statusCode: 401,
+        code: 'HTTP_401',
+        rawErrorSnippet:
+          '{"error":{"code":"new_api_error","message":"Invalid token (request id: 202606071512468498407098268d9d6mBARM7HT)","type":"new_api_error"}}',
+      }
+    );
+
+    const summary = mapErrorToPublicLogSummary(err);
+
+    expect(summary).toBe('Upstream authentication failed');
+    expect(summary).not.toContain('Invalid token');
+    expect(summary).not.toContain('202606071512468498407098268d9d6mBARM7HT');
+    expect(summary).not.toContain('new_api_error');
+  });
+
+  it('projects upstream 403 quota payload to public stage-log summary', () => {
+    const err = Object.assign(
+      new Error(
+        'HTTP 403: {"error":{"message":"余额和订阅额度均不足，请充值后再使用","type":"permission_error","code":"insufficient_quota"}}'
+      ),
+      {
+        statusCode: 403,
+        code: 'HTTP_403',
+        rawErrorSnippet:
+          '{"error":{"message":"余额和订阅额度均不足，请充值后再使用","type":"permission_error","code":"insufficient_quota"}}',
+      }
+    );
+
+    const summary = mapErrorToPublicLogSummary(err);
+
+    expect(summary).toBe('Upstream authentication failed');
+    expect(summary).not.toContain('余额和订阅额度均不足');
+    expect(summary).not.toContain('permission_error');
+    expect(summary).not.toContain('insufficient_quota');
   });
 });

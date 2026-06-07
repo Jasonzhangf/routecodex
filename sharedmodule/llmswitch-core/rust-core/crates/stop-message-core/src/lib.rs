@@ -19,9 +19,9 @@ const STOP_SCHEMA_MISSING_MAX_REPEATS: u32 = 3;
 const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS: u32 = STOP_SCHEMA_PROVIDED_MAX_REPEATS;
 
 const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
-    "收尾前请先回答：当前用户目标是什么？已经完成了哪些步骤？是否已经完成目标？建议下一步是什么？如果建议下一步不为空，不要询问用户、不要只总结，直接执行下一步并用文件、日志、命令输出或测试结果补证据；如果目标已完成或确实阻塞，请给出面向用户的简洁总结。",
-    "请重新检查用户最初输入和后续指令：用户真正意图是什么？目标边界是什么？当前问题卡在哪里？之前的笔记、文件、日志、命令输出或测试结果是否已经看过？如果仅靠重新理解用户意图就能获得信息，请先据此继续执行；否则按目标、已做、证据、问题原因、已排除因素、排查顺序补齐缺口。",
-    "这是最后一次自动续杯预算。不要再开启新一轮执行，不要复述系统校验过程；请直接给出面向用户的最终收尾 summary，包含：已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步。最后必须附 stop schema；若目标未完成且仍有下一步，也不要继续执行，把下一步写入 next_suggested_path 并以 blocked/continue_needed 说明。",
+    "第一轮核对：只确认当前用户目标、已经完成的步骤、以及是否已有文件/日志/命令输出/测试结果作为证据。证据不足时不要询问用户、不要总结，直接调用工具补证据；若目标已完成或阻塞，给出简洁结论并附 stop schema。",
+    "第二轮核对：在目标、已做步骤、证据之外，补齐问题原因、已排除因素、排查顺序。仍有缺口时必须调用工具继续验证；只有完成或确实阻塞时，才给用户结论并附 stop schema。",
+    "第三轮最终收尾：不要开启新一轮执行，不要暴露 stopless/校验过程。直接给用户可读 summary，包含已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步，并在末尾附 stop schema。",
 ];
 const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须在回复末尾附一个 JSON 对象，字段名和类型必须一致：
 {"stopreason":2,"reason":"当前状态原因","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"如果仍需继续，写立刻执行的下一步；否则空字符串","next_suggested_path":"","needs_user_input":false,"learned":""}
@@ -198,6 +198,7 @@ pub struct StopSchemaParsed {
     pub next_step: Option<String>,
     pub next_suggested_path: Option<String>,
     pub evidence: Option<String>,
+    pub done_steps: Option<String>,
     pub learned: Option<String>,
     pub issue_cause: Option<String>,
     pub excluded_factors: Option<String>,
@@ -327,7 +328,7 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_missing",
                 used,
                 missing_cap,
-                &format!("你刚才试图停止，但没有提供 stop schema。先核对：目标、已完成步骤、证据、问题原因、已排除因素、排查顺序。现在必须二选一：1) 若完成或阻塞，直接给用户简洁结论并附 stop schema；2) 若缺少文件/日志/命令输出/测试证据，必须继续执行当前目标，优先调用 exec_command。{}", STOP_SCHEMA_JSON_EXAMPLE),
+                &format!("本轮缺少 stop schema。按当前预算层级完成核对；若缺文件、日志、命令输出或测试证据，优先调用 exec_command 继续验证。{}", STOP_SCHEMA_JSON_EXAMPLE),
             );
         }
     };
@@ -339,7 +340,7 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_stopreason_missing_or_non_numeric",
                 used,
                 provided_cap,
-                &format!("stop schema 缺少数字 stopreason。不要猜、不要总结；先核对目标、过程、证据、问题原因、已排除因素、排查顺序。若任一项不足，stopreason=2 并给出 next_step 后继续执行。{}", STOP_SCHEMA_JSON_EXAMPLE),
+                &format!("stop schema 的 stopreason 必须是数字 0/1/2。按当前预算层级补齐后再判断；若仍需继续，stopreason=2 并给出 next_step 后继续执行。{}", STOP_SCHEMA_JSON_EXAMPLE),
                 parsed,
             );
         }
@@ -363,7 +364,7 @@ pub fn evaluate_stop_schema_gate(
             max_repeats: provided_cap,
             action: StopSchemaGateAction::AllowStop,
             reason_code: "stop_schema_needs_user_input".to_string(),
-            summary_prefix: Some(format!("需要向用户确认：{}", next_step_raw)),
+            summary_prefix: Some(format!("## 需要确认\n\n{}\n", next_step_raw)),
             followup_text: None,
             count_budget: false,
             parsed: Some(parsed),
@@ -381,7 +382,8 @@ pub fn evaluate_stop_schema_gate(
                 parsed,
             );
         }
-        let summary_prefix = build_allow_stop_summary_prefix(reason);
+        let summary_prefix =
+            build_allow_stop_summary_prefix_from_parsed(&parsed, stopreason, reason);
         return StopSchemaGateDecision {
             max_repeats: provided_cap,
             action: StopSchemaGateAction::AllowStop,
@@ -419,11 +421,13 @@ pub fn evaluate_stop_schema_gate(
     if next_suggested_path.is_empty() {
         if used >= provided_cap {
             let reason = parsed.reason.as_deref().map(str::trim).unwrap_or("");
-            let summary_prefix = build_allow_stop_summary_prefix(if reason.is_empty() {
+            let fallback_reason = if reason.is_empty() {
                 "任务尚未完成，但已无法给出明确下一步；请输出当前收尾总结并停止"
             } else {
                 reason
-            });
+            };
+            let summary_prefix =
+                build_allow_stop_summary_prefix_from_parsed(&parsed, stopreason, fallback_reason);
             return StopSchemaGateDecision {
                 max_repeats: provided_cap,
                 action: StopSchemaGateAction::AllowStop,
@@ -715,14 +719,55 @@ pub fn build_allow_stop_summary_prefix_from_history(
     _history: &[String],
 ) -> String {
     let mut out = String::new();
-    out.push_str("停止原因：");
+    out.push_str("## 完成内容\n\n");
     out.push_str(current_reason.trim());
     out.push('\n');
     out
 }
 
-fn build_allow_stop_summary_prefix(current_reason: &str) -> String {
-    build_allow_stop_summary_prefix_from_history(current_reason, &[])
+fn push_markdown_field(out: &mut String, label: &str, value: Option<&String>) {
+    let text = value.map(|v| v.trim()).unwrap_or("");
+    if text.is_empty() {
+        return;
+    }
+    out.push_str("- ");
+    out.push_str(label);
+    out.push_str(": ");
+    out.push_str(text);
+    out.push('\n');
+}
+
+fn build_allow_stop_summary_prefix_from_parsed(
+    parsed: &StopSchemaParsed,
+    stopreason: u8,
+    fallback_reason: &str,
+) -> String {
+    let title = if stopreason == 1 {
+        "## 当前结果"
+    } else {
+        "## 完成内容"
+    };
+    let mut out = String::new();
+    out.push_str(title);
+    out.push_str("\n\n");
+    push_markdown_field(&mut out, "结论", parsed.reason.as_ref());
+    if parsed.reason.is_none() && !fallback_reason.trim().is_empty() {
+        out.push_str("- 结论: ");
+        out.push_str(fallback_reason.trim());
+        out.push('\n');
+    }
+    push_markdown_field(&mut out, "已完成", parsed.done_steps.as_ref());
+    push_markdown_field(&mut out, "证据", parsed.evidence.as_ref());
+    push_markdown_field(&mut out, "问题原因", parsed.issue_cause.as_ref());
+    push_markdown_field(&mut out, "已排除因素", parsed.excluded_factors.as_ref());
+    push_markdown_field(&mut out, "排查顺序", parsed.diagnostic_order.as_ref());
+    push_markdown_field(&mut out, "建议下一步", parsed.next_suggested_path.as_ref());
+    if out.trim() == title && !fallback_reason.trim().is_empty() {
+        out.push_str(fallback_reason.trim());
+        out.push('\n');
+    }
+    out.push('\n');
+    out
 }
 
 fn schema_followup(
@@ -768,6 +813,7 @@ fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
         next_step: read_string(row.get("next_step")),
         next_suggested_path: read_string(row.get("next_suggested_path")),
         evidence: read_string(row.get("evidence")),
+        done_steps: read_string(row.get("done_steps")),
         learned: read_string(row.get("learned")),
         issue_cause: read_string(row.get("issue_cause")),
         excluded_factors: read_string(row.get("excluded_factors")),
@@ -1064,7 +1110,8 @@ mod tests {
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("当前用户目标"));
         assert!(text.contains("证据"));
-        assert!(text.contains("建议下一步"));
+        assert!(text.contains("第一轮核对"));
+        assert!(!text.contains("问题原因"));
     }
 
     #[test]
@@ -1074,7 +1121,9 @@ mod tests {
             .collect();
         let prefix =
             build_allow_stop_summary_prefix_from_history("目标已完成，全部轮次均已恢复", &history);
-        assert!(prefix.contains("停止原因：目标已完成"));
+        assert!(prefix.contains("## 完成内容"));
+        assert!(prefix.contains("目标已完成，全部轮次均已恢复"));
+        assert!(!prefix.contains("停止原因"));
         for entry in &history {
             assert!(
                 !prefix.contains(entry.as_str()),
@@ -1097,9 +1146,11 @@ mod tests {
         });
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
+        assert!(text.contains("第一轮核对"));
         assert!(text.contains("当前用户目标"));
         assert!(text.contains("证据"));
-        assert!(text.contains("建议下一步"));
+        assert!(text.contains("直接调用工具补证据"));
+        assert!(!text.contains("问题原因"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
@@ -1110,8 +1161,9 @@ mod tests {
         });
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
-        assert!(text.contains("用户真正意图是什么"));
-        assert!(text.contains("之前的笔记"));
+        assert!(text.contains("第二轮核对"));
+        assert!(text.contains("问题原因"));
+        assert!(text.contains("已排除因素"));
         assert!(text.contains("排查顺序"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
@@ -1123,7 +1175,8 @@ mod tests {
         });
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
-        assert!(text.contains("最终收尾 summary"));
+        assert!(text.contains("第三轮最终收尾"));
+        assert!(text.contains("用户可读 summary"));
         assert!(text.contains("建议下一步"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
@@ -1152,7 +1205,9 @@ mod tests {
         });
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
-        assert!(text.contains("用户真正意图是什么"));
+        assert!(text.contains("第二轮核对"));
+        assert!(text.contains("问题原因"));
+        assert!(text.contains("已排除因素"));
         assert!(text.contains("排查顺序"));
         assert_ne!(
             text,
@@ -1326,7 +1381,9 @@ mod tests {
         ctx.default_max_repeats = 5;
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Trigger);
-        assert!(result.followup_text.unwrap().contains("当前用户目标是什么"));
+        let text = result.followup_text.unwrap();
+        assert!(text.contains("第一轮核对"));
+        assert!(text.contains("当前用户目标"));
         assert_eq!(result.max_repeats, 5);
     }
 
@@ -1502,10 +1559,10 @@ mod tests {
         assert!(missing.count_budget);
         let missing_text = missing.followup_text.unwrap();
         assert!(!missing_text.contains("质询"));
-        assert!(missing_text.contains("直接发出工具调用"));
+        assert!(missing_text.contains("第一轮核对"));
+        assert!(missing_text.contains("直接调用工具补证据"));
         assert!(missing_text.contains("优先调用 exec_command"));
-        assert!(missing_text.contains("不准总结"));
-        assert!(missing_text.contains("解释工具被拒"));
+        assert!(!missing_text.contains("问题原因"));
 
         let invalid = evaluate_stop_schema_gate(
             r#"{"stopreason":"unknown","reason":"done","has_evidence":1,"next_step":""}"#,
@@ -1543,6 +1600,49 @@ mod tests {
             "stop_schema_continue_without_next_step"
         );
         assert!(!no_next_exhausted.count_budget);
+    }
+
+    #[test]
+    fn stop_schema_followup_prompts_are_layered_by_budget() {
+        let first = evaluate_stop_schema_gate("普通停止文本", 0, 3)
+            .followup_text
+            .expect("first followup");
+        assert!(first.contains("当前用户目标"));
+        assert!(first.contains("已完成"));
+        assert!(!first.contains("问题原因"));
+        assert!(!first.contains("已排除因素"));
+        assert!(!first.contains("排查顺序"));
+
+        let second = evaluate_stop_schema_gate("普通停止文本", 1, 3)
+            .followup_text
+            .expect("second followup");
+        assert!(second.contains("问题原因"));
+        assert!(second.contains("已排除因素"));
+        assert!(second.contains("排查顺序"));
+
+        let third = evaluate_stop_schema_gate("普通停止文本", 2, 3)
+            .followup_text
+            .expect("third followup");
+        assert!(third.contains("最终收尾"));
+        assert!(third.contains("已完成事项"));
+        assert!(third.contains("建议下一步"));
+    }
+
+    #[test]
+    fn stop_schema_allow_stop_summary_is_user_markdown_not_stopreason_report() {
+        let decision = evaluate_stop_schema_gate(
+            r#"已完成。
+{"stopreason":0,"reason":"SSE stop 响应已进入 stopless gate","has_evidence":1,"evidence":"executor 红测和 SSE 回归通过","issue_cause":"prebuilt SSE wrapper 提前直出","excluded_factors":"普通 tool_call SSE 顺序已验证正常","diagnostic_order":"日志样本 -> 红测 -> Rust RespInbound bodyText materialization -> 回归","done_steps":"修复 RespInbound SSE materialization，补红测","next_step":"","learned":"prebuilt SSE stopless 必须由 Rust RespInbound materialize bodyText"}"#,
+            0,
+            3,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
+        let summary = decision.summary_prefix.expect("summary");
+        assert!(summary.contains("## 完成内容"));
+        assert!(summary.contains("SSE stop 响应已进入 stopless gate"));
+        assert!(summary.contains("executor 红测和 SSE 回归通过"));
+        assert!(!summary.contains("停止原因"));
+        assert!(!summary.contains("stopreason"));
     }
 
     #[test]

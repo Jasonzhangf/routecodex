@@ -1882,7 +1882,8 @@ mod tests {
     }
 
     #[test]
-    fn materialize_plain_continuation_keeps_persisted_prefix_semantics_and_applies_current_delta_fields_only() {
+    fn materialize_plain_continuation_keeps_persisted_prefix_semantics_and_applies_current_delta_fields_only(
+    ) {
         let entry = json!({
             "requestId": "req_prev",
             "lastResponseId": "resp_prev",
@@ -1910,7 +1911,10 @@ mod tests {
             .get("payload")
             .and_then(Value::as_object)
             .unwrap();
-        assert_eq!(payload.get("model").and_then(Value::as_str), Some("current-route-model"));
+        assert_eq!(
+            payload.get("model").and_then(Value::as_str),
+            Some("current-route-model")
+        );
         let input = payload.get("input").and_then(Value::as_array).unwrap();
         assert_eq!(input.len(), 3);
         assert_eq!(input[0], first_prefix_before);
