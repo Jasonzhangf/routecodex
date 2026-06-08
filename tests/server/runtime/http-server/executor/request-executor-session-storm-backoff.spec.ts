@@ -22,7 +22,7 @@ describe('request-executor session storm backoff', () => {
     delete process.env.RCC_SESSION_STORM_BACKOFF_MAX_MS;
   });
 
-  test('treats router-direct protocol mismatch as deterministic storm candidate', () => {
+  test('treats any surfaced error as storm candidate but caps wait at three seconds', () => {
     process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
     process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
 
@@ -31,7 +31,27 @@ describe('request-executor session storm backoff', () => {
     );
 
     expect(isSessionStormBackoffCandidate(error)).toBe(true);
-    expect(consumeSessionStormBackoffMs('session:router-direct-protocol-mismatch', error)).toBe(1000);
-    expect(peekSessionStormBackoffWaitMs('session:router-direct-protocol-mismatch')).toBe(1000);
+    expect(consumeSessionStormBackoffMs('session:any-error', error)).toBe(1000);
+    jest.setSystemTime(new Date('2026-06-09T00:00:01.000Z'));
+    expect(consumeSessionStormBackoffMs('session:any-error', error)).toBe(2000);
+    jest.setSystemTime(new Date('2026-06-09T00:00:03.000Z'));
+    expect(consumeSessionStormBackoffMs('session:any-error', error)).toBe(3000);
+    jest.setSystemTime(new Date('2026-06-09T00:00:06.000Z'));
+    expect(consumeSessionStormBackoffMs('session:any-error', error)).toBe(3000);
+    expect(peekSessionStormBackoffWaitMs('session:any-error')).toBe(3000);
+  });
+
+  test('does not allow base or hard-block config to exceed three seconds', () => {
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '9000';
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '12000';
+
+    const genericError = new Error('upstream protocol error');
+    expect(consumeSessionStormBackoffMs('session:generic-high-base', genericError)).toBe(3000);
+
+    const clientToolArgsError = Object.assign(
+      new Error('converted provider tool call has invalid client arguments'),
+      { code: 'CLIENT_TOOL_ARGS_INVALID' }
+    );
+    expect(consumeSessionStormBackoffMs('session:hard-block-high-base', clientToolArgsError)).toBe(3000);
   });
 });

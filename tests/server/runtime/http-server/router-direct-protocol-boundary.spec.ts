@@ -55,7 +55,7 @@ describe('router direct protocol boundary', () => {
     };
   }
 
-  it('fails fast when router-direct reports protocol mismatch and does not relay into Hub', async () => {
+  it('relays into Hub when router-direct reports protocol mismatch', async () => {
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
     const server = new RouteCodexHttpServer(createRouterServer());
     attachRouterPort(server as any);
@@ -65,23 +65,28 @@ describe('router direct protocol boundary', () => {
     } as any);
     const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
       status: 200,
-      body: { id: 'must_not_relay', object: 'response' },
-      metadata: {},
+      body: { id: 'relay_after_protocol_mismatch', object: 'response' },
+      metadata: { relayed: true },
     } as any);
     const logStageSpy = jest.spyOn(server as any, 'logStage');
 
-    await expect((server as any).executePortAwarePipeline(
+    const result = await (server as any).executePortAwarePipeline(
       5555,
       buildResponsesInput('req_router_direct_mismatch_no_relay'),
-    )).rejects.toThrow('router-direct failed without relay: protocol mismatch: inbound=openai-responses, provider=openai-chat');
+    );
 
     expect(directSpy).toHaveBeenCalledTimes(1);
-    expect(executePipelineSpy).not.toHaveBeenCalled();
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.failed_no_relay')).toHaveLength(1);
-    expect(logStageSpy.mock.calls.some(([stage]) => stage === 'router-direct.relay')).toBe(false);
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      status: 200,
+      body: { id: 'relay_after_protocol_mismatch', object: 'response' },
+      metadata: { relayed: true },
+    });
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.failed_no_relay')).toHaveLength(0);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.relay')).toHaveLength(1);
   });
 
-  it('backs off repeated router-direct protocol mismatch failures without rewriting the error', async () => {
+  it('does not record router-direct storm backoff when protocol mismatch is relayed', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-06-09T00:00:00.000Z'));
     process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
@@ -95,8 +100,8 @@ describe('router direct protocol boundary', () => {
       reason: 'protocol mismatch: inbound=openai-responses, provider=openai-chat',
     } as any);
     const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
-      status: 200,
-      body: { id: 'must_not_relay', object: 'response' },
+      status: 202,
+      body: { id: 'relay_after_protocol_mismatch_repeat', object: 'response' },
       metadata: {},
     } as any);
     const logStageSpy = jest.spyOn(server as any, 'logStage');
@@ -104,23 +109,50 @@ describe('router direct protocol boundary', () => {
     await expect((server as any).executePortAwarePipeline(
       5555,
       buildResponsesInput('req_router_direct_mismatch_1', 'router-direct-protocol-mismatch-storm'),
-    )).rejects.toThrow('router-direct failed without relay: protocol mismatch: inbound=openai-responses, provider=openai-chat');
+    )).resolves.toMatchObject({
+      status: 202,
+      body: { id: 'relay_after_protocol_mismatch_repeat', object: 'response' },
+    });
 
-    const second = (server as any).executePortAwarePipeline(
+    await expect((server as any).executePortAwarePipeline(
       5555,
       buildResponsesInput('req_router_direct_mismatch_2', 'router-direct-protocol-mismatch-storm'),
-    );
-    const secondExpectation = expect(second)
-      .rejects.toThrow('router-direct failed without relay: protocol mismatch: inbound=openai-responses, provider=openai-chat');
-    await jest.advanceTimersByTimeAsync(999);
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff_wait')).toHaveLength(1);
-    await jest.advanceTimersByTimeAsync(1);
-    await secondExpectation;
+    )).resolves.toMatchObject({
+      status: 202,
+      body: { id: 'relay_after_protocol_mismatch_repeat', object: 'response' },
+    });
+
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(executePipelineSpy).toHaveBeenCalledTimes(2);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff_wait')).toHaveLength(0);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(0);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.failed_no_relay')).toHaveLength(0);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.relay')).toHaveLength(2);
+  });
+
+  it('fails fast and records storm backoff for non-relayable router-direct skip errors', async () => {
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
+
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+    const server = new RouteCodexHttpServer(createRouterServer());
+    attachRouterPort(server as any);
+    jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: false,
+      reason: 'provider not found for runtimeKey: missing.runtime',
+    } as any);
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline');
+    const logStageSpy = jest.spyOn(server as any, 'logStage');
+
+    await expect((server as any).executePortAwarePipeline(
+      5555,
+      buildResponsesInput('req_router_direct_missing_runtime', 'router-direct-missing-runtime-storm'),
+    )).rejects.toThrow('router-direct failed without relay: provider not found for runtimeKey: missing.runtime');
 
     expect(executePipelineSpy).not.toHaveBeenCalled();
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(2);
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.failed_no_relay')).toHaveLength(2);
-    expect(logStageSpy.mock.calls.some(([stage]) => stage === 'router-direct.relay')).toBe(false);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.failed_no_relay')).toHaveLength(1);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(1);
   });
 
   it('backs off repeated router-direct VR provider-unavailable failures without rewriting the error', async () => {

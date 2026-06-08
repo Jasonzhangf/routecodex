@@ -11,6 +11,7 @@ import {
 } from './request-executor-abort.js';
 
 const SESSION_STORM_BACKOFF_TTL_MS = 10 * 60_000;
+const SESSION_STORM_BACKOFF_MAX_CAP_MS = 3_000;
 
 const sessionStormBackoffState = new Map<string, {
   consecutive: number;
@@ -135,14 +136,9 @@ function isDeterministicNoProviderStorm(error: unknown): boolean {
   );
 }
 
-function isDeterministicDirectProtocolMismatchStorm(error: unknown): boolean {
-  const message = readErrorMessage(error).toLowerCase();
-  return message.includes('router-direct failed without relay: protocol mismatch:');
-}
-
 export function isSessionStormBackoffCandidate(error: unknown): boolean {
-  if (isDeterministicDirectProtocolMismatchStorm(error)) {
-    return true;
+  if (error == null) {
+    return false;
   }
   if (isClientToolArgsInvalidStorm(error)) {
     return true;
@@ -178,13 +174,16 @@ export function isSessionStormBackoffCandidate(error: unknown): boolean {
   if (known) {
     return true;
   }
-  return (
+  if (
     normalized.includes('fetch failed')
     || normalized.includes('all providers unavailable')
     || normalized.includes('no available providers after applying routing instructions')
     || normalized.includes('connect timeout')
     || normalized.includes('request timeout')
-  );
+  ) {
+    return true;
+  }
+  return Boolean(normalized);
 }
 
 export function resolveSessionStormBackoffBaseMs(): number {
@@ -194,7 +193,7 @@ export function resolveSessionStormBackoffBaseMs(): number {
     ?? '';
   const parsed = Number.parseInt(String(raw).trim(), 10);
   if (Number.isFinite(parsed) && parsed > 0) {
-    return parsed;
+    return Math.min(parsed, SESSION_STORM_BACKOFF_MAX_CAP_MS);
   }
   return 1_000;
 }
@@ -216,9 +215,9 @@ export function resolveSessionStormBackoffMaxMs(): number {
     ?? '';
   const parsed = Number.parseInt(String(raw).trim(), 10);
   if (Number.isFinite(parsed) && parsed > 0) {
-    return parsed;
+    return Math.min(parsed, SESSION_STORM_BACKOFF_MAX_CAP_MS);
   }
-  return process.env.NODE_ENV === 'test' ? 5_000 : 30_000;
+  return SESSION_STORM_BACKOFF_MAX_CAP_MS;
 }
 
 export function resolveSessionStormHardBlockMsForError(error?: unknown): number {
@@ -233,7 +232,7 @@ export function resolveSessionStormBackoffMaxMsForError(error?: unknown): number
     return resolveSessionStormHardBlockMsForError(error) || 1_000;
   }
   if (isDeterministicMalformedResponseStorm(error)) {
-    return 5_000;
+    return SESSION_STORM_BACKOFF_MAX_CAP_MS;
   }
   return resolveSessionStormBackoffMaxMs();
 }

@@ -234,6 +234,11 @@ function buildRouterDirectFailureError(reason: unknown): Error {
   return new Error(`router-direct failed without relay: ${message}`);
 }
 
+function isRouterDirectRelayableSkip(reason: unknown): boolean {
+  const message = typeof reason === 'string' ? reason.trim().toLowerCase() : '';
+  return message.startsWith('protocol mismatch:');
+}
+
 function shouldRecordRouterDirectStorm(error: unknown, readableMessage?: string): boolean {
   if (isSessionStormBackoffCandidate(error)) {
     return true;
@@ -1237,12 +1242,18 @@ export class RouteCodexHttpServer {
         if (directResult.used) {
           return this.buildRouterDirectResult(directResult, input);
         }
-        this.logStage('router-direct.failed_no_relay', input.requestId, {
+        if (!isRouterDirectRelayableSkip(directResult.reason)) {
+          this.logStage('router-direct.failed_no_relay', input.requestId, {
+            reason: directResult.reason,
+          });
+          const directError = buildRouterDirectFailureError(directResult.reason);
+          this.recordRouterDirectStormBackoff(input.requestId, routerDirectStormScopes, directError);
+          throw directError;
+        }
+        this.logStage('router-direct.relay', input.requestId, {
           reason: directResult.reason,
         });
-        const directError = buildRouterDirectFailureError(directResult.reason);
-        this.recordRouterDirectStormBackoff(input.requestId, routerDirectStormScopes, directError);
-        throw directError;
+        return await this.executePipeline(nextInput);
       }
       return await this.executePipeline(nextInput);
     }

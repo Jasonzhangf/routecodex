@@ -4567,7 +4567,7 @@ describe('HubRequestExecutor session storm backoff', () => {
     delete process.env.RCC_SESSION_STORM_BACKOFF_MAX_MS;
   });
 
-  test('backs off exponentially for repeated provider-unavailable failures', () => {
+  test('backs off repeated provider-unavailable failures and caps wait at three seconds', () => {
     process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
     process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
 
@@ -4591,14 +4591,20 @@ describe('HubRequestExecutor session storm backoff', () => {
     expect(__requestExecutorTestables.consumeSessionStormBackoffMs(key!)).toBe(2000);
     expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(2000);
 
+    jest.setSystemTime(new Date('2026-04-22T12:00:03.000Z'));
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs(key!)).toBe(3000);
+    jest.setSystemTime(new Date('2026-04-22T12:00:06.000Z'));
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs(key!)).toBe(3000);
+    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(3000);
+
     __requestExecutorTestables.clearSessionStormBackoff(key!);
     expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(0);
   });
 
-  test('does not treat generic application errors as storm candidates', () => {
+  test('treats generic application errors as storm candidates without rewriting them', () => {
     expect(
       __requestExecutorTestables.isSessionStormBackoffCandidate(new Error('boom'))
-    ).toBe(false);
+    ).toBe(true);
   });
 
   test('treats provider_status_2056 as storm candidate via unified catalog', () => {
@@ -4645,7 +4651,7 @@ describe('HubRequestExecutor session storm backoff', () => {
     expect(__requestExecutorTestables.buildSessionStormHardBlockError('workdir:/tmp/rc-workdir')).toBeUndefined();
   });
 
-  test('treats deterministic malformed response contract errors as storm candidates and caps wait', () => {
+  test('treats deterministic malformed response contract errors as storm candidates and caps wait at three seconds', () => {
     process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
     process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '30000';
 
@@ -4659,9 +4665,9 @@ describe('HubRequestExecutor session storm backoff', () => {
     jest.setSystemTime(new Date('2026-04-22T12:00:01.000Z'));
     expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(2000);
     jest.setSystemTime(new Date('2026-04-22T12:00:03.000Z'));
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(4000);
-    jest.setSystemTime(new Date('2026-04-22T12:00:07.000Z'));
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(5000);
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(3000);
+    jest.setSystemTime(new Date('2026-04-22T12:00:06.000Z'));
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(3000);
   });
 
   test('RED: records storm backoff when hub routing fails before provider send', async () => {
