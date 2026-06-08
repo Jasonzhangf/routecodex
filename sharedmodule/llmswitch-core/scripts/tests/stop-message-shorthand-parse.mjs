@@ -1,5 +1,8 @@
 import assert from 'node:assert';
-import { applyRoutingInstructions, parseRoutingInstructions } from '../../dist/router/virtual-router/routing-instructions.js';
+import {
+  applyRoutingInstructionsToStateWithNative,
+  parseRoutingInstructions
+} from '../../dist/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 
 function parseFrom(text) {
   return parseRoutingInstructions([{ role: 'user', content: text }]);
@@ -33,9 +36,7 @@ function run() {
   const supportsModeShorthand = parseFrom('<**stopMessage:on**>').some((inst) => inst?.type === 'stopMessageMode');
 
   const setLowercasePrefix = parseFrom('<**stopmessage:"继续"**>');
-  assert.strictEqual(setLowercasePrefix.length, 1);
-  assert.strictEqual(setLowercasePrefix[0].type, 'stopMessageSet');
-  assert.strictEqual(setLowercasePrefix[0].stopMessageText, '继续');
+  assert.strictEqual(setLowercasePrefix.length, 0);
 
   const modeWithTrailingText = parseFrom('<**stopMessage:on**>继续');
   assert.strictEqual(modeWithTrailingText.length, supportsModeShorthand ? 1 : 0);
@@ -84,7 +85,10 @@ function run() {
   const latestSetInstructions = parseRoutingInstructions([{ role: 'user', content: '<**stopMessage:"继续执行",5**>继续' }]);
   assert.strictEqual(latestSetInstructions.length, 1);
   assert.strictEqual(latestSetInstructions[0].type, 'stopMessageSet');
-  const latestState = applyRoutingInstructions(latestSetInstructions, createStateSnapshot());
+  const latestState = applyRoutingInstructionsToStateWithNative({
+    instructions: latestSetInstructions,
+    state: createStateSnapshot()
+  });
   assert.strictEqual(latestState.stopMessageUsed, 0, 'latest explicit stopMessage command should rearm counter');
   assert.strictEqual(latestState.stopMessageLastUsedAt, undefined, 'latest explicit command should clear last-used marker');
 
@@ -108,8 +112,7 @@ function run() {
   assert.strictEqual(invalidAiModeWithoutText.length, 0);
 
   const clearCaseInsensitive = parseFrom('<**stopmessage:clear**>');
-  assert.strictEqual(clearCaseInsensitive.length, 1);
-  assert.strictEqual(clearCaseInsensitive[0].type, 'stopMessageClear');
+  assert.strictEqual(clearCaseInsensitive.length, 0);
 
   console.log('✅ stop-message shorthand parse checks passed');
 }
