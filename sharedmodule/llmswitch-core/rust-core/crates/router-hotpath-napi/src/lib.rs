@@ -1394,6 +1394,12 @@ pub fn should_short_circuit_requires_action_followup_json(input_json: String) ->
 }
 
 #[napi]
+pub fn plan_followup_execution_mode_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_followup_execution_mode_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn extract_servertool_text_from_chat_like_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::extract_text_from_chat_like_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

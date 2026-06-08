@@ -35,7 +35,6 @@ const INTERNAL_METADATA_KEYS: ReadonlySet<string> = new Set([
   'clientAbortSignal',
   'clientConnectionState',
   '__routecodexDirectPassthrough',
-  '__routecodexProviderFailureAttemptOffset',
 ]);
 
 function isInternalMetadataCarrier(value: unknown): boolean {

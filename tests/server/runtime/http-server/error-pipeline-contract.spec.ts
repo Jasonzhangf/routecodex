@@ -93,6 +93,18 @@ describe('Error Pipeline contract', () => {
     expect(source).not.toContain('__routerDirectRecoverable');
   });
 
+  it('direct retry offset metadata is not consumed or projected by production source', () => {
+    const checkedFiles = [
+      'src/server/runtime/http-server/index.ts',
+      'src/server/runtime/http-server/request-executor.ts',
+      'src/server/handlers/handler-response-utils.ts',
+    ];
+    for (const file of checkedFiles) {
+      const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
+      expect(source).not.toContain('__routecodexProviderFailureAttemptOffset');
+    }
+  });
+
   it('handleProviderFailure is not implemented as independent policy in the TS proxy', () => {
     const filePath = path.join(ROOT, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts');
     const source = fs.readFileSync(filePath, 'utf8');

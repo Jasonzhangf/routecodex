@@ -546,12 +546,7 @@ export class HubRequestExecutor implements RequestExecutor {
         );
         const maxAttempts = resolveMaxProviderAttempts();
         const retryPayloadSeed = prepareRequestPayloadRetrySeed(input.body);
-        const providerFailureAttemptOffset = (() => {
-          const raw = (initialMetadata as Record<string, unknown>).__routecodexProviderFailureAttemptOffset;
-          const parsed = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number.parseInt(raw, 10) : 0;
-          return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
-        })();
-        let attempt = providerFailureAttemptOffset;
+        let attempt = 0;
         let allowBlockingRecoverableRetryBeyondAttemptBudget = false;
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;

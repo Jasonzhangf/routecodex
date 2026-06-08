@@ -48,6 +48,7 @@ const TS_BACKEND_ROUTE_SHAPE_GUARD = `${SERVERTOOL_TS_DIR}/backend-route-shape-g
 const TS_BACKEND_ROUTE_FINALIZE = `${SERVERTOOL_TS_DIR}/backend-route-finalize-block.ts`;
 const TS_BACKEND_ROUTE_FLOW_POLICY = `${SERVERTOOL_TS_DIR}/backend-route-flow-policy.ts`;
 const TS_BACKEND_ROUTE_ORIGIN_DELTA = `${SERVERTOOL_TS_DIR}/backend-route-origin-delta.ts`;
+const TS_BACKEND_ROUTE_RUNTIME = `${SERVERTOOL_TS_DIR}/backend-route-runtime-block.ts`;
 const TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY = `${SERVERTOOL_TS_DIR}/backend-route-bootstrap-replay-block.ts`;
 const TS_STOP_MESSAGE_LOOP_GUARD = `${SERVERTOOL_TS_DIR}/stop-message-loop-guard-block.ts`;
 const TS_STOP_MESSAGE_COUNTER = `${SERVERTOOL_TS_DIR}/stop-message-counter.ts`;
@@ -905,6 +906,24 @@ function checkBackendRoutePolicyRustOwner() {
     requiredExports,
     'shouldShortCircuitRequiresActionFollowupJson'
   );
+  assertContains(
+    'backend-route-followup-execution-mode-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_followup_execution_mode'
+  );
+  assertContains(
+    'backend-route-followup-execution-mode-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planFollowupExecutionModeWithNative'
+  );
+  assertContains(
+    'backend-route-followup-execution-mode-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planFollowupExecutionModeJson'
+  );
   for (const [toolName, forbiddenProjection] of [
     ['web_search', 'ClientExecCliProjection'],
     ['vision_auto', 'ClientExecCliProjection'],
@@ -921,6 +940,7 @@ function checkBackendRoutePolicyRustOwner() {
   const finalizeShell = readRequired(TS_BACKEND_ROUTE_FINALIZE);
   const originDeltaShell = readRequired(TS_BACKEND_ROUTE_ORIGIN_DELTA);
   const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
+  const runtimeShell = readRequired(TS_BACKEND_ROUTE_RUNTIME);
   assertContains(
     'backend-route-origin-delta-native-seed-owner',
     TS_BACKEND_ROUTE_ORIGIN_DELTA,
@@ -996,6 +1016,27 @@ function checkBackendRoutePolicyRustOwner() {
       fail(
         'backend-route-finalize-no-ts-owner',
         `Forbidden TS finalize semantic "${keyword}" found in backend-route-finalize-block.ts`
+      );
+    }
+  }
+  assertContains(
+    'backend-route-followup-execution-mode-thin-shell',
+    TS_BACKEND_ROUTE_RUNTIME,
+    runtimeShell,
+    'planFollowupExecutionModeWithNative'
+  );
+  const executionModeBlock = extractFunctionBlock(runtimeShell, 'resolveFollowupExecutionMode');
+  for (const keyword of [
+    "decision.outcomeMode === 'skip'",
+    'decision.noFollowup',
+    "clientInjectSource === 'servertool.stopless_goal_continue'",
+    "decision.outcomeMode === 'client_inject_only'",
+    'decision.clientInjectOnly',
+  ]) {
+    if (executionModeBlock.includes(keyword)) {
+      fail(
+        'backend-route-followup-execution-mode-no-ts-owner',
+        `Forbidden TS followup execution mode semantic "${keyword}" found in backend-route-runtime-block.ts`
       );
     }
   }

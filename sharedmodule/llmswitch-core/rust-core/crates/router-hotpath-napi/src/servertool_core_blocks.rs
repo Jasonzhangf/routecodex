@@ -2,11 +2,13 @@
 
 use servertool_core::backend_route_contract::{
     decorate_servertool_final_chat_with_context,
+    plan_followup_execution_mode,
     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03,
     should_short_circuit_requires_action_followup,
     ServertoolBackendRouteFinalizeInput,
     ServertoolBackendRoutePolicyInput,
     ServertoolBackendRouteRequiresActionShortCircuitInput,
+    ServertoolFollowupExecutionModeInput,
 };
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
@@ -169,6 +171,13 @@ pub fn should_short_circuit_requires_action_followup_json(
     .to_string())
 }
 
+pub fn plan_followup_execution_mode_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolFollowupExecutionModeInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize followup execution mode input: {e}"))?;
+    let output = plan_followup_execution_mode(input).map_err(|e| e.to_string())?;
+    serde_json::to_string(&output).map_err(|e| format!("serialize execution mode plan: {e}"))
+}
+
 pub fn extract_text_from_chat_like_json(input_json: &str) -> Result<String, String> {
     let payload: serde_json::Value = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize text extraction payload: {e}"))?;
@@ -256,6 +265,27 @@ mod tests {
         )
         .expect("requires action bridge");
         assert_eq!(raw, "true");
+    }
+
+    #[test]
+    fn plans_followup_execution_mode_via_servertool_core_bridge() {
+        let raw = plan_followup_execution_mode_json(
+            &json!({
+                "flowId": "continue_execution_flow",
+                "decision": {
+                    "outcomeMode": "reenter",
+                    "noFollowup": false,
+                    "clientInjectOnly": false
+                },
+                "metadataClientInjectOnly": true,
+                "clientInjectSource": null
+            })
+            .to_string(),
+        )
+        .expect("execution mode bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["flowId"], "continue_execution_flow");
+        assert_eq!(parsed["executionMode"], "client_inject_only");
     }
 
     #[test]

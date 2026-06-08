@@ -2,6 +2,7 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtime-metadata.js';
+import { planFollowupExecutionModeWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   resolveFollowupFlowDecision,
   type FollowupFlowDecision
@@ -93,25 +94,20 @@ export function resolveFollowupExecutionMode(args: {
 }): 'skip' | 'client_inject_only' | 'reenter' {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
   const metadataRecord = args.metadata as Record<string, unknown>;
-  const injectSource =
+  const clientInjectSource =
     typeof metadataRecord.clientInjectSource === 'string'
       ? metadataRecord.clientInjectSource.trim()
       : '';
-  if (decision.outcomeMode === 'skip' || decision.noFollowup) {
-    return 'skip';
-  }
-  // goal-managed stopless continue keeps normal re-enter path.
-  if (injectSource === 'servertool.stopless_goal_continue') {
-    return 'reenter';
-  }
-  if (
-    args.readClientInjectOnly(args.metadata) ||
-    decision.outcomeMode === 'client_inject_only' ||
-    decision.clientInjectOnly
-  ) {
-    return 'client_inject_only';
-  }
-  return 'reenter';
+  return planFollowupExecutionModeWithNative({
+    ...(args.flowId ? { flowId: args.flowId } : {}),
+    decision: {
+      outcomeMode: decision.outcomeMode,
+      noFollowup: decision.noFollowup,
+      clientInjectOnly: decision.clientInjectOnly
+    },
+    metadataClientInjectOnly: args.readClientInjectOnly(args.metadata),
+    ...(clientInjectSource ? { clientInjectSource } : {})
+  }).executionMode;
 }
 
 export function resolveLoopPayload(args: {

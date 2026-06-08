@@ -88,6 +88,38 @@ pub struct ServertoolBackendRouteRequiresActionShortCircuitInput {
     pub has_requires_action_shape: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupExecutionModeInput {
+    pub flow_id: Option<String>,
+    pub decision: Option<ServertoolFollowupExecutionModeDecision>,
+    pub metadata_client_inject_only: bool,
+    pub client_inject_source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupExecutionModeDecision {
+    pub outcome_mode: Option<String>,
+    pub no_followup: Option<bool>,
+    pub client_inject_only: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServertoolFollowupExecutionMode {
+    Skip,
+    ClientInjectOnly,
+    Reenter,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupExecutionModePlan {
+    pub flow_id: Option<String>,
+    pub execution_mode: ServertoolFollowupExecutionMode,
+}
+
 pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
     input: ServertoolBackendRoutePolicyInput,
 ) -> Result<ServertoolBackendRoutePolicy01Planned, ServertoolOutcomeError> {
@@ -217,6 +249,57 @@ pub fn should_short_circuit_requires_action_followup(
             .decision
             .and_then(|decision| decision.ignore_requires_action_followup)
             .unwrap_or(false)
+}
+
+pub fn plan_followup_execution_mode(
+    input: ServertoolFollowupExecutionModeInput,
+) -> Result<ServertoolFollowupExecutionModePlan, ServertoolOutcomeError> {
+    let flow_id = input
+        .flow_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let decision = input.decision;
+    let outcome_mode = decision
+        .as_ref()
+        .and_then(|item| item.outcome_mode.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("reenter");
+    if !matches!(outcome_mode, "skip" | "client_inject_only" | "reenter") {
+        return Err(ServertoolOutcomeError::InvalidField(
+            "decision.outcomeMode",
+        ));
+    }
+    let no_followup = decision
+        .as_ref()
+        .and_then(|item| item.no_followup)
+        .unwrap_or(false);
+    let client_inject_only = decision
+        .as_ref()
+        .and_then(|item| item.client_inject_only)
+        .unwrap_or(false);
+    let client_inject_source = input
+        .client_inject_source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let execution_mode = if outcome_mode == "skip" || no_followup {
+        ServertoolFollowupExecutionMode::Skip
+    } else if client_inject_source == Some("servertool.stopless_goal_continue") {
+        ServertoolFollowupExecutionMode::Reenter
+    } else if input.metadata_client_inject_only
+        || outcome_mode == "client_inject_only"
+        || client_inject_only
+    {
+        ServertoolFollowupExecutionMode::ClientInjectOnly
+    } else {
+        ServertoolFollowupExecutionMode::Reenter
+    };
+    Ok(ServertoolFollowupExecutionModePlan {
+        flow_id,
+        execution_mode,
+    })
 }
 
 fn normalize_backend_route_input(
@@ -620,5 +703,73 @@ mod tests {
                 has_requires_action_shape: false,
             }
         ));
+    }
+
+    #[test]
+    fn followup_execution_mode_skips_no_followup_decision() {
+        let plan = plan_followup_execution_mode(ServertoolFollowupExecutionModeInput {
+            flow_id: Some("reasoning_stop_finalize_flow".to_string()),
+            decision: Some(ServertoolFollowupExecutionModeDecision {
+                outcome_mode: Some("skip".to_string()),
+                no_followup: Some(false),
+                client_inject_only: Some(false),
+            }),
+            metadata_client_inject_only: false,
+            client_inject_source: None,
+        })
+        .expect("execution mode");
+        assert_eq!(plan.flow_id.as_deref(), Some("reasoning_stop_finalize_flow"));
+        assert_eq!(plan.execution_mode, ServertoolFollowupExecutionMode::Skip);
+    }
+
+    #[test]
+    fn followup_execution_mode_metadata_client_inject_only_wins() {
+        let plan = plan_followup_execution_mode(ServertoolFollowupExecutionModeInput {
+            flow_id: Some("continue_execution_flow".to_string()),
+            decision: Some(ServertoolFollowupExecutionModeDecision {
+                outcome_mode: Some("reenter".to_string()),
+                no_followup: Some(false),
+                client_inject_only: Some(false),
+            }),
+            metadata_client_inject_only: true,
+            client_inject_source: None,
+        })
+        .expect("execution mode");
+        assert_eq!(
+            plan.execution_mode,
+            ServertoolFollowupExecutionMode::ClientInjectOnly
+        );
+    }
+
+    #[test]
+    fn followup_execution_mode_stopless_goal_continue_keeps_reenter() {
+        let plan = plan_followup_execution_mode(ServertoolFollowupExecutionModeInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            decision: Some(ServertoolFollowupExecutionModeDecision {
+                outcome_mode: Some("client_inject_only".to_string()),
+                no_followup: Some(false),
+                client_inject_only: Some(true),
+            }),
+            metadata_client_inject_only: true,
+            client_inject_source: Some("servertool.stopless_goal_continue".to_string()),
+        })
+        .expect("execution mode");
+        assert_eq!(plan.execution_mode, ServertoolFollowupExecutionMode::Reenter);
+    }
+
+    #[test]
+    fn followup_execution_mode_rejects_invalid_decision_mode() {
+        let err = plan_followup_execution_mode(ServertoolFollowupExecutionModeInput {
+            flow_id: Some("continue_execution_flow".to_string()),
+            decision: Some(ServertoolFollowupExecutionModeDecision {
+                outcome_mode: Some("fallback".to_string()),
+                no_followup: Some(false),
+                client_inject_only: Some(false),
+            }),
+            metadata_client_inject_only: false,
+            client_inject_source: None,
+        })
+        .expect_err("invalid mode");
+        assert_eq!(err, ServertoolOutcomeError::InvalidField("decision.outcomeMode"));
     }
 }

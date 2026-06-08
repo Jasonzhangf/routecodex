@@ -159,6 +159,24 @@ export interface ServertoolBackendRouteFinalizeDecision {
   ignoreRequiresActionFollowup?: boolean;
 }
 
+export interface ServertoolFollowupExecutionModeDecision {
+  outcomeMode?: 'skip' | 'client_inject_only' | 'reenter';
+  noFollowup?: boolean;
+  clientInjectOnly?: boolean;
+}
+
+export interface ServertoolFollowupExecutionModeInput {
+  flowId?: string;
+  decision?: ServertoolFollowupExecutionModeDecision;
+  metadataClientInjectOnly: boolean;
+  clientInjectSource?: string;
+}
+
+export interface ServertoolFollowupExecutionModePlan {
+  flowId?: string;
+  executionMode: 'skip' | 'client_inject_only' | 'reenter';
+}
+
 export interface ServertoolBackendRouteFinalizeExecution {
   flowId?: string;
   context?: Record<string, unknown>;
@@ -426,6 +444,36 @@ export function shouldShortCircuitRequiresActionFollowupWithNative(input: {
     return false;
   }
   throw new Error(`shouldShortCircuitRequiresActionFollowupJson native returned invalid bool: ${resultJson}`);
+}
+
+export function planFollowupExecutionModeWithNative(
+  input: ServertoolFollowupExecutionModeInput,
+): ServertoolFollowupExecutionModePlan {
+  const capability = 'planFollowupExecutionModeJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planFollowupExecutionModeJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planFollowupExecutionModeJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planFollowupExecutionModeJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.executionMode !== 'skip' &&
+    record.executionMode !== 'client_inject_only' &&
+    record.executionMode !== 'reenter'
+  ) {
+    throw new Error('planFollowupExecutionModeJson native returned invalid executionMode');
+  }
+  return {
+    ...(typeof record.flowId === 'string' && record.flowId.trim() ? { flowId: record.flowId.trim() } : {}),
+    executionMode: record.executionMode
+  };
 }
 
 export function extractTextFromChatLikeWithNative(payload: unknown): string {
