@@ -439,6 +439,29 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('effectPlan.effects.length !== 1');
   });
 
+  it('provider response SSE marker materialization must stay Rust-owned', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'ts-sse-body-text-reader', pattern: /function\s+readProviderResponseSseText\s*\(/ },
+      { label: 'ts-sse-marker-classifier', pattern: /function\s+isProviderResponseSseMarker\s*\(/ },
+      { label: 'ts-sse-marker-signal', pattern: /function\s+hasProviderSseMarkerSignal\s*\(/ },
+      { label: 'ts-top-level-body-text-branch', pattern: /record\.bodyText|record\.raw/ },
+      { label: 'ts-nested-body-text-branch', pattern: /nested\.bodyText|nested\.raw/ },
+      { label: 'ts-marker-missing-body-error-owner', pattern: /throw\s+new\s+Error\(['"]Provider SSE marker did not include materializable stream or bodyText/ },
+      { label: 'ts-stream-error-terminated-classifier', pattern: /normalizedMessage\.includes\(['"]terminated['"]\)|normalizedCode\.includes\(['"]terminated['"]\)/ },
+      { label: 'ts-stream-error-hardcoded-status', pattern: /wrapped\.statusCode\s*=\s*502|wrapped\.retryable\s*=\s*true|wrapped\.requestExecutorProviderErrorStage\s*=\s*['"]provider\.sse_decode['"]/ },
+    ]);
+
+    expect(source).toContain('materializeProviderResponseSsePayloadWithNative');
+    expect(source).toContain('buildProviderSseStreamReadErrorDescriptorWithNative');
+    expect(source).toContain('readProviderResponseSseStreamText');
+    expect(findings).toEqual([]);
+  });
+
   it('provider response helper must not retain TS mapper canonicalization residue', () => {
     const filePath = path.join(
       process.cwd(),

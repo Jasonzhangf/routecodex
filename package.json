@@ -205,7 +205,8 @@
     "mock:clean": "node scripts/mock-provider/clean.mjs",
     "fix:cli-permission": "node scripts/ensure-cli-executable.mjs",
     "fix:cli-shim": "node scripts/ensure-cli-command-shim.mjs",
-    "verify:servertool-rust-only": "node scripts/verify-servertool-rust-only.mjs"
+    "verify:servertool-rust-only": "node scripts/verify-servertool-rust-only.mjs",
+    "verify:hub-response-provider-sse-materialization": "bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi provider_sse --lib -- --nocapture'"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

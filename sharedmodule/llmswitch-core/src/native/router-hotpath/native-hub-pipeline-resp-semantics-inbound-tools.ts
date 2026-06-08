@@ -3,6 +3,7 @@ import {
   parseBoolean,
   parseClientToolsRaw,
   parseContextLengthDiagnostics,
+  parseProviderSseStreamReadErrorDescriptor,
   parseRecord,
   parseRespInboundSseErrorDescriptor,
   parseStringOrUndefined,
@@ -18,6 +19,7 @@ import {
 import type {
   ContextLengthDiagnosticsOutput,
   NativeRespInboundReasoningNormalizeInput,
+  ProviderSseStreamReadErrorDescriptor,
   RespInboundSseErrorDescriptor
 } from './native-hub-pipeline-resp-semantics-types.js';
 
@@ -425,6 +427,62 @@ export function buildRespInboundSseErrorDescriptorWithNative(input: unknown): Re
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
+  }
+}
+
+export function materializeProviderResponseSsePayloadWithNative(
+  input: { payload: unknown; streamBodyText?: string }
+): Record<string, unknown> {
+  // canonical_builder: materialize_provider_response_sse_payload
+  const capability = 'materializeProviderResponseSsePayloadJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? { payload: null });
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return parseRecord(raw, 'materializeProviderResponseSsePayloadWithNative') ?? fail('invalid payload');
+  } catch (error) {
+    return fail(extractNativeErrorMessage(error));
+  }
+}
+
+export function buildProviderSseStreamReadErrorDescriptorWithNative(
+  input: { message?: string; code?: string; upstreamCode?: string }
+): ProviderSseStreamReadErrorDescriptor {
+  // canonical_builder: build_provider_sse_stream_read_error_descriptor
+  const capability = 'buildProviderSseStreamReadErrorDescriptorJson';
+  const fail = (reason?: string) => failNative<ProviderSseStreamReadErrorDescriptor>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? {});
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return parseProviderSseStreamReadErrorDescriptor(raw) ?? fail('invalid payload');
+  } catch (error) {
+    return fail(extractNativeErrorMessage(error));
   }
 }
 

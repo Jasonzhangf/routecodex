@@ -157,3 +157,86 @@ If a required verification fails because of unrelated dirty work, record the exa
 - Added native export `buildChatResponseFromResponsesFullJson` and required-export coverage.
 - Added residue gate blocking TS bridge/registry/snapshot restore helpers from returning to `responses-response-utils.ts`.
 - Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` with `hub.response_responses_chat_projection`.
+
+## 2026-06-08 Resume Entry: Provider Response SSE Marker Materialization
+
+Use this section as the short execution entry for the next continuation goal.
+
+### Current Target
+
+Close the next response-side TS semantic residue in:
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
+
+The suspected residue is provider response SSE marker materialization and classification around:
+
+- `readProviderResponseSseText`
+- `isProviderResponseSseMarker`
+- `materializeProviderResponseSsePayload`
+- `extractProviderResponseSseStream`
+- `readProviderResponseSseStreamText`
+- `buildProviderSseStreamReadError`
+
+### Boundary
+
+- TS may read Node streams and write HTTP/SSE frames as IO glue.
+- Rust must own marker classification, normalized SSE body materialization, and explicit read-error descriptor semantics if those semantics are part of the live Hub response chain.
+- Do not move request-side shadow wiring, provider-direct passthrough, VR health/selection, or unrelated provider runtime work into this slice.
+- Do not treat empty/invalid SSE as a successful payload. Invalid upstream shape must fail explicitly through the proper response/error path.
+
+### Minimum Slice Plan
+
+1. Re-audit `provider-response.ts` live call graph and classify each helper as IO glue, native wrapper, type-only, or semantic residue.
+2. Add or update a residue gate before moving/deleting TS semantics.
+3. Move the confirmed SSE marker materialization semantics to the matching Rust response owner.
+4. Keep TS as stream byte reader/native invocation glue only, or physically delete helpers with no remaining consumer.
+5. Update function/verification maps only if a new Rust owner or gate is introduced.
+6. Review the diff for fallback, payload trimming, provider-specific Hub logic, metadata/debug leak, and duplicated TS/Rust owners.
+
+### Suggested Focused Verification
+
+- Rust test for the new/updated native SSE marker materialization owner.
+- Focused Jest:
+  - `tests/server/handlers/responses-handler.anthropic-response-remap.blackbox.spec.ts`
+  - `tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts`
+  - `tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts`
+  - `tests/sharedmodule/provider-response-rust-plan.spec.ts`
+  - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
+- `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
+- `cargo test -p router-hotpath-napi hub_resp --lib -- --nocapture`
+- `npm run verify:architecture-ci`
+- `npm run verify:servertool-rust-only`
+
+Known unrelated gate issue from the previous run: `npm run test:unified-hub-shadow` currently fails on request-stage shadow baseline wiring (`hubShadowCompare.baselineProviderPayload missing`). Do not fix that inside this response-side SSE slice unless the scope is explicitly changed.
+
+## 2026-06-08 Slice: Provider Response SSE Marker Materialization
+
+### Audit Result
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` still owned response-side semantic residue before the Rust Hub response pipeline entry:
+  - SSE `bodyText` / `raw` / nested `data.bodyText` / `data.raw` classification.
+  - SSE marker detection for `mode=sse`, `mode=sse_passthrough`, and marker-only `clientStream`.
+  - Missing materializable stream/bodyText fail-fast message.
+  - Stream read error descriptor semantics (`SSE_DECODE_ERROR`, upstream terminated mapping, 502 retryable provider stage).
+- TS stream reading itself is IO glue and remains in TS because it consumes Node `Readable` objects.
+
+### Implementation Result
+
+- Added Rust owner `materialize_provider_response_sse_payload`.
+- Added Rust owner `build_provider_sse_stream_read_error_descriptor`.
+- Kept TS `materializeProviderResponseSsePayload` as Node stream read + native invocation glue only.
+- Removed TS `readProviderResponseSseText`, `isProviderResponseSseMarker`, and `hasProviderSseMarkerSignal`.
+- Added native exports:
+  - `materializeProviderResponseSsePayloadJson`
+  - `buildProviderSseStreamReadErrorDescriptorJson`
+- Added residue gate blocking TS SSE marker/bodyText/error descriptor semantics from returning to `provider-response.ts`.
+- Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` with `hub.response_provider_sse_materialization`.
+
+### Verification Plan
+
+- `cargo test -p router-hotpath-napi provider_sse --lib -- --nocapture`
+- Focused provider response Jest listed in the resume entry.
+- `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
+- `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
+- `npm run verify:architecture-ci`
+- `npm run verify:servertool-rust-only`

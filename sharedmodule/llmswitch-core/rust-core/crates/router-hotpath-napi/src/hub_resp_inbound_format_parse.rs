@@ -2,6 +2,8 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+// feature_id: hub.response_provider_sse_materialization
+
 const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024; // 50MB limit
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,6 +29,36 @@ pub struct RespFormatParseOutput {
     pub envelope: FormatEnvelope,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderResponseSseMaterializeInput {
+    pub payload: Value,
+    #[serde(default)]
+    pub stream_body_text: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderResponseSseStreamReadErrorInput {
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub upstream_code: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderResponseSseStreamReadErrorOutput {
+    pub message: String,
+    pub code: String,
+    pub upstream_code: String,
+    pub status_code: i64,
+    pub retryable: bool,
+    pub request_executor_provider_error_stage: String,
+}
+
 fn validate_payload_size(payload: &Value) -> Result<(), String> {
     let payload_str = match serde_json::to_string(payload) {
         Ok(s) => s,
@@ -42,6 +74,122 @@ fn validate_payload_size(payload: &Value) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn read_non_empty_text(value: Option<&Value>) -> Option<String> {
+    let text = value?.as_str()?;
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
+fn read_provider_response_sse_text(payload: &Value) -> Option<String> {
+    let record = payload.as_object()?;
+    if let Some(body_text) = read_non_empty_text(record.get("bodyText")) {
+        return Some(body_text);
+    }
+    if let Some(raw) = read_non_empty_text(record.get("raw")) {
+        return Some(raw);
+    }
+    if let Some(nested) = record.get("data").and_then(Value::as_object) {
+        if let Some(body_text) = read_non_empty_text(nested.get("bodyText")) {
+            return Some(body_text);
+        }
+        if let Some(raw) = read_non_empty_text(nested.get("raw")) {
+            return Some(raw);
+        }
+    }
+    None
+}
+
+fn has_provider_sse_marker_signal(record: &Map<String, Value>) -> bool {
+    let mode = record
+        .get("mode")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    mode == "sse"
+        || mode == "sse_passthrough"
+        || (record
+            .get("clientStream")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && !record.contains_key("__sse_responses")
+            && !record.contains_key("__sse_stream"))
+}
+
+fn is_provider_response_sse_marker(payload: &Value) -> bool {
+    payload.as_object().is_some_and(|record| {
+        has_provider_sse_marker_signal(record) && read_provider_response_sse_text(payload).is_none()
+    })
+}
+
+pub fn materialize_provider_response_sse_payload(
+    input: ProviderResponseSseMaterializeInput,
+) -> Result<Value, String> {
+    let Some(record) = input.payload.as_object() else {
+        return Ok(input.payload);
+    };
+
+    if let Some(body_text) = read_provider_response_sse_text(&input.payload).or_else(|| {
+        input.stream_body_text.and_then(|text| {
+            if text.trim().is_empty() {
+                None
+            } else {
+                Some(text)
+            }
+        })
+    }) {
+        let mut output = record.clone();
+        output.insert("mode".to_string(), Value::String("sse".to_string()));
+        output.insert("bodyText".to_string(), Value::String(body_text));
+        return Ok(Value::Object(output));
+    }
+
+    if !is_provider_response_sse_marker(&input.payload) {
+        return Ok(input.payload);
+    }
+
+    Err("Provider SSE marker did not include materializable stream or bodyText".to_string())
+}
+
+pub fn build_provider_sse_stream_read_error_descriptor(
+    input: ProviderResponseSseStreamReadErrorInput,
+) -> ProviderResponseSseStreamReadErrorOutput {
+    let message = input
+        .message
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    let normalized_message = message.to_ascii_lowercase();
+    let normalized_code = input
+        .code
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let upstream_code =
+        if normalized_message.contains("terminated") || normalized_code.contains("terminated") {
+            "UPSTREAM_STREAM_TERMINATED".to_string()
+        } else if let Some(value) = input
+            .upstream_code
+            .or(input.code)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            value
+        } else {
+            "SSE_TO_JSON_ERROR".to_string()
+        };
+    ProviderResponseSseStreamReadErrorOutput {
+        message,
+        code: "SSE_DECODE_ERROR".to_string(),
+        upstream_code,
+        status_code: 502,
+        retryable: true,
+        request_executor_provider_error_stage: "provider.sse_decode".to_string(),
+    }
 }
 
 fn parse_openai_responses_response(payload: &Value) -> Result<FormatEnvelope, String> {
@@ -705,6 +853,39 @@ pub fn parse_resp_format_envelope_json(input_json: String) -> napi::Result<Strin
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
 
+#[napi]
+pub fn materialize_provider_response_sse_payload_json(input_json: String) -> napi::Result<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+
+    let input: ProviderResponseSseMaterializeInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+
+    let output =
+        materialize_provider_response_sse_payload(input).map_err(napi::Error::from_reason)?;
+
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+#[napi]
+pub fn build_provider_sse_stream_read_error_descriptor_json(
+    input_json: String,
+) -> napi::Result<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+
+    let input: ProviderResponseSseStreamReadErrorInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+
+    let output = build_provider_sse_stream_read_error_descriptor(input);
+
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -759,6 +940,75 @@ mod tests {
         assert_eq!(
             result.envelope.payload["output"][0]["content"][0]["text"],
             "stopped"
+        );
+    }
+
+    #[test]
+    fn provider_sse_materialize_payload_uses_top_level_raw_text() {
+        let output =
+            materialize_provider_response_sse_payload(ProviderResponseSseMaterializeInput {
+                payload: serde_json::json!({
+                    "mode": "sse",
+                    "raw": " event: response.completed\n data: {}\n\n "
+                }),
+                stream_body_text: None,
+            })
+        .unwrap();
+        assert_eq!(output["mode"], "sse");
+        assert_eq!(
+            output["bodyText"],
+            " event: response.completed\n data: {}\n\n "
+        );
+    }
+
+    #[test]
+    fn provider_sse_materialize_payload_uses_stream_body_text() {
+        let output =
+            materialize_provider_response_sse_payload(ProviderResponseSseMaterializeInput {
+                payload: serde_json::json!({
+                    "clientStream": true,
+                    "trace": "kept"
+                }),
+                stream_body_text: Some(" data: {\"ok\":true}\n\n ".to_string()),
+            })
+        .unwrap();
+        assert_eq!(output["mode"], "sse");
+        assert_eq!(output["bodyText"], " data: {\"ok\":true}\n\n ");
+        assert_eq!(output["trace"], "kept");
+    }
+
+    #[test]
+    fn provider_sse_materialize_payload_rejects_marker_without_body() {
+        let error =
+            materialize_provider_response_sse_payload(ProviderResponseSseMaterializeInput {
+                payload: serde_json::json!({
+                    "mode": "sse_passthrough",
+                    "clientStream": true
+                }),
+                stream_body_text: None,
+            })
+            .unwrap_err();
+        assert!(
+            error.contains("Provider SSE marker did not include materializable stream or bodyText")
+        );
+    }
+
+    #[test]
+    fn provider_sse_stream_read_error_descriptor_marks_terminated() {
+        let output = build_provider_sse_stream_read_error_descriptor(
+            ProviderResponseSseStreamReadErrorInput {
+                message: Some("Upstream terminated".to_string()),
+                code: Some("terminated".to_string()),
+                upstream_code: None,
+            },
+        );
+        assert_eq!(output.code, "SSE_DECODE_ERROR");
+        assert_eq!(output.upstream_code, "UPSTREAM_STREAM_TERMINATED");
+        assert_eq!(output.status_code, 502);
+        assert!(output.retryable);
+        assert_eq!(
+            output.request_executor_provider_error_stage,
+            "provider.sse_decode"
         );
     }
 

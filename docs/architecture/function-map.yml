@@ -329,6 +329,38 @@ owners:
     notes:
       - TS `responses-response-utils.ts` is native invocation and JSON parse glue only; unwrap, bridge response actions, passthrough/snapshot retention, and chat carrier projection belong to Rust.
 
+  - feature_id: hub.response_provider_sse_materialization
+    status: active
+    summary: Provider response SSE marker/bodyText materialization before Rust Hub response pipeline entry
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
+    canonical_types:
+      - ProviderRespInbound01Raw
+      - HubRespInbound02Parsed
+    canonical_builders:
+      - materialize_provider_response_sse_payload
+      - build_provider_sse_stream_read_error_descriptor
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
+    forbidden_paths:
+      - src/providers
+      - src/server
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-helpers.ts
+    required_tests:
+      - tests/server/handlers/responses-handler.anthropic-response-remap.blackbox.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run verify:hub-response-provider-sse-materialization
+      - npm run verify:architecture-ci
+      - npm run verify:llmswitch-core-tsc
+    migration_target: rust
+    notes:
+      - TS may read Node Readable streams and pass bytes to native; marker classification, bodyText/raw selection, missing-body fail-fast, and stream-read error descriptor semantics belong to Rust.
+
   - feature_id: tool.apply_patch_freeform_contract
     status: active
     summary: apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance
@@ -658,7 +690,6 @@ owners:
       - record_failure
       - cooldown_provider
       - cooldown_provider_until_midnight_persisted
-      - clear_windsurf_managed_persisted_503_family
       - consume_persisted_503_reprobe_if_available
       - trip_provider
       - is_available

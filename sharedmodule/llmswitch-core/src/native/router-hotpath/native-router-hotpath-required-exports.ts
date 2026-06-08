@@ -145,6 +145,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildChatResponseFromResponsesJson",
   "buildChatResponseFromResponsesFullJson",
   "buildOpenaiChatFromAnthropicMessageFullJson",
+  "materializeProviderResponseSsePayloadJson",
+  "buildProviderSseStreamReadErrorDescriptorJson",
   "captureReqInboundResponsesContextSnapshotJson",
   "computeQuotaBucketsJson",
   "extractReasoningSegmentsJson",

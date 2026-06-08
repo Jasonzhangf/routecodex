@@ -189,6 +189,26 @@ verification:
     notes:
       - Shared Responses-to-Chat response projection must stay Rust-owned; TS wrapper must not restore registry, bridge-action, passthrough, or snapshot semantics.
 
+  - feature_id: hub.response_provider_sse_materialization
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/server/handlers/responses-handler.anthropic-response-remap.blackbox.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    smoke:
+      - node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs
+      - npm run verify:architecture-ci
+      - npm run verify:servertool-rust-only
+    build:
+      - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
+    notes:
+      - Provider SSE marker/bodyText materialization and read-error descriptor semantics must stay Rust-owned; TS provider-response shell may only read Node streams and invoke native.
+
   - feature_id: tool.apply_patch_freeform_contract
     change_risk: high
     unit:

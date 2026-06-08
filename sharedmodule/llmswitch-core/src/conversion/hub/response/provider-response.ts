@@ -24,7 +24,11 @@ import {
   type ProviderProtocol
 } from './provider-response-helpers.js';
 import { runServertoolResponseStageOrchestrationShell } from '../../../servertool/response-stage-orchestration-shell.js';
-import { buildResponsesPayloadFromChatWithNative } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import {
+  buildProviderSseStreamReadErrorDescriptorWithNative,
+  buildResponsesPayloadFromChatWithNative,
+  materializeProviderResponseSsePayloadWithNative
+} from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 type HubStageTopEntry = {
   stage: string;
@@ -496,84 +500,15 @@ export interface ProviderResponseConversionResult {
   format?: string;
 }
 
-export function readProviderResponseSseText(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return undefined;
-  }
-  const record = payload as Record<string, unknown>;
-  const bodyText = record.bodyText;
-  if (typeof bodyText === 'string' && bodyText.trim()) {
-    return bodyText;
-  }
-  const raw = record.raw;
-  if (typeof raw === 'string' && raw.trim()) {
-    return raw;
-  }
-  const data = record.data;
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    const nested = data as Record<string, unknown>;
-    const nestedBodyText = nested.bodyText;
-    if (typeof nestedBodyText === 'string' && nestedBodyText.trim()) {
-      return nestedBodyText;
-    }
-    const nestedRaw = nested.raw;
-    if (typeof nestedRaw === 'string' && nestedRaw.trim()) {
-      return nestedRaw;
-    }
-  }
-  return undefined;
-}
-
-export function isProviderResponseSseMarker(payload: unknown): boolean {
-  const record = asProviderResponseRecord(payload);
-  return Boolean(record && hasProviderSseMarkerSignal(record) && readProviderResponseSseText(record) === undefined);
-}
-
-function asProviderResponseRecord(payload: unknown): Record<string, unknown> | undefined {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return undefined;
-  }
-  return payload as Record<string, unknown>;
-}
-
-function hasProviderSseMarkerSignal(record: Record<string, unknown>): boolean {
-  const mode = typeof record.mode === 'string' ? record.mode.trim().toLowerCase() : '';
-  return mode === 'sse'
-    || mode === 'sse_passthrough'
-    || (record.clientStream === true && record.__sse_responses === undefined && record.__sse_stream === undefined);
-}
-
 export async function materializeProviderResponseSsePayload(
   payload: unknown
 ): Promise<Record<string, unknown>> {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return payload as Record<string, unknown>;
-  }
-
-  const bodyText = readProviderResponseSseText(payload);
-  if (typeof bodyText === 'string') {
-    return {
-      ...(payload as Record<string, unknown>),
-      mode: 'sse',
-      bodyText
-    };
-  }
-
   const stream = extractProviderResponseSseStream(payload);
-  if (stream) {
-    const bodyText = await readProviderResponseSseStreamText(stream);
-    return {
-      ...(payload as Record<string, unknown>),
-      mode: 'sse',
-      bodyText
-    };
-  }
-
-  if (!isProviderResponseSseMarker(payload)) {
-    return payload as Record<string, unknown>;
-  }
-
-  throw new Error('Provider SSE marker did not include materializable stream or bodyText');
+  const streamBodyText = stream ? await readProviderResponseSseStreamText(stream) : undefined;
+  return materializeProviderResponseSsePayloadWithNative({
+    payload,
+    ...(streamBodyText !== undefined ? { streamBodyText } : {})
+  });
 }
 
 function extractProviderResponseSseStream(payload: unknown): Readable | undefined {
@@ -614,28 +549,23 @@ async function readProviderResponseSseStreamText(stream: Readable): Promise<stri
 
 function buildProviderSseStreamReadError(error: unknown): Error {
   const source = error as Record<string, unknown> | undefined;
-  const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-  const normalizedMessage = message.toLowerCase();
-  const normalizedCode = typeof source?.code === 'string' ? source.code.toLowerCase() : '';
-  const upstreamCode = normalizedMessage.includes('terminated') || normalizedCode.includes('terminated')
-    ? 'UPSTREAM_STREAM_TERMINATED'
-    : typeof source?.upstreamCode === 'string'
-      ? source.upstreamCode
-      : typeof source?.code === 'string'
-        ? source.code
-        : 'SSE_TO_JSON_ERROR';
-  const wrapped = new Error(message) as Error & {
+  const descriptor = buildProviderSseStreamReadErrorDescriptorWithNative({
+    message: error instanceof Error ? error.message : String(error ?? 'unknown'),
+    ...(typeof source?.code === 'string' ? { code: source.code } : {}),
+    ...(typeof source?.upstreamCode === 'string' ? { upstreamCode: source.upstreamCode } : {})
+  });
+  const wrapped = new Error(descriptor.message) as Error & {
     code?: string;
     upstreamCode?: string;
     statusCode?: number;
     retryable?: boolean;
     requestExecutorProviderErrorStage?: string;
   };
-  wrapped.code = 'SSE_DECODE_ERROR';
-  wrapped.upstreamCode = upstreamCode;
-  wrapped.statusCode = 502;
-  wrapped.retryable = true;
-  wrapped.requestExecutorProviderErrorStage = 'provider.sse_decode';
+  wrapped.code = descriptor.code;
+  wrapped.upstreamCode = descriptor.upstreamCode;
+  wrapped.statusCode = descriptor.statusCode;
+  wrapped.retryable = descriptor.retryable;
+  wrapped.requestExecutorProviderErrorStage = descriptor.requestExecutorProviderErrorStage;
   return wrapped;
 }
 

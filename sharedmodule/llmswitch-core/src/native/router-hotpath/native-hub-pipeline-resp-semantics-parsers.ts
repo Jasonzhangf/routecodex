@@ -3,6 +3,7 @@ import type {
   AnthropicStopReasonResolution,
   ContextLengthDiagnosticsOutput,
   ProviderResponseContextHelpersOutput,
+  ProviderSseStreamReadErrorDescriptor,
   ProviderResponseToolCallSummary,
   RespInboundSseErrorDescriptor,
   ResponsesHostPolicyResult
@@ -162,6 +163,34 @@ export function parseRespInboundSseErrorDescriptor(raw: string): RespInboundSseE
     details: details as Record<string, unknown>,
     stageRecord: stageRecord as Record<string, unknown>,
     status: typeof status === 'number' ? Math.floor(status) : undefined
+  };
+}
+
+export function parseProviderSseStreamReadErrorDescriptor(raw: string): ProviderSseStreamReadErrorDescriptor | null {
+  const row = parseRecord(raw, 'parseProviderSseStreamReadErrorDescriptor');
+  if (!row) {
+    return null;
+  }
+  if (
+    row.code !== 'SSE_DECODE_ERROR'
+    || typeof row.message !== 'string'
+    || !row.message.trim()
+    || typeof row.upstreamCode !== 'string'
+    || !row.upstreamCode.trim()
+    || typeof row.statusCode !== 'number'
+    || !Number.isFinite(row.statusCode)
+    || typeof row.retryable !== 'boolean'
+    || row.requestExecutorProviderErrorStage !== 'provider.sse_decode'
+  ) {
+    return null;
+  }
+  return {
+    message: row.message,
+    code: 'SSE_DECODE_ERROR',
+    upstreamCode: row.upstreamCode.trim(),
+    statusCode: Math.floor(row.statusCode),
+    retryable: row.retryable,
+    requestExecutorProviderErrorStage: 'provider.sse_decode'
   };
 }
 

@@ -41,6 +41,15 @@ export interface RespInboundSseErrorDescriptor {
   status?: number;
 }
 
+export interface ProviderSseStreamReadErrorDescriptor {
+  message: string;
+  code: 'SSE_DECODE_ERROR';
+  upstreamCode: string;
+  statusCode: number;
+  retryable: boolean;
+  requestExecutorProviderErrorStage: 'provider.sse_decode';
+}
+
 export interface ResponsesHostPolicyResult {
   shouldStripHostManagedFields: boolean;
   targetProtocol: string;
