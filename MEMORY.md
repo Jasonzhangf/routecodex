@@ -2439,3 +2439,9 @@ Tags: req_outbound_stage3_compat, qwen, qwenchat, deepseek-web, lmstudio, rust-o
 - `native-router-hotpath-required-exports.ts` is the required-export manifest consumed by `native-router-hotpath-loader.ts`; keep an explicit `native-router-hotpath` binding marker there so `llmswitch-rustification-audit` classifies the manifest as native-linked instead of false-counting native manifest growth as non-native TS runtime.
 - Verified final gates: full Rust lib `RUSTFLAGS='-Awarnings' cargo test -p router-hotpath-napi --lib -- --nocapture` passed 1576/1576 with 1 ignored; VR focused `cargo test -p router-hotpath-napi virtual_router_engine --lib -- --nocapture` passed 247/247; `npm run verify:vr-no-ts-runtime`, `npm run verify:architecture-ci`, `npm run verify:llmswitch-rustification-audit`, `npx tsc --noEmit --pretty false`, `npm run build:min`, and `git diff --check` all passed.
 Tags: virtual-router, rustification, no-ts-runtime, native-owner, architecture-gate, 2026-06-08
+
+## 2026-06-08 1token Responses provider baseline
+- 1token Responses provider config baseline is `baseURL = "https://one.1token.xyz"` with auth `${CRS_OAI_KEY1}` in `/Users/fanzhang/.rcc/provider/1token/config.v2.toml`. The prior 401 was caused by using `${CC_OAI_KEY}`, not by the baseURL.
+- For RouteCodex `/v1/responses`, OpenAI SDK/provider runtime appends `/responses` to baseURL; with this baseline the upstream provider URL is `https://one.1token.xyz/responses`, matching the 1token tutorial screenshot.
+- Verified live on 5555: after `routecodex restart --port 5555`, `curl http://127.0.0.1:5555/v1/responses` with `model=1token.gpt-5.5` returned HTTP 200 and output text `pong`; provider-request snapshot URL was `https://one.1token.xyz/responses`, provider-response status 200.
+Tags: 1token, responses-provider, baseurl, auth, 5555, 2026-06-08
