@@ -1,11 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const DEFAULT_STOP_MESSAGE_MAX_REPEATS: i64 = 10;
 pub const STOP_MESSAGE_PERSISTED_LOOKUP_POLICY: &str = "strict_then_sticky_then_session_family";
-pub const STOP_MESSAGE_FOLLOWUP_FLOW_ID: &str = "stop_message_flow";
-pub const STOP_MESSAGE_FOLLOWUP_SOURCE: &str = "servertool.stop_message";
-pub const STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT: &str = "继续执行";
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -33,24 +29,6 @@ pub struct StopMessagePersistedLookupPlanOutput {
     pub read_stop_message_tombstone: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeStopMessageStateSnapshot {
-    pub text: String,
-    pub max_repeats: i64,
-    pub used: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_used_at: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stage_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ai_mode: Option<String>,
-}
-
 pub fn plan_stop_message_persisted_lookup(
     input: &StopMessagePersistedLookupPlannerInput,
 ) -> StopMessagePersistedLookupPlanOutput {
@@ -72,116 +50,6 @@ pub fn plan_stop_message_persisted_lookup(
             .and_then(|options| options.include_tombstone_lookup)
             .unwrap_or(true),
     }
-}
-
-pub fn resolve_runtime_stop_message_state(
-    runtime_metadata: &Value,
-) -> Option<RuntimeStopMessageStateSnapshot> {
-    let runtime = runtime_metadata.as_object()?;
-    let state = runtime.get("stopMessageState");
-    if let Some(direct) = resolve_stop_message_snapshot(state) {
-        return Some(direct);
-    }
-
-    let loop_state = runtime
-        .get("serverToolLoopState")
-        .and_then(Value::as_object)?;
-    if read_trimmed_string(loop_state.get("flowId")).as_deref()
-        != Some(STOP_MESSAGE_FOLLOWUP_FLOW_ID)
-    {
-        return None;
-    }
-    let max_repeats = read_js_nonnegative_integer(loop_state.get("maxRepeats"))?;
-    let used = state
-        .and_then(|value| value.as_object())
-        .and_then(|state| read_js_nonnegative_integer(state.get("stopMessageUsed")))
-        .unwrap_or(0);
-    let text = state
-        .and_then(|value| value.as_object())
-        .and_then(|state| read_trimmed_string(state.get("stopMessageText")))
-        .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string());
-
-    Some(RuntimeStopMessageStateSnapshot {
-        text,
-        max_repeats,
-        used,
-        source: Some(STOP_MESSAGE_FOLLOWUP_SOURCE.to_string()),
-        updated_at: None,
-        last_used_at: None,
-        stage_mode: Some("on".to_string()),
-        ai_mode: None,
-    })
-}
-
-pub fn read_runtime_stop_message_stage_mode(runtime_metadata: &Value) -> Option<String> {
-    let runtime = runtime_metadata.as_object()?;
-    let state = runtime.get("stopMessageState").and_then(Value::as_object)?;
-    normalize_stop_message_stage_mode(state.get("stopMessageStageMode"))
-}
-
-fn resolve_stop_message_snapshot(raw: Option<&Value>) -> Option<RuntimeStopMessageStateSnapshot> {
-    let record = raw?.as_object()?;
-    let text = read_trimmed_string(record.get("stopMessageText"))?;
-    let stage_mode = normalize_stop_message_stage_mode(record.get("stopMessageStageMode"));
-    if stage_mode.as_deref() == Some("off") {
-        return None;
-    }
-    let ai_mode = normalize_stop_message_ai_mode(record.get("stopMessageAiMode"))
-        .unwrap_or_else(|| "on".to_string());
-    let max_repeats = resolve_stop_message_max_repeats(
-        record.get("stopMessageMaxRepeats"),
-        stage_mode.as_deref(),
-    );
-    if max_repeats <= 0 {
-        return None;
-    }
-    let used = read_finite_number(record.get("stopMessageUsed"))
-        .map(|value| value.floor() as i64)
-        .map(|value| value.max(0))
-        .unwrap_or(0);
-    let updated_at = read_nonzero_finite_number(record.get("stopMessageUpdatedAt"));
-    let last_used_at = read_nonzero_finite_number(record.get("stopMessageLastUsedAt"));
-    let source = read_trimmed_string(record.get("stopMessageSource"));
-
-    Some(RuntimeStopMessageStateSnapshot {
-        text,
-        max_repeats,
-        used,
-        source,
-        updated_at,
-        last_used_at,
-        stage_mode,
-        ai_mode: Some(ai_mode),
-    })
-}
-
-fn resolve_stop_message_max_repeats(value: Option<&Value>, stage_mode: Option<&str>) -> i64 {
-    let parsed = read_finite_number(value)
-        .map(|value| value.floor() as i64)
-        .unwrap_or(0);
-    if parsed > 0 {
-        return parsed;
-    }
-    if matches!(stage_mode, Some("on" | "auto")) {
-        return DEFAULT_STOP_MESSAGE_MAX_REPEATS;
-    }
-    0
-}
-
-fn normalize_stop_message_stage_mode(value: Option<&Value>) -> Option<String> {
-    normalize_one_of(value, &["on", "off", "auto"])
-}
-
-fn normalize_stop_message_ai_mode(value: Option<&Value>) -> Option<String> {
-    normalize_one_of(value, &["on", "off"])
-}
-
-fn normalize_one_of(value: Option<&Value>, allowed: &[&str]) -> Option<String> {
-    let normalized = read_trimmed_string(value)?.to_lowercase();
-    if allowed.iter().any(|item| *item == normalized) {
-        return Some(normalized);
-    }
-    None
 }
 
 pub fn collect_stop_message_persisted_candidate_keys(
@@ -257,16 +125,6 @@ pub fn resolve_servertool_sticky_key(metadata: &Value) -> String {
     resolve_routing_state_key(metadata)
 }
 
-pub fn resolve_servertool_state_key(metadata: &Value) -> String {
-    if let Some(request_chain_key) = resolve_continuation_request_chain_key(metadata) {
-        return request_chain_key;
-    }
-    if let Some(stop_scope) = resolve_stop_message_session_scope(metadata) {
-        return stop_scope;
-    }
-    read_trimmed_string(metadata.get("requestId")).unwrap_or_else(|| "default".to_string())
-}
-
 fn merge_runtime_metadata_with_record(record: &Value, runtime_metadata: Option<&Value>) -> Value {
     match (record, runtime_metadata) {
         (Value::Object(record), Some(Value::Object(runtime))) => {
@@ -327,8 +185,7 @@ fn resolve_routing_state_key(metadata: &Value) -> String {
 
 fn resolve_continuation_request_chain_key(metadata: &Value) -> Option<String> {
     let continuation = metadata.get("continuation").and_then(Value::as_object)?;
-    let continuation_scope = read_trimmed_string(continuation.get("continuationScope"))
-        .or_else(|| read_trimmed_string(continuation.get("stickyScope")))?;
+    let continuation_scope = read_trimmed_string(continuation.get("continuationScope"))?;
     if continuation_scope != "request_chain" {
         return None;
     }
@@ -365,49 +222,6 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-}
-
-fn read_finite_number(value: Option<&Value>) -> Option<f64> {
-    let value = value?;
-    match value {
-        Value::Number(number) => number.as_f64().filter(|value| value.is_finite()),
-        _ => None,
-    }
-}
-
-fn read_nonzero_finite_number(value: Option<&Value>) -> Option<f64> {
-    read_finite_number(value).filter(|value| *value != 0.0)
-}
-
-fn read_js_nonnegative_integer(value: Option<&Value>) -> Option<i64> {
-    let number = match value? {
-        Value::Number(number) => number.as_f64()?,
-        Value::String(text) => {
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                0.0
-            } else {
-                trimmed.parse::<f64>().ok()?
-            }
-        }
-        Value::Bool(value) => {
-            if *value {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        Value::Null => 0.0,
-        _ => return None,
-    };
-    if !number.is_finite() {
-        return None;
-    }
-    let floored = number.floor();
-    if floored < 0.0 {
-        return None;
-    }
-    Some(floored as i64)
 }
 
 #[cfg(test)]
@@ -556,137 +370,5 @@ mod tests {
             "req-parent"
         );
         assert_eq!(resolve_servertool_sticky_key(&json!({})), "default");
-    }
-
-    #[test]
-    fn state_key_preserves_request_chain_before_session_scope() {
-        assert_eq!(
-            resolve_servertool_state_key(&json!({
-                "continuation": {
-                    "stickyScope": "request_chain",
-                    "resumeFrom": { "requestId": "req-parent" }
-                },
-                "sessionId": "session-should-lose",
-                "requestId": "req-child"
-            })),
-            "req-parent"
-        );
-    }
-
-    #[test]
-    fn state_key_uses_stop_message_scope_before_request_id() {
-        assert_eq!(
-            resolve_servertool_state_key(&json!({
-                "clientTmuxSessionId": "tmux-a",
-                "requestId": "req-a"
-            })),
-            "tmux:tmux-a"
-        );
-        assert_eq!(
-            resolve_servertool_state_key(&json!({
-                "sessionId": "session-a",
-                "requestId": "req-a"
-            })),
-            "session:session-a"
-        );
-    }
-
-    #[test]
-    fn state_key_falls_back_to_request_id_then_default() {
-        assert_eq!(
-            resolve_servertool_state_key(&json!({
-                "requestId": "req-a"
-            })),
-            "req-a"
-        );
-        assert_eq!(resolve_servertool_state_key(&json!({})), "default");
-    }
-
-    #[test]
-    fn runtime_stop_state_resolves_direct_snapshot_with_defaults() {
-        let snapshot = resolve_runtime_stop_message_state(&json!({
-            "stopMessageState": {
-                "stopMessageText": "  keep going  ",
-                "stopMessageStageMode": "AUTO",
-                "stopMessageUsed": 2.7,
-                "stopMessageUpdatedAt": 1234,
-                "stopMessageLastUsedAt": 0,
-                "stopMessageSource": " explicit "
-            }
-        }))
-        .expect("snapshot");
-
-        assert_eq!(
-            snapshot,
-            RuntimeStopMessageStateSnapshot {
-                text: "keep going".to_string(),
-                max_repeats: DEFAULT_STOP_MESSAGE_MAX_REPEATS,
-                used: 2,
-                source: Some("explicit".to_string()),
-                updated_at: Some(1234.0),
-                last_used_at: None,
-                stage_mode: Some("auto".to_string()),
-                ai_mode: Some("on".to_string()),
-            }
-        );
-    }
-
-    #[test]
-    fn runtime_stop_state_uses_loop_state_max_repeats_without_repeat_count() {
-        let snapshot = resolve_runtime_stop_message_state(&json!({
-            "stopMessageState": {
-                "stopMessageUsed": "2",
-                "stopMessageText": "  "
-            },
-            "serverToolLoopState": {
-                "flowId": "stop_message_flow",
-                "repeatCount": 99,
-                "maxRepeats": "3"
-            }
-        }))
-        .expect("snapshot");
-
-        assert_eq!(
-            snapshot,
-            RuntimeStopMessageStateSnapshot {
-                text: STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string(),
-                max_repeats: 3,
-                used: 2,
-                source: Some(STOP_MESSAGE_FOLLOWUP_SOURCE.to_string()),
-                updated_at: None,
-                last_used_at: None,
-                stage_mode: Some("on".to_string()),
-                ai_mode: None,
-            }
-        );
-
-        assert!(resolve_runtime_stop_message_state(&json!({
-            "serverToolLoopState": {
-                "flowId": "stop_message_flow",
-                "repeatCount": 3
-            }
-        }))
-        .is_none());
-    }
-
-    #[test]
-    fn runtime_stop_stage_mode_reads_state_only() {
-        assert_eq!(
-            read_runtime_stop_message_stage_mode(&json!({
-                "stopMessageState": {
-                    "stopMessageStageMode": " OFF "
-                }
-            }))
-            .as_deref(),
-            Some("off")
-        );
-        assert_eq!(
-            read_runtime_stop_message_stage_mode(&json!({
-                "serverToolLoopState": {
-                    "flowId": "stop_message_flow"
-                }
-            })),
-            None
-        );
     }
 }

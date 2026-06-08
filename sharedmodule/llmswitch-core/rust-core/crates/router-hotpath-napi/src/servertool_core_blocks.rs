@@ -12,7 +12,6 @@ use servertool_core::backend_route_contract::{
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
 use servertool_core::cli_result_guard;
-use servertool_core::persisted_lookup;
 use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_counter;
 use servertool_core::stop_message_loop_guard;
@@ -146,29 +145,6 @@ pub fn has_stop_message_auto_cli_result_in_request_json(
     )
 }
 
-pub fn resolve_servertool_state_key_json(input_json: &str) -> Result<String, String> {
-    let metadata: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize servertool state key metadata: {e}"))?;
-    let key = persisted_lookup::resolve_servertool_state_key(&metadata);
-    serde_json::to_string(&key).map_err(|e| format!("serialize state key: {e}"))
-}
-
-pub fn resolve_runtime_stop_message_state_json(input_json: &str) -> Result<String, String> {
-    let metadata: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize runtime stop-message metadata: {e}"))?;
-    let snapshot = persisted_lookup::resolve_runtime_stop_message_state(&metadata);
-    serde_json::to_string(&snapshot)
-        .map_err(|e| format!("serialize runtime stop-message state: {e}"))
-}
-
-pub fn read_runtime_stop_message_stage_mode_json(input_json: &str) -> Result<String, String> {
-    let metadata: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize runtime stop-message metadata: {e}"))?;
-    let stage_mode = persisted_lookup::read_runtime_stop_message_stage_mode(&metadata);
-    serde_json::to_string(&stage_mode)
-        .map_err(|e| format!("serialize runtime stop-message stage mode: {e}"))
-}
-
 pub fn plan_servertool_backend_route_policy_json(input_json: &str) -> Result<String, String> {
     let input: ServertoolBackendRoutePolicyInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize backend route input: {e}"))?;
@@ -268,60 +244,6 @@ mod tests {
         )
         .expect_err("stop_message_auto is not backend route");
         assert!(err.contains("SERVERTOOL_OUTCOME_MISMATCH"));
-    }
-
-    #[test]
-    fn resolves_servertool_state_key_via_servertool_core_bridge() {
-        let raw = resolve_servertool_state_key_json(
-            &json!({
-                "continuation": {
-                    "stickyScope": "request_chain",
-                    "resumeFrom": { "requestId": "req-parent" }
-                },
-                "sessionId": "session-should-lose",
-                "requestId": "req-child"
-            })
-            .to_string(),
-        )
-        .expect("state key");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed, "req-parent");
-    }
-
-    #[test]
-    fn resolves_runtime_stop_message_state_via_servertool_core_bridge() {
-        let raw = resolve_runtime_stop_message_state_json(
-            &json!({
-                "serverToolLoopState": {
-                    "flowId": "stop_message_flow",
-                    "repeatCount": 99,
-                    "maxRepeats": 3
-                }
-            })
-            .to_string(),
-        )
-        .expect("runtime stop state");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["text"], "继续执行");
-        assert_eq!(parsed["maxRepeats"], 3);
-        assert_eq!(parsed["used"], 0);
-        assert_eq!(parsed["source"], "servertool.stop_message");
-        assert_eq!(parsed["stageMode"], "on");
-    }
-
-    #[test]
-    fn reads_runtime_stop_message_stage_mode_via_servertool_core_bridge() {
-        let raw = read_runtime_stop_message_stage_mode_json(
-            &json!({
-                "stopMessageState": {
-                    "stopMessageStageMode": " AUTO "
-                }
-            })
-            .to_string(),
-        )
-        .expect("stage mode");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed, "auto");
     }
 
     #[test]

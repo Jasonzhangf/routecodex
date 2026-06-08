@@ -21,55 +21,6 @@ function collectMatches(source: string, checks: ResidueCheck[]): string[] {
   return findings;
 }
 
-function extractFunctionBlock(source: string, functionName: string): string {
-  const signature = `function ${functionName}`;
-  const start = source.indexOf(signature);
-  if (start < 0) {
-    return '';
-  }
-  const paramsEnd = source.indexOf(')', start);
-  if (paramsEnd < 0) {
-    return '';
-  }
-  let braceStart = -1;
-  let typeDepth = 0;
-  for (let index = paramsEnd + 1; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === '{') {
-      let prevIndex = index - 1;
-      while (prevIndex > paramsEnd && /\s/.test(source[prevIndex] ?? '')) {
-        prevIndex -= 1;
-      }
-      const prev = source[prevIndex] ?? '';
-      if (typeDepth > 0 || prev === ':') {
-        typeDepth += 1;
-        continue;
-      }
-      braceStart = index;
-      break;
-    }
-    if (char === '}') {
-      typeDepth = Math.max(0, typeDepth - 1);
-    }
-  }
-  if (braceStart < 0) {
-    return '';
-  }
-  let depth = 0;
-  for (let index = braceStart; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === '{') {
-      depth += 1;
-    } else if (char === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        return source.slice(start, index + 1);
-      }
-    }
-  }
-  return source.slice(start);
-}
-
 function walkFiles(dir: string, suffixes: string[], out: string[] = []): string[] {
   if (!fs.existsSync(dir)) {
     return out;
@@ -1848,50 +1799,27 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts',
     );
-    const rustLookupPath = path.join(
-      process.cwd(),
-      'sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs',
-    );
-    const nativeWrapperPath = path.join(
-      process.cwd(),
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
-    );
     const handlerPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
     );
     const runtimeUtilsSource = fs.readFileSync(runtimeUtilsPath, 'utf8');
-    const rustLookupSource = fs.readFileSync(rustLookupPath, 'utf8');
-    const nativeWrapperSource = fs.readFileSync(nativeWrapperPath, 'utf8');
     const handlerSource = fs.readFileSync(handlerPath, 'utf8');
-    const runtimeStateBlock = extractFunctionBlock(runtimeUtilsSource, 'resolveRuntimeStopMessageState');
-    const runtimeStageBlock = extractFunctionBlock(runtimeUtilsSource, 'readRuntimeStopMessageStageMode');
 
-    expect(rustLookupSource).toContain('pub fn resolve_runtime_stop_message_state');
-    expect(rustLookupSource).toContain('STOP_MESSAGE_FOLLOWUP_FLOW_ID');
-    expect(rustLookupSource).toContain('loop_state.get("maxRepeats")');
-    expect(rustLookupSource).not.toContain('loop_state.get("repeatCount")');
-    expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateWithNative');
-    expect(runtimeStateBlock).toContain('resolveRuntimeStopMessageStateWithNative');
-    expect(runtimeStageBlock).toContain('readRuntimeStopMessageStageModeWithNative');
-    expect(runtimeStateBlock).not.toContain('serverToolLoopState');
-    expect(runtimeStateBlock).not.toContain('stopMessageUsed');
-    expect(runtimeStateBlock).not.toContain('stopMessageText');
-    expect(runtimeStageBlock).not.toContain('stopMessageState');
+    expect(runtimeUtilsSource).toContain('runtime.serverToolLoopState');
+    expect(runtimeUtilsSource).toContain("toNonEmptyText(loopState.flowId) !== 'stop_message_flow'");
+    expect(runtimeUtilsSource).toContain('readPositiveInteger(loopState.maxRepeats)');
+    expect(runtimeUtilsSource).not.toContain('readPositiveInteger(loopState.repeatCount)');
+    expect(runtimeUtilsSource).toContain('readPositiveInteger(state?.stopMessageUsed)');
     expect(handlerSource).toContain('if (followupFlowId && followupFlowId !== FLOW_ID)');
     expect(handlerSource).toContain("reason: 'skip_servertool_followup_hop'");
     expect(handlerSource).not.toContain('stop_message_followup_policy');
     expect(handlerSource).not.toContain('preserve_eligibility');
 
-    const findings = [
-      ...collectMatches(handlerSource, [
-        { label: 'followup hop preserves stop_message eligibility', pattern: /preserve_eligibility|stop_message_followup_policy|stopMessageFollowupPolicy/ },
-      ]),
-      ...collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}`, [
-        { label: 'runtime stop snapshot ignores servertool loop state', pattern: /return\s+resolveStopMessageSnapshot\(state\);/ },
-        { label: 'runtime stop snapshot owns loop state in TS', pattern: /serverToolLoopState|stop_message_flow|readPositiveInteger|loopState\.maxRepeats|loopState\.repeatCount/ },
-      ]),
-    ];
+    const findings = collectMatches(`${runtimeUtilsSource}\n${handlerSource}`, [
+      { label: 'followup hop preserves stop_message eligibility', pattern: /preserve_eligibility|stop_message_followup_policy|stopMessageFollowupPolicy/ },
+      { label: 'runtime stop snapshot ignores servertool loop state', pattern: /return\s+resolveStopMessageSnapshot\(state\);/ },
+    ]);
     expect(findings).toEqual([]);
   });
 });

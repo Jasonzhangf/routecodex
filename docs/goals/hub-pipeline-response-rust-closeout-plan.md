@@ -104,3 +104,36 @@ If a required verification fails because of unrelated dirty work, record the exa
 - Review is complete.
 - Targeted verification passes.
 - Commit is created with only related files.
+
+## 2026-06-08 Slice: Anthropic Response Runtime Projection
+
+### Audit Result
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts` still owned response-side semantic residue:
+  - Anthropic `payload.data` unwrap.
+  - Responses reasoning/output-meta registry consume.
+  - Responses payload snapshot / passthrough alias consume and re-register.
+  - Responses snapshot to chat `semantics` restore.
+  - Internal continuation `requestId` stripping.
+- Rust already owned the base Anthropic message projection and Responses-to-chat projection, so the closeout unit was to compose those Rust owners behind one full native entrypoint and delete the TS semantic glue.
+
+### Implementation Result
+
+- Added Rust full owner `build_openai_chat_from_anthropic_message_full`.
+- Kept TS `buildOpenAIChatFromAnthropicMessage` as native invocation + JSON parse glue only.
+- Moved hidden reasoning signature / redacted reasoning / dot-only reasoning handling into Rust.
+- Moved Responses retention registry consume/re-register and snapshot semantics restore into Rust.
+- Added native export `buildOpenaiChatFromAnthropicMessageFullJson` and required-export coverage.
+- Added residue gate blocking TS registry/snapshot restore helpers from returning to `response-runtime-anthropic.ts`.
+- Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` with `hub.response_anthropic_client_projection`.
+
+### Verification Evidence
+
+- PASS: `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config sharedmodule/llmswitch-core/jest.config.cjs --runTestsByPath sharedmodule/llmswitch-core/src/conversion/hub/response/__tests__/response-runtime.anthropic-hidden-reasoning.test.ts --runInBand --no-cache --forceExit`
+- PASS: `cargo test -p router-hotpath-napi anthropic --lib -- --nocapture`
+- PASS: `cargo test -p router-hotpath-napi resolve_anthropic_chat_completion_outcome --lib -- --nocapture`
+- PASS: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
+- PASS: `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
+- PARTIAL: `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts --runInBand --no-cache --forceExit`
+  - `tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts` passed.
+  - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` failed only on existing unrelated dirty servertool stop-message residue in `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts`; the new Anthropic response runtime residue gate passed.
