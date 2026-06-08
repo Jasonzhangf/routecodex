@@ -191,6 +191,43 @@ owners:
       - do not patch empty-pool behavior in handlers, executors, adapters, or provider TS runtime.
       - route order is high-priority pools -> low-priority pools -> default pool; if default pool has providers, routing must not return empty.
 
+  - feature_id: vr.provider_forwarder_runtime
+    status: active
+    summary: ProviderForwarder config load, capability filtering, internal target selection, startup cooldown reprobe, and runtime diagnostics stay in Rust Virtual Router
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+    canonical_types:
+      - ForwarderRegistry
+      - ForwarderEntry
+      - ForwarderTarget
+    canonical_builders:
+      - build_forwarder_weights
+      - select_with_forwarder_resolution
+      - resolve_forwarder_candidate_for_pool
+      - forwarder_status_snapshot
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - src/server/runtime/http-server/routes.ts
+      - docs
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/router
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - src/manager/modules/quota
+      - src/client
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/forwarder.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
+    required_gates:
+      - npm run verify:vr-forwarder-runtime
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - Config routes may name `fwd.*`, but host/executor must receive only resolved real provider keys.
+      - Forwarder availability must inspect real targets, including startup persisted cooldown reprobe, without consuming unselected targets.
+      - HTTP diagnostics may expose Rust VR forwarder status only; diagnostics must not implement selection or health policy.
+
   - feature_id: hub.metadata_boundary
     status: active
     summary: internal metadata carrier isolation from normal request, provider wire, and client response payloads
@@ -234,7 +271,6 @@ owners:
     canonical_builders:
       - build_openai_chat_from_anthropic_message_full
       - build_openai_chat_response_from_anthropic_message
-      - build_chat_response_from_responses_impl
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
@@ -250,8 +286,8 @@ owners:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts
     required_gates:
-      - cargo test -p router-hotpath-napi anthropic --lib -- --nocapture
-      - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
+      - npm run verify:hub-response-anthropic-native
+      - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
       - TS response runtime is native invocation and JSON parse glue only; registry consume, payload unwrap, snapshot semantics restore, reasoning signature handling, and empty-output fail-fast belong to Rust.

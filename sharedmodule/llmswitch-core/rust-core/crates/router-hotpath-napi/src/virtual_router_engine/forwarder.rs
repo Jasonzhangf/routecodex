@@ -1,4 +1,5 @@
 //! ProviderForwarder — Rust 真源
+// feature_id: vr.provider_forwarder_runtime
 //!
 //! Forwarder 把同 protocol+model 的 N 个 provider 折叠为 1 个 logical target。
 //! 解析 100% 在 `select_with_forwarder_resolution` 完成，host 永远只看到 real `provider_key`。

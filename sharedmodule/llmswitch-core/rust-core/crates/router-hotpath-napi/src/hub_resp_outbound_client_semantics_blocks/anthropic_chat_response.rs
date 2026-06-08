@@ -1,3 +1,5 @@
+// feature_id: hub.response_anthropic_client_projection
+
 use serde_json::{Map, Value};
 
 use crate::hub_reasoning_tool_normalizer::{

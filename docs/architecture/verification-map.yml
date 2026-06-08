@@ -112,6 +112,25 @@ verification:
     notes:
       - Empty-pool closeout belongs to Rust VR selection only; no TS-side recovery or fallback is allowed.
 
+  - feature_id: vr.provider_forwarder_runtime
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/forwarder.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
+    contract:
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts
+    integration:
+      - src/server/runtime/http-server/routes.ts
+    smoke:
+      - npm run verify:vr-forwarder-runtime
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - ProviderForwarder load/select/status truth stays in Rust Virtual Router; TS may only bridge config/native diagnostics.
+      - Startup cooldown reprobe must give each real target one selected hit and must not be consumed by availability scans.
+
   - feature_id: hub.metadata_boundary
     change_risk: high
     unit:
@@ -144,10 +163,10 @@ verification:
     integration:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     smoke:
-      - cargo test -p router-hotpath-napi anthropic --lib -- --nocapture
+      - npm run verify:hub-response-anthropic-native
       - node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs
     build:
-      - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
+      - npm run verify:llmswitch-core-tsc
     notes:
       - Response-runtime Anthropic TS must stay a native wrapper; registry/snapshot restore and reasoning/signature semantics are verified through the full native export.
 
