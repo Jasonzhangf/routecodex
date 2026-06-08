@@ -2421,3 +2421,10 @@ Tags: servertool-cli-projection, responses-history, direct-passthrough, rust-own
 - Deterministic request/model errors such as `404` remain direct-return even if alternatives exist; do not mask request-shape/model-support bugs by provider switching. Router-direct stays same-protocol passthrough and delegates provider errors to the unified execution plan via retry metadata, not local classification or payload cleanup.
 - Verified: request-executor, router-direct route-level blackbox, retry-execution-plan, request-error-log, `npx tsc --noEmit --pretty false`, and scoped `git diff --check` passed on 2026-06-08.
 Tags: error-chain, ErrorErr05, provider-switch, router-direct, auth-failure, 5555, 2026-06-08
+
+## 2026-06-08 req_outbound compat profile closeout slice
+- Rust `req_outbound_stage3_compat` owns Qwen/QwenChat OpenAI-chat profile dispatch; request compat normalizes Responses-style content/tool shapes and response compat unwraps Qwen envelopes plus marker tool calls. Keep this in Rust profile dispatch, not TS provider wrappers.
+- DeepSeek-Web response compat must fail fast for strict declared-tool routes that return plain text without valid tool calls, while invalid plaintext tool markup outside explicit wrappers is skipped only under non-required/no-effective-declared-tool conditions.
+- LMStudio response compat harvests Responses `output` tool tokens before chat governance so profile-local output-token shape is not lost.
+- Verified: `cargo test -p router-hotpath-napi req_outbound_stage3_compat::tests --lib -- --nocapture` passed 130/130 on 2026-06-08.
+Tags: req_outbound_stage3_compat, qwen, qwenchat, deepseek-web, lmstudio, rust-owner, 2026-06-08

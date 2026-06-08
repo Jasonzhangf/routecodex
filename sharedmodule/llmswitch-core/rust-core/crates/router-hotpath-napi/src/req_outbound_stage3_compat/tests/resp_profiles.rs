@@ -1844,16 +1844,10 @@ fn test_resp_profile_chat_deepseek_web_coding_route_plain_text_final_requires_to
         explicit_profile: None,
     };
 
-    let result = run_resp_inbound_stage3_compat(input).unwrap();
-    assert_eq!(result.payload["choices"][0]["finish_reason"], "stop");
-    assert_eq!(
-        result.payload["choices"][0]["message"]["content"],
-        "我已经完成检查，根因在 response 侧 declared tools 判定过严，需要对齐 request 侧路由语义。"
+    let error = run_resp_inbound_stage3_compat(input).expect_err(
+        "coding route with strict declared tools should fail fast when tool call is missing",
     );
-    assert_eq!(
-        result.payload["metadata"]["deepseek"]["toolCallState"],
-        Value::String("no_tool_calls".to_string())
-    );
+    assert!(error.contains("DeepSeek declared tools present but no valid tool call was produced"));
 }
 
 #[test]
@@ -2842,14 +2836,7 @@ fn test_resp_profile_chat_qwenchat_web_harvests_real_failed_command_wrappers() {
         Some("chat:qwenchat-web".to_string())
     );
     assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
-    assert_eq!(
-        result.payload["metadata"]["deepseek"]["toolCallState"],
-        "text_tool_calls"
-    );
-    assert_eq!(
-        result.payload["metadata"]["deepseek"]["toolCallSource"],
-        "fallback"
-    );
+    assert!(result.payload["metadata"]["deepseek"].is_null());
 
     let tool_calls = result.payload["choices"][0]["message"]["tool_calls"]
         .as_array()

@@ -78,6 +78,10 @@ fn extract_responses_message_text(item: &Map<String, Value>) -> String {
 }
 
 fn recover_tool_calls_from_text(text: &str, request_id: &str) -> Vec<Value> {
+    let token_calls = recover_qwen_style_tool_tokens_from_text(text);
+    if !token_calls.is_empty() {
+        return token_calls;
+    }
     let synthetic_payload = json!({
         "choices": [
             {
@@ -110,6 +114,79 @@ fn recover_tool_calls_from_text(text: &str, request_id: &str) -> Vec<Value> {
         .and_then(|tool_calls| tool_calls.as_array())
         .cloned()
         .unwrap_or_default()
+}
+
+fn recover_qwen_style_tool_tokens_from_text(text: &str) -> Vec<Value> {
+    if !text.contains("<|tool_calls_section_begin|>") {
+        return Vec::new();
+    }
+    let Some(call_re) = regex::Regex::new(
+        r"(?is)<\|tool_call_begin\|>\s*(?:functions\.)?([A-Za-z_][A-Za-z0-9_.-]*)(?::\d+)?\s*<\|tool_call_argument_begin\|>",
+    )
+    .ok() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for caps in call_re.captures_iter(text) {
+        let Some(full) = caps.get(0) else {
+            continue;
+        };
+        let Some(name) = caps.get(1).map(|m| m.as_str().trim()).filter(|v| !v.is_empty()) else {
+            continue;
+        };
+        let mut args_start = full.end();
+        while args_start < text.len() && text.as_bytes()[args_start].is_ascii_whitespace() {
+            args_start += 1;
+        }
+        let Some(args_end) = find_balanced_json_end(text, args_start) else {
+            continue;
+        };
+        let args = text[args_start..args_end].trim();
+        let args_value = serde_json::from_str::<Value>(args).unwrap_or_else(|_| json!({}));
+        out.push(json!({
+            "id": format!("call_{}", out.len() + 1),
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": serde_json::to_string(&args_value).unwrap_or_else(|_| "{}".to_string())
+            }
+        }));
+    }
+    out
+}
+
+fn find_balanced_json_end(text: &str, start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if start >= bytes.len() || bytes[start] != b'{' {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (offset, ch) in text[start..].char_indices() {
+        if in_string {
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(start + offset + ch.len_utf8());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn sanitize_id_token(value: &str) -> String {
@@ -249,6 +326,19 @@ pub(crate) fn apply_lmstudio_response_compat(payload: Value, request_id: Option<
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "req_lmstudio_compat".to_string());
+
+    if payload
+        .get("output")
+        .and_then(|value| value.as_array())
+        .is_some()
+    {
+        let mut responses_payload = payload;
+        if let Some(root) = responses_payload.as_object_mut() {
+            harvest_responses_output_tool_calls(root, &request_id_value);
+            apply_lmstudio_response_defaults(root);
+        }
+        return responses_payload;
+    }
 
     let mut governed_payload = match govern_hub_resp_chatprocess_03_response(ToolGovernanceInput {
         payload: payload.clone(),

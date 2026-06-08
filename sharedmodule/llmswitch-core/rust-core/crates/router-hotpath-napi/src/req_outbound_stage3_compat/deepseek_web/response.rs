@@ -161,6 +161,110 @@ fn ensure_exec_command_args_have_cmd(payload: &mut Value) {
     }
 }
 
+fn payload_text_contains_bash_lc_single_quote(payload: &Value) -> bool {
+    let Some(choices) = payload.get("choices").and_then(Value::as_array) else {
+        return false;
+    };
+    for choice in choices {
+        let Some(message) = choice.get("message").and_then(Value::as_object) else {
+            continue;
+        };
+        for key in ["content", "reasoning", "reasoning_content", "thinking"] {
+            let Some(value) = message.get(key) else {
+                continue;
+            };
+            match value {
+                Value::String(raw) => {
+                    if raw.contains("bash -lc '") {
+                        return true;
+                    }
+                }
+                Value::Array(parts) => {
+                    for part in parts {
+                        let Some(part_obj) = part.as_object() else {
+                            continue;
+                        };
+                        for text_key in ["text", "content"] {
+                            let Some(raw) = part_obj.get(text_key).and_then(Value::as_str) else {
+                                continue;
+                            };
+                            if raw.contains("bash -lc '") {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
+fn restore_deepseek_single_quoted_bash_lc_args(payload: &mut Value, original_had_single_quote: bool) {
+    if !original_had_single_quote {
+        return;
+    }
+    let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for choice in choices {
+        let Some(tool_calls) = choice
+            .as_object_mut()
+            .and_then(|row| row.get_mut("message"))
+            .and_then(Value::as_object_mut)
+            .and_then(|message| message.get_mut("tool_calls"))
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        for tool_call in tool_calls {
+            let Some(function) = tool_call
+                .as_object_mut()
+                .and_then(|row| row.get_mut("function"))
+                .and_then(Value::as_object_mut)
+            else {
+                continue;
+            };
+            let is_exec = function
+                .get("name")
+                .and_then(Value::as_str)
+                .and_then(|raw_name| normalize_routecodex_tool_name(Some(raw_name)))
+                .as_deref()
+                .map(|name| name == "exec_command")
+                .unwrap_or(false);
+            if !is_exec {
+                continue;
+            }
+            let Some(arguments_raw) = function.get("arguments").and_then(Value::as_str) else {
+                continue;
+            };
+            let Ok(mut arguments) = serde_json::from_str::<Value>(arguments_raw) else {
+                continue;
+            };
+            let Some(arguments_obj) = arguments.as_object_mut() else {
+                continue;
+            };
+            let Some(cmd) = arguments_obj.get("cmd").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(inner) = cmd
+                .strip_prefix("bash -lc \"")
+                .and_then(|value| value.strip_suffix('"'))
+            else {
+                continue;
+            };
+            if inner.contains('\"') || inner.contains('\'') {
+                continue;
+            }
+            arguments_obj.insert("cmd".to_string(), Value::String(format!("bash -lc '{}'", inner)));
+            if let Ok(serialized) = serde_json::to_string(&arguments) {
+                function.insert("arguments".to_string(), Value::String(serialized));
+            }
+        }
+    }
+}
+
 fn normalize_tool_call_only_content_to_null(payload: &mut Value) {
     let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
         return;
@@ -491,6 +595,30 @@ fn detect_plaintext_invalid_tool_calls_markup(payload: &Value) -> bool {
     false
 }
 
+fn mask_deepseek_unwhitelisted_command_wrappers(payload: &mut Value) {
+    let Some(wrapper_re) = Regex::new(
+        r"(?is)<command>\s*<grep_command>[\s\S]*?</grep_command>\s*</command>|<execute_command>[\s\S]*?</execute_command>",
+    )
+    .ok() else {
+        return;
+    };
+    let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for choice in choices {
+        let Some(message) = choice
+            .as_object_mut()
+            .and_then(|row| row.get_mut("message"))
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        if let Some(Value::String(content)) = message.get_mut("content") {
+            *content = wrapper_re.replace_all(content, "").trim().to_string();
+        }
+    }
+}
+
 fn attach_requested_tool_names(payload: &mut Value, adapter_context: &AdapterContext) {
     let requested: Vec<Value> = adapter_context
         .captured_chat_request
@@ -525,6 +653,18 @@ fn attach_requested_tool_names(payload: &mut Value, adapter_context: &AdapterCon
         .or_insert_with(|| serde_json::json!({}));
     if let Some(row) = governance.as_object_mut() {
         row.insert("requestedToolNames".to_string(), Value::Array(requested));
+    }
+}
+
+fn set_deepseek_skip_text_harvest(payload: &mut Value) {
+    let Some(root) = payload.as_object_mut() else {
+        return;
+    };
+    let governance = root
+        .entry("__rcc_tool_governance".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(row) = governance.as_object_mut() {
+        row.insert("skipTextHarvest".to_string(), Value::Bool(true));
     }
 }
 
@@ -585,6 +725,7 @@ pub(crate) fn apply_deepseek_web_response_compat(
     adapter_context: &AdapterContext,
 ) -> Result<Value, String> {
     let mut normalized = normalize_deepseek_business_envelope(payload, Some(adapter_context))?;
+    mask_deepseek_unwhitelisted_command_wrappers(&mut normalized);
     let harvested_function_results = harvest_function_results_markup(&mut normalized);
     let before_count = count_tool_calls_from_choices(&normalized);
     attach_requested_tool_names(&mut normalized, adapter_context);
@@ -597,6 +738,14 @@ pub(crate) fn apply_deepseek_web_response_compat(
         detect_forbidden_hidden_tool_transport_payload(&normalized);
     let plaintext_invalid_markup_before_governance =
         detect_plaintext_invalid_tool_calls_markup(&normalized);
+    let original_had_single_quoted_bash_lc =
+        payload_text_contains_bash_lc_single_quote(&normalized);
+    if plaintext_invalid_markup_before_governance
+        && !tool_choice_required
+        && !effective_declared_tools_present
+    {
+        set_deepseek_skip_text_harvest(&mut normalized);
+    }
 
     let request_id = adapter_context
         .request_id
@@ -643,6 +792,10 @@ pub(crate) fn apply_deepseek_web_response_compat(
         resolve_requested_exec_tool_alias(adapter_context).as_deref(),
     );
     ensure_exec_command_args_have_cmd(&mut governed);
+    restore_deepseek_single_quoted_bash_lc_args(
+        &mut governed,
+        original_had_single_quoted_bash_lc,
+    );
     let forbidden_transport_detected = hidden_transport_detected_before_governance
         || sanitize_deepseek_meta_leakage(&mut governed);
     normalize_tool_call_only_content_to_null(&mut governed);
@@ -681,7 +834,7 @@ pub(crate) fn apply_deepseek_web_response_compat(
             tool_choice_required, text_tool_fallback, strict_tool_required
         ));
     }
-    if (declared_tools_present || tool_choice_required)
+    if (tool_choice_required || effective_declared_tools_present)
         && plaintext_invalid_markup_before_governance
     {
         return Err(format!(
